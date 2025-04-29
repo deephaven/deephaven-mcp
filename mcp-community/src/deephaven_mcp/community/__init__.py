@@ -53,7 +53,7 @@ def run_server(transport: str = "stdio") -> None:
     logging.info(f"Starting MCP server '{mcp_server.name}' with transport={transport}")
 
     # Make sure config can be loaded before starting
-    config.load_config()
+    config.get_config()
 
     try:
         mcp_server.run(transport=transport)
@@ -120,7 +120,7 @@ def deephaven_default_worker() -> Optional[str]:
         str: The default worker name as defined in the config file.
     """
     logging.info("CALL: deephaven_default_worker called with no arguments")
-    return config.deephaven_default_worker()
+    return config.get_worker_name_default()
 
 @mcp_server.tool()
 def deephaven_worker_names() -> list[str]:
@@ -134,7 +134,7 @@ def deephaven_worker_names() -> list[str]:
         list[str]: List of all Deephaven worker names from the config file.
     """
     logging.info("CALL: deephaven_worker_names called with no arguments")
-    return config.deephaven_worker_names()
+    return config.get_worker_names()
 
 @mcp_server.tool()
 def deephaven_list_table_names(worker_name: Optional[str] = None) -> list:

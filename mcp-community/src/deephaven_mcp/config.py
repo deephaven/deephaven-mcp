@@ -214,7 +214,7 @@ def get_worker_config(worker_name: Optional[str] = None) -> Dict[str, Any]:
     _LOGGER.debug(f"Returning config for worker: {worker_name}")
     return workers[worker_name]
 
-def deephaven_worker_names() -> list[str]:
+def get_worker_names() -> list[str]:
     """
     Get a list of all configured Deephaven worker names from the loaded configuration.
 
@@ -228,7 +228,7 @@ def deephaven_worker_names() -> list[str]:
     _LOGGER.debug(f"Found {len(worker_names)} worker(s): {worker_names}")
     return worker_names
 
-def deephaven_default_worker() -> Optional[str]:
+def get_worker_name_default() -> Optional[str]:
     """
     Get the name of the default Deephaven worker, as set in the configuration.
 
