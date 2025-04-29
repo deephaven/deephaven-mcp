@@ -20,6 +20,9 @@ import json
 import logging
 import threading
 from typing import Optional, Dict, Any
+from time import perf_counter
+
+_LOGGER = logging.getLogger(__name__)
 
 _CONFIG_CACHE: Optional[Dict[str, Any]] = None
 _CONFIG_CACHE_LOCK = threading.RLock()
@@ -36,14 +39,13 @@ def clear_config_cache() -> None:
     This ensures that future config loads will re-read from disk. Thread-safe and
     safe to call concurrently or recursively (uses a reentrant lock).
     """
-    logging.info("CALL: clear_config_cache called with no arguments")
-    logging.info("Clearing Deephaven configuration cache...")
+    _LOGGER.debug("Clearing Deephaven configuration cache...")
     global _CONFIG_CACHE
     
     with _CONFIG_CACHE_LOCK:
         _CONFIG_CACHE = None
 
-    logging.info("Configuration cache cleared.")
+    _LOGGER.debug("Configuration cache cleared.")
 
 CONFIG_ENV_VAR = "DH_MCP_CONFIG_FILE"
 """
@@ -85,32 +87,33 @@ def load_config() -> Dict[str, Any]:
         RuntimeError: If the environment variable is not set, or the file cannot be read.
         ValueError: If the config file is not a JSON object, contains unknown keys, or fails validation.
     """
-    logging.info("CALL: load_config called with no arguments")
+    _LOGGER.debug("Loading Deephaven worker configuration...")
     global _CONFIG_CACHE
 
     # Thread-safe read of the config cache
     with _CONFIG_CACHE_LOCK:
         if _CONFIG_CACHE is not None:
-            logging.debug("Using cached Deephaven worker configuration.")
+            _LOGGER.debug("Using cached Deephaven worker configuration.")
             return _CONFIG_CACHE
 
         # Only one thread proceeds to load and cache the config
-        logging.info("Loading Deephaven worker configuration...")
+        _LOGGER.info("Loading Deephaven worker configuration from disk...")
+        start_time = perf_counter()
         config_path = os.environ.get(CONFIG_ENV_VAR)
         if not config_path:
-            logging.error(f"Environment variable {CONFIG_ENV_VAR} must be set to the path of the Deephaven worker config file.")
+            _LOGGER.error(f"Environment variable {CONFIG_ENV_VAR} must be set to the path of the Deephaven worker config file.")
             raise RuntimeError(f"Environment variable {CONFIG_ENV_VAR} must be set to the path of the Deephaven worker config file.")
 
         try:
             with open(config_path, 'r') as f:
                 config = json.load(f)
         except Exception as e:
-            logging.error(f"Failed to load Deephaven worker config from {config_path}: {str(e)}")
+            _LOGGER.error(f"Failed to load Deephaven worker config from {config_path}: {str(e)}")
             raise RuntimeError(f"Failed to load Deephaven worker config from {config_path}: {str(e)}") from e
 
         # Validate config structure
         if not isinstance(config, dict):
-            logging.error("Deephaven worker config must be a JSON object")
+            _LOGGER.error("Deephaven worker config must be a JSON object")
             raise ValueError("Deephaven worker config must be a JSON object")
 
         # Validate top-level keys
@@ -118,40 +121,41 @@ def load_config() -> Dict[str, Any]:
         allowed_top_level = {'workers', 'default_worker'}
         unknown_keys = top_level_keys - allowed_top_level
         if unknown_keys:
-            logging.error(f"Unknown top-level keys in Deephaven worker config: {unknown_keys}")
+            _LOGGER.error(f"Unknown top-level keys in Deephaven worker config: {unknown_keys}")
             raise ValueError(f"Unknown top-level keys in Deephaven worker config: {unknown_keys}")
 
         # Validate workers
         workers = config.get('workers', {})
         if not isinstance(workers, dict):
-            logging.error("'workers' must be a dictionary in Deephaven worker config")
+            _LOGGER.error("'workers' must be a dictionary in Deephaven worker config")
             raise ValueError("'workers' must be a dictionary in Deephaven worker config")
 
         for worker_name, worker_config in workers.items():
             if not isinstance(worker_config, dict):
-                logging.error(f"Worker config for {worker_name} must be a dictionary")
+                _LOGGER.error(f"Worker config for {worker_name} must be a dictionary")
                 raise ValueError(f"Worker config for {worker_name} must be a dictionary")
 
             # Check required fields
             missing_fields = [field for field in _REQUIRED_FIELDS if field not in worker_config]
             if missing_fields:
-                logging.error(f"Missing required fields in worker config for {worker_name}: {missing_fields}")
+                _LOGGER.error(f"Missing required fields in worker config for {worker_name}: {missing_fields}")
                 raise ValueError(f"Missing required fields in worker config for {worker_name}: {missing_fields}")
 
             # Check allowed fields and types
             for field, value in worker_config.items():
                 if field not in _ALLOWED_WORKER_FIELDS:
-                    logging.error(f"Unknown field '{field}' in worker config for {worker_name}")
+                    _LOGGER.error(f"Unknown field '{field}' in worker config for {worker_name}")
                     raise ValueError(f"Unknown field '{field}' in worker config for {worker_name}")
 
                 allowed_types = _ALLOWED_WORKER_FIELDS[field]
                 if not isinstance(value, allowed_types):
-                    logging.error(f"Field '{field}' in worker config for {worker_name} must be of type {allowed_types}")
+                    _LOGGER.error(f"Field '{field}' in worker config for {worker_name} must be of type {allowed_types}")
                     raise ValueError(f"Field '{field}' in worker config for {worker_name} must be of type {allowed_types}")
 
         # Cache the validated config
         _CONFIG_CACHE = config
-        logging.info("Deephaven worker configuration loaded and validated successfully")
+        load_time = perf_counter() - start_time
+        _LOGGER.info(f"Deephaven worker configuration loaded and validated successfully in {load_time:.3f} seconds")
         return config
 
 def resolve_worker_name(worker_name: Optional[str] = None) -> str:
@@ -167,7 +171,7 @@ def resolve_worker_name(worker_name: Optional[str] = None) -> str:
     Raises:
         RuntimeError: If no worker name is specified (via argument or default_worker in config).
     """
-    logging.info(f"CALL: resolve_worker_name called with worker_name={worker_name!r}")
+    _LOGGER.debug(f"Resolving worker name (provided: {worker_name!r})")
     config = load_config()
 
     if worker_name:
@@ -175,9 +179,10 @@ def resolve_worker_name(worker_name: Optional[str] = None) -> str:
 
     default_worker = config.get('default_worker')
     if not default_worker:
-        logging.error("No worker name specified and no default_worker in config")
+        _LOGGER.error("No worker name specified and no default_worker in config")
         raise RuntimeError("No worker name specified and no default_worker in config")
 
+    _LOGGER.debug(f"Using default worker: {default_worker}")
     return default_worker
 
 def get_worker_config(worker_name: Optional[str] = None) -> Dict[str, Any]:
@@ -193,19 +198,20 @@ def get_worker_config(worker_name: Optional[str] = None) -> Dict[str, Any]:
     Raises:
         RuntimeError: If no workers are defined, the worker is not found, or no default_worker is set.
     """
-    logging.info(f"CALL: get_worker_config called with worker_name={worker_name!r}")
+    _LOGGER.debug(f"Getting worker config for worker: {worker_name!r}")
     config = load_config()
     workers = config.get('workers', {})
 
     if not workers:
-        logging.error("No workers defined in configuration")
+        _LOGGER.error("No workers defined in configuration")
         raise RuntimeError("No workers defined in configuration")
 
     worker_name = resolve_worker_name(worker_name)
     if worker_name not in workers:
-        logging.error(f"Worker {worker_name} not found in configuration")
+        _LOGGER.error(f"Worker {worker_name} not found in configuration")
         raise RuntimeError(f"Worker {worker_name} not found in configuration")
 
+    _LOGGER.debug(f"Returning config for worker: {worker_name}")
     return workers[worker_name]
 
 def deephaven_worker_names() -> list[str]:
@@ -215,10 +221,12 @@ def deephaven_worker_names() -> list[str]:
     Returns:
         list[str]: List of worker names defined in the configuration.
     """
-    logging.info("CALL: deephaven_worker_names called with no arguments")
+    _LOGGER.debug("Getting list of all worker names")
     config = load_config()
     workers = config.get('workers', {})
-    return list(workers.keys())
+    worker_names = list(workers.keys())
+    _LOGGER.debug(f"Found {len(worker_names)} worker(s): {worker_names}")
+    return worker_names
 
 def deephaven_default_worker() -> Optional[str]:
     """
@@ -227,6 +235,8 @@ def deephaven_default_worker() -> Optional[str]:
     Returns:
         str or None: The default worker name, or None if not set in the config.
     """
-    logging.info("CALL: deephaven_default_worker called with no arguments")
+    _LOGGER.debug("Getting default worker name")
     config = load_config()
-    return config.get('default_worker')
+    default_worker = config.get('default_worker')
+    _LOGGER.debug(f"Default worker: {default_worker}")
+    return default_worker
