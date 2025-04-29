@@ -72,7 +72,7 @@ Dictionary of allowed worker configuration fields and their expected types.
 Type: dict[str, type | tuple[type, ...]]
 """
 
-def _load_config() -> Dict[str, Any]:
+def load_config() -> Dict[str, Any]:
     """
     Load and validate the Deephaven worker configuration from the JSON file specified
     by the DH_MCP_CONFIG_FILE environment variable. Uses a thread-safe cache to avoid
@@ -85,7 +85,7 @@ def _load_config() -> Dict[str, Any]:
         RuntimeError: If the environment variable is not set, or the file cannot be read.
         ValueError: If the config file is not a JSON object, contains unknown keys, or fails validation.
     """
-    logging.info("CALL: _load_config called with no arguments")
+    logging.info("CALL: load_config called with no arguments")
     global _CONFIG_CACHE
 
     # Thread-safe read of the config cache
@@ -168,7 +168,7 @@ def resolve_worker_name(worker_name: Optional[str] = None) -> str:
         RuntimeError: If no worker name is specified (via argument or default_worker in config).
     """
     logging.info(f"CALL: resolve_worker_name called with worker_name={worker_name!r}")
-    config = _load_config()
+    config = load_config()
 
     if worker_name:
         return worker_name
@@ -194,7 +194,7 @@ def get_worker_config(worker_name: Optional[str] = None) -> Dict[str, Any]:
         RuntimeError: If no workers are defined, the worker is not found, or no default_worker is set.
     """
     logging.info(f"CALL: get_worker_config called with worker_name={worker_name!r}")
-    config = _load_config()
+    config = load_config()
     workers = config.get('workers', {})
 
     if not workers:
@@ -216,7 +216,7 @@ def deephaven_worker_names() -> list[str]:
         list[str]: List of worker names defined in the configuration.
     """
     logging.info("CALL: deephaven_worker_names called with no arguments")
-    config = _load_config()
+    config = load_config()
     workers = config.get('workers', {})
     return list(workers.keys())
 
@@ -228,5 +228,5 @@ def deephaven_default_worker() -> Optional[str]:
         str or None: The default worker name, or None if not set in the config.
     """
     logging.info("CALL: deephaven_default_worker called with no arguments")
-    config = _load_config()
+    config = load_config()
     return config.get('default_worker')
