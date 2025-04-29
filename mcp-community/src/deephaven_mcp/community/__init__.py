@@ -52,6 +52,9 @@ def run_server(transport: str = "stdio") -> None:
 
     logging.info(f"Starting MCP server '{mcp_server.name}' with transport={transport}")
 
+    # Make sure config can be loaded before starting
+    config._load_config()
+
     try:
         mcp_server.run(transport=transport)
     finally:
