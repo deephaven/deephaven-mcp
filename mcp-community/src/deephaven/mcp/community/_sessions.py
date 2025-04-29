@@ -17,7 +17,7 @@ from typing import Optional
 from pydeephaven import Session
 import logging
 import threading
-from ._config import get_worker_config, resolve_worker_name
+from ...mcp import config
 
 
 _SESSION_CACHE = {}
@@ -81,7 +81,7 @@ def get_session(worker_name: Optional[str] = None) -> Session:
         Exception: If session creation fails or certificates cannot be loaded.
     """
     logging.info(f"CALL: get_session called with worker_name={worker_name!r}")
-    resolved_worker = resolve_worker_name(worker_name)
+    resolved_worker = config.resolve_worker_name(worker_name)
     logging.info(f"Resolving worker name: {worker_name} -> {resolved_worker}")
 
     # First, check and create the session in a single atomic lock block
@@ -98,7 +98,7 @@ def get_session(worker_name: Optional[str] = None) -> Session:
                 logging.warning(f"Error checking session liveness for worker '{resolved_worker}': {e}. Recreating session.")
 
         # At this point, we need to create a new session and update the cache
-        cfg = get_worker_config(worker_name)
+        cfg = config.get_worker_config(worker_name)
         host = cfg.get("host", None)
         port = cfg.get("port", None)
         auth_type = cfg.get("auth_type", "Anonymous")

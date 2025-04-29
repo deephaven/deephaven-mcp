@@ -32,7 +32,7 @@ See the project README for more information on configuration, running the server
 import logging
 from typing import Optional
 from mcp.server.fastmcp import FastMCP
-from ._config import clear_config_cache, _CONFIG_CACHE_LOCK
+from ...mcp import config
 from ._sessions import get_session, clear_session_cache, _SESSION_CACHE_LOCK
 
 
@@ -78,9 +78,9 @@ def deephaven_refresh() -> None:
     It also reopens all sessions to the workers to handle any expired or disconnected sessions.
     """
     logging.info("CALL: deephaven_refresh called with no arguments")
-    with _CONFIG_CACHE_LOCK:
+    with config._CONFIG_CACHE_LOCK:
         with _SESSION_CACHE_LOCK:
-            clear_config_cache()
+            config.clear_config_cache()
             clear_session_cache()
     logging.info("Deephaven worker configuration and session cache reloaded via MCP tool.")
 
@@ -97,7 +97,7 @@ def deephaven_default_worker() -> Optional[str]:
         str: The default worker name as defined in the config file.
     """
     logging.info("CALL: deephaven_default_worker called with no arguments")
-    return _config.deephaven_default_worker()
+    return config.deephaven_default_worker()
 
 @mcp_server.tool()
 def deephaven_worker_names() -> list[str]:
@@ -111,7 +111,7 @@ def deephaven_worker_names() -> list[str]:
         list[str]: List of all Deephaven worker names from the config file.
     """
     logging.info("CALL: deephaven_worker_names called with no arguments")
-    return _config.deephaven_worker_names()
+    return config.deephaven_worker_names()
 
 @mcp_server.tool()
 def deephaven_list_table_names(worker_name: Optional[str] = None) -> list:
