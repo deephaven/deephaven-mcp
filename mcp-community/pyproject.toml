@@ -12,4 +12,6 @@ dependencies = [
     "mcp[cli]>=1.6.0",
     "pydeephaven>=0.38.0",
 ]
-#TODO: add a script to run
+
+[project.scripts]
+dh-mcp-community = "deephaven.mcp.community:run_server"

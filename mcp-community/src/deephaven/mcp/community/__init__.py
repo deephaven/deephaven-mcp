@@ -38,6 +38,26 @@ from ._sessions import get_session, clear_session_cache, _SESSION_CACHE_LOCK
 
 mcp_server = FastMCP("test-dh-mcp")
 
+def run_server(transport: str = "stdio") -> None:
+    """
+    Start the MCP server with the specified transport.
+    
+    Args:
+        transport (str, optional): The transport type ('stdio' or 'sse'). Defaults to 'stdio'.
+    """
+    #TODO: can the log_level just be set via env?
+    # Set log level based on transport
+    log_level = logging.ERROR if transport == "stdio" else logging.DEBUG
+    logging.basicConfig(level=log_level, format='[%(asctime)s] %(levelname)s: %(message)s')
+
+    logging.info(f"Starting MCP server '{mcp_server.name}' with transport={transport}")
+
+    try:
+        mcp_server.run(transport=transport)
+    finally:
+        logging.info(f"MCP server '{mcp_server.name}' stopped.")
+
+
 
 @mcp_server.tool()
 def echo_tool(message: str) -> str:
