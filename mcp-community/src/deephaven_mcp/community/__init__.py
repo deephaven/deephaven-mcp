@@ -36,7 +36,7 @@ from deephaven_mcp import config
 from ._sessions import get_session, clear_session_cache, _SESSION_CACHE_LOCK
 
 
-mcp_server = FastMCP("test-dh-mcp")
+mcp_server = FastMCP("deephaven-mcp-community")
 
 def run_server(transport: str = "stdio") -> None:
     """
