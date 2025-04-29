@@ -6,6 +6,56 @@ configuration from a JSON file specified by the DH_MCP_CONFIG_FILE environment v
 It ensures robust error handling, strict schema validation, atomic cache operations, and
 provides helpers for retrieving worker names and the default worker for session management.
 
+Example Configuration:
+
+```json
+{
+    "workers": {
+        "local": {
+            "host": "localhost",  // str: Hostname or IP address
+            "port": 10000,        // int: Port number
+            "auth_type": "token", // str: Authentication type ("token", "basic", "none")
+            "auth_token": "your-token-here", // str: Authentication token
+            "never_timeout": true, // bool: Whether sessions should never timeout
+            "session_type": "single", // str: "single" or "multi"
+            "use_tls": true,      // bool: Whether to use TLS/SSL
+            "tls_root_certs": "/path/to/certs.pem", // str: Path to TLS root certificates
+            "client_cert_chain": "/path/to/client-cert.pem", // str: Path to client certificate chain
+            "client_private_key": "/path/to/client-key.pem"  // str: Path to client private key
+        },
+        "remote": {
+            "host": "remote-server.example.com",
+            "port": 10000,
+            "auth_type": "basic",
+            "auth_token": "basic-auth-token",
+            "never_timeout": false,
+            "session_type": "multi",
+            "use_tls": true
+        }
+    },
+    "default_worker": "local"  // str: Name of the default worker
+}
+```
+
+Example Invalid Configurations:
+
+```json
+// Invalid: Missing required top-level keys
+{
+    "workers": {}
+}
+
+// Invalid: Missing default_worker
+{
+    "workers": {
+        "local": {
+            "host": "localhost",
+            "port": 10000
+        }
+    }
+}
+```
+
 Features:
     - Thread-safe, reentrant loading and caching of configuration from JSON.
     - Strict validation of configuration structure, allowed fields, and required fields.
@@ -13,6 +63,47 @@ Features:
     - Only 'workers' and 'default_worker' allowed as top-level keys.
     - Atomic cache clearing for safe reloads.
     - Designed for use by other modules and tools in the dhmcp package.
+
+Configuration Schema:
+    - Top-level keys:
+        - `workers` (dict): Dictionary of worker configurations
+        - `default_worker` (str): Name of the default worker to use
+    - Worker configuration fields:
+        - `host` (str): Hostname or IP address
+        - `port` (int): Port number
+        - `auth_type` (str): Authentication type (e.g., "token", "basic")
+        - `auth_token` (str): Authentication token
+        - `never_timeout` (bool): Whether sessions should never timeout
+        - `session_type` (str): Type of session (e.g., "single", "multi")
+        - `use_tls` (bool): Whether to use TLS/SSL
+        - `tls_root_certs` (str, optional): Path to TLS root certificates
+        - `client_cert_chain` (str, optional): Path to client certificate chain
+        - `client_private_key` (str, optional): Path to client private key
+
+Performance Considerations:
+    - The configuration is cached after first load to avoid repeated disk I/O
+    - Use `clear_config_cache()` when the configuration file has been modified
+    - All configuration access is thread-safe and can be called from multiple threads
+
+Common Use Cases:
+    - Loading a worker configuration:
+        ```python
+        config = get_worker_config('local')
+        connection = connect(**config)
+        ```
+
+    - Listing available workers:
+        ```python
+        workers = get_worker_names()
+        for worker in workers:
+            print(f"Available worker: {worker}")
+        ```
+
+    - Using the default worker:
+        ```python
+        default_worker = get_worker_name_default()
+        config = get_worker_config(default_worker)
+        ```
 """
 
 import os
@@ -35,9 +126,13 @@ def clear_config_cache() -> None:
     """
     Atomically clear the Deephaven configuration cache.
 
-    Acquires the configuration cache lock and sets the cached config to None.
-    This ensures that future config loads will re-read from disk. Thread-safe and
-    safe to call concurrently or recursively (uses a reentrant lock).
+    Clears the cached configuration, forcing a reload from disk on next access.
+    This is useful when the configuration file has been modified externally.
+    Thread-safe and safe to call concurrently or recursively (uses a reentrant lock).
+
+    Example:
+        >>> clear_config_cache()  # Clear the cache
+        >>> config = get_config()  # Will reload from disk
     """
     _LOGGER.debug("Clearing Deephaven configuration cache...")
     global _CONFIG_CACHE
@@ -86,6 +181,12 @@ def get_config() -> Dict[str, Any]:
     Raises:
         RuntimeError: If the environment variable is not set, or the file cannot be read.
         ValueError: If the config file is not a JSON object, contains unknown keys, or fails validation.
+
+    Example:
+        >>> os.environ['DH_MCP_CONFIG_FILE'] = '/path/to/config.json'
+        >>> config = get_config()
+        >>> config['workers']['local']['host']
+        'localhost'
     """
     _LOGGER.debug("Loading Deephaven worker configuration...")
     global _CONFIG_CACHE
@@ -170,6 +271,16 @@ def resolve_worker_name(worker_name: Optional[str] = None) -> str:
 
     Raises:
         RuntimeError: If no worker name is specified (via argument or default_worker in config).
+
+    Example:
+        >>> config = {
+        ...     'workers': {'local': {...}},
+        ...     'default_worker': 'local'
+        ... }
+        >>> resolve_worker_name('local')
+        'local'
+        >>> resolve_worker_name()  # Uses default_worker
+        'local'
     """
     _LOGGER.debug(f"Resolving worker name (provided: {worker_name!r})")
     config = get_config()
@@ -197,6 +308,13 @@ def get_worker_config(worker_name: Optional[str] = None) -> Dict[str, Any]:
 
     Raises:
         RuntimeError: If no workers are defined, the worker is not found, or no default_worker is set.
+
+    Example:
+        >>> config = get_worker_config('local')
+        >>> config['host']
+        'localhost'
+        >>> config['port']
+        10000
     """
     _LOGGER.debug(f"Getting worker config for worker: {worker_name!r}")
     config = get_config()
