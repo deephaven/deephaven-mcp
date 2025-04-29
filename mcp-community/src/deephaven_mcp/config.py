@@ -74,7 +74,7 @@ Dictionary of allowed worker configuration fields and their expected types.
 Type: dict[str, type | tuple[type, ...]]
 """
 
-def load_config() -> Dict[str, Any]:
+def get_config() -> Dict[str, Any]:
     """
     Load and validate the Deephaven worker configuration from the JSON file specified
     by the DH_MCP_CONFIG_FILE environment variable. Uses a thread-safe cache to avoid
@@ -172,7 +172,7 @@ def resolve_worker_name(worker_name: Optional[str] = None) -> str:
         RuntimeError: If no worker name is specified (via argument or default_worker in config).
     """
     _LOGGER.debug(f"Resolving worker name (provided: {worker_name!r})")
-    config = load_config()
+    config = get_config()
 
     if worker_name:
         return worker_name
@@ -199,7 +199,7 @@ def get_worker_config(worker_name: Optional[str] = None) -> Dict[str, Any]:
         RuntimeError: If no workers are defined, the worker is not found, or no default_worker is set.
     """
     _LOGGER.debug(f"Getting worker config for worker: {worker_name!r}")
-    config = load_config()
+    config = get_config()
     workers = config.get('workers', {})
 
     if not workers:
@@ -222,7 +222,7 @@ def deephaven_worker_names() -> list[str]:
         list[str]: List of worker names defined in the configuration.
     """
     _LOGGER.debug("Getting list of all worker names")
-    config = load_config()
+    config = get_config()
     workers = config.get('workers', {})
     worker_names = list(workers.keys())
     _LOGGER.debug(f"Found {len(worker_names)} worker(s): {worker_names}")
@@ -236,7 +236,7 @@ def deephaven_default_worker() -> Optional[str]:
         str or None: The default worker name, or None if not set in the config.
     """
     _LOGGER.debug("Getting default worker name")
-    config = load_config()
+    config = get_config()
     default_worker = config.get('default_worker')
     _LOGGER.debug(f"Default worker: {default_worker}")
     return default_worker
