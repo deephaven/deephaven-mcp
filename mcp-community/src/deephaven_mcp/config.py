@@ -45,14 +45,15 @@ Example Invalid Configurations:
     "workers": {}
 }
 
-// Invalid: Missing default_worker
+// Invalid: default_worker must be defined and must exist in workers
 {
     "workers": {
         "local": {
             "host": "localhost",
             "port": 10000
         }
-    }
+    },
+    "default_worker": "nonexistent"  // Must be a worker that exists in the workers dictionary
 }
 ```
 
@@ -65,9 +66,9 @@ Features:
     - Designed for use by other modules and tools in the dhmcp package.
 
 Configuration Schema:
-    - Top-level keys:
+    - Required top-level keys:
         - `workers` (dict): Dictionary of worker configurations
-        - `default_worker` (str): Name of the default worker to use
+        - `default_worker` (str): Name of the default worker to use (must exist in workers dictionary)
     - Worker configuration fields:
         - `host` (str): Hostname or IP address
         - `port` (int): Port number
@@ -219,14 +220,23 @@ def get_config() -> Dict[str, Any]:
 
         # Validate top-level keys
         top_level_keys = set(config.keys())
-        allowed_top_level = {'workers', 'default_worker'}
+        required_top_level = {'workers', 'default_worker'}
+        allowed_top_level = required_top_level
+        
+        # Check for unknown keys
         unknown_keys = top_level_keys - allowed_top_level
         if unknown_keys:
             _LOGGER.error(f"Unknown top-level keys in Deephaven worker config: {unknown_keys}")
             raise ValueError(f"Unknown top-level keys in Deephaven worker config: {unknown_keys}")
+        
+        # Check for missing required keys
+        missing_keys = required_top_level - top_level_keys
+        if missing_keys:
+            _LOGGER.error(f"Missing required top-level keys in Deephaven worker config: {missing_keys}")
+            raise ValueError(f"Missing required top-level keys in Deephaven worker config: {missing_keys}")
 
         # Validate workers
-        workers = config.get('workers', {})
+        workers = config['workers']  # Required key, guaranteed by previous validation
         if not isinstance(workers, dict):
             _LOGGER.error("'workers' must be a dictionary in Deephaven worker config")
             raise ValueError("'workers' must be a dictionary in Deephaven worker config")
@@ -252,6 +262,12 @@ def get_config() -> Dict[str, Any]:
                 if not isinstance(value, allowed_types):
                     _LOGGER.error(f"Field '{field}' in worker config for {worker_name} must be of type {allowed_types}")
                     raise ValueError(f"Field '{field}' in worker config for {worker_name} must be of type {allowed_types}")
+
+        # Validate default_worker
+        default_worker = config['default_worker']  # Required key, guaranteed by previous validation
+        if default_worker not in workers:
+            _LOGGER.error(f"Default worker '{default_worker}' is not defined in workers")
+            raise ValueError(f"Default worker '{default_worker}' is not defined in workers")
 
         # Cache the validated config
         _CONFIG_CACHE = config
