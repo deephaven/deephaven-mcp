@@ -32,7 +32,7 @@ See the project README for more information on configuration, running the server
 import logging
 from typing import Optional
 from mcp.server.fastmcp import FastMCP
-from ...mcp import config
+from deephaven_mcp import config
 from ._sessions import get_session, clear_session_cache, _SESSION_CACHE_LOCK
 
 

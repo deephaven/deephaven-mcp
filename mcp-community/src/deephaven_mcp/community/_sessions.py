@@ -17,7 +17,7 @@ from typing import Optional
 from pydeephaven import Session
 import logging
 import threading
-from ...mcp import config
+from deephaven_mcp import config
 
 
 _SESSION_CACHE = {}

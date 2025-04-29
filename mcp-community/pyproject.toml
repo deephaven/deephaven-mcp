@@ -14,4 +14,7 @@ dependencies = [
 ]
 
 [project.scripts]
-dh-mcp-community = "deephaven.mcp.community:run_server"
+dh-mcp-community = "deephaven_mcp.community:run_server"
+
+[tool.uv]
+package = true
