@@ -1,0 +1,7 @@
+#TODO: Remove this file?
+#TODO: Clean up dependencies
+mcp[cli]
+deephaven-server
+pydeephaven
+aiohttp
+autogen-ext[mcp]
