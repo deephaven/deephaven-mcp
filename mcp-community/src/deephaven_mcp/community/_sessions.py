@@ -169,20 +169,20 @@ async def get_or_create_session(worker_name: Optional[str] = None) -> Session:
 
         # At this point, we need to create a new session and update the cache
         _LOGGER.info(f"Creating new session for worker: {resolved_worker}")
-        cfg = await config.get_worker_config(worker_name)
-        host = cfg.get("host", None)
-        port = cfg.get("port", None)
-        auth_type = cfg.get("auth_type", "Anonymous")
-        auth_token = cfg.get("auth_token", "")
-        never_timeout = cfg.get("never_timeout", False)
-        session_type = cfg.get("session_type", "python")
-        use_tls = cfg.get("use_tls", False)
-        tls_root_certs = cfg.get("tls_root_certs", None)
-        client_cert_chain = cfg.get("client_cert_chain", None)
-        client_private_key = cfg.get("client_private_key", None)
+        worker_cfg = await config.get_worker_config(worker_name)
+        host = worker_cfg.get("host", None)
+        port = worker_cfg.get("port", None)
+        auth_type = worker_cfg.get("auth_type", "Anonymous")
+        auth_token = worker_cfg.get("auth_token", "")
+        never_timeout = worker_cfg.get("never_timeout", False)
+        session_type = worker_cfg.get("session_type", "python")
+        use_tls = worker_cfg.get("use_tls", False)
+        tls_root_certs = worker_cfg.get("tls_root_certs", None)
+        client_cert_chain = worker_cfg.get("client_cert_chain", None)
+        client_private_key = worker_cfg.get("client_private_key", None)
 
         # Log configuration details (redacting sensitive info)
-        log_cfg = dict(cfg)
+        log_cfg = dict(worker_cfg)
 
         if "auth_token" in log_cfg:
             log_cfg["auth_token"] = "REDACTED"
@@ -201,7 +201,7 @@ async def get_or_create_session(worker_name: Optional[str] = None) -> Session:
                 raise
 
         if tls_root_certs:
-            _LOGGER.info(f"Loading TLS root certs from: {cfg.get('tls_root_certs')}")
+            _LOGGER.info(f"Loading TLS root certs from: {worker_cfg.get('tls_root_certs')}")
             tls_root_certs = await _load_bytes(tls_root_certs)
             _LOGGER.info("Loaded TLS root certs successfully.")
         else:
@@ -209,7 +209,7 @@ async def get_or_create_session(worker_name: Optional[str] = None) -> Session:
 
         if client_cert_chain:
             _LOGGER.info(
-                f"Loading client cert chain from: {cfg.get('client_cert_chain')}"
+                f"Loading client cert chain from: {worker_cfg.get('client_cert_chain')}"
             )
             client_cert_chain = await _load_bytes(client_cert_chain)
             _LOGGER.info("Loaded client cert chain successfully.")
@@ -218,7 +218,7 @@ async def get_or_create_session(worker_name: Optional[str] = None) -> Session:
 
         if client_private_key:
             _LOGGER.info(
-                f"Loading client private key from: {cfg.get('client_private_key')}"
+                f"Loading client private key from: {worker_cfg.get('client_private_key')}"
             )
             client_private_key = await _load_bytes(client_private_key)
             _LOGGER.info("Loaded client private key successfully.")
