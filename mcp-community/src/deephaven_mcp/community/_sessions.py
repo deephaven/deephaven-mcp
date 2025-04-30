@@ -25,7 +25,7 @@ Dependencies:
     - Requires aiofiles for async file I/O.
 """
 
-from typing import Optional
+from typing import Optional, Dict
 from pydeephaven import Session
 import logging
 import asyncio
