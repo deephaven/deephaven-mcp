@@ -11,6 +11,15 @@ Features:
     - Secure loading of certificate files for TLS connections.
     - Tools for cache clearing and atomic reloads.
     - Designed for use by other dhmcp modules and MCP tools.
+
+Thread Safety:
+    All public functions are thread-safe and use appropriate locking mechanisms.
+    The session cache is protected by a reentrant lock (_SESSION_CACHE_LOCK).
+
+Error Handling:
+    - All certificate loading operations are wrapped in try-except blocks.
+    - Session creation failures are logged and raised to the caller.
+    - Session closure failures are logged but do not prevent other operations.
 """
 
 from typing import Optional
@@ -29,22 +38,41 @@ _SESSION_CACHE_LOCK (threading.RLock): Ensures thread-safe, reentrant access to 
 
 def clear_all_sessions() -> None:
     """
-    Atomically clear the Deephaven session cache and close all alive sessions.
+    Atomically clear all Deephaven sessions and their cache.
 
-    For each cached session, if it is alive, attempts to close it. All exceptions are logged
-    and do not prevent other sessions from being closed. After all sessions are processed,
-    the cache is emptied. This function is thread-safe and acquires the session cache lock.
+    This function:
+    1. Acquires the session cache lock
+    2. Iterates through all cached sessions
+    3. Attempts to close each alive session
+    4. Clears the session cache
+
+    Error Handling:
+        - Any exceptions during session closure are logged but do not prevent other sessions from being closed
+        - The cache is always cleared regardless of errors
+
+    Thread Safety:
+        This function is thread-safe and uses the session cache lock to prevent race conditions.
+
+    Returns:
+        None
     """
     logging.info("CALL: clear_all_sessions called with no arguments")
     logging.info("Clearing Deephaven session cache...")
     
     def _close_session_safely(worker_key, session):
         """
-        Close the session if it is alive, logging the result.
+        Safely close a Deephaven session if it is alive.
+
+        This helper function attempts to close a session while handling any potential errors.
+        It is used internally by clear_all_sessions to clean up sessions.
 
         Args:
-            worker_key (str): The cache key for the worker.
-            session (Session): The Deephaven session instance.
+            worker_key (str): The cache key for the worker (used for logging)
+            session (Session): The Deephaven session instance to close
+
+        Error Handling:
+            - Any exceptions during session closure are caught and logged
+            - The function continues execution regardless of errors
         """
         logging.info(f"CALL: _close_session_safely called with worker_key={worker_key!r}, session={session!r}")
         try:
@@ -63,11 +91,14 @@ def clear_all_sessions() -> None:
 
 def get_or_create_session(worker_name: Optional[str] = None) -> Session:
     """
-    Retrieve a cached or new Deephaven Session for the specified worker.
+    Get or create a Deephaven Session for the specified worker.
 
-    If a session for the worker exists in the cache and is alive, it is reused.
-    Otherwise, a new session is created, cached, and returned. All access to the
-    session cache is thread-safe and reentrant.
+    This function implements a caching pattern where sessions are reused when possible.
+    The process is as follows:
+    1. Check if a cached session exists for the worker
+    2. If cached session exists and is alive, return it
+    3. Otherwise, create a new session using worker configuration
+    4. Cache the new session and return it
 
     Args:
         worker_name (str, optional): Name of the Deephaven worker to use. If None,
@@ -79,6 +110,14 @@ def get_or_create_session(worker_name: Optional[str] = None) -> Session:
     Raises:
         RuntimeError: If required configuration fields are missing or invalid.
         Exception: If session creation fails or certificates cannot be loaded.
+
+    Thread Safety:
+        This function is thread-safe and uses the session cache lock to prevent race conditions.
+        It is also reentrant, allowing nested calls to safely share the same lock.
+
+    Note:
+        This function handles TLS certificate loading and configuration for secure connections.
+        All sensitive information (like auth tokens and private keys) is redacted from logs.
     """
     logging.info(f"CALL: get_or_create_session called with worker_name={worker_name!r}")
     resolved_worker = config.resolve_worker_name(worker_name)
