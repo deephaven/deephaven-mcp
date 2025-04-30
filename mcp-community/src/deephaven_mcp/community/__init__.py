@@ -30,6 +30,7 @@ See the project README for more information on configuration, running the server
 """
 
 import logging
+import asyncio
 from typing import Optional
 from mcp.server.fastmcp import FastMCP
 from deephaven_mcp import config
@@ -37,6 +38,7 @@ from ._sessions import get_or_create_session, clear_all_sessions, _SESSION_CACHE
 
 
 mcp_server = FastMCP("deephaven-mcp-community")
+
 
 def run_server(transport: str = "stdio") -> None:
     """
@@ -52,64 +54,35 @@ def run_server(transport: str = "stdio") -> None:
 
     logging.info(f"Starting MCP server '{mcp_server.name}' with transport={transport}")
 
-    # Make sure config can be loaded before starting
-    config.get_config()
+    async def run():
+        # Make sure config can be loaded before starting
+        await config.get_config()
 
-    try:
-        mcp_server.run(transport=transport)
-    finally:
-        logging.info(f"MCP server '{mcp_server.name}' stopped.")
+        try:
+            await mcp_server.run(transport=transport)
+        finally:
+            logging.info(f"MCP server '{mcp_server.name}' stopped.")
 
-
-
-@mcp_server.tool()
-def echo_tool(message: str) -> str:
-    """
-    Echo the input message, prefixed with 'Echo: '.
-
-    Args:
-        message (str): The message to echo back to the caller.
-
-    Returns:
-        str: The echoed message, prefixed with 'Echo: '.
-    """
-    logging.info(f"CALL: echo_tool called with message={message!r}")
-    result = f"Echo: {message}"
-    logging.info("echo_tool called with message: %r, returning: %r", message, result)
-    return result
+    asyncio.run(run())
 
 
 @mcp_server.tool()
-def gnome_count_colorado() -> int:
-    """
-    Return the current number of gnomes in Colorado.
-
-    Returns:
-        int: The number of gnomes in Colorado.
-    """
-    logging.info("CALL: gnome_count_colorado called with no arguments")
-    count = 53
-    logging.info("gnome_count_colorado called, returning: %d", count)
-    return count
-
-
-@mcp_server.tool()
-def deephaven_refresh() -> None:
+async def deephaven_refresh() -> None:
     """
     Reloads and refreshes the Deephaven worker configuration and session cache.
     This allows new workers to be added or existing workers to be removed.
     It also reopens all sessions to the workers to handle any expired or disconnected sessions.
     """
     logging.info("CALL: deephaven_refresh called with no arguments")
-    with config._CONFIG_CACHE_LOCK:
-        with _SESSION_CACHE_LOCK:
-            config.clear_config_cache()
-            clear_all_sessions()
+    async with config._CONFIG_CACHE_LOCK:
+        async with _SESSION_CACHE_LOCK:
+            await config.clear_config_cache()
+            await clear_all_sessions()
     logging.info("Deephaven worker configuration and session cache reloaded via MCP tool.")
 
 
 @mcp_server.tool()
-def deephaven_default_worker() -> Optional[str]:
+async def deephaven_default_worker() -> Optional[str]:
     """
     MCP Tool: Get the default Deephaven worker name.
 
@@ -120,10 +93,10 @@ def deephaven_default_worker() -> Optional[str]:
         str: The default worker name as defined in the config file.
     """
     logging.info("CALL: deephaven_default_worker called with no arguments")
-    return config.get_worker_name_default()
+    return await config.get_worker_name_default()
 
 @mcp_server.tool()
-def deephaven_worker_names() -> list[str]:
+async def deephaven_worker_names() -> list[str]:
     """
     MCP Tool: List all Deephaven worker names.
 
@@ -134,10 +107,10 @@ def deephaven_worker_names() -> list[str]:
         list[str]: List of all Deephaven worker names from the config file.
     """
     logging.info("CALL: deephaven_worker_names called with no arguments")
-    return config.get_worker_names()
+    return await config.get_worker_names()
 
 @mcp_server.tool()
-def deephaven_list_table_names(worker_name: Optional[str] = None) -> list:
+async def deephaven_list_table_names(worker_name: Optional[str] = None) -> list:
     """
     MCP Tool: List table names in a Deephaven worker.
 
@@ -155,18 +128,18 @@ def deephaven_list_table_names(worker_name: Optional[str] = None) -> list:
     """
     logging.info(f"CALL: deephaven_list_table_names called with worker_name={worker_name!r}")
     try:
-        session = get_or_create_session(worker_name)
+        session = await get_or_create_session(worker_name)
         logging.info(f"deephaven_list_tables: Session obtained successfully for worker: '{worker_name}'")
         tables = list(session.tables)
         logging.info(f"deephaven_list_tables: Retrieved tables from session: {tables!r}")
         return tables
     except Exception as e:
-        logging.error(f"deephaven_list_tables failed for worker: '{worker_name}', error: {e!r}", exc_info=True)
+        logging.error(f"deephaven_list_tables: failed for worker: '{worker_name}', error: {e!r}", exc_info=True)
         return [f"Error: {e}"]
 
 
 @mcp_server.tool()
-def deephaven_table_schemas(worker_name: Optional[str] = None, table_names: Optional[list[str]] = None) -> list:
+async def deephaven_table_schemas(worker_name: Optional[str] = None, table_names: Optional[list[str]] = None) -> list:
     """
     MCP Tool: Get the schemas for one or more Deephaven tables.
 
@@ -187,7 +160,7 @@ def deephaven_table_schemas(worker_name: Optional[str] = None, table_names: Opti
     logging.info(f"CALL: deephaven_table_schemas called with worker_name={worker_name!r}, table_names={table_names!r}")
     results = []
     try:
-        session = get_or_create_session(worker_name)
+        session = await get_or_create_session(worker_name)
         logging.info(f"deephaven_table_schemas: Session obtained successfully for worker: '{worker_name}'")
 
         if table_names is not None:
@@ -217,7 +190,7 @@ def deephaven_table_schemas(worker_name: Optional[str] = None, table_names: Opti
 
 
 @mcp_server.tool()
-def deephaven_run_script(worker_name: Optional[str] = None, script: Optional[str] = None, script_path: Optional[str] = None) -> dict:
+async def deephaven_run_script(worker_name: Optional[str] = None, script: Optional[str] = None, script_path: Optional[str] = None) -> dict:
     """
     MCP Tool: Run a script on a Deephaven server.
 
@@ -240,14 +213,13 @@ def deephaven_run_script(worker_name: Optional[str] = None, script: Optional[str
             return result
 
         if script is None:
-            with open(script_path, "r") as f:
-                script = f.read()
+            script = await asyncio.to_thread(lambda: open(script_path, "r").read())
 
-        session = get_or_create_session(worker_name)
+        session = await get_or_create_session(worker_name)
         logging.info(f"deephaven_run_script: Session obtained successfully for worker: '{worker_name}'")
 
         logging.info(f"deephaven_run_script: Executing script on worker: '{worker_name}'")
-        session.run_script(script)
+        await asyncio.to_thread(session.run_script, script)
         logging.info(f"deephaven_run_script: Script executed successfully on worker: '{worker_name}'")
         result["success"] = True
     except Exception as e:

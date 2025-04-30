@@ -1,12 +1,67 @@
 """
-Configuration management for Deephaven worker servers.
+Async Deephaven MCP configuration management.
 
-This module provides thread-safe loading, validation, and access to Deephaven worker
-configuration from a JSON file specified by the DH_MCP_CONFIG_FILE environment variable.
-It ensures robust error handling, strict schema validation, atomic cache operations, and
-provides helpers for retrieving worker names and the default worker for session management.
+This module provides async functions to load, validate, and manage configuration for Deephaven workers from a JSON file.
+Configuration is loaded from a file specified by the DH_MCP_CONFIG_FILE environment variable using native async file I/O (aiofiles).
 
-Example Configuration:
+Features:
+    - Coroutine-safe, cached loading of configuration using asyncio.Lock.
+    - Strict validation of configuration structure and values.
+    - Helper functions to access worker-specific config, default worker, and worker names.
+    - Logging of configuration loading, environment variable value, and validation steps.
+    - Uses aiofiles for non-blocking, native async config file reads.
+
+Configuration Schema:
+---------------------
+The configuration file must be a JSON object with exactly two top-level keys:
+
+  - workers (dict, required):
+      A dictionary mapping worker names (str) to worker configuration dicts.
+      Each worker configuration dict may contain any of the following fields (all are optional):
+
+        - host (str): Hostname or IP address of the worker.
+        - port (int): Port number for the worker connection.
+        - auth_type (str): Authentication type. Allowed values include:
+            * "token": Use a bearer token for authentication.
+            * "basic": Use HTTP Basic authentication.
+            * "anonymous": No authentication required.
+        - auth_token (str): The authentication token or password. May be empty if auth_type is "anonymous".
+        - never_timeout (bool): If True, sessions to this worker never time out.
+        - session_type (str): Session management mode. Allowed values include:
+            * "single": Only one session is maintained per worker.
+            * "multi": Multiple sessions may be created per worker.
+        - use_tls (bool): Whether to use TLS/SSL for the connection.
+        - tls_root_certs (str): Path to a PEM file containing root certificates to trust for TLS.
+        - client_cert_chain (str): Path to a PEM file containing the client certificate chain for mutual TLS.
+        - client_private_key (str): Path to a PEM file containing the client private key for mutual TLS.
+
+      Notes:
+        - All fields are optional; if a field is omitted, a default may be used by the consuming code, or the feature may be disabled.
+        - All file paths should be absolute, or relative to the process working directory.
+        - If use_tls is True and any of the optional TLS fields are provided, they must point to valid PEM files.
+        - Sensitive fields (auth_token, client_private_key) are redacted from logs for security.
+        - Unknown fields are not allowed and will cause validation to fail.
+
+  - default_worker (str, required):
+      The name of the default worker to use. Must match one of the keys in the workers dictionary.
+      This worker will be used if no worker name is explicitly specified in API calls.
+
+Validation rules:
+  - All required fields must be present and have the correct type.
+  - All field values must be valid (see allowed values above).
+  - No unknown fields are permitted in worker configs.
+  - The default_worker must be present in the workers dictionary.
+  - If TLS fields are provided, referenced files must exist and be readable.
+
+Configuration JSON Specification:
+---------------------------------
+- The configuration file must be a JSON object with exactly two top-level keys:
+    - "workers": a dictionary mapping worker names to worker configuration dicts
+    - "default_worker": the name (string) of the default worker (must be a key in "workers")
+
+Example Valid Configuration:
+---------------------------
+The configuration file should look like the following (see field explanations below):
 
 ```json
 {
@@ -38,14 +93,16 @@ Example Configuration:
 ```
 
 Example Invalid Configurations:
-
+------------------------------
+1. Invalid: Missing required top-level keys
 ```json
-// Invalid: Missing required top-level keys
 {
     "workers": {}
 }
+```
 
-// Invalid: default_worker must be defined and must exist in workers
+2. Invalid: default_worker must be defined and must exist in workers
+```json
 {
     "workers": {
         "local": {
@@ -57,79 +114,92 @@ Example Invalid Configurations:
 }
 ```
 
-Features:
-    - Thread-safe, reentrant loading and caching of configuration from JSON.
-    - Strict validation of configuration structure, allowed fields, and required fields.
-    - Access to individual worker configs, worker lists, and the default worker.
-    - Only 'workers' and 'default_worker' allowed as top-level keys.
-    - Atomic cache clearing for safe reloads.
-    - Designed for use by other modules and tools in the dhmcp package.
-
-Configuration Schema:
-    - Required top-level keys:
-        - `workers` (dict): Dictionary of worker configurations
-        - `default_worker` (str): Name of the default worker to use (must exist in workers dictionary)
-    - Worker configuration fields:
-        - `host` (str): Hostname or IP address
-        - `port` (int): Port number
-        - `auth_type` (str): Authentication type (e.g., "token", "basic")
-        - `auth_token` (str): Authentication token
-        - `never_timeout` (bool): Whether sessions should never timeout
-        - `session_type` (str): Type of session (e.g., "single", "multi")
-        - `use_tls` (bool): Whether to use TLS/SSL
-        - `tls_root_certs` (str, optional): Path to TLS root certificates
-        - `client_cert_chain` (str, optional): Path to client certificate chain
-        - `client_private_key` (str, optional): Path to client private key
-
 Performance Considerations:
-    - The configuration is cached after first load to avoid repeated disk I/O
-    - Use `clear_config_cache()` when the configuration file has been modified
-    - All configuration access is thread-safe and can be called from multiple threads
+--------------------------
+- Uses native async file I/O (aiofiles) to avoid blocking the event loop.
+- Employs an asyncio.Lock to ensure coroutine-safe, cached configuration loading.
+- Designed for high-throughput, concurrent environments.
 
-Common Use Cases:
-    - Loading a worker configuration:
-        ```python
-        config = get_worker_config('local')
-        connection = connect(**config)
-        ```
+Usage Patterns:
+---------------
+- Loading a worker configuration:
+    >>> config = await get_worker_config('local')
+    >>> connection = connect(**config)
+- Listing available workers:
+    >>> workers = await get_worker_names()
+    >>> for worker in workers:
+    ...     print(f"Available worker: {worker}")
+- Using the default worker:
+    >>> default_worker = await get_worker_name_default()
+    >>> config = await get_worker_config(default_worker)
 
-    - Listing available workers:
-        ```python
-        workers = get_worker_names()
-        for worker in workers:
-            print(f"Available worker: {worker}")
-        ```
+Environment Variables:
+---------------------
+- DH_MCP_CONFIG_FILE: Path to the Deephaven worker configuration JSON file.
 
-    - Using the default worker:
-        ```python
-        default_worker = get_worker_name_default()
-        config = get_worker_config(default_worker)
-        ```
+Security:
+---------
+- Sensitive information (such as authentication tokens) is redacted in logs.
+- Environment variable values are logged for debugging.
+
+Async/Await & I/O:
+------------------
+- All configuration loading is async and coroutine-safe.
+- File I/O uses aiofiles for non-blocking reads.
+
+Usage Patterns:
+---------------
+- Loading a worker configuration:
+    >>> config = await get_worker_config('local')
+    >>> connection = connect(**config)
+- Listing available workers:
+    >>> workers = await get_worker_names()
+    >>> for worker in workers:
+    ...     print(f"Available worker: {worker}")
+- Using the default worker:
+    >>> default_worker = await get_worker_name_default()
+    >>> config = await get_worker_config(default_worker)
+
+Environment Variables:
+---------------------
+- DH_MCP_CONFIG_FILE: Path to the Deephaven worker configuration JSON file.
+
+Security:
+---------
+- Sensitive information (such as authentication tokens) is redacted in logs.
+- Environment variable values are logged for debugging.
+
+Async/Await & I/O:
+------------------
+- All configuration loading is async and coroutine-safe.
+- File I/O uses aiofiles for non-blocking reads.
 """
 
 import os
 import json
 import logging
-import threading
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
 from time import perf_counter
+import asyncio
+import aiofiles
 
 _LOGGER = logging.getLogger(__name__)
 
 _CONFIG_CACHE: Optional[Dict[str, Any]] = None
-_CONFIG_CACHE_LOCK = threading.RLock()
+#TODO: does this need to be a reentrant lock?
+_CONFIG_CACHE_LOCK = asyncio.Lock()
 """
 _CONFIG_CACHE (Optional[dict]): Holds the loaded Deephaven worker configuration, or None if not loaded.
-_CONFIG_CACHE_LOCK (threading.RLock): Ensures thread-safe, reentrant access to the configuration cache.
+_CONFIG_CACHE_LOCK (asyncio.Lock): Ensures coroutine-safe, reentrant access to the configuration cache.
 """
 
-def clear_config_cache() -> None:
+async def clear_config_cache() -> None:
     """
     Atomically clear the Deephaven configuration cache.
 
     Clears the cached configuration, forcing a reload from disk on next access.
     This is useful when the configuration file has been modified externally.
-    Thread-safe and safe to call concurrently or recursively (uses a reentrant lock).
+    Coroutine-safe and safe to call concurrently or recursively (uses a reentrant lock).
 
     Example:
         >>> clear_config_cache()  # Clear the cache
@@ -137,8 +207,8 @@ def clear_config_cache() -> None:
     """
     _LOGGER.debug("Clearing Deephaven configuration cache...")
     global _CONFIG_CACHE
-    
-    with _CONFIG_CACHE_LOCK:
+
+    async with _CONFIG_CACHE_LOCK:
         _CONFIG_CACHE = None
 
     _LOGGER.debug("Configuration cache cleared.")
@@ -170,11 +240,10 @@ Dictionary of allowed worker configuration fields and their expected types.
 Type: dict[str, type | tuple[type, ...]]
 """
 
-def get_config() -> Dict[str, Any]:
+async def get_config() -> Dict[str, Any]:
     """
-    Load and validate the Deephaven worker configuration from the JSON file specified
-    by the DH_MCP_CONFIG_FILE environment variable. Uses a thread-safe cache to avoid
-    repeated disk reads and validation.
+    Load and validate the Deephaven worker configuration from disk, using a cache if available.
+    Uses native async file I/O (aiofiles) for non-blocking config file reads.
 
     Returns:
         Dict[str, Any]: The loaded and validated configuration dictionary.
@@ -193,7 +262,7 @@ def get_config() -> Dict[str, Any]:
     global _CONFIG_CACHE
 
     # Thread-safe read of the config cache
-    with _CONFIG_CACHE_LOCK:
+    async with _CONFIG_CACHE_LOCK:
         if _CONFIG_CACHE is not None:
             _LOGGER.debug("Using cached Deephaven worker configuration.")
             return _CONFIG_CACHE
@@ -201,81 +270,92 @@ def get_config() -> Dict[str, Any]:
         # Only one thread proceeds to load and cache the config
         _LOGGER.info("Loading Deephaven worker configuration from disk...")
         start_time = perf_counter()
-        config_path = os.environ.get(CONFIG_ENV_VAR)
-        if not config_path:
-            _LOGGER.error(f"Environment variable {CONFIG_ENV_VAR} must be set to the path of the Deephaven worker config file.")
-            raise RuntimeError(f"Environment variable {CONFIG_ENV_VAR} must be set to the path of the Deephaven worker config file.")
-
+        if CONFIG_ENV_VAR not in os.environ:
+            _LOGGER.error(f"Environment variable {CONFIG_ENV_VAR} is not set.")
+            raise RuntimeError(f"Environment variable {CONFIG_ENV_VAR} is not set.")
+        config_path = os.environ[CONFIG_ENV_VAR]
+        _LOGGER.info(f"Environment variable {CONFIG_ENV_VAR} is set to: {config_path}")
+        _LOGGER.info(f"Loading Deephaven worker configuration from disk...")
         try:
-            with open(config_path, 'r') as f:
-                config = json.load(f)
+            async with aiofiles.open(config_path, "r") as f:
+                data = json.loads(await f.read())
         except Exception as e:
-            _LOGGER.error(f"Failed to load Deephaven worker config from {config_path}: {str(e)}")
-            raise RuntimeError(f"Failed to load Deephaven worker config from {config_path}: {str(e)}") from e
+            _LOGGER.error(f"Failed to load config file {config_path}: {e}")
+            raise
+        # Validate config
+        data = _validate_config(data)
+        _CONFIG_CACHE = data
+        _LOGGER.info(f"Deephaven worker configuration loaded and validated successfully in {perf_counter() - start_time:.3f} seconds")
+        return data
 
-        # Validate config structure
-        if not isinstance(config, dict):
-            _LOGGER.error("Deephaven worker config must be a JSON object")
-            raise ValueError("Deephaven worker config must be a JSON object")
+def _validate_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Validate the Deephaven worker configuration.
 
-        # Validate top-level keys
-        top_level_keys = set(config.keys())
-        required_top_level = {'workers', 'default_worker'}
-        allowed_top_level = required_top_level
-        
-        # Check for unknown keys
-        unknown_keys = top_level_keys - allowed_top_level
-        if unknown_keys:
-            _LOGGER.error(f"Unknown top-level keys in Deephaven worker config: {unknown_keys}")
-            raise ValueError(f"Unknown top-level keys in Deephaven worker config: {unknown_keys}")
-        
-        # Check for missing required keys
-        missing_keys = required_top_level - top_level_keys
-        if missing_keys:
-            _LOGGER.error(f"Missing required top-level keys in Deephaven worker config: {missing_keys}")
-            raise ValueError(f"Missing required top-level keys in Deephaven worker config: {missing_keys}")
+    Args:
+        config (dict): The configuration dictionary to validate.
 
-        # Validate workers
-        workers = config['workers']  # Required key, guaranteed by previous validation
-        if not isinstance(workers, dict):
-            _LOGGER.error("'workers' must be a dictionary in Deephaven worker config")
-            raise ValueError("'workers' must be a dictionary in Deephaven worker config")
+    Returns:
+        dict: The validated configuration dictionary (may be normalized/cleaned).
 
-        for worker_name, worker_config in workers.items():
-            if not isinstance(worker_config, dict):
-                _LOGGER.error(f"Worker config for {worker_name} must be a dictionary")
-                raise ValueError(f"Worker config for {worker_name} must be a dictionary")
+    Raises:
+        ValueError: If the config is missing required keys, has unknown keys, has invalid field types,
+            or is otherwise invalid.
+    """
 
-            # Check required fields
-            missing_fields = [field for field in _REQUIRED_FIELDS if field not in worker_config]
-            if missing_fields:
-                _LOGGER.error(f"Missing required fields in worker config for {worker_name}: {missing_fields}")
-                raise ValueError(f"Missing required fields in worker config for {worker_name}: {missing_fields}")
+    required_top_level = {'workers', 'default_worker'}
+    allowed_top_level = required_top_level
+    top_level_keys = set(config.keys())
 
-            # Check allowed fields and types
-            for field, value in worker_config.items():
-                if field not in _ALLOWED_WORKER_FIELDS:
-                    _LOGGER.error(f"Unknown field '{field}' in worker config for {worker_name}")
-                    raise ValueError(f"Unknown field '{field}' in worker config for {worker_name}")
+    # Check for unknown keys
+    unknown_keys = top_level_keys - allowed_top_level
+    if unknown_keys:
+        _LOGGER.error(f"Unknown top-level keys in Deephaven worker config: {unknown_keys}")
+        raise ValueError(f"Unknown top-level keys in Deephaven worker config: {unknown_keys}")
 
-                allowed_types = _ALLOWED_WORKER_FIELDS[field]
-                if not isinstance(value, allowed_types):
-                    _LOGGER.error(f"Field '{field}' in worker config for {worker_name} must be of type {allowed_types}")
-                    raise ValueError(f"Field '{field}' in worker config for {worker_name} must be of type {allowed_types}")
+    # Check for missing required keys
+    missing_keys = required_top_level - top_level_keys
+    if missing_keys:
+        _LOGGER.error(f"Missing required top-level keys in Deephaven worker config: {missing_keys}")
+        raise ValueError(f"Missing required top-level keys in Deephaven worker config: {missing_keys}")
 
-        # Validate default_worker
-        default_worker = config['default_worker']  # Required key, guaranteed by previous validation
-        if default_worker not in workers:
-            _LOGGER.error(f"Default worker '{default_worker}' is not defined in workers")
-            raise ValueError(f"Default worker '{default_worker}' is not defined in workers")
+    # Validate workers
+    workers = config['workers']  # Required key, guaranteed by previous validation
+    if not isinstance(workers, dict):
+        _LOGGER.error("'workers' must be a dictionary in Deephaven worker config")
+        raise ValueError("'workers' must be a dictionary in Deephaven worker config")
 
-        # Cache the validated config
-        _CONFIG_CACHE = config
-        load_time = perf_counter() - start_time
-        _LOGGER.info(f"Deephaven worker configuration loaded and validated successfully in {load_time:.3f} seconds")
-        return config
+    for worker_name, worker_config in workers.items():
+        if not isinstance(worker_config, dict):
+            _LOGGER.error(f"Worker config for {worker_name} must be a dictionary")
+            raise ValueError(f"Worker config for {worker_name} must be a dictionary")
 
-def resolve_worker_name(worker_name: Optional[str] = None) -> str:
+        # Check required fields
+        missing_fields = [field for field in _REQUIRED_FIELDS if field not in worker_config]
+        if missing_fields:
+            _LOGGER.error(f"Missing required fields in worker config for {worker_name}: {missing_fields}")
+            raise ValueError(f"Missing required fields in worker config for {worker_name}: {missing_fields}")
+
+        # Check allowed fields and types
+        for field, value in worker_config.items():
+            if field not in _ALLOWED_WORKER_FIELDS:
+                _LOGGER.error(f"Unknown field '{field}' in worker config for {worker_name}")
+                raise ValueError(f"Unknown field '{field}' in worker config for {worker_name}")
+
+            allowed_types = _ALLOWED_WORKER_FIELDS[field]
+            if not isinstance(value, allowed_types):
+                _LOGGER.error(f"Field '{field}' in worker config for {worker_name} must be of type {allowed_types}")
+                raise ValueError(f"Field '{field}' in worker config for {worker_name} must be of type {allowed_types}")
+
+    # Validate default_worker
+    default_worker = config['default_worker']  # Required key, guaranteed by previous validation
+    if default_worker not in workers:
+        _LOGGER.error(f"Default worker '{default_worker}' is not defined in workers")
+        raise ValueError(f"Default worker '{default_worker}' is not defined in workers")
+
+    return config
+
+async def resolve_worker_name(worker_name: Optional[str] = None) -> str:
     """
     Resolve the worker name to use, either from the provided worker_name or the default_worker from config.
 
@@ -312,7 +392,7 @@ def resolve_worker_name(worker_name: Optional[str] = None) -> str:
     _LOGGER.debug(f"Using default worker: {default_worker}")
     return default_worker
 
-def get_worker_config(worker_name: Optional[str] = None) -> Dict[str, Any]:
+async def get_worker_config(worker_name: Optional[str] = None) -> Dict[str, Any]:
     """
     Retrieve the configuration dictionary for a specific worker.
 
@@ -333,14 +413,14 @@ def get_worker_config(worker_name: Optional[str] = None) -> Dict[str, Any]:
         10000
     """
     _LOGGER.debug(f"Getting worker config for worker: {worker_name!r}")
-    config = get_config()
+    config = await get_config()
     workers = config.get('workers', {})
 
     if not workers:
         _LOGGER.error("No workers defined in configuration")
         raise RuntimeError("No workers defined in configuration")
 
-    worker_name = resolve_worker_name(worker_name)
+    worker_name = await resolve_worker_name(worker_name)
     if worker_name not in workers:
         _LOGGER.error(f"Worker {worker_name} not found in configuration")
         raise RuntimeError(f"Worker {worker_name} not found in configuration")
@@ -348,7 +428,7 @@ def get_worker_config(worker_name: Optional[str] = None) -> Dict[str, Any]:
     _LOGGER.debug(f"Returning config for worker: {worker_name}")
     return workers[worker_name]
 
-def get_worker_names() -> list[str]:
+async def get_worker_names() -> list[str]:
     """
     Get a list of all configured Deephaven worker names from the loaded configuration.
 
@@ -356,13 +436,13 @@ def get_worker_names() -> list[str]:
         list[str]: List of worker names defined in the configuration.
     """
     _LOGGER.debug("Getting list of all worker names")
-    config = get_config()
+    config = await get_config()
     workers = config.get('workers', {})
     worker_names = list(workers.keys())
     _LOGGER.debug(f"Found {len(worker_names)} worker(s): {worker_names}")
     return worker_names
 
-def get_worker_name_default() -> Optional[str]:
+async def get_worker_name_default() -> Optional[str]:
     """
     Get the name of the default Deephaven worker, as set in the configuration.
 
@@ -370,7 +450,7 @@ def get_worker_name_default() -> Optional[str]:
         str or None: The default worker name, or None if not set in the config.
     """
     _LOGGER.debug("Getting default worker name")
-    config = get_config()
+    config = await get_config()
     default_worker = config.get('default_worker')
     _LOGGER.debug(f"Default worker: {default_worker}")
     return default_worker
