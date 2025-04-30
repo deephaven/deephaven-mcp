@@ -56,6 +56,7 @@ def clear_all_sessions() -> None:
     Returns:
         None
     """
+    start_time = time.time()
     logging.info("Clearing Deephaven session cache...")
     logging.info(f"Current session cache size: {len(_SESSION_CACHE)}")
     
@@ -74,24 +75,27 @@ def clear_all_sessions() -> None:
             - Any exceptions during session closure are caught and logged
             - The function continues execution regardless of errors
         """
-        logging.info(f"CALL: _close_session_safely called with worker_key={worker_key!r}, session={session!r}")
+        logging.debug(f"Attempting to close session for worker: {worker_key}")
         try:
             if hasattr(session, "is_alive") and session.is_alive:
-                logging.info(f"Attempting to close alive session for worker: {worker_key}")
+                logging.info(f"Closing alive session for worker: {worker_key}")
                 session.close()
                 logging.info(f"Successfully closed session for worker: {worker_key}")
             else:
-                logging.info(f"Session for worker {worker_key} is already closed")
+                logging.debug(f"Session for worker {worker_key} is already closed")
         except Exception as exc:
-            logging.warning(f"Failed to close session for worker {worker_key}: {exc}")
-            logging.warning(f"Session state after error: is_alive={hasattr(session, 'is_alive') and session.is_alive}")
+            logging.error(f"Failed to close session for worker {worker_key}: {exc}")
+            logging.debug(f"Session state after error: is_alive={hasattr(session, 'is_alive') and session.is_alive}", exc_info=True)
 
     with _SESSION_CACHE_LOCK:
         # Iterate over a copy to avoid mutation during iteration
+        num_sessions = len(_SESSION_CACHE)
+        logging.info(f"Processing {num_sessions} cached sessions...")
         for worker_key, session in list(_SESSION_CACHE.items()):
-            _close_session_if_alive(worker_key, session)
+            _close_session_safely(worker_key, session)
         _SESSION_CACHE.clear()
-        logging.info("Session cache cleared.")
+        logging.info(f"Session cache cleared. Processed {num_sessions} sessions in {time.time() - start_time:.2f}s")
+
 
 def get_or_create_session(worker_name: Optional[str] = None) -> Session:
     """
@@ -123,11 +127,12 @@ def get_or_create_session(worker_name: Optional[str] = None) -> Session:
         This function handles TLS certificate loading and configuration for secure connections.
         All sensitive information (like auth tokens and private keys) is redacted from logs.
     """
+    start_time = time.time()
     logging.info(f"Getting or creating session for worker: {worker_name}")
     resolved_worker = config.resolve_worker_name(worker_name)
-    logging.info(f"Resolving worker name: {worker_name} -> {resolved_worker}")
-    logging.info(f"Checking session cache for worker: {resolved_worker}")
-
+    logging.info(f"Resolved worker name: {worker_name} -> {resolved_worker}")
+    logging.info(f"Session cache size: {len(_SESSION_CACHE)}")
+    
     # First, check and create the session in a single atomic lock block
     with _SESSION_CACHE_LOCK:
         session = _SESSION_CACHE.get(resolved_worker)
