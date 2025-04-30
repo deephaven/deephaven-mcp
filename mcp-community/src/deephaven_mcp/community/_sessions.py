@@ -28,6 +28,8 @@ import logging
 import threading
 from deephaven_mcp import config
 
+_LOGGER = logging.getLogger(__name__)
+
 
 _SESSION_CACHE = {}
 _SESSION_CACHE_LOCK = threading.RLock()
@@ -57,8 +59,8 @@ def clear_all_sessions() -> None:
         None
     """
     start_time = time.time()
-    logging.info("Clearing Deephaven session cache...")
-    logging.info(f"Current session cache size: {len(_SESSION_CACHE)}")
+    _LOGGER.info("Clearing Deephaven session cache...")
+    _LOGGER.info(f"Current session cache size: {len(_SESSION_CACHE)}")
     
     def _close_session_safely(worker_key, session):
         """
@@ -75,26 +77,26 @@ def clear_all_sessions() -> None:
             - Any exceptions during session closure are caught and logged
             - The function continues execution regardless of errors
         """
-        logging.debug(f"Attempting to close session for worker: {worker_key}")
+        _LOGGER.debug(f"Attempting to close session for worker: {worker_key}")
         try:
             if hasattr(session, "is_alive") and session.is_alive:
-                logging.info(f"Closing alive session for worker: {worker_key}")
+                _LOGGER.info(f"Closing alive session for worker: {worker_key}")
                 session.close()
-                logging.info(f"Successfully closed session for worker: {worker_key}")
+                _LOGGER.info(f"Successfully closed session for worker: {worker_key}")
             else:
-                logging.debug(f"Session for worker {worker_key} is already closed")
+                _LOGGER.debug(f"Session for worker {worker_key} is already closed")
         except Exception as exc:
-            logging.error(f"Failed to close session for worker {worker_key}: {exc}")
-            logging.debug(f"Session state after error: is_alive={hasattr(session, 'is_alive') and session.is_alive}", exc_info=True)
+            _LOGGER.error(f"Failed to close session for worker {worker_key}: {exc}")
+            _LOGGER.debug(f"Session state after error: is_alive={hasattr(session, 'is_alive') and session.is_alive}", exc_info=True)
 
     with _SESSION_CACHE_LOCK:
         # Iterate over a copy to avoid mutation during iteration
         num_sessions = len(_SESSION_CACHE)
-        logging.info(f"Processing {num_sessions} cached sessions...")
+        _LOGGER.info(f"Processing {num_sessions} cached sessions...")
         for worker_key, session in list(_SESSION_CACHE.items()):
             _close_session_safely(worker_key, session)
         _SESSION_CACHE.clear()
-        logging.info(f"Session cache cleared. Processed {num_sessions} sessions in {time.time() - start_time:.2f}s")
+        _LOGGER.info(f"Session cache cleared. Processed {num_sessions} sessions in {time.time() - start_time:.2f}s")
 
 
 def get_or_create_session(worker_name: Optional[str] = None) -> Session:
@@ -128,10 +130,10 @@ def get_or_create_session(worker_name: Optional[str] = None) -> Session:
         All sensitive information (like auth tokens and private keys) is redacted from logs.
     """
     start_time = time.time()
-    logging.info(f"Getting or creating session for worker: {worker_name}")
+    _LOGGER.info(f"Getting or creating session for worker: {worker_name}")
     resolved_worker = config.resolve_worker_name(worker_name)
-    logging.info(f"Resolved worker name: {worker_name} -> {resolved_worker}")
-    logging.info(f"Session cache size: {len(_SESSION_CACHE)}")
+    _LOGGER.info(f"Resolved worker name: {worker_name} -> {resolved_worker}")
+    _LOGGER.info(f"Session cache size: {len(_SESSION_CACHE)}")
     
     # First, check and create the session in a single atomic lock block
     with _SESSION_CACHE_LOCK:
@@ -139,16 +141,16 @@ def get_or_create_session(worker_name: Optional[str] = None) -> Session:
         if session is not None:
             try:
                 if session.is_alive:
-                    logging.info(f"Found and returning cached session for worker: {resolved_worker}")
-                    logging.info(f"Session state: host={cfg.get('host')}, port={cfg.get('port')}, auth_type={cfg.get('auth_type')}")
+                    _LOGGER.info(f"Found and returning cached session for worker: {resolved_worker}")
+                    _LOGGER.debug(f"Session state: host={session.host}, port={session.port}, auth_type={session.auth_type}")
                     return session
                 else:
-                    logging.info(f"Cached session for worker '{resolved_worker}' is not alive. Recreating.")
+                    _LOGGER.info(f"Cached session for worker '{resolved_worker}' is not alive. Recreating.")
             except Exception as e:
-                logging.warning(f"Error checking session liveness for worker '{resolved_worker}': {e}. Recreating session.")
+                _LOGGER.warning(f"Error checking session liveness for worker '{resolved_worker}': {e}. Recreating session.")
 
         # At this point, we need to create a new session and update the cache
-        logging.info(f"Creating new session for worker: {resolved_worker}")
+        _LOGGER.info(f"Creating new session for worker: {resolved_worker}")
         cfg = config.get_worker_config(worker_name)
         host = cfg.get("host", None)
         port = cfg.get("port", None)
@@ -167,43 +169,43 @@ def get_or_create_session(worker_name: Optional[str] = None) -> Session:
         if "auth_token" in log_cfg:
             log_cfg["auth_token"] = "REDACTED"
 
-        logging.info(f"Session configuration: {log_cfg}")
+        _LOGGER.info(f"Session configuration: {log_cfg}")
 
         # Load certificate files as bytes if provided as file paths, with logging (outside lock if slow)
         def _load_bytes(path):
             """
             Helper to load bytes from a file path, or return None if path is None.
             """
-            logging.info(f"Loading certificate/key file: {path}")
+            _LOGGER.info(f"Loading certificate/key file: {path}")
             if path is None:
                 return None
             try:
                 with open(path, "rb") as f:
                     return f.read()
             except Exception as e:
-                logging.error(f"Failed to load certificate/key file: {path}: {e}")
+                _LOGGER.error(f"Failed to load certificate/key file: {path}: {e}")
                 raise
 
         if tls_root_certs:
-            logging.info(f"Loading TLS root certs from: {cfg.get('tls_root_certs')}")
+            _LOGGER.info(f"Loading TLS root certs from: {cfg.get('tls_root_certs')}")
             tls_root_certs = _load_bytes(tls_root_certs)
-            logging.info("Loaded TLS root certs successfully.")
+            _LOGGER.info("Loaded TLS root certs successfully.")
         else:
-            logging.info("No TLS root certs provided for session.")
+            _LOGGER.debug("No TLS root certs provided for session.")
  
         if client_cert_chain:
-            logging.info(f"Loading client cert chain from: {cfg.get('client_cert_chain')}")
+            _LOGGER.info(f"Loading client cert chain from: {cfg.get('client_cert_chain')}")
             client_cert_chain = _load_bytes(client_cert_chain)
-            logging.info("Loaded client cert chain successfully.")
+            _LOGGER.info("Loaded client cert chain successfully.")
         else:
-            logging.info("No client cert chain provided for session.")
+            _LOGGER.debug("No client cert chain provided for session.")
  
         if client_private_key:
-            logging.info(f"Loading client private key from: {cfg.get('client_private_key')}")
+            _LOGGER.info(f"Loading client private key from: {cfg.get('client_private_key')}")
             client_private_key = _load_bytes(client_private_key)
-            logging.info("Loaded client private key successfully.")
+            _LOGGER.info("Loaded client private key successfully.")
         else:
-            logging.info("No client private key provided for session.")
+            _LOGGER.debug("No client private key provided for session.")
 
         # Redact sensitive info for logging
         log_cfg = {
@@ -220,7 +222,7 @@ def get_or_create_session(worker_name: Optional[str] = None) -> Session:
             "client_private_key": "REDACTED" if client_private_key else None,
         }
 
-        logging.info(f"Creating Deephaven Session with config: {log_cfg} (worker cache key: {resolved_worker})")
+        _LOGGER.info(f"Creating new Deephaven Session with config: {log_cfg} (worker cache key: {resolved_worker})")
 
         session = Session(
             host=host,
@@ -235,7 +237,7 @@ def get_or_create_session(worker_name: Optional[str] = None) -> Session:
             client_private_key=client_private_key,
         )
 
-        logging.info(f"Session created for worker '{resolved_worker}', adding to cache.")
+        _LOGGER.info(f"Successfully created session for worker: {resolved_worker}, adding to cache.")
         _SESSION_CACHE[resolved_worker] = session
-        logging.info(f"Session cached for worker '{resolved_worker}'. Returning session.")
+        _LOGGER.info(f"Session cached for worker '{resolved_worker}'. Returning session.")
         return session
