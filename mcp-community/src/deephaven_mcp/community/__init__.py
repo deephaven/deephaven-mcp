@@ -18,6 +18,7 @@ See the project README for configuration details, available tools, and usage exa
 
 import logging
 import asyncio
+import sys
 from deephaven_mcp import config
 from ._mcp import mcp_server
 
@@ -31,11 +32,16 @@ def run_server(transport: str = "stdio") -> None:
     Args:
         transport (str, optional): The transport type ('stdio' or 'sse'). Defaults to 'stdio'.
     """
-    # TODO: can the log_level just be set via env?
-    # Set log level based on transport
-    log_level = logging.ERROR if transport == "stdio" else logging.DEBUG
+    # Set stream based on transport
+    # stdio MCP servers log to stderr so that they don't pollute the communication channel
+    stream = sys.stderr if transport == "stdio" else sys.stdout
+    
+    # Configure logging with the PYTHONLOGLEVEL environment variable
     logging.basicConfig(
-        level=log_level, format="[%(asctime)s] %(levelname)s: %(message)s"
+        level=os.getenv('PYTHONLOGLEVEL', 'INFO'),
+        format="[%(asctime)s] %(levelname)s: %(message)s",
+        stream=stream,
+        force=True  # Ensure we override any existing logging configuration
     )
 
     logging.info(f"Starting MCP server '{mcp_server.name}' with transport={transport}")
