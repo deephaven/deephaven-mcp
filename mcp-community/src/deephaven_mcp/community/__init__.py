@@ -33,7 +33,7 @@ import logging
 from typing import Optional
 from mcp.server.fastmcp import FastMCP
 from deephaven_mcp import config
-from ._sessions import get_session, clear_session_cache, _SESSION_CACHE_LOCK
+from ._sessions import get_or_create_session, clear_all_sessions, _SESSION_CACHE_LOCK
 
 
 mcp_server = FastMCP("deephaven-mcp-community")
@@ -104,7 +104,7 @@ def deephaven_refresh() -> None:
     with config._CONFIG_CACHE_LOCK:
         with _SESSION_CACHE_LOCK:
             config.clear_config_cache()
-            clear_session_cache()
+            clear_all_sessions()
     logging.info("Deephaven worker configuration and session cache reloaded via MCP tool.")
 
 
@@ -155,7 +155,7 @@ def deephaven_list_table_names(worker_name: Optional[str] = None) -> list:
     """
     logging.info(f"CALL: deephaven_list_table_names called with worker_name={worker_name!r}")
     try:
-        session = get_session(worker_name)
+        session = get_or_create_session(worker_name)
         logging.info(f"deephaven_list_tables: Session obtained successfully for worker: '{worker_name}'")
         tables = list(session.tables)
         logging.info(f"deephaven_list_tables: Retrieved tables from session: {tables!r}")
@@ -187,7 +187,7 @@ def deephaven_table_schemas(worker_name: Optional[str] = None, table_names: Opti
     logging.info(f"CALL: deephaven_table_schemas called with worker_name={worker_name!r}, table_names={table_names!r}")
     results = []
     try:
-        session = get_session(worker_name)
+        session = get_or_create_session(worker_name)
         logging.info(f"deephaven_table_schemas: Session obtained successfully for worker: '{worker_name}'")
 
         if table_names is not None:
@@ -243,7 +243,7 @@ def deephaven_run_script(worker_name: Optional[str] = None, script: Optional[str
             with open(script_path, "r") as f:
                 script = f.read()
 
-        session = get_session(worker_name)
+        session = get_or_create_session(worker_name)
         logging.info(f"deephaven_run_script: Session obtained successfully for worker: '{worker_name}'")
 
         logging.info(f"deephaven_run_script: Executing script on worker: '{worker_name}'")

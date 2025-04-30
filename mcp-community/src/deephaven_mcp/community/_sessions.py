@@ -27,7 +27,7 @@ _SESSION_CACHE (dict): Module-level cache for Deephaven sessions, keyed by worke
 _SESSION_CACHE_LOCK (threading.RLock): Ensures thread-safe, reentrant access to the session cache.
 """
 
-def clear_session_cache() -> None:
+def clear_all_sessions() -> None:
     """
     Atomically clear the Deephaven session cache and close all alive sessions.
 
@@ -35,10 +35,10 @@ def clear_session_cache() -> None:
     and do not prevent other sessions from being closed. After all sessions are processed,
     the cache is emptied. This function is thread-safe and acquires the session cache lock.
     """
-    logging.info("CALL: clear_session_cache called with no arguments")
+    logging.info("CALL: clear_all_sessions called with no arguments")
     logging.info("Clearing Deephaven session cache...")
     
-    def _close_session_if_alive(worker_key, session):
+    def _close_session_safely(worker_key, session):
         """
         Close the session if it is alive, logging the result.
 
@@ -46,7 +46,7 @@ def clear_session_cache() -> None:
             worker_key (str): The cache key for the worker.
             session (Session): The Deephaven session instance.
         """
-        logging.info(f"CALL: _close_session_if_alive called with worker_key={worker_key!r}, session={session!r}")
+        logging.info(f"CALL: _close_session_safely called with worker_key={worker_key!r}, session={session!r}")
         try:
             if hasattr(session, "is_alive") and session.is_alive:
                 session.close()
@@ -61,7 +61,7 @@ def clear_session_cache() -> None:
         _SESSION_CACHE.clear()
         logging.info("Session cache cleared.")
 
-def get_session(worker_name: Optional[str] = None) -> Session:
+def get_or_create_session(worker_name: Optional[str] = None) -> Session:
     """
     Retrieve a cached or new Deephaven Session for the specified worker.
 
@@ -80,7 +80,7 @@ def get_session(worker_name: Optional[str] = None) -> Session:
         RuntimeError: If required configuration fields are missing or invalid.
         Exception: If session creation fails or certificates cannot be loaded.
     """
-    logging.info(f"CALL: get_session called with worker_name={worker_name!r}")
+    logging.info(f"CALL: get_or_create_session called with worker_name={worker_name!r}")
     resolved_worker = config.resolve_worker_name(worker_name)
     logging.info(f"Resolving worker name: {worker_name} -> {resolved_worker}")
 
