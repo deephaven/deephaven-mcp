@@ -29,8 +29,9 @@ from typing import Optional
 from pydeephaven import Session
 import logging
 import asyncio
-from deephaven_mcp import config
+import time
 import aiofiles
+from deephaven_mcp import config
 
 _LOGGER = logging.getLogger(__name__)
 

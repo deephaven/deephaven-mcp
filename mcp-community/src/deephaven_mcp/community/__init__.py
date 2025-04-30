@@ -19,6 +19,7 @@ See the project README for configuration details, available tools, and usage exa
 import logging
 import asyncio
 import sys
+import os
 from deephaven_mcp import config
 from ._mcp import mcp_server
 
