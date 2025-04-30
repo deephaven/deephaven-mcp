@@ -18,5 +18,6 @@ from ._version import version as __version__
 
 # Initialize logging
 import logging
+
 _LOGGER = logging.getLogger(__name__)
 _LOGGER.addHandler(logging.NullHandler())

@@ -56,9 +56,6 @@ See the module-level docstring for an overview of the available tools and error 
 """
 
 
-#TODO: readability
-
-
 @mcp_server.tool()
 async def refresh() -> dict:
     """
@@ -83,7 +80,9 @@ async def refresh() -> dict:
     Logging:
         - Logs tool invocation, success, and error details at INFO/ERROR levels.
     """
-    _LOGGER.info("[refresh] Invoked: refreshing worker configuration and session cache.")
+    _LOGGER.info(
+        "[refresh] Invoked: refreshing worker configuration and session cache."
+    )
     # Acquire the refresh lock to prevent concurrent refreshes. This does not
     # guarantee atomicity with respect to other config/session operations, but
     # it does ensure that only one refresh runs at a time and reduces race risk.
@@ -91,11 +90,17 @@ async def refresh() -> dict:
         async with _REFRESH_LOCK:
             await config.clear_config_cache()
             await sessions.clear_all_sessions()
-        _LOGGER.info("[refresh] Success: Worker configuration and session cache have been reloaded.")
+        _LOGGER.info(
+            "[refresh] Success: Worker configuration and session cache have been reloaded."
+        )
         return {"success": True}
     except Exception as e:
-        _LOGGER.error(f"[refresh] Failed to refresh worker configuration/session cache: {e!r}", exc_info=True)
+        _LOGGER.error(
+            f"[refresh] Failed to refresh worker configuration/session cache: {e!r}",
+            exc_info=True,
+        )
         return {"success": False, "error": str(e), "isError": True}
+
 
 @mcp_server.tool()
 async def default_worker() -> dict:
@@ -126,8 +131,11 @@ async def default_worker() -> dict:
         _LOGGER.info(f"[default_worker] Success: Default worker is '{worker}'.")
         return {"success": True, "result": worker}
     except Exception as e:
-        _LOGGER.error(f"[default_worker] Failed to get default worker: {e!r}", exc_info=True)
+        _LOGGER.error(
+            f"[default_worker] Failed to get default worker: {e!r}", exc_info=True
+        )
         return {"success": False, "error": str(e), "isError": True}
+
 
 @mcp_server.tool()
 async def worker_names() -> dict:
@@ -152,17 +160,24 @@ async def worker_names() -> dict:
     Logging:
         - Logs tool invocation, returned worker names, and error details at INFO/ERROR levels.
     """
-    _LOGGER.info("[worker_names] Invoked: retrieving list of all configured worker names.")
+    _LOGGER.info(
+        "[worker_names] Invoked: retrieving list of all configured worker names."
+    )
     try:
         names = await config.get_worker_names()
         _LOGGER.info(f"[worker_names] Success: Found workers: {names!r}")
         return {"success": True, "result": names}
     except Exception as e:
-        _LOGGER.error(f"[worker_names] Failed to get worker names: {e!r}", exc_info=True)
-        return {"success": False, "error": str(e), "isError": True}    
+        _LOGGER.error(
+            f"[worker_names] Failed to get worker names: {e!r}", exc_info=True
+        )
+        return {"success": False, "error": str(e), "isError": True}
+
 
 @mcp_server.tool()
-async def table_schemas(worker_name: Optional[str] = None, table_names: Optional[list[str]] = None) -> list:
+async def table_schemas(
+    worker_name: Optional[str] = None, table_names: Optional[list[str]] = None
+) -> list:
     """
     MCP Tool: Retrieve schemas for one or more tables from a Deephaven worker.
 
@@ -194,7 +209,9 @@ async def table_schemas(worker_name: Optional[str] = None, table_names: Optional
     Logging:
         - Logs tool invocation, per-table results, and error details at INFO/ERROR levels.
     """
-    _LOGGER.info(f"[table_schemas] Invoked: worker_name={worker_name!r}, table_names={table_names!r}")
+    _LOGGER.info(
+        f"[table_schemas] Invoked: worker_name={worker_name!r}, table_names={table_names!r}"
+    )
     results = []
     try:
         session = await sessions.get_or_create_session(worker_name)
@@ -202,10 +219,14 @@ async def table_schemas(worker_name: Optional[str] = None, table_names: Optional
 
         if table_names is not None:
             selected_table_names = table_names
-            _LOGGER.info(f"[table_schemas] Fetching schemas for specified tables: {selected_table_names!r}")
+            _LOGGER.info(
+                f"[table_schemas] Fetching schemas for specified tables: {selected_table_names!r}"
+            )
         else:
             selected_table_names = list(session.tables)
-            _LOGGER.info(f"[table_schemas] Fetching schemas for all tables in worker: {selected_table_names!r}")
+            _LOGGER.info(
+                f"[table_schemas] Fetching schemas for all tables in worker: {selected_table_names!r}"
+            )
 
         for table_name in selected_table_names:
             try:
@@ -216,19 +237,38 @@ async def table_schemas(worker_name: Optional[str] = None, table_names: Optional
                     for row in meta_table.to_pylist()
                 ]
                 results.append({"success": True, "table": table_name, "schema": schema})
-                _LOGGER.info(f"[table_schemas] Success: Retrieved schema for table '{table_name}'")
+                _LOGGER.info(
+                    f"[table_schemas] Success: Retrieved schema for table '{table_name}'"
+                )
             except Exception as table_exc:
-                _LOGGER.error(f"[table_schemas] Failed to get schema for table '{table_name}': {table_exc!r}", exc_info=True)
-                results.append({"success": False, "table": table_name, "error": str(table_exc), "isError": True})
+                _LOGGER.error(
+                    f"[table_schemas] Failed to get schema for table '{table_name}': {table_exc!r}",
+                    exc_info=True,
+                )
+                results.append(
+                    {
+                        "success": False,
+                        "table": table_name,
+                        "error": str(table_exc),
+                        "isError": True,
+                    }
+                )
         _LOGGER.info(f"[table_schemas] Returning schemas: {results!r}")
         return results
     except Exception as e:
-        _LOGGER.error(f"[table_schemas] Failed for worker: '{worker_name}', error: {e!r}", exc_info=True)
-        return [{"success": False, "table": None, "error": str(e), "isError": True}]    
+        _LOGGER.error(
+            f"[table_schemas] Failed for worker: '{worker_name}', error: {e!r}",
+            exc_info=True,
+        )
+        return [{"success": False, "table": None, "error": str(e), "isError": True}]
 
 
 @mcp_server.tool()
-async def run_script(worker_name: Optional[str] = None, script: Optional[str] = None, script_path: Optional[str] = None) -> dict:
+async def run_script(
+    worker_name: Optional[str] = None,
+    script: Optional[str] = None,
+    script_path: Optional[str] = None,
+) -> dict:
     """
     MCP Tool: Execute a script on a specified Deephaven worker.
 
@@ -255,11 +295,15 @@ async def run_script(worker_name: Optional[str] = None, script: Optional[str] = 
     Logging:
         - Logs tool invocation, script source/path, execution status, and error details at INFO/WARNING/ERROR levels.
     """
-    _LOGGER.info(f"[run_script] Invoked: worker_name={worker_name!r}, script={'<provided>' if script else None}, script_path={script_path!r}")
+    _LOGGER.info(
+        f"[run_script] Invoked: worker_name={worker_name!r}, script={'<provided>' if script else None}, script_path={script_path!r}"
+    )
     result = {"success": False, "error": ""}
     try:
         if script is None and script_path is None:
-            _LOGGER.warning("[run_script] No script or script_path provided. Returning error.")
+            _LOGGER.warning(
+                "[run_script] No script or script_path provided. Returning error."
+            )
             result["error"] = "Must provide either script or script_path."
             result["isError"] = True
             return result
@@ -274,10 +318,15 @@ async def run_script(worker_name: Optional[str] = None, script: Optional[str] = 
 
         _LOGGER.info(f"[run_script] Executing script on worker: '{worker_name}'")
         await asyncio.to_thread(session.run_script, script)
-        _LOGGER.info(f"[run_script] Script executed successfully on worker: '{worker_name}'")
+        _LOGGER.info(
+            f"[run_script] Script executed successfully on worker: '{worker_name}'"
+        )
         result["success"] = True
     except Exception as e:
-        _LOGGER.error(f"[run_script] Failed for worker: '{worker_name}', error: {e!r}", exc_info=True)
+        _LOGGER.error(
+            f"[run_script] Failed for worker: '{worker_name}', error: {e!r}",
+            exc_info=True,
+        )
         result["error"] = str(e)
         result["isError"] = True
-    return result    
+    return result

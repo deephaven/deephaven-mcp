@@ -186,12 +186,12 @@ import aiofiles
 _LOGGER = logging.getLogger(__name__)
 
 _CONFIG_CACHE: Optional[Dict[str, Any]] = None
-#TODO: does this need to be a reentrant lock?
 _CONFIG_CACHE_LOCK = asyncio.Lock()
 """
 _CONFIG_CACHE (Optional[dict]): Holds the loaded Deephaven worker configuration, or None if not loaded.
 _CONFIG_CACHE_LOCK (asyncio.Lock): Ensures coroutine-safe, reentrant access to the configuration cache.
 """
+
 
 async def clear_config_cache() -> None:
     """
@@ -212,6 +212,7 @@ async def clear_config_cache() -> None:
         _CONFIG_CACHE = None
 
     _LOGGER.debug("Configuration cache cleared.")
+
 
 CONFIG_ENV_VAR = "DH_MCP_CONFIG_FILE"
 """
@@ -239,6 +240,7 @@ _ALLOWED_WORKER_FIELDS = {
 Dictionary of allowed worker configuration fields and their expected types.
 Type: dict[str, type | tuple[type, ...]]
 """
+
 
 async def get_config() -> Dict[str, Any]:
     """
@@ -285,8 +287,11 @@ async def get_config() -> Dict[str, Any]:
         # Validate config
         data = _validate_config(data)
         _CONFIG_CACHE = data
-        _LOGGER.info(f"Deephaven worker configuration loaded and validated successfully in {perf_counter() - start_time:.3f} seconds")
+        _LOGGER.info(
+            f"Deephaven worker configuration loaded and validated successfully in {perf_counter() - start_time:.3f} seconds"
+        )
         return data
+
 
 def _validate_config(config: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -303,24 +308,32 @@ def _validate_config(config: Dict[str, Any]) -> Dict[str, Any]:
             or is otherwise invalid.
     """
 
-    required_top_level = {'workers', 'default_worker'}
+    required_top_level = {"workers", "default_worker"}
     allowed_top_level = required_top_level
     top_level_keys = set(config.keys())
 
     # Check for unknown keys
     unknown_keys = top_level_keys - allowed_top_level
     if unknown_keys:
-        _LOGGER.error(f"Unknown top-level keys in Deephaven worker config: {unknown_keys}")
-        raise ValueError(f"Unknown top-level keys in Deephaven worker config: {unknown_keys}")
+        _LOGGER.error(
+            f"Unknown top-level keys in Deephaven worker config: {unknown_keys}"
+        )
+        raise ValueError(
+            f"Unknown top-level keys in Deephaven worker config: {unknown_keys}"
+        )
 
     # Check for missing required keys
     missing_keys = required_top_level - top_level_keys
     if missing_keys:
-        _LOGGER.error(f"Missing required top-level keys in Deephaven worker config: {missing_keys}")
-        raise ValueError(f"Missing required top-level keys in Deephaven worker config: {missing_keys}")
+        _LOGGER.error(
+            f"Missing required top-level keys in Deephaven worker config: {missing_keys}"
+        )
+        raise ValueError(
+            f"Missing required top-level keys in Deephaven worker config: {missing_keys}"
+        )
 
     # Validate workers
-    workers = config['workers']  # Required key, guaranteed by previous validation
+    workers = config["workers"]  # Required key, guaranteed by previous validation
     if not isinstance(workers, dict):
         _LOGGER.error("'workers' must be a dictionary in Deephaven worker config")
         raise ValueError("'workers' must be a dictionary in Deephaven worker config")
@@ -331,29 +344,45 @@ def _validate_config(config: Dict[str, Any]) -> Dict[str, Any]:
             raise ValueError(f"Worker config for {worker_name} must be a dictionary")
 
         # Check required fields
-        missing_fields = [field for field in _REQUIRED_FIELDS if field not in worker_config]
+        missing_fields = [
+            field for field in _REQUIRED_FIELDS if field not in worker_config
+        ]
         if missing_fields:
-            _LOGGER.error(f"Missing required fields in worker config for {worker_name}: {missing_fields}")
-            raise ValueError(f"Missing required fields in worker config for {worker_name}: {missing_fields}")
+            _LOGGER.error(
+                f"Missing required fields in worker config for {worker_name}: {missing_fields}"
+            )
+            raise ValueError(
+                f"Missing required fields in worker config for {worker_name}: {missing_fields}"
+            )
 
         # Check allowed fields and types
         for field, value in worker_config.items():
             if field not in _ALLOWED_WORKER_FIELDS:
-                _LOGGER.error(f"Unknown field '{field}' in worker config for {worker_name}")
-                raise ValueError(f"Unknown field '{field}' in worker config for {worker_name}")
+                _LOGGER.error(
+                    f"Unknown field '{field}' in worker config for {worker_name}"
+                )
+                raise ValueError(
+                    f"Unknown field '{field}' in worker config for {worker_name}"
+                )
 
             allowed_types = _ALLOWED_WORKER_FIELDS[field]
             if not isinstance(value, allowed_types):
-                _LOGGER.error(f"Field '{field}' in worker config for {worker_name} must be of type {allowed_types}")
-                raise ValueError(f"Field '{field}' in worker config for {worker_name} must be of type {allowed_types}")
+                _LOGGER.error(
+                    f"Field '{field}' in worker config for {worker_name} must be of type {allowed_types}"
+                )
+                raise ValueError(
+                    f"Field '{field}' in worker config for {worker_name} must be of type {allowed_types}"
+                )
 
     # Validate default_worker
-    default_worker = config['default_worker']  # Required key, guaranteed by previous validation
+    # Required key, guaranteed by previous validation
+    default_worker = config["default_worker"]
     if default_worker not in workers:
         _LOGGER.error(f"Default worker '{default_worker}' is not defined in workers")
         raise ValueError(f"Default worker '{default_worker}' is not defined in workers")
 
     return config
+
 
 async def resolve_worker_name(worker_name: Optional[str] = None) -> str:
     """
@@ -384,13 +413,14 @@ async def resolve_worker_name(worker_name: Optional[str] = None) -> str:
     if worker_name:
         return worker_name
 
-    default_worker = config.get('default_worker')
+    default_worker = config.get("default_worker")
     if not default_worker:
         _LOGGER.error("No worker name specified and no default_worker in config")
         raise RuntimeError("No worker name specified and no default_worker in config")
 
     _LOGGER.debug(f"Using default worker: {default_worker}")
     return default_worker
+
 
 async def get_worker_config(worker_name: Optional[str] = None) -> Dict[str, Any]:
     """
@@ -414,7 +444,7 @@ async def get_worker_config(worker_name: Optional[str] = None) -> Dict[str, Any]
     """
     _LOGGER.debug(f"Getting worker config for worker: {worker_name!r}")
     config = await get_config()
-    workers = config.get('workers', {})
+    workers = config.get("workers", {})
 
     if not workers:
         _LOGGER.error("No workers defined in configuration")
@@ -428,6 +458,7 @@ async def get_worker_config(worker_name: Optional[str] = None) -> Dict[str, Any]
     _LOGGER.debug(f"Returning config for worker: {worker_name}")
     return workers[worker_name]
 
+
 async def get_worker_names() -> list[str]:
     """
     Get a list of all configured Deephaven worker names from the loaded configuration.
@@ -437,10 +468,11 @@ async def get_worker_names() -> list[str]:
     """
     _LOGGER.debug("Getting list of all worker names")
     config = await get_config()
-    workers = config.get('workers', {})
+    workers = config.get("workers", {})
     worker_names = list(workers.keys())
     _LOGGER.debug(f"Found {len(worker_names)} worker(s): {worker_names}")
     return worker_names
+
 
 async def get_worker_name_default() -> Optional[str]:
     """
@@ -451,6 +483,6 @@ async def get_worker_name_default() -> Optional[str]:
     """
     _LOGGER.debug("Getting default worker name")
     config = await get_config()
-    default_worker = config.get('default_worker')
+    default_worker = config.get("default_worker")
     _LOGGER.debug(f"Default worker: {default_worker}")
     return default_worker

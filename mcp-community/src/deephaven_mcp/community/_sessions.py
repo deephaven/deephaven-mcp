@@ -42,6 +42,7 @@ _SESSION_CACHE (dict): Module-level cache for Deephaven sessions, keyed by worke
 _SESSION_CACHE_LOCK (asyncio.Lock): Ensures coroutine-safe access to the session cache for all async operations.
 """
 
+
 async def clear_all_sessions() -> None:
     """
     Atomically clear all Deephaven sessions and their cache (async).
@@ -65,7 +66,7 @@ async def clear_all_sessions() -> None:
     start_time = time.time()
     _LOGGER.info("Clearing Deephaven session cache...")
     _LOGGER.info(f"Current session cache size: {len(_SESSION_CACHE)}")
-    
+
     async def _close_session_safely(worker_key, session):
         """
         Safely close a Deephaven session if it is alive.
@@ -91,7 +92,10 @@ async def clear_all_sessions() -> None:
                 _LOGGER.debug(f"Session for worker {worker_key} is already closed")
         except Exception as exc:
             _LOGGER.error(f"Failed to close session for worker {worker_key}: {exc}")
-            _LOGGER.debug(f"Session state after error: is_alive={hasattr(session, 'is_alive') and session.is_alive}", exc_info=True)
+            _LOGGER.debug(
+                f"Session state after error: is_alive={hasattr(session, 'is_alive') and session.is_alive}",
+                exc_info=True,
+            )
 
     async with _SESSION_CACHE_LOCK:
         # Iterate over a copy to avoid mutation during iteration
@@ -100,7 +104,9 @@ async def clear_all_sessions() -> None:
         for worker_key, session in list(_SESSION_CACHE.items()):
             await _close_session_safely(worker_key, session)
         _SESSION_CACHE.clear()
-        _LOGGER.info(f"Session cache cleared. Processed {num_sessions} sessions in {time.time() - start_time:.2f}s")
+        _LOGGER.info(
+            f"Session cache cleared. Processed {num_sessions} sessions in {time.time() - start_time:.2f}s"
+        )
 
 
 async def get_or_create_session(worker_name: Optional[str] = None) -> Session:
@@ -138,19 +144,27 @@ async def get_or_create_session(worker_name: Optional[str] = None) -> Session:
     resolved_worker = await config.resolve_worker_name(worker_name)
     _LOGGER.info(f"Resolved worker name: {worker_name} -> {resolved_worker}")
     _LOGGER.info(f"Session cache size: {len(_SESSION_CACHE)}")
-    
+
     async with _SESSION_CACHE_LOCK:
         session = _SESSION_CACHE.get(resolved_worker)
         if session is not None:
             try:
                 if session.is_alive:
-                    _LOGGER.info(f"Found and returning cached session for worker: {resolved_worker}")
-                    _LOGGER.debug(f"Session state: host={session.host}, port={session.port}, auth_type={session.auth_type}")
+                    _LOGGER.info(
+                        f"Found and returning cached session for worker: {resolved_worker}"
+                    )
+                    _LOGGER.debug(
+                        f"Session state: host={session.host}, port={session.port}, auth_type={session.auth_type}"
+                    )
                     return session
                 else:
-                    _LOGGER.info(f"Cached session for worker '{resolved_worker}' is not alive. Recreating.")
+                    _LOGGER.info(
+                        f"Cached session for worker '{resolved_worker}' is not alive. Recreating."
+                    )
             except Exception as e:
-                _LOGGER.warning(f"Error checking session liveness for worker '{resolved_worker}': {e}. Recreating session.")
+                _LOGGER.warning(
+                    f"Error checking session liveness for worker '{resolved_worker}': {e}. Recreating session."
+                )
 
         # At this point, we need to create a new session and update the cache
         _LOGGER.info(f"Creating new session for worker: {resolved_worker}")
@@ -191,16 +205,20 @@ async def get_or_create_session(worker_name: Optional[str] = None) -> Session:
             _LOGGER.info("Loaded TLS root certs successfully.")
         else:
             _LOGGER.debug("No TLS root certs provided for session.")
- 
+
         if client_cert_chain:
-            _LOGGER.info(f"Loading client cert chain from: {cfg.get('client_cert_chain')}")
+            _LOGGER.info(
+                f"Loading client cert chain from: {cfg.get('client_cert_chain')}"
+            )
             client_cert_chain = await _load_bytes(client_cert_chain)
             _LOGGER.info("Loaded client cert chain successfully.")
         else:
             _LOGGER.debug("No client cert chain provided for session.")
- 
+
         if client_private_key:
-            _LOGGER.info(f"Loading client private key from: {cfg.get('client_private_key')}")
+            _LOGGER.info(
+                f"Loading client private key from: {cfg.get('client_private_key')}"
+            )
             client_private_key = await _load_bytes(client_private_key)
             _LOGGER.info("Loaded client private key successfully.")
         else:
@@ -221,9 +239,12 @@ async def get_or_create_session(worker_name: Optional[str] = None) -> Session:
             "client_private_key": "REDACTED" if client_private_key else None,
         }
 
-        _LOGGER.info(f"Creating new Deephaven Session with config: {log_cfg} (worker cache key: {resolved_worker})")
+        _LOGGER.info(
+            f"Creating new Deephaven Session with config: {log_cfg} (worker cache key: {resolved_worker})"
+        )
 
-        session = await asyncio.to_thread(Session,
+        session = await asyncio.to_thread(
+            Session,
             host=host,
             port=port,
             auth_type=auth_type,
@@ -236,7 +257,11 @@ async def get_or_create_session(worker_name: Optional[str] = None) -> Session:
             client_private_key=client_private_key,
         )
 
-        _LOGGER.info(f"Successfully created session for worker: {resolved_worker}, adding to cache.")
+        _LOGGER.info(
+            f"Successfully created session for worker: {resolved_worker}, adding to cache."
+        )
         _SESSION_CACHE[resolved_worker] = session
-        _LOGGER.info(f"Session cached for worker: {resolved_worker}. Returning session.")
+        _LOGGER.info(
+            f"Session cached for worker: {resolved_worker}. Returning session."
+        )
         return session

@@ -4,4 +4,6 @@ mcp[cli]
 deephaven-server
 pydeephaven
 aiohttp
+aiofiles
 autogen-ext[mcp]
+black
