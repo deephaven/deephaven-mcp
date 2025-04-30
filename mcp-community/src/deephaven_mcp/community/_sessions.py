@@ -36,7 +36,7 @@ from deephaven_mcp import config
 _LOGGER = logging.getLogger(__name__)
 
 
-_SESSION_CACHE = {}
+_SESSION_CACHE: Dict[str, Session] = {}
 _SESSION_CACHE_LOCK = asyncio.Lock()
 """
 _SESSION_CACHE (dict): Module-level cache for Deephaven sessions, keyed by worker name (or '__default__').
