@@ -56,8 +56,8 @@ def clear_all_sessions() -> None:
     Returns:
         None
     """
-    logging.info("CALL: clear_all_sessions called with no arguments")
     logging.info("Clearing Deephaven session cache...")
+    logging.info(f"Current session cache size: {len(_SESSION_CACHE)}")
     
     def _close_session_safely(worker_key, session):
         """
@@ -77,10 +77,14 @@ def clear_all_sessions() -> None:
         logging.info(f"CALL: _close_session_safely called with worker_key={worker_key!r}, session={session!r}")
         try:
             if hasattr(session, "is_alive") and session.is_alive:
+                logging.info(f"Attempting to close alive session for worker: {worker_key}")
                 session.close()
-                logging.info(f"Closed alive Deephaven session for worker: {worker_key}")
+                logging.info(f"Successfully closed session for worker: {worker_key}")
+            else:
+                logging.info(f"Session for worker {worker_key} is already closed")
         except Exception as exc:
             logging.warning(f"Failed to close session for worker {worker_key}: {exc}")
+            logging.warning(f"Session state after error: is_alive={hasattr(session, 'is_alive') and session.is_alive}")
 
     with _SESSION_CACHE_LOCK:
         # Iterate over a copy to avoid mutation during iteration
@@ -119,9 +123,10 @@ def get_or_create_session(worker_name: Optional[str] = None) -> Session:
         This function handles TLS certificate loading and configuration for secure connections.
         All sensitive information (like auth tokens and private keys) is redacted from logs.
     """
-    logging.info(f"CALL: get_or_create_session called with worker_name={worker_name!r}")
+    logging.info(f"Getting or creating session for worker: {worker_name}")
     resolved_worker = config.resolve_worker_name(worker_name)
     logging.info(f"Resolving worker name: {worker_name} -> {resolved_worker}")
+    logging.info(f"Checking session cache for worker: {resolved_worker}")
 
     # First, check and create the session in a single atomic lock block
     with _SESSION_CACHE_LOCK:
@@ -129,14 +134,16 @@ def get_or_create_session(worker_name: Optional[str] = None) -> Session:
         if session is not None:
             try:
                 if session.is_alive:
-                    logging.info(f"Returning cached Deephaven session for worker: {resolved_worker}")
+                    logging.info(f"Found and returning cached session for worker: {resolved_worker}")
+                    logging.info(f"Session state: host={cfg.get('host')}, port={cfg.get('port')}, auth_type={cfg.get('auth_type')}")
                     return session
                 else:
-                    logging.info(f"Cached Deephaven session for worker '{resolved_worker}' is not alive. Recreating.")
+                    logging.info(f"Cached session for worker '{resolved_worker}' is not alive. Recreating.")
             except Exception as e:
                 logging.warning(f"Error checking session liveness for worker '{resolved_worker}': {e}. Recreating session.")
 
         # At this point, we need to create a new session and update the cache
+        logging.info(f"Creating new session for worker: {resolved_worker}")
         cfg = config.get_worker_config(worker_name)
         host = cfg.get("host", None)
         port = cfg.get("port", None)
@@ -148,13 +155,21 @@ def get_or_create_session(worker_name: Optional[str] = None) -> Session:
         tls_root_certs = cfg.get("tls_root_certs", None)
         client_cert_chain = cfg.get("client_cert_chain", None)
         client_private_key = cfg.get("client_private_key", None)
+        
+        # Log configuration details (redacting sensitive info)
+        log_cfg = dict(cfg)
+
+        if "auth_token" in log_cfg:
+            log_cfg["auth_token"] = "REDACTED"
+
+        logging.info(f"Session configuration: {log_cfg}")
 
         # Load certificate files as bytes if provided as file paths, with logging (outside lock if slow)
         def _load_bytes(path):
             """
             Helper to load bytes from a file path, or return None if path is None.
             """
-            logging.info(f"CALL: _load_bytes called with path={path!r}")
+            logging.info(f"Loading certificate/key file: {path}")
             if path is None:
                 return None
             try:
@@ -186,19 +201,20 @@ def get_or_create_session(worker_name: Optional[str] = None) -> Session:
             logging.info("No client private key provided for session.")
 
         # Redact sensitive info for logging
-        log_cfg = dict(cfg)
-        if "auth_token" in log_cfg:
-            log_cfg["auth_token"] = "<redacted>"
- 
-        if "client_private_key" in log_cfg:
-            log_cfg["client_private_key"] = "<redacted>"
- 
-        if "client_cert_chain" in log_cfg:
-            log_cfg["client_cert_chain"] = "<redacted>"
- 
-        if "tls_root_certs" in log_cfg:
-            log_cfg["tls_root_certs"] = "<redacted>"
- 
+        log_cfg = {
+            "worker_name": resolved_worker,
+            "host": host,
+            "port": port,
+            "auth_type": auth_type,
+            "auth_token": "REDACTED" if auth_token else None,
+            "never_timeout": never_timeout,
+            "session_type": session_type,
+            "use_tls": use_tls,
+            "tls_root_certs": "REDACTED" if tls_root_certs else None,
+            "client_cert_chain": "REDACTED" if client_cert_chain else None,
+            "client_private_key": "REDACTED" if client_private_key else None,
+        }
+
         logging.info(f"Creating Deephaven Session with config: {log_cfg} (worker cache key: {resolved_worker})")
 
         session = Session(
@@ -213,6 +229,7 @@ def get_or_create_session(worker_name: Optional[str] = None) -> Session:
             client_cert_chain=client_cert_chain,
             client_private_key=client_private_key,
         )
+
         logging.info(f"Session created for worker '{resolved_worker}', adding to cache.")
         _SESSION_CACHE[resolved_worker] = session
         logging.info(f"Session cached for worker '{resolved_worker}'. Returning session.")
