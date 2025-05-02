@@ -213,6 +213,14 @@ async def clear_config_cache() -> None:
 
     _LOGGER.debug("Configuration cache cleared.")
 
+async def set_config_cache(config: Dict[str, Any]) -> None:
+    """
+    Atomically set the config cache (for testing only). Uses the same lock as clear_config_cache.
+    """
+    global _CONFIG_CACHE
+    async with _CONFIG_CACHE_LOCK:
+        _CONFIG_CACHE = validate_config(config)
+
 
 CONFIG_ENV_VAR = "DH_MCP_CONFIG_FILE"
 """
@@ -284,16 +292,15 @@ async def get_config() -> Dict[str, Any]:
         except Exception as e:
             _LOGGER.error(f"Failed to load config file {config_path}: {e}")
             raise
-        # Validate config
-        data = _validate_config(data)
-        _CONFIG_CACHE = data
+        validated = validate_config(data)
+        _CONFIG_CACHE = validated
         _LOGGER.info(
             f"Deephaven worker configuration loaded and validated successfully in {perf_counter() - start_time:.3f} seconds"
         )
-        return data
+        return validated
 
 
-def _validate_config(config: Dict[str, Any]) -> Dict[str, Any]:
+def validate_config(config: Dict[str, Any]) -> Dict[str, Any]:
     """
     Validate the Deephaven worker configuration.
 
@@ -338,6 +345,11 @@ def _validate_config(config: Dict[str, Any]) -> Dict[str, Any]:
         _LOGGER.error("'workers' must be a dictionary in Deephaven worker config")
         raise ValueError("'workers' must be a dictionary in Deephaven worker config")
 
+    if not workers:
+        _LOGGER.error("No workers defined in Deephaven worker config")
+        raise ValueError("No workers defined in Deephaven worker config")
+
+    # Validate each worker
     for worker_name, worker_config in workers.items():
         if not isinstance(worker_config, dict):
             _LOGGER.error(f"Worker config for {worker_name} must be a dictionary")
@@ -414,6 +426,7 @@ async def resolve_worker_name(worker_name: Optional[str] = None) -> str:
         return worker_name
 
     default_worker = config.get("default_worker")
+    #TODO: unreachable given the validation
     if not default_worker:
         _LOGGER.error("No worker name specified and no default_worker in config")
         raise RuntimeError("No worker name specified and no default_worker in config")
@@ -446,17 +459,14 @@ async def get_worker_config(worker_name: Optional[str] = None) -> Dict[str, Any]
     config = await get_config()
     workers = config.get("workers", {})
 
-    if not workers:
-        _LOGGER.error("No workers defined in configuration")
-        raise RuntimeError("No workers defined in configuration")
+    resolved_name = await resolve_worker_name(worker_name)
+    #TODO: unreachable given the validation
+    if resolved_name not in workers:
+        _LOGGER.error(f"Worker {resolved_name} not found in configuration")
+        raise RuntimeError(f"Worker {resolved_name} not found in configuration")
 
-    worker_name = await resolve_worker_name(worker_name)
-    if worker_name not in workers:
-        _LOGGER.error(f"Worker {worker_name} not found in configuration")
-        raise RuntimeError(f"Worker {worker_name} not found in configuration")
-
-    _LOGGER.debug(f"Returning config for worker: {worker_name}")
-    return workers[worker_name]
+    _LOGGER.debug(f"Returning config for worker: {resolved_name}")
+    return workers[resolved_name]
 
 
 async def get_worker_names() -> list[str]:
