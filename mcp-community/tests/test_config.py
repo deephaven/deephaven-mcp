@@ -6,6 +6,7 @@ import pytest
 import pytest_asyncio
 from unittest import mock
 import importlib
+import json
 
 # Ensure local source is used for imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
@@ -224,24 +225,19 @@ def test_validate_config_default_worker_not_in_workers():
     with pytest.raises(ValueError, match="Default worker 'local' is not defined in workers"):
         config.validate_config(bad_config)
 
-import pytest_asyncio
 @pytest.mark.asyncio
-async def test_resolve_worker_name_missing_default():
+async def test_resolve_worker_name_missing_default(monkeypatch):
     from deephaven_mcp import config
     # Patch get_config to return a config without default_worker
     async def fake_get_config():
         return {"workers": {"local": {}}}
-    monkeypatch = pytest.MonkeyPatch()
     monkeypatch.setattr(config, "get_config", fake_get_config)
     with pytest.raises(RuntimeError, match="No worker name specified and no default_worker in config"):
         await config.resolve_worker_name(None)
-    monkeypatch.undo()
 
 @pytest.mark.asyncio
 async def test_get_config_loads_and_validates(monkeypatch):
     from deephaven_mcp import config
-    import importlib
-    import json
     # Set up environment variable
     monkeypatch.setenv("DH_MCP_CONFIG_FILE", "/fake/path/config.json")
     # Mock aiofiles.open to return valid JSON config
