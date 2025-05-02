@@ -192,6 +192,8 @@ _CONFIG_CACHE (Optional[dict]): Holds the loaded Deephaven worker configuration,
 _CONFIG_CACHE_LOCK (asyncio.Lock): Ensures coroutine-safe, reentrant access to the configuration cache.
 """
 
+#TODO: should there be a default worker?  Should it be required?
+#TODO: fix code coverage after fixing the above.
 
 async def clear_config_cache() -> None:
     """
@@ -280,18 +282,22 @@ async def get_config() -> Dict[str, Any]:
         # Only one thread proceeds to load and cache the config
         _LOGGER.info("Loading Deephaven worker configuration from disk...")
         start_time = perf_counter()
+
         if CONFIG_ENV_VAR not in os.environ:
             _LOGGER.error(f"Environment variable {CONFIG_ENV_VAR} is not set.")
             raise RuntimeError(f"Environment variable {CONFIG_ENV_VAR} is not set.")
+
         config_path = os.environ[CONFIG_ENV_VAR]
         _LOGGER.info(f"Environment variable {CONFIG_ENV_VAR} is set to: {config_path}")
         _LOGGER.info(f"Loading Deephaven worker configuration from disk...")
+
         try:
             async with aiofiles.open(config_path, "r") as f:
                 data = json.loads(await f.read())
         except Exception as e:
             _LOGGER.error(f"Failed to load config file {config_path}: {e}")
             raise
+
         validated = validate_config(data)
         _CONFIG_CACHE = validated
         _LOGGER.info(
@@ -426,6 +432,7 @@ async def resolve_worker_name(worker_name: Optional[str] = None) -> str:
         return worker_name
 
     default_worker = config.get("default_worker")
+
     #TODO: unreachable given the validation
     if not default_worker:
         _LOGGER.error("No worker name specified and no default_worker in config")
