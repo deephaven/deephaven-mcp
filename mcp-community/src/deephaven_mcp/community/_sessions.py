@@ -10,7 +10,7 @@ Features:
     - Automatic session reuse, liveness checking, and resource cleanup.
     - Native async file I/O for secure loading of certificate files (TLS, client certs/keys) using aiofiles.
     - Tools for cache clearing and atomic reloads.
-    - Designed for use by other dhmcp modules and MCP tools.
+    - Designed for use by other MCP modules and MCP tools.
 
 Async Safety:
     All public functions are async and use asyncio.Lock for coroutine safety.
