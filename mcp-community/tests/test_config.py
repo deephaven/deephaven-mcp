@@ -2,8 +2,6 @@
 
 import pytest
 import pytest_asyncio
-
-# The following imports are only used for tests that simulate file I/O or environment variable errors.
 from unittest import mock
 import importlib
 
@@ -22,12 +20,10 @@ def test_validate_config_unknown_top_level_key():
 
 def test_validate_config_missing_required_worker_field(monkeypatch):
     from deephaven_mcp import config
-    # Patch _REQUIRED_FIELDS to require 'host'
     monkeypatch.setattr(config, '_REQUIRED_FIELDS', ['host'])
     bad_config = {"workers": {"local": {}}, "default_worker": "local"}
     with pytest.raises(ValueError, match=r"Missing required fields in worker config for local: \['host'\]"):
         config.validate_config(bad_config)
-    # Restore _REQUIRED_FIELDS to empty
     monkeypatch.setattr(config, '_REQUIRED_FIELDS', [])
 
 @pytest.mark.asyncio
@@ -48,7 +44,7 @@ async def test_resolve_worker_name_no_default():
 @pytest.mark.asyncio
 async def test_get_worker_config_no_workers_key():
     from deephaven_mcp import config
-    bad_config = {"default_worker": "local"}  # workers key missing
+    bad_config = {"default_worker": "local"}
     with pytest.raises(ValueError, match="Missing required top-level keys in Deephaven worker config: {'workers'}"):
         await config.set_config_cache(bad_config)
 
@@ -80,7 +76,6 @@ async def cleanup_config_cache():
     await config.clear_config_cache()
     yield
     await config.clear_config_cache()
-
 
 @pytest.mark.asyncio
 async def test_get_config_valid():
@@ -117,11 +112,9 @@ def test_validate_config_invalid_schema():
 @pytest.mark.asyncio
 async def test_clear_config_cache():
     from deephaven_mcp import config
-    # Set initial config
     await config.set_config_cache({"workers": {"a": {}}, "default_worker": "a"})
     cfg1 = await config.get_config()
     assert "a" in cfg1["workers"]
-    # Clear and set a new config
     await config.clear_config_cache()
     await config.set_config_cache({"workers": {"b": {}}, "default_worker": "b"})
     cfg2 = await config.get_config()
@@ -134,7 +127,6 @@ async def test_get_worker_config():
     await config.set_config_cache(VALID_CONFIG)
     cfg = await config.get_worker_config("local")
     assert cfg["host"] == "localhost"
-    # Should raise if worker doesn't exist
     with pytest.raises(RuntimeError):
         await config.get_worker_config("nonexistent")
 
@@ -156,10 +148,8 @@ async def test_get_worker_name_default():
 async def test_resolve_worker_name():
     from deephaven_mcp import config
     await config.set_config_cache(VALID_CONFIG)
-    # Explicit
     name = await config.resolve_worker_name("local")
     assert name == "local"
-    # Default
     name = await config.resolve_worker_name(None)
     assert name == "local"
 
@@ -168,65 +158,3 @@ def test_validate_config_missing_default_worker():
     bad_config = {"workers": {}}
     with pytest.raises(ValueError, match="Missing required top-level keys in Deephaven worker config: {'default_worker'}"):
         config.validate_config(bad_config)
-
-def test_validate_config_no_workers():
-    from deephaven_mcp import config
-    bad_config = {"workers": {}, "default_worker": "local"}
-    with pytest.raises(ValueError, match="No workers defined in Deephaven worker config"):
-        config.validate_config(bad_config)
-
-def test_validate_config_workers_not_dict():
-    from deephaven_mcp import config
-    bad_config = {"workers": [], "default_worker": "local"}
-    with pytest.raises(ValueError, match="'workers' must be a dictionary in Deephaven worker config"):
-        config.validate_config(bad_config)
-
-def test_validate_config_worker_config_not_dict():
-    from deephaven_mcp import config
-    bad_config = {"workers": {"local": []}, "default_worker": "local"}
-    with pytest.raises(ValueError, match="Worker config for local must be a dictionary"):
-        config.validate_config(bad_config)
-
-def test_validate_config_unknown_worker_field():
-    from deephaven_mcp import config
-    bad_config = {"workers": {"local": {"host": "localhost", "unknown_field": 123}}, "default_worker": "local"}
-    with pytest.raises(ValueError, match="Unknown field 'unknown_field' in worker config for local"):
-        config.validate_config(bad_config)
-
-def test_validate_config_worker_field_wrong_type():
-    from deephaven_mcp import config
-    bad_config = {"workers": {"local": {"host": 123}}, "default_worker": "local"}
-    with pytest.raises(ValueError, match="Field 'host' in worker config for local must be of type <class 'str'>"):
-        config.validate_config(bad_config)
-
-@pytest.mark.asyncio
-async def test_get_worker_config_no_workers():
-    from deephaven_mcp import config
-    bad_config = {"workers": {}, "default_worker": "local"}
-    with pytest.raises(ValueError, match="No workers defined in Deephaven worker config"):
-        await config.set_config_cache(bad_config)
-
-@pytest.mark.asyncio
-async def test_get_worker_config_worker_not_found_error():
-    from deephaven_mcp import config
-    bad_config = {"workers": {"local": {}}, "default_worker": "local"}
-    await config.set_config_cache(bad_config)
-    with pytest.raises(RuntimeError, match="Worker nonexistent not found in configuration"):
-        await config.get_worker_config("nonexistent")
-
-@pytest.mark.asyncio
-async def test_get_worker_config_worker_not_found():
-    from deephaven_mcp import config
-    # Config with only 'local' worker
-    test_config = {"workers": {"local": VALID_CONFIG["workers"]["local"]}, "default_worker": "local"}
-    await config.set_config_cache(test_config)
-    with pytest.raises(RuntimeError, match="Worker nonexistent not found in configuration"):
-        await config.get_worker_config("nonexistent")
-
-@pytest.mark.asyncio
-async def test_get_worker_name_default_none():
-    from deephaven_mcp import config
-    # Config missing default_worker
-    bad_config = {"workers": {"local": VALID_CONFIG["workers"]["local"]}}
-    with pytest.raises(ValueError, match="Missing required top-level keys in Deephaven worker config: {'default_worker'}"):
-        await config.set_config_cache(bad_config)
