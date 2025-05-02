@@ -408,7 +408,7 @@ async def resolve_worker_name(worker_name: Optional[str] = None) -> str:
         'local'
     """
     _LOGGER.debug(f"Resolving worker name (provided: {worker_name!r})")
-    config = get_config()
+    config = await get_config()
 
     if worker_name:
         return worker_name
