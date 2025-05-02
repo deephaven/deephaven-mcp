@@ -169,7 +169,7 @@ async def get_or_create_session(worker_name: Optional[str] = None) -> Session:
 
         # At this point, we need to create a new session and update the cache
         _LOGGER.info(f"Creating new session for worker: {resolved_worker}")
-        worker_cfg = await config.get_worker_config(worker_name)
+        worker_cfg = await config.get_worker_config(resolved_worker)
         host = worker_cfg.get("host", None)
         port = worker_cfg.get("port", None)
         auth_type = worker_cfg.get("auth_type", "Anonymous")
