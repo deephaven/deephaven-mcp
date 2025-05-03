@@ -36,32 +36,6 @@ from deephaven_mcp import config
 
 _LOGGER = logging.getLogger(__name__)
 
-DEFAULT_SESSION_MANAGER = SessionManager()
-"""
-DEFAULT_SESSION_MANAGER is the canonical, shared instance of SessionManager for Deephaven MCP session management.
-
-Overview:
-    - Provides a singleton-like, module-level manager for all Deephaven sessions in typical production and development usage.
-    - Encapsulates session creation, caching, lifecycle management, and cleanup.
-    - Used by all module-level APIs (get_or_create_session, clear_all_sessions) for backward compatibility and convenience.
-
-Usage:
-    - Use DEFAULT_SESSION_MANAGER directly to access advanced session management methods or to inject/mutate state for testing.
-    - For most use cases, prefer the provided async functions:
-        - await get_or_create_session(worker_name)
-        - await clear_all_sessions()
-    - For custom scenarios (e.g., test isolation, dependency injection), instantiate your own SessionManager.
-
-Thread/Coroutine Safety:
-    - All public methods on SessionManager (and thus DEFAULT_SESSION_MANAGER) are coroutine-safe via asyncio.Lock.
-    - It is safe to use DEFAULT_SESSION_MANAGER in concurrent async contexts.
-
-Notes:
-    - There should generally be only one DEFAULT_SESSION_MANAGER per process unless you are writing advanced tests or custom runners.
-    - All session cache and lock state is encapsulated within this instance.
-    - See SessionManager class docs for full API details.
-"""
-
 
 class SessionManager:
     """
@@ -396,9 +370,6 @@ class SessionManager:
                         _LOGGER.info(
                             f"Found and returning cached session for worker: {resolved_worker}"
                         )
-                        _LOGGER.debug(
-                            f"Session state: host={session.host}, port={session.port}, auth_type={session.auth_type}"
-                        )
                         return session
                     else:
                         _LOGGER.info(
@@ -432,6 +403,32 @@ class SessionManager:
             )
             return session
 
+
+DEFAULT_SESSION_MANAGER = SessionManager()
+"""
+DEFAULT_SESSION_MANAGER is the canonical, shared instance of SessionManager for Deephaven MCP session management.
+
+Overview:
+    - Provides a singleton-like, module-level manager for all Deephaven sessions in typical production and development usage.
+    - Encapsulates session creation, caching, lifecycle management, and cleanup.
+    - Used by all module-level APIs (get_or_create_session, clear_all_sessions) for backward compatibility and convenience.
+
+Usage:
+    - Use DEFAULT_SESSION_MANAGER directly to access advanced session management methods or to inject/mutate state for testing.
+    - For most use cases, prefer the provided async functions:
+        - await get_or_create_session(worker_name)
+        - await clear_all_sessions()
+    - For custom scenarios (e.g., test isolation, dependency injection), instantiate your own SessionManager.
+
+Thread/Coroutine Safety:
+    - All public methods on SessionManager (and thus DEFAULT_SESSION_MANAGER) are coroutine-safe via asyncio.Lock.
+    - It is safe to use DEFAULT_SESSION_MANAGER in concurrent async contexts.
+
+Notes:
+    - There should generally be only one DEFAULT_SESSION_MANAGER per process unless you are writing advanced tests or custom runners.
+    - All session cache and lock state is encapsulated within this instance.
+    - See SessionManager class docs for full API details.
+"""
 
 
 async def _load_bytes(path: Optional[str]) -> Optional[bytes]:
