@@ -49,7 +49,7 @@ def run_server(transport: str = "stdio") -> None:
 
     async def run():
         # Make sure config can be loaded before starting
-        await config.get_config()
+        await config.DEFAULT_CONFIG_MANAGER.get_config()
 
         try:
             await mcp_server.run(transport=transport)

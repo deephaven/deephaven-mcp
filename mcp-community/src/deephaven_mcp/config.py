@@ -185,51 +185,12 @@ import aiofiles
 
 _LOGGER = logging.getLogger(__name__)
 
-_CONFIG_CACHE: Optional[Dict[str, Any]] = None
-_CONFIG_CACHE_LOCK = asyncio.Lock()
-"""
-_CONFIG_CACHE (Optional[dict]): Holds the loaded Deephaven worker configuration, or None if not loaded.
-_CONFIG_CACHE_LOCK (asyncio.Lock): Ensures coroutine-safe, reentrant access to the configuration cache.
-"""
-
-#TODO: should there be a default worker?  Should it be required?
-#TODO: fix code coverage after fixing the above.
-
-async def clear_config_cache() -> None:
-    """
-    Atomically clear the Deephaven configuration cache.
-
-    Clears the cached configuration, forcing a reload from disk on next access.
-    This is useful when the configuration file has been modified externally.
-    Coroutine-safe and safe to call concurrently or recursively (uses a reentrant lock).
-
-    Example:
-        >>> clear_config_cache()  # Clear the cache
-        >>> config = get_config()  # Will reload from disk
-    """
-    _LOGGER.debug("Clearing Deephaven configuration cache...")
-    global _CONFIG_CACHE
-
-    async with _CONFIG_CACHE_LOCK:
-        _CONFIG_CACHE = None
-
-    _LOGGER.debug("Configuration cache cleared.")
-
-async def set_config_cache(config: Dict[str, Any]) -> None:
-    """
-    Atomically set the config cache (for testing only). Uses the same lock as clear_config_cache.
-    """
-    global _CONFIG_CACHE
-    async with _CONFIG_CACHE_LOCK:
-        _CONFIG_CACHE = validate_config(config)
-
-
 CONFIG_ENV_VAR = "DH_MCP_CONFIG_FILE"
 """
 str: Name of the environment variable specifying the path to the Deephaven worker config file.
 """
 
-_REQUIRED_FIELDS = []
+_REQUIRED_FIELDS: list[str] = []
 """
 list[str]: List of required fields for each worker configuration dictionary.
 """
@@ -251,255 +212,318 @@ Dictionary of allowed worker configuration fields and their expected types.
 Type: dict[str, type | tuple[type, ...]]
 """
 
-
-async def get_config() -> Dict[str, Any]:
+class ConfigManager:
     """
-    Load and validate the Deephaven worker configuration from disk, using a cache if available.
-    Uses native async file I/O (aiofiles) for non-blocking config file reads.
+    Async configuration manager for Deephaven MCP worker configuration.
 
-    Returns:
-        Dict[str, Any]: The loaded and validated configuration dictionary.
-
-    Raises:
-        RuntimeError: If the environment variable is not set, or the file cannot be read.
-        ValueError: If the config file is not a JSON object, contains unknown keys, or fails validation.
-
-    Example:
-        >>> os.environ['DH_MCP_CONFIG_FILE'] = '/path/to/config.json'
-        >>> config = get_config()
-        >>> config['workers']['local']['host']
-        'localhost'
+    This class encapsulates all logic for loading, validating, and caching the configuration used by Deephaven MCP workers. It ensures coroutine safety for all operations, supports async file I/O, and provides methods for retrieving worker-specific configurations, listing available workers, and resolving the default worker. All configuration access and mutation should go through an instance of this class (typically DEFAULT_CONFIG_MANAGER).
     """
-    _LOGGER.debug("Loading Deephaven worker configuration...")
-    global _CONFIG_CACHE
+    def __init__(self) -> None:
+        """
+        Initialize a new ConfigManager instance.
 
-    # Thread-safe read of the config cache
-    async with _CONFIG_CACHE_LOCK:
-        if _CONFIG_CACHE is not None:
-            _LOGGER.debug("Using cached Deephaven worker configuration.")
-            return _CONFIG_CACHE
+        Sets up the internal configuration cache and an asyncio.Lock for coroutine safety.
+        Typically, only one instance (DEFAULT_CONFIG_MANAGER) should be used in production.
+        """
+        self._cache: Optional[Dict[str, Any]] = None
+        self._lock = asyncio.Lock()
 
-        # Only one thread proceeds to load and cache the config
-        _LOGGER.info("Loading Deephaven worker configuration from disk...")
-        start_time = perf_counter()
+    async def get_worker_name_default(self) -> str:
+        """
+        Get the default worker name from the loaded configuration.
 
-        if CONFIG_ENV_VAR not in os.environ:
-            _LOGGER.error(f"Environment variable {CONFIG_ENV_VAR} is not set.")
-            raise RuntimeError(f"Environment variable {CONFIG_ENV_VAR} is not set.")
+        Returns:
+            str: The default worker name.
 
-        config_path = os.environ[CONFIG_ENV_VAR]
-        _LOGGER.info(f"Environment variable {CONFIG_ENV_VAR} is set to: {config_path}")
-        _LOGGER.info(f"Loading Deephaven worker configuration from disk...")
+        Raises:
+            RuntimeError: If no default worker is set in the configuration.
 
-        try:
-            async with aiofiles.open(config_path, "r") as f:
-                data = json.loads(await f.read())
-        except Exception as e:
-            _LOGGER.error(f"Failed to load config file {config_path}: {e}")
-            raise
+        Example:
+            >>> default_worker = await config.DEFAULT_CONFIG_MANAGER.get_worker_name_default()
+        """
+        config = await self.get_config()
+        default_worker = config.get("default_worker")
+        if not default_worker:
+            raise RuntimeError("No default worker is set in the configuration.")
+        return default_worker
 
-        validated = validate_config(data)
-        _CONFIG_CACHE = validated
-        _LOGGER.info(
-            f"Deephaven worker configuration loaded and validated successfully in {perf_counter() - start_time:.3f} seconds"
-        )
-        return validated
+    async def clear_config_cache(self) -> None:
+        """
+        Clear the cached Deephaven configuration (coroutine-safe).
+
+        This will force the next configuration access to reload from disk. Useful for tests or when the config file has changed.
+
+        Returns:
+            None
+
+        Example:
+            >>> await config.DEFAULT_CONFIG_MANAGER.clear_config_cache()
+        """
+        _LOGGER.debug("Clearing Deephaven configuration cache...")
+        async with self._lock:
+            self._cache = None
+
+        _LOGGER.debug("Configuration cache cleared.")
 
 
-def validate_config(config: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Validate the Deephaven worker configuration.
+    async def set_config_cache(self, config: Dict[str, Any]) -> None:
+        """
+        Set the in-memory configuration cache (coroutine-safe, for testing only).
 
-    Args:
-        config (dict): The configuration dictionary to validate.
+        Args:
+            config (Dict[str, Any]): The configuration dictionary to set as the cache. This will be validated before caching.
 
-    Returns:
-        dict: The validated configuration dictionary (may be normalized/cleaned).
+        Returns:
+            None
 
-    Raises:
-        ValueError: If the config is missing required keys, has unknown keys, has invalid field types,
-            or is otherwise invalid.
-    """
+        Example:
+            >>> await config.DEFAULT_CONFIG_MANAGER.set_config_cache({'workers': {...}, 'default_worker': 'local'})
+        """
+        async with self._lock:
+            self._cache = self.validate_config(config)
 
-    required_top_level = {"workers", "default_worker"}
-    allowed_top_level = required_top_level
-    top_level_keys = set(config.keys())
 
-    # Check for unknown keys
-    unknown_keys = top_level_keys - allowed_top_level
-    if unknown_keys:
-        _LOGGER.error(
-            f"Unknown top-level keys in Deephaven worker config: {unknown_keys}"
-        )
-        raise ValueError(
-            f"Unknown top-level keys in Deephaven worker config: {unknown_keys}"
-        )
+    async def get_config(self) -> Dict[str, Any]:
+        """
+        Load and validate the Deephaven worker configuration from disk (coroutine-safe).
 
-    # Check for missing required keys
-    missing_keys = required_top_level - top_level_keys
-    if missing_keys:
-        _LOGGER.error(
-            f"Missing required top-level keys in Deephaven worker config: {missing_keys}"
-        )
-        raise ValueError(
-            f"Missing required top-level keys in Deephaven worker config: {missing_keys}"
-        )
+        Uses aiofiles for async file I/O and caches the result. If the cache is present, returns it; otherwise, loads from disk and validates.
 
-    # Validate workers
-    workers = config["workers"]  # Required key, guaranteed by previous validation
-    if not isinstance(workers, dict):
-        _LOGGER.error("'workers' must be a dictionary in Deephaven worker config")
-        raise ValueError("'workers' must be a dictionary in Deephaven worker config")
+        Returns:
+            Dict[str, Any]: The loaded and validated configuration dictionary.
 
-    if not workers:
-        _LOGGER.error("No workers defined in Deephaven worker config")
-        raise ValueError("No workers defined in Deephaven worker config")
+        Raises:
+            RuntimeError: If the environment variable is not set, or the file cannot be read.
+            ValueError: If the config file is invalid, contains unknown keys, or fails validation.
 
-    # Validate each worker
-    for worker_name, worker_config in workers.items():
-        if not isinstance(worker_config, dict):
-            _LOGGER.error(f"Worker config for {worker_name} must be a dictionary")
-            raise ValueError(f"Worker config for {worker_name} must be a dictionary")
+        Example:
+            >>> import os
+            >>> os.environ['DH_MCP_CONFIG_FILE'] = '/path/to/config.json'
+            >>> config_dict = await config.DEFAULT_CONFIG_MANAGER.get_config()
+            >>> config_dict['workers']['local']['host']
+            'localhost'
+        """
+        _LOGGER.debug("Loading Deephaven worker configuration...")
+        async with self._lock:
+            if self._cache is not None:
+                _LOGGER.debug("Using cached Deephaven worker configuration.")
+                return self._cache
 
-        # Check required fields
-        missing_fields = [
-            field for field in _REQUIRED_FIELDS if field not in worker_config
-        ]
-        if missing_fields:
+            _LOGGER.info("Loading Deephaven worker configuration from disk...")
+            start_time = perf_counter()
+
+            if CONFIG_ENV_VAR not in os.environ:
+                _LOGGER.error(f"Environment variable {CONFIG_ENV_VAR} is not set.")
+                raise RuntimeError(f"Environment variable {CONFIG_ENV_VAR} is not set.")
+
+            config_path = os.environ[CONFIG_ENV_VAR]
+            _LOGGER.info(f"Environment variable {CONFIG_ENV_VAR} is set to: {config_path}")
+
+            try:
+                async with aiofiles.open(config_path, "r") as f:
+                    data = json.loads(await f.read())
+            except Exception as e:
+                _LOGGER.error(f"Failed to load config file {config_path}: {e}")
+                raise
+
+            validated = self.validate_config(data)
+            self._cache = validated
+            _LOGGER.info(
+                f"Deephaven worker configuration loaded and validated successfully in {perf_counter() - start_time:.3f} seconds"
+            )
+            return validated
+
+
+    async def get_worker_config(self, worker_name: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Retrieve the configuration dictionary for a specific worker.
+
+        Args:
+            worker_name (Optional[str]): The name of the worker to retrieve. If None, uses the default_worker from config.
+
+        Returns:
+            Dict[str, Any]: The configuration dictionary for the specified worker.
+
+        Raises:
+            RuntimeError: If the specified worker is not found in the configuration.
+
+        Example:
+            >>> worker_cfg = await config.DEFAULT_CONFIG_MANAGER.get_worker_config('local')
+        """
+        _LOGGER.debug(f"Getting worker config for worker: {worker_name!r}")
+        config = await self.get_config()
+        workers = config.get("workers", {})
+        resolved_name = await self.resolve_worker_name(worker_name)
+
+        if resolved_name not in workers:
+            _LOGGER.error(f"Worker {resolved_name} not found in configuration")
+            raise RuntimeError(f"Worker {resolved_name} not found in configuration")
+
+        _LOGGER.debug(f"Returning config for worker: {resolved_name}")
+        return workers[resolved_name]
+
+
+    async def resolve_worker_name(self, worker_name: Optional[str] = None) -> str:
+        """
+        Resolve the worker name to use, either from the provided worker_name or the default_worker from config.
+
+        Args:
+            worker_name (Optional[str]): The name of the worker to resolve. If None, uses the default_worker from config.
+
+        Returns:
+            str: The resolved worker name.
+
+        Raises:
+            RuntimeError: If no worker name is specified and no default_worker is set in the config.
+
+        Example:
+            >>> worker = await config.DEFAULT_CONFIG_MANAGER.resolve_worker_name()
+        """
+        _LOGGER.debug(f"Resolving worker name (provided: {worker_name!r})")
+        config = await self.get_config()
+
+        if worker_name:
+            return worker_name
+
+        default_worker = config.get("default_worker")
+        if not default_worker:
+            _LOGGER.error("No worker name specified and no default_worker in config")
+            raise RuntimeError("No worker name specified and no default_worker in config")
+
+        _LOGGER.debug(f"Using default worker: {default_worker}")
+        return default_worker
+
+
+    async def get_worker_names(self) -> list[str]:
+        """
+        Get a list of all configured Deephaven worker names from the loaded configuration.
+
+        Returns:
+            list[str]: List of all worker names defined in the configuration.
+
+        Example:
+            >>> workers = await config.DEFAULT_CONFIG_MANAGER.get_worker_names()
+            >>> for worker in workers:
+            ...     print(f"Available worker: {worker}")
+        """
+        _LOGGER.debug("Getting list of all worker names")
+        config = await self.get_config()
+        workers = config.get("workers", {})
+        worker_names = list(workers.keys())
+
+        _LOGGER.debug(f"Found {len(worker_names)} worker(s): {worker_names}")
+        return worker_names
+
+
+    @staticmethod
+    def validate_config(config: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Validate the Deephaven worker configuration dictionary.
+
+        Args:
+            config (Dict[str, Any]): The configuration dictionary to validate.
+
+        Returns:
+            Dict[str, Any]: The validated configuration dictionary. This may be a normalized or cleaned version of the input.
+
+        Raises:
+            ValueError: If the config is missing required keys, has unknown keys, has invalid field types, or is otherwise invalid.
+
+        Example:
+            >>> valid = ConfigManager.validate_config({'workers': {...}, 'default_worker': 'local'})
+        """
+        required_top_level = {"workers", "default_worker"}
+        allowed_top_level = required_top_level
+        top_level_keys = set(config.keys())
+
+        unknown_keys = top_level_keys - allowed_top_level
+        if unknown_keys:
             _LOGGER.error(
-                f"Missing required fields in worker config for {worker_name}: {missing_fields}"
+                f"Unknown top-level keys in Deephaven worker config: {unknown_keys}"
             )
             raise ValueError(
-                f"Missing required fields in worker config for {worker_name}: {missing_fields}"
+                f"Unknown top-level keys in Deephaven worker config: {unknown_keys}"
             )
 
-        # Check allowed fields and types
-        for field, value in worker_config.items():
-            if field not in _ALLOWED_WORKER_FIELDS:
+        missing_keys = required_top_level - top_level_keys
+        if missing_keys:
+            _LOGGER.error(
+                f"Missing required top-level keys in Deephaven worker config: {missing_keys}"
+            )
+            raise ValueError(
+                f"Missing required top-level keys in Deephaven worker config: {missing_keys}"
+            )
+
+        workers = config["workers"]
+        if not isinstance(workers, dict):
+            _LOGGER.error("'workers' must be a dictionary in Deephaven worker config")
+            raise ValueError("'workers' must be a dictionary in Deephaven worker config")
+
+        if not workers:
+            _LOGGER.error("No workers defined in Deephaven worker config")
+            raise ValueError("No workers defined in Deephaven worker config")
+
+        for worker_name, worker_config in workers.items():
+            if not isinstance(worker_config, dict):
+                _LOGGER.error(f"Worker config for {worker_name} must be a dictionary")
+                raise ValueError(f"Worker config for {worker_name} must be a dictionary")
+
+            missing_fields = [
+                field for field in _REQUIRED_FIELDS if field not in worker_config
+            ]
+            if missing_fields:
                 _LOGGER.error(
-                    f"Unknown field '{field}' in worker config for {worker_name}"
+                    f"Missing required fields in worker config for {worker_name}: {missing_fields}"
                 )
                 raise ValueError(
-                    f"Unknown field '{field}' in worker config for {worker_name}"
+                    f"Missing required fields in worker config for {worker_name}: {missing_fields}"
                 )
 
-            allowed_types = _ALLOWED_WORKER_FIELDS[field]
-            if not isinstance(value, allowed_types):
-                _LOGGER.error(
-                    f"Field '{field}' in worker config for {worker_name} must be of type {allowed_types}"
-                )
-                raise ValueError(
-                    f"Field '{field}' in worker config for {worker_name} must be of type {allowed_types}"
-                )
+            for field, value in worker_config.items():
+                if field not in _ALLOWED_WORKER_FIELDS:
+                    _LOGGER.error(
+                        f"Unknown field '{field}' in worker config for {worker_name}"
+                    )
+                    raise ValueError(
+                        f"Unknown field '{field}' in worker config for {worker_name}"
+                    )
 
-    # Validate default_worker
-    # Required key, guaranteed by previous validation
-    default_worker = config["default_worker"]
-    if default_worker not in workers:
-        _LOGGER.error(f"Default worker '{default_worker}' is not defined in workers")
-        raise ValueError(f"Default worker '{default_worker}' is not defined in workers")
+                allowed_types = _ALLOWED_WORKER_FIELDS[field]
+                if not isinstance(value, allowed_types):
+                    _LOGGER.error(
+                        f"Field '{field}' in worker config for {worker_name} must be of type {allowed_types}"
+                    )
+                    raise ValueError(
+                        f"Field '{field}' in worker config for {worker_name} must be of type {allowed_types}"
+                    )
 
-    return config
+        default_worker = config["default_worker"]
+        if default_worker not in workers:
+            _LOGGER.error(f"Default worker '{default_worker}' is not defined in workers")
+            raise ValueError(f"Default worker '{default_worker}' is not defined in workers")
 
-
-async def resolve_worker_name(worker_name: Optional[str] = None) -> str:
-    """
-    Resolve the worker name to use, either from the provided worker_name or the default_worker from config.
-
-    Args:
-        worker_name (str, optional): The name of the worker to retrieve. If None, uses the default_worker from config.
-
-    Returns:
-        str: The resolved worker name.
-
-    Raises:
-        RuntimeError: If no worker name is specified (via argument or default_worker in config).
-
-    Example:
-        >>> config = {
-        ...     'workers': {'local': {...}},
-        ...     'default_worker': 'local'
-        ... }
-        >>> resolve_worker_name('local')
-        'local'
-        >>> resolve_worker_name()  # Uses default_worker
-        'local'
-    """
-    _LOGGER.debug(f"Resolving worker name (provided: {worker_name!r})")
-    config = await get_config()
-
-    if worker_name:
-        return worker_name
-
-    default_worker = config.get("default_worker")
-
-    #TODO: unreachable given the validation
-    if not default_worker:
-        _LOGGER.error("No worker name specified and no default_worker in config")
-        raise RuntimeError("No worker name specified and no default_worker in config")
-
-    _LOGGER.debug(f"Using default worker: {default_worker}")
-    return default_worker
+        return config
 
 
-async def get_worker_config(worker_name: Optional[str] = None) -> Dict[str, Any]:
-    """
-    Retrieve the configuration dictionary for a specific worker.
+DEFAULT_CONFIG_MANAGER: ConfigManager = ConfigManager()
+"""
+DEFAULT_CONFIG_MANAGER (ConfigManager):
+    The default singleton instance of ConfigManager used by all Deephaven MCP configuration APIs.
+    This instance is coroutine-safe and should be used for all configuration loading, validation, and cache management unless a custom instance is required (e.g., for testing or advanced use).
 
-    Args:
-        worker_name (str, optional): The name of the worker to retrieve. If None, uses the default_worker from config.
+    Usage Example:
+        from deephaven_mcp import config
+        config_dict = await config.DEFAULT_CONFIG_MANAGER.get_config()
+        worker_cfg = await config.DEFAULT_CONFIG_MANAGER.get_worker_config('local')
+        await config.DEFAULT_CONFIG_MANAGER.clear_config_cache()
 
-    Returns:
-        dict: The configuration dictionary for the specified worker.
+    # Listing all workers
+        workers = await config.DEFAULT_CONFIG_MANAGER.get_worker_names()
+        for worker in workers:
+            print(f"Available worker: {worker}")
 
-    Raises:
-        RuntimeError: If no workers are defined, the worker is not found, or no default_worker is set.
+    # Resolving the default worker
+        default = await config.DEFAULT_CONFIG_MANAGER.resolve_worker_name()
 
-    Example:
-        >>> config = get_worker_config('local')
-        >>> config['host']
-        'localhost'
-        >>> config['port']
-        10000
-    """
-    _LOGGER.debug(f"Getting worker config for worker: {worker_name!r}")
-    config = await get_config()
-    workers = config.get("workers", {})
-
-    resolved_name = await resolve_worker_name(worker_name)
-    #TODO: unreachable given the validation
-    if resolved_name not in workers:
-        _LOGGER.error(f"Worker {resolved_name} not found in configuration")
-        raise RuntimeError(f"Worker {resolved_name} not found in configuration")
-
-    _LOGGER.debug(f"Returning config for worker: {resolved_name}")
-    return workers[resolved_name]
-
-
-async def get_worker_names() -> list[str]:
-    """
-    Get a list of all configured Deephaven worker names from the loaded configuration.
-
-    Returns:
-        list[str]: List of worker names defined in the configuration.
-    """
-    _LOGGER.debug("Getting list of all worker names")
-    config = await get_config()
-    workers = config.get("workers", {})
-    worker_names = list(workers.keys())
-    _LOGGER.debug(f"Found {len(worker_names)} worker(s): {worker_names}")
-    return worker_names
-
-
-async def get_worker_name_default() -> Optional[str]:
-    """
-    Get the name of the default Deephaven worker, as set in the configuration.
-
-    Returns:
-        str or None: The default worker name, or None if not set in the config.
-    """
-    _LOGGER.debug("Getting default worker name")
-    config = await get_config()
-    default_worker = config.get("default_worker")
-    _LOGGER.debug(f"Default worker: {default_worker}")
-    return default_worker
+    This singleton ensures a consistent configuration state across the application.
+"""

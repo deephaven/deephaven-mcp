@@ -88,7 +88,7 @@ async def refresh() -> dict:
     # it does ensure that only one refresh runs at a time and reduces race risk.
     try:
         async with _REFRESH_LOCK:
-            await config.clear_config_cache()
+            await config.DEFAULT_CONFIG_MANAGER.clear_config_cache()
             await sessions.clear_all_sessions()
         _LOGGER.info(
             "[refresh] Success: Worker configuration and session cache have been reloaded."
@@ -127,7 +127,7 @@ async def default_worker() -> dict:
     """
     _LOGGER.info("[default_worker] Invoked: retrieving default worker name.")
     try:
-        worker = await config.get_worker_name_default()
+        worker = await config.DEFAULT_CONFIG_MANAGER.get_worker_name_default()
         _LOGGER.info(f"[default_worker] Success: Default worker is '{worker}'.")
         return {"success": True, "result": worker}
     except Exception as e:
@@ -164,7 +164,7 @@ async def worker_names() -> dict:
         "[worker_names] Invoked: retrieving list of all configured worker names."
     )
     try:
-        names = await config.get_worker_names()
+        names = await config.DEFAULT_CONFIG_MANAGER.get_worker_names()
         _LOGGER.info(f"[worker_names] Success: Found workers: {names!r}")
         return {"success": True, "result": names}
     except Exception as e:

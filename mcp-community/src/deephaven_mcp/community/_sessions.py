@@ -358,7 +358,7 @@ class SessionManager:
         """
         start_time = time.time()
         _LOGGER.info(f"Getting or creating session for worker: {worker_name}")
-        resolved_worker = await config.resolve_worker_name(worker_name)
+        resolved_worker = await config.DEFAULT_CONFIG_MANAGER.resolve_worker_name(worker_name)
         _LOGGER.info(f"Resolved worker name: {worker_name} -> {resolved_worker}")
         _LOGGER.info(f"Session cache size: {len(self._cache)}")
 
@@ -382,14 +382,13 @@ class SessionManager:
 
             # At this point, we need to create a new session and update the cache
             _LOGGER.info(f"Creating new session for worker: {resolved_worker}")
-            worker_cfg = await config.get_worker_config(resolved_worker)
+            worker_cfg = await config.DEFAULT_CONFIG_MANAGER.get_worker_config(resolved_worker)
             session_params = await self._get_session_parameters(worker_cfg)
 
             # Redact sensitive info for logging
             log_cfg = self._redact_sensitive_session_fields(session_params)
             log_cfg["worker_name"] = resolved_worker
-            _LOGGER.info(
-                f"Creating new Deephaven Session with config: (worker cache key: {resolved_worker}) {log_cfg}"
+            _LOGGER.info(                f"Creating new Deephaven Session with config: (worker cache key: {resolved_worker}) {log_cfg}"
             )
 
             session = await self._create_session(**session_params)
