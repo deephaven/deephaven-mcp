@@ -25,6 +25,14 @@ from ._mcp import mcp_server
 
 __all__ = ["mcp_server", "run_server"]
 
+_CONFIG_MANAGER = config.DEFAULT_CONFIG_MANAGER
+"""
+_CONFIG_MANAGER is a private, module-level reference to the default configuration manager.
+
+This allows for easier patching and testability in unit tests or other scenarios where the
+configuration manager needs to be swapped or mocked. Production code should not modify this value.
+"""
+
 
 def run_server(transport: str = "stdio") -> None:
     """
@@ -49,7 +57,7 @@ def run_server(transport: str = "stdio") -> None:
 
     async def run():
         # Make sure config can be loaded before starting
-        await config.DEFAULT_CONFIG_MANAGER.get_config()
+        await _CONFIG_MANAGER.get_config()
 
         try:
             await mcp_server.run(transport=transport)
