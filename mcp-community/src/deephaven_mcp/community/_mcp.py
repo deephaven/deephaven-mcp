@@ -89,7 +89,7 @@ async def refresh() -> dict:
     try:
         async with _REFRESH_LOCK:
             await config.DEFAULT_CONFIG_MANAGER.clear_config_cache()
-            await sessions.clear_all_sessions()
+            await sessions.DEFAULT_SESSION_MANAGER.clear_all_sessions()
         _LOGGER.info(
             "[refresh] Success: Worker configuration and session cache have been reloaded."
         )
@@ -214,7 +214,7 @@ async def table_schemas(
     )
     results = []
     try:
-        session = await sessions.get_or_create_session(worker_name)
+        session = await sessions.DEFAULT_SESSION_MANAGER.get_or_create_session(worker_name)
         _LOGGER.info(f"[table_schemas] Session established for worker: '{worker_name}'")
 
         if table_names is not None:
@@ -313,7 +313,7 @@ async def run_script(
             async with aiofiles.open(script_path, "r") as f:
                 script = await f.read()
 
-        session = await sessions.get_or_create_session(worker_name)
+        session = await sessions.DEFAULT_SESSION_MANAGER.get_or_create_session(worker_name)
         _LOGGER.info(f"[run_script] Session established for worker: '{worker_name}'")
 
         _LOGGER.info(f"[run_script] Executing script on worker: '{worker_name}'")
