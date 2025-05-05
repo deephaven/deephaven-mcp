@@ -243,8 +243,11 @@ class ConfigManager:
         """
         config = await self.get_config()
         default_worker = config.get("default_worker")
+
+        # TODO: it is impossible to get here with the current validation ... what is the right thing to do?
         if not default_worker:
             raise RuntimeError("No default worker is set in the configuration.")
+
         return default_worker
 
     async def clear_config_cache(self) -> None:
