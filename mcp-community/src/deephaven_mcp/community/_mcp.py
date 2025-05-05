@@ -31,6 +31,14 @@ from deephaven_mcp import config
 import deephaven_mcp.community._sessions as sessions
 import aiofiles
 
+# Private module-level variable for the configuration manager singleton.
+# This allows easier patching/mocking in tests and centralizes the default config manager reference.
+_CONFIG_MANAGER = config.DEFAULT_CONFIG_MANAGER
+
+# Private module-level variable for the session manager singleton.
+# This allows easier patching/mocking in tests and centralizes the default session manager reference.
+_SESSION_MANAGER = sessions.DEFAULT_SESSION_MANAGER
+
 _LOGGER = logging.getLogger(__name__)
 
 # Module-level lock for refresh to prevent concurrent refresh operations.
@@ -88,8 +96,8 @@ async def refresh() -> dict:
     # it does ensure that only one refresh runs at a time and reduces race risk.
     try:
         async with _REFRESH_LOCK:
-            await config.clear_config_cache()
-            await sessions.clear_all_sessions()
+            await _CONFIG_MANAGER.clear_config_cache()
+            await _SESSION_MANAGER.clear_all_sessions()
         _LOGGER.info(
             "[refresh] Success: Worker configuration and session cache have been reloaded."
         )
@@ -127,7 +135,7 @@ async def default_worker() -> dict:
     """
     _LOGGER.info("[default_worker] Invoked: retrieving default worker name.")
     try:
-        worker = await config.get_worker_name_default()
+        worker = await _CONFIG_MANAGER.get_worker_name_default()
         _LOGGER.info(f"[default_worker] Success: Default worker is '{worker}'.")
         return {"success": True, "result": worker}
     except Exception as e:
@@ -164,7 +172,7 @@ async def worker_names() -> dict:
         "[worker_names] Invoked: retrieving list of all configured worker names."
     )
     try:
-        names = await config.get_worker_names()
+        names = await _CONFIG_MANAGER.get_worker_names()
         _LOGGER.info(f"[worker_names] Success: Found workers: {names!r}")
         return {"success": True, "result": names}
     except Exception as e:
@@ -214,7 +222,7 @@ async def table_schemas(
     )
     results = []
     try:
-        session = await sessions.get_or_create_session(worker_name)
+        session = await _SESSION_MANAGER.get_or_create_session(worker_name)
         _LOGGER.info(f"[table_schemas] Session established for worker: '{worker_name}'")
 
         if table_names is not None:
@@ -313,7 +321,7 @@ async def run_script(
             async with aiofiles.open(script_path, "r") as f:
                 script = await f.read()
 
-        session = await sessions.get_or_create_session(worker_name)
+        session = await _SESSION_MANAGER.get_or_create_session(worker_name)
         _LOGGER.info(f"[run_script] Session established for worker: '{worker_name}'")
 
         _LOGGER.info(f"[run_script] Executing script on worker: '{worker_name}'")

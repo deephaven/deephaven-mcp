@@ -27,7 +27,33 @@ dependencies = [
     "aiohttp>=3.11.18",
     "autogen-ext[mcp]>=0.5.4",
     "mcp[cli]>=1.6.0",
-    "pydeephaven>=0.38.0",
+    "pydeephaven>=0.38.0"
+]
+
+[project.optional-dependencies]
+# Testing (coverage, etc.)
+test = [
+    "pytest>=8.0.0", # Test framework
+    "pytest-asyncio>=0.23.0", # Async test support
+    "pytest-cov>=4.1.0",    # Code coverage reporting
+]
+dev = [
+    # Code formatting and style
+    "black>=24.0.0",  # Code formatter
+    "ruff>=0.1.0",    # Linter and code quality tool
+    "isort>=5.12.0",  # Import sorter
+
+    # Type checking and static analysis
+    "mypy>=1.6.0",  # Static type checker
+
+    # Development and CI
+    "pre-commit>=3.4.0",  # Git hooks management
+    "deephaven-server>=0.38.0",  # Required for testing against Deephaven
+
+    # Testing (duplicate from [test] for setuptools compatibility)
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.1.0"
 ]
 
 [project.urls]
@@ -54,26 +80,6 @@ write_to = "src/deephaven_mcp/_version.py"
 version_scheme = "post-release"
 local_scheme = "node-and-date"
 fallback_version = "0.0.0"
-
-[project.optional-dependencies]
-dev = [
-    # Code formatting and style
-    "black>=24.0.0",  # Code formatter
-    "ruff>=0.1.0",    # Linter and code quality tool
-    "isort>=5.12.0",  # Import sorter
-
-    # Testing
-    "pytest>=7.4.0",        # Test framework
-    "pytest-cov>=4.1.0",    # Code coverage reporting
-    "pytest-asyncio>=0.21.1",  # Async test support
-
-    # Type checking and static analysis
-    "mypy>=1.6.0",  # Static type checker
-
-    # Development and CI
-    "pre-commit>=3.4.0",  # Git hooks management
-    "deephaven-server>=0.38.0"  # Required for testing against Deephaven
-]
 
 # Black configuration for code formatting
 [tool.black]
