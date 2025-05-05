@@ -6,7 +6,7 @@ uv run dh-mcp-community
 
 https://www.firecrawl.dev/blog/fastmcp-tutorial-building-mcp-servers-python
 
-#TODO: coposite service
+#TODO: composite service
 https://github.com/jlowin/fastmcp
 
 # for debugging
