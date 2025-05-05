@@ -38,25 +38,28 @@ async def test_load_bytes_error(tmp_path, caplog):
         await _load_bytes("/nonexistent/path/to/file")
 
 # --- Tests for SessionManager._redact_sensitive_session_fields ---
-def test_redact_sensitive_session_fields_basic(session_manager):
+def test_redact_sensitive_session_fields_comprehensive(session_manager):
+    # All sensitive keys, string and binary
     config = {
         "auth_token": "secret",
         "tls_root_certs": b"bytes",
-        "client_cert_chain": "path/to/cert",
+        "client_cert_chain": b"chain-bytes",
         "client_private_key": b"key-bytes",
         "foo": "bar"
     }
+    # Default: redact all sensitive fields
     redacted = session_manager._redact_sensitive_session_fields(config)
     assert redacted["auth_token"] == "REDACTED"
     assert redacted["tls_root_certs"] == "REDACTED"
-    assert redacted["client_cert_chain"] == "path/to/cert"
+    assert redacted["client_cert_chain"] == "REDACTED"
     assert redacted["client_private_key"] == "REDACTED"
     assert redacted["foo"] == "bar"
-
-def test_redact_sensitive_session_fields_no_binary(session_manager):
-    config = {"tls_root_certs": "cert.pem"}
+    # redact_binary_values=False: only auth_token is redacted, binary fields are not
+    config = {"auth_token": "tok", "tls_root_certs": b"binary"}
     redacted = session_manager._redact_sensitive_session_fields(config, redact_binary_values=False)
-    assert redacted["tls_root_certs"] == "cert.pem"
+    assert redacted["auth_token"] == "REDACTED"
+    assert redacted["tls_root_certs"] == b"binary"
+
 
 # --- Tests for SessionManager._close_session_safely ---
 @pytest.mark.asyncio
@@ -134,26 +137,6 @@ async def test_get_session_parameters_file_error(monkeypatch):
     with pytest.raises(IOError):
         await mgr._get_session_parameters(cfg)
 
-def test_redact_sensitive_session_fields():
-    mgr = SessionManager()
-    # All sensitive keys, string and binary
-    cfg = {
-        'auth_token': 'tok',
-        'tls_root_certs': b'binary',
-        'client_cert_chain': b'binary',
-        'client_private_key': b'binary',
-        'other': 'x'
-    }
-    redacted = mgr._redact_sensitive_session_fields(cfg)
-    assert redacted['auth_token'] == 'REDACTED'
-    assert redacted['tls_root_certs'] == 'REDACTED'
-    assert redacted['client_cert_chain'] == 'REDACTED'
-    assert redacted['client_private_key'] == 'REDACTED'
-    # If redact_binary_values is False, only auth_token is redacted
-    cfg = {'auth_token': 'tok', 'tls_root_certs': b'binary'}
-    redacted = mgr._redact_sensitive_session_fields(cfg, redact_binary_values=False)
-    assert redacted['auth_token'] == 'REDACTED'
-    assert redacted['tls_root_certs'] == b'binary'
 
 def test_redact_sensitive_session_fields_empty():
     mgr = SessionManager()

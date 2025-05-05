@@ -59,10 +59,20 @@ def test_validate_config_missing_required_worker_field(monkeypatch):
 
 def test_validate_config_invalid_schema():
     from deephaven_mcp import config
+    # Case 1: Remove 'default_worker' from a minimal config
     bad_config = MINIMAL_CONFIG.copy()
-    bad_config.pop("default_worker")  # Remove required key
+    bad_config.pop("default_worker")
     with pytest.raises(ValueError):
         config.ConfigManager.validate_config(bad_config)
+    # Case 2: Construct a config missing 'default_worker' explicitly
+    bad_config2 = {
+        "workers": {
+            "local": {"host": "localhost", "port": 10000}
+        }
+        # Missing default_worker
+    }
+    with pytest.raises(ValueError):
+        config.ConfigManager.validate_config(bad_config2)
 
 def test_validate_config_missing_default_worker():
     from deephaven_mcp import config
@@ -167,16 +177,6 @@ async def test_get_config_missing_env(monkeypatch):
         await config.DEFAULT_CONFIG_MANAGER.get_config()
 
 
-def test_validate_config_invalid_schema():
-    from deephaven_mcp import config
-    bad_config = {
-        "workers": {
-            "local": {"host": "localhost", "port": 10000}
-        }
-        # Missing default_worker
-    }
-    with pytest.raises(ValueError):
-        config.ConfigManager.validate_config(bad_config)
 
 def test_validate_config_workers_not_dict():
     from deephaven_mcp import config
