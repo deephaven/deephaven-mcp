@@ -36,9 +36,6 @@ import random
 import time
 
 from deephaven_server import Server
-from deephaven import (
-    empty_table, time_table, new_table, string_col, int_col, double_col, bool_col, date_time_col, dtypes as dht, agg
-)
 
 # Parse command-line arguments for host and port
 parser = argparse.ArgumentParser(description="Launch a Deephaven server with configurable host and port and table group.")
@@ -66,6 +63,11 @@ server = Server(
     jvm_args=jvm_args,
 )
 server.start()
+
+# The server must be created before importing deephaven
+from deephaven import (
+    empty_table, time_table, new_table, string_col, int_col, double_col, bool_col, date_time_col, dtypes as dht, agg
+)
 
 # Table creation by group
 if table_group == 'simple' or table_group == 'all':
