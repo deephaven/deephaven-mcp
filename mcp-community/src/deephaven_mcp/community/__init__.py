@@ -57,3 +57,24 @@ def run_server(transport: str = "stdio") -> None:
             logging.info(f"MCP server '{mcp_server.name}' stopped.")
 
     asyncio.run(run())
+
+def main():
+    """
+    Command-line entry point for the Deephaven MCP Community server.
+
+    Parses CLI arguments using argparse and starts the MCP server with the specified transport.
+
+    Arguments:
+        -t, --transport: Transport type for the MCP server ('stdio' or 'sse'). Default: 'stdio'.
+    """
+    import argparse
+    parser = argparse.ArgumentParser(description="Start the Deephaven MCP Community server.")
+    parser.add_argument(
+        "-t", "--transport", choices=["stdio", "sse"], default="stdio",
+        help="Transport type for the MCP server (stdio or sse). Default: stdio"
+    )
+    args = parser.parse_args()
+    run_server(args.transport)
+
+if __name__ == "__main__":
+    main()

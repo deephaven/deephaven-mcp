@@ -21,6 +21,8 @@ This script will:
 See the project README for further details.
 """
 
+#TODO: *** is this needed with the "mcp dev" command?
+
 import asyncio
 from autogen_core import CancellationToken
 from autogen_ext.tools.mcp import SseServerParams, mcp_server_tools
