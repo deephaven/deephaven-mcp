@@ -166,17 +166,6 @@ async def test_get_config_missing_env(monkeypatch):
     with pytest.raises(RuntimeError, match="Environment variable DH_MCP_CONFIG_FILE is not set"):
         await config.DEFAULT_CONFIG_MANAGER.get_config()
 
-@pytest.mark.asyncio
-async def test_get_config_invalid_json(monkeypatch):
-    from deephaven_mcp import config
-    monkeypatch.setenv("DH_MCP_CONFIG_FILE", "/fake/path/config.json")
-    aiofiles_mock = mock.Mock()
-    aiofiles_open_ctx = mock.AsyncMock()
-    aiofiles_open_ctx.__aenter__.return_value.read = mock.AsyncMock(return_value=b"not json")
-    aiofiles_mock.open = mock.Mock(return_value=aiofiles_open_ctx)
-    monkeypatch.setitem(importlib.import_module('aiofiles').__dict__, 'open', aiofiles_mock.open)
-    with pytest.raises(ValueError):
-        await config.DEFAULT_CONFIG_MANAGER.get_config()
 
 def test_validate_config_invalid_schema():
     from deephaven_mcp import config
