@@ -114,9 +114,9 @@ if table_group == 'simple' or table_group == 'all':
         bool_col("Flag", [True, False, True, False]),
     ])
 
-elif table_group == 'financial' or table_group == 'all':
+if table_group == 'financial' or table_group == 'all':
     print("Creating financial example tables...")
-    SYMBOLS = dht.array(["AAPL", "AMZN", "GOOG", "MSFT"])
+    SYMBOLS = dht.array(dht.string, ["AAPL", "AMZN", "GOOG", "MSFT"])
 
     # Single quotes table with all symbols
     quotes = (
@@ -125,8 +125,8 @@ elif table_group == 'financial' or table_group == 'all':
             "Symbol = (String) SYMBOLS[i % 4]",
             "Bid = 100 + (random() * 10)",
             "Ask = Bid + (random() * 2)",
-            "BidSize = int(100 + random() * 900)",
-            "AskSize = int(100 + random() * 900)"
+            "BidSize = (int) (100 + random() * 900)",
+            "AskSize = (int) (100 + random() * 900)",
         ])
     )
 
@@ -136,7 +136,7 @@ elif table_group == 'financial' or table_group == 'all':
         .update([
             "Symbol = (String) SYMBOLS[i % 4]",
             "Price = 100 + (random() * 12)",
-            "Size = int(1 + random() * 999)",
+            "Size = (int) (1 + random() * 999)",
             "Side = i % 2 == 0 ? `BUY` : `SELL`"
         ])
     )
@@ -144,7 +144,7 @@ elif table_group == 'financial' or table_group == 'all':
     # OHLCV bar table (10s bars) using lower_bin and agg_by
     ohlcv = (
         trades
-        .update(["Bar = lower_bin(Timestamp, 'PT10s')"])
+        .update(["Bar = lowerBin(Timestamp, 'PT10s')"])
         .agg_by([
             agg.first('Open = Price'),
             agg.max_('High = Price'),
@@ -175,7 +175,7 @@ elif table_group == 'financial' or table_group == 'all':
         .update([
             "Symbol = (String) SYMBOLS[i % 4]",
             f"ActionType = pick_random(news_types)",
-            f"Headline = pick_random(news_headlines) + ' for ' + Symbol",
+            f"Headline = pick_random(news_headlines) + ` for ` + Symbol",
         ])
     )
 
