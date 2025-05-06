@@ -58,6 +58,7 @@ def run_server(transport: str = "stdio") -> None:
     _LOGGER.info(f"Starting MCP server '{mcp_server.name}' with transport={transport}")
 
     try:
+        #TODO: move this into lifespan?
         # Make sure config can be loaded before starting the server
         _LOGGER.info("Making sure config can be loaded before starting the server...")
         _LOGGER.info("Loading configuration...")
