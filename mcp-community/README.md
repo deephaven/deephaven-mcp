@@ -50,15 +50,29 @@ uv pip install .[dev]  # or pip install -e .[dev] if you use pip
 ```
 
 ### 2. Prepare Worker Configuration
-Create a JSON file describing your Deephaven workers. Example:
+
+The MCP server requires a JSON configuration file describing the available Deephaven Community Core workers. This file must be an object with a `workers` mapping and a `default_worker` key.
+
+See the section on [Worker Configuration File Specification](#worker-configuration-file-specification) below for a complete list of fields and options.
+
+**Example:**
 ```json
-[
-  {"name": "worker1", "host": "localhost", "port": 10000},
-  {"name": "worker2", "host": "localhost", "port": 10001}
-]
+{
+  "workers": {
+    "worker1": {
+      "host": "localhost",
+      "port": 10000
+    },
+    "worker2": {
+      "host": "localhost",
+      "port": 10001
+    }
+  },
+  "default_worker": "worker1"
+}
 ```
 
-The `DH_MCP_CONFIG_FILE` environment variable should be set to the path of this file.
+Set the `DH_MCP_CONFIG_FILE` environment variable to the path of this file before starting the server.
 
 ### 3. Run the MCP Server
 #### SSE Transport (for web/Inspector):
@@ -78,6 +92,63 @@ DH_MCP_CONFIG_FILE=/path/to/deephaven_workers.json uv run dh-mcp-community --tra
 - **Config file:** Set `DH_MCP_CONFIG_FILE` to point to your worker JSON.
 - **Logging:** Controlled by `PYTHONLOGLEVEL` env variable (e.g., `export PYTHONLOGLEVEL=DEBUG`).
 - **Other env:** Pass additional environment variables using the test client’s `--env` flag.
+
+---
+
+## Worker Configuration File Specification
+
+The worker configuration file is a JSON object that defines all available Deephaven Community Core workers and their connection details. It is referenced via the `DH_MCP_CONFIG_FILE` environment variable.
+
+### Full Example
+
+
+```json
+{
+  "workers": {
+    "worker1": {
+      "host":             "localhost",   // Optional: hostname or IP address of the Deephaven server (default: localhost)
+      "port":             10000,          // Optional: port number for the Deephaven server (default: 10000)
+      "auth_type":        "Anonymous",   // Optional: authentication type (default: Anonymous)
+      "auth_token":       "",            // Optional: authentication token
+      "use_tls":          false,          // Optional: whether to use TLS (default: false)
+      "session_type":     "python",      // Optional: session type (default: python)
+      "never_timeout":    false,          // Optional: prevent session timeout (default: false)
+      "tls_root_certs":   null,           // Optional: path to root CA certs for TLS
+      "client_cert_chain":null,           // Optional: path to client certificate chain for TLS
+      "client_private_key":null           // Optional: path to client private key for TLS
+    },
+    "worker2": {
+      "host": "localhost",
+      "port": 10001
+    }
+  },
+  "default_worker": "worker1"
+}
+```
+
+> **Note:** The comments in the above example (lines starting with `//`) are for documentation only and must be removed in your actual configuration file. Standard JSON does not support comments.
+
+### Field Reference
+| Field                | Type      | Required | Default      | Description                                                      |
+|----------------------|-----------|----------|--------------|------------------------------------------------------------------|
+| `workers`            | object    | Yes      | —            | Map of worker names to worker configuration objects               |
+| `default_worker`     | string    | Yes      | —            | Name of the default worker (must match a key in `workers`)       |
+| `host`               | string    | No       | "localhost"  | Hostname or IP address of the Deephaven server (optional; only required for direct TCP connections) |
+| `port`               | integer   | No       | 10000        | Port number for the Deephaven server (optional; only required for direct TCP connections)           |
+| `auth_type`          | string    | No       | "Anonymous"  | Authentication type (`Anonymous`, `Basic`, `Bearer`, etc.)       |
+| `auth_token`         | string    | No       | ""           | Authentication token, if required                                |
+| `use_tls`            | boolean   | No       | false         | Whether to use TLS/SSL for the connection                        |
+| `session_type`       | string    | No       | "python"     | Session type for Deephaven connection                            |
+| `never_timeout`      | boolean   | No       | false         | Prevent session timeout                                          |
+| `tls_root_certs`     | string    | No       | null          | Path to root CA certificates for TLS                             |
+| `client_cert_chain`  | string    | No       | null          | Path to client certificate chain for mutual TLS                  |
+| `client_private_key` | string    | No       | null          | Path to client private key for mutual TLS                        |
+
+### Notes
+- The `default_worker` must be the name of one of the keys in `workers`.
+- The config file must be valid JSON (no comments allowed in actual file).
+- Unknown fields are not allowed.
+- This schema may be extended in future releases; consult the documentation for updates.
 
 ---
 
