@@ -208,10 +208,19 @@ uv pip install .[dev]
 
 ### Useful Commands
 - **Run tests:** `uv pytest`
-- **Type checking:** `uv mypy .`
-- **Linting:** `uv ruff .`
-- **Format code:** `uv black .`
-- **Sort imports:** `uv isort .`
+- **Run all tests with coverage:**
+  ```sh
+  uv run pytest --cov=src --cov-report=term-missing
+  ```
+  This will print a coverage summary to the terminal. To generate an HTML report:
+  ```sh
+  uv run pytest --cov=src --cov-report=html
+  open htmlcov/index.html
+  ```
+- **Type checking:** `uv run mypy .`
+- **Linting:** `uv run ruff .`
+- **Format code:** `uv run black .`
+- **Sort imports:** `uv run isort .`
 
 ### Debugging
 - Run the server directly with a custom entrypoint:
