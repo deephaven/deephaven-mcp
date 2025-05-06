@@ -46,7 +46,7 @@ This repository provides an implementation of a Deephaven Community Core MCP ser
 ```sh
 git clone https://github.com/deephaven/deephaven-mcp.git
 cd deephaven-mcp/mcp-community
-uv pip install .[dev]  # or pip install -e .[dev] if you use pip
+uv pip install ".[dev]"
 ```
 
 ### 2. Prepare Worker Configuration
@@ -161,14 +161,34 @@ The worker configuration file is a JSON object that defines all available Deepha
 ### Test Client
 A Python script for exercising the MCP tools and validating server functionality.
 
-#### Example usage:
-```sh
-uv run scripts/mcp_test_client.py --transport stdio --env DH_MCP_CONFIG_FILE=/path/to/deephaven_workers.json
-```
+**Arguments:**
 - `--transport`: Choose `sse` or `stdio`.
 - `--env`: Pass environment variables as `KEY=VALUE` (can be repeated).
 - `--url`: URL for SSE server (if using SSE transport).
 - `--stdio-cmd`: Command to launch stdio server (if using stdio transport).
+
+> **Note:** You must start a test Deephaven server before using the test client. Use the provided script:
+>
+> ```sh
+> uv run scripts/run_deephaven_test_server.py
+> ```
+>
+> The server you start must be represented as `worker1` in your configuration file (see `DH_MCP_CONFIG_FILE`). Ensure the server is running and accessible according to your worker configuration before running the test client.
+
+#### Example usage (stdio):
+```sh
+uv run scripts/mcp_test_client.py --transport stdio --env DH_MCP_CONFIG_FILE=/path/to/deephaven_workers.json
+```
+
+#### Example usage (SSE):
+First, start the MCP server in SSE mode (in a separate terminal):
+```sh
+DH_MCP_CONFIG_FILE=/path/to/deephaven_workers.json uv run dh-mcp-community --transport sse
+```
+Then, in another terminal, run the test client:
+```sh
+uv run scripts/mcp_test_client.py --transport sse
+```
 
 ### Inspector Integration
 Use the [MCP Inspector](https://github.com/modelcontextprotocol/inspector) to interactively explore and invoke MCP tools:
