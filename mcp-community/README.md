@@ -190,12 +190,29 @@ Then, in another terminal, run the test client:
 uv run scripts/mcp_test_client.py --transport sse
 ```
 
-### Inspector Integration
-Use the [MCP Inspector](https://github.com/modelcontextprotocol/inspector) to interactively explore and invoke MCP tools:
+### MCP Inspector Integration
+The [MCP Inspector](https://github.com/modelcontextprotocol/inspector) is a very useful tool for testing MCP servers, especially when developing new features. It provides an interactive UI for exploring and invoking MCP tools.
 
-```sh
-npx @modelcontextprotocol/inspector@latest --config ../mcp-config.json --server mcp-community
-```
+#### Recommended workflow:
+1. **Start a Deephaven Community Core worker** (in one terminal):
+   - The provided test server script is a convenient option:
+     ```sh
+     uv run scripts/run_deephaven_test_server.py
+     ```
+   - Alternatively, you may start any compatible Deephaven Community Core server instance.
+2. **Start the MCP server in SSE mode** (in another terminal):
+   ```sh
+   DH_MCP_CONFIG_FILE=/path/to/deephaven_workers.json uv run dh-mcp-community --transport sse
+   ```
+3. **Start the MCP Inspector** (in a third terminal, no arguments needed):
+   ```sh
+   npx @modelcontextprotocol/inspector@latest
+   ```
+4. **Connect to the MCP server via SSE**
+   - Open the Inspector in your browser (URL will be shown in the terminal, typically `http://localhost:6274`).
+   - In the Inspector UI, select "Connect" and enter the SSE URL (e.g., `http://localhost:8000/sse`).
+
+This workflow allows you to interactively test and debug your MCP server implementation with minimal setup.
 
 ---
 
