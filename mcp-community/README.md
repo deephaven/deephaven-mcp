@@ -15,6 +15,7 @@ A Python implementation of a Model Context Protocol (MCP) server for Deephaven C
   - [Running the MCP Server](#running-the-mcp-server)
   - [Test Client](#test-client)
   - [Inspector Integration](#inspector-integration)
+- [Claude Desktop Integration](#claude-desktop-integration)
 - [Development](#development)
 - [Troubleshooting](#troubleshooting)
 - [Resources](#resources)
@@ -213,6 +214,51 @@ The [MCP Inspector](https://github.com/modelcontextprotocol/inspector) is a very
    - In the Inspector UI, select "Connect" and enter the SSE URL (e.g., `http://localhost:8000/sse`).
 
 This workflow allows you to interactively test and debug your MCP server implementation with minimal setup.
+
+---
+
+## Claude Desktop Integration
+
+Claude Desktop is very useful for debugging and interactively exploring MCP servers. The configuration file format described in this documentation is also used by most AI Agents that support MCP, making it easy to reuse your setup across different tools.
+
+To configure Claude Desktop to use your MCP server:
+
+1. **Open Claude Desktop.**
+2. **Navigate to `Settings > Developer > Edit Config`.**
+3. **Edit the `claude_desktop_config.json` file.**
+4. **Add your MCP server under the `mcpServers` section.**
+   - We recommend using the `stdio` transport for best results.
+   - Example configuration:
+     ```json
+     {
+       "mcpServers": {
+         "mcp-community": {
+           "command": "uv",
+           "args": [
+             "--directory",
+             "/path/to/deephaven-mcp/mcp-community",
+             "run",
+             "dh-mcp-community"
+           ],
+           "env": {
+             "DH_MCP_CONFIG_FILE": "/path/to/deephaven_workers.json"
+           }
+         }
+       }
+     }
+     ```
+5. **Save the configuration and restart Claude Desktop if needed.**
+
+Claude Desktop will now be able to discover and use the tools exposed by your Deephaven MCP server.
+
+> **Log Location:** For troubleshooting, Claude Desktop MCP logs are located at:
+> - **macOS:** `~/Library/Logs/Claude`
+> - **Windows:** `%APPDATA%\Claude\logs`
+> 
+> - `mcp.log` contains general logging about MCP connections and connection failures.
+> - Files named `mcp-server-SERVERNAME.log` contain error (stderr) logs from each configured server.
+> 
+> These logs can help diagnose connection and communication issues.
 
 ---
 
