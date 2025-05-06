@@ -1,49 +1,97 @@
 """
-mcp_client.py
+mcp_test_client.py
 
-Async Python client for discovering and calling all tools on an MCP (Model Context Protocol) server using SSE.
+Async Python client for discovering and calling all tools on an MCP (Model Context Protocol) server using SSE or stdio transport.
 
-- Connects to a running MCP server via SSE endpoint and lists available tools.
+Features:
+- Connects to a running MCP server via SSE endpoint or spawns a stdio server process.
+- Lists all available tools on the server.
 - Demonstrates how to call each tool registered on the server, using appropriate or sample arguments for each tool.
+- Supports passing environment variables to stdio subprocesses.
 - Requires `autogen-ext[mcp]` to be installed.
 
-Edit the `url` and `headers` parameters as needed for your server configuration.
+Usage examples:
+    # Connect via SSE (default)
+    $ python mcp_test_client.py --transport sse --url http://localhost:8000/sse
 
-Example:
-    $ PYTHONPATH=./src python mcp-community/scripts/mcp_test_client.py
+    # Connect via stdio
+    $ python mcp_test_client.py --transport stdio --stdio-cmd "uv run dh-mcp-community --transport stdio" --env DH_MCP_CONFIG_FILE=/path/to/file.json
 
-This script will:
-    - Connect to the MCP server
-    - List all available tools
-    - Call each tool with the correct or sample arguments (as defined in _mcp.py)
-    - Print the results or errors for each tool invocation
+Arguments:
+    --transport   Transport type: 'sse' (default) or 'stdio'.
+    --url         SSE server URL (default: http://localhost:8000/sse).
+    --stdio-cmd   Command to launch stdio server (default: uv run dh-mcp-community --transport stdio).
+    --env         Environment variable for stdio, format KEY=VALUE. Can be specified multiple times.
 
 See the project README for further details.
 """
 
 #TODO: *** is this needed with the "mcp dev" command?
 
+import argparse
 import asyncio
+import shlex
 from autogen_core import CancellationToken
-from autogen_ext.tools.mcp import SseServerParams, mcp_server_tools
+from autogen_ext.tools.mcp import SseServerParams, StdioServerParams, mcp_server_tools
+
+def parse_args():
+    """
+    Parse command-line arguments for the MCP test client.
+
+    Returns:
+        argparse.Namespace: Parsed arguments with fields:
+            - transport: 'sse' or 'stdio'
+            - url: SSE server URL
+            - stdio_cmd: Command to launch stdio server
+            - env: List of environment variable strings (KEY=VALUE)
+    """
+    parser = argparse.ArgumentParser(description="MCP test client for SSE or stdio server")
+    parser.add_argument("--transport", choices=["sse", "stdio"], default="sse", help="Transport type (sse or stdio)")
+    parser.add_argument("--url", default="http://localhost:8000/sse", help="SSE server URL")
+    parser.add_argument("--stdio-cmd", default="uv run dh-mcp-community --transport stdio", help="Stdio server command (pass as a shell string, e.g. 'uv run dh-mcp-community --transport stdio')")
+    parser.add_argument(
+        '--env', action='append', default=[],
+        help="Environment variable for stdio transport, format KEY=VALUE. Can be specified multiple times.")
+    return parser.parse_args()
 
 async def main():
     """
-    Connects to the MCP server, lists available tools, and demonstrates invocation of all tools.
+    Connects to the MCP server (SSE or stdio), lists available tools, and demonstrates invocation of all tools.
 
-    - Establishes a connection to the MCP server using SSE.
+    - Establishes a connection to the MCP server using the selected transport.
     - Lists all registered tools on the server.
     - Calls each tool with correct or sample arguments based on its definition in _mcp.py.
     - Prints the results or errors for each tool invocation.
     - Modify the tool arguments as needed for your server setup or data.
     """
-    # Set up server params for your MCP SSE server
-    server_params = SseServerParams(
-        url="http://localhost:8000/sse",  # Adjust endpoint as needed
-        headers={"Authorization": "Bearer YOUR_TOKEN"}  # Optional
-    )
+    args = parse_args()
 
-    # Get all available tools (this also establishes the connection)
+    if args.transport == "sse":
+        server_params = SseServerParams(
+            url=args.url,
+            headers={"Authorization": "Bearer YOUR_TOKEN"}  # Optional
+        )
+    else:
+        # Parse env vars from --env KEY=VALUE
+        env_dict = {}
+        for item in args.env:
+            if '=' in item:
+                k, v = item.split('=', 1)
+                env_dict[k] = v
+            else:
+                raise ValueError(f"Invalid --env entry: {item}. Must be KEY=VALUE.")
+        # StdioServerParams expects 'command' as the executable, and 'args' as the list of arguments.
+        stdio_tokens = shlex.split(args.stdio_cmd)
+        if not stdio_tokens:
+            raise ValueError("--stdio-cmd must not be empty")
+        stdio_command = stdio_tokens[0]
+        stdio_args = stdio_tokens[1:]
+        server_params = StdioServerParams(
+            command=stdio_command,
+            args=stdio_args,
+            env=env_dict if env_dict else None
+        )
+
     tools = await mcp_server_tools(server_params)
 
     # List all tools
@@ -90,7 +138,7 @@ async def main():
         # Try with sample args
         print("\nCalling tool: table_schemas (sample args)")
         try:
-            result = await tool_map['table_schemas'].run_json({"worker_name": "local", "table_names": ["MyTable"]}, cancellation_token=CancellationToken())
+            result = await tool_map['table_schemas'].run_json({"worker_name": "worker1", "table_names": ["t1"]}, cancellation_token=CancellationToken())
             print(f"Result for table_schemas (sample args): {result}")
         except Exception as e:
             print(f"Error calling table_schemas (sample args): {e}")
