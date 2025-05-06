@@ -12,10 +12,10 @@ A Python implementation of a Model Context Protocol (MCP) server for Deephaven C
 - [Quick Start](#quick-start)
 - [Configuration](#configuration)
 - [Usage](#usage)
+  - [Running the Test Deephaven Server](#running-the-test-deephaven-server)
   - [Running the MCP Server](#running-the-mcp-server)
   - [Test Client](#test-client)
-  - [Running the Test Deephaven Server](#running-the-test-deephaven-server)
-  - [MCP Inspector](#mcp-inspector)
+- [MCP Inspector](#mcp-inspector)
 - [Claude Desktop Integration](#claude-desktop-integration)
 - [Development](#development)
 - [Troubleshooting](#troubleshooting)
@@ -85,6 +85,69 @@ DH_MCP_CONFIG_FILE=/path/to/deephaven_workers.json uv run dh-mcp-community --tra
 #### stdio Transport (for local/test):
 ```sh
 DH_MCP_CONFIG_FILE=/path/to/deephaven_workers.json uv run dh-mcp-community --transport stdio
+```
+
+---
+
+## Usage
+
+### Running the Test Deephaven Server
+
+To use the MCP test client or Inspector, you need a running Deephaven Community Core server. For development and testing, use the provided script:
+
+```sh
+uv run scripts/run_deephaven_test_server.py --table-group {simple|financial|all}
+```
+
+- **Purpose:** Launches a local Deephaven server with demo tables for MCP development and testing. Not for production use.
+- **Arguments:**
+  - `--table-group {simple|financial|all}` (**required**): Which demo tables to create
+  - `--host HOST` (default: `localhost`)
+  - `--port PORT` (default: `10000`)
+- **Requirements:** `deephaven-server` Python package, Java in PATH, 8GB+ RAM
+
+Make sure the server is running and matches the worker config in your `DH_MCP_CONFIG_FILE`.
+
+### Running the MCP Server
+
+To start the MCP server, run:
+```sh
+uv run dh-mcp-community --transport {sse|stdio}
+```
+
+- **SSE:** For integration with web-based tools (e.g., Inspector).
+- **stdio:** For local development, CLI tools, or subprocess-based clients.
+
+### Test Client
+A Python script for exercising the MCP tools and validating server functionality.
+
+**Arguments:**
+- `--transport`: Choose `sse` or `stdio`.
+- `--env`: Pass environment variables as `KEY=VALUE` (can be repeated).
+- `--url`: URL for SSE server (if using SSE transport).
+- `--stdio-cmd`: Command to launch stdio server (if using stdio transport).
+
+> **Note:** You must start a test Deephaven server before using the test client. Use the provided script:
+>
+> ```sh
+> uv run scripts/run_deephaven_test_server.py
+> ```
+>
+> The server you start must be represented as `worker1` in your configuration file (see `DH_MCP_CONFIG_FILE`). Ensure the server is running and accessible according to your worker configuration before running the test client.
+
+#### Example usage (stdio):
+```sh
+uv run scripts/mcp_test_client.py --transport stdio --env DH_MCP_CONFIG_FILE=/path/to/deephaven_workers.json
+```
+
+#### Example usage (SSE):
+First, start the MCP server in SSE mode (in a separate terminal):
+```sh
+DH_MCP_CONFIG_FILE=/path/to/deephaven_workers.json uv run dh-mcp-community --transport sse
+```
+Then, in another terminal, run the test client:
+```sh
+uv run scripts/mcp_test_client.py --transport sse
 ```
 
 ---
@@ -192,8 +255,6 @@ Then, in another terminal, run the test client:
 uv run scripts/mcp_test_client.py --transport sse
 ```
 
----
-
 ### Running the Test Deephaven Server
 
 To use the MCP test client or Inspector, you need a running Deephaven Community Core server. For development and testing, use the provided script:
@@ -211,9 +272,11 @@ uv run scripts/run_deephaven_test_server.py --table-group {simple|financial|all}
 
 Make sure the server is running and matches the worker config in your `DH_MCP_CONFIG_FILE`.
 
+
 ---
 
-### MCP Inspector
+## MCP Inspector
+
 The [MCP Inspector](https://github.com/modelcontextprotocol/inspector) is a very useful tool for testing MCP servers, especially when developing new features. It provides an interactive UI for exploring and invoking MCP tools.
 
 #### Recommended workflow:
