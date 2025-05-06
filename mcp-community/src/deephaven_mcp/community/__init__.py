@@ -55,11 +55,14 @@ def run_server(transport: str = "stdio") -> None:
 
     logging.info(f"Starting MCP server '{mcp_server.name}' with transport={transport}")
 
-    async def run():
+    async def check_config():
         # Make sure config can be loaded before starting
-        asyncio.run(_CONFIG_MANAGER.get_config())
+        logging.info("Loading configuration...")
+        await _CONFIG_MANAGER.get_config()
+        logging.info("Configuration loaded.")
 
     try:
+        asyncio.run(check_config())
         mcp_server.run(transport=transport)
     finally:
         logging.info(f"MCP server '{mcp_server.name}' stopped.")
