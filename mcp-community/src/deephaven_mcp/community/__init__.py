@@ -55,8 +55,6 @@ def run_server(transport: str = "stdio") -> None:
         force=True  # Ensure we override any existing logging configuration
     )
 
-    _LOGGER.info(f"Starting MCP server '{mcp_server.name}' with transport={transport}")
-
     try:
         #TODO: move this into lifespan?
         # Make sure config can be loaded before starting the server
