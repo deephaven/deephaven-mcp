@@ -25,6 +25,8 @@ from ._mcp import mcp_server
 
 __all__ = ["mcp_server", "run_server"]
 
+_LOGGER = logging.getLogger(__name__)
+
 _CONFIG_MANAGER = config.DEFAULT_CONFIG_MANAGER
 """
 _CONFIG_MANAGER is a private, module-level reference to the default configuration manager.
@@ -53,19 +55,20 @@ def run_server(transport: str = "stdio") -> None:
         force=True  # Ensure we override any existing logging configuration
     )
 
-    logging.info(f"Starting MCP server '{mcp_server.name}' with transport={transport}")
-
-    async def check_config():
-        # Make sure config can be loaded before starting
-        logging.info("Loading configuration...")
-        await _CONFIG_MANAGER.get_config()
-        logging.info("Configuration loaded.")
+    _LOGGER.info(f"Starting MCP server '{mcp_server.name}' with transport={transport}")
 
     try:
-        asyncio.run(check_config())
+        # Make sure config can be loaded before starting the server
+        _LOGGER.info("Making sure config can be loaded before starting the server...")
+        _LOGGER.info("Loading configuration...")
+        asyncio.run(_CONFIG_MANAGER.get_config())
+        _LOGGER.info("Configuration loaded.")
+        
+        # Start the server
+        _LOGGER.info(f"Starting MCP server '{mcp_server.name}' with transport={transport}")
         mcp_server.run(transport=transport)
     finally:
-        logging.info(f"MCP server '{mcp_server.name}' stopped.")
+        _LOGGER.info(f"MCP server '{mcp_server.name}' stopped.")
 
 
 def main():
