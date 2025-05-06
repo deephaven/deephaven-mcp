@@ -25,10 +25,10 @@ A Python implementation of a Model Context Protocol (MCP) server for Deephaven C
 
 ## Project Overview
 
-This repository provides an implementation of a Deephaven Community Core MCP server, exposing a set of tools for remote orchestration and inspection of Deephaven Community Core worker nodes. It is designed for use with the Model Context Protocol ecosystem and integrates with the [MCP Inspector](https://github.com/modelcontextprotocol/inspector) and other MCP-compatible tools.
+This repository provides an implementation of a Deephaven Community Core MCP server, exposing a set of tools for remote orchestration and inspection of Deephaven Community Core worker nodes. The server uses the [Deephaven Community Core Python client](https://docs.deephaven.io/core/client-api/python/) to connect to and manage worker nodes. It is designed for use with the Model Context Protocol ecosystem and integrates with the [MCP Inspector](https://github.com/modelcontextprotocol/inspector) and other MCP-compatible tools.
 
 ## Features
-- **MCP Server:** Implements the MCP protocol for Deephaven Community Core workers.
+- **MCP Server:** Implements the MCP protocol for Deephaven Community Core workers using the [Deephaven Community Core Python client](https://docs.deephaven.io/core/client-api/python/) for communication.
 - **Multiple Transports:** Supports both SSE (for web) and stdio (for local/subprocess) communication.
 - **Tooling:** Exposes tools for refreshing configuration, listing workers, inspecting table schemas, and running scripts.
 - **Configurable:** Loads worker configuration from a JSON file or environment variable.
