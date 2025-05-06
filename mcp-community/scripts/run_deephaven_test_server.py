@@ -66,8 +66,10 @@ server.start()
 
 # The server must be created before importing deephaven
 from deephaven import (
-    empty_table, time_table, new_table, string_col, int_col, double_col, bool_col, date_time_col, dtypes as dht, agg
+    empty_table, time_table, new_table, dtypes as dht, agg
 )
+
+from deephaven.column import string_col, int_col, double_col, bool_col, datetime_col
 
 # Table creation by group
 if table_group == 'simple' or table_group == 'all':
@@ -79,7 +81,7 @@ if table_group == 'simple' or table_group == 'all':
     t2 = t1.update(["C4 = C1 + 1000000"])
 
     # t3: Periodic time table with computed columns
-    t3 = time_table("PT15m").update(["C1 = ii%2 == 0 ? `abc` ? `def`", "C2 = i", "C3 = sqrt(C2)"])
+    t3 = time_table("PT15m").update(["C1 = ii%2 == 0 ? `abc` : `def`", "C2 = i", "C3 = sqrt(C2)"])
 
     # Table of people with demographic info
     people = new_table([
@@ -100,7 +102,7 @@ if table_group == 'simple' or table_group == 'all':
 
     # Simple time series table
     time_series = new_table([
-        date_time_col("Timestamp", [datetime.datetime(2025, 5, 5, 14, 0) + datetime.timedelta(minutes=5*i) for i in range(4)]),
+        datetime_col("Timestamp", [datetime.datetime(2025, 5, 5, 14, 0) + datetime.timedelta(minutes=5*i) for i in range(4)]),
         double_col("Value", [10.1, 10.5, 9.8, 11.0]),
     ])
 
