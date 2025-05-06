@@ -25,6 +25,8 @@ from ._mcp import mcp_server
 
 __all__ = ["mcp_server", "run_server"]
 
+_LOGGER = logging.getLogger(__name__)
+
 _CONFIG_MANAGER = config.DEFAULT_CONFIG_MANAGER
 """
 _CONFIG_MANAGER is a private, module-level reference to the default configuration manager.
@@ -53,15 +55,38 @@ def run_server(transport: str = "stdio") -> None:
         force=True  # Ensure we override any existing logging configuration
     )
 
-    logging.info(f"Starting MCP server '{mcp_server.name}' with transport={transport}")
+    try:
+        #TODO: move this into lifespan?
+        # Make sure config can be loaded before starting the server
+        _LOGGER.info("Making sure config can be loaded before starting the server...")
+        _LOGGER.info("Loading configuration...")
+        asyncio.run(_CONFIG_MANAGER.get_config())
+        _LOGGER.info("Configuration loaded.")
+        
+        # Start the server
+        _LOGGER.info(f"Starting MCP server '{mcp_server.name}' with transport={transport}")
+        mcp_server.run(transport=transport)
+    finally:
+        _LOGGER.info(f"MCP server '{mcp_server.name}' stopped.")
 
-    async def run():
-        # Make sure config can be loaded before starting
-        await _CONFIG_MANAGER.get_config()
 
-        try:
-            await mcp_server.run(transport=transport)
-        finally:
-            logging.info(f"MCP server '{mcp_server.name}' stopped.")
+def main():
+    """
+    Command-line entry point for the Deephaven MCP Community server.
 
-    asyncio.run(run())
+    Parses CLI arguments using argparse and starts the MCP server with the specified transport.
+
+    Arguments:
+        -t, --transport: Transport type for the MCP server ('stdio' or 'sse'). Default: 'stdio'.
+    """
+    import argparse
+    parser = argparse.ArgumentParser(description="Start the Deephaven MCP Community server.")
+    parser.add_argument(
+        "-t", "--transport", choices=["stdio", "sse"], default="stdio",
+        help="Transport type for the MCP server (stdio or sse). Default: stdio"
+    )
+    args = parser.parse_args()
+    run_server(args.transport)
+
+if __name__ == "__main__":
+    main()
