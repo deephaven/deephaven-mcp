@@ -29,16 +29,7 @@ npx @modelcontextprotocol/inspector@latest
 PYTHONPATH=src DH_MCP_CONFIG_FILE=/Users/chip/dev/test-dh-mcp/deephaven_workers.json uv run mcp run src/deephaven_mcp/community/_mcp.py:mcp_server --transport sse
 
 
-uv run scripts/mcp_test_client.py --transport stdio --env DH_MCP_CONFIG_FILE=/Users/chip/dev/test-dh-mcp/deephaven_workers.json
-
-# install dev dependencies
-uv pip install ".[dev]"
 
 
-You can now use all the development tools. Here are some quick commands:
 
-Run tests: uv pytest
-Run type checking: uv mypy .
-Run linting: uv ruff .
-Format code: uv black .
-Sort imports: uv isort .
+

@@ -14,7 +14,8 @@ A Python implementation of a Model Context Protocol (MCP) server for Deephaven C
 - [Usage](#usage)
   - [Running the MCP Server](#running-the-mcp-server)
   - [Test Client](#test-client)
-  - [Inspector Integration](#inspector-integration)
+  - [Running the Test Deephaven Server](#running-the-test-deephaven-server)
+  - [MCP Inspector](#mcp-inspector)
 - [Claude Desktop Integration](#claude-desktop-integration)
 - [Development](#development)
 - [Troubleshooting](#troubleshooting)
@@ -191,7 +192,28 @@ Then, in another terminal, run the test client:
 uv run scripts/mcp_test_client.py --transport sse
 ```
 
-### MCP Inspector Integration
+---
+
+### Running the Test Deephaven Server
+
+To use the MCP test client or Inspector, you need a running Deephaven Community Core server. For development and testing, use the provided script:
+
+```sh
+uv run scripts/run_deephaven_test_server.py --table-group {simple|financial|all}
+```
+
+- **Purpose:** Launches a local Deephaven server with demo tables for MCP development and testing. Not for production use.
+- **Arguments:**
+  - `--table-group {simple|financial|all}` (**required**): Which demo tables to create
+  - `--host HOST` (default: `localhost`)
+  - `--port PORT` (default: `10000`)
+- **Requirements:** `deephaven-server` Python package, Java in PATH, 8GB+ RAM
+
+Make sure the server is running and matches the worker config in your `DH_MCP_CONFIG_FILE`.
+
+---
+
+### MCP Inspector
 The [MCP Inspector](https://github.com/modelcontextprotocol/inspector) is a very useful tool for testing MCP servers, especially when developing new features. It provides an interactive UI for exploring and invoking MCP tools.
 
 #### Recommended workflow:
