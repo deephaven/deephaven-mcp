@@ -7,6 +7,7 @@
     "esbenp.prettier-vscode",     // Code formatting (for markdown, json, etc.)
     "ms-vscode.test-adapter-converter", // Test explorer UI (optional)
     "streetsidesoftware.code-spell-checker", // Spell checking
-    "eamodio.gitlens"              // Git enhancements
+    "eamodio.gitlens",             // Git enhancements
+    "github.vscode-pull-request-github" // GitHub Pull Requests and Issues
   ]
 }
