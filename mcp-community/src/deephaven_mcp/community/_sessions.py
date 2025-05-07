@@ -37,6 +37,11 @@ from deephaven_mcp import config
 _LOGGER = logging.getLogger(__name__)
 
 
+class SessionCreationError(Exception):
+    """Raised when a Deephaven Session cannot be created."""
+    pass
+
+
 class SessionManager:
     """
     Manages Deephaven Session objects, including creation, caching, and lifecycle.
@@ -232,14 +237,23 @@ class SessionManager:
             Session: A configured Deephaven Session instance.
 
         Error Handling:
-            - Any exceptions during session creation will propagate to the caller.
+            - Any exceptions during session creation will raise SessionCreationError with details.
+
+        Raises:
+            SessionCreationError: If the session could not be created for any reason.
 
         Example:
             session = await mgr._create_session(host='localhost', port=10000)
         """
         log_kwargs = self._redact_sensitive_session_fields(kwargs)
         _LOGGER.info(f"Creating new Deephaven Session with config: {log_kwargs}")
-        session = await asyncio.to_thread(Session, **kwargs)
+
+        try:
+            session = await asyncio.to_thread(Session, **kwargs)
+        except Exception as e:
+            _LOGGER.error(f"Failed to create Deephaven Session: {e}", exc_info=True)
+            raise SessionCreationError(f"Failed to create Deephaven Session: {e}") from e
+
         _LOGGER.info(f"Successfully created Deephaven Session: {session}")
         return session
 
@@ -347,8 +361,16 @@ class SessionManager:
             Session: An alive Deephaven Session instance for the worker.
 
         Error Handling:
-            - Any exceptions during session creation or config loading are logged and propagated to the caller.
+            - Any exceptions during session creation will raise SessionCreationError with details.
+            - Any exceptions during config loading are logged and propagated to the caller.
             - If the cached session is not alive or liveness check fails, a new session is created.
+
+        Raises:
+            SessionCreationError: If the session could not be created for any reason.
+            FileNotFoundError: If configuration or certificate files are missing.
+            ValueError: If configuration is invalid.
+            OSError: If there are file I/O errors when loading certificates/keys.
+            RuntimeError: If configuration loading fails for other reasons.
 
         Usage:
             This method is coroutine-safe and can be used concurrently in async workflows.

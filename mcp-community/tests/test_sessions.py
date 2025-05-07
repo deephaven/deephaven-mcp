@@ -6,7 +6,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../s
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 from pydeephaven import Session
-from deephaven_mcp.community._sessions import SessionManager, _load_bytes
+from deephaven_mcp.community._sessions import SessionManager, _load_bytes, SessionCreationError
 
 # --- Fixtures and helpers ---
 @pytest.fixture
@@ -149,8 +149,9 @@ async def test_create_session_error(monkeypatch):
     mgr = SessionManager()
     # Patch Session to raise
     monkeypatch.setattr("deephaven_mcp.community._sessions.Session", MagicMock(side_effect=RuntimeError("fail")))
-    with pytest.raises(RuntimeError):
+    with pytest.raises(SessionCreationError) as exc_info:
         await mgr._create_session(host='localhost')
+    assert "fail" in str(exc_info.value)
 
 @pytest.mark.asyncio
 async def test_get_or_create_session_liveness_exception(monkeypatch, session_manager, caplog):
