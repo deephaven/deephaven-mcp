@@ -106,3 +106,12 @@ def test_run_server_async_logic(monkeypatch):
     # The config manager's get_config should be awaited inside the async function
     # (We can't await here, but we can check that the async function was constructed)
     # This is a smoke test for coverage
+
+
+def test_main_calls_run_server():
+    import deephaven_mcp.community as mod
+    with patch("sys.argv", ["prog", "--transport", "sse"]), \
+         patch.object(mod, "run_server") as mock_run:
+        mod.main()
+        mock_run.assert_called_once_with("sse")
+
