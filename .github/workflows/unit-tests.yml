@@ -46,10 +46,6 @@ jobs:
         name: coverage-xml-${{ matrix.python-version }}
         path: ./mcp-community/coverage.xml
 
-    - name: Display coverage report
-      run: |
-        cat ./mcp-community/coverage.xml
-
     - name: Fail if any file has <90% coverage (except _version.py)
       run: |
         coverage report -m | tee coverage.txt
