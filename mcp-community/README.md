@@ -1,6 +1,10 @@
 
 # Deephaven MCP Community
 
+> **Note:** This document contains low-level technical details for developers. **Users seeking high-level usage and onboarding information should refer to the main documentation in the [root README](../README.md).**
+
+> _A Python server for orchestrating Deephaven Community Core nodes via the Model Context Protocol (MCP)_
+
 A Python implementation of a Model Context Protocol (MCP) server for Deephaven Community Core, built with [FastMCP](https://github.com/jlowin/fastmcp). This project enables the orchestration, inspection, and management of Deephaven Community Core worker nodes via the MCP protocol, supporting both SSE (Server-Sent Events) and stdio transports.
 
 ---
@@ -42,7 +46,38 @@ This repository provides an implementation of a Deephaven Community Core MCP ser
 - **Tools:** Exposed as MCP tools (refresh, default_worker, worker_names, table_schemas, run_script).
 - **Transport:** Selectable via CLI (`--transport sse` or `--transport stdio`).
 
+```
+          +----------------------+
+          |   MCP Inspector      |
+          | Claude Desktop, etc.|
+          +----------+-----------+
+                     |
+              SSE/stdio (MCP)
+                     |
+           +---------v---------+
+           |   MCP Server      |
+           +---------+---------+
+                     |
+         +-----------+-----------+
+         |                       |
++--------v--------+     +--------v--------+
+| Deephaven Core  | ... | Deephaven Core  |
+| Worker (worker1)|     | Worker (workerN)|
++-----------------+     +-----------------+
+```
+
+**Diagram:** Clients (Inspector, Claude Desktop) connect to the MCP Server via SSE or stdio. The MCP Server manages multiple Deephaven Community Core workers.
+
 ## Quick Start
+
+### Environment Variables
+
+| Variable                | Required | Description                                                  | Where Used                |
+|-------------------------|----------|--------------------------------------------------------------|---------------------------|
+| `DH_MCP_CONFIG_FILE`    | Yes      | Path to worker config JSON file for MCP server and clients.   | MCP Server, Test Client   |
+| `PYTHONLOGLEVEL`        | No       | Python logging level (e.g., DEBUG, INFO).                    | Server, Client (optional) |
+
+> Set `DH_MCP_CONFIG_FILE` before running the MCP server or test client. See the [Configuration](#configuration) section for details.
 
 ### 1. Clone and Install
 ```sh
@@ -150,9 +185,7 @@ Then, in another terminal, run the test client:
 uv run scripts/mcp_test_client.py --transport sse
 ```
 
-
 ### MCP Inspector
-
 The [MCP Inspector](https://github.com/modelcontextprotocol/inspector) is a very useful tool for testing MCP servers, especially when developing new features. It provides an interactive UI for exploring and invoking MCP tools.
 
 #### Recommended workflow:
@@ -176,9 +209,7 @@ The [MCP Inspector](https://github.com/modelcontextprotocol/inspector) is a very
 
 This workflow allows you to interactively test and debug your MCP server implementation with minimal setup.
 
-
 ### Claude Desktop Integration
-
 Claude Desktop is very useful for debugging and interactively exploring MCP servers. The configuration file format described in this documentation is also used by most AI Agents that support MCP, making it easy to reuse your setup across different tools.
 
 To configure Claude Desktop to use your MCP server:
@@ -379,19 +410,61 @@ uv pip install .[dev]
 
 ## Troubleshooting
 
+### Common Errors & Solutions
+
 - **Config File Not Found:**
   - Ensure `DH_MCP_CONFIG_FILE` points to a valid JSON file.
   - Example error: `FileNotFoundError: No such file or directory: ...`
+- **Invalid JSON/Schema in Config:**
+  - Double-check your worker config file for syntax errors or unsupported fields.
+  - Use a JSON linter or validator if unsure.
+- **Port Already in Use:**
+  - Change the port in your config or ensure no other process is using it.
+  - Example error: `OSError: [Errno 98] Address already in use`
 - **Timeouts:**
   - Check that Deephaven workers are running and reachable.
   - Increase timeouts if needed in client/server code.
 - **Transport Issues:**
   - Verify you are using the correct transport and URL/command.
   - For SSE, ensure ports are open and not firewalled.
+  - For stdio, check the command path and environment variables.
+- **Missing Dependencies:**
+  - Ensure all Python dependencies are installed (`uv pip install .[dev]`).
 - **Session Errors:**
   - Review logs for session cache or connection errors.
 - **KeyboardInterrupt / CancelledError:**
   - Normal if you stop the server with Ctrl+C.
+
+### Log File Locations
+
+- **MCP Server:**
+  - Standard output/error in your terminal.
+  - Set `PYTHONLOGLEVEL=DEBUG` for more verbose logs.
+- **MCP Inspector:**
+  - Shown in browser and terminal running `npx @modelcontextprotocol/inspector@latest`.
+- **Claude Desktop:**
+  - macOS: `~/Library/Logs/Claude/`
+  - Windows: `%APPDATA%\Claude\logs`
+  - `mcp.log` for general MCP logs; `mcp-server-SERVERNAME.log` for server-specific errors.
+
+### Debugging Tips
+
+- **Enable Debug Logging:**
+  - Set `PYTHONLOGLEVEL=DEBUG` before running the server or client for detailed logs.
+- **Check System Resources:**
+  - Deephaven requires significant RAM (8GB+ recommended) and Java.
+- **Use MCP Inspector:**
+  - Great for interactively testing and debugging tool calls.
+- **Use Claude Desktop:**
+  - Excellent for interactively exploring and debugging MCP servers with a desktop UI; provides detailed logs and supports custom server configurations.
+- **Validate Worker Connectivity:**
+  - Use `ping`, `telnet`, or similar tools to confirm worker host/port accessibility.
+- **Check Configuration:**
+  - Ensure all paths and environment variables are correct and accessible from your shell.
+- **Update Dependencies:**
+  - If you experience strange errors, try upgrading to the latest versions of dependencies.
+
+> For persistent issues, open an issue on GitHub with logs and configuration details.
 
 ---
 
@@ -405,7 +478,7 @@ uv pip install .[dev]
 
 ## License
 
-[Apache License 2.0](../LICENSE)
+This project is licensed under the [Apache License 2.0](../LICENSE).
 
 ---
 
