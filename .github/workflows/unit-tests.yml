@@ -52,7 +52,7 @@ jobs:
 
     - name: Fail if any file has <90% coverage (except _version.py)
       run: |
-        coverage report -m src/deephaven_mcp/ > coverage.txt
+        coverage report -m src/deephaven_mcp/ | tee coverage.txt
         awk '
           NR > 2 && $1 !~ /_version\.py/ && $1 ~ /\.py/ {
             cov = $(NF-1)
