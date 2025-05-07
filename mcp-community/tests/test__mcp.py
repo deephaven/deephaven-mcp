@@ -26,22 +26,50 @@ async def test_refresh_failure(monkeypatch):
     assert result["isError"] is True
     assert "fail" in result["error"]
 
-# === worker_names ===
+# === worker_statuses ===
 @pytest.mark.asyncio
-async def test_worker_names_success(monkeypatch):
+async def test_worker_statuses_all_available(monkeypatch):
     monkeypatch.setattr(mcp_mod, "_CONFIG_MANAGER", MagicMock())
-    mcp_mod._CONFIG_MANAGER.get_worker_names = AsyncMock(return_value=["a", "b"])
-    result = await mcp_mod.worker_names()
-    assert result == {"success": True, "result": ["a", "b"]}
+    monkeypatch.setattr(mcp_mod, "_SESSION_MANAGER", MagicMock())
+    mcp_mod._CONFIG_MANAGER.get_worker_names = AsyncMock(return_value=["w1", "w2"])
+    alive_session = MagicMock(is_alive=True)
+    mcp_mod._SESSION_MANAGER.get_or_create_session = AsyncMock(return_value=alive_session)
+    result = await mcp_mod.worker_statuses()
+    assert result == {"success": True, "result": [
+        {"worker": "w1", "available": True},
+        {"worker": "w2", "available": True}
+    ]}
 
 @pytest.mark.asyncio
-async def test_worker_names_error(monkeypatch):
+async def test_worker_statuses_some_unavailable(monkeypatch):
     monkeypatch.setattr(mcp_mod, "_CONFIG_MANAGER", MagicMock())
-    mcp_mod._CONFIG_MANAGER.get_worker_names = AsyncMock(side_effect=Exception("fail"))
-    result = await mcp_mod.worker_names()
+    monkeypatch.setattr(mcp_mod, "_SESSION_MANAGER", MagicMock())
+    mcp_mod._CONFIG_MANAGER.get_worker_names = AsyncMock(return_value=["w1", "w2", "w3"])
+    alive_session = MagicMock(is_alive=True)
+    dead_session = MagicMock(is_alive=False)
+    async def get_or_create_session(name):
+        if name == "w1":
+            return alive_session
+        elif name == "w2":
+            raise RuntimeError("fail")
+        else:
+            return dead_session
+    mcp_mod._SESSION_MANAGER.get_or_create_session = AsyncMock(side_effect=get_or_create_session)
+    result = await mcp_mod.worker_statuses()
+    assert result == {"success": True, "result": [
+        {"worker": "w1", "available": True},
+        {"worker": "w2", "available": False},
+        {"worker": "w3", "available": False}
+    ]}
+
+@pytest.mark.asyncio
+async def test_worker_statuses_config_error(monkeypatch):
+    monkeypatch.setattr(mcp_mod, "_CONFIG_MANAGER", MagicMock())
+    mcp_mod._CONFIG_MANAGER.get_worker_names = AsyncMock(side_effect=Exception("fail-cfg"))
+    result = await mcp_mod.worker_statuses()
     assert result["success"] is False
     assert result["isError"] is True
-    assert "fail" in result["error"]
+    assert "fail-cfg" in result["error"]
 
 # === table_schemas ===
 @pytest.mark.asyncio

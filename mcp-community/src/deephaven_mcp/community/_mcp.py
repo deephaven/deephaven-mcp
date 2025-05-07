@@ -110,39 +110,45 @@ async def refresh() -> dict:
 
 
 @mcp_server.tool()
-async def worker_names() -> dict:
+async def worker_statuses() -> dict:
     """
-    MCP Tool: List all configured Deephaven worker names.
+    MCP Tool: List all configured Deephaven workers and their availability status.
 
-    This tool returns the list of all worker names currently defined in the loaded configuration. Useful for populating UI dropdowns, validating worker names, or for agents to discover available workers.
+    This tool returns the list of all worker names currently defined in the loaded configuration, along with a boolean indicating whether each worker is available (i.e., a session can be created for the worker).
 
     Returns:
         dict: Structured result object with the following keys:
-            - 'success' (bool): True if worker names were retrieved successfully, False otherwise.
-            - 'result' (list[str], optional): List of worker names if successful.
+            - 'success' (bool): True if statuses were retrieved successfully, False otherwise.
+            - 'result' (list[dict], optional): List of dicts with keys 'worker' (str) and 'available' (bool).
             - 'error' (str, optional): Error message if retrieval failed. Omitted on success.
             - 'isError' (bool, optional): Present and True if this is an error response (i.e., success is False).
 
     Example Successful Response:
-        {'success': True, 'result': ['local', 'remote1', ...]}
+        {'success': True, 'result': [{'worker': 'local', 'available': True}, {'worker': 'remote1', 'available': False}, ...]}
 
     Example Error Response:
-        {'success': False, 'error': 'Failed to load configuration: ...', 'isError': True}
+        {'success': False, 'error': 'Failed to check worker statuses: ...', 'isError': True}
 
     Logging:
-        - Logs tool invocation, returned worker names, and error details at INFO/ERROR levels.
+        - Logs tool invocation, checked workers, statuses, and error details at INFO/ERROR levels.
     """
-    _LOGGER.info(
-        "[worker_names] Invoked: retrieving list of all configured worker names."
-    )
+    _LOGGER.info("[worker_statuses] Invoked: retrieving status of all configured workers.")
     try:
         names = await _CONFIG_MANAGER.get_worker_names()
-        _LOGGER.info(f"[worker_names] Success: Found workers: {names!r}")
-        return {"success": True, "result": names}
+        results = []
+        for name in names:
+            try:
+                # Try to get or create a session for the worker. If this fails, mark as unavailable.
+                session = await _SESSION_MANAGER.get_or_create_session(name)
+                available = session is not None and session.is_alive
+            except Exception as e:
+                _LOGGER.warning(f"[worker_statuses] Worker '{name}' unavailable: {e!r}")
+                available = False
+            results.append({'worker': name, 'available': available})
+        _LOGGER.info(f"[worker_statuses] Statuses: {results!r}")
+        return {"success": True, "result": results}
     except Exception as e:
-        _LOGGER.error(
-            f"[worker_names] Failed to get worker names: {e!r}", exc_info=True
-        )
+        _LOGGER.error(f"[worker_statuses] Failed to get worker statuses: {e!r}", exc_info=True)
         return {"success": False, "error": str(e), "isError": True}
 
 
