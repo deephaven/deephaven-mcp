@@ -16,7 +16,7 @@ def test_module_all_exports():
 
 def test_run_server_async_finally(monkeypatch):
     import deephaven_mcp.community as mod
-    monkeypatch.setattr(mod, 'logging', MagicMock())
+    monkeypatch.setattr(mod, '_LOGGER', MagicMock())
     monkeypatch.setattr(mod, 'os', MagicMock())
     monkeypatch.setattr(mod, 'sys', MagicMock())
     # Patch _CONFIG_MANAGER.get_config and mcp_server.run to be async mocks
@@ -25,7 +25,7 @@ def test_run_server_async_finally(monkeypatch):
     monkeypatch.setattr(mod, '_CONFIG_MANAGER', mock_config)
     mock_server = MagicMock()
     # Make mcp_server.run raise an exception to trigger finally
-    async def raise_exc(*a, **kw):
+    def raise_exc(*a, **kw):
         raise RuntimeError("fail")
     mock_server.run = raise_exc
     mock_server.name = 'testserver'
@@ -35,21 +35,22 @@ def test_run_server_async_finally(monkeypatch):
     def fake_asyncio_run(coro):
         try:
             import asyncio
-            asyncio.get_event_loop().run_until_complete(coro)
+            asyncio.run(coro)
         except RuntimeError:
             # If already in event loop (pytest-asyncio), just await
             import asyncio
             return asyncio.ensure_future(coro)
     monkeypatch.setattr(mod, 'asyncio', MagicMock(run=fake_asyncio_run))
     mod.os.getenv.return_value = 'INFO'
-    mod.run_server('stdio')
-    # logging.info should be called for both start and stop
-    assert mod.logging.info.call_count >= 2
+    with pytest.raises(RuntimeError, match="fail"):
+        mod.run_server('stdio')
+    # _LOGGER.info should be called for both start and stop
+    assert mod._LOGGER.info.call_count >= 2
 
 def test_run_server_stdio(monkeypatch):
     import deephaven_mcp.community as mod
     # Patch all side effects
-    monkeypatch.setattr(mod, 'logging', MagicMock())
+    monkeypatch.setattr(mod, '_LOGGER', MagicMock())
     monkeypatch.setattr(mod, 'os', MagicMock())
     monkeypatch.setattr(mod, 'sys', MagicMock())
     monkeypatch.setattr(mod, '_CONFIG_MANAGER', MagicMock())
@@ -59,17 +60,19 @@ def test_run_server_stdio(monkeypatch):
     # Setup mocks
     mod.os.getenv.return_value = 'INFO'
     mod.mcp_server.name = 'testserver'
+    mock_logger = MagicMock()
+    monkeypatch.setattr(mod, '_LOGGER', mock_logger)
     # Call run_server
+    monkeypatch.setattr(mod.logging, "basicConfig", MagicMock())
     mod.run_server('stdio')
-    mod.logging.basicConfig.assert_called()
-    mod.logging.info.assert_any_call("Starting MCP server 'testserver' with transport=stdio")
+    mock_logger.info.assert_any_call(f"Starting MCP server 'testserver' with transport=stdio")
     mock_asyncio.run.assert_called()
     # Should use sys.stderr for stdio
     assert mod.sys.stderr == mod.logging.basicConfig.call_args.kwargs['stream']
 
 def test_run_server_sse(monkeypatch):
     import deephaven_mcp.community as mod
-    monkeypatch.setattr(mod, 'logging', MagicMock())
+    monkeypatch.setattr(mod, '_LOGGER', MagicMock())
     monkeypatch.setattr(mod, 'os', MagicMock())
     monkeypatch.setattr(mod, 'sys', MagicMock())
     monkeypatch.setattr(mod, '_CONFIG_MANAGER', MagicMock())
@@ -78,13 +81,14 @@ def test_run_server_sse(monkeypatch):
     monkeypatch.setattr(mod, 'asyncio', mock_asyncio)
     mod.os.getenv.return_value = 'INFO'
     mod.mcp_server.name = 'testserver'
+    monkeypatch.setattr(mod.logging, "basicConfig", MagicMock())
     mod.run_server('sse')
     # Should use sys.stdout for sse
     assert mod.sys.stdout == mod.logging.basicConfig.call_args.kwargs['stream']
 
 def test_run_server_async_logic(monkeypatch):
     import deephaven_mcp.community as mod
-    monkeypatch.setattr(mod, 'logging', MagicMock())
+    monkeypatch.setattr(mod, '_LOGGER', MagicMock())
     monkeypatch.setattr(mod, 'os', MagicMock())
     monkeypatch.setattr(mod, 'sys', MagicMock())
     mock_config = MagicMock()
