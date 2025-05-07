@@ -251,8 +251,8 @@ class SessionManager:
         try:
             session = await asyncio.to_thread(Session, **kwargs)
         except Exception as e:
-            _LOGGER.error(f"Failed to create Deephaven Session: {e}", exc_info=True)
-            raise SessionCreationError(f"Failed to create Deephaven Session: {e}") from e
+            _LOGGER.error(f"Failed to create Deephaven Session with config: {log_kwargs}: {e}", exc_info=True)
+            raise SessionCreationError(f"Failed to create Deephaven Session with config: {log_kwargs}: {e}") from e
 
         _LOGGER.info(f"Successfully created Deephaven Session: {session}")
         return session
