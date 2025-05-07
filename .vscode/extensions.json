@@ -1,0 +1,13 @@
+{
+  // Recommended VSCode extensions for this project
+  "recommendations": [
+    "ms-python.python",            // Python language support
+    "ms-python.vscode-pylance",   // Python type checking and IntelliSense
+    "ms-pyright.pyright",         // Optional: Static type checking for Python
+    "esbenp.prettier-vscode",     // Code formatting (for markdown, json, etc.)
+    "ms-vscode.test-adapter-converter", // Test explorer UI (optional)
+    "streetsidesoftware.code-spell-checker", // Spell checking
+    "eamodio.gitlens",             // Git enhancements
+    "github.vscode-pull-request-github" // GitHub Pull Requests and Issues
+  ]
+}
