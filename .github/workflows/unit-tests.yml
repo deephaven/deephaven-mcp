@@ -37,7 +37,7 @@ jobs:
       working-directory: ./mcp-community
 
     - name: Run tests with coverage
-      run: pytest --cov=deephaven_mcp --cov-report=term --cov-report=xml
+      run: pytest -W error --cov=deephaven_mcp --cov-report=term --cov-report=xml
       working-directory: ./mcp-community
 
     - name: Upload coverage report
