@@ -26,23 +26,6 @@ async def test_refresh_failure(monkeypatch):
     assert result["isError"] is True
     assert "fail" in result["error"]
 
-# === default_worker ===
-@pytest.mark.asyncio
-async def test_default_worker_success(monkeypatch):
-    monkeypatch.setattr(mcp_mod, "_CONFIG_MANAGER", MagicMock())
-    mcp_mod._CONFIG_MANAGER.get_worker_name_default = AsyncMock(return_value="worker1")
-    result = await mcp_mod.default_worker()
-    assert result == {"success": True, "result": "worker1"}
-
-@pytest.mark.asyncio
-async def test_default_worker_error(monkeypatch):
-    monkeypatch.setattr(mcp_mod, "_CONFIG_MANAGER", MagicMock())
-    mcp_mod._CONFIG_MANAGER.get_worker_name_default = AsyncMock(side_effect=Exception("fail"))
-    result = await mcp_mod.default_worker()
-    assert result["success"] is False
-    assert result["isError"] is True
-    assert "fail" in result["error"]
-
 # === worker_names ===
 @pytest.mark.asyncio
 async def test_worker_names_success(monkeypatch):
@@ -78,7 +61,7 @@ async def test_table_schemas_success(monkeypatch):
             return Table()
     mcp_mod._SESSION_MANAGER.get_or_create_session = AsyncMock(return_value=DummySession())
     mcp_mod._CONFIG_MANAGER.get_worker_config = AsyncMock(return_value=MagicMock())
-    res = await mcp_mod.table_schemas("worker", ["t1"])
+    res = await mcp_mod.table_schemas(worker_name="worker", table_names=["t1"])
     assert isinstance(res, list)
     assert res[0]["success"] is True
     assert res[0]["table"] == "t1"
@@ -102,7 +85,7 @@ async def test_table_schemas_all_tables(monkeypatch):
             return Table()
     mcp_mod._SESSION_MANAGER.get_or_create_session = AsyncMock(return_value=DummySession())
     mcp_mod._CONFIG_MANAGER.get_worker_config = AsyncMock(return_value=MagicMock())
-    res = await mcp_mod.table_schemas("worker", None)
+    res = await mcp_mod.table_schemas(worker_name="worker", table_names=None)
     assert isinstance(res, list)
     assert len(res) == 2
     for i, tname in enumerate(["t1", "t2"]):
@@ -128,7 +111,7 @@ async def test_table_schemas_schema_key_error(monkeypatch):
             return Table()
     mcp_mod._SESSION_MANAGER.get_or_create_session = AsyncMock(return_value=DummySession())
     mcp_mod._CONFIG_MANAGER.get_worker_config = AsyncMock(return_value=MagicMock())
-    res = await mcp_mod.table_schemas("worker", ["t1"])
+    res = await mcp_mod.table_schemas(worker_name="worker", table_names=["t1"])
     assert isinstance(res, list)
     assert res[0]["success"] is False
     assert res[0]["isError"] is True
@@ -140,7 +123,7 @@ async def test_table_schemas_session_error(monkeypatch):
     monkeypatch.setattr(mcp_mod, "_CONFIG_MANAGER", MagicMock())
     mcp_mod._SESSION_MANAGER.get_or_create_session = AsyncMock(side_effect=Exception("fail"))
     mcp_mod._CONFIG_MANAGER.get_worker_config = AsyncMock(return_value=MagicMock())
-    res = await mcp_mod.table_schemas("worker", ["t1"])
+    res = await mcp_mod.table_schemas(worker_name="worker", table_names=["t1"])
     assert isinstance(res, list)
     assert res[0]["success"] is False
     assert res[0]["isError"] is True
@@ -156,16 +139,16 @@ async def test_run_script_success(monkeypatch):
             DummySession.called = script
     mcp_mod._SESSION_MANAGER.get_or_create_session = AsyncMock(return_value=DummySession())
     mcp_mod._CONFIG_MANAGER.get_worker_config = AsyncMock(return_value=MagicMock())
-    res = await mcp_mod.run_script("worker", script="print(1)")
+    res = await mcp_mod.run_script(worker_name="worker", script="print(1)")
     assert res["success"] is True
     assert DummySession.called == "print(1)"
 
 @pytest.mark.asyncio
 async def test_run_script_no_script(monkeypatch):
-    res = await mcp_mod.run_script("worker")
+    res = await mcp_mod.run_script(worker_name="worker")
     assert res["success"] is False
     assert res["isError"] is True
-    assert "Must provide" in res["error"]
+    assert "Must provide either script or script_path." in res["error"]
 
 @pytest.mark.asyncio
 async def test_run_script_session_error(monkeypatch):
@@ -173,7 +156,7 @@ async def test_run_script_session_error(monkeypatch):
     monkeypatch.setattr(mcp_mod, "_CONFIG_MANAGER", MagicMock())
     mcp_mod._SESSION_MANAGER.get_or_create_session = AsyncMock(side_effect=Exception("fail"))
     mcp_mod._CONFIG_MANAGER.get_worker_config = AsyncMock(return_value=MagicMock())
-    res = await mcp_mod.run_script("worker", script="print(1)")
+    res = await mcp_mod.run_script(worker_name="worker", script="print(1)")
     assert res["success"] is False
     assert res["isError"] is True
     assert "fail" in res["error"]
@@ -190,7 +173,7 @@ async def test_run_script_script_path(monkeypatch):
     with patch("aiofiles.open", new_callable=MagicMock) as aio_open:
         mock_file = aio_open.return_value.__aenter__.return_value
         mock_file.read = AsyncMock(return_value="print(123)")
-        res = await mcp_mod.run_script("worker", script_path="myscript.py")
+        res = await mcp_mod.run_script(worker_name="worker", script_path="/tmp/foo.py")
     assert res["success"] is True
     assert DummySession.called == "print(123)"
 
@@ -203,7 +186,7 @@ async def test_run_script_script_path_error(monkeypatch):
     with patch("aiofiles.open", new_callable=MagicMock) as aio_open:
         mock_file = aio_open.return_value.__aenter__.return_value
         mock_file.read = AsyncMock(side_effect=FileNotFoundError("fail"))
-        res = await mcp_mod.run_script("worker", script_path="notfound.py")
+        res = await mcp_mod.run_script(worker_name="worker", script_path="/tmp/foo.py")
     assert res["success"] is False
     assert res["isError"] is True
     assert "fail" in res["error"]
