@@ -38,6 +38,10 @@ jobs:
           path: ./mcp-community/dist/*.whl
 
       # TODO: Uncomment and configure the following step to enable PyPI publishing
+      #       Refer to the official documentation for detailed setup instructions: 
+      #       https://github.com/pypa/gh-action-pypi-publish
+      #       Ensure you have added your PyPI API token as a GitHub Secret named PYPI_API_TOKEN.
+      #       The 'packages_dir' parameter specifies the directory containing the built wheel files.
       # - name: Publish to PyPI
       #   uses: pypa/gh-action-pypi-publish@release/v1
       #   with:
