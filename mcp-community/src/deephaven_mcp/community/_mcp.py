@@ -11,10 +11,9 @@ Key Features:
 
 Tools Provided:
     - refresh: Reload configuration and clear all sessions atomically.
-    - default_worker: Get the default Deephaven worker name.
     - worker_names: List all configured Deephaven worker names.
-    - table_schemas: Retrieve schemas for one or more tables from a worker.
-    - run_script: Execute a script on a specified Deephaven worker.
+    - table_schemas: Retrieve schemas for one or more tables from a worker (requires worker_name).
+    - run_script: Execute a script on a specified Deephaven worker (requires worker_name).
 
 Return Types:
     - All tools return structured dicts or lists of dicts, never raise exceptions to the MCP layer.
@@ -48,7 +47,7 @@ mcp_server = FastMCP("deephaven-mcp-community")
 """
 FastMCP Server Instance for Deephaven MCP Community Tools
 
-This object is the singleton FastMCP server for the Deephaven MCP community toolset. It is responsible for registering and exposing all MCP tool functions defined in this module (such as refresh, default_worker, worker_names, table_schemas, and run_script) to the MCP runtime environment.
+This object is the singleton FastMCP server for the Deephaven MCP community toolset. It is responsible for registering and exposing all MCP tool functions defined in this module (such as refresh, worker_names, table_schemas, and run_script) to the MCP runtime environment.
 
 Key Details:
     - The server is instantiated with the name 'deephaven-mcp-community', which uniquely identifies this toolset in the MCP ecosystem.
@@ -111,88 +110,59 @@ async def refresh() -> dict:
 
 
 @mcp_server.tool()
-async def default_worker() -> dict:
+async def worker_statuses() -> dict:
     """
-    MCP Tool: Retrieve the default Deephaven worker name as defined in configuration.
+    MCP Tool: List all configured Deephaven workers and their availability status.
 
-    This tool returns the name of the default Deephaven worker, as specified in the loaded configuration file. The default worker is used by other tools when no explicit worker name is provided.
+    This tool returns the list of all worker names currently defined in the loaded configuration, along with a boolean indicating whether each worker is available (i.e., a session can be created for the worker).
 
     Returns:
         dict: Structured result object with the following keys:
-            - 'success' (bool): True if the default worker was found, False otherwise.
-            - 'result' (str, optional): The name of the default worker if successful.
+            - 'success' (bool): True if statuses were retrieved successfully, False otherwise.
+            - 'result' (list[dict], optional): List of dicts with keys 'worker' (str) and 'available' (bool).
             - 'error' (str, optional): Error message if retrieval failed. Omitted on success.
             - 'isError' (bool, optional): Present and True if this is an error response (i.e., success is False).
 
     Example Successful Response:
-        {'success': True, 'result': 'local'}
+        {'success': True, 'result': [{'worker': 'local', 'available': True}, {'worker': 'remote1', 'available': False}, ...]}
 
     Example Error Response:
-        {'success': False, 'error': 'No default worker set in configuration', 'isError': True}
+        {'success': False, 'error': 'Failed to check worker statuses: ...', 'isError': True}
 
     Logging:
-        - Logs tool invocation, returned worker, and error details at INFO/ERROR levels.
+        - Logs tool invocation, checked workers, statuses, and error details at INFO/ERROR levels.
     """
-    _LOGGER.info("[default_worker] Invoked: retrieving default worker name.")
-    try:
-        worker = await _CONFIG_MANAGER.get_worker_name_default()
-        _LOGGER.info(f"[default_worker] Success: Default worker is '{worker}'.")
-        return {"success": True, "result": worker}
-    except Exception as e:
-        _LOGGER.error(
-            f"[default_worker] Failed to get default worker: {e!r}", exc_info=True
-        )
-        return {"success": False, "error": str(e), "isError": True}
-
-
-@mcp_server.tool()
-async def worker_names() -> dict:
-    """
-    MCP Tool: List all configured Deephaven worker names.
-
-    This tool returns the list of all worker names currently defined in the loaded configuration. Useful for populating UI dropdowns, validating worker names, or for agents to discover available workers.
-
-    Returns:
-        dict: Structured result object with the following keys:
-            - 'success' (bool): True if worker names were retrieved successfully, False otherwise.
-            - 'result' (list[str], optional): List of worker names if successful.
-            - 'error' (str, optional): Error message if retrieval failed. Omitted on success.
-            - 'isError' (bool, optional): Present and True if this is an error response (i.e., success is False).
-
-    Example Successful Response:
-        {'success': True, 'result': ['local', 'remote1', ...]}
-
-    Example Error Response:
-        {'success': False, 'error': 'Failed to load configuration: ...', 'isError': True}
-
-    Logging:
-        - Logs tool invocation, returned worker names, and error details at INFO/ERROR levels.
-    """
-    _LOGGER.info(
-        "[worker_names] Invoked: retrieving list of all configured worker names."
-    )
+    _LOGGER.info("[worker_statuses] Invoked: retrieving status of all configured workers.")
     try:
         names = await _CONFIG_MANAGER.get_worker_names()
-        _LOGGER.info(f"[worker_names] Success: Found workers: {names!r}")
-        return {"success": True, "result": names}
+        results = []
+        for name in names:
+            try:
+                # Try to get or create a session for the worker. If this fails, mark as unavailable.
+                session = await _SESSION_MANAGER.get_or_create_session(name)
+                available = session is not None and session.is_alive
+            except Exception as e:
+                _LOGGER.warning(f"[worker_statuses] Worker '{name}' unavailable: {e!r}")
+                available = False
+            results.append({'worker': name, 'available': available})
+        _LOGGER.info(f"[worker_statuses] Statuses: {results!r}")
+        return {"success": True, "result": results}
     except Exception as e:
-        _LOGGER.error(
-            f"[worker_names] Failed to get worker names: {e!r}", exc_info=True
-        )
+        _LOGGER.error(f"[worker_statuses] Failed to get worker statuses: {e!r}", exc_info=True)
         return {"success": False, "error": str(e), "isError": True}
 
 
 @mcp_server.tool()
 async def table_schemas(
-    worker_name: Optional[str] = None, table_names: Optional[list[str]] = None
+    worker_name: str, table_names: Optional[list[str]] = None
 ) -> list:
     """
     MCP Tool: Retrieve schemas for one or more tables from a Deephaven worker.
 
-    This tool returns the column schemas for the specified tables in the given Deephaven worker. If no table_names are provided, schemas for all tables in the worker are returned. If no worker_name is provided, the default worker is used.
+    This tool returns the column schemas for the specified tables in the given Deephaven worker. If no table_names are provided, schemas for all tables in the worker are returned.
 
     Arguments:
-        worker_name (str, optional): Name of the Deephaven worker to query. Uses the default worker if None.
+        worker_name (str): Name of the Deephaven worker to query. This argument is required.
         table_names (list[str], optional): List of table names to fetch schemas for. If None, all tables are included.
 
     Returns:
@@ -273,7 +243,7 @@ async def table_schemas(
 
 @mcp_server.tool()
 async def run_script(
-    worker_name: Optional[str] = None,
+    worker_name: str,
     script: Optional[str] = None,
     script_path: Optional[str] = None,
 ) -> dict:
@@ -283,7 +253,7 @@ async def run_script(
     This tool executes a user-provided script (either as a direct string or loaded from a file path) on the specified Deephaven worker. The worker's language (e.g., Python, Groovy) is determined by its configuration. Script execution is performed in an isolated session for the worker. The tool returns a structured result indicating success or failure, along with error details if applicable.
 
     Arguments:
-        worker_name (str, optional): Name of the Deephaven worker on which to execute the script. If not provided, the default worker is used.
+        worker_name (str): Name of the Deephaven worker on which to execute the script. This argument is required.
         script (str, optional): The script source code to execute. Must be provided unless script_path is specified.
         script_path (str, optional): Path to a file containing the script to execute. Used if script is not provided.
 

@@ -6,7 +6,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../s
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 from pydeephaven import Session
-from deephaven_mcp.community._sessions import SessionManager, _load_bytes
+from deephaven_mcp.community._sessions import SessionManager, _load_bytes, SessionCreationError
 
 # --- Fixtures and helpers ---
 @pytest.fixture
@@ -149,8 +149,9 @@ async def test_create_session_error(monkeypatch):
     mgr = SessionManager()
     # Patch Session to raise
     monkeypatch.setattr("deephaven_mcp.community._sessions.Session", MagicMock(side_effect=RuntimeError("fail")))
-    with pytest.raises(RuntimeError):
+    with pytest.raises(SessionCreationError) as exc_info:
         await mgr._create_session(host='localhost')
+    assert "fail" in str(exc_info.value)
 
 @pytest.mark.asyncio
 async def test_get_or_create_session_liveness_exception(monkeypatch, session_manager, caplog):
@@ -158,7 +159,6 @@ async def test_get_or_create_session_liveness_exception(monkeypatch, session_man
     bad_session = MagicMock(spec=Session)
     type(bad_session).is_alive = property(lambda self: (_ for _ in ()).throw(Exception("fail")))
     session_manager._cache['foo'] = bad_session
-    monkeypatch.setattr("deephaven_mcp.config.DEFAULT_CONFIG_MANAGER.resolve_worker_name", AsyncMock(return_value="foo"))
     monkeypatch.setattr("deephaven_mcp.config.DEFAULT_CONFIG_MANAGER.get_worker_config", AsyncMock(return_value={"host": "localhost"}))
     monkeypatch.setattr("deephaven_mcp.community._sessions.Session", MagicMock())
     await session_manager.get_or_create_session("foo")
@@ -173,7 +173,6 @@ async def test_get_or_create_session_reuses_alive(monkeypatch, session_manager):
     session.host = "localhost"
     session.port = 10000
     session_manager._cache["foo"] = session
-    monkeypatch.setattr("deephaven_mcp.config.DEFAULT_CONFIG_MANAGER.resolve_worker_name", AsyncMock(return_value="foo"))
     monkeypatch.setattr("deephaven_mcp.config.DEFAULT_CONFIG_MANAGER.get_worker_config", AsyncMock(return_value={"host": "localhost"}))
     monkeypatch.setattr("deephaven_mcp.community._sessions.Session", MagicMock())
     result = await session_manager.get_or_create_session("foo")
@@ -183,7 +182,6 @@ async def test_get_or_create_session_reuses_alive(monkeypatch, session_manager):
 async def test_get_or_create_session_creates_new(monkeypatch, session_manager):
     session_manager._cache.clear()
     fake_config = {"host": "localhost"}
-    monkeypatch.setattr("deephaven_mcp.config.DEFAULT_CONFIG_MANAGER.resolve_worker_name", AsyncMock(return_value="foo"))
     monkeypatch.setattr("deephaven_mcp.config.DEFAULT_CONFIG_MANAGER.get_worker_config", AsyncMock(return_value=fake_config))
     monkeypatch.setattr(SessionManager, "_get_session_parameters", AsyncMock(return_value={"host": "localhost"}))
     monkeypatch.setattr(SessionManager, "_create_session", AsyncMock(return_value="SESSION"))
@@ -197,7 +195,6 @@ async def test_get_or_create_session_handles_dead(monkeypatch, session_manager):
     session.is_alive = False
     session_manager._cache["foo"] = session
     fake_config = {"host": "localhost"}
-    monkeypatch.setattr("deephaven_mcp.config.DEFAULT_CONFIG_MANAGER.resolve_worker_name", AsyncMock(return_value="foo"))
     monkeypatch.setattr("deephaven_mcp.config.DEFAULT_CONFIG_MANAGER.get_worker_config", AsyncMock(return_value=fake_config))
     monkeypatch.setattr(SessionManager, "_get_session_parameters", AsyncMock(return_value={"host": "localhost"}))
     monkeypatch.setattr(SessionManager, "_create_session", AsyncMock(return_value="SESSION"))
