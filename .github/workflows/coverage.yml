@@ -11,15 +11,22 @@ jobs:
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     steps:
-      - name: Download coverage artifact
+      - name: Download all coverage artifacts
         uses: actions/download-artifact@v4
         with:
-          name: coverage-xml
+          pattern: coverage-xml-*
           path: ./coverage
 
-      - name: Display coverage report
+      - name: List downloaded files
         run: |
-          cat ./coverage/coverage.xml
+          find ./coverage
+
+      - name: Display all coverage reports
+        run: |
+          for f in ./coverage/**/coverage.xml; do
+            echo "--- $f ---"
+            cat "$f"
+          done
 
       # Add steps here to upload to Codecov, Coveralls, etc. if desired
       # - name: Upload to Codecov
