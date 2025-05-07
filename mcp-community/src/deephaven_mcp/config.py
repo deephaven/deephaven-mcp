@@ -7,7 +7,7 @@ Configuration is loaded from a file specified by the DH_MCP_CONFIG_FILE environm
 Features:
     - Coroutine-safe, cached loading of configuration using asyncio.Lock.
     - Strict validation of configuration structure and values.
-    - Helper functions to access worker-specific config, default worker, and worker names.
+    - Helper functions to access worker-specific config, and worker names.
     - Logging of configuration loading, environment variable value, and validation steps.
     - Uses aiofiles for non-blocking, native async config file reads.
 
@@ -42,22 +42,16 @@ The configuration file must be a JSON object with exactly two top-level keys:
         - Sensitive fields (auth_token, client_private_key) are redacted from logs for security.
         - Unknown fields are not allowed and will cause validation to fail.
 
-  - default_worker (str, required):
-      The name of the default worker to use. Must match one of the keys in the workers dictionary.
-      This worker will be used if no worker name is explicitly specified in API calls.
-
 Validation rules:
   - All required fields must be present and have the correct type.
   - All field values must be valid (see allowed values above).
   - No unknown fields are permitted in worker configs.
-  - The default_worker must be present in the workers dictionary.
   - If TLS fields are provided, referenced files must exist and be readable.
 
 Configuration JSON Specification:
 ---------------------------------
-- The configuration file must be a JSON object with exactly two top-level keys:
+- The configuration file must be a JSON object with one top-level key:
     - "workers": a dictionary mapping worker names to worker configuration dicts
-    - "default_worker": the name (string) of the default worker (must be a key in "workers")
 
 Example Valid Configuration:
 ---------------------------
@@ -88,7 +82,6 @@ The configuration file should look like the following (see field explanations be
             "use_tls": true
         }
     },
-    "default_worker": "local"  // str: Name of the default worker
 }
 ```
 
@@ -101,16 +94,16 @@ Example Invalid Configurations:
 }
 ```
 
-2. Invalid: default_worker must be defined and must exist in workers
+
+2. Invalid: Worker field with wrong type
 ```json
 {
     "workers": {
         "local": {
-            "host": "localhost",
-            "port": 10000
+            "host": 12345,  // Should be a string, not an integer
+            "port": "not-a-port"  // Should be an integer, not a string
         }
-    },
-    "default_worker": "nonexistent"  // Must be a worker that exists in the workers dictionary
+    }
 }
 ```
 
@@ -122,6 +115,7 @@ Performance Considerations:
 
 Usage Patterns:
 ---------------
+- The configuration **must** include a 'workers' dictionary as a top-level key.
 - Loading a worker configuration:
     >>> config = await get_worker_config('local')
     >>> connection = connect(**config)
@@ -129,9 +123,6 @@ Usage Patterns:
     >>> workers = await get_worker_names()
     >>> for worker in workers:
     ...     print(f"Available worker: {worker}")
-- Using the default worker:
-    >>> default_worker = await get_worker_name_default()
-    >>> config = await get_worker_config(default_worker)
 
 Environment Variables:
 ---------------------
@@ -146,28 +137,6 @@ Async/Await & I/O:
 ------------------
 - All configuration loading is async and coroutine-safe.
 - File I/O uses aiofiles for non-blocking reads.
-
-Usage Patterns:
----------------
-- Loading a worker configuration:
-    >>> config = await get_worker_config('local')
-    >>> connection = connect(**config)
-- Listing available workers:
-    >>> workers = await get_worker_names()
-    >>> for worker in workers:
-    ...     print(f"Available worker: {worker}")
-- Using the default worker:
-    >>> default_worker = await get_worker_name_default()
-    >>> config = await get_worker_config(default_worker)
-
-Environment Variables:
----------------------
-- DH_MCP_CONFIG_FILE: Path to the Deephaven worker configuration JSON file.
-
-Security:
----------
-- Sensitive information (such as authentication tokens) is redacted in logs.
-- Environment variable values are logged for debugging.
 
 Async/Await & I/O:
 ------------------
@@ -216,7 +185,7 @@ class ConfigManager:
     """
     Async configuration manager for Deephaven MCP worker configuration.
 
-    This class encapsulates all logic for loading, validating, and caching the configuration used by Deephaven MCP workers. It ensures coroutine safety for all operations, supports async file I/O, and provides methods for retrieving worker-specific configurations, listing available workers, and resolving the default worker. All configuration access and mutation should go through an instance of this class (typically DEFAULT_CONFIG_MANAGER).
+    This class encapsulates all logic for loading, validating, and caching the configuration used by Deephaven MCP workers. The configuration must include a 'workers' dictionary as a required top-level key. All configuration operations, including retrieving worker-specific configurations, depend on this key being present and valid. All configuration access and mutation should go through an instance of this class (typically DEFAULT_CONFIG_MANAGER).
     """
     def __init__(self) -> None:
         """
@@ -227,28 +196,6 @@ class ConfigManager:
         """
         self._cache: Optional[Dict[str, Any]] = None
         self._lock = asyncio.Lock()
-
-    async def get_worker_name_default(self) -> str:
-        """
-        Get the default worker name from the loaded configuration.
-
-        Returns:
-            str: The default worker name.
-
-        Raises:
-            RuntimeError: If no default worker is set in the configuration.
-
-        Example:
-            >>> default_worker = await config.DEFAULT_CONFIG_MANAGER.get_worker_name_default()
-        """
-        config = await self.get_config()
-        default_worker = config.get("default_worker")
-
-        # TODO: it is impossible to get here with the current validation ... what is the right thing to do?
-        if not default_worker:
-            raise RuntimeError("No default worker is set in the configuration.")
-
-        return default_worker
 
     async def clear_config_cache(self) -> None:
         """
@@ -280,7 +227,7 @@ class ConfigManager:
             None
 
         Example:
-            >>> await config.DEFAULT_CONFIG_MANAGER.set_config_cache({'workers': {...}, 'default_worker': 'local'})
+            >>> await config.DEFAULT_CONFIG_MANAGER.set_config_cache({'workers': {...}})
         """
         async with self._lock:
             self._cache = self.validate_config(config)
@@ -337,12 +284,12 @@ class ConfigManager:
             return validated
 
 
-    async def get_worker_config(self, worker_name: Optional[str] = None) -> Dict[str, Any]:
+    async def get_worker_config(self, worker_name: str) -> Dict[str, Any]:
         """
         Retrieve the configuration dictionary for a specific worker.
 
         Args:
-            worker_name (Optional[str]): The name of the worker to retrieve. If None, uses the default_worker from config.
+            worker_name (str): The name of the worker to retrieve. This argument is required.
 
         Returns:
             Dict[str, Any]: The configuration dictionary for the specified worker.
@@ -356,45 +303,13 @@ class ConfigManager:
         _LOGGER.debug(f"Getting worker config for worker: {worker_name!r}")
         config = await self.get_config()
         workers = config.get("workers", {})
-        resolved_name = await self.resolve_worker_name(worker_name)
 
-        if resolved_name not in workers:
-            _LOGGER.error(f"Worker {resolved_name} not found in configuration")
-            raise RuntimeError(f"Worker {resolved_name} not found in configuration")
+        if worker_name not in workers:
+            _LOGGER.error(f"Worker {worker_name} not found in configuration")
+            raise RuntimeError(f"Worker {worker_name} not found in configuration")
 
-        _LOGGER.debug(f"Returning config for worker: {resolved_name}")
-        return workers[resolved_name]
-
-
-    async def resolve_worker_name(self, worker_name: Optional[str] = None) -> str:
-        """
-        Resolve the worker name to use, either from the provided worker_name or the default_worker from config.
-
-        Args:
-            worker_name (Optional[str]): The name of the worker to resolve. If None, uses the default_worker from config.
-
-        Returns:
-            str: The resolved worker name.
-
-        Raises:
-            RuntimeError: If no worker name is specified and no default_worker is set in the config.
-
-        Example:
-            >>> worker = await config.DEFAULT_CONFIG_MANAGER.resolve_worker_name()
-        """
-        _LOGGER.debug(f"Resolving worker name (provided: {worker_name!r})")
-        config = await self.get_config()
-
-        if worker_name:
-            return worker_name
-
-        default_worker = config.get("default_worker")
-        if not default_worker:
-            _LOGGER.error("No worker name specified and no default_worker in config")
-            raise RuntimeError("No worker name specified and no default_worker in config")
-
-        _LOGGER.debug(f"Using default worker: {default_worker}")
-        return default_worker
+        _LOGGER.debug(f"Returning config for worker: {worker_name}")
+        return workers[worker_name]
 
 
     async def get_worker_names(self) -> list[str]:
@@ -424,7 +339,7 @@ class ConfigManager:
         Validate the Deephaven worker configuration dictionary.
 
         Args:
-            config (Dict[str, Any]): The configuration dictionary to validate.
+            config (Dict[str, Any]): The configuration dictionary to validate. Must include a 'workers' dictionary as a top-level key.
 
         Returns:
             Dict[str, Any]: The validated configuration dictionary. This may be a normalized or cleaned version of the input.
@@ -433,9 +348,9 @@ class ConfigManager:
             ValueError: If the config is missing required keys, has unknown keys, has invalid field types, or is otherwise invalid.
 
         Example:
-            >>> valid = ConfigManager.validate_config({'workers': {...}, 'default_worker': 'local'})
+            >>> valid = ConfigManager.validate_config({'workers': {'local': {...}}})
         """
-        required_top_level = {"workers", "default_worker"}
+        required_top_level = {"workers"}
         allowed_top_level = required_top_level
         top_level_keys = set(config.keys())
 
@@ -500,11 +415,6 @@ class ConfigManager:
                         f"Field '{field}' in worker config for {worker_name} must be of type {allowed_types}"
                     )
 
-        default_worker = config["default_worker"]
-        if default_worker not in workers:
-            _LOGGER.error(f"Default worker '{default_worker}' is not defined in workers")
-            raise ValueError(f"Default worker '{default_worker}' is not defined in workers")
-
         return config
 
 
@@ -524,9 +434,6 @@ DEFAULT_CONFIG_MANAGER (ConfigManager):
         workers = await config.DEFAULT_CONFIG_MANAGER.get_worker_names()
         for worker in workers:
             print(f"Available worker: {worker}")
-
-    # Resolving the default worker
-        default = await config.DEFAULT_CONFIG_MANAGER.resolve_worker_name()
 
     This singleton ensures a consistent configuration state across the application.
 """
