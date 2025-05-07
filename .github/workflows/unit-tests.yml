@@ -45,3 +45,7 @@ jobs:
       with:
         name: coverage-xml-${{ matrix.python-version }}
         path: ./mcp-community/coverage.xml
+
+    - name: Display coverage report
+      run: |
+        cat ./mcp-community/coverage.xml
