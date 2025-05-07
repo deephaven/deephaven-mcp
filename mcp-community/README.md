@@ -43,7 +43,11 @@ This repository provides an implementation of a Deephaven Community Core MCP ser
 ## Architecture
 - **Server:** Built on [FastMCP](https://github.com/jlowin/fastmcp) and [autogen-ext](https://github.com/jlowin/autogen-ext).
 - **Workers:** Each worker is a Deephaven Community Core server defined in a config file.
-- **Tools:** Exposed as MCP tools (refresh, worker_names, table_schemas, run_script).
+- **Tools:** Exposed as MCP tools:
+  - `refresh`: Reload configuration and clear all active worker sessions atomically.
+  - `worker_statuses`: List all configured workers and their availability status.
+  - `table_schemas`: Retrieve schemas for one or more tables from a worker (requires `worker_name`).
+  - `run_script`: Execute a script on a specified Deephaven worker (requires `worker_name` and a script or script path).
 - **Transport:** Selectable via CLI (`--transport sse` or `--transport stdio`).
 
 ```
