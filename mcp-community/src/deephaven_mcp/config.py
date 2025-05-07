@@ -36,7 +36,7 @@ The configuration file must be a JSON object with exactly two top-level keys:
         - client_private_key (str): Path to a PEM file containing the client private key for mutual TLS.
 
       Notes:
-        - All fields are optional; if a field is omitted, a default may be used by the consuming code, or the feature may be disabled.
+        - All fields are optional; if a field is omitted, the consuming code may use an internal default value for that field, or the feature may be disabled. There is no default or fallback worker—every worker must be explicitly configured and selected by name.
         - All file paths should be absolute, or relative to the process working directory.
         - If use_tls is True and any of the optional TLS fields are provided, they must point to valid PEM files.
         - Sensitive fields (auth_token, client_private_key) are redacted from logs for security.

@@ -6,7 +6,7 @@ Sessions are configured using validated worker configuration from _config.py. Se
 if a cached session is alive, it is returned; otherwise, a new session is created and cached.
 
 Features:
-    - Coroutine-safe session cache keyed by worker name (or default), protected by an asyncio.Lock.
+    - Coroutine-safe session cache keyed by worker name, protected by an asyncio.Lock.
     - Automatic session reuse, liveness checking, and resource cleanup.
     - Native async file I/O for secure loading of certificate files (TLS, client certs/keys) using aiofiles.
     - Tools for cache clearing and atomic reloads.
@@ -333,7 +333,7 @@ class SessionManager:
 
         return rst
 
-    async def get_or_create_session(self, worker_name: Optional[str] = None) -> Session:
+    async def get_or_create_session(self, worker_name: str) -> Session:
         """
         Retrieve a cached Deephaven session for the specified worker, or create and cache a new one if needed.
 
@@ -341,7 +341,7 @@ class SessionManager:
         if the cached session is not alive, a new one is created and cached. All session creation and configuration is coroutine-safe.
 
         Args:
-            worker_name (Optional[str]): The name of the worker to retrieve a session for. If None, uses the default worker config.
+            worker_name (str): The name of the worker to retrieve a session for. This argument is required.
 
         Returns:
             Session: An alive Deephaven Session instance for the worker.
@@ -358,47 +358,44 @@ class SessionManager:
         """
         start_time = time.time()
         _LOGGER.info(f"Getting or creating session for worker: {worker_name}")
-        resolved_worker = await config.DEFAULT_CONFIG_MANAGER.resolve_worker_name(worker_name)
-        _LOGGER.info(f"Resolved worker name: {worker_name} -> {resolved_worker}")
         _LOGGER.info(f"Session cache size: {len(self._cache)}")
 
         async with self._lock:
-            session = self._cache.get(resolved_worker)
+            session = self._cache.get(worker_name)
             if session is not None:
                 try:
                     if session.is_alive:
                         _LOGGER.info(
-                            f"Found and returning cached session for worker: {resolved_worker}"
+                            f"Found and returning cached session for worker: {worker_name}"
                         )
                         return session
                     else:
                         _LOGGER.info(
-                            f"Cached session for worker '{resolved_worker}' is not alive. Recreating."
+                            f"Cached session for worker '{worker_name}' is not alive. Recreating."
                         )
                 except Exception as e:
                     _LOGGER.warning(
-                        f"Error checking session liveness for worker '{resolved_worker}': {e}. Recreating session."
+                        f"Error checking session liveness for worker '{worker_name}': {e}. Recreating session."
                     )
 
             # At this point, we need to create a new session and update the cache
-            _LOGGER.info(f"Creating new session for worker: {resolved_worker}")
-            worker_cfg = await config.DEFAULT_CONFIG_MANAGER.get_worker_config(resolved_worker)
+            _LOGGER.info(f"Creating new session for worker: {worker_name}")
+            worker_cfg = await config.DEFAULT_CONFIG_MANAGER.get_worker_config(worker_name)
             session_params = await self._get_session_parameters(worker_cfg)
 
             # Redact sensitive info for logging
             log_cfg = self._redact_sensitive_session_fields(session_params)
-            log_cfg["worker_name"] = resolved_worker
-            _LOGGER.info(                f"Creating new Deephaven Session with config: (worker cache key: {resolved_worker}) {log_cfg}"
-            )
+            log_cfg["worker_name"] = worker_name
+            _LOGGER.info(f"Creating new Deephaven Session with config: (worker cache key: {worker_name}) {log_cfg}")
 
             session = await self._create_session(**session_params)
 
             _LOGGER.info(
-                f"Successfully created session for worker: {resolved_worker}, adding to cache."
+                f"Successfully created session for worker: {worker_name}, adding to cache."
             )
-            self._cache[resolved_worker] = session
+            self._cache[worker_name] = session
             _LOGGER.info(
-                f"Session cached for worker: {resolved_worker}. Returning session."
+                f"Session cached for worker: {worker_name}. Returning session."
             )
             return session
 

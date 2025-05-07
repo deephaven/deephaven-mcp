@@ -47,7 +47,7 @@ mcp_server = FastMCP("deephaven-mcp-community")
 """
 FastMCP Server Instance for Deephaven MCP Community Tools
 
-This object is the singleton FastMCP server for the Deephaven MCP community toolset. It is responsible for registering and exposing all MCP tool functions defined in this module (such as refresh, default_worker, worker_names, table_schemas, and run_script) to the MCP runtime environment.
+This object is the singleton FastMCP server for the Deephaven MCP community toolset. It is responsible for registering and exposing all MCP tool functions defined in this module (such as refresh, worker_names, table_schemas, and run_script) to the MCP runtime environment.
 
 Key Details:
     - The server is instantiated with the name 'deephaven-mcp-community', which uniquely identifies this toolset in the MCP ecosystem.
