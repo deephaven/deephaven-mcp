@@ -43,7 +43,7 @@ This repository provides an implementation of a Deephaven Community Core MCP ser
 ## Architecture
 - **Server:** Built on [FastMCP](https://github.com/jlowin/fastmcp) and [autogen-ext](https://github.com/jlowin/autogen-ext).
 - **Workers:** Each worker is a Deephaven Community Core server defined in a config file.
-- **Tools:** Exposed as MCP tools (refresh, default_worker, worker_names, table_schemas, run_script).
+- **Tools:** Exposed as MCP tools (refresh, , worker_names, table_schemas, run_script).
 - **Transport:** Selectable via CLI (`--transport sse` or `--transport stdio`).
 
 ```
@@ -88,7 +88,7 @@ uv pip install ".[dev]"
 
 ### 2. Prepare Worker Configuration
 
-The MCP server requires a JSON configuration file describing the available Deephaven Community Core workers. This file must be an object with a `workers` mapping and a `default_worker` key.
+The MCP server requires a JSON configuration file describing the available Deephaven Community Core workers. This file must be an object with a `workers` mapping. 
 
 See the section on [Worker Configuration File Specification](#worker-configuration-file-specification) below for a complete list of fields and options.
 
@@ -105,7 +105,6 @@ See the section on [Worker Configuration File Specification](#worker-configurati
       "port": 10001
     }
   },
-  "default_worker": "worker1"
 }
 ```
 
@@ -288,8 +287,7 @@ The worker configuration file is a JSON object that defines all available Deepha
       "host": "localhost",
       "port": 10001
     }
-  },
-  "default_worker": "worker1"
+  }
 }
 ```
 
@@ -299,7 +297,6 @@ The worker configuration file is a JSON object that defines all available Deepha
 | Field                | Type      | Required | Default      | Description                                                      |
 |----------------------|-----------|----------|--------------|------------------------------------------------------------------|
 | `workers`            | object    | Yes      | —            | Map of worker names to worker configuration objects               |
-| `default_worker`     | string    | Yes      | —            | Name of the default worker (must match a key in `workers`)       |
 | `host`               | string    | No       | "localhost"  | Hostname or IP address of the Deephaven server (optional; only required for direct TCP connections) |
 | `port`               | integer   | No       | 10000        | Port number for the Deephaven server (optional; only required for direct TCP connections)           |
 | `auth_type`          | string    | No       | "Anonymous"  | Authentication type (`Anonymous`, `Basic`, `Bearer`, etc.)       |
@@ -312,7 +309,6 @@ The worker configuration file is a JSON object that defines all available Deepha
 | `client_private_key` | string    | No       | null          | Path to client private key for mutual TLS                        |
 
 ### Notes
-- The `default_worker` must be the name of one of the keys in `workers`.
 - The config file must be valid JSON (no comments allowed in actual file).
 - Unknown fields are not allowed.
 - This schema may be extended in future releases; consult the documentation for updates.
