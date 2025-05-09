@@ -227,7 +227,10 @@ def test_app_lifespan_yields_context_and_cleans_up():
             session_manager.clear_all_sessions.assert_awaited_once()
         asyncio.run(run())
 
+# Use filterwarnings to suppress ResourceWarning about unclosed sockets, which can be triggered by mocks or library internals in CI
+# but are not caused by this test (no real sockets are created or left open). This is required for Python 3.12 and older.
 @pytest.mark.asyncio
+@pytest.mark.filterwarnings("ignore:unclosed <socket.socket:ResourceWarning")
 async def test_run_script_success(monkeypatch):
     session_manager = MagicMock()
     class DummySession:
@@ -237,11 +240,7 @@ async def test_run_script_success(monkeypatch):
     context = MockContext({
         "session_manager": session_manager,
     })
-    # Suppress ResourceWarning for unclosed sockets, which can be triggered by mocks or library internals in CI,
-    # but are not caused by this test (no real sockets are created or left open).
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", ResourceWarning)
-        res = await mcp_mod.run_script(context, worker_name="worker", script="print(1)")
+    res = await mcp_mod.run_script(context, worker_name="worker", script="print(1)")
     assert res["success"] is True
     assert DummySession.called == "print(1)"
 
@@ -263,7 +262,10 @@ async def test_run_script_session_error(monkeypatch):
     assert res["isError"] is True
     assert "fail" in res["error"]
 
+# Use filterwarnings to suppress ResourceWarning about unclosed sockets, which can be triggered by mocks or library internals in CI
+# but are not caused by this test (no real sockets are created or left open). This is required for Python 3.12 and older.
 @pytest.mark.asyncio
+@pytest.mark.filterwarnings("ignore:unclosed <socket.socket:ResourceWarning")
 async def test_run_script_script_path(monkeypatch):
     session_manager = MagicMock()
     class DummySession:
@@ -271,16 +273,12 @@ async def test_run_script_script_path(monkeypatch):
             DummySession.called = script
     session_manager.get_or_create_session = AsyncMock(return_value=DummySession())
     context = MockContext({"session_manager": session_manager})
-    # Suppress ResourceWarning for unclosed sockets, which can be triggered by mocks or library internals in CI,
-    # but are not caused by this test (no real sockets are created or left open).
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", ResourceWarning)
-        with patch("aiofiles.open", new_callable=MagicMock) as aio_open:
-            mock_file = aio_open.return_value.__aenter__.return_value
-            mock_file.read = AsyncMock(return_value="print(123)")
-            res = await mcp_mod.run_script(context, worker_name="worker", script_path="foo.py")
-        assert res["success"] is True
-        assert DummySession.called == "print(123)"
+    with patch("aiofiles.open", new_callable=MagicMock) as aio_open:
+        mock_file = aio_open.return_value.__aenter__.return_value
+        mock_file.read = AsyncMock(return_value="print(123)")
+        res = await mcp_mod.run_script(context, worker_name="worker", script_path="foo.py")
+    assert res["success"] is True
+    assert DummySession.called == "print(123)"
 
 @pytest.mark.asyncio
 async def test_run_script_script_path_error(monkeypatch):
