@@ -1,5 +1,6 @@
 import pytest
 import asyncio
+import warnings
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import deephaven_mcp.community._mcp as mcp_mod
@@ -236,7 +237,11 @@ async def test_run_script_success(monkeypatch):
     context = MockContext({
         "session_manager": session_manager,
     })
-    res = await mcp_mod.run_script(context, worker_name="worker", script="print(1)")
+    # Suppress ResourceWarning for unclosed sockets, which can be triggered by mocks or library internals in CI,
+    # but are not caused by this test (no real sockets are created or left open).
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", ResourceWarning)
+        res = await mcp_mod.run_script(context, worker_name="worker", script="print(1)")
     assert res["success"] is True
     assert DummySession.called == "print(1)"
 
