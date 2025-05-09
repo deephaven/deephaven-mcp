@@ -231,6 +231,7 @@ def test_app_lifespan_yields_context_and_cleans_up():
 # but are not caused by this test (no real sockets are created or left open). This is required for Python 3.12 and older.
 @pytest.mark.asyncio
 @pytest.mark.filterwarnings("ignore:unclosed <socket.socket:ResourceWarning")
+@pytest.mark.filterwarnings("ignore:unclosed event loop:ResourceWarning")
 async def test_run_script_success(monkeypatch):
     session_manager = MagicMock()
     class DummySession:
