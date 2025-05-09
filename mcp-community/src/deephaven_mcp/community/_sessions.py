@@ -13,8 +13,8 @@ Features:
     - Designed for use by other MCP modules and MCP tools.
 
 Async Safety:
-    All public functions are async and use asyncio.Lock for coroutine safety.
-    The session cache is protected by _SESSION_CACHE_LOCK (asyncio.Lock).
+    All public functions are async and use an instance-level asyncio.Lock (self._lock) for coroutine safety.
+    Each SessionManager instance encapsulates its own session cache and lock.
 
 Error Handling:
     - All certificate loading operations are wrapped in try-except blocks and use aiofiles for async file I/O.
@@ -45,27 +45,36 @@ class SessionCreationError(Exception):
 class SessionManager:
     """
     Manages Deephaven Session objects, including creation, caching, and lifecycle.
-    Allows testability by encapsulating state and providing reset methods.
+ 
+    Usage:
+        - Instantiate with a ConfigManager instance:
+            cfg_mgr = ...  # Your ConfigManager
+            mgr = SessionManager(cfg_mgr)
+        - Use in async context for deterministic cleanup:
+            async with SessionManager(cfg_mgr) as mgr:
+                ...
+            # Sessions are automatically cleared on exit
 
-    Supports async context management for deterministic resource cleanup:
-        async with SessionManager() as mgr:
-            ...
-        # Sessions are automatically cleared on exit
+    Notes:
+        - Each SessionManager instance is fully isolated and must be provided a ConfigManager.
     """
-    def __init__(self):
+    def __init__(self, config_manager: config.ConfigManager):
         """
         Initialize a new SessionManager instance.
 
+        Args:
+            config_manager (ConfigManager): The configuration manager to use for worker config lookup.
+
         This constructor sets up the internal session cache (mapping worker names to Session objects)
         and an asyncio.Lock to ensure coroutine safety for all session management operations.
-        Typically, only one instance should exist per process (see DEFAULT_SESSION_MANAGER), but
-        custom instances may be created for testing, isolation, or advanced scenarios.
 
         Example:
-            mgr = SessionManager()
+            cfg_mgr = ...  # Your ConfigManager instance
+            mgr = SessionManager(cfg_mgr)
         """
         self._cache: Dict[str, Session] = {}
         self._lock = asyncio.Lock()
+        self._config_manager = config_manager
 
     async def __aenter__(self) -> "SessionManager":
         """
@@ -402,7 +411,7 @@ class SessionManager:
 
             # At this point, we need to create a new session and update the cache
             _LOGGER.info(f"Creating new session for worker: {worker_name}")
-            worker_cfg = await config.DEFAULT_CONFIG_MANAGER.get_worker_config(worker_name)
+            worker_cfg = await self._config_manager.get_worker_config(worker_name)
             session_params = await self._get_session_parameters(worker_cfg)
 
             # Redact sensitive info for logging
@@ -420,33 +429,6 @@ class SessionManager:
                 f"Session cached for worker: {worker_name}. Returning session."
             )
             return session
-
-
-DEFAULT_SESSION_MANAGER = SessionManager()
-"""
-DEFAULT_SESSION_MANAGER is the canonical, shared instance of SessionManager for Deephaven MCP session management.
-
-Overview:
-    - Provides a singleton-like, module-level manager for all Deephaven sessions in typical production and development usage.
-    - Encapsulates session creation, caching, lifecycle management, and cleanup.
-    - Used by all module-level APIs (get_or_create_session, clear_all_sessions) for backward compatibility and convenience.
-
-Usage:
-    - Use DEFAULT_SESSION_MANAGER directly to access advanced session management methods or to inject/mutate state for testing.
-    - For most use cases, prefer the provided async functions:
-        - await get_or_create_session(worker_name)
-        - await clear_all_sessions()
-    - For custom scenarios (e.g., test isolation, dependency injection), instantiate your own SessionManager.
-
-Thread/Coroutine Safety:
-    - All public methods on SessionManager (and thus DEFAULT_SESSION_MANAGER) are coroutine-safe via asyncio.Lock.
-    - It is safe to use DEFAULT_SESSION_MANAGER in concurrent async contexts.
-
-Notes:
-    - There should generally be only one DEFAULT_SESSION_MANAGER per process unless you are writing advanced tests or custom runners.
-    - All session cache and lock state is encapsulated within this instance.
-    - See SessionManager class docs for full API details.
-"""
 
 
 async def _load_bytes(path: Optional[str]) -> Optional[bytes]:

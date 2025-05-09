@@ -417,23 +417,3 @@ class ConfigManager:
 
         return config
 
-
-DEFAULT_CONFIG_MANAGER: ConfigManager = ConfigManager()
-"""
-DEFAULT_CONFIG_MANAGER (ConfigManager):
-    The default singleton instance of ConfigManager used by all Deephaven MCP configuration APIs.
-    This instance is coroutine-safe and should be used for all configuration loading, validation, and cache management unless a custom instance is required (e.g., for testing or advanced use).
-
-    Usage Example:
-        from deephaven_mcp import config
-        config_dict = await config.DEFAULT_CONFIG_MANAGER.get_config()
-        worker_cfg = await config.DEFAULT_CONFIG_MANAGER.get_worker_config('local')
-        await config.DEFAULT_CONFIG_MANAGER.clear_config_cache()
-
-    # Listing all workers
-        workers = await config.DEFAULT_CONFIG_MANAGER.get_worker_names()
-        for worker in workers:
-            print(f"Available worker: {worker}")
-
-    This singleton ensures a consistent configuration state across the application.
-"""
