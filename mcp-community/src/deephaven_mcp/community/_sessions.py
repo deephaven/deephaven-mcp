@@ -41,13 +41,14 @@ _LOGGER = logging.getLogger(__name__)
 
 class SessionCreationError(Exception):
     """Raised when a Deephaven Session cannot be created."""
+
     pass
 
 
 class SessionManager:
     """
     Manages Deephaven Session objects, including creation, caching, and lifecycle.
- 
+
     Usage:
         - Instantiate with a ConfigManager instance:
             cfg_mgr = ...  # Your ConfigManager
@@ -60,6 +61,7 @@ class SessionManager:
     Notes:
         - Each SessionManager instance is fully isolated and must be provided a ConfigManager.
     """
+
     def __init__(self, config_manager: config.ConfigManager):
         """
         Initialize a new SessionManager instance.
@@ -97,7 +99,7 @@ class SessionManager:
         self,
         exc_type: type[BaseException] | None,
         exc: BaseException | None,
-        tb: TracebackType | None
+        tb: TracebackType | None,
     ) -> None:
         """
         Exit the async context manager for SessionManager, ensuring resource cleanup.
@@ -194,7 +196,9 @@ class SessionManager:
                 exc_info=True,
             )
 
-    def _redact_sensitive_session_fields(self, config: dict[str, Any], redact_binary_values: bool = True) -> dict[str, Any]:
+    def _redact_sensitive_session_fields(
+        self, config: dict[str, Any], redact_binary_values: bool = True
+    ) -> dict[str, Any]:
         """
         Return a copy of a session config dictionary with sensitive values redacted for safe logging.
 
@@ -224,13 +228,20 @@ class SessionManager:
             {'auth_token': 'REDACTED', 'client_private_key': 'REDACTED'}
         """
         redacted = dict(config)
-        sensitive_keys = ["auth_token", "tls_root_certs", "client_cert_chain", "client_private_key"]
+        sensitive_keys = [
+            "auth_token",
+            "tls_root_certs",
+            "client_cert_chain",
+            "client_private_key",
+        ]
         for key in sensitive_keys:
             if key in redacted and redacted[key]:
                 # Redact if binary (bytes) or if always sensitive (auth_token)
                 if key == "auth_token":
                     redacted[key] = "REDACTED"
-                elif redact_binary_values and isinstance(redacted[key], bytes | bytearray):
+                elif redact_binary_values and isinstance(
+                    redacted[key], bytes | bytearray
+                ):
                     redacted[key] = "REDACTED"
         return redacted
 
@@ -262,13 +273,20 @@ class SessionManager:
         try:
             session = await asyncio.to_thread(Session, **kwargs)
         except Exception as e:
-            _LOGGER.error(f"Failed to create Deephaven Session with config: {log_kwargs}: {e}", exc_info=True)
-            raise SessionCreationError(f"Failed to create Deephaven Session with config: {log_kwargs}: {e}") from e
+            _LOGGER.error(
+                f"Failed to create Deephaven Session with config: {log_kwargs}: {e}",
+                exc_info=True,
+            )
+            raise SessionCreationError(
+                f"Failed to create Deephaven Session with config: {log_kwargs}: {e}"
+            ) from e
 
         _LOGGER.info(f"Successfully created Deephaven Session: {session}")
         return session
 
-    async def _get_session_parameters(self, worker_cfg: dict[str, Any]) -> dict[str, Any]:
+    async def _get_session_parameters(
+        self, worker_cfg: dict[str, Any]
+    ) -> dict[str, Any]:
         """
         Prepare and return the configuration dictionary for Deephaven Session creation.
 
@@ -315,7 +333,9 @@ class SessionManager:
         client_private_key = worker_cfg.get("client_private_key", None)
 
         if tls_root_certs:
-            _LOGGER.info(f"Loading TLS root certs from: {worker_cfg.get('tls_root_certs')}")
+            _LOGGER.info(
+                f"Loading TLS root certs from: {worker_cfg.get('tls_root_certs')}"
+            )
             tls_root_certs = await _load_bytes(tls_root_certs)
             _LOGGER.info("Loaded TLS root certs successfully.")
         else:
@@ -418,7 +438,9 @@ class SessionManager:
             # Redact sensitive info for logging
             log_cfg = self._redact_sensitive_session_fields(session_params)
             log_cfg["worker_name"] = worker_name
-            _LOGGER.info(f"Creating new Deephaven Session with config: (worker cache key: {worker_name}) {log_cfg}")
+            _LOGGER.info(
+                f"Creating new Deephaven Session with config: (worker cache key: {worker_name}) {log_cfg}"
+            )
 
             session = await self._create_session(**session_params)
 

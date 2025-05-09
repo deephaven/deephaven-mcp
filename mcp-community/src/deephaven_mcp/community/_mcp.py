@@ -35,6 +35,7 @@ from deephaven_mcp import config
 
 _LOGGER = logging.getLogger(__name__)
 
+
 @asynccontextmanager
 async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
     """
@@ -67,7 +68,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
     """
     _LOGGER.info("Starting MCP server '%s'", server.name)
     session_manager = None
-    
+
     try:
         config_manager = config.ConfigManager()
 
@@ -91,6 +92,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
         if session_manager is not None:
             await session_manager.clear_all_sessions()
         _LOGGER.info("MCP server '%s' shut down.", server.name)
+
 
 mcp_server = FastMCP("deephaven-mcp-community", lifespan=app_lifespan)
 """
@@ -191,7 +193,9 @@ async def worker_statuses(context: Context) -> dict:
     Logging:
         - Logs tool invocation, checked workers, statuses, and error details at INFO/ERROR levels.
     """
-    _LOGGER.info("[worker_statuses] Invoked: retrieving status of all configured workers.")
+    _LOGGER.info(
+        "[worker_statuses] Invoked: retrieving status of all configured workers."
+    )
     try:
         config_manager = context.request_context.lifespan_context["config_manager"]
         session_manager = context.request_context.lifespan_context["session_manager"]
@@ -209,7 +213,9 @@ async def worker_statuses(context: Context) -> dict:
         _LOGGER.info(f"[worker_statuses] Statuses: {results!r}")
         return {"success": True, "result": results}
     except Exception as e:
-        _LOGGER.error(f"[worker_statuses] Failed to get worker statuses: {e!r}", exc_info=True)
+        _LOGGER.error(
+            f"[worker_statuses] Failed to get worker statuses: {e!r}", exc_info=True
+        )
         return {"success": False, "error": str(e), "isError": True}
 
 

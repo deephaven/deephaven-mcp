@@ -182,12 +182,14 @@ Dictionary of allowed worker configuration fields and their expected types.
 Type: dict[str, type | tuple[type, ...]]
 """
 
+
 class ConfigManager:
     """
     Async configuration manager for Deephaven MCP worker configuration.
 
     This class encapsulates all logic for loading, validating, and caching the configuration used by Deephaven MCP workers. The configuration must include a 'workers' dictionary as a required top-level key. All configuration operations, including retrieving worker-specific configurations, depend on this key being present and valid. All configuration access and mutation should go through an instance of this class (typically DEFAULT_CONFIG_MANAGER).
     """
+
     def __init__(self) -> None:
         """
         Initialize a new ConfigManager instance.
@@ -216,7 +218,6 @@ class ConfigManager:
 
         _LOGGER.debug("Configuration cache cleared.")
 
-
     async def set_config_cache(self, config: dict[str, Any]) -> None:
         """
         Set the in-memory configuration cache (coroutine-safe, for testing only).
@@ -232,7 +233,6 @@ class ConfigManager:
         """
         async with self._lock:
             self._cache = self.validate_config(config)
-
 
     async def get_config(self) -> dict[str, Any]:
         """
@@ -268,7 +268,9 @@ class ConfigManager:
                 raise RuntimeError(f"Environment variable {CONFIG_ENV_VAR} is not set.")
 
             config_path = os.environ[CONFIG_ENV_VAR]
-            _LOGGER.info(f"Environment variable {CONFIG_ENV_VAR} is set to: {config_path}")
+            _LOGGER.info(
+                f"Environment variable {CONFIG_ENV_VAR} is set to: {config_path}"
+            )
 
             try:
                 async with aiofiles.open(config_path) as f:
@@ -283,7 +285,6 @@ class ConfigManager:
                 f"Deephaven worker configuration loaded and validated successfully in {perf_counter() - start_time:.3f} seconds"
             )
             return validated
-
 
     async def get_worker_config(self, worker_name: str) -> dict[str, Any]:
         """
@@ -312,7 +313,6 @@ class ConfigManager:
         _LOGGER.debug(f"Returning config for worker: {worker_name}")
         return cast(dict[str, Any], workers[worker_name])
 
-
     async def get_worker_names(self) -> list[str]:
         """
         Get a list of all configured Deephaven worker names from the loaded configuration.
@@ -332,7 +332,6 @@ class ConfigManager:
 
         _LOGGER.debug(f"Found {len(worker_names)} worker(s): {worker_names}")
         return worker_names
-
 
     @staticmethod
     def validate_config(config: dict[str, Any]) -> dict[str, Any]:
@@ -375,7 +374,9 @@ class ConfigManager:
 
         workers = config["workers"]
         if not isinstance(workers, dict):
-            raise ValueError("'workers' must be a dictionary in Deephaven worker config")
+            raise ValueError(
+                "'workers' must be a dictionary in Deephaven worker config"
+            )
         if not workers:
             _LOGGER.error("No workers defined in Deephaven worker config")
             raise ValueError("No workers defined in Deephaven worker config")
@@ -386,7 +387,9 @@ class ConfigManager:
         return config
 
     @staticmethod
-    def _validate_worker_config(worker_name: str, worker_config: dict[str, Any]) -> None:
+    def _validate_worker_config(
+        worker_name: str, worker_config: dict[str, Any]
+    ) -> None:
         """
         Validate the configuration dictionary for a single Deephaven worker.
 
