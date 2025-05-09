@@ -20,20 +20,11 @@ import logging
 import asyncio
 import sys
 import os
-from deephaven_mcp import config
 from ._mcp import mcp_server
 
 __all__ = ["mcp_server", "run_server"]
 
 _LOGGER = logging.getLogger(__name__)
-
-_CONFIG_MANAGER = config.DEFAULT_CONFIG_MANAGER
-"""
-_CONFIG_MANAGER is a private, module-level reference to the default configuration manager.
-
-This allows for easier patching and testability in unit tests or other scenarios where the
-configuration manager needs to be swapped or mocked. Production code should not modify this value.
-"""
 
 
 def run_server(transport: str = "stdio") -> None:
@@ -56,13 +47,6 @@ def run_server(transport: str = "stdio") -> None:
     )
 
     try:
-        #TODO: move this into lifespan?
-        # Make sure config can be loaded before starting the server
-        _LOGGER.info("Making sure config can be loaded before starting the server...")
-        _LOGGER.info("Loading configuration...")
-        asyncio.run(_CONFIG_MANAGER.get_config())
-        _LOGGER.info("Configuration loaded.")
-        
         # Start the server
         _LOGGER.info(f"Starting MCP server '{mcp_server.name}' with transport={transport}")
         mcp_server.run(transport=transport)

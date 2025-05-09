@@ -25,25 +25,72 @@ See individual tool docstrings for full argument, return, and error details.
 import logging
 import asyncio
 from typing import Optional
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import FastMCP, Context
 from deephaven_mcp import config
 import deephaven_mcp.community._sessions as sessions
 import aiofiles
-
-# Private module-level variable for the configuration manager singleton.
-# This allows easier patching/mocking in tests and centralizes the default config manager reference.
-_CONFIG_MANAGER = config.DEFAULT_CONFIG_MANAGER
-
-# Private module-level variable for the session manager singleton.
-# This allows easier patching/mocking in tests and centralizes the default session manager reference.
-_SESSION_MANAGER = sessions.DEFAULT_SESSION_MANAGER
+from contextlib import asynccontextmanager
 
 _LOGGER = logging.getLogger(__name__)
 
-# Module-level lock for refresh to prevent concurrent refresh operations.
-_REFRESH_LOCK = asyncio.Lock()
+@asynccontextmanager
+async def app_lifespan(server: FastMCP):
+    """
+    Async context manager for the FastMCP server application lifespan.
 
-mcp_server = FastMCP("deephaven-mcp-community")
+    This function manages the startup and shutdown lifecycle of the MCP server. It is responsible for:
+      - Instantiating a ConfigManager and SessionManager for Deephaven worker configuration and session management.
+      - Creating a coroutine-safe asyncio.Lock (refresh_lock) for atomic configuration/session refreshes.
+      - Loading and validating the Deephaven worker configuration before the server accepts requests.
+      - Yielding a context dictionary containing config_manager, session_manager, and refresh_lock for use by all tool functions via MCPRequest.context.
+      - Ensuring all session resources are properly cleaned up on shutdown.
+
+    Startup actions:
+      - Loads and validates the Deephaven worker configuration using the ConfigManager.
+      - Logs progress and yields a context dict containing the loaded managers/lock.
+
+    Shutdown actions:
+      - Logs server shutdown initiation.
+      - Clears all active Deephaven sessions using the SessionManager.
+      - Logs completion of server shutdown.
+
+    Args:
+        server: The FastMCP server instance (required by the FastMCP API, not directly used).
+
+    Yields:
+        dict: A context dictionary with the following keys for use in all MCP tool requests:
+            - 'config_manager': The ConfigManager instance for worker configuration.
+            - 'session_manager': The SessionManager instance for session management.
+            - 'refresh_lock': An asyncio.Lock for atomic refresh operations.
+    """
+    _LOGGER.info("Starting MCP server '%s'", server.name)
+    session_manager = None
+    
+    try:
+        config_manager = config.ConfigManager()
+
+        # Make sure config can be loaded before starting
+        _LOGGER.info("Loading configuration...")
+        await config_manager.get_config()
+        _LOGGER.info("Configuration loaded.")
+
+        session_manager = sessions.SessionManager(config_manager)
+
+        # lock for refresh to prevent concurrent refresh operations.
+        refresh_lock = asyncio.Lock()
+
+        yield {
+            "config_manager": config_manager,
+            "session_manager": session_manager,
+            "refresh_lock": refresh_lock,
+        }
+    finally:
+        _LOGGER.info("Shutting down MCP server '%s'", server.name)
+        if session_manager is not None:
+            await session_manager.clear_all_sessions()
+        _LOGGER.info("MCP server '%s' shut down.", server.name)
+
+mcp_server = FastMCP("deephaven-mcp-community", lifespan=app_lifespan)
 """
 FastMCP Server Instance for Deephaven MCP Community Tools
 
@@ -64,13 +111,16 @@ See the module-level docstring for an overview of the available tools and error 
 
 
 @mcp_server.tool()
-async def refresh() -> dict:
+async def refresh(context: Context) -> dict:
     """
     MCP Tool: Reload and refresh Deephaven worker configuration and session cache.
 
-    This tool atomically reloads the Deephaven worker configuration from disk and clears all active session objects for all workers. This ensures that any changes to the configuration (such as adding, removing, or updating workers) are applied immediately and that all sessions are reopened to reflect the new configuration. The operation is protected by a module-level lock to prevent concurrent refreshes, reducing race conditions.
+    This tool atomically reloads the Deephaven worker configuration from disk and clears all active session objects for all workers. It uses dependency injection via the MCPRequest context to access the config manager, session manager, and a coroutine-safe refresh lock (all provided by app_lifespan). This ensures that any changes to the configuration (such as adding, removing, or updating workers) are applied immediately and that all sessions are reopened to reflect the new configuration. The operation is protected by the provided lock to prevent concurrent refreshes, reducing race conditions.
 
     This tool is typically used by administrators or automated agents to force a full reload of the MCP environment after configuration changes.
+
+    Args:
+        context (Context): The FastMCP Context for this tool call.
 
     Returns:
         dict: Structured result object with the following keys:
@@ -94,9 +144,13 @@ async def refresh() -> dict:
     # guarantee atomicity with respect to other config/session operations, but
     # it does ensure that only one refresh runs at a time and reduces race risk.
     try:
-        async with _REFRESH_LOCK:
-            await _CONFIG_MANAGER.clear_config_cache()
-            await _SESSION_MANAGER.clear_all_sessions()
+        refresh_lock = context.request_context.lifespan_context["refresh_lock"]
+        config_manager = context.request_context.lifespan_context["config_manager"]
+        session_manager = context.request_context.lifespan_context["session_manager"]
+
+        async with refresh_lock:
+            await config_manager.clear_config_cache()
+            await session_manager.clear_all_sessions()
         _LOGGER.info(
             "[refresh] Success: Worker configuration and session cache have been reloaded."
         )
@@ -110,11 +164,14 @@ async def refresh() -> dict:
 
 
 @mcp_server.tool()
-async def worker_statuses() -> dict:
+async def worker_statuses(context: Context) -> dict:
     """
     MCP Tool: List all configured Deephaven workers and their availability status.
 
-    This tool returns the list of all worker names currently defined in the loaded configuration, along with a boolean indicating whether each worker is available (i.e., a session can be created for the worker).
+    This tool returns the list of all worker names currently defined in the loaded configuration, along with a boolean indicating whether each worker is available (i.e., a session can be created for the worker). Configuration and session management are accessed via dependency injection using the MCPRequest context.
+
+    Args:
+        context (Context): The FastMCP Context for this tool call.
 
     Returns:
         dict: Structured result object with the following keys:
@@ -134,12 +191,14 @@ async def worker_statuses() -> dict:
     """
     _LOGGER.info("[worker_statuses] Invoked: retrieving status of all configured workers.")
     try:
-        names = await _CONFIG_MANAGER.get_worker_names()
+        config_manager = context.request_context.lifespan_context["config_manager"]
+        session_manager = context.request_context.lifespan_context["session_manager"]
+        names = await config_manager.get_worker_names()
         results = []
         for name in names:
             try:
                 # Try to get or create a session for the worker. If this fails, mark as unavailable.
-                session = await _SESSION_MANAGER.get_or_create_session(name)
+                session = await session_manager.get_or_create_session(name)
                 available = session is not None and session.is_alive
             except Exception as e:
                 _LOGGER.warning(f"[worker_statuses] Worker '{name}' unavailable: {e!r}")
@@ -154,14 +213,15 @@ async def worker_statuses() -> dict:
 
 @mcp_server.tool()
 async def table_schemas(
-    worker_name: str, table_names: Optional[list[str]] = None
+    context: Context, worker_name: str, table_names: Optional[list[str]] = None
 ) -> list:
     """
     MCP Tool: Retrieve schemas for one or more tables from a Deephaven worker.
 
-    This tool returns the column schemas for the specified tables in the given Deephaven worker. If no table_names are provided, schemas for all tables in the worker are returned.
+    This tool returns the column schemas for the specified tables in the given Deephaven worker. If no table_names are provided, schemas for all tables in the worker are returned. Session management is accessed via dependency injection from the MCPRequest context.
 
-    Arguments:
+    Args:
+        context (Context): The FastMCP Context for this tool call.
         worker_name (str): Name of the Deephaven worker to query. This argument is required.
         table_names (list[str], optional): List of table names to fetch schemas for. If None, all tables are included.
 
@@ -192,7 +252,8 @@ async def table_schemas(
     )
     results = []
     try:
-        session = await _SESSION_MANAGER.get_or_create_session(worker_name)
+        session_manager = context.request_context.lifespan_context["session_manager"]
+        session = await session_manager.get_or_create_session(worker_name)
         _LOGGER.info(f"[table_schemas] Session established for worker: '{worker_name}'")
 
         if table_names is not None:
@@ -243,6 +304,7 @@ async def table_schemas(
 
 @mcp_server.tool()
 async def run_script(
+    context: Context,
     worker_name: str,
     script: Optional[str] = None,
     script_path: Optional[str] = None,
@@ -250,9 +312,10 @@ async def run_script(
     """
     MCP Tool: Execute a script on a specified Deephaven worker.
 
-    This tool executes a user-provided script (either as a direct string or loaded from a file path) on the specified Deephaven worker. The worker's language (e.g., Python, Groovy) is determined by its configuration. Script execution is performed in an isolated session for the worker. The tool returns a structured result indicating success or failure, along with error details if applicable.
+    This tool executes a user-provided script (either as a direct string or loaded from a file path) on the specified Deephaven worker. The worker's language (e.g., Python, Groovy) is determined by its configuration. Script execution is performed in an isolated session for the worker. All session management is accessed via dependency injection using the MCPRequest context.
 
-    Arguments:
+    Args:
+        context (Context): The FastMCP Context for this tool call.
         worker_name (str): Name of the Deephaven worker on which to execute the script. This argument is required.
         script (str, optional): The script source code to execute. Must be provided unless script_path is specified.
         script_path (str, optional): Path to a file containing the script to execute. Used if script is not provided.
@@ -291,7 +354,8 @@ async def run_script(
             async with aiofiles.open(script_path, "r") as f:
                 script = await f.read()
 
-        session = await _SESSION_MANAGER.get_or_create_session(worker_name)
+        session_manager = context.request_context.lifespan_context["session_manager"]
+        session = await session_manager.get_or_create_session(worker_name)
         _LOGGER.info(f"[run_script] Session established for worker: '{worker_name}'")
 
         _LOGGER.info(f"[run_script] Executing script on worker: '{worker_name}'")
