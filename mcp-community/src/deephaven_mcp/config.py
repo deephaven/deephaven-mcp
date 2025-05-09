@@ -144,14 +144,14 @@ Async/Await & I/O:
 - File I/O uses aiofiles for non-blocking reads.
 """
 
-import os
+import asyncio
 import json
 import logging
-from typing import Any, Dict, Optional
+import os
 from time import perf_counter
-import asyncio
+from typing import Any, cast
+
 import aiofiles
-from typing import cast, Any
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -195,7 +195,7 @@ class ConfigManager:
         Sets up the internal configuration cache and an asyncio.Lock for coroutine safety.
         Typically, only one instance (DEFAULT_CONFIG_MANAGER) should be used in production.
         """
-        self._cache: Optional[Dict[str, Any]] = None
+        self._cache: dict[str, Any] | None = None
         self._lock = asyncio.Lock()
 
     async def clear_config_cache(self) -> None:
@@ -217,7 +217,7 @@ class ConfigManager:
         _LOGGER.debug("Configuration cache cleared.")
 
 
-    async def set_config_cache(self, config: Dict[str, Any]) -> None:
+    async def set_config_cache(self, config: dict[str, Any]) -> None:
         """
         Set the in-memory configuration cache (coroutine-safe, for testing only).
 
@@ -234,7 +234,7 @@ class ConfigManager:
             self._cache = self.validate_config(config)
 
 
-    async def get_config(self) -> Dict[str, Any]:
+    async def get_config(self) -> dict[str, Any]:
         """
         Load and validate the Deephaven worker configuration from disk (coroutine-safe).
 
@@ -271,7 +271,7 @@ class ConfigManager:
             _LOGGER.info(f"Environment variable {CONFIG_ENV_VAR} is set to: {config_path}")
 
             try:
-                async with aiofiles.open(config_path, "r") as f:
+                async with aiofiles.open(config_path) as f:
                     data = json.loads(await f.read())
             except Exception as e:
                 _LOGGER.error(f"Failed to load config file {config_path}: {e}")
@@ -285,7 +285,7 @@ class ConfigManager:
             return validated
 
 
-    async def get_worker_config(self, worker_name: str) -> Dict[str, Any]:
+    async def get_worker_config(self, worker_name: str) -> dict[str, Any]:
         """
         Retrieve the configuration dictionary for a specific worker.
 
@@ -335,7 +335,7 @@ class ConfigManager:
 
 
     @staticmethod
-    def validate_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    def validate_config(config: dict[str, Any]) -> dict[str, Any]:
         """
         Validate the Deephaven worker configuration dictionary.
 
@@ -375,47 +375,59 @@ class ConfigManager:
 
         workers = config["workers"]
         if not isinstance(workers, dict):
-            _LOGGER.error("'workers' must be a dictionary in Deephaven worker config")
             raise ValueError("'workers' must be a dictionary in Deephaven worker config")
-
         if not workers:
             _LOGGER.error("No workers defined in Deephaven worker config")
             raise ValueError("No workers defined in Deephaven worker config")
 
         for worker_name, worker_config in workers.items():
-            if not isinstance(worker_config, dict):
-                _LOGGER.error(f"Worker config for {worker_name} must be a dictionary")
-                raise ValueError(f"Worker config for {worker_name} must be a dictionary")
-
-            missing_fields = [
-                field for field in _REQUIRED_FIELDS if field not in worker_config
-            ]
-            if missing_fields:
-                _LOGGER.error(
-                    f"Missing required fields in worker config for {worker_name}: {missing_fields}"
-                )
-                raise ValueError(
-                    f"Missing required fields in worker config for {worker_name}: {missing_fields}"
-                )
-
-            for field, value in worker_config.items():
-                if field not in _ALLOWED_WORKER_FIELDS:
-                    _LOGGER.error(
-                        f"Unknown field '{field}' in worker config for {worker_name}"
-                    )
-                    raise ValueError(
-                        f"Unknown field '{field}' in worker config for {worker_name}"
-                    )
-
-                allowed_types = _ALLOWED_WORKER_FIELDS[field]
-                if not isinstance(allowed_types, tuple):
-                    allowed_types = (allowed_types,)
-                if not isinstance(value, allowed_types):
-                    _LOGGER.error(
-                        f"Field '{field}' in worker config for {worker_name} must be of type {allowed_types}"
-                    )
-                    raise ValueError(
-                        f"Field '{field}' in worker config for {worker_name} must be of type {allowed_types}"
-                    )
+            ConfigManager._validate_worker_config(worker_name, worker_config)
 
         return config
+
+    @staticmethod
+    def _validate_worker_config(worker_name: str, worker_config: dict[str, Any]) -> None:
+        """
+        Validate the configuration dictionary for a single Deephaven worker.
+
+        Args:
+            worker_name (str): The name of the worker being validated.
+            worker_config (dict[str, Any]): The configuration dictionary for the worker.
+
+        Raises:
+            ValueError: If the worker config is not a dictionary, is missing required fields,
+                contains unknown fields, or contains fields with invalid types.
+        """
+        if not isinstance(worker_config, dict):
+            raise ValueError(f"Worker config for {worker_name} must be a dictionary.")
+
+        missing_fields = [
+            field for field in _REQUIRED_FIELDS if field not in worker_config
+        ]
+        if missing_fields:
+            _LOGGER.error(
+                f"Missing required fields in worker config for {worker_name}: {missing_fields}"
+            )
+            raise ValueError(
+                f"Missing required fields in worker config for {worker_name}: {missing_fields}"
+            )
+
+        for field, value in worker_config.items():
+            if field not in _ALLOWED_WORKER_FIELDS:
+                _LOGGER.error(
+                    f"Unknown field '{field}' in worker config for {worker_name}"
+                )
+                raise ValueError(
+                    f"Unknown field '{field}' in worker config for {worker_name}"
+                )
+
+            allowed_types = _ALLOWED_WORKER_FIELDS[field]
+            if not isinstance(allowed_types, tuple):
+                allowed_types = (allowed_types,)
+            if not isinstance(value, allowed_types):
+                _LOGGER.error(
+                    f"Field '{field}' in worker config for {worker_name} must be of type {allowed_types}"
+                )
+                raise ValueError(
+                    f"Field '{field}' in worker config for {worker_name} must be of type {allowed_types}"
+                )

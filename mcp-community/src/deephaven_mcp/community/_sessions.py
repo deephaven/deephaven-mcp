@@ -25,13 +25,15 @@ Dependencies:
     - Requires aiofiles for async file I/O.
 """
 
-from typing import Optional, Dict, Any, Type
-from types import TracebackType
-from pydeephaven import Session
-import logging
 import asyncio
+import logging
 import time
+from types import TracebackType
+from typing import Any
+
 import aiofiles
+from pydeephaven import Session
+
 from deephaven_mcp import config
 
 _LOGGER = logging.getLogger(__name__)
@@ -72,7 +74,7 @@ class SessionManager:
             cfg_mgr = ...  # Your ConfigManager instance
             mgr = SessionManager(cfg_mgr)
         """
-        self._cache: Dict[str, Session] = {}
+        self._cache: dict[str, Session] = {}
         self._lock = asyncio.Lock()
         self._config_manager = config_manager
 
@@ -93,9 +95,9 @@ class SessionManager:
 
     async def __aexit__(
         self,
-        exc_type: Optional[Type[BaseException]],
-        exc: Optional[BaseException],
-        tb: Optional[TracebackType]
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None
     ) -> None:
         """
         Exit the async context manager for SessionManager, ensuring resource cleanup.
@@ -192,7 +194,7 @@ class SessionManager:
                 exc_info=True,
             )
 
-    def _redact_sensitive_session_fields(self, config: Dict[str, Any], redact_binary_values: bool = True) -> Dict[str, Any]:
+    def _redact_sensitive_session_fields(self, config: dict[str, Any], redact_binary_values: bool = True) -> dict[str, Any]:
         """
         Return a copy of a session config dictionary with sensitive values redacted for safe logging.
 
@@ -228,7 +230,7 @@ class SessionManager:
                 # Redact if binary (bytes) or if always sensitive (auth_token)
                 if key == "auth_token":
                     redacted[key] = "REDACTED"
-                elif redact_binary_values and isinstance(redacted[key], (bytes, bytearray)):
+                elif redact_binary_values and isinstance(redacted[key], bytes | bytearray):
                     redacted[key] = "REDACTED"
         return redacted
 
@@ -266,7 +268,7 @@ class SessionManager:
         _LOGGER.info(f"Successfully created Deephaven Session: {session}")
         return session
 
-    async def _get_session_parameters(self, worker_cfg: Dict[str, Any]) -> Dict[str, Any]:
+    async def _get_session_parameters(self, worker_cfg: dict[str, Any]) -> dict[str, Any]:
         """
         Prepare and return the configuration dictionary for Deephaven Session creation.
 
@@ -387,7 +389,6 @@ class SessionManager:
         Example:
             session = await mgr.get_or_create_session('worker1')
         """
-        start_time = time.time()
         _LOGGER.info(f"Getting or creating session for worker: {worker_name}")
         _LOGGER.info(f"Session cache size: {len(self._cache)}")
 
@@ -431,7 +432,7 @@ class SessionManager:
             return session
 
 
-async def _load_bytes(path: Optional[str]) -> Optional[bytes]:
+async def _load_bytes(path: str | None) -> bytes | None:
     """
     Asynchronously load the contents of a binary file.
 

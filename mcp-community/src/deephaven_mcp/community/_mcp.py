@@ -22,14 +22,16 @@ Return Types:
 See individual tool docstrings for full argument, return, and error details.
 """
 
-import logging
 import asyncio
-from typing import Optional, AsyncIterator
-from mcp.server.fastmcp import FastMCP, Context
-from deephaven_mcp import config
-import deephaven_mcp.community._sessions as sessions
-import aiofiles
+import logging
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+
+import aiofiles
+from mcp.server.fastmcp import Context, FastMCP
+
+import deephaven_mcp.community._sessions as sessions
+from deephaven_mcp import config
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -203,7 +205,7 @@ async def worker_statuses(context: Context) -> dict:
             except Exception as e:
                 _LOGGER.warning(f"[worker_statuses] Worker '{name}' unavailable: {e!r}")
                 available = False
-            results.append({'worker': name, 'available': available})
+            results.append({"worker": name, "available": available})
         _LOGGER.info(f"[worker_statuses] Statuses: {results!r}")
         return {"success": True, "result": results}
     except Exception as e:
@@ -213,7 +215,7 @@ async def worker_statuses(context: Context) -> dict:
 
 @mcp_server.tool()
 async def table_schemas(
-    context: Context, worker_name: str, table_names: Optional[list[str]] = None
+    context: Context, worker_name: str, table_names: list[str] | None = None
 ) -> list:
     """
     MCP Tool: Retrieve schemas for one or more tables from a Deephaven worker.
@@ -306,8 +308,8 @@ async def table_schemas(
 async def run_script(
     context: Context,
     worker_name: str,
-    script: Optional[str] = None,
-    script_path: Optional[str] = None,
+    script: str | None = None,
+    script_path: str | None = None,
 ) -> dict:
     """
     MCP Tool: Execute a script on a specified Deephaven worker.
@@ -351,8 +353,9 @@ async def run_script(
 
         if script is None:
             _LOGGER.info(f"[run_script] Loading script from file: {script_path!r}")
-            assert script_path is not None
-            async with aiofiles.open(script_path, "r") as f:
+            if script_path is None:
+                raise ValueError("script_path must not be None")
+            async with aiofiles.open(script_path) as f:
                 script = await f.read()
 
         session_manager = context.request_context.lifespan_context["session_manager"]

@@ -16,11 +16,12 @@ Usage:
 See the project README for configuration details, available tools, and usage examples.
 """
 
+import asyncio  # noqa: F401
 import logging
-import asyncio
-import sys
 import os
-from typing import Literal, cast
+import sys
+from typing import Literal
+
 from ._mcp import mcp_server
 
 __all__ = ["mcp_server", "run_server"]
@@ -40,7 +41,7 @@ def run_server(transport: Literal["stdio", "sse"] = "stdio") -> None:
     
     # Configure logging with the PYTHONLOGLEVEL environment variable
     logging.basicConfig(
-        level=os.getenv('PYTHONLOGLEVEL', 'INFO'),
+        level=os.getenv("PYTHONLOGLEVEL", "INFO"),
         format="[%(asctime)s] %(levelname)s: %(message)s",
         stream=stream,
         force=True  # Ensure we override any existing logging configuration
