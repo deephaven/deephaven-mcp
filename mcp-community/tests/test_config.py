@@ -35,17 +35,17 @@ MINIMAL_CONFIG = {
 # --- Fixtures ---
 @pytest_asyncio.fixture(autouse=True)
 async def cleanup_config_cache():
-    """Ensure config cache is cleared before and after each test."""
-    from deephaven_mcp import config
-    await config.DEFAULT_CONFIG_MANAGER.clear_config_cache()
+    """Ensure config cache is cleared before and after each test using a local ConfigManager."""
+    # No-op: Use local ConfigManager in each test, so no global cache to clear
     yield
-    await config.DEFAULT_CONFIG_MANAGER.clear_config_cache()
 
 # --- Validation tests ---
 def test_validate_config_unknown_top_level_key():
     from deephaven_mcp import config
     bad_config = {"workers": {}, "extra": 1}
+    cm = config.ConfigManager()
     with pytest.raises(ValueError, match="Unknown top-level keys in Deephaven worker config: {'extra'}"):
+        config.ConfigManager().validate_config(bad_config)
         config.ConfigManager.validate_config(bad_config)
 
 def test_validate_config_missing_required_worker_field(monkeypatch):
@@ -70,8 +70,9 @@ def test_validate_config_invalid_schema():
 @pytest.mark.asyncio
 async def test_get_config_valid():
     from deephaven_mcp import config
-    await config.DEFAULT_CONFIG_MANAGER.set_config_cache(VALID_CONFIG)
-    cfg = await config.DEFAULT_CONFIG_MANAGER.get_config()
+    cm = config.ConfigManager()
+    await cm.set_config_cache(VALID_CONFIG)
+    cfg = await cm.get_config()
     assert "workers" in cfg
     assert "local" in cfg["workers"]
 
@@ -107,12 +108,12 @@ async def test_get_config_sets_cache_and_logs(monkeypatch, caplog):
     aiofiles_mock.open = mock.Mock(return_value=aiofiles_open_ctx)
     monkeypatch.setitem(importlib.import_module('aiofiles').__dict__, 'open', aiofiles_mock.open)
 
-    # Clear cache
-    await config.DEFAULT_CONFIG_MANAGER.clear_config_cache()
+    cm = config.ConfigManager()
+    await cm.clear_config_cache()
     with caplog.at_level("INFO"):
-        cfg = await config.DEFAULT_CONFIG_MANAGER.get_config()
+        cfg = await cm.get_config()
     assert cfg == valid_config
-    assert config.DEFAULT_CONFIG_MANAGER._cache == valid_config
+    assert cm._cache == valid_config
     assert any("Deephaven worker configuration loaded and validated successfully" in r for r in caplog.text.splitlines())
 
 @pytest.mark.asyncio
@@ -120,7 +121,7 @@ async def test_get_config_missing_env(monkeypatch):
     from deephaven_mcp import config
     monkeypatch.delenv("DH_MCP_CONFIG_FILE", raising=False)
     with pytest.raises(RuntimeError, match="Environment variable DH_MCP_CONFIG_FILE is not set"):
-        await config.DEFAULT_CONFIG_MANAGER.get_config()
+        await config.ConfigManager().get_config()
 
 @pytest.mark.asyncio
 async def test_get_config_invalid_json(monkeypatch):
@@ -133,36 +134,40 @@ async def test_get_config_invalid_json(monkeypatch):
     aiofiles_open_ctx.__aenter__.return_value.read = mock.AsyncMock(return_value=b"not json")
     aiofiles_mock.open = mock.Mock(return_value=aiofiles_open_ctx)
     monkeypatch.setitem(importlib.import_module('aiofiles').__dict__, 'open', aiofiles_mock.open)
+    cm = config.ConfigManager()
     with pytest.raises(ValueError):
-        await config.DEFAULT_CONFIG_MANAGER.get_config()
+        await cm.get_config()
 
 # --- Cache and worker config tests ---
 @pytest.mark.asyncio
 async def test_clear_config_cache():
     from deephaven_mcp import config
-    await config.DEFAULT_CONFIG_MANAGER.set_config_cache({"workers": {"a": {}}})
-    cfg1 = await config.DEFAULT_CONFIG_MANAGER.get_config()
+    cm = config.ConfigManager()
+    await cm.set_config_cache({"workers": {"a": {}}})
+    cfg1 = await cm.get_config()
     assert "a" in cfg1["workers"]
-    await config.DEFAULT_CONFIG_MANAGER.clear_config_cache()
-    await config.DEFAULT_CONFIG_MANAGER.set_config_cache({"workers": {"b": {}}})
-    cfg2 = await config.DEFAULT_CONFIG_MANAGER.get_config()
+    await cm.clear_config_cache()
+    await cm.set_config_cache({"workers": {"b": {}}})
+    cfg2 = await cm.get_config()
     assert "b" in cfg2["workers"]
     assert "a" not in cfg2["workers"]
 
 @pytest.mark.asyncio
 async def test_get_worker_config():
     from deephaven_mcp import config
-    await config.DEFAULT_CONFIG_MANAGER.set_config_cache(VALID_CONFIG)
-    cfg = await config.DEFAULT_CONFIG_MANAGER.get_worker_config("local")
+    cm = config.ConfigManager()
+    await cm.set_config_cache(VALID_CONFIG)
+    cfg = await cm.get_worker_config("local")
     assert cfg["host"] == "localhost"
     with pytest.raises(RuntimeError):
-        await config.DEFAULT_CONFIG_MANAGER.get_worker_config("nonexistent")
+        await cm.get_worker_config("nonexistent")
 
 @pytest.mark.asyncio
 async def test_get_worker_names():
     from deephaven_mcp import config
-    await config.DEFAULT_CONFIG_MANAGER.set_config_cache(VALID_CONFIG)
-    names = await config.DEFAULT_CONFIG_MANAGER.get_worker_names()
+    cm = config.ConfigManager()
+    await cm.set_config_cache(VALID_CONFIG)
+    names = await cm.get_worker_names()
     assert "local" in names
 
 
@@ -171,14 +176,14 @@ async def test_get_worker_config_no_workers_key():
     from deephaven_mcp import config
     bad_config = {}
     with pytest.raises(ValueError, match="Missing required top-level keys in Deephaven worker config: {'workers'}"):
-        await config.DEFAULT_CONFIG_MANAGER.set_config_cache(bad_config)
+        await config.ConfigManager().set_config_cache(bad_config)
 
 @pytest.mark.asyncio
 async def test_get_config_missing_env(monkeypatch):
     from deephaven_mcp import config
     monkeypatch.delenv("DH_MCP_CONFIG_FILE", raising=False)
     with pytest.raises(RuntimeError, match="Environment variable DH_MCP_CONFIG_FILE is not set"):
-        await config.DEFAULT_CONFIG_MANAGER.get_config()
+        await config.ConfigManager().get_config()
 
 
 
@@ -215,27 +220,30 @@ def test_validate_config_worker_field_wrong_type():
 @pytest.mark.asyncio
 async def test_clear_config_cache():
     from deephaven_mcp import config
-    await config.DEFAULT_CONFIG_MANAGER.set_config_cache({"workers": {"a": {}}})
-    cfg1 = await config.DEFAULT_CONFIG_MANAGER.get_config()
+    cm = config.ConfigManager()
+    await cm.set_config_cache({"workers": {"a": {}}})
+    cfg1 = await cm.get_config()
     assert "a" in cfg1["workers"]
-    await config.DEFAULT_CONFIG_MANAGER.clear_config_cache()
-    await config.DEFAULT_CONFIG_MANAGER.set_config_cache({"workers": {"b": {}}})
-    cfg2 = await config.DEFAULT_CONFIG_MANAGER.get_config()
+    await cm.clear_config_cache()
+    await cm.set_config_cache({"workers": {"b": {}}})
+    cfg2 = await cm.get_config()
     assert "b" in cfg2["workers"]
     assert "a" not in cfg2["workers"]
 
 @pytest.mark.asyncio
 async def test_get_worker_config():
     from deephaven_mcp import config
-    await config.DEFAULT_CONFIG_MANAGER.set_config_cache(VALID_CONFIG)
-    cfg = await config.DEFAULT_CONFIG_MANAGER.get_worker_config("local")
+    cm = config.ConfigManager()
+    await cm.set_config_cache(VALID_CONFIG)
+    cfg = await cm.get_worker_config("local")
     assert cfg["host"] == "localhost"
     with pytest.raises(RuntimeError):
-        await config.DEFAULT_CONFIG_MANAGER.get_worker_config("nonexistent")
+        await cm.get_worker_config("nonexistent")
 
 @pytest.mark.asyncio
 async def test_get_worker_names():
     from deephaven_mcp import config
-    await config.DEFAULT_CONFIG_MANAGER.set_config_cache(VALID_CONFIG)
-    names = await config.DEFAULT_CONFIG_MANAGER.get_worker_names()
+    cm = config.ConfigManager()
+    await cm.set_config_cache(VALID_CONFIG)
+    names = await cm.get_worker_names()
     assert "local" in names
