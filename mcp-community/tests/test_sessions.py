@@ -1,13 +1,20 @@
-import sys
 import os
+import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 from pydeephaven import Session
-from deephaven_mcp.community._sessions import SessionManager, _load_bytes, SessionCreationError
+
 from deephaven_mcp import config
+from deephaven_mcp.community._sessions import (
+    SessionCreationError,
+    SessionManager,
+    _load_bytes,
+)
+
 
 # --- Fixtures and helpers ---
 @pytest.fixture

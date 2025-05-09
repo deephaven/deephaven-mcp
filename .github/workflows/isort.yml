@@ -1,0 +1,30 @@
+name: isort (Import Sorting)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  isort-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Install dependencies
+        run: uv pip install .[dev]
+        working-directory: mcp-community
+
+      - name: Run isort (check only)
+        run: uv run isort . --check-only --diff
+        working-directory: mcp-community

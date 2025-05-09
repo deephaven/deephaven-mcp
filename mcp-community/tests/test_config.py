@@ -1,12 +1,13 @@
 """Tests for Deephaven MCP configuration management."""
 
-import sys
-import os
-import pytest
-import pytest_asyncio
-from unittest import mock
 import importlib
 import json
+import os
+import sys
+from unittest import mock
+
+import pytest
+import pytest_asyncio
 
 # Ensure local source is used for imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
@@ -58,6 +59,7 @@ def test_validate_config_missing_required_worker_field(monkeypatch):
 
 def test_validate_config_invalid_schema():
     from deephaven_mcp import config
+
     # Case: Minimal config is valid
     valid_config = MINIMAL_CONFIG.copy()
     assert config.ConfigManager.validate_config(valid_config) == valid_config
@@ -78,10 +80,11 @@ async def test_get_config_valid():
 
 @pytest.mark.asyncio
 async def test_get_config_sets_cache_and_logs(monkeypatch, caplog):
-    from deephaven_mcp import config
     import importlib
     import json
     from unittest import mock
+
+    from deephaven_mcp import config
 
     # Prepare a valid config JSON string
     valid_config = {
@@ -125,9 +128,10 @@ async def test_get_config_missing_env(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_get_config_invalid_json(monkeypatch):
-    from deephaven_mcp import config
     import importlib
     from unittest import mock
+
+    from deephaven_mcp import config
     monkeypatch.setenv("DH_MCP_CONFIG_FILE", "/fake/path/config.json")
     aiofiles_mock = mock.Mock()
     aiofiles_open_ctx = mock.AsyncMock()

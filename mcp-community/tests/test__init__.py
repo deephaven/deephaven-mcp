@@ -1,13 +1,16 @@
-import sys
-import os
-import logging
-import types
 import builtins
+import logging
+import os
+import sys
+import types
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
+
 
 def test_module_all_exports():
     import deephaven_mcp.community as mod
+
     # __all__ should include mcp_server and run_server
     assert hasattr(mod, 'mcp_server')
     assert hasattr(mod, 'run_server')
@@ -45,6 +48,7 @@ def test_run_server_async_finally(monkeypatch):
 
 def test_run_server_stdio(monkeypatch):
     import deephaven_mcp.community as mod
+
     # Patch all side effects
     monkeypatch.setattr(mod, '_LOGGER', MagicMock())
     monkeypatch.setattr(mod, 'os', MagicMock())

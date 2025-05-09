@@ -1,10 +1,12 @@
-import pytest
 import asyncio
 import warnings
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 import deephaven_mcp.community._mcp as mcp_mod
-from types import SimpleNamespace
+
 
 class MockRequestContext:
     def __init__(self, lifespan_context):

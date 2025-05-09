@@ -65,11 +65,10 @@ server = Server(
 server.start()
 
 # The server must be created before importing deephaven
-from deephaven import (
-    empty_table, time_table, new_table, dtypes as dht, agg
-)
-
-from deephaven.column import string_col, int_col, double_col, bool_col, datetime_col
+from deephaven import agg
+from deephaven import dtypes as dht
+from deephaven import empty_table, new_table, time_table
+from deephaven.column import bool_col, datetime_col, double_col, int_col, string_col
 
 # Table creation by group
 if table_group == 'simple' or table_group == 'all':
