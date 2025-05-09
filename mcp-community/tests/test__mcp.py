@@ -266,6 +266,7 @@ async def test_run_script_session_error(monkeypatch):
 # but are not caused by this test (no real sockets are created or left open). This is required for Python 3.12 and older.
 @pytest.mark.asyncio
 @pytest.mark.filterwarnings("ignore:unclosed <socket.socket:ResourceWarning")
+@pytest.mark.filterwarnings("ignore:unclosed event loop:ResourceWarning")
 async def test_run_script_script_path(monkeypatch):
     session_manager = MagicMock()
     class DummySession:
