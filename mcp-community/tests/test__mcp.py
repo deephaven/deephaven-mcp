@@ -282,7 +282,7 @@ async def test_run_script_script_path_error(monkeypatch):
     session_manager.get_or_create_session = AsyncMock(return_value=DummySession())
     context = MockContext({"session_manager": session_manager})
     with patch("aiofiles.open", new_callable=MagicMock) as aio_open:
-        aio_open.side_effect = RuntimeError("fail-open")
+        aio_open.side_effect = FileNotFoundError("fail-open")
         res = await mcp_mod.run_script(context, worker_name="worker", script_path="foo.py")
         assert res["success"] is False
         assert res["isError"] is True
