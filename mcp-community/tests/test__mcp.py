@@ -19,6 +19,11 @@ class MockContext:
 
 
 # === refresh ===
+
+
+# Suppress ResourceWarning about unclosed sockets, which can be triggered by mocks or library internals in CI
+# but are not caused by this test (no real sockets are created or left open). This is required for Python 3.12 and older.
+@pytest.mark.filterwarnings("ignore:unclosed <socket.socket")
 @pytest.mark.asyncio
 async def test_refresh_success(monkeypatch):
     config_manager = MagicMock()
