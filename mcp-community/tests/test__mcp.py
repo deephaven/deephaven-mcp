@@ -253,7 +253,11 @@ async def test_run_script_no_script(monkeypatch):
     assert res["isError"] is True
     assert "Must provide either script or script_path." in res["error"]
 
+# Use filterwarnings to suppress ResourceWarning about unclosed sockets and event loops, which can be triggered by mocks or library internals in CI
+# but are not caused by this test (no real sockets or event loops are created or left open). This is required for Python 3.12+ and some CI environments.
 @pytest.mark.asyncio
+@pytest.mark.filterwarnings("ignore:unclosed <socket.socket:ResourceWarning")
+@pytest.mark.filterwarnings("ignore:unclosed event loop:ResourceWarning")
 async def test_run_script_session_error(monkeypatch):
     session_manager = MagicMock()
     session_manager.get_or_create_session = AsyncMock(side_effect=Exception("fail"))
