@@ -271,10 +271,14 @@ async def test_run_script_script_path(monkeypatch):
             DummySession.called = script
     session_manager.get_or_create_session = AsyncMock(return_value=DummySession())
     context = MockContext({"session_manager": session_manager})
-    with patch("aiofiles.open", new_callable=MagicMock) as aio_open:
-        mock_file = aio_open.return_value.__aenter__.return_value
-        mock_file.read = AsyncMock(return_value="print(123)")
-        res = await mcp_mod.run_script(context, worker_name="worker", script_path="foo.py")
+    # Suppress ResourceWarning for unclosed sockets, which can be triggered by mocks or library internals in CI,
+    # but are not caused by this test (no real sockets are created or left open).
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", ResourceWarning)
+        with patch("aiofiles.open", new_callable=MagicMock) as aio_open:
+            mock_file = aio_open.return_value.__aenter__.return_value
+            mock_file.read = AsyncMock(return_value="print(123)")
+            res = await mcp_mod.run_script(context, worker_name="worker", script_path="foo.py")
         assert res["success"] is True
         assert DummySession.called == "print(123)"
 
