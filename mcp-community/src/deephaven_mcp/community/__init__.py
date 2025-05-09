@@ -20,14 +20,14 @@ import logging
 import asyncio
 import sys
 import os
+from typing import Literal, cast
 from ._mcp import mcp_server
 
 __all__ = ["mcp_server", "run_server"]
 
 _LOGGER = logging.getLogger(__name__)
 
-
-def run_server(transport: str = "stdio") -> None:
+def run_server(transport: Literal["stdio", "sse"] = "stdio") -> None:
     """
     Start the MCP server with the specified transport.
 
@@ -54,7 +54,7 @@ def run_server(transport: str = "stdio") -> None:
         _LOGGER.info(f"MCP server '{mcp_server.name}' stopped.")
 
 
-def main():
+def main() -> None:
     """
     Command-line entry point for the Deephaven MCP Community server.
 

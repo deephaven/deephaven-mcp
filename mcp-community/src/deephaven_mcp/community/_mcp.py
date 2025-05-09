@@ -24,7 +24,7 @@ See individual tool docstrings for full argument, return, and error details.
 
 import logging
 import asyncio
-from typing import Optional
+from typing import Optional, AsyncIterator
 from mcp.server.fastmcp import FastMCP, Context
 from deephaven_mcp import config
 import deephaven_mcp.community._sessions as sessions
@@ -34,7 +34,7 @@ from contextlib import asynccontextmanager
 _LOGGER = logging.getLogger(__name__)
 
 @asynccontextmanager
-async def app_lifespan(server: FastMCP):
+async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
     """
     Async context manager for the FastMCP server application lifespan.
 
@@ -351,6 +351,7 @@ async def run_script(
 
         if script is None:
             _LOGGER.info(f"[run_script] Loading script from file: {script_path!r}")
+            assert script_path is not None
             async with aiofiles.open(script_path, "r") as f:
                 script = await f.read()
 

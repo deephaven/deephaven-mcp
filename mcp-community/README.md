@@ -394,7 +394,7 @@ uv pip install .[dev]
   uv run pytest --cov=src --cov-report=html
   open htmlcov/index.html
   ```
-- **Type checking:** `uv run mypy .`
+- **Type checking:** `uv run mypy src`
 - **Linting:** `uv run ruff .`
 - **Format code:** `uv run black .`
 - **Sort imports:** `uv run isort .`

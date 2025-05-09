@@ -151,6 +151,7 @@ from typing import Any, Dict, Optional
 from time import perf_counter
 import asyncio
 import aiofiles
+from typing import cast, Any
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -309,7 +310,7 @@ class ConfigManager:
             raise RuntimeError(f"Worker {worker_name} not found in configuration")
 
         _LOGGER.debug(f"Returning config for worker: {worker_name}")
-        return workers[worker_name]
+        return cast(dict[str, Any], workers[worker_name])
 
 
     async def get_worker_names(self) -> list[str]:
@@ -407,6 +408,8 @@ class ConfigManager:
                     )
 
                 allowed_types = _ALLOWED_WORKER_FIELDS[field]
+                if not isinstance(allowed_types, tuple):
+                    allowed_types = (allowed_types,)
                 if not isinstance(value, allowed_types):
                     _LOGGER.error(
                         f"Field '{field}' in worker config for {worker_name} must be of type {allowed_types}"
@@ -416,4 +419,3 @@ class ConfigManager:
                     )
 
         return config
-
