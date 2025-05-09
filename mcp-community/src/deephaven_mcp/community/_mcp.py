@@ -34,7 +34,7 @@ from contextlib import asynccontextmanager
 _LOGGER = logging.getLogger(__name__)
 
 @asynccontextmanager
-async def app_lifespan(server):
+async def app_lifespan(server: FastMCP):
     """
     Async context manager for the FastMCP server application lifespan.
 
