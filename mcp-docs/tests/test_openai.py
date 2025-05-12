@@ -1,5 +1,6 @@
 import types
 
+import asyncio
 import openai
 import pytest
 
@@ -146,9 +147,6 @@ def test_openai_client_constructor_validation():
         OpenAIClient(api_key="x", base_url=123, model="z")
     with pytest.raises(OpenAIClientError):
         OpenAIClient(api_key="x", base_url="y", model=123)
-
-import asyncio
-
 
 @pytest.mark.asyncio
 async def test_chat_malformed_response():
