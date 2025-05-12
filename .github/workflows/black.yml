@@ -26,5 +26,5 @@ jobs:
         working-directory: mcp-community
 
       - name: Run Black (check only)
-        run: uv run black . --check --diff
+        run: uv run black . --check --diff --exclude _version.py --exclude .venv
         working-directory: mcp-community
