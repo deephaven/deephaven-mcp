@@ -32,7 +32,8 @@ dependencies = [
     # Data validation and settings
     "pydantic>=2.0.0",       # Data validation and parsing
     # Environment variable loading
-    "python-dotenv>=1.0.0"   # Load .env files
+    "python-dotenv>=1.0.0",   # Load .env files
+    "mcp[cli]>=1.6.0"  # Enable import of mcp.server.fastmcp for docs
 ]
 
 
