@@ -359,7 +359,7 @@ class SessionManager:
         else:
             _LOGGER.debug("No client private key provided for session.")
 
-        rst = {
+        session_config = {
             "host": host,
             "port": port,
             "auth_type": auth_type,
@@ -373,10 +373,10 @@ class SessionManager:
         }
 
         # Log final prepared config (file paths may have been replaced by binary values)
-        log_cfg = self._redact_sensitive_session_fields(rst)
+        log_cfg = self._redact_sensitive_session_fields(session_config)
         _LOGGER.info(f"Prepared Deephaven Session config: {log_cfg}")
 
-        return rst
+        return session_config
 
     async def get_or_create_session(self, worker_name: str) -> Session:
         """
