@@ -16,6 +16,7 @@ Usage:
 See the project README for configuration details, available tools, and usage examples.
 """
 
+import asyncio  # noqa: F401
 import logging
 import os
 import sys
