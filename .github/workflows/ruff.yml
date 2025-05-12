@@ -26,5 +26,5 @@ jobs:
         working-directory: mcp-community
 
       - name: Run Ruff
-        run: uv run ruff check src
+        run: uv run ruff check src --exclude _version.py --exclude .venv
         working-directory: mcp-community
