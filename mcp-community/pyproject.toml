@@ -45,6 +45,7 @@ dev = [
 
     # Type checking and static analysis
     "mypy>=1.6.0",  # Static type checker
+    "types-aiofiles",  # Type stubs for aiofiles
 
     # Development and CI
     "pre-commit>=3.4.0",  # Git hooks management
@@ -88,6 +89,8 @@ target-version = ["py310"]
 
 # Ruff configuration for linting and code quality
 [tool.ruff]
+
+[tool.ruff.lint]
 select = ["E", "F", "I", "B", "C", "U", "Q", "S"]  # Select specific linting rules
 ignore = ["E501"]  # Ignore line length warnings since we use black
 

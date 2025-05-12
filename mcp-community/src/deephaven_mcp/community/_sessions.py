@@ -25,13 +25,15 @@ Dependencies:
     - Requires aiofiles for async file I/O.
 """
 
-from typing import Optional, Dict, Any, Type
-from types import TracebackType
-from pydeephaven import Session
-import logging
 import asyncio
+import logging
 import time
+from types import TracebackType
+from typing import Any
+
 import aiofiles
+from pydeephaven import Session
+
 from deephaven_mcp import config
 
 _LOGGER = logging.getLogger(__name__)
@@ -39,13 +41,14 @@ _LOGGER = logging.getLogger(__name__)
 
 class SessionCreationError(Exception):
     """Raised when a Deephaven Session cannot be created."""
+
     pass
 
 
 class SessionManager:
     """
     Manages Deephaven Session objects, including creation, caching, and lifecycle.
- 
+
     Usage:
         - Instantiate with a ConfigManager instance:
             cfg_mgr = ...  # Your ConfigManager
@@ -58,6 +61,7 @@ class SessionManager:
     Notes:
         - Each SessionManager instance is fully isolated and must be provided a ConfigManager.
     """
+
     def __init__(self, config_manager: config.ConfigManager):
         """
         Initialize a new SessionManager instance.
@@ -72,7 +76,7 @@ class SessionManager:
             cfg_mgr = ...  # Your ConfigManager instance
             mgr = SessionManager(cfg_mgr)
         """
-        self._cache: Dict[str, Session] = {}
+        self._cache: dict[str, Session] = {}
         self._lock = asyncio.Lock()
         self._config_manager = config_manager
 
@@ -93,9 +97,9 @@ class SessionManager:
 
     async def __aexit__(
         self,
-        exc_type: Optional[Type[BaseException]],
-        exc: Optional[BaseException],
-        tb: Optional[TracebackType]
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
     ) -> None:
         """
         Exit the async context manager for SessionManager, ensuring resource cleanup.
@@ -192,7 +196,9 @@ class SessionManager:
                 exc_info=True,
             )
 
-    def _redact_sensitive_session_fields(self, config: Dict[str, Any], redact_binary_values: bool = True) -> Dict[str, Any]:
+    def _redact_sensitive_session_fields(
+        self, config: dict[str, Any], redact_binary_values: bool = True
+    ) -> dict[str, Any]:
         """
         Return a copy of a session config dictionary with sensitive values redacted for safe logging.
 
@@ -222,13 +228,20 @@ class SessionManager:
             {'auth_token': 'REDACTED', 'client_private_key': 'REDACTED'}
         """
         redacted = dict(config)
-        sensitive_keys = ["auth_token", "tls_root_certs", "client_cert_chain", "client_private_key"]
+        sensitive_keys = [
+            "auth_token",
+            "tls_root_certs",
+            "client_cert_chain",
+            "client_private_key",
+        ]
         for key in sensitive_keys:
             if key in redacted and redacted[key]:
                 # Redact if binary (bytes) or if always sensitive (auth_token)
                 if key == "auth_token":
                     redacted[key] = "REDACTED"
-                elif redact_binary_values and isinstance(redacted[key], (bytes, bytearray)):
+                elif redact_binary_values and isinstance(
+                    redacted[key], bytes | bytearray
+                ):
                     redacted[key] = "REDACTED"
         return redacted
 
@@ -260,13 +273,20 @@ class SessionManager:
         try:
             session = await asyncio.to_thread(Session, **kwargs)
         except Exception as e:
-            _LOGGER.error(f"Failed to create Deephaven Session with config: {log_kwargs}: {e}", exc_info=True)
-            raise SessionCreationError(f"Failed to create Deephaven Session with config: {log_kwargs}: {e}") from e
+            _LOGGER.error(
+                f"Failed to create Deephaven Session with config: {log_kwargs}: {e}",
+                exc_info=True,
+            )
+            raise SessionCreationError(
+                f"Failed to create Deephaven Session with config: {log_kwargs}: {e}"
+            ) from e
 
         _LOGGER.info(f"Successfully created Deephaven Session: {session}")
         return session
 
-    async def _get_session_parameters(self, worker_cfg: Dict[str, Any]) -> Dict[str, Any]:
+    async def _get_session_parameters(
+        self, worker_cfg: dict[str, Any]
+    ) -> dict[str, Any]:
         """
         Prepare and return the configuration dictionary for Deephaven Session creation.
 
@@ -313,7 +333,9 @@ class SessionManager:
         client_private_key = worker_cfg.get("client_private_key", None)
 
         if tls_root_certs:
-            _LOGGER.info(f"Loading TLS root certs from: {worker_cfg.get('tls_root_certs')}")
+            _LOGGER.info(
+                f"Loading TLS root certs from: {worker_cfg.get('tls_root_certs')}"
+            )
             tls_root_certs = await _load_bytes(tls_root_certs)
             _LOGGER.info("Loaded TLS root certs successfully.")
         else:
@@ -337,7 +359,7 @@ class SessionManager:
         else:
             _LOGGER.debug("No client private key provided for session.")
 
-        rst = {
+        session_config = {
             "host": host,
             "port": port,
             "auth_type": auth_type,
@@ -351,10 +373,10 @@ class SessionManager:
         }
 
         # Log final prepared config (file paths may have been replaced by binary values)
-        log_cfg = self._redact_sensitive_session_fields(rst)
+        log_cfg = self._redact_sensitive_session_fields(session_config)
         _LOGGER.info(f"Prepared Deephaven Session config: {log_cfg}")
 
-        return rst
+        return session_config
 
     async def get_or_create_session(self, worker_name: str) -> Session:
         """
@@ -387,7 +409,6 @@ class SessionManager:
         Example:
             session = await mgr.get_or_create_session('worker1')
         """
-        start_time = time.time()
         _LOGGER.info(f"Getting or creating session for worker: {worker_name}")
         _LOGGER.info(f"Session cache size: {len(self._cache)}")
 
@@ -417,7 +438,9 @@ class SessionManager:
             # Redact sensitive info for logging
             log_cfg = self._redact_sensitive_session_fields(session_params)
             log_cfg["worker_name"] = worker_name
-            _LOGGER.info(f"Creating new Deephaven Session with config: (worker cache key: {worker_name}) {log_cfg}")
+            _LOGGER.info(
+                f"Creating new Deephaven Session with config: (worker cache key: {worker_name}) {log_cfg}"
+            )
 
             session = await self._create_session(**session_params)
 
@@ -431,7 +454,7 @@ class SessionManager:
             return session
 
 
-async def _load_bytes(path: Optional[str]) -> Optional[bytes]:
+async def _load_bytes(path: str | None) -> bytes | None:
     """
     Asynchronously load the contents of a binary file.
 

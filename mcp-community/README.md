@@ -378,33 +378,82 @@ Make sure the server is running and matches the worker config in your `DH_MCP_CO
 
 ## Development
 
-### Install Dev Dependencies
-```sh
-uv pip install .[dev]
-```
+### Setting Up Your Development Environment
+
+1. **Install Dev Dependencies**
+   ```sh
+   uv pip install .[dev]
+   ```
+   This will install all necessary packages for development, testing, linting, and formatting.
+
+2. **Pre-commit Hooks (Recommended)**
+   To automatically run linting and formatting before each commit, you can set up pre-commit hooks:
+   ```sh
+   uv pip install pre-commit
+   pre-commit install
+   ```
+
+---
 
 ### Useful Commands
-- **Run tests:** `uv pytest`
-- **Run all tests with coverage:**
+
+#### Testing & Coverage
+- **Run all tests with coverage summary:**
   ```sh
   uv run pytest --cov=src --cov-report=term-missing
   ```
-  This will print a coverage summary to the terminal. To generate an HTML report:
+  Prints a concise coverage report to the terminal.
+
+- **Generate HTML coverage report:**
   ```sh
   uv run pytest --cov=src --cov-report=html
   open htmlcov/index.html
   ```
-- **Type checking:** `uv run mypy .`
-- **Linting:** `uv run ruff .`
-- **Format code:** `uv run black .`
-- **Sort imports:** `uv run isort .`
+  Opens a detailed, navigable HTML report in your browser.
 
-### Debugging
-- Run the server directly with a custom entrypoint:
+- **Run tests only (no coverage):**
+  ```sh
+  uv run pytest
+  ```
+
+#### Static Analysis & Code Quality
+- **Type checking:**
+  ```sh
+  uv run mypy src
+  ```
+  Checks for type errors using [mypy](http://mypy-lang.org/).
+
+- **Linting:**
+  ```sh
+  uv run ruff check src
+  uv run ruff check src --fix  # Auto-fix common issues
+  ```
+  Uses [Ruff](https://docs.astral.sh/ruff/) for fast linting and code quality enforcement.
+
+- **Format code:**
+  ```sh
+  uv run black .
+  ```
+  Formats your code using [Black](https://black.readthedocs.io/).
+
+- **Sort imports:**
+  ```sh
+  uv run isort .
+  ```
+  Sorts imports for consistency using [isort](https://pycqa.github.io/isort/).
+
+---
+
+### Running and Debugging the Server
+
+- **Run the server directly (development mode):**
   ```sh
   PYTHONPATH=src uv run mcp dev src/deephaven_mcp/community/_mcp.py:mcp_server
   ```
-- Use the Inspector or the test client for interactive tool calls.
+  This command starts the MCP server for local development. You can specify different entrypoints as needed.
+
+- **Interactive Tools:**
+  Use the Inspector or the test client for interactive tool calls and debugging.
 
 ---
 

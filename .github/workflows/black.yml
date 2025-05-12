@@ -1,0 +1,30 @@
+name: black (Code Formatter)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  black-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Install dependencies
+        run: uv pip install ".[dev]" --system
+        working-directory: mcp-community
+
+      - name: Run Black (check only)
+        run: uv run black . --check --diff --exclude '(_version.py|.venv)'
+        working-directory: mcp-community

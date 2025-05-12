@@ -1,0 +1,30 @@
+name: ruff lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  ruff-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Install dependencies
+        run: uv pip install ".[dev]" --system
+        working-directory: mcp-community
+
+      - name: Run Ruff
+        run: uv run ruff check src --exclude _version.py --exclude .venv
+        working-directory: mcp-community

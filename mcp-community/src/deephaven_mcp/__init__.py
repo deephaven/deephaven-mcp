@@ -14,10 +14,12 @@ To run a Deephaven MCP server, use the `run_server` function from the `community
 """
 
 # Import version from _version.py
-from ._version import version as __version__
-
 # Initialize logging
 import logging
+
+from ._version import version as __version__
+
+__all__ = ["__version__"]
 
 _LOGGER = logging.getLogger(__name__)
 _LOGGER.addHandler(logging.NullHandler())
