@@ -72,7 +72,7 @@ Repository = "https://github.com/deephaven/deephaven-mcp"
 Issues = "https://github.com/deephaven/deephaven-mcp/issues"
 
 [project.scripts]
-dh-mcp-docs = "deephaven_mcp.docs.__main__:main"
+dh-mcp-docs = "deephaven_mcp.docs:main"
 
 [tool.uv]
 package = true
