@@ -173,6 +173,9 @@ class OpenAIClient:
         except openai.OpenAIError as e:
             _LOGGER.error(f"[OpenAIClient.chat] OpenAI API call failed: {e}", exc_info=True)
             raise OpenAIClientError(f"OpenAI API call failed: {e}") from e
+        except Exception as e:
+            _LOGGER.error(f"[OpenAIClient.chat] Unexpected error: {e}", exc_info=True)
+            raise OpenAIClientError(f"Unexpected error: {e}") from e
 
     async def stream_chat(
         self,
@@ -226,4 +229,7 @@ class OpenAIClient:
         except openai.OpenAIError as e:
             _LOGGER.error(f"[OpenAIClient.stream_chat] OpenAI API streaming call failed: {e}", exc_info=True)
             raise OpenAIClientError(f"OpenAI API streaming call failed: {e}") from e
+        except Exception as e:
+            _LOGGER.error(f"[OpenAIClient.stream_chat] Unexpected error: {e}", exc_info=True)
+            raise OpenAIClientError(f"Unexpected error: {e}") from e
 
