@@ -1,8 +1,10 @@
-import pytest
 import types
-from deephaven_mcp.openai import OpenAIClient, OpenAIClientError
 
 import openai
+import pytest
+
+from deephaven_mcp.openai import OpenAIClient, OpenAIClientError
+
 
 class DummyOpenAIError(openai.OpenAIError):
     pass
@@ -146,6 +148,7 @@ def test_openai_client_constructor_validation():
         OpenAIClient(api_key="x", base_url="y", model=123)
 
 import asyncio
+
 
 @pytest.mark.asyncio
 async def test_chat_malformed_response():

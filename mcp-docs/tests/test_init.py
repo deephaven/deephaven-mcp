@@ -1,6 +1,7 @@
 import importlib
 import logging
 
+
 def test_init_module_attributes():
     mod = importlib.import_module("deephaven_mcp")
     # __version__ should exist and be a string

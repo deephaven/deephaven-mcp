@@ -2,6 +2,7 @@ import importlib
 import os
 import sys
 import types
+
 import pytest
 
 
@@ -29,6 +30,7 @@ def test_mcp_server_and_docs_chat(monkeypatch):
 
 import asyncio
 
+
 class DummyOpenAIClient:
     def __init__(self, response=None, exc=None):
         self.response = response
@@ -42,6 +44,7 @@ def test_docs_chat_success(monkeypatch):
     monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
     sys.modules.pop("deephaven_mcp.docs._mcp", None)
     import deephaven_mcp.docs._mcp as mcp_mod
+
     # Patch inkeep_client with dummy
     mcp_mod.inkeep_client = DummyOpenAIClient(response="Hello from docs!")
     coro = mcp_mod.docs_chat("hi", [{"role": "user", "content": "hi"}])
@@ -53,6 +56,7 @@ def test_docs_chat_error(monkeypatch):
     monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
     sys.modules.pop("deephaven_mcp.docs._mcp", None)
     import deephaven_mcp.docs._mcp as mcp_mod
+
     # Patch inkeep_client with dummy that raises
     mcp_mod.inkeep_client = DummyOpenAIClient(exc=OpenAIClientError("fail!"))
     coro = mcp_mod.docs_chat("fail", None)

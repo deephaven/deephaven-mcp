@@ -4,11 +4,12 @@ openai.py - Generic OpenAI/LLM client utilities for deephaven_mcp
 This module provides a generic OpenAIClient class for interacting with OpenAI-compatible LLM APIs.
 """
 
-import time
 import logging
-import openai
+import time
+from collections.abc import AsyncGenerator, Sequence
 from typing import Any
-from collections.abc import Sequence, AsyncGenerator
+
+import openai
 
 _LOGGER = logging.getLogger(__name__)
 

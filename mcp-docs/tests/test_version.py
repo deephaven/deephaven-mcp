@@ -1,6 +1,7 @@
 import importlib
 import types
 
+
 def test_version_module_attributes():
     version_mod = importlib.import_module("deephaven_mcp._version")
     assert hasattr(version_mod, "__version__")

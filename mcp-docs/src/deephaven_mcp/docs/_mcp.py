@@ -29,7 +29,9 @@ Example (agentic usage):
 """
 
 import os
+
 from mcp.server.fastmcp import FastMCP
+
 from ..openai import OpenAIClient
 
 #: The API key for authenticating with the Inkeep-powered LLM API. Must be set in the environment. Private to this module.

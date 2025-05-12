@@ -13,6 +13,7 @@ To run a Deephaven MCP Docs server, use the `run_server` function from the `docs
 # Import version from _version.py
 # Initialize logging
 import logging
+
 from ._version import version as __version__
 
 __all__ = ["__version__"]

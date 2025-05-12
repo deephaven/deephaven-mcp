@@ -1,8 +1,9 @@
 import importlib
+import logging
 import sys
 import types
+
 import pytest
-import logging
 
 
 def test_module_exports(monkeypatch):
