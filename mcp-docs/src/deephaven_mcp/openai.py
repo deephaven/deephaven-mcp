@@ -119,7 +119,7 @@ class OpenAIClient:
                 {"role": "user", "content": "What's the weather?"}
             ]
         """
-        messages = []
+        messages: list[dict[str, str]] = []
         if history:
             messages.extend(history)
         if self.system_prompt:
@@ -160,7 +160,7 @@ class OpenAIClient:
             start_time = time.monotonic()
             response = await self.client.chat.completions.create(
                 model=self.model,
-                messages=messages,
+                messages=messages,  # type: ignore[arg-type]  # Acceptable: OpenAI expects a list of dicts with 'role' and 'content'
                 **kwargs
             )
             elapsed = time.monotonic() - start_time
@@ -170,7 +170,10 @@ class OpenAIClient:
                 _LOGGER.error(f"[OpenAIClient.chat] Unexpected response structure: {response}")
                 raise OpenAIClientError("Unexpected response structure from OpenAI API")
             _LOGGER.info(f"[OpenAIClient.chat] Chat completion succeeded | request_id={request_id} | elapsed={elapsed:.3f}s")
-            return response.choices[0].message.content.strip()
+            content = response.choices[0].message.content
+            if content is None:
+                raise OpenAIClientError("OpenAI API returned a null content message")
+            return content.strip()
         except openai.OpenAIError as e:
             _LOGGER.error(f"[OpenAIClient.chat] OpenAI API call failed: {e}", exc_info=True)
             raise OpenAIClientError(f"OpenAI API call failed: {e}") from e
@@ -211,18 +214,23 @@ class OpenAIClient:
             start_time = time.monotonic()
             response = await self.client.chat.completions.create(
                 model=self.model,
-                messages=messages,
+                messages=messages,  # type: ignore[arg-type]  # Acceptable: OpenAI expects a list of dicts with 'role' and 'content'
                 stream=True,
                 **kwargs
             )
             request_id = getattr(response, 'id', None)
             yielded = False
-            async for chunk in response:
-                # OpenAI's SDK returns chunks with choices[0].delta.content
-                content = getattr(chunk.choices[0].delta, "content", None)
-                if content:
-                    yielded = True
-                    yield content
+            # Only async iterate if response is an async iterable
+            if hasattr(response, "__aiter__"):
+                async for chunk in response:
+                    # OpenAI's SDK returns chunks with choices[0].delta.content
+                    content = getattr(chunk.choices[0].delta, "content", None)
+                    if content:
+                        yielded = True
+                        yield content
+            else:
+                _LOGGER.error(f"[OpenAIClient.stream_chat] Response is not async iterable: {type(response)} | request_id={request_id}")
+                raise OpenAIClientError("OpenAI API did not return an async iterable for streaming chat.")
             elapsed = time.monotonic() - start_time
             if not yielded:
                 _LOGGER.warning(f"[OpenAIClient.stream_chat] No content yielded in stream | request_id={request_id}")
