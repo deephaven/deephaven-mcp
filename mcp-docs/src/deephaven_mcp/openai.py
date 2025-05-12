@@ -2,7 +2,6 @@
 openai.py - Generic OpenAI/LLM client utilities for deephaven_mcp
 
 This module provides a generic OpenAIClient class for interacting with OpenAI-compatible LLM APIs.
-It is designed to be imported and used by other modules (e.g., docs/_openai.py) for specific tool implementations.
 """
 
 import time
