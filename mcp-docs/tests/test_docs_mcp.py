@@ -22,11 +22,13 @@ def test_mcp_server_and_docs_chat(monkeypatch):
     sys.modules.pop("deephaven_mcp.docs._mcp", None)
     mod = importlib.import_module("deephaven_mcp.docs._mcp")
     from mcp.server.fastmcp import FastMCP
+
     assert hasattr(mod, "mcp_server")
     assert isinstance(mod.mcp_server, FastMCP)
     # Check __all__
     assert hasattr(mod, "__all__")
     assert "mcp_server" in mod.__all__
+
 
 import asyncio
 
@@ -35,10 +37,12 @@ class DummyOpenAIClient:
     def __init__(self, response=None, exc=None):
         self.response = response
         self.exc = exc
+
     async def chat(self, prompt, history=None):
         if self.exc:
             raise self.exc
         return self.response
+
 
 def test_docs_chat_success(monkeypatch):
     monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
@@ -51,8 +55,10 @@ def test_docs_chat_success(monkeypatch):
     result = asyncio.run(coro)
     assert result == "Hello from docs!"
 
+
 def test_docs_chat_error(monkeypatch):
     from deephaven_mcp.openai import OpenAIClientError
+
     monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
     sys.modules.pop("deephaven_mcp.docs._mcp", None)
     import deephaven_mcp.docs._mcp as mcp_mod

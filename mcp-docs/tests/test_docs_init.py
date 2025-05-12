@@ -23,12 +23,13 @@ def test_run_server_stdio(monkeypatch):
     sys.modules.pop("deephaven_mcp.docs.__init__", None)
     mod = importlib.import_module("deephaven_mcp.docs.__init__")
     called = {}
-    
+
     class DummyServer:
         name = "dummy"
+
         def run(self, transport=None):
             called["run"] = transport
-    
+
     monkeypatch.setattr(mod, "mcp_server", DummyServer())
     logs = []
     monkeypatch.setattr(logging, "basicConfig", lambda **kwargs: logs.append(kwargs))
@@ -43,10 +44,13 @@ def test_run_server_sse(monkeypatch):
     sys.modules.pop("deephaven_mcp.docs.__init__", None)
     mod = importlib.import_module("deephaven_mcp.docs.__init__")
     called = {}
+
     class DummyServer:
         name = "dummy"
+
         def run(self, transport=None):
             called["run"] = transport
+
     monkeypatch.setattr(mod, "mcp_server", DummyServer())
     monkeypatch.setattr(logging, "basicConfig", lambda **kwargs: None)
     monkeypatch.setattr(mod, "_LOGGER", logging.getLogger("dummy"))
@@ -59,7 +63,9 @@ def test_main_invokes_run_server(monkeypatch):
     sys.modules.pop("deephaven_mcp.docs.__init__", None)
     mod = importlib.import_module("deephaven_mcp.docs.__init__")
     called = {}
-    monkeypatch.setattr(mod, "run_server", lambda transport: called.setdefault("transport", transport))
+    monkeypatch.setattr(
+        mod, "run_server", lambda transport: called.setdefault("transport", transport)
+    )
     monkeypatch.setattr("sys.argv", ["prog", "-t", "sse"])
     mod.main()
     assert called["transport"] == "sse"

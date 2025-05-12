@@ -65,6 +65,7 @@ FastMCP: The server instance for the Deephaven documentation tools.
 - The server is intended for use in MCP-compatible orchestration environments.
 """
 
+
 @mcp_server.tool()
 async def docs_chat(prompt: str, history: list[dict[str, str]] | None = None) -> str:
     """
@@ -105,7 +106,5 @@ async def docs_chat(prompt: str, history: list[dict[str, str]] | None = None) ->
     """
     return await inkeep_client.chat(prompt, history)
 
+
 __all__ = ["mcp_server"]
-
-
-

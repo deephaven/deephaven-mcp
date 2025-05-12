@@ -11,6 +11,7 @@ def test_init_module_attributes():
     assert hasattr(mod, "__all__")
     assert "__version__" in mod.__all__
 
+
 def test_logger_is_null_handler():
     mod = importlib.import_module("deephaven_mcp")
     logger = logging.getLogger(mod.__name__)

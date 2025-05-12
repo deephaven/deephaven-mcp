@@ -10,6 +10,7 @@ from deephaven_mcp.openai import OpenAIClient, OpenAIClientError
 class DummyOpenAIError(openai.OpenAIError):
     pass
 
+
 class DummyCompletions:
     def __init__(self, parent):
         self.parent = parent
@@ -21,21 +22,32 @@ class DummyCompletions:
                 if self.parent.should_fail:
                     raise DummyOpenAIError("Simulated OpenAI error")
                 for chunk in self.parent.stream_content:
+
                     class DummyChoice:
                         def __init__(self, content):
                             self.delta = types.SimpleNamespace(content=content)
+
                     yield types.SimpleNamespace(choices=[DummyChoice(chunk)])
+
             return stream()
         # Non-streaming
         if self.parent.should_fail:
             raise DummyOpenAIError("Simulated OpenAI error")
+
         class DummyResponse:
-            choices = [types.SimpleNamespace(message=types.SimpleNamespace(content=self.parent.response_content))]
+            choices = [
+                types.SimpleNamespace(
+                    message=types.SimpleNamespace(content=self.parent.response_content)
+                )
+            ]
+
         return DummyResponse()
+
 
 class DummyChat:
     def __init__(self, parent):
         self.completions = DummyCompletions(parent)
+
 
 class DummyAsyncOpenAI:
     def __init__(self):
@@ -44,16 +56,18 @@ class DummyAsyncOpenAI:
         self.stream_content = ["Hello,", " world!"]
         self.chat = DummyChat(self)
 
+
 @pytest.mark.asyncio
 async def test_chat_success():
     client = OpenAIClient(
         api_key="test-key",
         base_url="https://api.test.com/v1",
         model="gpt-test",
-        client=DummyAsyncOpenAI()
+        client=DummyAsyncOpenAI(),
     )
     result = await client.chat("hello", history=[{"role": "user", "content": "hi"}])
     assert result == "Hello, world!"
+
 
 @pytest.mark.asyncio
 async def test_chat_failure():
@@ -63,10 +77,11 @@ async def test_chat_failure():
         api_key="test-key",
         base_url="https://api.test.com/v1",
         model="gpt-test",
-        client=dummy
+        client=dummy,
     )
     with pytest.raises(OpenAIClientError):
         await client.chat("fail")
+
 
 @pytest.mark.asyncio
 async def test_stream_chat_success():
@@ -75,12 +90,13 @@ async def test_stream_chat_success():
         api_key="test-key",
         base_url="https://api.test.com/v1",
         model="gpt-test",
-        client=dummy
+        client=dummy,
     )
     result = []
     async for token in client.stream_chat("hello"):  # type: ignore
         result.append(token)
     assert result == ["Hello,", " world!"]
+
 
 @pytest.mark.asyncio
 async def test_stream_chat_failure():
@@ -90,18 +106,19 @@ async def test_stream_chat_failure():
         api_key="test-key",
         base_url="https://api.test.com/v1",
         model="gpt-test",
-        client=dummy
+        client=dummy,
     )
     with pytest.raises(OpenAIClientError):
         async for _ in client.stream_chat("fail"):  # type: ignore
             pass
+
 
 def test_build_messages_and_validate_history():
     client = OpenAIClient(
         api_key="test-key",
         base_url="https://api.test.com/v1",
         model="gpt-test",
-        client=DummyAsyncOpenAI()
+        client=DummyAsyncOpenAI(),
     )
     prompt = "What's up?"
     history = [{"role": "user", "content": "Hi"}]
@@ -131,7 +148,7 @@ def test_build_messages_and_validate_history():
         client._validate_history(["notadict"])
     # Non-string values
     with pytest.raises(OpenAIClientError):
-        client._validate_history([{ "role": "user", "content": 123 }])
+        client._validate_history([{"role": "user", "content": 123}])
 
 
 def test_openai_client_constructor_validation():
@@ -148,6 +165,7 @@ def test_openai_client_constructor_validation():
     with pytest.raises(OpenAIClientError):
         OpenAIClient(api_key="x", base_url="y", model=123)
 
+
 @pytest.mark.asyncio
 async def test_chat_malformed_response():
     class MalformedDummy:
@@ -155,23 +173,31 @@ async def test_chat_malformed_response():
             # Missing choices
             class DummyResponse:
                 pass
+
             return DummyResponse()
+
         @property
         def chat(self):
             parent = self
+
             class Chat:
                 @property
                 def completions(self_inner):
                     class Completions:
                         def __init__(self, parent):
                             self._parent = parent
+
                         async def create(self, **kwargs):
                             return await self._parent.chat_create(**kwargs)
+
                     return Completions(parent)
+
             return Chat()
+
     client = OpenAIClient(api_key="x", base_url="y", model="z", client=MalformedDummy())
     with pytest.raises(OpenAIClientError):
         await client.chat("test")
+
 
 @pytest.mark.asyncio
 async def test_stream_chat_no_content():
@@ -181,46 +207,63 @@ async def test_stream_chat_no_content():
                 class DummyChoice:
                     def __init__(self):
                         self.delta = type("Delta", (), {"content": None})
+
                 for _ in range(2):
                     yield type("Chunk", (), {"choices": [DummyChoice()]})
+
             return stream()
+
         @property
         def chat(self):
             parent = self
+
             class Chat:
                 @property
                 def completions(self_inner):
                     class Completions:
                         def __init__(self, parent):
                             self._parent = parent
+
                         async def create(self, **kwargs):
                             return await self._parent.chat_create(**kwargs)
+
                     return Completions(parent)
+
             return Chat()
+
     client = OpenAIClient(api_key="x", base_url="y", model="z", client=NoContentDummy())
     # Should not yield any content, but should not raise
     tokens = [token async for token in client.stream_chat("test")]
     assert tokens == []
+
 
 @pytest.mark.asyncio
 async def test_chat_and_stream_chat_wraps_non_openai_error():
     class NonOpenAIErrorDummy:
         async def chat_create(self, **kwargs):
             raise DummyOpenAIError("unexpected")
+
         @property
         def chat(self):
             parent = self
+
             class Chat:
                 @property
                 def completions(self_inner):
                     class Completions:
                         def __init__(self, parent):
                             self._parent = parent
+
                         async def create(self, **kwargs):
                             return await self._parent.chat_create(**kwargs)
+
                     return Completions(parent)
+
             return Chat()
-    client = OpenAIClient(api_key="x", base_url="y", model="z", client=NonOpenAIErrorDummy())
+
+    client = OpenAIClient(
+        api_key="x", base_url="y", model="z", client=NonOpenAIErrorDummy()
+    )
     # chat: should raise OpenAIClientError due to caught Exception
     with pytest.raises(OpenAIClientError):
         await client.chat("test")

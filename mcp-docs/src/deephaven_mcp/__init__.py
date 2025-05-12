@@ -20,4 +20,3 @@ __all__ = ["__version__"]
 
 _LOGGER = logging.getLogger(__name__)
 _LOGGER.addHandler(logging.NullHandler())
-

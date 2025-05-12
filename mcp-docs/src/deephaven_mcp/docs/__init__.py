@@ -68,9 +68,7 @@ def main() -> None:
     """
     import argparse
 
-    parser = argparse.ArgumentParser(
-        description="Start the Deephaven MCP Docs server."
-    )
+    parser = argparse.ArgumentParser(description="Start the Deephaven MCP Docs server.")
     parser.add_argument(
         "-t",
         "--transport",
