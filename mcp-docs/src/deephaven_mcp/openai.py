@@ -90,14 +90,14 @@ class OpenAIClient:
             ... ])
         """
         if history is not None:
-            if not isinstance(history, (list, tuple)):
+            if not isinstance(history, list | tuple):
                 raise OpenAIClientError("history must be a sequence (list or tuple) of dicts")
             for msg in history:
                 if not isinstance(msg, dict):
                     raise OpenAIClientError("Each message in history must be a dict")
-                if 'role' not in msg or 'content' not in msg:
+                if "role" not in msg or "content" not in msg:
                     raise OpenAIClientError("Each message in history must have 'role' and 'content' keys")
-                if not isinstance(msg['role'], str) or not isinstance(msg['content'], str):
+                if not isinstance(msg["role"], str) or not isinstance(msg["content"], str):
                     raise OpenAIClientError("'role' and 'content' in each message must be strings")
 
     def _build_messages(self, prompt: str, history: Sequence[dict[str, str]] | None) -> list[dict[str, str]]:
@@ -164,9 +164,9 @@ class OpenAIClient:
                 **kwargs
             )
             elapsed = time.monotonic() - start_time
-            request_id = getattr(response, 'id', None)
+            request_id = getattr(response, "id", None)
             # Validate response structure
-            if not hasattr(response, 'choices') or not response.choices or not hasattr(response.choices[0], 'message') or not hasattr(response.choices[0].message, 'content'):
+            if not hasattr(response, "choices") or not response.choices or not hasattr(response.choices[0], "message") or not hasattr(response.choices[0].message, "content"):
                 _LOGGER.error(f"[OpenAIClient.chat] Unexpected response structure: {response}")
                 raise OpenAIClientError("Unexpected response structure from OpenAI API")
             _LOGGER.info(f"[OpenAIClient.chat] Chat completion succeeded | request_id={request_id} | elapsed={elapsed:.3f}s")
@@ -218,7 +218,7 @@ class OpenAIClient:
                 stream=True,
                 **kwargs
             )
-            request_id = getattr(response, 'id', None)
+            request_id = getattr(response, "id", None)
             yielded = False
             # Only async iterate if response is an async iterable
             if hasattr(response, "__aiter__"):
