@@ -26,5 +26,5 @@ jobs:
         working-directory: mcp-community
 
       - name: Run isort (check only)
-        run: uv run isort . --check-only --diff --skip _version.py
+        run: uv run isort . --check-only --diff --skip _version.py --skip .venv
         working-directory: mcp-community
