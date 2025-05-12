@@ -1,6 +1,6 @@
+import asyncio
 import types
 
-import asyncio
 import openai
 import pytest
 
