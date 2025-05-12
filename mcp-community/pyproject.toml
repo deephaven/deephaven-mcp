@@ -45,6 +45,7 @@ dev = [
 
     # Type checking and static analysis
     "mypy>=1.6.0",  # Static type checker
+    "types-aiofiles",  # Type stubs for aiofiles
 
     # Development and CI
     "pre-commit>=3.4.0",  # Git hooks management
