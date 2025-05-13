@@ -175,7 +175,7 @@ A Python script for exercising the MCP tools and validating server functionality
 
 #### Example usage (stdio):
 ```sh
-uv run scripts/mcp_test_client.py --transport stdio --env DH_MCP_CONFIG_FILE=/path/to/deephaven_workers.json
+uv run scripts/mcp_community_test_client.py --transport stdio --env DH_MCP_CONFIG_FILE=/path/to/deephaven_workers.json
 ```
 
 #### Example usage (SSE):
@@ -185,7 +185,7 @@ DH_MCP_CONFIG_FILE=/path/to/deephaven_workers.json uv run dh-mcp-community --tra
 ```
 Then, in another terminal, run the test client:
 ```sh
-uv run scripts/mcp_test_client.py --transport sse
+uv run scripts/mcp_community_test_client.py --transport sse
 ```
 
 ### MCP Inspector
@@ -344,7 +344,7 @@ A Python script for exercising the MCP tools and validating server functionality
 
 #### Example usage (stdio):
 ```sh
-uv run scripts/mcp_test_client.py --transport stdio --env DH_MCP_CONFIG_FILE=/path/to/deephaven_workers.json
+uv run scripts/mcp_community_test_client.py --transport stdio --env DH_MCP_CONFIG_FILE=/path/to/deephaven_workers.json
 ```
 
 #### Example usage (SSE):
@@ -354,7 +354,7 @@ DH_MCP_CONFIG_FILE=/path/to/deephaven_workers.json uv run dh-mcp-community --tra
 ```
 Then, in another terminal, run the test client:
 ```sh
-uv run scripts/mcp_test_client.py --transport sse
+uv run scripts/mcp_community_test_client.py --transport sse
 ```
 
 ### Running the Test Deephaven Server

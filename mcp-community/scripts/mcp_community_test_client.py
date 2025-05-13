@@ -1,5 +1,5 @@
 """
-mcp_test_client.py
+mcp_community_test_client.py
 
 Async Python client for discovering and calling all tools on an MCP (Model Context Protocol) server using SSE or stdio transport.
 
@@ -12,10 +12,10 @@ Features:
 
 Usage examples:
     # Connect via SSE (default)
-    $ python mcp_test_client.py --transport sse --url http://localhost:8000/sse
+    $ python mcp_community_test_client.py --transport sse --url http://localhost:8000/sse
 
     # Connect via stdio
-    $ python mcp_test_client.py --transport stdio --stdio-cmd "uv run dh-mcp-community --transport stdio" --env DH_MCP_CONFIG_FILE=/path/to/file.json
+    $ python mcp_community_test_client.py --transport stdio --stdio-cmd "uv run dh-mcp-community --transport stdio" --env DH_MCP_CONFIG_FILE=/path/to/file.json
 
 Arguments:
     --transport   Transport type: 'sse' (default) or 'stdio'.
