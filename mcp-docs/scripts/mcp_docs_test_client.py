@@ -26,7 +26,9 @@ from autogen_ext.tools.mcp import SseServerParams, StdioServerParams, mcp_server
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Async MCP Docs test client (SSE or stdio)")
+    parser = argparse.ArgumentParser(
+        description="Async MCP Docs test client (SSE or stdio)"
+    )
     parser.add_argument(
         "--transport",
         choices=["sse", "stdio"],
@@ -34,7 +36,9 @@ def parse_args():
         help="Transport type (sse or stdio)",
     )
     parser.add_argument(
-        "--url", default="http://localhost:8000/sse", help="SSE server URL (default: http://localhost:8000/sse)"
+        "--url",
+        default="http://localhost:8000/sse",
+        help="SSE server URL (default: http://localhost:8000/sse)",
     )
     parser.add_argument(
         "--stdio-cmd",
@@ -59,6 +63,7 @@ def parse_args():
     )
     return parser.parse_args()
 
+
 async def main():
     args = parse_args()
 
@@ -78,7 +83,9 @@ async def main():
             raise ValueError("--stdio-cmd must not be empty")
         stdio_command = stdio_tokens[0]
         stdio_args = stdio_tokens[1:]
-        server_params = StdioServerParams(command=stdio_command, args=stdio_args, env=env_dict if env_dict else None)
+        server_params = StdioServerParams(
+            command=stdio_command, args=stdio_args, env=env_dict if env_dict else None
+        )
 
     tools = await mcp_server_tools(server_params)
     print("Available tools:", [t.name for t in tools])
@@ -111,6 +118,7 @@ async def main():
     except Exception as e:
         print(f"Error calling docs_chat: {e}", file=sys.stderr)
         sys.exit(3)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
