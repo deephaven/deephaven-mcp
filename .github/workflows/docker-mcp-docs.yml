@@ -4,18 +4,54 @@ name: Build and Publish MCP Docs Docker Image
 # This workflow builds and publishes the mcp-docs Docker image to Google Artifact Registry,
 # and redeploys the service using Terraform via admin/run_terraform.sh.
 #
+# Deephaven MCP Docs: Docker Build & Deploy Workflow
+#
+# This GitHub Actions workflow builds and deploys the MCP documentation Docker image to Google Cloud.
+#
+# ---
+#
 # Directory Structure:
-# - Terraform and supporting scripts are under admin/ (e.g., admin/run_terraform.sh, admin/terraform/)
+# - Terraform and supporting scripts: admin/ (e.g., admin/run_terraform.sh, admin/terraform/)
 # - .env is expected at the project root for local runs; in CI/CD, INKEEP_API_KEY is set via a GitHub secret.
 #
-# REQUIREMENTS:
-# - Google Cloud service account with permissions:
-#     * Artifact Registry Writer
-#     * Cloud Run Admin
-#     * Service Account User
-#     * Storage Admin
+# Service Account & Secrets Requirements:
+# - A Google Cloud service account with the following roles (principle of least privilege):
+#     * Artifact Registry Writer   - Push Docker images
+#     * Artifact Registry Reader   - Pull Docker images
+#     * Cloud Run Admin            - Deploy/update Cloud Run services
+#     * Service Account User       - Use service account for deployments
+#     * Storage Admin              - Manage GCS buckets for state/artifacts
 # - Service account key JSON must be stored as the GitHub secret: GH_ACTION_GCLOUD_JSON
 # - INKEEP_API_KEY must be stored as the GitHub secret: INKEEP_API_KEY
+#
+# ---
+#
+# Service Account Setup:
+#
+# 1. Go to https://console.cloud.google.com/iam-admin/serviceaccounts
+# 2. Create a new service account or select an existing one (e.g., deephaven-mcp-github-actions)
+# 3. Click the three dots > Manage permissions
+# 4. Go to "Keys" > "Add key" > "Create new key" > JSON
+# 5. Download the JSON key file
+#    **This file is highly sensitive. After uploading it as a GitHub secret, delete it from your local machine to prevent accidental exposure.**
+# 6. Add the JSON file as the GitHub secret: GH_ACTION_GCLOUD_JSON
+# 7. Go to https://console.cloud.google.com/iam-admin/iam
+# 8. Click "Grant access", add the service account as "New principals", and assign the roles listed above.
+#
+# Note: If you rotate the key, update the GitHub secret immediately. Remove unused or old keys in the Google Cloud Console.
+#
+# ---
+#
+# Security Warning:
+# - Never commit the service account key JSON to version control.
+# - Store the key securely and rotate it regularly.
+# - If you rotate the key, update the GitHub secret `GH_ACTION_GCLOUD_JSON` immediately.
+# - Remove unused keys in the Google Cloud Console.
+#
+# References:
+# - Terraform module: admin/terraform/service-account/README.md
+# - GCP IAM docs: https://cloud.google.com/iam/docs/creating-managing-service-accounts
+# - GitHub Actions secrets: https://docs.github.com/en/actions/security-guides/encrypted-secrets
 #
 # Triggers:
 # - On push or PR to main, or manual dispatch.
