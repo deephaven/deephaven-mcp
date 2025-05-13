@@ -18,7 +18,7 @@ resource "google_artifact_registry_repository" "docker_repo" {
   location      = var.region
   repository_id = var.app
   format        = "DOCKER"
-  description   = "Deephaven GitHub Copilot Extension Docker repository."
+  description   = "Deephaven MCP Docker repository."
 
   labels = {
     app = var.app,

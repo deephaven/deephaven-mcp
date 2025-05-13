@@ -176,3 +176,6 @@ cython_debug/
 # Terraform
 .terraform
 #.terraform.lock.hcl
+
+# Env secrets
+.env
