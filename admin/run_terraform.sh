@@ -10,17 +10,17 @@ SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 cd "${SCRIPT_DIR}/terraform/"
 
 # Load .env file from project root and require INKEEP_API_KEY
-if [ ! -f "${SCRIPT_DIR}/.env" ]; then
-  echo "ERROR: .env file not found in project root (${SCRIPT_DIR})." >&2
+if [ ! -f "${SCRIPT_DIR}/../.env" ]; then
+  echo "ERROR: .env file not found in project root (${SCRIPT_DIR}/../.env)." >&2
   exit 1
 fi
 
 set -a
-. "${SCRIPT_DIR}/.env"
+. "${SCRIPT_DIR}/../.env"
 set +a
 
 if [ -z "${INKEEP_API_KEY}" ]; then
-  echo "ERROR: INKEEP_API_KEY is not set in .env file." >&2
+  echo "ERROR: INKEEP_API_KEY is not set in .env file (${SCRIPT_DIR}/../.env)." >&2
   exit 1
 fi
 

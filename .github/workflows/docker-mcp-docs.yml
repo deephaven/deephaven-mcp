@@ -1,17 +1,24 @@
 name: Build and Publish MCP Docs Docker Image
 
 # ============================================================================
-# This workflow builds and publishes the mcp-docs Docker image to Google Artifact Registry
-# and optionally triggers a redeploy via Terraform. It is intended for the Deephaven MCP Docs Server.
+# This workflow builds and publishes the mcp-docs Docker image to Google Artifact Registry,
+# and redeploys the service using Terraform via admin/run_terraform.sh.
+#
+# Directory Structure:
+# - Terraform and supporting scripts are under admin/ (e.g., admin/run_terraform.sh, admin/terraform/)
+# - .env is expected at the project root for local runs; in CI/CD, INKEEP_API_KEY is set via a GitHub secret.
 #
 # REQUIREMENTS:
-# - A Google Cloud service account with the following permissions:
+# - Google Cloud service account with permissions:
 #     * Artifact Registry Writer
 #     * Cloud Run Admin
 #     * Service Account User
 #     * Storage Admin
-# - The service account key JSON file must be stored as the GitHub secret: GH_ACTION_GCLOUD_JSON
-# - The workflow builds on pushes and PRs to main, and can also be triggered manually.
+# - Service account key JSON must be stored as the GitHub secret: GH_ACTION_GCLOUD_JSON
+# - INKEEP_API_KEY must be stored as the GitHub secret: INKEEP_API_KEY
+#
+# Triggers:
+# - On push or PR to main, or manual dispatch.
 #
 # IMAGE LOCATION:
 #   Artifact Registry: us-central1-docker.pkg.dev/deephaven-oss/deephaven-mcp/mcp-docs
@@ -117,6 +124,10 @@ jobs:
 
       # Run the deployment script to redeploy the latest image
       # Expects run_terraform.sh to handle the actual redeploy logic
+      - name: Create .env file for deployment
+        run: |
+          echo "INKEEP_API_KEY=${{ secrets.INKEEP_API_KEY }}" > .env
+
       - name: Deploy to Cloud Run
         run: |
-          ./run_terraform.sh ${{ env.WORKSPACE }} redeploy-image
+          ./admin/run_terraform.sh ${{ env.WORKSPACE }} redeploy-image
