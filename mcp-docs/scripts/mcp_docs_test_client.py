@@ -121,4 +121,19 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(
+            asyncio.wait_for(main(), timeout=20)
+        )  # 20 seconds for the whole script
+    except asyncio.TimeoutError:
+        print("Timed out waiting for main() to complete.", file=sys.stderr)
+        sys.exit(5)
+    except asyncio.CancelledError:
+        print("Async operation was cancelled.", file=sys.stderr)
+        sys.exit(6)
+    except KeyboardInterrupt:
+        print("Interrupted by user.", file=sys.stderr)
+        sys.exit(130)
+    except Exception as e:
+        print(f"Fatal error in main: {e}", file=sys.stderr)
+        sys.exit(10)
