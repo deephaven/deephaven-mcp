@@ -39,7 +39,7 @@ This will install all dependencies (including optional groups like `[dev]` if sp
 
 Run a script:
 ```sh
-uv run scripts/mcp_test_client.py
+uv run scripts/mcp_community_test_client.py
 ```
 
 You can use `uv` as a drop-in replacement for many common pip and python commands in this project.

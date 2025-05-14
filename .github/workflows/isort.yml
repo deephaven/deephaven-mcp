@@ -21,10 +21,18 @@ jobs:
       - name: Install uv
         run: pip install uv
 
-      - name: Install dependencies
+      - name: Install dependencies (mcp-community)
         run: uv pip install ".[dev]" --system
         working-directory: mcp-community
 
-      - name: Run isort (check only)
+      - name: Run isort (check only, mcp-community)
         run: uv run isort . --check-only --diff --skip _version.py --skip .venv
         working-directory: mcp-community
+
+      - name: Install dependencies (mcp-docs)
+        run: uv pip install ".[dev]" --system
+        working-directory: mcp-docs
+
+      - name: Run isort (check only, mcp-docs)
+        run: uv run isort . --check-only --diff --skip _version.py --skip .venv
+        working-directory: mcp-docs

@@ -1,7 +1,7 @@
 """
-deephaven_mcp.community package
+deephaven_mcp.docs package
 
-This module serves as the entrypoint for the Deephaven MCP Community server package. It provides access to the MCP server instance (`mcp_server`) and the `run_server` entrypoint for starting the server.
+This module serves as the entrypoint for the Deephaven MCP Docs server package. It provides access to the MCP server instance (`mcp_server`) and the `run_server` entrypoint for starting the server.
 
 All MCP tool definitions are implemented in the internal module `_mcp.py`.
 
@@ -10,13 +10,12 @@ Exports:
     - run_server: Function to start the MCP server with the specified transport.
 
 Usage:
-    from deephaven_mcp.community import mcp_server, run_server
+    from deephaven_mcp.docs import mcp_server, run_server
     run_server("stdio")
 
 See the project README for configuration details, available tools, and usage examples.
 """
 
-import asyncio  # noqa: F401
 import logging
 import os
 import sys
@@ -60,7 +59,7 @@ def run_server(transport: Literal["stdio", "sse"] = "stdio") -> None:
 
 def main() -> None:
     """
-    Command-line entry point for the Deephaven MCP Community server.
+    Command-line entry point for the Deephaven MCP Docs server.
 
     Parses CLI arguments using argparse and starts the MCP server with the specified transport.
 
@@ -69,9 +68,7 @@ def main() -> None:
     """
     import argparse
 
-    parser = argparse.ArgumentParser(
-        description="Start the Deephaven MCP Community server."
-    )
+    parser = argparse.ArgumentParser(description="Start the Deephaven MCP Docs server.")
     parser.add_argument(
         "-t",
         "--transport",

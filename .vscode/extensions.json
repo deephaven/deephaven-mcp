@@ -8,6 +8,7 @@
     "ms-vscode.test-adapter-converter", // Test explorer UI (optional)
     "streetsidesoftware.code-spell-checker", // Spell checking
     "eamodio.gitlens",             // Git enhancements
-    "github.vscode-pull-request-github" // GitHub Pull Requests and Issues
+    "github.vscode-pull-request-github", // GitHub Pull Requests and Issues
+    "hashicorp.terraform"    // Terraform
   ]
 }

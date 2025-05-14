@@ -21,10 +21,18 @@ jobs:
       - name: Install uv
         run: pip install uv
 
-      - name: Install dependencies
+      - name: Install dependencies (mcp-community)
         run: uv pip install ".[dev]" --system
         working-directory: mcp-community
 
-      - name: Run Black (check only)
+      - name: Run Black (check only, mcp-community)
         run: uv run black . --check --diff --exclude '(_version.py|.venv)'
         working-directory: mcp-community
+
+      - name: Install dependencies (mcp-docs)
+        run: uv pip install ".[dev]" --system
+        working-directory: mcp-docs
+
+      - name: Run Black (check only, mcp-docs)
+        run: uv run black . --check --diff --exclude '(_version.py|.venv)'
+        working-directory: mcp-docs
