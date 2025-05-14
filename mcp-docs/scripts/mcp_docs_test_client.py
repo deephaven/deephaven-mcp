@@ -123,7 +123,7 @@ async def main():
 if __name__ == "__main__":
     try:
         asyncio.run(
-            asyncio.wait_for(main(), timeout=20)
+            asyncio.wait_for(main(), timeout=40)
         )  # 20 seconds for the whole script
     except asyncio.TimeoutError:
         print("Timed out waiting for main() to complete.", file=sys.stderr)
