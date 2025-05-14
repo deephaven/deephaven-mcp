@@ -33,7 +33,9 @@ dependencies = [
     "pydantic>=2.0.0",       # Data validation and parsing
     # Environment variable loading
     "python-dotenv>=1.0.0",   # Load .env files
-    "mcp[cli]>=1.6.0"  # Enable import of mcp.server.fastmcp for docs
+    "mcp[cli]>=1.6.0",  # Enable import of mcp.server.fastmcp for docs
+    "aiohttp>=3.9.0",  # For stress testing /sse endpoint
+    "aiolimiter>=1.1.0"  # For global async rate limiting
 ]
 
 

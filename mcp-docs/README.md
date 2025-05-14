@@ -22,6 +22,8 @@ A Model Context Protocol (MCP) server for learning about Deephaven Data Labs doc
 - [Development](#development)
   - [Workflow](#workflow)
   - [Commands](#commands)
+  - [Running with Docker Compose](#running-with-docker-compose)
+  - [Stress Testing the /sse Endpoint](#stress-testing-the-sse-endpoint)
 - [Troubleshooting](#troubleshooting)
 - [Resources](#resources)
 - [License](#license)
@@ -233,6 +235,36 @@ uv run black . --check --diff --exclude '(_version.py|.venv)'
 # Type checking
 uv run mypy src/
 ```
+
+### Running with Docker Compose
+
+To build and run the `mcp-docs` service using Docker Compose:
+
+1. Ensure you have a `.env` file in the parent directory (one level above the `mcp-docs` folder) containing required environment variables (e.g., `INKEEP_API_KEY`).
+2. From the `mcp-docs` directory, run:
+
+```sh
+docker compose up --build
+```
+
+This will build the Docker image and start the service on port 8000, loading environment variables from the root directory's `.env` file.
+
+### Stress Testing the /sse Endpoint
+
+A script is provided to stress test the `/sse` endpoint with concurrent connections:
+
+All dependencies are installed automatically with the project dependencies.
+
+Run the stress test script from the `mcp-docs` directory:
+```sh
+python scripts/mcp_docs_stress_sse.py --concurrency 100 --requests-per-conn 20 --sse-url http://localhost:8000/sse
+```
+
+- `--concurrency`: Number of concurrent connections (default: 50)
+- `--requests-per-conn`: Number of requests per connection (default: 10)
+- `--sse-url`: SSE endpoint URL (default: http://localhost:8000/sse)
+
+If you omit the arguments, the script will use the defaults. Adjust the numbers as needed for your environment.
 
 ---
 
