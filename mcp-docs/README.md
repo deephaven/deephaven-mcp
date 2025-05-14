@@ -251,20 +251,56 @@ This will build the Docker image and start the service on port 8000, loading env
 
 ### Stress Testing the /sse Endpoint
 
-A script is provided to stress test the `/sse` endpoint with concurrent connections:
+The script is provided to stress test the `/sse` endpoint of a Deephaven MCP deployment. This is intended for validating the stability and performance of production or staging deployments under load.
 
-All dependencies are installed automatically with the project dependencies.
+This script is intended for use by engineers or SREs validating MCP deployments.
+
+#### Stress Testing the /sse Endpoint (Production Validation)
+
+A script is provided to stress test the `/sse` endpoint of a Deephaven MCP deployment. This is intended for validating the stability and performance of production or staging deployments under load.
+
+#### Usage Example
 
 Run the stress test script from the `mcp-docs` directory:
+
 ```sh
-python scripts/mcp_docs_stress_sse.py --concurrency 100 --requests-per-conn 20 --sse-url http://localhost:8000/sse
+uv run ./scripts/mcp_docs_stress_sse.py \
+    --concurrency 10 \
+    --requests-per-conn 100 \
+    --sse-url "https://deephaven-mcp-docs-dev.dhc-demo.deephaven.io/sse" \
+    --max-errors 5 \
+    --rps 10 \
+    --max-response-time 2
 ```
 
-- `--concurrency`: Number of concurrent connections (default: 50)
-- `--requests-per-conn`: Number of requests per connection (default: 10)
-- `--sse-url`: SSE endpoint URL (default: http://localhost:8000/sse)
+```sh
+uv run ./scripts/mcp_docs_stress_sse.py \
+    --concurrency 10 \
+    --requests-per-conn 100 \
+    --sse-url "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/sse" \
+    --max-errors 5 \
+    --rps 10 \
+    --max-response-time 2
+```
 
-If you omit the arguments, the script will use the defaults. Adjust the numbers as needed for your environment.
+#### Arguments
+
+The script accepts the following arguments:
+
+- `--concurrency`: Number of concurrent connections (default: 100)
+- `--requests-per-conn`: Number of requests per connection (default: 100)
+- `--sse-url`: Target SSE endpoint URL (default: http://localhost:8000/sse)
+- `--max-errors`: Maximum number of errors before stopping the test (default: 5)
+- `--rps`: Requests per second limit per connection (default: 0, no limit)
+- `--max-response-time`: Maximum allowed response time in seconds (default: 1)
+
+#### Output
+
+The script will print the following:
+
+- Logs warnings and errors for slow responses, bad status codes, or exceptions.
+- Prints only the reason string for any error encountered.
+- Prints "PASSED" if the test completes without exceeding the error threshold, or "FAILED" with the reason if the error threshold is reached or another fatal error occurs.
 
 ---
 

@@ -1,3 +1,42 @@
+"""
+SSE Stress Test Script for Production Deployments
+
+This script is designed to stress-test the /sse endpoint of a Deephaven MCP deployment.
+It creates multiple concurrent connections and sends requests to the specified SSE endpoint,
+reporting errors and response times. The script is useful for validating the stability and
+performance of production or staging deployments under load.
+
+Usage Example:
+    uv run ./scripts/mcp_docs_stress_sse.py \
+        --concurrency 10 \
+        --requests-per-conn 100 \
+        --sse-url "https://your-production-url/sse" \
+        --max-errors 5 \
+        --rps 100 \
+        --max-response-time 2
+
+Arguments:
+    --concurrency         Number of concurrent connections (default: 100)
+    --requests-per-conn   Number of requests per connection (default: 100)
+    --sse-url             Target SSE endpoint URL
+    --max-errors          Maximum number of errors before stopping the test (default: 5)
+    --rps                 Requests per second limit per connection (default: 0, no limit)
+    --max-response-time   Maximum allowed response time in seconds (default: 1)
+
+Output:
+    - Logs warnings and errors for slow responses, bad status codes, or exceptions.
+    - Prints only the reason string for any error encountered.
+    - Prints "PASSED" if the test completes without exceeding the error threshold,
+      or "FAILED" with the reason if the error threshold is reached or another fatal error occurs.
+
+Requirements:
+    - Python 3.8+
+    - aiohttp
+    - aiolimiter
+    - uv (for running in a virtual environment, optional)
+
+This script is intended for use by engineers or SREs validating MCP deployments.
+"""
 import asyncio
 import aiohttp
 import argparse
@@ -64,7 +103,7 @@ async def sse_client(session, idx, state: 'StressTestState'):
                         # print(f"[Conn {idx}] {line.decode().strip()}")
                         break  # Only read the first event for stress
         except Exception as e:
-            logging.error(f"[Conn{idx}:{i}] Error: {e}", exc_info=True)
+            logging.error(f"[Conn{idx}:{i}] Error: {e.args[0] if e.args else ""}", exc_info=True)
             if await state.increment_error():
                 break
         if limiter:
@@ -76,8 +115,13 @@ async def main():
     async with aiohttp.ClientSession() as session:
         tasks = [sse_client(session, i, state) for i in range(CONCURRENCY)]
         await asyncio.gather(*tasks)
+    if state.error_count >= state.max_errors:
+        raise RuntimeError(f"Error threshold reached: {state.error_count} errors (max allowed: {state.max_errors})")
 
 if __name__ == "__main__":
-    print(f"Starting SSE stress test: {CONCURRENCY} concurrent connections, {REQUESTS_PER_CONN} requests each")
-    asyncio.run(main())
-    print(f"Complete... PASSED")
+    try:
+        print(f"Starting SSE stress test: {CONCURRENCY} concurrent connections, {REQUESTS_PER_CONN} requests each")
+        asyncio.run(main())
+        print(f"Complete... PASSED")
+    except Exception as e:
+        print(f"Complete... FAILED: {e}")
