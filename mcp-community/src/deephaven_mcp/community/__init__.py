@@ -80,6 +80,7 @@ def main() -> None:
         help="Transport type for the MCP server (stdio or sse). Default: stdio",
     )
     args = parser.parse_args()
+    _LOGGER.info(f"CLI args: {args}")
     run_server(args.transport)
 
 

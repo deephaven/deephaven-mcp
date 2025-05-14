@@ -40,4 +40,4 @@ RUN uv venv && uv pip install ".[dev]"
 EXPOSE 8000
 
 # Run the docs MCP server using the script entrypoint (dh-mcp-docs) defined in pyproject.toml
-CMD ["uv", "run", "dh-mcp-docs", "--transport", "stdio"]
+CMD ["uv", "run", "dh-mcp-docs", "--transport", "sse"]
