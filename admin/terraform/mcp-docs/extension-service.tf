@@ -25,10 +25,10 @@ resource "google_cloud_run_v2_service" "mcp_docs_service" {
         container_port = 8000
       }
 
-      env {
-        name  = "PYTHONLOGLEVEL"
-        value = "debug"
-      }
+      # env {
+      #   name  = "PYTHONLOGLEVEL"
+      #   value = "DEBUG"
+      # }
 
       env {
         name = "INKEEP_API_KEY"
@@ -37,20 +37,20 @@ resource "google_cloud_run_v2_service" "mcp_docs_service" {
 
       startup_probe {
         http_get {
-          path = "/"
+          path = "/health"
           port = 8000
         }
-        initial_delay_seconds = 10
+        initial_delay_seconds = 20
         period_seconds        = 5
         failure_threshold     = 3
       }
 
       liveness_probe {
         http_get {
-          path = "/"
+          path = "/health"
           port = 8000
         }
-        initial_delay_seconds = 10
+        initial_delay_seconds = 20
         period_seconds        = 5
         failure_threshold     = 3
       }
