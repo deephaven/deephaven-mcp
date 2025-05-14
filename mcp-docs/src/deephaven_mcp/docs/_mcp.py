@@ -31,6 +31,8 @@ Example (agentic usage):
 import os
 
 from mcp.server.fastmcp import FastMCP
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 from ..openai import OpenAIClient
 
@@ -64,6 +66,29 @@ FastMCP: The server instance for the Deephaven documentation tools.
 - All tools decorated with @mcp_server.tool are registered here and discoverable by agentic frameworks.
 - The server is intended for use in MCP-compatible orchestration environments.
 """
+
+
+@mcp_server.custom_route("/health", methods=["GET"])  # type: ignore[misc]
+async def health_check(request: Request) -> JSONResponse:
+    """
+    Health Check Endpoint
+    ---------------------
+    Exposes a simple HTTP GET endpoint at /health for liveness and readiness checks.
+
+    Purpose:
+        - Allows load balancers, orchestrators, or monitoring tools to verify that the MCP server is running and responsive.
+        - Intended for use as a liveness or readiness probe in deployment environments (e.g., Kubernetes, Cloud Run).
+
+    Request:
+        - Method: GET
+        - Path: /health
+        - No authentication or parameters required.
+
+    Response:
+        - HTTP 200 with JSON body: {"status": "ok"}
+        - Indicates the server is alive and able to handle requests.
+    """
+    return JSONResponse({"status": "ok"})
 
 
 @mcp_server.tool()
