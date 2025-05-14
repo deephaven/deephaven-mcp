@@ -38,11 +38,12 @@ Requirements:
 This script is intended for use by engineers or SREs validating MCP deployments.
 """
 
-import asyncio
-import aiohttp
 import argparse
+import asyncio
 import logging
 import time
+
+import aiohttp
 from aiolimiter import AsyncLimiter
 
 parser = argparse.ArgumentParser(
