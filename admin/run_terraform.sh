@@ -104,7 +104,7 @@ echo "REGION: ${REGION}"
 export IMAGE=$(grep 'image' ${TF_VAR_FILE} | cut -d '=' -f2 | tr -d ' "')
 echo "IMAGE: ${IMAGE}"
 
-if [[ "$#" -ne 2 && "${COMMAND}" -ne "tf-cmd" ]]; then
+if [[ "$#" -ne 2 && "${COMMAND}" != "tf-cmd" ]]; then
   usage
 fi
 
