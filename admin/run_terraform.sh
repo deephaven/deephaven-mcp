@@ -172,7 +172,7 @@ artifacts-all-repos-list)
   gcloud artifacts repositories list --project=${PROJECT}
   ;;  
 artifacts-mcp-repo-list)
-  REPO_PATH="${REGION}-docker.pkg.dev/${PROJECT}/deephaven-mcp-docs"
+  REPO_PATH="${REGION}-docker.pkg.dev/${PROJECT}/mcp-docs"
   echo "Listing mcp images in GCP Artifact Repository: ${REPO_PATH}"
   gcloud artifacts docker images list ${REPO_PATH}
   ;;
