@@ -35,7 +35,9 @@ dependencies = [
     "python-dotenv>=1.0.0",   # Load .env files
     "mcp[cli]>=1.6.0",  # Enable import of mcp.server.fastmcp for docs
     "aiohttp>=3.9.0",  # For stress testing /sse endpoint
-    "aiolimiter>=1.1.0"  # For global async rate limiting
+    "aiolimiter>=1.1.0",  # For global async rate limiting
+    "autogen-core",  # For test client CancellationToken
+    "autogen-ext"  # For test client SseServerParams, etc.
 ]
 
 
