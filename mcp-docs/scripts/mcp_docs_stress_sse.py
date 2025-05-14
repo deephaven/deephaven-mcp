@@ -101,7 +101,11 @@ limiter = AsyncLimiter(max_rate=RPS, time_period=1) if RPS > 0 else None
 class StressTestState:
     def __init__(self, max_errors):
         self.error_count = 0
+        self.success_count = 0
+        self.attempt_count = 0
         self.error_lock = asyncio.Lock()
+        self.success_lock = asyncio.Lock()
+        self.attempt_lock = asyncio.Lock()
         self.stop_event = asyncio.Event()
         self.max_errors = max_errors
 
@@ -117,11 +121,20 @@ class StressTestState:
                 return True
         return False
 
+    async def increment_success(self):
+        async with self.success_lock:
+            self.success_count += 1
+
+    async def increment_attempt(self):
+        async with self.attempt_lock:
+            self.attempt_count += 1
+
 
 async def sse_client(session, idx, state: "StressTestState"):
     for i in range(REQUESTS_PER_CONN):
         if state.should_stop:
             break
+        await state.increment_attempt()
         try:
             start_time = time.monotonic()
             async with session.get(SSE_URL, timeout=10) as resp:
@@ -138,6 +151,7 @@ async def sse_client(session, idx, state: "StressTestState"):
                             )
                         # Uncomment below to print all lines
                         # print(f"[Conn {idx}] {line.decode().strip()}")
+                        await state.increment_success()
                         break  # Only read the first event for stress
         except Exception as e:
             logging.error(
@@ -157,7 +171,7 @@ async def main():
         await asyncio.gather(*tasks)
     if state.error_count >= state.max_errors:
         raise RuntimeError(
-            f"Error threshold reached: {state.error_count} errors (max allowed: {state.max_errors})"
+            f"Error threshold reached: {state.error_count} errors (max allowed: {state.max_errors}), {state.success_count} successes out of {state.attempt_count} attempts"
         )
 
 
