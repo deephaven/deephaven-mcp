@@ -49,7 +49,7 @@ function apply_tf() {
   echo "APPLY: $@"
   pushd "$1"
   terraform workspace select "${WORKSPACE}"
-  terraform -var "inkeep_api_key=${INKEEP_API_KEY}" ${@:2}
+  terraform ${@:2} -var "inkeep_api_key=${INKEEP_API_KEY}" 
   popd
 }
 

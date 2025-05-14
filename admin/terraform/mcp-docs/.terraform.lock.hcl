@@ -6,6 +6,7 @@ provider "registry.terraform.io/bwoznicki/assert" {
   constraints = "0.0.1"
   hashes = [
     "h1:ONvOG8EeNFSBNNkf28UFViVm8A/9di49gTPnameFVyM=",
+    "h1:PqhZ58g8EnSbGN2liQfr+ZlCi/6aDPUiHeugfIoQTbk=",
     "zh:04bcf081b46a1f5a49216355692dec53974d3d653276533eca8ff7c89f17e579",
     "zh:2afe1397d479bc56d34f9f2e567ce87d18e58a1972bdae608d16d05f2987790c",
     "zh:2f2ab5a72610087e07851aba02d7aee80d9e5bcd8fe3d5bfc86c975a9b78fe91",
@@ -25,6 +26,7 @@ provider "registry.terraform.io/hashicorp/google" {
   version     = "6.21.0"
   constraints = ">= 4.53.0"
   hashes = [
+    "h1:M4X6/r6w8QrkzoOu/8+61+fkYy4+kqNt1fbHE7Igvgg=",
     "h1:pZhpGdzOtzGkX38PIYbXWilwA/LtWXQ22dkt6Fh2DAQ=",
     "zh:1c2462367d92f6f8f6c527115905f7cca78e48cf5d5bc7448d3beeb7c9e895eb",
     "zh:3644dbd09c3740e6d843e035de34a74ed41ffc32e7ed04a19aecddc4c57334cc",
