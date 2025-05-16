@@ -15,6 +15,7 @@ A Model Context Protocol (MCP) server for learning about Deephaven Data Labs doc
 - [Usage](#usage)
   - [Test Client](#test-client)
   - [MCP Inspector](#mcp-inspector)
+  - [Using mcp-proxy](#using-mcp-proxy)
 - [Configuration](#configuration)
   - [Environment Variables](#environment-variables)
 - [Architecture](#architecture)
@@ -149,6 +150,34 @@ The [MCP Inspector](https://github.com/modelcontextprotocol/inspector) is a web-
     - Enter a prompt/question and submit. The response will be shown in the Inspector UI.
 
 > **Tip:** By running the Inspector locally, you ensure compatibility with local MCP servers and can experiment with all features interactively. The default Inspector URL is [http://localhost:6274](http://localhost:6274).
+
+### Using mcp-proxy
+
+[`mcp-proxy`](https://github.com/modelcontextprotocol/mcp-proxy) is a utility for bridging Model Context Protocol (MCP) servers that use SSE/Streamable-HTTP to clients that expect standard input/output (stdio) or HTTP endpoints, such as Claude Desktop. This is especially useful if you want to connect Claude Desktop or other tools that do not natively support SSE to your MCP server.
+
+#### When to use
+- You want to use Claude Desktop (or another tool) with this MCP server, but it does not support SSE/Streamable-HTTP directly.
+- You need to proxy between the MCP server's SSE endpoint and a local client.
+
+#### How to use
+1. **Install dependencies** (already handled if you installed from `pyproject.toml`):
+    ```sh
+    pip install mcp-proxy
+    # or, if using uv/other modern tools:
+    uv pip install mcp-proxy
+    ```
+2. **Run mcp-proxy** to connect to your running MCP server:
+    ```sh
+    mcp-proxy --server-url http://localhost:8000/sse --stdio
+    ```
+    - Replace `http://localhost:8000/sse` with your MCP server's SSE endpoint URL as needed.
+    - The `--stdio` flag tells the proxy to communicate using standard input/output, which is compatible with Claude Desktop.
+    - For more options, run `mcp-proxy --help`.
+3. **Configure Claude Desktop** to connect to the local proxy (typically via stdio or a local HTTP endpoint, depending on your setup).
+
+#### Additional notes
+- `mcp-proxy` is included as a dependency in this project, so you do not need to install it separately.
+- For advanced configuration or troubleshooting, see the [mcp-proxy documentation](https://pypi.org/project/mcp-proxy/) or run `mcp-proxy --help`.
 
 ---
 

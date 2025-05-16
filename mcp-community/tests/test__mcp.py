@@ -264,7 +264,8 @@ async def test_table_schemas_session_error(monkeypatch):
 # === run_script ===
 
 
-def test_app_lifespan_yields_context_and_cleans_up():
+@pytest.mark.asyncio
+async def test_app_lifespan_yields_context_and_cleans_up():
     from deephaven_mcp.community._mcp import app_lifespan
 
     class DummyServer:
@@ -288,16 +289,11 @@ def test_app_lifespan_yields_context_and_cleans_up():
         patch("deephaven_mcp.community._mcp.asyncio.Lock", return_value=refresh_lock),
     ):
         server = DummyServer()
-        import asyncio
-
-        async def run():
-            async with app_lifespan(server) as context:
-                assert context["config_manager"] is config_manager
-                assert context["session_manager"] is session_manager
-                assert context["refresh_lock"] is refresh_lock
-            session_manager.clear_all_sessions.assert_awaited_once()
-
-        asyncio.run(run())
+        async with app_lifespan(server) as context:
+            assert context["config_manager"] is config_manager
+            assert context["session_manager"] is session_manager
+            assert context["refresh_lock"] is refresh_lock
+        session_manager.clear_all_sessions.assert_awaited_once()
 
 
 # Use filterwarnings to suppress ResourceWarning about unclosed sockets, which can be triggered by mocks or library internals in CI
