@@ -333,6 +333,7 @@ dependencies = [
     { name = "autogen-ext" },
     { name = "fastapi" },
     { name = "mcp", extra = ["cli"] },
+    { name = "mcp-proxy" },
     { name = "openai" },
     { name = "pydantic" },
     { name = "python-dotenv" },
@@ -369,6 +370,7 @@ requires-dist = [
     { name = "httpx", extras = ["cli"], marker = "extra == 'dev'", specifier = ">=0.24.0" },
     { name = "isort", marker = "extra == 'dev'", specifier = ">=5.12.0" },
     { name = "mcp", extras = ["cli"], specifier = ">=1.6.0" },
+    { name = "mcp-proxy" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.6.0" },
     { name = "openai", specifier = ">=1.0.0" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.4.0" },
@@ -786,6 +788,19 @@ wheels = [
 cli = [
     { name = "python-dotenv" },
     { name = "typer" },
+]
+
+[[package]]
+name = "mcp-proxy"
+version = "0.6.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "mcp" },
+    { name = "uvicorn" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/e1/34/4e1cf8b6eb93bed8d9f3442408d6d6f266fde522fc2201c39bce49477976/mcp_proxy-0.6.0.tar.gz", hash = "sha256:e4f41dbd6c978cfe359dcbcc66cd14a4735606f9ff856e9b6888ef310038edd0", size = 20322 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/87/03/ab61421d76fb81ca71125d815b25950c879514c4d665a69bc43cb6242b48/mcp_proxy-0.6.0-py3-none-any.whl", hash = "sha256:befbbd1ce7700b66bf16684971b753f78a1417e2ef360dfb536413a2c6ad6b3a", size = 13637 },
 ]
 
 [[package]]
