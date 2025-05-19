@@ -1,16 +1,22 @@
 """
-Deephaven Model Context Protocol (MCP) Community Edition
+Deephaven Model Context Protocol (MCP)
 
-This package provides a Python implementation of the Deephaven MCP protocol for
-interacting with Deephaven Community Core workers. It includes tools for managing
-worker configurations, establishing connections, and executing operations on
-Deephaven workers.
+This package provides unified Python implementations of the Deephaven Model Context Protocol (MCP) servers, supporting both:
 
-Modules:
-    - config: Configuration management for Deephaven MCP servers
-    - community: Main MCP implementation for Deephaven Community Core
+- **Community Core MCP Server:** Orchestrates and manages connections to Deephaven Community Core workers, enabling AI agents and tools to interact with live data tables and computations.
+- **Docs MCP Server:** Provides a natural language Q&A assistant for Deephaven documentation, leveraging LLMs to answer user and agent queries.
 
-To run a Deephaven MCP server, use the `run_server` function from the `community` module.
+Key Modules:
+    - config: Configuration management for server and worker setup
+    - community: Community Core MCP server implementation and CLI entrypoint
+    - docs: Documentation Q&A MCP server implementation and CLI entrypoint
+    - openai: Utilities for interacting with OpenAI-compatible LLM APIs
+
+Usage:
+    - To run a Community Core MCP server, use the `run_server` function from the `community` module or the `dh-mcp-community` CLI entrypoint.
+    - To run a Docs Q&A MCP server, use the `run_server` function from the `docs` module or the `dh-mcp-docs` CLI entrypoint (if enabled in your installation).
+
+See the project README for setup, configuration, and usage details for each server.
 """
 
 # Import version from _version.py
