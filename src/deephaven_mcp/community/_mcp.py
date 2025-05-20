@@ -454,7 +454,7 @@ async def pip_packages(context: Context, worker_name: str) -> dict:
         )
 
         # Convert the Arrow table to a list of dicts
-        packages = []
+        packages: list[dict[str, str]] = []
         if arrow_table is not None:
             # Convert to pandas DataFrame for easy dict conversion
             df = arrow_table.to_pandas()
@@ -470,6 +470,7 @@ async def pip_packages(context: Context, worker_name: str) -> dict:
                     raise ValueError(
                         "Malformed package data: missing 'Package' or 'Version' key"
                     )
+                # Results should have lower case names.  The query had to use Upper case names to avoid invalid column names
                 packages.append({"package": pkg["Package"], "version": pkg["Version"]})
 
         result["success"] = True
