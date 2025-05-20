@@ -579,7 +579,7 @@ uv run scripts/run_deephaven_test_server.py --table-group {simple|financial|all}
 A Python script ([`../scripts/mcp_community_test_client.py`](../scripts/mcp_community_test_client.py)) is available for exercising the Community MCP tools and validating server functionality without setting up a full MCP Inspector deployment. The script connects to a running server, lists all available tools, and demonstrates calling each tool with appropriate arguments.
 
 ```sh
-uv run scripts/mcp_community_test_client.py --transport {sse|stdio} [OPTIONS]
+uv run scripts/mcp_community_test_client.py --transport {sse|stdio|streamable-http} [OPTIONS]
 ```
 
 **Key Arguments:**
