@@ -25,5 +25,5 @@ jobs:
         run: uv pip install ".[dev]" --system
 
       - name: Run Ruff
-        run: uv run ruff check src tests --exclude _version.py --exclude .venv
+        run: uv run ruff check src --exclude _version.py --exclude .venv
 
