@@ -14,6 +14,7 @@ Tools Provided:
     - worker_names: List all configured Deephaven worker names.
     - table_schemas: Retrieve schemas for one or more tables from a worker (requires worker_name).
     - run_script: Execute a script on a specified Deephaven worker (requires worker_name).
+    - pip_packages: Retrieve all installed pip packages (name and version) from a specified Deephaven worker using importlib.metadata, returned as a list of dicts.
 
 Return Types:
     - All tools return structured dicts or lists of dicts, never raise exceptions to the MCP layer.
@@ -24,6 +25,7 @@ See individual tool docstrings for full argument, return, and error details.
 
 import asyncio
 import logging
+import textwrap
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -277,7 +279,7 @@ async def table_schemas(
 
         for table_name in selected_table_names:
             try:
-                meta_table = session.open_table(table_name).meta_table.to_arrow()
+                meta_table = await sessions.get_table(session, table_name)
                 # meta_table is a pyarrow.Table with columns: 'Name', 'DataType', etc.
                 schema = [
                     {"name": row["Name"], "type": row["DataType"]}
@@ -377,6 +379,102 @@ async def run_script(
     except Exception as e:
         _LOGGER.error(
             f"[run_script] Failed for worker: '{worker_name}', error: {e!r}",
+            exc_info=True,
+        )
+        result["error"] = str(e)
+        result["isError"] = True
+    return result
+
+
+@mcp_server.tool()
+async def pip_packages(context: Context, worker_name: str) -> dict:
+    """
+    MCP Tool: Get all installed pip packages on a specified Deephaven worker.
+
+    This tool connects to the specified Deephaven worker using pydeephaven and retrieves the list of installed pip packages by executing `pip list --format=json` in the worker's Python environment.
+
+    Args:
+        context (Context): The FastMCP Context for this tool call.
+        worker_name (str): Name of the Deephaven worker to query.
+
+    Returns:
+        dict: Structured result object with the following keys:
+            - 'success' (bool): True if the packages were retrieved successfully, False otherwise.
+            - 'result' (list[dict], optional): List of pip package dicts (name, version) if successful.
+            - 'error' (str, optional): Error message if retrieval failed.
+            - 'isError' (bool, optional): Present and True if this is an error response (i.e., success is False).
+
+    Example Successful Response:
+        {'success': True, 'result': [{"package": "numpy", "version": "1.25.0"}, ...]}
+
+    Example Error Response:
+        {'success': False, 'error': 'Failed to get pip packages: ...', 'isError': True}
+
+    Logging:
+        - Logs tool invocation, script execution, and error details at INFO/ERROR levels.
+    """
+    _LOGGER.info(f"[pip_packages] Invoked for worker: {worker_name!r}")
+    result: dict = {"success": False}
+    try:
+        session_manager = context.request_context.lifespan_context["session_manager"]
+        session = await session_manager.get_or_create_session(worker_name)
+        _LOGGER.info(f"[pip_packages] Session established for worker: '{worker_name}'")
+
+        # Script to create a table with the pip list
+        script = textwrap.dedent(
+            """
+            from deephaven import new_table
+            from deephaven.column import string_col
+            import importlib.metadata
+
+            def _make_pip_packages_table():
+                names = []
+                versions = []
+                for dist in importlib.metadata.distributions():
+                    names.append(dist.metadata["Name"])
+                    versions.append(dist.version)
+                return new_table([
+                    string_col("package", names),
+                    string_col("version", versions),
+                ])
+
+            _pip_packages_table = _make_pip_packages_table()
+        """
+        )
+
+        await asyncio.to_thread(session.run_script, script)
+        _LOGGER.info(
+            f"[pip_packages] Script executed successfully on worker: '{worker_name}'"
+        )
+
+        # Get the table using a thread for sync operations
+        arrow_table = await sessions.get_table(session, "_pip_packages_table")
+        _LOGGER.info(
+            f"[pip_packages] Table retrieved successfully on worker: '{worker_name}'"
+        )
+
+        # Convert the Arrow table to a list of dicts
+        packages = []
+        if arrow_table is not None:
+            # Convert to pandas DataFrame for easy dict conversion
+            df = arrow_table.to_pandas()
+            packages = df.to_dict(orient="records")
+            # Validate that each package dict has the expected keys
+            for pkg in packages:
+                if (
+                    not isinstance(pkg, dict)
+                    or "package" not in pkg
+                    or "version" not in pkg
+                ):
+                    raise ValueError(
+                        "Malformed package data: missing 'package' or 'version' key"
+                    )
+
+        result["success"] = True
+        result["result"] = packages
+    except Exception as e:
+        _LOGGER.error(
+            f"[pip_packages] Failed for worker: '{worker_name}', error: {e!r}",
             exc_info=True,
         )
         result["error"] = str(e)
