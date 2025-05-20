@@ -14,92 +14,50 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.10", "3.11", "3.12", "3.13"]
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      steps:
+        - name: Checkout code
+          uses: actions/checkout@v4
 
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
+        - name: Set up Python ${{ matrix.python-version }}
+          uses: actions/setup-python@v5
+          with:
+            python-version: ${{ matrix.python-version }}
 
-      - name: Cache pip dependencies
-        uses: actions/cache@v3
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install pytest pytest-cov coverage
-          pip install .[test]
-        working-directory: ./mcp-community
+        - name: Cache pip dependencies
+          uses: actions/cache@v3
+          with:
+            path: ~/.cache/pip
+            key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+            restore-keys: |
+              ${{ runner.os }}-pip-
 
-      - name: Run tests with coverage
-        run: pytest -W error --cov=deephaven_mcp --cov-report=term --cov-report=xml
-        working-directory: ./mcp-community
+        - name: Install dependencies
+          run: |
+            python -m pip install --upgrade pip
+            pip install pytest pytest-cov coverage
+            pip install .[test]
 
-      - name: Upload coverage report
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-xml-${{ matrix.python-version }}
-          path: ./mcp-community/coverage.xml
+        - name: Run tests with coverage
+          run: pytest -W error --cov=deephaven_mcp --cov-report=term --cov-report=xml
 
-      - name: Fail if any file has <90% coverage (except _version.py)
-        run: |
-          coverage report -m | tee coverage.txt
-          awk '
-            NR > 2 && $1 !~ /_version\.py/ && $1 ~ /\.py/ {
-              cov = $4
-              gsub("%","",cov)
-              if (cov+0 < 90) {
-                print $1 " has coverage " cov "% which is below the required 90%."
-                fail=1
+        - name: Upload coverage report
+          uses: actions/upload-artifact@v4
+          with:
+            name: coverage-xml-${{ matrix.python-version }}
+            path: coverage.xml
+
+        - name: Fail if any file has <90% coverage (except _version.py)
+          run: |
+            coverage report -m | tee coverage.txt
+            awk '
+              NR > 2 && $1 !~ /_version\.py/ && $1 ~ /\.py/ {
+                cov = $4
+                gsub("%","",cov)
+                if (cov+0 < 90) {
+                  print $1 " has coverage " cov "% which is below the required 90%."
+                  fail=1
+                }
               }
-            }
-            END { exit fail }
-          ' coverage.txt
-        working-directory: ./mcp-community
-
-  test-mcp-docs:
-    name: Test MCP Docs
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-
-      - name: Cache pip dependencies
-        uses: actions/cache@v3
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install pytest pytest-cov coverage
-          pip install .[test]
-        working-directory: ./mcp-docs
-
-      - name: Run tests with coverage
-        run: pytest -W error --cov=deephaven_mcp --cov-report=term --cov-report=xml
-        working-directory: ./mcp-docs
-
-      - name: Upload coverage report
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-xml-docs-${{ matrix.python-version }}
-          path: ./mcp-docs/coverage.xml
+              END { exit fail }
+            ' coverage.txt
 

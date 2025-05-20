@@ -179,3 +179,6 @@ cython_debug/
 
 # Env secrets
 .env
+
+# Python versioning
+**/_version.py

@@ -21,18 +21,9 @@ jobs:
       - name: Install uv
         run: pip install uv
 
-      - name: Install dependencies (mcp-community)
+      - name: Install dependencies
         run: uv pip install ".[dev]" --system
-        working-directory: mcp-community
 
-      - name: Run Ruff (mcp-community)
+      - name: Run Ruff
         run: uv run ruff check src --exclude _version.py --exclude .venv
-        working-directory: mcp-community
 
-      - name: Install dependencies (mcp-docs)
-        run: uv pip install ".[dev]" --system
-        working-directory: mcp-docs
-
-      - name: Run Ruff (mcp-docs)
-        run: uv run ruff check src --exclude _version.py --exclude .venv
-        working-directory: mcp-docs
