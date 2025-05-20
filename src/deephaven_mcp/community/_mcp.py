@@ -413,7 +413,7 @@ async def pip_packages(context: Context, worker_name: str) -> dict:
         - Logs tool invocation, script execution, and error details at INFO/ERROR levels.
     """
     _LOGGER.info(f"[pip_packages] Invoked for worker: {worker_name!r}")
-    result = {"success": False}
+    result: dict = {"success": False}
     try:
         session_manager = context.request_context.lifespan_context["session_manager"]
         session = await session_manager.get_or_create_session(worker_name)
