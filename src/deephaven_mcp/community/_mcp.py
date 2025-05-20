@@ -25,6 +25,7 @@ See individual tool docstrings for full argument, return, and error details.
 
 import asyncio
 import logging
+import textwrap
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -420,24 +421,26 @@ async def pip_packages(context: Context, worker_name: str) -> dict:
         _LOGGER.info(f"[pip_packages] Session established for worker: '{worker_name}'")
 
         # Script to create a table with the pip list
-        script = """
-from deephaven import new_table
-from deephaven.column import string_col
-import importlib.metadata
+        script = textwrap.dedent(
+            """
+            from deephaven import new_table
+            from deephaven.column import string_col
+            import importlib.metadata
 
-def _make_pip_packages_table():
-    names = []
-    versions = []
-    for dist in importlib.metadata.distributions():
-        names.append(dist.metadata["Name"])
-        versions.append(dist.version)
-    return new_table([
-        string_col("package", names),
-        string_col("version", versions),
-    ])
+            def _make_pip_packages_table():
+                names = []
+                versions = []
+                for dist in importlib.metadata.distributions():
+                    names.append(dist.metadata["Name"])
+                    versions.append(dist.version)
+                return new_table([
+                    string_col("package", names),
+                    string_col("version", versions),
+                ])
 
-_pip_packages_table = _make_pip_packages_table()
-"""
+            _pip_packages_table = _make_pip_packages_table()
+        """
+        )
 
         await asyncio.to_thread(session.run_script, script)
         _LOGGER.info(

@@ -551,7 +551,7 @@ On error:
 ```json
 {
   "success": false,
-  "error": "Failed to get pip packages: ...",
+  "error": "Table not found",
   "isError": true
 }
 ```
