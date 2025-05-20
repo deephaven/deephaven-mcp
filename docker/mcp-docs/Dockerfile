@@ -1,19 +1,31 @@
 # ------------------------------------------------------------------------------
 # Deephaven MCP Docs Server Dockerfile
 #
-# This Dockerfile builds a container image for the Deephaven Model Context Protocol
-# (MCP) Docs Server. The server provides an API for interacting with documentation
-# about Deephaven Data Labs, powered by Inkeep LLM APIs.
+# Builds a container image for the Deephaven Model Context Protocol (MCP) Docs Server.
+# The server provides an API for interacting with documentation about Deephaven Data Labs,
+# powered by Inkeep LLM APIs.
 #
-# IMPORTANT:
-#   - The container REQUIRES the INKEEP_API_KEY environment variable to be set at
-#     runtime. Without this variable, the server will fail to start.
-#     Example:
-#         docker run --rm -e INKEEP_API_KEY=your-actual-api-key deephaven-mcp-docs
+# REQUIREMENTS:
+#   - The INKEEP_API_KEY environment variable must be set at runtime.
+#     - Locally: via .env file or docker-compose.yml (see docker/mcp-docs/README.md)
+#     - In CI/CD: via GitHub secret
 #   - The server listens on port 8000 by default.
 #
-# Build:   docker build -t deephaven-mcp-docs .
-# Run:     docker run --rm -e INKEEP_API_KEY=your-actual-api-key -p 8000:8000 deephaven-mcp-docs
+# BUILD CONTEXT:
+#   - Build context must be the repository root (.) so all code/assets are available.
+#
+# IMAGE NAME:
+#   - Standard image/tag: mcp-docs:latest (see Compose and workflow)
+#
+# USAGE:
+#   - Build:   docker build -f docker/mcp-docs/Dockerfile -t mcp-docs:latest .
+#   - Run:     docker run --rm -e INKEEP_API_KEY=your-actual-api-key -p 8000:8000 mcp-docs:latest
+#   - Orchestration: see docker/mcp-docs/docker-compose.yml for multi-service/local dev
+#   - In CI/CD, see .github/workflows/docker-mcp-docs.yml
+#
+# ENTRYPOINT:
+#   - The default container entrypoint runs the docs server using the 'dh-mcp-docs' script
+#     (see pyproject.toml) with SSE transport.
 # ------------------------------------------------------------------------------
 
 # Use the official Python 3.13 slim image for compatibility and minimal size

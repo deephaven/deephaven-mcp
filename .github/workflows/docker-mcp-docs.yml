@@ -1,18 +1,25 @@
 name: Build and Publish MCP Docs Docker Image
 
 # ============================================================================
-# This workflow builds and publishes the mcp-docs Docker image to Google Artifact Registry,
+# This workflow builds and publishes the MCP Docs Docker image to Google Artifact Registry,
 # and redeploys the service using Terraform via admin/run_terraform.sh.
 #
 # Deephaven MCP Docs: Docker Build & Deploy Workflow
 #
-# This GitHub Actions workflow builds and deploys the MCP documentation Docker image to Google Cloud.
+# This GitHub Actions workflow builds and deploys the MCP Docs server Docker image to Google Cloud.
 #
 # ---
 #
 # Directory Structure:
+# - Dockerfile and Compose file for the docs server: docker/mcp-docs/
+#     * [`docker/mcp-docs/Dockerfile`](../../docker/mcp-docs/Dockerfile)
+#     * [`docker/mcp-docs/docker-compose.yml`](../../docker/mcp-docs/docker-compose.yml)
 # - Terraform and supporting scripts: admin/ (e.g., admin/run_terraform.sh, admin/terraform/)
 # - .env is expected at the project root for local runs; in CI/CD, INKEEP_API_KEY is set via a GitHub secret.
+#
+# Build Context:
+# - The Docker build context is the repo root (.), so all code/assets are accessible to the Dockerfile.
+# - The workflow uses docker/mcp-docs/Dockerfile for building the image.
 #
 # Service Account & Secrets Requirements:
 # - A Google Cloud service account with the following roles (principle of least privilege):
@@ -118,8 +125,8 @@ jobs:
       - name: Build and push Docker image
         uses: docker/build-push-action@v2
         with:
-          context: mcp-docs
-          file: mcp-docs/Dockerfile
+          context: .
+          file: docker/mcp-docs/Dockerfile
           push: true
           tags: ${{ env.DOCKER_REPO }}/mcp-docs:${{ env.IMAGE_TAG }}
 
