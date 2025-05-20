@@ -187,7 +187,8 @@ async def main():
     if "worker_statuses" in tool_map:
         try:
             result = await tool_map["worker_statuses"].run_json(
-                {}, cancellation_token=CancellationToken(),
+                {},
+                cancellation_token=CancellationToken(),
             )
             print(f"Result for worker_statuses: {result}")
         except Exception as e:

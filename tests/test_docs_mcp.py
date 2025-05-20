@@ -1,14 +1,11 @@
+import asyncio
 import importlib
 import os
 import sys
 import types
 
 import pytest
-import pytest
-import asyncio
 from starlette.requests import Request
-
-
 
 
 def test_env_var_required(monkeypatch):
@@ -86,11 +83,10 @@ def test_docs_chat_with_deephaven_core(monkeypatch):
     monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
     sys.modules.pop("deephaven_mcp.docs._mcp", None)
     import deephaven_mcp.docs._mcp as mcp_mod
+
     dummy_client = DummyOpenAIClient(response="core!")
     mcp_mod.inkeep_client = dummy_client
-    pip_pkgs = [
-        {"package": "deephaven", "version": "0.39.0"}
-    ]
+    pip_pkgs = [{"package": "deephaven", "version": "0.39.0"}]
     coro = mcp_mod.docs_chat("core version?", None, pip_packages=pip_pkgs)
     result = asyncio.run(coro)
     assert result == "core!"
@@ -101,26 +97,29 @@ def test_docs_chat_with_coreplus(monkeypatch):
     monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
     sys.modules.pop("deephaven_mcp.docs._mcp", None)
     import deephaven_mcp.docs._mcp as mcp_mod
+
     dummy_client = DummyOpenAIClient(response="coreplus!")
     mcp_mod.inkeep_client = dummy_client
-    pip_pkgs = [
-        {"package": "deephaven_coreplus_worker", "version": "1.2.3"}
-    ]
+    pip_pkgs = [{"package": "deephaven_coreplus_worker", "version": "1.2.3"}]
     coro = mcp_mod.docs_chat("coreplus version?", None, pip_packages=pip_pkgs)
     result = asyncio.run(coro)
     assert result == "coreplus!"
-    assert any("Core+ (Enterprise) version: 1.2.3" in p for p in dummy_client.last_system_prompts)
+    assert any(
+        "Core+ (Enterprise) version: 1.2.3" in p
+        for p in dummy_client.last_system_prompts
+    )
 
 
 def test_docs_chat_with_both_versions(monkeypatch):
     monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
     sys.modules.pop("deephaven_mcp.docs._mcp", None)
     import deephaven_mcp.docs._mcp as mcp_mod
+
     dummy_client = DummyOpenAIClient(response="both!")
     mcp_mod.inkeep_client = dummy_client
     pip_pkgs = [
         {"package": "deephaven", "version": "0.39.0"},
-        {"package": "deephaven_coreplus_worker", "version": "1.2.3"}
+        {"package": "deephaven_coreplus_worker", "version": "1.2.3"},
     ]
     coro = mcp_mod.docs_chat("both?", None, pip_packages=pip_pkgs)
     result = asyncio.run(coro)
@@ -132,8 +131,9 @@ def test_docs_chat_with_both_versions(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_health_check_direct():
-    import sys
     import importlib
+    import sys
+
     sys.modules.pop("deephaven_mcp.docs._mcp", None)
     mod = importlib.import_module("deephaven_mcp.docs._mcp")
     # Minimal ASGI scope for Request
@@ -142,6 +142,7 @@ async def test_health_check_direct():
     resp = await mod.health_check(req)
     assert resp.status_code == 200
     assert resp.body == b'{"status":"ok"}'
+
 
 def test_docs_chat_error(monkeypatch):
     from deephaven_mcp.openai import OpenAIClientError

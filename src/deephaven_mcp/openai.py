@@ -135,9 +135,7 @@ class OpenAIClient:
                 )
             for prompt in system_prompts:
                 if not isinstance(prompt, str):
-                    raise OpenAIClientError(
-                        "Each system prompt must be a string"
-                    )
+                    raise OpenAIClientError("Each system prompt must be a string")
 
     def _build_messages(
         self,

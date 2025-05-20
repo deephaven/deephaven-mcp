@@ -180,80 +180,110 @@ def test_validate_system_prompts():
 async def test_chat_invalid_response_structure(monkeypatch):
     class BadResponse:
         pass
+
     dummy = DummyAsyncOpenAI()
+
     async def bad_create(**kwargs):
         return BadResponse()
+
     dummy.chat.completions.create = bad_create
     client = OpenAIClient(api_key="x", base_url="y", model="z", client=dummy)
-    with pytest.raises(OpenAIClientError, match="Unexpected response structure from OpenAI API"):
+    with pytest.raises(
+        OpenAIClientError, match="Unexpected response structure from OpenAI API"
+    ):
         await client.chat("prompt")
+
 
 @pytest.mark.asyncio
 async def test_chat_null_content(monkeypatch):
     class NullContent:
         choices = [types.SimpleNamespace(message=types.SimpleNamespace(content=None))]
+
     dummy = DummyAsyncOpenAI()
+
     async def null_content_create(**kwargs):
         return NullContent()
+
     dummy.chat.completions.create = null_content_create
     client = OpenAIClient(api_key="x", base_url="y", model="z", client=dummy)
-    with pytest.raises(OpenAIClientError, match="OpenAI API returned a null content message"):
+    with pytest.raises(
+        OpenAIClientError, match="OpenAI API returned a null content message"
+    ):
         await client.chat("prompt")
+
 
 @pytest.mark.asyncio
 async def test_chat_openaierror(monkeypatch):
     dummy = DummyAsyncOpenAI()
+
     async def fail(**kwargs):
         raise openai.OpenAIError("fail")
+
     dummy.chat.completions.create = fail
     client = OpenAIClient(api_key="x", base_url="y", model="z", client=dummy)
     with pytest.raises(OpenAIClientError, match="OpenAI API call failed"):
         await client.chat("prompt")
 
+
 @pytest.mark.asyncio
 async def test_chat_generic_exception(monkeypatch):
     dummy = DummyAsyncOpenAI()
+
     async def fail(**kwargs):
         raise RuntimeError("fail")
+
     dummy.chat.completions.create = fail
     client = OpenAIClient(api_key="x", base_url="y", model="z", client=dummy)
     with pytest.raises(OpenAIClientError, match="Unexpected error"):
         await client.chat("prompt")
 
+
 @pytest.mark.asyncio
 async def test_stream_chat_openaierror(monkeypatch):
     dummy = DummyAsyncOpenAI()
+
     async def fail(**kwargs):
         raise openai.OpenAIError("fail")
+
     dummy.chat.completions.create = fail
     client = OpenAIClient(api_key="x", base_url="y", model="z", client=dummy)
     with pytest.raises(OpenAIClientError, match="OpenAI API streaming call failed"):
         async for _ in client.stream_chat("prompt"):
             pass
 
+
 @pytest.mark.asyncio
 async def test_stream_chat_generic_exception(monkeypatch):
     dummy = DummyAsyncOpenAI()
+
     async def fail(**kwargs):
         raise RuntimeError("fail")
+
     dummy.chat.completions.create = fail
     client = OpenAIClient(api_key="x", base_url="y", model="z", client=dummy)
     with pytest.raises(OpenAIClientError, match="Unexpected error"):
         async for _ in client.stream_chat("prompt"):
             pass
 
+
 @pytest.mark.asyncio
 async def test_stream_chat_not_async_iterable():
     class NotAsyncIterable:
         pass
+
     dummy = DummyAsyncOpenAI()
+
     async def not_async_iterable_create(**kwargs):
         return NotAsyncIterable()
+
     dummy.chat.completions.create = not_async_iterable_create
     client = OpenAIClient(api_key="x", base_url="y", model="z", client=dummy)
-    with pytest.raises(OpenAIClientError, match="did not return an async iterable for streaming chat"):
+    with pytest.raises(
+        OpenAIClientError, match="did not return an async iterable for streaming chat"
+    ):
         async for _ in client.stream_chat("prompt"):
             pass
+
 
 def test_openai_client_constructor_validation():
     with pytest.raises(OpenAIClientError):

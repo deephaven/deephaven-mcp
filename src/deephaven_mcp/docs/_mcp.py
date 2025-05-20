@@ -142,36 +142,41 @@ async def docs_chat(
         To install Deephaven, ...
     """
 
-    system_prompts=[
+    system_prompts = [
         """
         You are a helpful assistant that answers questions about Deephaven Data Labs documentation. 
         Never return answers about Legacy Deephaven.
         """,
     ]
 
-    # Extract Deephaven Core version from pip_packages if available
+    # Extract Deephaven Core and Core+ versions from pip_packages if available
     deephaven_core_version = None
-    if pip_packages:
-        for pkg in pip_packages:
-            if pkg.get("package", "").lower() == "deephaven":
-                deephaven_core_version = pkg.get("version")
-                break
-
-    if deephaven_core_version:
-        system_prompts.append(f"Answer questions about Deephaven Core version: {deephaven_core_version}.")
-
-    # Extract Deephaven Core+ version from pip_packages if available
     deephaven_coreplus_version = None
     if pip_packages:
         for pkg in pip_packages:
-            if pkg.get("package", "").lower() == "deephaven_coreplus_worker":
+            pkg_name = pkg.get("package", "").lower()
+            if pkg_name == "deephaven" and deephaven_core_version is None:
+                deephaven_core_version = pkg.get("version")
+            elif (
+                pkg_name == "deephaven_coreplus_worker"
+                and deephaven_coreplus_version is None
+            ):
                 deephaven_coreplus_version = pkg.get("version")
+            if deephaven_core_version and deephaven_coreplus_version:
                 break
 
+    if deephaven_core_version:
+        system_prompts.append(
+            f"Answer questions about Deephaven Core version: {deephaven_core_version}."
+        )
     if deephaven_coreplus_version:
-        system_prompts.append(f"Answer questions about Deephaven Core+ (Enterprise) version: {deephaven_coreplus_version}.")
+        system_prompts.append(
+            f"Answer questions about Deephaven Core+ (Enterprise) version: {deephaven_coreplus_version}."
+        )
 
-    return await inkeep_client.chat(prompt=prompt, history=history, system_prompts=system_prompts)
+    return await inkeep_client.chat(
+        prompt=prompt, history=history, system_prompts=system_prompts
+    )
 
 
 __all__ = ["mcp_server"]
