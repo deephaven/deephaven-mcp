@@ -221,6 +221,38 @@ async def test_get_or_create_session_liveness_exception(
     assert "foo" in session_manager._cache
 
 
+# --- Tests for get_table ---
+import pyarrow
+from deephaven_mcp.community._sessions import get_table
+
+@pytest.mark.asyncio
+async def test_get_table_success():
+    table_mock = MagicMock()
+    arrow_mock = MagicMock(spec=pyarrow.Table)
+    table_mock.to_arrow = MagicMock(return_value=arrow_mock)
+    session_mock = MagicMock()
+    session_mock.open_table = MagicMock(return_value=table_mock)
+    result = await get_table(session_mock, "foo")
+    assert result is arrow_mock
+    session_mock.open_table.assert_called_once_with("foo")
+    table_mock.to_arrow.assert_called_once()
+
+@pytest.mark.asyncio
+async def test_get_table_open_table_error():
+    session_mock = MagicMock()
+    session_mock.open_table = MagicMock(side_effect=RuntimeError("fail open"))
+    with pytest.raises(RuntimeError, match="fail open"):
+        await get_table(session_mock, "foo")
+
+@pytest.mark.asyncio
+async def test_get_table_to_arrow_error():
+    table_mock = MagicMock()
+    table_mock.to_arrow = MagicMock(side_effect=RuntimeError("fail arrow"))
+    session_mock = MagicMock()
+    session_mock.open_table = MagicMock(return_value=table_mock)
+    with pytest.raises(RuntimeError, match="fail arrow"):
+        await get_table(session_mock, "foo")
+
 # --- Tests for get_or_create_session ---
 @pytest.mark.asyncio
 async def test_get_or_create_session_reuses_alive(monkeypatch, session_manager):

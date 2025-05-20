@@ -279,7 +279,7 @@ async def table_schemas(
 
         for table_name in selected_table_names:
             try:
-                meta_table = session.open_table(table_name).meta_table.to_arrow()
+                meta_table = await sessions.get_table(session, table_name)
                 # meta_table is a pyarrow.Table with columns: 'Name', 'DataType', etc.
                 schema = [
                     {"name": row["Name"], "type": row["DataType"]}
@@ -444,8 +444,7 @@ _pip_packages_table = _make_pip_packages_table()
         _LOGGER.info(f"[pip_packages] Script executed successfully on worker: '{worker_name}'")
 
         # Get the table using a thread for sync operations
-        table = await asyncio.to_thread(session.open_table, "_pip_packages_table")
-        arrow_table = await asyncio.to_thread(table.to_arrow)
+        arrow_table = await sessions.get_table(session, "_pip_packages_table")
         _LOGGER.info(f"[pip_packages] Table retrieved successfully on worker: '{worker_name}'")
 
         # Convert the Arrow table to a list of dicts

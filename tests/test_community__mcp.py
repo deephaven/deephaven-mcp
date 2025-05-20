@@ -217,17 +217,12 @@ async def test_table_schemas_success(monkeypatch):
 
     class DummySession:
         def open_table(self, name):
-            class MetaTable:
-                def to_arrow(self):
-                    class Arrow:
-                        def to_pylist(self):
-                            return [{"Name": name, "DataType": "int"}]
-
-                    return Arrow()
-
+            class Arrow:
+                def to_pylist(self):
+                    return [{"Name": name, "DataType": "int"}]
             class Table:
-                meta_table = MetaTable()
-
+                def to_arrow(self):
+                    return Arrow()
             return Table()
 
     session_manager.get_or_create_session = AsyncMock(return_value=DummySession())
@@ -251,17 +246,12 @@ async def test_table_schemas_all_tables(monkeypatch):
         tables = ["t1", "t2"]
 
         def open_table(self, name):
-            class MetaTable:
-                def to_arrow(self):
-                    class Arrow:
-                        def to_pylist(self):
-                            return [{"Name": name, "DataType": "int"}]
-
-                    return Arrow()
-
+            class Arrow:
+                def to_pylist(self):
+                    return [{"Name": name, "DataType": "int"}]
             class Table:
-                meta_table = MetaTable()
-
+                def to_arrow(self):
+                    return Arrow()
             return Table()
 
     session_manager.get_or_create_session = AsyncMock(return_value=DummySession())
@@ -285,18 +275,13 @@ async def test_table_schemas_schema_key_error(monkeypatch):
 
     class DummySession:
         def open_table(self, name):
-            class MetaTable:
-                def to_arrow(self):
-                    class Arrow:
-                        def to_pylist(self):
-                            # Missing 'Name' and/or 'DataType' keys
-                            return [{"foo": "bar"}]
-
-                    return Arrow()
-
+            class Arrow:
+                def to_pylist(self):
+                    # Missing 'Name' and/or 'DataType' keys
+                    return [{"foo": "bar"}]
             class Table:
-                meta_table = MetaTable()
-
+                def to_arrow(self):
+                    return Arrow()
             return Table()
 
     session_manager.get_or_create_session = AsyncMock(return_value=DummySession())

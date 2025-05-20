@@ -30,6 +30,7 @@ import logging
 import time
 from types import TracebackType
 from typing import Any
+import pyarrow
 
 import aiofiles
 from pydeephaven import Session
@@ -488,3 +489,18 @@ async def _load_bytes(path: str | None) -> bytes | None:
     except Exception as e:
         _LOGGER.error(f"Failed to load binary file: {path}: {e}")
         raise
+
+
+async def get_table(session: Session, table_name: str) -> pyarrow.Table:
+    """
+    Retrieve a table from a Deephaven session as a pyarrow.Table.
+
+    Args:
+        session (Session): The Deephaven session to retrieve the table from.
+        table_name (str): The name of the table to retrieve.
+
+    Returns:
+        pyarrow.Table: The table as a pyarrow.Table.
+    """
+    table = await asyncio.to_thread(session.open_table, table_name)
+    return await asyncio.to_thread(table.to_arrow)
