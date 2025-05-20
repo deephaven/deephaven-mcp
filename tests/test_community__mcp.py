@@ -20,6 +20,7 @@ class MockContext:
 
 # === refresh ===
 
+
 @pytest.mark.asyncio
 async def test_refresh_missing_context_keys(monkeypatch):
     # context missing session_manager
@@ -28,11 +29,14 @@ async def test_refresh_missing_context_keys(monkeypatch):
     refresh_lock.__aenter__ = AsyncMock(return_value=None)
     refresh_lock.__aexit__ = AsyncMock(return_value=None)
     config_manager.clear_config_cache = AsyncMock()
-    context = MockContext({"config_manager": config_manager, "refresh_lock": refresh_lock})
+    context = MockContext(
+        {"config_manager": config_manager, "refresh_lock": refresh_lock}
+    )
     result = await mcp_mod.refresh(context)
     assert result["success"] is False
     assert result["isError"] is True
     assert "session_manager" in result["error"]
+
 
 @pytest.mark.asyncio
 async def test_refresh_lock_error(monkeypatch):
@@ -43,11 +47,13 @@ async def test_refresh_lock_error(monkeypatch):
     refresh_lock.__aexit__ = AsyncMock(return_value=None)
     config_manager.clear_config_cache = AsyncMock()
     session_manager.clear_all_sessions = AsyncMock()
-    context = MockContext({
-        "config_manager": config_manager,
-        "session_manager": session_manager,
-        "refresh_lock": refresh_lock,
-    })
+    context = MockContext(
+        {
+            "config_manager": config_manager,
+            "session_manager": session_manager,
+            "refresh_lock": refresh_lock,
+        }
+    )
     result = await mcp_mod.refresh(context)
     assert result["success"] is False
     assert result["isError"] is True
@@ -178,39 +184,52 @@ async def test_worker_statuses_config_error(monkeypatch):
 
 # === table_schemas ===
 
+
 @pytest.mark.asyncio
 async def test_table_schemas_empty_table_names(monkeypatch):
     session_manager = MagicMock()
+
     class DummySession:
         tables = ["t1"]
+
         def open_table(self, name):
             class MetaTable:
                 def to_arrow(self):
                     class Arrow:
                         def to_pylist(self):
                             return [{"Name": name, "DataType": "int"}]
+
                     return Arrow()
+
             class Table:
                 meta_table = MetaTable()
+
             return Table()
+
     session_manager.get_or_create_session = AsyncMock(return_value=DummySession())
     context = MockContext({"session_manager": session_manager})
     res = await mcp_mod.table_schemas(context, worker_name="worker", table_names=[])
     assert isinstance(res, list)
     assert res == []
 
+
 @pytest.mark.asyncio
 async def test_table_schemas_no_tables(monkeypatch):
     session_manager = MagicMock()
+
     class DummySession:
         tables = []
+
         def open_table(self, name):
             raise Exception("Should not be called")
+
     session_manager.get_or_create_session = AsyncMock(return_value=DummySession())
     context = MockContext({"session_manager": session_manager})
     res = await mcp_mod.table_schemas(context, worker_name="worker", table_names=None)
     assert isinstance(res, list)
     assert res == []
+
+
 @pytest.mark.asyncio
 async def test_table_schemas_success(monkeypatch):
     session_manager = MagicMock()
@@ -220,9 +239,11 @@ async def test_table_schemas_success(monkeypatch):
             class Arrow:
                 def to_pylist(self):
                     return [{"Name": name, "DataType": "int"}]
+
             class Table:
                 def to_arrow(self):
                     return Arrow()
+
             return Table()
 
     session_manager.get_or_create_session = AsyncMock(return_value=DummySession())
@@ -249,9 +270,11 @@ async def test_table_schemas_all_tables(monkeypatch):
             class Arrow:
                 def to_pylist(self):
                     return [{"Name": name, "DataType": "int"}]
+
             class Table:
                 def to_arrow(self):
                     return Arrow()
+
             return Table()
 
     session_manager.get_or_create_session = AsyncMock(return_value=DummySession())
@@ -279,9 +302,11 @@ async def test_table_schemas_schema_key_error(monkeypatch):
                 def to_pylist(self):
                     # Missing 'Name' and/or 'DataType' keys
                     return [{"foo": "bar"}]
+
             class Table:
                 def to_arrow(self):
                     return Arrow()
+
             return Table()
 
     session_manager.get_or_create_session = AsyncMock(return_value=DummySession())
@@ -315,6 +340,7 @@ async def test_table_schemas_session_error(monkeypatch):
 
 # === run_script ===
 
+
 @pytest.mark.asyncio
 async def test_run_script_both_script_and_path(monkeypatch):
     # Both script and script_path provided, should prefer script
@@ -323,7 +349,9 @@ async def test_run_script_both_script_and_path(monkeypatch):
     session_manager = AsyncMock()
     session_manager.get_or_create_session = AsyncMock(return_value=session)
     context = MockContext({"session_manager": session_manager})
-    result = await mcp_mod.run_script(context, worker_name="foo", script="print('hi')", script_path="/tmp/fake.py")
+    result = await mcp_mod.run_script(
+        context, worker_name="foo", script="print('hi')", script_path="/tmp/fake.py"
+    )
     assert result["success"] is True
     assert session.run_script.call_count >= 1
     session.run_script.assert_any_call("print('hi')")
@@ -332,12 +360,15 @@ async def test_run_script_both_script_and_path(monkeypatch):
 @pytest.mark.asyncio
 async def test_run_script_missing_worker(monkeypatch):
     session_manager = AsyncMock()
-    session_manager.get_or_create_session = AsyncMock(side_effect=Exception("no worker"))
+    session_manager.get_or_create_session = AsyncMock(
+        side_effect=Exception("no worker")
+    )
     context = MockContext({"session_manager": session_manager})
     result = await mcp_mod.run_script(context, worker_name=None, script="print('hi')")
     assert result["success"] is False
     assert result["isError"] is True
     assert "no worker" in result["error"]
+
 
 @pytest.mark.asyncio
 async def test_run_script_both_none(monkeypatch):
@@ -479,6 +510,7 @@ async def test_run_script_script_path_error(monkeypatch):
 
 # === pip_packages ===
 
+
 @pytest.mark.asyncio
 async def test_pip_packages_empty(monkeypatch):
     mock_df = MagicMock()
@@ -492,10 +524,13 @@ async def test_pip_packages_empty(monkeypatch):
     mock_session.open_table = MagicMock(return_value=table)
     mock_manager = AsyncMock()
     mock_manager.get_or_create_session = AsyncMock(return_value=mock_session)
-    context = MockContext({"session_manager": mock_manager, "config_manager": AsyncMock()})
+    context = MockContext(
+        {"session_manager": mock_manager, "config_manager": AsyncMock()}
+    )
     result = await mcp_mod.pip_packages(context, worker_name="test_worker")
     assert result["success"] is True
     assert result["result"] == []
+
 
 @pytest.mark.asyncio
 async def test_pip_packages_malformed_data(monkeypatch):
@@ -510,7 +545,9 @@ async def test_pip_packages_malformed_data(monkeypatch):
     mock_session.open_table = MagicMock(return_value=table)
     mock_manager = AsyncMock()
     mock_manager.get_or_create_session = AsyncMock(return_value=mock_session)
-    context = MockContext({"session_manager": mock_manager, "config_manager": AsyncMock()})
+    context = MockContext(
+        {"session_manager": mock_manager, "config_manager": AsyncMock()}
+    )
     result = await mcp_mod.pip_packages(context, worker_name="test_worker")
     assert result["success"] is False
     assert result["isError"] is True
@@ -523,9 +560,9 @@ async def test_pip_packages_success(monkeypatch):
     mock_df = MagicMock()
     mock_df.to_dict.return_value = [
         {"package": "numpy", "version": "1.25.0"},
-        {"package": "pandas", "version": "2.0.1"}
+        {"package": "pandas", "version": "2.0.1"},
     ]
-    
+
     mock_arrow_table = MagicMock()
     mock_arrow_table.to_pandas.return_value = mock_df
     table = MagicMock()
@@ -535,10 +572,12 @@ async def test_pip_packages_success(monkeypatch):
     mock_session.open_table = MagicMock(return_value=table)
     mock_manager = AsyncMock()
     mock_manager.get_or_create_session = AsyncMock(return_value=mock_session)
-    context = MockContext({
-        "session_manager": mock_manager,
-        "config_manager": AsyncMock(),
-    })
+    context = MockContext(
+        {
+            "session_manager": mock_manager,
+            "config_manager": AsyncMock(),
+        }
+    )
     result = await mcp_mod.pip_packages(context, worker_name="test_worker")
     assert result["success"] is True
     assert len(result["result"]) == 2
@@ -556,20 +595,22 @@ async def test_pip_packages_worker_not_found(monkeypatch):
     """Test pip_packages when the worker is not found."""
     # Mock the session manager to raise an exception
     mock_manager = AsyncMock()
-    mock_manager.get_or_create_session = AsyncMock(side_effect=ValueError("Worker not found"))
-    
+    mock_manager.get_or_create_session = AsyncMock(
+        side_effect=ValueError("Worker not found")
+    )
+
     # Create the context with our mocks
     context = MockContext(
         {
             "session_manager": mock_manager,
             "config_manager": AsyncMock(),
-            "importlib_metadata": MagicMock()
+            "importlib_metadata": MagicMock(),
         }
     )
-    
+
     # Call the function
     result = await mcp_mod.pip_packages(context, worker_name="nonexistent_worker")
-    
+
     # Verify the result
     assert result["success"] is False
     assert "Worker not found" in result["error"]
@@ -581,21 +622,24 @@ async def test_pip_packages_worker_not_found(monkeypatch):
 async def test_pip_packages_script_error(monkeypatch):
     """Test pip_packages when there's an error executing the script."""
     mock_session = MagicMock()
-    mock_session.run_script = MagicMock(side_effect=Exception("Script execution failed"))
+    mock_session.run_script = MagicMock(
+        side_effect=Exception("Script execution failed")
+    )
     mock_session.open_table = MagicMock()
     mock_manager = AsyncMock()
     mock_manager.get_or_create_session = AsyncMock(return_value=mock_session)
-    context = MockContext({
-        "session_manager": mock_manager,
-        "config_manager": AsyncMock(),
-    })
+    context = MockContext(
+        {
+            "session_manager": mock_manager,
+            "config_manager": AsyncMock(),
+        }
+    )
     result = await mcp_mod.pip_packages(context, worker_name="test_worker")
     assert result["success"] is False
     assert "Script execution failed" in result["error"]
     assert result["isError"] is True
     mock_manager.get_or_create_session.assert_awaited_once_with("test_worker")
     mock_session.run_script.assert_called_once()
-
 
 
 @pytest.mark.asyncio
@@ -606,10 +650,12 @@ async def test_pip_packages_table_error(monkeypatch):
     mock_session.open_table = MagicMock(side_effect=Exception("Table not found"))
     mock_manager = AsyncMock()
     mock_manager.get_or_create_session = AsyncMock(return_value=mock_session)
-    context = MockContext({
-        "session_manager": mock_manager,
-        "config_manager": AsyncMock(),
-    })
+    context = MockContext(
+        {
+            "session_manager": mock_manager,
+            "config_manager": AsyncMock(),
+        }
+    )
     result = await mcp_mod.pip_packages(context, worker_name="test_worker")
     assert result["success"] is False
     assert "Table not found" in result["error"]
@@ -617,4 +663,3 @@ async def test_pip_packages_table_error(monkeypatch):
     mock_manager.get_or_create_session.assert_awaited_once_with("test_worker")
     mock_session.run_script.assert_called_once()
     mock_session.open_table.assert_called_once_with("_pip_packages_table")
-

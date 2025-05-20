@@ -29,7 +29,6 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 import aiofiles
-import json
 from mcp.server.fastmcp import Context, FastMCP
 
 import deephaven_mcp.community._sessions as sessions
@@ -441,11 +440,15 @@ _pip_packages_table = _make_pip_packages_table()
 """
 
         await asyncio.to_thread(session.run_script, script)
-        _LOGGER.info(f"[pip_packages] Script executed successfully on worker: '{worker_name}'")
+        _LOGGER.info(
+            f"[pip_packages] Script executed successfully on worker: '{worker_name}'"
+        )
 
         # Get the table using a thread for sync operations
         arrow_table = await sessions.get_table(session, "_pip_packages_table")
-        _LOGGER.info(f"[pip_packages] Table retrieved successfully on worker: '{worker_name}'")
+        _LOGGER.info(
+            f"[pip_packages] Table retrieved successfully on worker: '{worker_name}'"
+        )
 
         # Convert the Arrow table to a list of dicts
         packages = []
@@ -455,13 +458,22 @@ _pip_packages_table = _make_pip_packages_table()
             packages = df.to_dict(orient="records")
             # Validate that each package dict has the expected keys
             for pkg in packages:
-                if not isinstance(pkg, dict) or "package" not in pkg or "version" not in pkg:
-                    raise ValueError("Malformed package data: missing 'package' or 'version' key")
+                if (
+                    not isinstance(pkg, dict)
+                    or "package" not in pkg
+                    or "version" not in pkg
+                ):
+                    raise ValueError(
+                        "Malformed package data: missing 'package' or 'version' key"
+                    )
 
         result["success"] = True
         result["result"] = packages
     except Exception as e:
-        _LOGGER.error(f"[pip_packages] Failed for worker: '{worker_name}', error: {e!r}", exc_info=True)
+        _LOGGER.error(
+            f"[pip_packages] Failed for worker: '{worker_name}', error: {e!r}",
+            exc_info=True,
+        )
         result["error"] = str(e)
         result["isError"] = True
     return result

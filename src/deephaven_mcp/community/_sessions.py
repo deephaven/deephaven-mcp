@@ -30,9 +30,9 @@ import logging
 import time
 from types import TracebackType
 from typing import Any
-import pyarrow
 
 import aiofiles
+import pyarrow
 from pydeephaven import Session
 
 from deephaven_mcp import config

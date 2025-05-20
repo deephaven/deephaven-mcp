@@ -5,6 +5,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../s
 
 from unittest.mock import AsyncMock, MagicMock
 
+import pyarrow
 import pytest
 from pydeephaven import Session
 
@@ -13,6 +14,7 @@ from deephaven_mcp.community._sessions import (
     SessionCreationError,
     SessionManager,
     _load_bytes,
+    get_table,
 )
 
 
@@ -222,8 +224,7 @@ async def test_get_or_create_session_liveness_exception(
 
 
 # --- Tests for get_table ---
-import pyarrow
-from deephaven_mcp.community._sessions import get_table
+
 
 @pytest.mark.asyncio
 async def test_get_table_success():
@@ -237,12 +238,14 @@ async def test_get_table_success():
     session_mock.open_table.assert_called_once_with("foo")
     table_mock.to_arrow.assert_called_once()
 
+
 @pytest.mark.asyncio
 async def test_get_table_open_table_error():
     session_mock = MagicMock()
     session_mock.open_table = MagicMock(side_effect=RuntimeError("fail open"))
     with pytest.raises(RuntimeError, match="fail open"):
         await get_table(session_mock, "foo")
+
 
 @pytest.mark.asyncio
 async def test_get_table_to_arrow_error():
@@ -252,6 +255,7 @@ async def test_get_table_to_arrow_error():
     session_mock.open_table = MagicMock(return_value=table_mock)
     with pytest.raises(RuntimeError, match="fail arrow"):
         await get_table(session_mock, "foo")
+
 
 # --- Tests for get_or_create_session ---
 @pytest.mark.asyncio
