@@ -1113,7 +1113,7 @@ A [Docker Compose](https://docs.docker.com/compose/) configuration for the MCP D
 
 ```sh
 # Start the MCP Docs server
-docker compose -f docker/mcp-docs/docker-compose.yml up
+docker compose -f docker/mcp-docs/docker-compose.yml up --build
 
 # View logs
 docker compose -f docker/mcp-docs/docker-compose.yml logs -f

@@ -28,10 +28,10 @@ dependencies = [
     "aiohttp>=3.11.18",         # Async HTTP client (stress testing, SSE)
     # MCP protocol and orchestration
     "autogen-ext[mcp]>=0.5.4",  # MCP orchestration and agentic tools
-    "mcp[cli]>=1.6.0",          # CLI and fastmcp server
+    "mcp[cli]>=1.9.0",          # CLI and fastmcp server
     "mcp-proxy",                # SSE/Streamable-HTTP proxy support
     # Deephaven integration
-    "pydeephaven>=0.38.0",      # Deephaven Python API
+    "pydeephaven>=0.39.1",      # Deephaven Python API
     # Docs/LLM and web server dependencies
     "fastapi>=0.100.0",         # FastAPI web framework for Docs server
     "uvicorn[standard]>=0.23.0",# ASGI server for FastAPI
