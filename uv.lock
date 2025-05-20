@@ -503,7 +503,7 @@ requires-dist = [
     { name = "openai", specifier = ">=1.0.0" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.4.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
-    { name = "pydeephaven", specifier = ">=0.38.0" },
+    { name = "pydeephaven", specifier = ">=0.39.1" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8.0.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23.0" },
@@ -1839,7 +1839,7 @@ wheels = [
 
 [[package]]
 name = "pydeephaven"
-version = "0.38.0"
+version = "0.39.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "bitstring" },
@@ -1849,7 +1849,7 @@ dependencies = [
     { name = "pyarrow" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f3/50/f38949dd746b7f166620188f670d32f8a0d1a49c8bda4031ecadb5ac89d3/pydeephaven-0.38.0-py3-none-any.whl", hash = "sha256:523f791aa7568189156e1709e5dcb91c75a003c60a65830afaef1bf14d1d0a20", size = 115152 },
+    { url = "https://files.pythonhosted.org/packages/7e/38/e561e85858068c29a6eb0a7239eac5895f887ee31507d0016b96a8e375c5/pydeephaven-0.39.1-py3-none-any.whl", hash = "sha256:94d9dbb990e2992468c7c9dc178bdbcb313a285af7fca5018e8fec842338b02d", size = 115623 },
 ]
 
 [[package]]

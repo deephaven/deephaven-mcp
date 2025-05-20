@@ -399,6 +399,10 @@ All Community Server tools use a consistent error response format when encounter
 
 This consistent format makes error handling and response parsing more predictable across all tools.
 
+#### MCP Tools
+
+The Community Server provides the following MCP tools:
+
 ##### `refresh`
 
 **Purpose**: Atomically reload configuration and clear all active worker sessions.
@@ -524,6 +528,36 @@ On error:
 ```
 
 **Description**: This tool executes code on a specified worker. The script language is determined by the worker's configuration and can be Python, Groovy, or other supported languages. According to the source code, it only returns success status and does not include stdout or a list of created/modified tables in the response.
+
+##### `pip_packages`
+
+**Purpose**: Retrieve all installed pip packages (name and version) from a specified worker.
+
+**Parameters**:
+- `worker_name` (str): The name of the Deephaven worker to query.
+
+**Returns**:
+```json
+{
+  "success": true,
+  "result": [
+    {"package": "numpy", "version": "1.25.0"},
+    {"package": "pandas", "version": "2.0.1"}
+  ]
+}
+```
+
+On error:
+```json
+{
+  "success": false,
+  "error": "Failed to get pip packages: ...",
+  "isError": true
+}
+```
+
+**Description**:  
+This tool connects to the specified Deephaven worker, gathers installed pip packages using Python's [`importlib.metadata`](https://docs.python.org/3/library/importlib.metadata.html), and returns them as a list of dictionaries.
 
 #### Community Server Test Components
 
