@@ -26,21 +26,34 @@ def test_run_script_reads_script_from_file(monkeypatch):
     mock_session.run_script = MagicMock()
     mock_manager = AsyncMock()
     mock_manager.get_or_create_session = AsyncMock(return_value=mock_session)
-    context = MockContext({
-        "session_manager": mock_manager,
-        "config_manager": AsyncMock(),
-    })
+    context = MockContext(
+        {
+            "session_manager": mock_manager,
+            "config_manager": AsyncMock(),
+        }
+    )
 
     file_content = "print('hello')"
+
     class DummyFile:
-        async def __aenter__(self): return self
-        async def __aexit__(self, exc_type, exc, tb): pass
-        async def read(self): return file_content
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            pass
+
+        async def read(self):
+            return file_content
 
     with patch("aiofiles.open", return_value=DummyFile()):
-        result = asyncio.run(mcp_mod.run_script(context, worker_name="test_worker", script=None, script_path="dummy.py"))
+        result = asyncio.run(
+            mcp_mod.run_script(
+                context, worker_name="test_worker", script=None, script_path="dummy.py"
+            )
+        )
         assert result["success"] is True
         mock_session.run_script.assert_called_once_with(file_content)
+
 
 @pytest.mark.asyncio
 async def test_refresh_missing_context_keys(monkeypatch):
