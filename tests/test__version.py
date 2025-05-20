@@ -1,7 +1,9 @@
 import importlib
 
+
 def test_version_module_sanity():
     import deephaven_mcp._version as v
+
     # Existence checks
     assert hasattr(v, "__version__")
     assert hasattr(v, "__version_tuple__")

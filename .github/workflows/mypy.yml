@@ -25,4 +25,4 @@ jobs:
         run: uv pip install ".[dev]" --system
 
       - name: Run mypy
-        run: uv run mypy src tests --exclude _version.py --exclude .venv
+        run: uv run mypy src --exclude _version.py --exclude .venv
