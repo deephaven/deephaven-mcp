@@ -4,7 +4,7 @@
 
 > **Project repository:** [https://github.com/deephaven/deephaven-mcp](https://github.com/deephaven/deephaven-mcp)
 
-> **Note:** This document contains low-level technical details for contributors working on the [deephaven-mcp/mcp-community](https://github.com/deephaven/deephaven-mcp/mcp-community) project. **End users seeking high-level usage and onboarding information should refer to the main documentation in the [README](../README.md).**
+> **Note:** This document contains low-level technical details for contributors working on the [deephaven-mcp/mcp-community](https://github.com/deephaven/deephaven-mcp/mcp-community) project. **End users seeking high-level usage and onboarding information should refer to the main documentation in the [`../README.md`](../README.md).**
 
 This repository houses the Python-based Model Context Protocol (MCP) servers for Deephaven:
 1. **Deephaven MCP Community Server**: Orchestrates Deephaven Community Core nodes.
@@ -75,7 +75,7 @@ This repository houses the Python-based Model Context Protocol (MCP) servers for
 
 ### About This Project
 
-The `deephaven-mcp/mcp-community` project provides Python implementations of two Model Context Protocol (MCP) servers:
+The [deephaven-mcp/mcp-community](https://github.com/deephaven/deephaven-mcp/mcp-community) project provides Python implementations of two Model Context Protocol (MCP) servers:
 
 1. **Deephaven MCP Community Server**:
    * Enables orchestration, inspection, and management of Deephaven Community Core worker nodes via the MCP protocol
@@ -176,7 +176,7 @@ Users or API clients send natural language questions or documentation queries ov
    uv run scripts/run_deephaven_test_server.py --table-group simple
    ```
    
-   > This script is located at [scripts/run_deephaven_test_server.py](../scripts/run_deephaven_test_server.py) and creates a local Deephaven server with test data.
+   > This script is located at [`../scripts/run_deephaven_test_server.py`](../scripts/run_deephaven_test_server.py) and creates a local Deephaven server with test data.
 
 3. **Run the Community Server:**
    ```sh
@@ -271,7 +271,7 @@ The MCP Community server requires a JSON configuration file specified by the `DH
 
 **Notes:**
 - All fields are optional
-- Sensitive fields like `auth_token` are automatically redacted in logs (using [aiofiles](https://github.com/Tinche/aiofiles) for async file I/O)
+- Sensitive fields like `auth_token` are automatically redacted in logs
 
 **Example Configuration:**
 
@@ -329,7 +329,7 @@ Follow these steps to start the Community Server:
       ```sh
       uv run scripts/run_deephaven_test_server.py --table-group simple
       ```
-      This script is located at [scripts/run_deephaven_test_server.py](../scripts/run_deephaven_test_server.py).
+      This script is located at [`../scripts/run_deephaven_test_server.py`](../scripts/run_deephaven_test_server.py).
 
 2. **Start the MCP Community Server**:
    ```sh
@@ -542,7 +542,7 @@ uv run scripts/run_deephaven_test_server.py --table-group {simple|financial|all}
 
 ##### Test Client
 
-A Python script ([scripts/mcp_community_test_client.py](../scripts/mcp_community_test_client.py)) is available for exercising the Community MCP tools and validating server functionality without setting up a full MCP Inspector deployment. The script connects to a running server, lists all available tools, and demonstrates calling each tool with appropriate arguments.
+A Python script ([`../scripts/mcp_community_test_client.py`](../scripts/mcp_community_test_client.py)) is available for exercising the Community MCP tools and validating server functionality without setting up a full MCP Inspector deployment. The script connects to a running server, lists all available tools, and demonstrates calling each tool with appropriate arguments.
 
 ```sh
 uv run scripts/mcp_community_test_client.py --transport {sse|stdio} [OPTIONS]
@@ -735,7 +735,7 @@ curl http://localhost:8000/health
 
 A Python script is provided for testing the MCP Docs tool and validating server functionality without setting up a full MCP Inspector deployment. The script connects to the docs server, demonstrates calling the `docs_chat` tool with your query, and displays the response.
 
-**Script Location**: [scripts/mcp_docs_test_client.py](../scripts/mcp_docs_test_client.py)
+**Script Location**: [`../scripts/mcp_docs_test_client.py`](../scripts/mcp_docs_test_client.py)
 
 **Arguments:**
 - `--transport`: Choose `sse` or `stdio` (default: `sse`)
@@ -1072,11 +1072,14 @@ deephaven-mcp/
 │   ├── mcp_community_test_client.py
 │   ├── mcp_docs_test_client.py
 │   └── mcp_docs_stress_sse.py
+├── docker/
+│   └── mcp-docs/
+│       ├── Dockerfile            # Dockerfile for the MCP Docs server
+│       ├── docker-compose.yml    # Docker Compose config for the MCP Docs server
+│       └── README.md             # Docker usage notes for the MCP Docs server
 ├── docs/                         # Documentation
 │   └── DEVELOPER_GUIDE.md        # This developer & contributor guide
 ├── pyproject.toml                # Package metadata and dependencies
-├── docker-compose.yml            # Docker Compose configuration for development
-├── Dockerfile                    # Dockerfile for containerized deployment
 └── README.md                     # Main user-facing README
 ```
 
@@ -1086,10 +1089,10 @@ The project includes several utility scripts to help with development and testin
 
 | Script | Purpose | Usage |
 |--------|---------|-------|
-| [scripts/run_deephaven_test_server.py](../scripts/run_deephaven_test_server.py) | Starts a local Deephaven server for testing | `uv run scripts/run_deephaven_test_server.py --table-group simple` |
-| [scripts/mcp_community_test_client.py](../scripts/mcp_community_test_client.py) | Tests the Community Server tools | `uv run scripts/mcp_community_test_client.py --transport sse` |
-| [scripts/mcp_docs_test_client.py](../scripts/mcp_docs_test_client.py) | Tests the Docs Server chat functionality | `uv run scripts/mcp_docs_test_client.py --prompt "What is Deephaven?"` |
-| [scripts/mcp_docs_stress_sse.py](../scripts/mcp_docs_stress_sse.py) | Stress tests the SSE endpoint | `uv run scripts/mcp_docs_stress_sse.py --sse-url "http://localhost:8000/sse"` |
+| [`../scripts/run_deephaven_test_server.py`](../scripts/run_deephaven_test_server.py) | Starts a local Deephaven server for testing | `uv run scripts/run_deephaven_test_server.py --table-group simple` |
+| [`../scripts/mcp_community_test_client.py`](../scripts/mcp_community_test_client.py) | Tests the Community Server tools | `uv run scripts/mcp_community_test_client.py --transport sse` |
+| [`../scripts/mcp_docs_test_client.py`](../scripts/mcp_docs_test_client.py) | Tests the Docs Server chat functionality | `uv run scripts/mcp_docs_test_client.py --prompt "What is Deephaven?"` |
+| [`../scripts/mcp_docs_stress_sse.py`](../scripts/mcp_docs_stress_sse.py) | Stress tests the SSE endpoint | `uv run scripts/mcp_docs_stress_sse.py --sse-url "http://localhost:8000/sse"` |
 
 ### Dependencies
 
@@ -1106,18 +1109,20 @@ This package uses [setuptools-scm](https://github.com/pypa/setuptools_scm) for d
 
 ### Docker Compose
 
-A [Docker Compose](https://docs.docker.com/compose/) configuration is provided for development (See [.docker-compose.yml](../docker-compose.yml)):
+A [Docker Compose](https://docs.docker.com/compose/) configuration for the MCP Docs server is provided at [`docker/mcp-docs/docker-compose.yml`](../docker/mcp-docs/docker-compose.yml):
 
 ```sh
-# Start the services
-docker-compose up -d
+# Start the MCP Docs server
+docker compose -f docker/mcp-docs/docker-compose.yml up
 
 # View logs
-docker-compose logs -f
+docker compose -f docker/mcp-docs/docker-compose.yml logs -f
 
 # Stop services
-docker-compose down
+docker compose -f docker/mcp-docs/docker-compose.yml down
 ```
+
+> **Note:** The build context is the repo root, so all code/assets are accessible to the Dockerfile. Other services may have their own Compose files under the `docker/` directory.
 
 ### Performance Testing
 
@@ -1125,7 +1130,7 @@ A script is provided for stress testing the SSE transport for production deploym
 
 #### Usage Example
 
-The [scripts/mcp_docs_stress_sse.py](../scripts/mcp_docs_stress_sse.py) script can be used to stress test the SSE endpoint:
+The [`../scripts/mcp_docs_stress_sse.py`](../scripts/mcp_docs_stress_sse.py) script can be used to stress test the SSE endpoint:
 
 ```sh
 uv run scripts/mcp_docs_stress_sse.py \
