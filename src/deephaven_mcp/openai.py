@@ -29,15 +29,12 @@ class OpenAIClient:
     Asynchronous client for OpenAI-compatible chat APIs, supporting chat completion and streaming.
 
     This class wraps the OpenAI Python SDK (or compatible APIs) and provides methods to send chat
-    completion requests with configurable parameters such as base URL, API key, model, and default
-    system prompt. It supports dependency injection of the OpenAI async client for testability, and
-    provides robust validation of chat message history.
+    completion requests with configurable parameters such as base URL, API key, and model. It supports dependency injection of the OpenAI async client for testability, and provides robust validation of chat message history.
 
     Attributes:
         api_key (str): The API key for authentication.
         base_url (str): The base URL of the OpenAI-compatible API endpoint.
         model (str): The model name to use for chat completions.
-        system_prompt (str | None): Default system prompt to prepend to the conversation (optional).
         client (openai.AsyncOpenAI): The underlying OpenAI async client instance. Can be injected for testing.
 
     Example:
@@ -53,7 +50,6 @@ class OpenAIClient:
         api_key: str,
         base_url: str,
         model: str,
-        system_prompt: str | None = None,
         client: openai.AsyncOpenAI | None = None,
     ):
         """
@@ -63,7 +59,6 @@ class OpenAIClient:
             api_key (str): API key for authentication with the OpenAI-compatible API.
             base_url (str): Base URL for the OpenAI-compatible API endpoint.
             model (str): Model name to use for chat completions (e.g., 'gpt-3.5-turbo').
-            system_prompt (str | None, optional): Default system prompt to prepend to the conversation. If None, no system prompt is used.
             client (openai.AsyncOpenAI | None, optional): Optionally inject a custom OpenAI async client (for testing or advanced usage).
 
         Raises:
@@ -81,7 +76,6 @@ class OpenAIClient:
         self.api_key: str = api_key
         self.base_url: str = base_url
         self.model: str = model
-        self.system_prompt: str | None = system_prompt
         self.client: openai.AsyncOpenAI = client or openai.AsyncOpenAI(
             api_key=api_key, base_url=base_url
         )
@@ -121,32 +115,66 @@ class OpenAIClient:
                         "'role' and 'content' in each message must be strings"
                     )
 
+    def _validate_system_prompts(self, system_prompts: Sequence[str] | None) -> None:
+        """
+        Validate that the system prompt is a sequence of strings.
+
+        Args:
+            system_prompts (Sequence[str] | None): The system prompts to validate. Each entry must be a string.
+
+        Raises:
+            OpenAIClientError: If system_prompts is not a sequence of strings.
+
+        Example:
+            >>> client._validate_system_prompts(["You are a bot."])
+        """
+        if system_prompts is not None:
+            if not isinstance(system_prompts, list | tuple):
+                raise OpenAIClientError(
+                    "system_prompts must be a sequence (list or tuple) of strings"
+                )
+            for prompt in system_prompts:
+                if not isinstance(prompt, str):
+                    raise OpenAIClientError(
+                        "Each system prompt must be a string"
+                    )
+
     def _build_messages(
-        self, prompt: str, history: Sequence[dict[str, str]] | None
+        self,
+        prompt: str,
+        history: Sequence[dict[str, str]] | None,
+        system_prompts: Sequence[str] | None = None,
     ) -> list[dict[str, str]]:
         """
-        Construct the messages list for OpenAI chat completion requests, including system prompt, history, and user prompt.
+        Construct the messages list for OpenAI chat completion requests, including system prompts, history, and user prompt.
 
         Args:
             prompt (str): The latest user message to append to the conversation.
             history (Sequence[dict[str, str]] | None): Previous chat messages for context. Each must be a dict with 'role' and 'content'.
+            system_prompts (Sequence[str] | None): Optional sequence of system prompt strings to prepend as system messages.
 
         Returns:
             list[dict[str, str]]: The formatted list of messages for the OpenAI API.
 
         Example:
-            >>> client._build_messages("What's the weather?", [{"role": "user", "content": "Hi"}])
+            >>> client._build_messages("What's the weather?", [{"role": "user", "content": "Hi"}], ["You are a bot."])
             [
-                {"role": "system", "content": "..."},
+                {"role": "system", "content": "You are a bot."},
                 {"role": "user", "content": "Hi"},
                 {"role": "user", "content": "What's the weather?"}
             ]
         """
+        self._validate_history(history)
+        self._validate_system_prompts(system_prompts)
         messages: list[dict[str, str]] = []
+        # Insert system prompts first (in order)
+        if system_prompts:
+            for sys_msg in system_prompts:
+                messages.append({"role": "system", "content": sys_msg})
+        # Then add history
         if history:
             messages.extend(history)
-        if self.system_prompt:
-            messages.insert(0, {"role": "system", "content": self.system_prompt})
+        # Finally, add the new user prompt
         messages.append({"role": "user", "content": prompt})
         return messages
 
@@ -154,16 +182,18 @@ class OpenAIClient:
         self,
         prompt: str,
         history: Sequence[dict[str, str]] | None = None,
+        system_prompts: Sequence[str] | None = None,
         **kwargs: Any,
     ) -> str:
         """
         Asynchronously send a chat completion request to the OpenAI API and return the assistant's response.
 
-        This method validates the chat history, constructs the message list (including system prompt and user prompt), and sends a chat completion request using the injected or default OpenAI async client. It logs request and response details, and raises a custom error on failure.
+        This method validates the chat history, constructs the message list (including system prompt(s) and user prompt), and sends a chat completion request using the injected or default OpenAI async client. It logs request and response details, and raises a custom error on failure.
 
         Args:
             prompt (str): The user's question or message to send to the assistant.
             history (Sequence[dict[str, str]] | None, optional): Previous chat messages for context. Each must be a dict with 'role' and 'content'.
+            system_prompts (Sequence[str] | None, optional): Optional sequence of system prompt strings to prepend as system messages.
             **kwargs: Additional keyword arguments to pass to the OpenAI API (e.g., max_tokens, temperature, stop, presence_penalty, frequency_penalty, etc.).
 
         Returns:
@@ -173,14 +203,13 @@ class OpenAIClient:
             OpenAIClientError: If the API call fails, returns an error, or if parameters are invalid.
 
         Example:
-            >>> await client.chat("Hello, who are you?", max_tokens=100, temperature=0.7, stop=["\n"])
+            >>> await client.chat("Hello, who are you?", max_tokens=100, temperature=0.7, stop=["\n"], system_prompts=["You are a bot."])
             'I am an AI language model developed by OpenAI...'
         """
-        self._validate_history(history)
-        messages = self._build_messages(prompt, history)
+        messages = self._build_messages(prompt, history, system_prompts)
         try:
             _LOGGER.info(
-                f"[OpenAIClient.chat] Sending chat completion request | model={self.model}, base_url={self.base_url}, prompt_len={len(prompt)}, history_len={len(history) if history else 0}"
+                f"[OpenAIClient.chat] Sending chat completion request | model={self.model}, base_url={self.base_url}, prompt_len={len(prompt)}, history_len={len(history) if history else 0}, system_prompts_len={len(system_prompts) if system_prompts else 0}"
             )
             start_time = time.monotonic()
             response = await self.client.chat.completions.create(
@@ -221,16 +250,18 @@ class OpenAIClient:
         self,
         prompt: str,
         history: Sequence[dict[str, str]] | None = None,
+        system_prompts: Sequence[str] | None = None,
         **kwargs: Any,
     ) -> AsyncGenerator[str, None]:
         """
         Asynchronously send a streaming chat completion request to the OpenAI API, yielding tokens as they arrive.
 
-        This method validates the chat history, constructs the message list (including system prompt and user prompt), and sends a streaming chat completion request using the injected or default OpenAI async client. It logs request and response details, and raises a custom error on failure. Each yielded string is a new token or chunk from the assistant's response.
+        This method validates the chat history, constructs the message list (including system prompt(s) and user prompt), and sends a streaming chat completion request using the injected or default OpenAI async client. It logs request and response details, and raises a custom error on failure. Each yielded string is a new token or chunk from the assistant's response.
 
         Args:
             prompt (str): The user's question or message to send to the assistant.
             history (Sequence[dict[str, str]] | None, optional): Previous chat messages for context. Each must be a dict with 'role' and 'content'.
+            system_prompts (Sequence[str] | None, optional): Optional sequence of system prompt strings to prepend as system messages.
             **kwargs: Additional keyword arguments to pass to the OpenAI API (e.g., max_tokens, temperature, stop, presence_penalty, frequency_penalty, etc.).
 
         Yields:
@@ -240,14 +271,13 @@ class OpenAIClient:
             OpenAIClientError: If the API call fails, streaming is not supported, or if parameters are invalid.
 
         Example:
-            >>> async for chunk in client.stream_chat("Tell me a joke.", max_tokens=20, temperature=0.5, stop=["\n"]):
+            >>> async for chunk in client.stream_chat("Tell me a joke.", max_tokens=20, temperature=0.5, stop=["\n"], system_prompts=["You are a bot."]):
             ...     print(chunk, end="")
         """
-        self._validate_history(history)
-        messages = self._build_messages(prompt, history)
+        messages = self._build_messages(prompt, history, system_prompts)
         try:
             _LOGGER.info(
-                f"[OpenAIClient.stream_chat] Sending streaming chat request | model={self.model}, base_url={self.base_url}, prompt_len={len(prompt)}, history_len={len(history) if history else 0}"
+                f"[OpenAIClient.stream_chat] Sending streaming chat request | model={self.model}, base_url={self.base_url}, prompt_len={len(prompt)}, history_len={len(history) if history else 0}, system_prompts_len={len(system_prompts) if system_prompts else 0}"
             )
             start_time = time.monotonic()
             response = await self.client.chat.completions.create(
