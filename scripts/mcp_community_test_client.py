@@ -182,6 +182,30 @@ async def main():
         except Exception as e:
             print(f"Error calling run_script: {e}")
 
+    # 6. worker_statuses
+    print("\nCalling tool: worker_statuses")
+    if "worker_statuses" in tool_map:
+        try:
+            result = await tool_map["worker_statuses"].run_json(
+                {},
+                cancellation_token=CancellationToken(),
+            )
+            print(f"Result for worker_statuses: {result}")
+        except Exception as e:
+            print(f"Error calling worker_statuses: {e}")
+
+    # 7. pip_packages (requires worker_name)
+    print("\nCalling tool: pip_packages (sample args)")
+    if "pip_packages" in tool_map:
+        try:
+            result = await tool_map["pip_packages"].run_json(
+                {"worker_name": "worker1"},
+                cancellation_token=CancellationToken(),
+            )
+            print(f"Result for pip_packages: {result}")
+        except Exception as e:
+            print(f"Error calling pip_packages: {e}")
+
 
 if __name__ == "__main__":
     asyncio.run(main())

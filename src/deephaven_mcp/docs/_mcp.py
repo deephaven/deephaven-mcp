@@ -48,14 +48,12 @@ inkeep_client = OpenAIClient(
     api_key=_INKEEP_API_KEY,
     base_url="https://api.inkeep.com/v1",
     model="inkeep-context-expert",
-    system_prompt="You are a helpful assistant that answers questions about Deephaven Data Labs documentation. Answer with reference to the docs when possible.",
 )
 """
 OpenAIClient: Configured for Inkeep-powered Deephaven documentation Q&A.
 - api_key: Pulled from _INKEEP_API_KEY env var.
 - base_url: https://api.inkeep.com/v1
 - model: inkeep-context-expert
-- system_prompt: Custom prompt for documentation assistance.
 
 This client is injected into tools for agentic and programmatic use. It should not be instantiated directly by users.
 """
@@ -92,7 +90,11 @@ async def health_check(request: Request) -> JSONResponse:
 
 
 @mcp_server.tool()
-async def docs_chat(prompt: str, history: list[dict[str, str]] | None = None) -> str:
+async def docs_chat(
+    prompt: str,
+    history: list[dict[str, str]] | None = None,
+    pip_packages: list[dict] | None = None,
+) -> str:
     """
     docs_chat - Asynchronous Documentation Q&A Tool (MCP Tool)
 
@@ -108,6 +110,14 @@ async def docs_chat(prompt: str, history: list[dict[str, str]] | None = None) ->
                     {"role": "user", "content": "How do I install Deephaven?"},
                     {"role": "assistant", "content": "To install Deephaven, ..."}
                 ]
+        pip_packages (list[dict] | None, optional):
+            The list of installed pip packages on the relevant worker, as returned by pip_packages()['result'].
+            Each dict should have 'package' and 'version' keys. This provides additional context to the documentation assistant for environment-specific answers.
+            Example:
+                [
+                    {"package": "numpy", "version": "1.25.0"},
+                    {"package": "pandas", "version": "2.1.0"}
+                ]
 
     Returns:
         str: The assistant's response message answering the user's documentation question. The response is a natural language string, suitable for direct display or further agentic processing.
@@ -119,17 +129,54 @@ async def docs_chat(prompt: str, history: list[dict[str, str]] | None = None) ->
         - This tool is asynchronous and should be awaited in agentic or orchestration frameworks.
         - The tool is discoverable via MCP server tool registries and can be invoked by name ('docs_chat').
         - For best results, provide relevant chat history for multi-turn conversations.
+        - For environment-specific questions, provide pip_packages for more accurate answers.
         - Designed for integration with LLM agents, RAG pipelines, chatbots, and automation scripts.
 
     Example (agentic call):
         >>> response = await docs_chat(
         ...     prompt="How do I install Deephaven?",
-        ...     history=[{"role": "user", "content": "Hi"}]
+        ...     history=[{"role": "user", "content": "Hi"}],
+        ...     pip_packages=[{"package": "numpy", "version": "1.25.0"}]
         ... )
         >>> print(response)
         To install Deephaven, ...
     """
-    return await inkeep_client.chat(prompt, history)
+
+    system_prompts = [
+        """
+        You are a helpful assistant that answers questions about Deephaven Data Labs documentation. 
+        Never return answers about Legacy Deephaven.
+        """,
+    ]
+
+    # Extract Deephaven Core and Core+ versions from pip_packages if available
+    deephaven_core_version = None
+    deephaven_coreplus_version = None
+    if pip_packages:
+        for pkg in pip_packages:
+            pkg_name = pkg.get("package", "").lower()
+            if pkg_name == "deephaven" and deephaven_core_version is None:
+                deephaven_core_version = pkg.get("version")
+            elif (
+                pkg_name == "deephaven_coreplus_worker"
+                and deephaven_coreplus_version is None
+            ):
+                deephaven_coreplus_version = pkg.get("version")
+            if deephaven_core_version and deephaven_coreplus_version:
+                break
+
+    if deephaven_core_version:
+        system_prompts.append(
+            f"Answer questions about Deephaven Core version: {deephaven_core_version}."
+        )
+    if deephaven_coreplus_version:
+        system_prompts.append(
+            f"Answer questions about Deephaven Core+ (Enterprise) version: {deephaven_coreplus_version}."
+        )
+
+    return await inkeep_client.chat(
+        prompt=prompt, history=history, system_prompts=system_prompts
+    )
 
 
 __all__ = ["mcp_server"]
