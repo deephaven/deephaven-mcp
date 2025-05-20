@@ -1,5 +1,8 @@
 # deephaven-mcp
 
+> **Are you a developer or contributor?**
+> See the [Developer & Contributor Guide](docs/DEVELOPER_GUIDE.md) for detailed technical and contribution documentation.
+
 ![GitHub Workflow Status](https://img.shields.io/github/workflow/status/deephaven/deephaven-mcp/CI)
 ![PyPI](https://img.shields.io/pypi/v/deephaven-mcp)
 ![License](https://img.shields.io/github/license/deephaven/deephaven-mcp)
