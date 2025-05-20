@@ -434,8 +434,8 @@ async def pip_packages(context: Context, worker_name: str) -> dict:
                     names.append(dist.metadata["Name"])
                     versions.append(dist.version)
                 return new_table([
-                    string_col("package", names),
-                    string_col("version", versions),
+                    string_col("Package", names),
+                    string_col("Version", versions),
                 ])
 
             _pip_packages_table = _make_pip_packages_table()
@@ -458,17 +458,19 @@ async def pip_packages(context: Context, worker_name: str) -> dict:
         if arrow_table is not None:
             # Convert to pandas DataFrame for easy dict conversion
             df = arrow_table.to_pandas()
-            packages = df.to_dict(orient="records")
-            # Validate that each package dict has the expected keys
-            for pkg in packages:
+            raw_packages = df.to_dict(orient="records")
+            # Validate and convert keys to lowercase
+            packages = []
+            for pkg in raw_packages:
                 if (
                     not isinstance(pkg, dict)
-                    or "package" not in pkg
-                    or "version" not in pkg
+                    or "Package" not in pkg
+                    or "Version" not in pkg
                 ):
                     raise ValueError(
-                        "Malformed package data: missing 'package' or 'version' key"
+                        "Malformed package data: missing 'Package' or 'Version' key"
                     )
+                packages.append({"package": pkg["Package"], "version": pkg["Version"]})
 
         result["success"] = True
         result["result"] = packages

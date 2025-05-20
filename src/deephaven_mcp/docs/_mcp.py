@@ -112,7 +112,7 @@ async def docs_chat(
                 ]
         pip_packages (list[dict] | None, optional):
             The list of installed pip packages on the relevant worker, as returned by pip_packages()['result'].
-            Each dict should have 'package' and 'version' keys. This provides additional context to the documentation assistant for environment-specific answers.
+            Each dict should have 'package' and 'version' keys. Providing this argument enables the documentation assistant to tailor its answers to your actual environment, resulting in more accurate and relevant responses.
             Example:
                 [
                     {"package": "numpy", "version": "1.25.0"},

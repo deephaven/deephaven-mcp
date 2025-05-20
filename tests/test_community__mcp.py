@@ -593,8 +593,8 @@ async def test_pip_packages_success(monkeypatch):
     # Test successful retrieval of pip packages.
     mock_df = MagicMock()
     mock_df.to_dict.return_value = [
-        {"package": "numpy", "version": "1.25.0"},
-        {"package": "pandas", "version": "2.0.1"},
+        {"Package": "numpy", "Version": "1.25.0"},
+        {"Package": "pandas", "Version": "2.0.1"},
     ]
 
     mock_arrow_table = MagicMock()
