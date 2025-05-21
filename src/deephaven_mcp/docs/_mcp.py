@@ -162,6 +162,7 @@ A Deephaven query string is a compact, text-based expression used to define tran
 Generate a Deephaven query string based on the following user request: [USER_REQUEST_HERE]
 """
 
+
 @mcp_server.tool()
 async def docs_chat(
     prompt: str,
