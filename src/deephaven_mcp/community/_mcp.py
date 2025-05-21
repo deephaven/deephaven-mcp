@@ -453,37 +453,13 @@ async def pip_packages(context: Context, worker_name: str) -> dict:
         session = await session_manager.get_or_create_session(worker_name)
         _LOGGER.info(f"[pip_packages] Session established for worker: '{worker_name}'")
 
-        # Script to create a table with the pip list
-        script = textwrap.dedent(
-            """
-            from deephaven import new_table
-            from deephaven.column import string_col
-            import importlib.metadata
-
-            def _make_pip_packages_table():
-                names = []
-                versions = []
-                for dist in importlib.metadata.distributions():
-                    names.append(dist.metadata["Name"])
-                    versions.append(dist.version)
-                return new_table([
-                    string_col("Package", names),
-                    string_col("Version", versions),
-                ])
-
-            _pip_packages_table = _make_pip_packages_table()
-        """
-        )
-
-        await asyncio.to_thread(session.run_script, script)
+        # Run the pip packages script and get the table in one step
         _LOGGER.info(
-            f"[pip_packages] Script executed successfully on worker: '{worker_name}'"
+            f"[pip_packages] Getting pip packages table for worker: '{worker_name}'"
         )
-
-        # Get the table using a thread for sync operations
-        arrow_table = await sessions.get_table(session, "_pip_packages_table")
+        arrow_table = await sessions.get_pip_packages_table(session)
         _LOGGER.info(
-            f"[pip_packages] Table retrieved successfully on worker: '{worker_name}'"
+            f"[pip_packages] Pip packages table retrieved successfully for worker: '{worker_name}'"
         )
 
         # Convert the Arrow table to a list of dicts

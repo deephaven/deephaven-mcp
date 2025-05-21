@@ -280,6 +280,57 @@ async def test_get_meta_table_to_arrow_error():
 
 
 
+# --- Tests for get_pip_packages_table ---
+
+import logging
+
+@pytest.mark.asyncio
+async def test_get_pip_packages_table_success(monkeypatch, caplog):
+    session_mock = MagicMock()
+    # Patch asyncio.to_thread to run synchronously
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+    monkeypatch.setattr(_sessions.asyncio, "to_thread", fake_to_thread)
+    # Patch get_table to return a sentinel
+    arrow_mock = MagicMock()
+    monkeypatch.setattr(_sessions, "get_table", AsyncMock(return_value=arrow_mock))
+    # Should log all steps
+    with caplog.at_level(logging.INFO):
+        result = await _sessions.get_pip_packages_table(session_mock)
+    assert result is arrow_mock
+    assert "Running pip packages script in session..." in caplog.text
+    assert "Script executed successfully." in caplog.text
+    assert "Table retrieved successfully." in caplog.text
+    session_mock.run_script.assert_called_once()
+    _sessions.get_table.assert_awaited_once_with(session_mock, "_pip_packages_table")
+
+@pytest.mark.asyncio
+async def test_get_pip_packages_table_script_failure(monkeypatch):
+    session_mock = MagicMock()
+    # Patch asyncio.to_thread to raise when running script
+    async def fake_to_thread(fn, *args, **kwargs):
+        if fn == session_mock.run_script:
+            raise RuntimeError("fail-script")
+        return fn(*args, **kwargs)
+    monkeypatch.setattr(_sessions.asyncio, "to_thread", fake_to_thread)
+    with pytest.raises(RuntimeError, match="fail-script"):
+        await _sessions.get_pip_packages_table(session_mock)
+    # No assertion on run_script: exception is raised before call
+
+@pytest.mark.asyncio
+async def test_get_pip_packages_table_table_failure(monkeypatch):
+    session_mock = MagicMock()
+    # Patch asyncio.to_thread to run synchronously
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+    monkeypatch.setattr(_sessions.asyncio, "to_thread", fake_to_thread)
+    # Patch get_table to raise
+    monkeypatch.setattr(_sessions, "get_table", AsyncMock(side_effect=RuntimeError("fail-table")))
+    with pytest.raises(RuntimeError, match="fail-table"):
+        await _sessions.get_pip_packages_table(session_mock)
+    session_mock.run_script.assert_called_once()
+    _sessions.get_table.assert_awaited_once_with(session_mock, "_pip_packages_table")
+
 # --- Tests for get_table ---
 
 

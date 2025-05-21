@@ -573,154 +573,119 @@ async def test_run_script_script_path_error(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_pip_packages_empty(monkeypatch):
-    mock_df = MagicMock()
-    mock_df.to_dict.return_value = []
+async def test_pip_packages_success(monkeypatch):
+    """Test successful retrieval of pip packages."""
     mock_arrow_table = MagicMock()
-    mock_arrow_table.to_pandas = MagicMock(return_value=mock_df)
-    table = MagicMock()
-    table.to_arrow = MagicMock(return_value=mock_arrow_table)
-    mock_session = MagicMock()
-    mock_session.run_script = MagicMock(return_value=None)
-    mock_session.open_table = MagicMock(return_value=table)
+    mock_df = MagicMock()
+    mock_df.to_dict.side_effect = lambda *args, **kwargs: [
+        {"Package": "numpy", "Version": "1.25.0"},
+        {"Package": "pandas", "Version": "2.0.1"},
+    ] if kwargs.get("orient") == "records" else []
+    mock_arrow_table.to_pandas.return_value = mock_df
+    mock_get_pip_packages_table = AsyncMock(return_value=mock_arrow_table)
+    mock_get_or_create_session = AsyncMock(return_value=MagicMock())
+
+    with patch(
+        "deephaven_mcp.community._sessions.get_pip_packages_table",
+        mock_get_pip_packages_table,
+    ):
+        mock_manager = AsyncMock()
+        mock_manager.get_or_create_session = AsyncMock(return_value=MagicMock())
+        context = MockContext(
+            {
+                "session_manager": mock_manager,
+                "config_manager": AsyncMock(),
+            }
+        )
+        result = await mcp_mod.pip_packages(context, worker_name="test_worker")
+        assert result["success"] is True
+        assert len(result["result"]) == 2
+        assert result["result"][0]["package"] == "numpy"
+        assert result["result"][0]["version"] == "1.25.0"
+
+
+@pytest.mark.asyncio
+async def test_pip_packages_empty(monkeypatch):
+    """Test pip_packages with an empty table."""
+    mock_arrow_table = MagicMock()
+    mock_df = MagicMock()
+    mock_df.to_dict.side_effect = lambda *args, **kwargs: []
+    mock_arrow_table.to_pandas.return_value = mock_df
+    mock_get_pip_packages_table = AsyncMock(return_value=mock_arrow_table)
     mock_manager = AsyncMock()
-    mock_manager.get_or_create_session = AsyncMock(return_value=mock_session)
-    context = MockContext(
-        {"session_manager": mock_manager, "config_manager": AsyncMock()}
-    )
-    result = await mcp_mod.pip_packages(context, worker_name="test_worker")
+    mock_manager.get_or_create_session = AsyncMock(return_value=MagicMock())
+    context = MockContext({"session_manager": mock_manager, "config_manager": AsyncMock()})
+    with patch("deephaven_mcp.community._sessions.get_pip_packages_table", mock_get_pip_packages_table):
+        result = await mcp_mod.pip_packages(context, worker_name="test_worker")
     assert result["success"] is True
     assert result["result"] == []
+    mock_manager.get_or_create_session.assert_awaited_once_with("test_worker")
+    mock_get_pip_packages_table.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_pip_packages_malformed_data(monkeypatch):
-    mock_df = MagicMock()
-    mock_df.to_dict.return_value = [{"badkey": 1}]
+    """Test pip_packages with malformed data."""
     mock_arrow_table = MagicMock()
-    mock_arrow_table.to_pandas = MagicMock(return_value=mock_df)
-    table = MagicMock()
-    table.to_arrow = MagicMock(return_value=mock_arrow_table)
-    mock_session = MagicMock()
-    mock_session.run_script = MagicMock(return_value=None)
-    mock_session.open_table = MagicMock(return_value=table)
+    mock_df = MagicMock()
+    mock_df.to_dict.side_effect = lambda *args, **kwargs: [{"badkey": 1}] if kwargs.get("orient") == "records" else []  # missing 'Package' and 'Version'
+    mock_arrow_table.to_pandas.return_value = mock_df
+    mock_get_pip_packages_table = AsyncMock(return_value=mock_arrow_table)
     mock_manager = AsyncMock()
-    mock_manager.get_or_create_session = AsyncMock(return_value=mock_session)
-    context = MockContext(
-        {"session_manager": mock_manager, "config_manager": AsyncMock()}
-    )
-    result = await mcp_mod.pip_packages(context, worker_name="test_worker")
+    mock_manager.get_or_create_session = AsyncMock(return_value=MagicMock())
+    context = MockContext({"session_manager": mock_manager, "config_manager": AsyncMock()})
+    with patch("deephaven_mcp.community._sessions.get_pip_packages_table", mock_get_pip_packages_table):
+        result = await mcp_mod.pip_packages(context, worker_name="test_worker")
     assert result["success"] is False
     assert result["isError"] is True
-    assert "package" in result["error"] or "version" in result["error"]
+    assert "Malformed package data" in result["error"]
+    mock_manager.get_or_create_session.assert_awaited_once_with("test_worker")
+    mock_get_pip_packages_table.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_pip_packages_success(monkeypatch):
-    # Test successful retrieval of pip packages.
-    mock_df = MagicMock()
-    mock_df.to_dict.return_value = [
-        {"Package": "numpy", "Version": "1.25.0"},
-        {"Package": "pandas", "Version": "2.0.1"},
-    ]
+async def test_pip_packages_error(monkeypatch):
+    """Test pip_packages with an error."""
+    mock_get_pip_packages_table = AsyncMock(side_effect=Exception("Table error"))
+    mock_get_or_create_session = AsyncMock(return_value=MagicMock())
 
-    mock_arrow_table = MagicMock()
-    mock_arrow_table.to_pandas.return_value = mock_df
-    table = MagicMock()
-    table.to_arrow.return_value = mock_arrow_table
-    mock_session = MagicMock()
-    mock_session.run_script = MagicMock(return_value=None)
-    mock_session.open_table = MagicMock(return_value=table)
-    mock_manager = AsyncMock()
-    mock_manager.get_or_create_session = AsyncMock(return_value=mock_session)
-    context = MockContext(
-        {
-            "session_manager": mock_manager,
-            "config_manager": AsyncMock(),
-        }
-    )
-    result = await mcp_mod.pip_packages(context, worker_name="test_worker")
-    assert result["success"] is True
-    assert len(result["result"]) == 2
-    assert result["result"][0]["package"] == "numpy"
-    assert result["result"][0]["version"] == "1.25.0"
-    mock_manager.get_or_create_session.assert_awaited_once_with("test_worker")
-    mock_session.run_script.assert_called_once()
-    mock_session.open_table.assert_called_once_with("_pip_packages_table")
-    mock_arrow_table.to_pandas.assert_called_once()
-    mock_df.to_dict.assert_called_once_with(orient="records")
+    with patch(
+        "deephaven_mcp.community._sessions.get_pip_packages_table",
+        mock_get_pip_packages_table,
+    ):
+        mock_manager = AsyncMock()
+        mock_manager.get_or_create_session = AsyncMock(return_value=MagicMock())
+        context = MockContext(
+            {
+                "session_manager": mock_manager,
+                "config_manager": AsyncMock(),
+            }
+        )
+        result = await mcp_mod.pip_packages(context, worker_name="test_worker")
+        assert result["success"] is False
+        assert result["isError"] is True
+        assert "Table error" in result["error"]
 
 
 @pytest.mark.asyncio
 async def test_pip_packages_worker_not_found(monkeypatch):
     """Test pip_packages when the worker is not found."""
-    # Mock the session manager to raise an exception
-    mock_manager = AsyncMock()
-    mock_manager.get_or_create_session = AsyncMock(
-        side_effect=ValueError("Worker not found")
-    )
+    mock_get_pip_packages_table = AsyncMock(return_value=MagicMock())
+    mock_get_or_create_session = AsyncMock(side_effect=ValueError("Worker not found"))
 
-    # Create the context with our mocks
-    context = MockContext(
-        {
-            "session_manager": mock_manager,
-            "config_manager": AsyncMock(),
-            "importlib_metadata": MagicMock(),
-        }
-    )
-
-    # Call the function
-    result = await mcp_mod.pip_packages(context, worker_name="nonexistent_worker")
-
-    # Verify the result
-    assert result["success"] is False
-    assert "Worker not found" in result["error"]
-    assert result["isError"] is True
-    mock_manager.get_or_create_session.assert_awaited_once_with("nonexistent_worker")
-
-
-@pytest.mark.asyncio
-async def test_pip_packages_script_error(monkeypatch):
-    """Test pip_packages when there's an error executing the script."""
-    mock_session = MagicMock()
-    mock_session.run_script = MagicMock(
-        side_effect=Exception("Script execution failed")
-    )
-    mock_session.open_table = MagicMock()
-    mock_manager = AsyncMock()
-    mock_manager.get_or_create_session = AsyncMock(return_value=mock_session)
-    context = MockContext(
-        {
-            "session_manager": mock_manager,
-            "config_manager": AsyncMock(),
-        }
-    )
-    result = await mcp_mod.pip_packages(context, worker_name="test_worker")
-    assert result["success"] is False
-    assert "Script execution failed" in result["error"]
-    assert result["isError"] is True
-    mock_manager.get_or_create_session.assert_awaited_once_with("test_worker")
-    mock_session.run_script.assert_called_once()
-
-
-@pytest.mark.asyncio
-async def test_pip_packages_table_error(monkeypatch):
-    """Test pip_packages when there's an error accessing the table."""
-    mock_session = MagicMock()
-    mock_session.run_script = MagicMock(return_value=None)
-    mock_session.open_table = MagicMock(side_effect=Exception("Table not found"))
-    mock_manager = AsyncMock()
-    mock_manager.get_or_create_session = AsyncMock(return_value=mock_session)
-    context = MockContext(
-        {
-            "session_manager": mock_manager,
-            "config_manager": AsyncMock(),
-        }
-    )
-    result = await mcp_mod.pip_packages(context, worker_name="test_worker")
-    assert result["success"] is False
-    assert "Table not found" in result["error"]
-    assert result["isError"] is True
-    mock_manager.get_or_create_session.assert_awaited_once_with("test_worker")
-    mock_session.run_script.assert_called_once()
-    mock_session.open_table.assert_called_once_with("_pip_packages_table")
+    with patch(
+        "deephaven_mcp.community._sessions.get_pip_packages_table",
+        mock_get_pip_packages_table,
+    ):
+        mock_manager = AsyncMock()
+        mock_manager.get_or_create_session = AsyncMock(side_effect=ValueError("Worker not found"))
+        context = MockContext(
+            {
+                "session_manager": mock_manager,
+                "config_manager": AsyncMock(),
+            }
+        )
+        result = await mcp_mod.pip_packages(context, worker_name="nonexistent_worker")
+        assert result["success"] is False
+        assert "Worker not found" in result["error"]
+        assert result["isError"] is True

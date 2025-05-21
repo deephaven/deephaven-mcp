@@ -33,6 +33,7 @@ from typing import Any
 
 import aiofiles
 import pyarrow
+import textwrap
 from pydeephaven import Session
 
 from deephaven_mcp import config
@@ -519,3 +520,51 @@ async def get_meta_table(session: Session, table_name: str) -> pyarrow.Table:
     # the lambda is needed to avoid the meta_table property from being evaluated outside the thread
     meta_table = await asyncio.to_thread(lambda: table.meta_table)
     return await asyncio.to_thread(meta_table.to_arrow)
+
+
+async def get_pip_packages_table(session):
+    """
+    Returns a table of installed pip packages from a Deephaven session.
+
+    Args:
+        session (Session):
+            An active Deephaven session in which to run the script and retrieve the resulting table.
+
+    Returns:
+        pyarrow.Table:
+            A pyarrow.Table containing two columns: 'Package' (str) and 'Version' (str), listing all installed pip packages.
+
+    Raises:
+        Exception: On failure to run the script or retrieve the table.
+
+    Example:
+        >>> arrow_table = await get_pip_packages_table(session)
+        >>> df = arrow_table.to_pandas()
+        >>> print(df.head())
+    """
+    script = textwrap.dedent(
+        """
+        from deephaven import new_table
+        from deephaven.column import string_col
+        import importlib.metadata
+
+        def __DH_MCP_make_pip_packages_table():
+            names = []
+            versions = []
+            for dist in importlib.metadata.distributions():
+                names.append(dist.metadata["Name"])
+                versions.append(dist.version)
+            return new_table([
+                string_col("Package", names),
+                string_col("Version", versions),
+            ])
+
+        _pip_packages_table = __DH_MCP_make_pip_packages_table()
+        """
+    )
+    _LOGGER.info("Running pip packages script in session...")
+    await asyncio.to_thread(session.run_script, script)
+    _LOGGER.info("Script executed successfully.")
+    arrow_table = await get_table(session, "_pip_packages_table")
+    _LOGGER.info("Table retrieved successfully.")
+    return arrow_table
