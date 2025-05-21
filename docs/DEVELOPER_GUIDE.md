@@ -729,6 +729,7 @@ The Deephaven MCP Docs Server exposes a single MCP-compatible tool:
     ```
   - `deephaven_core_version` (optional): The version of Deephaven Community Core installed for the relevant worker. Providing this enables the documentation assistant to tailor its answers for greater accuracy.
   - `deephaven_enterprise_version` (optional): The version of Deephaven Core+ (Enterprise) installed for the relevant worker. Providing this enables the documentation assistant to tailor its answers for greater accuracy.
+  - `programming_language` (optional): Programming language context for the user's question (e.g., "python", "groovy"). If provided, the assistant tailors its answer for this language.
 - **Returns**: String containing the assistant's response message
 - **Error Handling**: If the underlying LLM API call fails, an `OpenAIClientError` is raised with a descriptive error message. Common errors include:
     - Invalid or missing API keys
@@ -740,6 +741,7 @@ The Deephaven MCP Docs Server exposes a single MCP-compatible tool:
   - This tool is asynchronous and should be awaited when used programmatically
   - For multi-turn conversations, providing conversation history improves contextual understanding
   - Providing Deephaven version arguments for a worker will result in more accurate and context-specific answers.
+  - Providing the `programming_language` argument will tailor the assistant's answer for that language (e.g., "python", "groovy").
   - Powered by Inkeep's LLM API service for retrieving documentation-specific responses
 
 **Example (programmatic use):**
@@ -750,11 +752,12 @@ async def get_docs_answer():
     response = await docs_chat(
         prompt="How do I filter tables in Deephaven?",
         history=[
-            {"role": "user", "content": "Hello"},
-            {"role": "assistant", "content": "Hi! How can I help you with Deephaven today?"}
+            {"role": "user", "content": "How do I create a table?"},
+            {"role": "assistant", "content": "To create a table in Deephaven..."},
         ],
         deephaven_core_version="1.2.3",
-        deephaven_enterprise_version="4.5.6"
+        deephaven_enterprise_version="4.5.6",
+        programming_language="python",
     )
     return response
 ```
@@ -986,7 +989,8 @@ from deephaven_mcp.docs._mcp import docs_chat
 async def get_answer():
     response = await docs_chat(
         prompt="How do I filter tables in Deephaven?",
-        history=[{"role": "user", "content": "Hello"}]
+        history=[{"role": "user", "content": "Hello"}],
+        programming_language="python",
     )
     return response
 
