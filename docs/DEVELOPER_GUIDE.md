@@ -724,9 +724,11 @@ The Deephaven MCP Docs Server exposes a single MCP-compatible tool:
     ```python
     [
         {"role": "user", "content": "How do I install Deephaven?"},
-        {"role": "assistant", "content": "To install Deephaven, ..."}  
+        {"role": "assistant", "content": "To install Deephaven, ..."}
     ]
     ```
+  - `deephaven_core_version` (optional): The version of Deephaven Community Core installed for the relevant worker. Providing this enables the documentation assistant to tailor its answers for greater accuracy.
+  - `deephaven_enterprise_version` (optional): The version of Deephaven Core+ (Enterprise) installed for the relevant worker. Providing this enables the documentation assistant to tailor its answers for greater accuracy.
 - **Returns**: String containing the assistant's response message
 - **Error Handling**: If the underlying LLM API call fails, an `OpenAIClientError` is raised with a descriptive error message. Common errors include:
     - Invalid or missing API keys
@@ -737,6 +739,7 @@ The Deephaven MCP Docs Server exposes a single MCP-compatible tool:
 - **Usage Notes**:
   - This tool is asynchronous and should be awaited when used programmatically
   - For multi-turn conversations, providing conversation history improves contextual understanding
+  - Providing Deephaven version arguments for a worker will result in more accurate and context-specific answers.
   - Powered by Inkeep's LLM API service for retrieving documentation-specific responses
 
 **Example (programmatic use):**
@@ -749,7 +752,9 @@ async def get_docs_answer():
         history=[
             {"role": "user", "content": "Hello"},
             {"role": "assistant", "content": "Hi! How can I help you with Deephaven today?"}
-        ]
+        ],
+        deephaven_core_version="1.2.3",
+        deephaven_enterprise_version="4.5.6"
     )
     return response
 ```

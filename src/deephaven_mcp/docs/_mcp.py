@@ -93,7 +93,8 @@ async def health_check(request: Request) -> JSONResponse:
 async def docs_chat(
     prompt: str,
     history: list[dict[str, str]] | None = None,
-    pip_packages: list[dict] | None = None,
+    deephaven_core_version: str | None = None,
+    deephaven_enterprise_version: str | None = None,
 ) -> str:
     """
     docs_chat - Asynchronous Documentation Q&A Tool (MCP Tool)
@@ -110,14 +111,10 @@ async def docs_chat(
                     {"role": "user", "content": "How do I install Deephaven?"},
                     {"role": "assistant", "content": "To install Deephaven, ..."}
                 ]
-        pip_packages (list[dict] | None, optional):
-            The list of installed pip packages on the relevant worker, as returned by pip_packages()['result'].
-            Each dict should have 'package' and 'version' keys. Providing this argument enables the documentation assistant to tailor its answers to your actual environment, resulting in more accurate and relevant responses.
-            Example:
-                [
-                    {"package": "numpy", "version": "1.25.0"},
-                    {"package": "pandas", "version": "2.1.0"}
-                ]
+        deephaven_core_version (str | None, optional):
+            The version of Deephaven Community Core installed for the relevant worker. Providing this enables the documentation assistant to tailor its answers for greater accuracy.
+        deephaven_enterprise_version (str | None, optional):
+            The version of Deephaven Core+ (Enterprise) installed for the relevant worker. Providing this enables the documentation assistant to tailor its answers for greater accuracy.
 
     Returns:
         str: The assistant's response message answering the user's documentation question. The response is a natural language string, suitable for direct display or further agentic processing.
@@ -129,14 +126,16 @@ async def docs_chat(
         - This tool is asynchronous and should be awaited in agentic or orchestration frameworks.
         - The tool is discoverable via MCP server tool registries and can be invoked by name ('docs_chat').
         - For best results, provide relevant chat history for multi-turn conversations.
-        - For environment-specific questions, provide pip_packages for more accurate answers.
+        - For environment-specific questions, provide Deephaven version information for more accurate answers.
+        - Including Deephaven Core and Core+ versions leads to more precise, context-aware responses.
         - Designed for integration with LLM agents, RAG pipelines, chatbots, and automation scripts.
 
     Example (agentic call):
         >>> response = await docs_chat(
         ...     prompt="How do I install Deephaven?",
         ...     history=[{"role": "user", "content": "Hi"}],
-        ...     pip_packages=[{"package": "numpy", "version": "1.25.0"}]
+        ...     deephaven_core_version="1.2.3",
+        ...     deephaven_enterprise_version="4.5.6"
         ... )
         >>> print(response)
         To install Deephaven, ...
@@ -149,30 +148,13 @@ async def docs_chat(
         """,
     ]
 
-    # Extract Deephaven Core and Core+ versions from pip_packages if available
-    deephaven_core_version = None
-    deephaven_coreplus_version = None
-    if pip_packages:
-        for pkg in pip_packages:
-            pkg_name = pkg.get("package", "").lower()
-            if pkg_name == "deephaven" and deephaven_core_version is None:
-                deephaven_core_version = pkg.get("version")
-            elif (
-                pkg_name == "deephaven_coreplus_worker"
-                and deephaven_coreplus_version is None
-            ):
-                deephaven_coreplus_version = pkg.get("version")
-            if deephaven_core_version and deephaven_coreplus_version:
-                break
-
+    # Optionally add version info to prompt context if provided
     if deephaven_core_version:
-        system_prompts.append(
-            f"Answer questions about Deephaven Core version: {deephaven_core_version}."
-        )
-    if deephaven_coreplus_version:
-        system_prompts.append(
-            f"Answer questions about Deephaven Core+ (Enterprise) version: {deephaven_coreplus_version}."
-        )
+        system_prompts.append(f"Worker environment: Deephaven Community Core version: {deephaven_core_version}")
+    if deephaven_enterprise_version:
+        system_prompts.append(f"Worker environment: Deephaven Core+ (Enterprise) version: {deephaven_enterprise_version}")
+
+
 
     return await inkeep_client.chat(
         prompt=prompt, history=history, system_prompts=system_prompts
