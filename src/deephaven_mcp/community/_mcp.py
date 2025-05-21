@@ -255,6 +255,9 @@ async def describe_workers(context: Context) -> dict:
                     core_version, enterprise_version = await sessions.get_dh_versions(
                         session
                     )
+                    _LOGGER.debug(
+                        f"[describe_workers] Worker '{name}' versions: core={core_version}, enterprise={enterprise_version}"
+                    )
                     if core_version is not None:
                         result_dict["deephaven_core_version"] = core_version
                     if enterprise_version is not None:

@@ -571,13 +571,13 @@ async def get_pip_packages_table(session: Session) -> pyarrow.Table:
     return arrow_table
 
 
-async def get_dh_versions(session: Any) -> tuple[str | None, str | None]:
+async def get_dh_versions(session: Session) -> tuple[str | None, str | None]:
     """
     Retrieve the Deephaven Core and Core+ versions installed in a given Deephaven session.
     These versions are retrieved by running a script in the session that queries the installed pip packages.
 
     Args:
-        session (Any): An active Deephaven session object.
+        session (Session): An active Deephaven session object.
 
     Returns:
         Tuple[Optional[str], Optional[str]]: A tuple containing:
@@ -605,12 +605,13 @@ async def get_dh_versions(session: Any) -> tuple[str | None, str | None]:
         raw_packages = df.to_dict(orient="records")
         for pkg in raw_packages:
             pkg_name = pkg.get("Package", "").lower()
-            if pkg_name == "deephaven" and dh_core_version is None:
-                dh_core_version = pkg.get("Version")
+            version = pkg.get("Version", "")
+            if pkg_name == "deephaven-core" and dh_core_version is None:
+                dh_core_version = version
             elif (
                 pkg_name == "deephaven_coreplus_worker" and dh_coreplus_version is None
             ):
-                dh_coreplus_version = pkg.get("Version")
+                dh_coreplus_version = version
             if dh_core_version and dh_coreplus_version:
                 break
 

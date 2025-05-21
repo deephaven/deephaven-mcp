@@ -453,7 +453,7 @@ async def test_get_dh_versions_both_versions(monkeypatch):
     session = MagicMock()
     df = MagicMock()
     df.to_dict.return_value = [
-        {"Package": "deephaven", "Version": "1.2.3"},
+        {"Package": "deephaven-core", "Version": "1.2.3"},
         {"Package": "deephaven_coreplus_worker", "Version": "4.5.6"},
     ]
     arrow_table = MagicMock()
@@ -472,7 +472,7 @@ async def test_get_dh_versions_only_core(monkeypatch):
     session = MagicMock()
     df = MagicMock()
     df.to_dict.return_value = [
-        {"Package": "deephaven", "Version": "1.2.3"},
+        {"Package": "deephaven-core", "Version": "1.2.3"},
         {"Package": "numpy", "Version": "2.0.0"},
     ]
     arrow_table = MagicMock()
