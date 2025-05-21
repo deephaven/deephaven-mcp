@@ -324,7 +324,7 @@ async def test_describe_workers_versions_error(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_describe_workers_some_unavailable(monkeypatch):
+async def test_describe_workers_some_unavailable_with_versions(monkeypatch):
     config_manager = MagicMock()
     session_manager = MagicMock()
     config_manager.get_worker_names = AsyncMock(return_value=["w1", "w2", "w3"])
@@ -343,6 +343,10 @@ async def test_describe_workers_some_unavailable(monkeypatch):
     config_manager.get_worker_config = AsyncMock(
         return_value={"session_type": "python"}
     )
+    # Only w1 is alive, w2 fails, w3 is dead
+    monkeypatch.setattr(
+        mcp_mod.sessions, "get_dh_versions", AsyncMock(return_value=("1.2.3", None))
+    )
     context = MockContext(
         {
             "config_manager": config_manager,
@@ -353,7 +357,12 @@ async def test_describe_workers_some_unavailable(monkeypatch):
     assert result == {
         "success": True,
         "result": [
-            {"worker": "w1", "available": True, "programming_language": "python"},
+            {
+                "worker": "w1",
+                "available": True,
+                "programming_language": "python",
+                "deephaven_core_version": "1.2.3",
+            },
             {"worker": "w2", "available": False, "programming_language": "python"},
             {"worker": "w3", "available": False, "programming_language": "python"},
         ],

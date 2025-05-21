@@ -156,9 +156,9 @@ async def main():
             result = await tool_map["table_schemas"].run_json(
                 {"worker_name": "worker1"}, cancellation_token=CancellationToken()
             )
-            print(f"Result for table_schemas (no args): {result}")
+            print(f"Result for table_schemas (1 arg): {result}")
         except Exception as e:
-            print(f"Error calling table_schemas (no args): {e}")
+            print(f"Error calling table_schemas (1 arg): {e}")
         # Try with sample args
         print("\nCalling tool: table_schemas (sample args)")
         try:
