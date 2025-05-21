@@ -69,6 +69,19 @@ def test_docs_chat_programming_language(monkeypatch):
     assert any("Worker environment: Programming language: groovy" in p for p in prompts)
 
 
+def test_docs_chat_programming_language_invalid(monkeypatch):
+    monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
+    sys.modules.pop("deephaven_mcp.docs._mcp", None)
+    import deephaven_mcp.docs._mcp as mcp_mod
+
+    dummy_client = DummyOpenAIClient(response="should not matter")
+    mcp_mod.inkeep_client = dummy_client
+    with pytest.raises(ValueError) as excinfo:
+        coro = mcp_mod.docs_chat("language?", None, programming_language="java")
+        asyncio.run(coro)
+    assert "Unsupported programming language: java" in str(excinfo.value)
+
+
 def test_docs_chat_success(monkeypatch):
     monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
     sys.modules.pop("deephaven_mcp.docs._mcp", None)
