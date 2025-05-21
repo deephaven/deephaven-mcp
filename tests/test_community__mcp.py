@@ -143,13 +143,39 @@ async def test_refresh_failure(monkeypatch):
 
 # === describe_workers ===
 @pytest.mark.asyncio
-async def test_describe_workers_all_available(monkeypatch):
+async def test_describe_workers_all_available_with_versions(monkeypatch):
     config_manager = MagicMock()
     session_manager = MagicMock()
     config_manager.get_worker_names = AsyncMock(return_value=["w1", "w2"])
     alive_session = MagicMock(is_alive=True)
     session_manager.get_or_create_session = AsyncMock(return_value=alive_session)
     config_manager.get_worker_config = AsyncMock(return_value={"session_type": "python"})
+    monkeypatch.setattr(mcp_mod.sessions, "get_dh_versions", AsyncMock(return_value=("1.2.3", "4.5.6")))
+    context = MockContext(
+        {
+            "config_manager": config_manager,
+            "session_manager": session_manager,
+        }
+    )
+    result = await mcp_mod.describe_workers(context)
+    assert result == {
+        "success": True,
+        "result": [
+            {"worker": "w1", "available": True, "programming_language": "python", "deephaven_core_version": "1.2.3", "deephaven_enterprise_version": "4.5.6"},
+            {"worker": "w2", "available": True, "programming_language": "python", "deephaven_core_version": "1.2.3", "deephaven_enterprise_version": "4.5.6"},
+        ],
+    }
+
+@pytest.mark.asyncio
+async def test_describe_workers_all_available_no_versions(monkeypatch):
+    config_manager = MagicMock()
+    session_manager = MagicMock()
+    config_manager.get_worker_names = AsyncMock(return_value=["w1", "w2"])
+    alive_session = MagicMock(is_alive=True)
+    session_manager.get_or_create_session = AsyncMock(return_value=alive_session)
+    config_manager.get_worker_config = AsyncMock(return_value={"session_type": "python"})
+    # Both versions are None
+    monkeypatch.setattr(mcp_mod.sessions, "get_dh_versions", AsyncMock(return_value=(None, None)))
     context = MockContext(
         {
             "config_manager": config_manager,
@@ -162,6 +188,90 @@ async def test_describe_workers_all_available(monkeypatch):
         "result": [
             {"worker": "w1", "available": True, "programming_language": "python"},
             {"worker": "w2", "available": True, "programming_language": "python"},
+        ],
+    }
+
+@pytest.mark.asyncio
+async def test_describe_workers_some_unavailable(monkeypatch):
+    config_manager = MagicMock()
+    session_manager = MagicMock()
+    config_manager.get_worker_names = AsyncMock(return_value=["w1", "w2", "w3"])
+    alive_session = MagicMock(is_alive=True)
+    dead_session = MagicMock(is_alive=False)
+    async def get_or_create_session(name):
+        if name == "w1":
+            return alive_session
+        elif name == "w2":
+            raise RuntimeError("fail")
+        else:
+            return dead_session
+    session_manager.get_or_create_session = AsyncMock(side_effect=get_or_create_session)
+    config_manager.get_worker_config = AsyncMock(return_value={"session_type": "python"})
+    # Only w1 is alive, w2 fails, w3 is dead
+    monkeypatch.setattr(mcp_mod.sessions, "get_dh_versions", AsyncMock(return_value=("1.2.3", None)))
+    context = MockContext(
+        {
+            "config_manager": config_manager,
+            "session_manager": session_manager,
+        }
+    )
+    result = await mcp_mod.describe_workers(context)
+    # Only w1 gets versions, w2 and w3 are unavailable
+    assert result == {
+        "success": True,
+        "result": [
+            {"worker": "w1", "available": True, "programming_language": "python", "deephaven_core_version": "1.2.3"},
+            {"worker": "w2", "available": False, "programming_language": "python"},
+            {"worker": "w3", "available": False, "programming_language": "python"},
+        ],
+    }
+
+@pytest.mark.asyncio
+async def test_describe_workers_non_python(monkeypatch):
+    config_manager = MagicMock()
+    session_manager = MagicMock()
+    config_manager.get_worker_names = AsyncMock(return_value=["w1"])
+    alive_session = MagicMock(is_alive=True)
+    session_manager.get_or_create_session = AsyncMock(return_value=alive_session)
+    config_manager.get_worker_config = AsyncMock(return_value={"session_type": "groovy"})
+    # Should never call get_dh_versions for non-python
+    monkeypatch.setattr(mcp_mod.sessions, "get_dh_versions", AsyncMock(side_effect=Exception("should not be called")))
+    context = MockContext(
+        {
+            "config_manager": config_manager,
+            "session_manager": session_manager,
+        }
+    )
+    result = await mcp_mod.describe_workers(context)
+    assert result == {
+        "success": True,
+        "result": [
+            {"worker": "w1", "available": True, "programming_language": "groovy"},
+        ],
+    }
+
+@pytest.mark.asyncio
+async def test_describe_workers_versions_error(monkeypatch):
+    config_manager = MagicMock()
+    session_manager = MagicMock()
+    config_manager.get_worker_names = AsyncMock(return_value=["w1"])
+    alive_session = MagicMock(is_alive=True)
+    session_manager.get_or_create_session = AsyncMock(return_value=alive_session)
+    config_manager.get_worker_config = AsyncMock(return_value={"session_type": "python"})
+    # get_dh_versions throws
+    monkeypatch.setattr(mcp_mod.sessions, "get_dh_versions", AsyncMock(side_effect=Exception("fail-version")))
+    context = MockContext(
+        {
+            "config_manager": config_manager,
+            "session_manager": session_manager,
+        }
+    )
+    result = await mcp_mod.describe_workers(context)
+    # Should not include version keys if get_dh_versions fails
+    assert result == {
+        "success": True,
+        "result": [
+            {"worker": "w1", "available": True, "programming_language": "python"},
         ],
     }
 

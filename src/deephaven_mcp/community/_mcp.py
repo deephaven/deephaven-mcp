@@ -189,6 +189,8 @@ async def describe_workers(context: Context) -> dict:
                 - 'worker' (str): Worker name
                 - 'available' (bool): Whether the worker is available
                 - 'programming_language' (str): Programming language for the worker (e.g., 'python', 'groovy')
+                - 'deephaven_core_version' (str, optional): Deephaven Core version (if available)
+                - 'deephaven_enterprise_version' (str, optional): Deephaven Core+ (Enterprise) version (if available)
             - 'error' (str, optional): Error message if retrieval failed. Omitted on success.
             - 'isError' (bool, optional): Present and True if this is an error response (i.e., success is False).
 
@@ -196,7 +198,7 @@ async def describe_workers(context: Context) -> dict:
         {
             'success': True,
             'result': [
-                {'worker': 'local', 'available': True, 'programming_language': 'python'},
+                {'worker': 'local', 'available': True, 'programming_language': 'python', 'deephaven_core_version': '1.2.3', 'deephaven_enterprise_version': '4.5.6'},
                 {'worker': 'remote1', 'available': False, 'programming_language': 'groovy'}
             ]
         }
@@ -240,11 +242,26 @@ async def describe_workers(context: Context) -> dict:
                     "isError": True
                 }
             
-            results.append({
+            result_dict = {
                 "worker": name,
                 "available": available,
                 "programming_language": programming_language
-            })
+            }
+
+            # Only add versions if Python
+            if programming_language == "python" and available:
+                try:
+                    core_version, enterprise_version = await sessions.get_dh_versions(session)
+                    if core_version is not None:
+                        result_dict["deephaven_core_version"] = core_version
+                    if enterprise_version is not None:
+                        result_dict["deephaven_enterprise_version"] = enterprise_version
+                except Exception as e:
+                    _LOGGER.warning(f"[describe_workers] Could not get versions for worker '{name}': {e!r}")
+
+            #TODO: Support getting deephaven versions for other languages
+
+            results.append(result_dict)
         _LOGGER.info(f"[describe_workers] Statuses: {results!r}")
         return {"success": True, "result": results}
     except Exception as e:

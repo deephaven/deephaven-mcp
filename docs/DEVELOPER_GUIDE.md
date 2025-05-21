@@ -438,8 +438,18 @@ On error:
 {
   "success": true,
   "result": [
-    {"worker": "worker_name_1", "available": true, "programming_language": "python"},
-    {"worker": "worker_name_2", "available": false, "programming_language": "groovy"}
+    {
+      "worker": "worker_name_1",
+      "available": true,
+      "programming_language": "python",
+      "deephaven_core_version": "1.2.3",
+      "deephaven_enterprise_version": "4.5.6"
+    },
+    {
+      "worker": "worker_name_2",
+      "available": false,
+      "programming_language": "groovy"
+    }
   ]
 }
 ```
