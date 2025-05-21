@@ -427,9 +427,9 @@ On error:
 
 **Description**: This tool reloads the worker configuration from the file specified in `DH_MCP_CONFIG_FILE` and clears all active sessions. It's useful after changing the worker configuration to ensure changes are immediately applied. The tool uses an asyncio.Lock to ensure thread safety and atomicity of the operation.
 
-##### `worker_statuses`
+##### `describe_workers`
 
-**Purpose**: List all configured Deephaven workers and check their availability status.
+**Purpose**: Describe all configured Deephaven workers, including their availability status and programming language.
 
 **Parameters**: None
 
@@ -438,8 +438,8 @@ On error:
 {
   "success": true,
   "result": [
-    {"worker": "worker_name_1", "available": true},
-    {"worker": "worker_name_2", "available": false}
+    {"worker": "worker_name_1", "available": true, "programming_language": "python"},
+    {"worker": "worker_name_2", "available": false, "programming_language": "groovy"}
   ]
 }
 ```
@@ -833,7 +833,7 @@ The [MCP Inspector](https://github.com/modelcontextprotocol/inspector) is a web-
 4. **Connect to the MCP server via SSE**:
    - Open the Inspector in your browser (URL shown in terminal, typically `http://localhost:6274`)
    - In the Inspector UI, select "Connect" and enter the SSE URL (e.g., `http://localhost:8000/sse`)
-   - Explore and invoke tools like `refresh`, `worker_statuses`, `table_schemas` and `run_script`
+   - Explore and invoke tools like `refresh`, `describe_workers`, `table_schemas` and `run_script`
 
 #### With Docs Server
 
@@ -949,10 +949,10 @@ Both servers can be used programmatically within Python applications:
 from deephaven_mcp.community import mcp_server, run_server
 
 # Use the MCP tools directly (synchronous)
-from deephaven_mcp.community._mcp import refresh, worker_statuses, table_schemas, run_script
+from deephaven_mcp.community._mcp import refresh, describe_workers, table_schemas, run_script
 
 # Example: Get status of all workers
-result = worker_statuses(context)  # Requires MCP context
+result = describe_workers(context)  # Requires MCP context
 
 # Or start the server with a specific transport
 run_server(transport="sse")  # Starts SSE server

@@ -141,32 +141,33 @@ async def test_refresh_failure(monkeypatch):
     assert "fail" in result["error"]
 
 
-# === worker_statuses ===
+# === describe_workers ===
 @pytest.mark.asyncio
-async def test_worker_statuses_all_available(monkeypatch):
+async def test_describe_workers_all_available(monkeypatch):
     config_manager = MagicMock()
     session_manager = MagicMock()
     config_manager.get_worker_names = AsyncMock(return_value=["w1", "w2"])
     alive_session = MagicMock(is_alive=True)
     session_manager.get_or_create_session = AsyncMock(return_value=alive_session)
+    config_manager.get_worker_config = AsyncMock(return_value={"session_type": "python"})
     context = MockContext(
         {
             "config_manager": config_manager,
             "session_manager": session_manager,
         }
     )
-    result = await mcp_mod.worker_statuses(context)
+    result = await mcp_mod.describe_workers(context)
     assert result == {
         "success": True,
         "result": [
-            {"worker": "w1", "available": True},
-            {"worker": "w2", "available": True},
+            {"worker": "w1", "available": True, "programming_language": "python"},
+            {"worker": "w2", "available": True, "programming_language": "python"},
         ],
     }
 
 
 @pytest.mark.asyncio
-async def test_worker_statuses_some_unavailable(monkeypatch):
+async def test_describe_workers_some_unavailable(monkeypatch):
     config_manager = MagicMock()
     session_manager = MagicMock()
     config_manager.get_worker_names = AsyncMock(return_value=["w1", "w2", "w3"])
@@ -182,25 +183,45 @@ async def test_worker_statuses_some_unavailable(monkeypatch):
             return dead_session
 
     session_manager.get_or_create_session = AsyncMock(side_effect=get_or_create_session)
+    config_manager.get_worker_config = AsyncMock(return_value={"session_type": "python"})
     context = MockContext(
         {
             "config_manager": config_manager,
             "session_manager": session_manager,
         }
     )
-    result = await mcp_mod.worker_statuses(context)
+    result = await mcp_mod.describe_workers(context)
     assert result == {
         "success": True,
         "result": [
-            {"worker": "w1", "available": True},
-            {"worker": "w2", "available": False},
-            {"worker": "w3", "available": False},
+            {"worker": "w1", "available": True, "programming_language": "python"},
+            {"worker": "w2", "available": False, "programming_language": "python"},
+            {"worker": "w3", "available": False, "programming_language": "python"},
         ],
     }
 
 
 @pytest.mark.asyncio
-async def test_worker_statuses_config_error(monkeypatch):
+async def test_describe_workers_worker_config_error(monkeypatch):
+    config_manager = MagicMock()
+    session_manager = MagicMock()
+    config_manager.get_worker_names = AsyncMock(return_value=["w1"])
+    # Simulate get_worker_config raising an exception
+    config_manager.get_worker_config = AsyncMock(side_effect=RuntimeError("config-fail"))
+    session_manager.get_or_create_session = AsyncMock(return_value=MagicMock(is_alive=True))
+    context = MockContext(
+        {
+            "config_manager": config_manager,
+            "session_manager": session_manager,
+        }
+    )
+    result = await mcp_mod.describe_workers(context)
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "config-fail" in result["error"]
+
+@pytest.mark.asyncio
+async def test_describe_workers_config_error(monkeypatch):
     config_manager = MagicMock()
     session_manager = MagicMock()
     config_manager.get_worker_names = AsyncMock(side_effect=Exception("fail-cfg"))
@@ -210,7 +231,7 @@ async def test_worker_statuses_config_error(monkeypatch):
             "session_manager": session_manager,
         }
     )
-    result = await mcp_mod.worker_statuses(context)
+    result = await mcp_mod.describe_workers(context)
     assert result["success"] is False
     assert result["isError"] is True
     assert "fail-cfg" in result["error"]

@@ -183,6 +183,11 @@ Type: dict[str, type | tuple[type, ...]]
 """
 
 
+class WorkerConfigurationError(Exception):
+    """Raised when a worker's configuration cannot be retrieved or is invalid."""
+    pass
+
+
 class ConfigManager:
     """
     Async configuration manager for Deephaven MCP worker configuration.
@@ -297,7 +302,7 @@ class ConfigManager:
             Dict[str, Any]: The configuration dictionary for the specified worker.
 
         Raises:
-            RuntimeError: If the specified worker is not found in the configuration.
+            WorkerConfigurationError: If the specified worker is not found in the configuration.
 
         Example:
             >>> worker_cfg = await config.DEFAULT_CONFIG_MANAGER.get_worker_config('local')
@@ -308,7 +313,7 @@ class ConfigManager:
 
         if worker_name not in workers:
             _LOGGER.error(f"Worker {worker_name} not found in configuration")
-            raise RuntimeError(f"Worker {worker_name} not found in configuration")
+            raise WorkerConfigurationError(f"Worker {worker_name} not found in configuration")
 
         _LOGGER.debug(f"Returning config for worker: {worker_name}")
         return cast(dict[str, Any], workers[worker_name])

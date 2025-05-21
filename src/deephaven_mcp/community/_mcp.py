@@ -170,11 +170,14 @@ async def refresh(context: Context) -> dict:
 
 
 @mcp_server.tool()
-async def worker_statuses(context: Context) -> dict:
+async def describe_workers(context: Context) -> dict:
     """
-    MCP Tool: List all configured Deephaven workers and their availability status.
+    MCP Tool: Describe all configured Deephaven workers, including availability and programming language.
 
-    This tool returns the list of all worker names currently defined in the loaded configuration, along with a boolean indicating whether each worker is available (i.e., a session can be created for the worker). Configuration and session management are accessed via dependency injection using the MCPRequest context.
+    This tool returns the list of all worker names currently defined in the loaded configuration, along with:
+      - a boolean indicating whether each worker is available (i.e., a session can be created for the worker)
+      - the programming language for each worker (from the worker's 'session_type', defaulting to 'python')
+    Configuration and session management are accessed via dependency injection using the MCPRequest context.
 
     Args:
         context (Context): The FastMCP Context for this tool call.
@@ -182,21 +185,34 @@ async def worker_statuses(context: Context) -> dict:
     Returns:
         dict: Structured result object with the following keys:
             - 'success' (bool): True if statuses were retrieved successfully, False otherwise.
-            - 'result' (list[dict], optional): List of dicts with keys 'worker' (str) and 'available' (bool).
+            - 'result' (list[dict], optional): List of dicts with keys:
+                - 'worker' (str): Worker name
+                - 'available' (bool): Whether the worker is available
+                - 'programming_language' (str): Programming language for the worker (e.g., 'python', 'groovy')
             - 'error' (str, optional): Error message if retrieval failed. Omitted on success.
             - 'isError' (bool, optional): Present and True if this is an error response (i.e., success is False).
 
     Example Successful Response:
-        {'success': True, 'result': [{'worker': 'local', 'available': True}, {'worker': 'remote1', 'available': False}, ...]}
+        {
+            'success': True,
+            'result': [
+                {'worker': 'local', 'available': True, 'programming_language': 'python'},
+                {'worker': 'remote1', 'available': False, 'programming_language': 'groovy'}
+            ]
+        }
 
     Example Error Response:
-        {'success': False, 'error': 'Failed to check worker statuses: ...', 'isError': True}
+        {
+            'success': False,
+            'error': "WorkerConfigurationError: Worker nonexistent not found in configuration",
+            'isError': True
+        }
 
     Logging:
         - Logs tool invocation, checked workers, statuses, and error details at INFO/ERROR levels.
     """
     _LOGGER.info(
-        "[worker_statuses] Invoked: retrieving status of all configured workers."
+        "[describe_workers] Invoked: retrieving status of all configured workers."
     )
     try:
         config_manager = context.request_context.lifespan_context["config_manager"]
@@ -209,14 +225,31 @@ async def worker_statuses(context: Context) -> dict:
                 session = await session_manager.get_or_create_session(name)
                 available = session is not None and session.is_alive
             except Exception as e:
-                _LOGGER.warning(f"[worker_statuses] Worker '{name}' unavailable: {e!r}")
+                _LOGGER.warning(f"[describe_workers] Worker '{name}' unavailable: {e!r}")
                 available = False
-            results.append({"worker": name, "available": available})
-        _LOGGER.info(f"[worker_statuses] Statuses: {results!r}")
+            
+            # Get programming_language from worker config
+            try:
+                worker_cfg = await config_manager.get_worker_config(name)
+                programming_language = str(worker_cfg.get("session_type", "python")).lower()
+            except Exception as e:
+                _LOGGER.error(f"[describe_workers] Could not retrieve config for worker '{name}': {e!r}")
+                return {
+                    "success": False,
+                    "error": str(e),
+                    "isError": True
+                }
+            
+            results.append({
+                "worker": name,
+                "available": available,
+                "programming_language": programming_language
+            })
+        _LOGGER.info(f"[describe_workers] Statuses: {results!r}")
         return {"success": True, "result": results}
     except Exception as e:
         _LOGGER.error(
-            f"[worker_statuses] Failed to get worker statuses: {e!r}", exc_info=True
+            f"[describe_workers] Failed to get worker descriptions: {e!r}", exc_info=True
         )
         return {"success": False, "error": str(e), "isError": True}
 
