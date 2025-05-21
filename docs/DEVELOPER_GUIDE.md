@@ -1076,6 +1076,25 @@ Both servers expose their tools through FastMCP, following the Model Context Pro
 
 ### Development Commands
 
+#### Code Quality & Pre-commit Checks
+
+To help maintain a consistent and high-quality codebase, the [`bin/precommit.sh`](../bin/precommit.sh) script is provided. This script will:
+
+- Sort Python imports using [**isort**](https://pycqa.github.io/isort/)
+- Format code using [**black**](https://black.readthedocs.io/)
+- Lint code using [**ruff**](https://docs.astral.sh/ruff/) (with autofix)
+- Perform static type checking using [**mypy**](https://mypy-lang.org/)
+
+**How to run:**
+
+```sh
+bin/precommit.sh
+```
+
+You should run this script before every commit or pull request. If any step fails, the script will stop and print an error. Fix the reported issues and rerun the script until it completes successfully. Only commit code that passes all pre-commit checks.
+
+You may also configure this script as a git pre-commit hook or run it in your CI pipeline to enforce code quality for all contributors.
+
 ```sh
 # Run tests with pytest
 uv run pytest  # Runs all unit and integration tests
