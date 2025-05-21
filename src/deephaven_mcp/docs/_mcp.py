@@ -117,7 +117,7 @@ async def docs_chat(
         deephaven_enterprise_version (str | None, optional):
             The version of Deephaven Core+ (Enterprise) installed for the relevant worker. Providing this enables the documentation assistant to tailor its answers for greater accuracy.
         programming_language (str | None, optional):
-            The programming language context for the user's question (e.g., "python", "groovy"). If provided, the assistant will tailor its answer to this language.
+            The programming language context for the user's question ("python" or "groovy"). If provided, the assistant will tailor its answer to this language.
 
     Returns:
         str: The assistant's response message answering the user's documentation question. The response is a natural language string, suitable for direct display or further agentic processing.
@@ -130,7 +130,7 @@ async def docs_chat(
         - The tool is discoverable via MCP server tool registries and can be invoked by name ('docs_chat').
         - For best results, provide relevant chat history for multi-turn conversations.
         - For environment-specific questions, provide Deephaven version information for more accurate answers.
-        - Including Deephaven Core and Core+ versions leads to more precise, context-aware responses.
+        - Including Deephaven Core and Core+ versions and programming language context leads to more precise, context-aware responses.
         - Designed for integration with LLM agents, RAG pipelines, chatbots, and automation scripts.
 
     Example (agentic call):
