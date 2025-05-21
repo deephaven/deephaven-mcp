@@ -11,7 +11,7 @@ from pydeephaven import Session
 import types
 from unittest.mock import patch
 from deephaven_mcp.community import _sessions
-
+from deephaven_mcp.community._sessions import get_dh_versions
 
 from deephaven_mcp import config
 from deephaven_mcp.community._sessions import (
@@ -421,3 +421,95 @@ async def test_get_or_create_session_handles_dead(monkeypatch, session_manager):
     result = await session_manager.get_or_create_session("foo")
     assert result == "SESSION"
     assert session_manager._cache["foo"] == "SESSION"
+
+# --- Tests for get_dh_versions ---
+
+@pytest.mark.asyncio
+async def test_get_dh_versions_both_versions(monkeypatch):
+    session = MagicMock()
+    df = MagicMock()
+    df.to_dict.return_value = [
+        {"Package": "deephaven", "Version": "1.2.3"},
+        {"Package": "deephaven_coreplus_worker", "Version": "4.5.6"},
+    ]
+    arrow_table = MagicMock()
+    arrow_table.to_pandas.return_value = df
+    monkeypatch.setattr("deephaven_mcp.community._sessions.get_pip_packages_table", AsyncMock(return_value=arrow_table))
+    core, coreplus = await get_dh_versions(session)
+    assert core == "1.2.3"
+    assert coreplus == "4.5.6"
+
+@pytest.mark.asyncio
+async def test_get_dh_versions_only_core(monkeypatch):
+    session = MagicMock()
+    df = MagicMock()
+    df.to_dict.return_value = [
+        {"Package": "deephaven", "Version": "1.2.3"},
+        {"Package": "numpy", "Version": "2.0.0"},
+    ]
+    arrow_table = MagicMock()
+    arrow_table.to_pandas.return_value = df
+    monkeypatch.setattr("deephaven_mcp.community._sessions.get_pip_packages_table", AsyncMock(return_value=arrow_table))
+    core, coreplus = await get_dh_versions(session)
+    assert core == "1.2.3"
+    assert coreplus is None
+
+@pytest.mark.asyncio
+async def test_get_dh_versions_only_coreplus(monkeypatch):
+    session = MagicMock()
+    df = MagicMock()
+    df.to_dict.return_value = [
+        {"Package": "deephaven_coreplus_worker", "Version": "4.5.6"},
+        {"Package": "pandas", "Version": "2.0.0"},
+    ]
+    arrow_table = MagicMock()
+    arrow_table.to_pandas.return_value = df
+    monkeypatch.setattr("deephaven_mcp.community._sessions.get_pip_packages_table", AsyncMock(return_value=arrow_table))
+    core, coreplus = await get_dh_versions(session)
+    assert core is None
+    assert coreplus == "4.5.6"
+
+@pytest.mark.asyncio
+async def test_get_dh_versions_neither(monkeypatch):
+    session = MagicMock()
+    df = MagicMock()
+    df.to_dict.return_value = [
+        {"Package": "numpy", "Version": "2.0.0"},
+        {"Package": "pandas", "Version": "2.0.0"},
+    ]
+    arrow_table = MagicMock()
+    arrow_table.to_pandas.return_value = df
+    monkeypatch.setattr("deephaven_mcp.community._sessions.get_pip_packages_table", AsyncMock(return_value=arrow_table))
+    core, coreplus = await get_dh_versions(session)
+    assert core is None
+    assert coreplus is None
+
+@pytest.mark.asyncio
+async def test_get_dh_versions_malformed(monkeypatch):
+    session = MagicMock()
+    df = MagicMock()
+    df.to_dict.return_value = [
+        {"NotPackage": "foo", "NotVersion": "bar"}
+    ]
+    arrow_table = MagicMock()
+    arrow_table.to_pandas.return_value = df
+    monkeypatch.setattr("deephaven_mcp.community._sessions.get_pip_packages_table", AsyncMock(return_value=arrow_table))
+    core, coreplus = await get_dh_versions(session)
+    assert core is None
+    assert coreplus is None
+
+@pytest.mark.asyncio
+async def test_get_dh_versions_arrow_none(monkeypatch):
+    session = MagicMock()
+    monkeypatch.setattr("deephaven_mcp.community._sessions.get_pip_packages_table", AsyncMock(return_value=None))
+    core, coreplus = await get_dh_versions(session)
+    assert core is None
+    assert coreplus is None
+
+@pytest.mark.asyncio
+async def test_get_dh_versions_raises(monkeypatch):
+    session = MagicMock()
+    monkeypatch.setattr("deephaven_mcp.community._sessions.get_pip_packages_table", AsyncMock(side_effect=RuntimeError("fail!")))
+    with pytest.raises(RuntimeError, match="fail!"):
+        await get_dh_versions(session)
+

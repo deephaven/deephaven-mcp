@@ -25,11 +25,11 @@ Dependencies:
     - Requires aiofiles for async file I/O.
 """
 
+from typing import Any, Optional, Tuple
 import asyncio
 import logging
 import time
 from types import TracebackType
-from typing import Any
 
 import aiofiles
 import pyarrow
@@ -568,3 +568,49 @@ async def get_pip_packages_table(session):
     arrow_table = await get_table(session, "_pip_packages_table")
     _LOGGER.info("Table retrieved successfully.")
     return arrow_table
+
+
+async def get_dh_versions(session: Any) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Retrieve the Deephaven Core and Core+ versions installed in a given Deephaven session.
+    These versions are retrieved by running a script in the session that queries the installed pip packages.
+
+    Args:
+        session (Any): An active Deephaven session object.
+
+    Returns:
+        Tuple[Optional[str], Optional[str]]: A tuple containing:
+            - The version string for Deephaven Core, or None if not found (index 0).
+            - The version string for Deephaven Core+, or None if not found (index 1).
+
+    Raises:
+        RuntimeError: If the session is invalid, closed, or unable to execute scripts.
+        Exception: Any exception raised by get_pip_packages_table, table conversion, or data parsing (e.g., communication errors, unexpected data format).
+        These exceptions will propagate to the caller for handling.
+
+    Example:
+        >>> core_version, coreplus_version = await get_dh_versions(session)
+        >>> print(core_version)
+        '0.39.0'
+        >>> print(coreplus_version)
+        '0.39.0'
+    """
+    arrow_table = await get_pip_packages_table(session)
+    dh_core_version: Optional[str] = None
+    dh_coreplus_version: Optional[str] = None
+
+    if arrow_table is not None:
+        df = arrow_table.to_pandas()
+        raw_packages = df.to_dict(orient="records")
+        for pkg in raw_packages:
+            pkg_name = pkg.get("Package", "").lower()
+            if pkg_name == "deephaven" and dh_core_version is None:
+                dh_core_version = pkg.get("Version")
+            elif pkg_name == "deephaven_coreplus_worker" and dh_coreplus_version is None:
+                dh_coreplus_version = pkg.get("Version")
+            if dh_core_version and dh_coreplus_version:
+                break
+    
+    return dh_core_version, dh_coreplus_version
+
+    
