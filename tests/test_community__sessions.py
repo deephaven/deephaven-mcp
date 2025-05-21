@@ -8,6 +8,10 @@ from unittest.mock import AsyncMock, MagicMock
 import pyarrow
 import pytest
 from pydeephaven import Session
+import types
+from unittest.mock import patch
+from deephaven_mcp.community import _sessions
+
 
 from deephaven_mcp import config
 from deephaven_mcp.community._sessions import (
@@ -15,6 +19,7 @@ from deephaven_mcp.community._sessions import (
     SessionManager,
     _load_bytes,
     get_table,
+    get_meta_table,
 )
 
 
@@ -221,6 +226,58 @@ async def test_get_or_create_session_liveness_exception(
     await session_manager.get_or_create_session("foo")
     assert any("Error checking session liveness" in r for r in caplog.text.splitlines())
     assert "foo" in session_manager._cache
+
+
+# --- Tests for get_meta_table ---
+
+
+@pytest.mark.asyncio
+async def test_get_meta_table_success():
+    session_mock = MagicMock()
+    table_mock = MagicMock()
+    meta_table_mock = MagicMock()
+    arrow_mock = object()
+    session_mock.open_table.return_value = table_mock
+    type(table_mock).meta_table = property(lambda self: meta_table_mock)
+    def to_arrow():
+        return arrow_mock
+    meta_table_mock.to_arrow = to_arrow
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+    with patch("deephaven_mcp.community._sessions.asyncio.to_thread", new=fake_to_thread):
+        result = await get_meta_table(session_mock, "foo")
+        assert result is arrow_mock
+        session_mock.open_table.assert_called_once_with("foo")
+
+
+@pytest.mark.asyncio
+async def test_get_meta_table_open_table_error():
+    session_mock = MagicMock()
+    session_mock.open_table.side_effect = RuntimeError("fail-open")
+    with pytest.raises(RuntimeError) as excinfo:
+        await get_meta_table(session_mock, "foo")
+    assert "fail-open" in str(excinfo.value)
+    session_mock.open_table.assert_called_once_with("foo")
+
+
+@pytest.mark.asyncio
+async def test_get_meta_table_to_arrow_error():
+    session_mock = MagicMock()
+    table_mock = MagicMock()
+    meta_table_mock = MagicMock()
+    session_mock.open_table.return_value = table_mock
+    type(table_mock).meta_table = property(lambda self: meta_table_mock)
+    def to_arrow():
+        raise RuntimeError("fail-arrow")
+    meta_table_mock.to_arrow = to_arrow
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+    with patch("deephaven_mcp.community._sessions.asyncio.to_thread", new=fake_to_thread):
+        with pytest.raises(RuntimeError) as excinfo:
+            await get_meta_table(session_mock, "foo")
+        assert "fail-arrow" in str(excinfo.value)
+        session_mock.open_table.assert_called_once_with("foo")
+
 
 
 # --- Tests for get_table ---

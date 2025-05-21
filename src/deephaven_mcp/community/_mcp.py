@@ -312,7 +312,7 @@ async def table_schemas(
 
         for table_name in selected_table_names:
             try:
-                meta_table = await sessions.get_table(session, table_name)
+                meta_table = await sessions.get_meta_table(session, table_name)
                 # meta_table is a pyarrow.Table with columns: 'Name', 'DataType', etc.
                 schema = [
                     {"name": row["Name"], "type": row["DataType"]}

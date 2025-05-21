@@ -274,9 +274,8 @@ class SessionManager:
         try:
             session = await asyncio.to_thread(Session, **kwargs)
         except Exception as e:
-            _LOGGER.error(
-                f"Failed to create Deephaven Session with config: {log_kwargs}: {e}",
-                exc_info=True,
+            _LOGGER.warning(
+                f"Failed to create Deephaven Session with config: {log_kwargs}: {e}"
             )
             raise SessionCreationError(
                 f"Failed to create Deephaven Session with config: {log_kwargs}: {e}"
@@ -504,3 +503,19 @@ async def get_table(session: Session, table_name: str) -> pyarrow.Table:
     """
     table = await asyncio.to_thread(session.open_table, table_name)
     return await asyncio.to_thread(table.to_arrow)
+
+async def get_meta_table(session: Session, table_name: str) -> pyarrow.Table:
+    """
+    Retrieve the meta table (schema/metadata) for a Deephaven table as a pyarrow.Table.
+
+    Args:
+        session (Session): The Deephaven session to retrieve the meta table from.
+        table_name (str): The name of the table to retrieve the meta table for.
+
+    Returns:
+        pyarrow.Table: The meta table containing schema/metadata information for the specified table.
+    """
+    table = await asyncio.to_thread(session.open_table, table_name)
+    # the lambda is needed to avoid the meta_table property from being evaluated outside the thread
+    meta_table = await asyncio.to_thread(lambda: table.meta_table)
+    return await asyncio.to_thread(meta_table.to_arrow)

@@ -294,11 +294,13 @@ async def test_table_schemas_success(monkeypatch):
             class Arrow:
                 def to_pylist(self):
                     return [{"Name": name, "DataType": "int"}]
-
-            class Table:
+            class MetaTable:
                 def to_arrow(self):
                     return Arrow()
-
+            class Table:
+                @property
+                def meta_table(self):
+                    return MetaTable()
             return Table()
 
     session_manager.get_or_create_session = AsyncMock(return_value=DummySession())
@@ -325,11 +327,13 @@ async def test_table_schemas_all_tables(monkeypatch):
             class Arrow:
                 def to_pylist(self):
                     return [{"Name": name, "DataType": "int"}]
-
-            class Table:
+            class MetaTable:
                 def to_arrow(self):
                     return Arrow()
-
+            class Table:
+                @property
+                def meta_table(self):
+                    return MetaTable()
             return Table()
 
     session_manager.get_or_create_session = AsyncMock(return_value=DummySession())
@@ -357,11 +361,13 @@ async def test_table_schemas_schema_key_error(monkeypatch):
                 def to_pylist(self):
                     # Missing 'Name' and/or 'DataType' keys
                     return [{"foo": "bar"}]
-
-            class Table:
+            class MetaTable:
                 def to_arrow(self):
                     return Arrow()
-
+            class Table:
+                @property
+                def meta_table(self):
+                    return MetaTable()
             return Table()
 
     session_manager.get_or_create_session = AsyncMock(return_value=DummySession())
