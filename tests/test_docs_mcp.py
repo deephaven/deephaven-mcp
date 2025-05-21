@@ -8,6 +8,12 @@ import pytest
 from starlette.requests import Request
 
 
+def test_all_exports():
+    import deephaven_mcp.docs._mcp as mcp_mod
+    assert hasattr(mcp_mod, "mcp_server")
+    assert "mcp_server" in mcp_mod.__all__
+
+
 def test_env_var_required(monkeypatch):
     # Remove INKEEP_API_KEY if present
     monkeypatch.delenv("INKEEP_API_KEY", raising=False)
@@ -48,6 +54,19 @@ class DummyOpenAIClient:
         return self.response
 
 
+def test_docs_chat_programming_language(monkeypatch):
+    monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
+    sys.modules.pop("deephaven_mcp.docs._mcp", None)
+    import deephaven_mcp.docs._mcp as mcp_mod
+    dummy_client = DummyOpenAIClient(response="lang!")
+    mcp_mod.inkeep_client = dummy_client
+    coro = mcp_mod.docs_chat("language?", None, programming_language="groovy")
+    result = asyncio.run(coro)
+    assert result == "lang!"
+    prompts = dummy_client.last_system_prompts
+    assert any("Worker environment: Programming language: groovy" in p for p in prompts)
+
+
 def test_docs_chat_success(monkeypatch):
     monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
     sys.modules.pop("deephaven_mcp.docs._mcp", None)
@@ -55,7 +74,7 @@ def test_docs_chat_success(monkeypatch):
 
     # Patch inkeep_client with dummy
     mcp_mod.inkeep_client = DummyOpenAIClient(response="Hello from docs!")
-    coro = mcp_mod.docs_chat("hi", [{"role": "user", "content": "hi"}])
+    coro = mcp_mod.docs_chat("hi", [{"role": "user", "content": "hi"}], programming_language=None)
     result = asyncio.run(coro)
     assert result == "Hello from docs!"
 
@@ -67,7 +86,7 @@ def test_docs_chat_with_core_version(monkeypatch):
 
     dummy_client = DummyOpenAIClient(response="core!")
     mcp_mod.inkeep_client = dummy_client
-    coro = mcp_mod.docs_chat("core version?", None, deephaven_core_version="0.39.0")
+    coro = mcp_mod.docs_chat("core version?", None, deephaven_core_version="0.39.0", programming_language=None)
     result = asyncio.run(coro)
     assert result == "core!"
     prompts = dummy_client.last_system_prompts
@@ -83,7 +102,7 @@ def test_docs_chat_with_enterprise_version(monkeypatch):
     dummy_client = DummyOpenAIClient(response="coreplus!")
     mcp_mod.inkeep_client = dummy_client
     coro = mcp_mod.docs_chat(
-        "coreplus version?", None, deephaven_enterprise_version="1.2.3"
+        "coreplus version?", None, deephaven_enterprise_version="1.2.3", programming_language=None
     )
     result = asyncio.run(coro)
     assert result == "coreplus!"
@@ -104,6 +123,7 @@ def test_docs_chat_with_both_versions(monkeypatch):
         None,
         deephaven_core_version="0.39.0",
         deephaven_enterprise_version="1.2.3",
+        programming_language=None,
     )
     result = asyncio.run(coro)
     assert result == "both!"
@@ -120,7 +140,7 @@ def test_docs_chat_with_neither_version(monkeypatch):
 
     dummy_client = DummyOpenAIClient(response="no version!")
     mcp_mod.inkeep_client = dummy_client
-    coro = mcp_mod.docs_chat("no version?", None)
+    coro = mcp_mod.docs_chat("no version?", None, programming_language=None)
     result = asyncio.run(coro)
     assert result == "no version!"
     prompts = dummy_client.last_system_prompts
@@ -155,7 +175,7 @@ def test_docs_chat_error(monkeypatch):
 
     # Patch inkeep_client with dummy that raises
     mcp_mod.inkeep_client = DummyOpenAIClient(exc=OpenAIClientError("fail!"))
-    coro = mcp_mod.docs_chat("fail", None)
+    coro = mcp_mod.docs_chat("fail", None, programming_language=None)
     try:
         asyncio.run(coro)
     except OpenAIClientError as e:

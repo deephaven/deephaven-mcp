@@ -95,6 +95,7 @@ async def docs_chat(
     history: list[dict[str, str]] | None = None,
     deephaven_core_version: str | None = None,
     deephaven_enterprise_version: str | None = None,
+    programming_language: str | None = None,
 ) -> str:
     """
     docs_chat - Asynchronous Documentation Q&A Tool (MCP Tool)
@@ -115,6 +116,8 @@ async def docs_chat(
             The version of Deephaven Community Core installed for the relevant worker. Providing this enables the documentation assistant to tailor its answers for greater accuracy.
         deephaven_enterprise_version (str | None, optional):
             The version of Deephaven Core+ (Enterprise) installed for the relevant worker. Providing this enables the documentation assistant to tailor its answers for greater accuracy.
+        programming_language (str | None, optional):
+            The programming language context for the user's question (e.g., "python", "groovy"). If provided, the assistant will tailor its answer to this language.
 
     Returns:
         str: The assistant's response message answering the user's documentation question. The response is a natural language string, suitable for direct display or further agentic processing.
@@ -135,7 +138,8 @@ async def docs_chat(
         ...     prompt="How do I install Deephaven?",
         ...     history=[{"role": "user", "content": "Hi"}],
         ...     deephaven_core_version="1.2.3",
-        ...     deephaven_enterprise_version="4.5.6"
+        ...     deephaven_enterprise_version="4.5.6",
+        ...     programming_language="python",
         ... )
         >>> print(response)
         To install Deephaven, ...
@@ -156,6 +160,11 @@ async def docs_chat(
     if deephaven_enterprise_version:
         system_prompts.append(
             f"Worker environment: Deephaven Core+ (Enterprise) version: {deephaven_enterprise_version}"
+        )
+
+    if programming_language:
+        system_prompts.append(
+            f"Worker environment: Programming language: {programming_language}"
         )
 
     return await inkeep_client.chat(
