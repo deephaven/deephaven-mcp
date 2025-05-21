@@ -82,7 +82,9 @@ def test_docs_chat_with_enterprise_version(monkeypatch):
 
     dummy_client = DummyOpenAIClient(response="coreplus!")
     mcp_mod.inkeep_client = dummy_client
-    coro = mcp_mod.docs_chat("coreplus version?", None, deephaven_enterprise_version="1.2.3")
+    coro = mcp_mod.docs_chat(
+        "coreplus version?", None, deephaven_enterprise_version="1.2.3"
+    )
     result = asyncio.run(coro)
     assert result == "coreplus!"
     prompts = dummy_client.last_system_prompts
@@ -98,9 +100,10 @@ def test_docs_chat_with_both_versions(monkeypatch):
     dummy_client = DummyOpenAIClient(response="both!")
     mcp_mod.inkeep_client = dummy_client
     coro = mcp_mod.docs_chat(
-        "both?", None,
+        "both?",
+        None,
         deephaven_core_version="0.39.0",
-        deephaven_enterprise_version="1.2.3"
+        deephaven_enterprise_version="1.2.3",
     )
     result = asyncio.run(coro)
     assert result == "both!"
@@ -123,7 +126,9 @@ def test_docs_chat_with_neither_version(monkeypatch):
     prompts = dummy_client.last_system_prompts
     # Only the base system prompt should be present
     assert any("helpful assistant" in p for p in prompts)
-    assert not any("Core version" in p or "Core+ (Enterprise) version" in p for p in prompts)
+    assert not any(
+        "Core version" in p or "Core+ (Enterprise) version" in p for p in prompts
+    )
 
 
 @pytest.mark.asyncio

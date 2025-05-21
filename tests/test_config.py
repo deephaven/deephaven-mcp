@@ -8,6 +8,7 @@ from unittest import mock
 
 import pytest
 import pytest_asyncio
+
 from deephaven_mcp.config import WorkerConfigurationError
 
 # TODO: needed?

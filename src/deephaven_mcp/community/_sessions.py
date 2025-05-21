@@ -25,15 +25,15 @@ Dependencies:
     - Requires aiofiles for async file I/O.
 """
 
-from typing import Any, Optional, Tuple
 import asyncio
 import logging
+import textwrap
 import time
 from types import TracebackType
+from typing import Any
 
 import aiofiles
 import pyarrow
-import textwrap
 from pydeephaven import Session
 
 from deephaven_mcp import config
@@ -505,6 +505,7 @@ async def get_table(session: Session, table_name: str) -> pyarrow.Table:
     table = await asyncio.to_thread(session.open_table, table_name)
     return await asyncio.to_thread(table.to_arrow)
 
+
 async def get_meta_table(session: Session, table_name: str) -> pyarrow.Table:
     """
     Retrieve the meta table (schema/metadata) for a Deephaven table as a pyarrow.Table.
@@ -522,7 +523,7 @@ async def get_meta_table(session: Session, table_name: str) -> pyarrow.Table:
     return await asyncio.to_thread(meta_table.to_arrow)
 
 
-async def get_pip_packages_table(session):
+async def get_pip_packages_table(session: Session) -> pyarrow.Table:
     """
     Returns a table of installed pip packages from a Deephaven session.
 
@@ -570,7 +571,7 @@ async def get_pip_packages_table(session):
     return arrow_table
 
 
-async def get_dh_versions(session: Any) -> Tuple[Optional[str], Optional[str]]:
+async def get_dh_versions(session: Any) -> tuple[str | None, str | None]:
     """
     Retrieve the Deephaven Core and Core+ versions installed in a given Deephaven session.
     These versions are retrieved by running a script in the session that queries the installed pip packages.
@@ -596,8 +597,8 @@ async def get_dh_versions(session: Any) -> Tuple[Optional[str], Optional[str]]:
         '0.39.0'
     """
     arrow_table = await get_pip_packages_table(session)
-    dh_core_version: Optional[str] = None
-    dh_coreplus_version: Optional[str] = None
+    dh_core_version: str | None = None
+    dh_coreplus_version: str | None = None
 
     if arrow_table is not None:
         df = arrow_table.to_pandas()
@@ -606,11 +607,11 @@ async def get_dh_versions(session: Any) -> Tuple[Optional[str], Optional[str]]:
             pkg_name = pkg.get("Package", "").lower()
             if pkg_name == "deephaven" and dh_core_version is None:
                 dh_core_version = pkg.get("Version")
-            elif pkg_name == "deephaven_coreplus_worker" and dh_coreplus_version is None:
+            elif (
+                pkg_name == "deephaven_coreplus_worker" and dh_coreplus_version is None
+            ):
                 dh_coreplus_version = pkg.get("Version")
             if dh_core_version and dh_coreplus_version:
                 break
-    
-    return dh_core_version, dh_coreplus_version
 
-    
+    return dh_core_version, dh_coreplus_version

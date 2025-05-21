@@ -150,11 +150,13 @@ async def docs_chat(
 
     # Optionally add version info to prompt context if provided
     if deephaven_core_version:
-        system_prompts.append(f"Worker environment: Deephaven Community Core version: {deephaven_core_version}")
+        system_prompts.append(
+            f"Worker environment: Deephaven Community Core version: {deephaven_core_version}"
+        )
     if deephaven_enterprise_version:
-        system_prompts.append(f"Worker environment: Deephaven Core+ (Enterprise) version: {deephaven_enterprise_version}")
-
-
+        system_prompts.append(
+            f"Worker environment: Deephaven Core+ (Enterprise) version: {deephaven_enterprise_version}"
+        )
 
     return await inkeep_client.chat(
         prompt=prompt, history=history, system_prompts=system_prompts

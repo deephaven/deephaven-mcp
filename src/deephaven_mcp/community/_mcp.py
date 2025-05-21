@@ -25,7 +25,6 @@ See individual tool docstrings for full argument, return, and error details.
 
 import asyncio
 import logging
-import textwrap
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -227,46 +226,53 @@ async def describe_workers(context: Context) -> dict:
                 session = await session_manager.get_or_create_session(name)
                 available = session is not None and session.is_alive
             except Exception as e:
-                _LOGGER.warning(f"[describe_workers] Worker '{name}' unavailable: {e!r}")
+                _LOGGER.warning(
+                    f"[describe_workers] Worker '{name}' unavailable: {e!r}"
+                )
                 available = False
-            
+
             # Get programming_language from worker config
             try:
                 worker_cfg = await config_manager.get_worker_config(name)
-                programming_language = str(worker_cfg.get("session_type", "python")).lower()
+                programming_language = str(
+                    worker_cfg.get("session_type", "python")
+                ).lower()
             except Exception as e:
-                _LOGGER.error(f"[describe_workers] Could not retrieve config for worker '{name}': {e!r}")
-                return {
-                    "success": False,
-                    "error": str(e),
-                    "isError": True
-                }
-            
+                _LOGGER.error(
+                    f"[describe_workers] Could not retrieve config for worker '{name}': {e!r}"
+                )
+                return {"success": False, "error": str(e), "isError": True}
+
             result_dict = {
                 "worker": name,
                 "available": available,
-                "programming_language": programming_language
+                "programming_language": programming_language,
             }
 
             # Only add versions if Python
             if programming_language == "python" and available:
                 try:
-                    core_version, enterprise_version = await sessions.get_dh_versions(session)
+                    core_version, enterprise_version = await sessions.get_dh_versions(
+                        session
+                    )
                     if core_version is not None:
                         result_dict["deephaven_core_version"] = core_version
                     if enterprise_version is not None:
                         result_dict["deephaven_enterprise_version"] = enterprise_version
                 except Exception as e:
-                    _LOGGER.warning(f"[describe_workers] Could not get versions for worker '{name}': {e!r}")
+                    _LOGGER.warning(
+                        f"[describe_workers] Could not get versions for worker '{name}': {e!r}"
+                    )
 
-            #TODO: Support getting deephaven versions for other languages
+            # TODO: Support getting deephaven versions for other languages
 
             results.append(result_dict)
         _LOGGER.info(f"[describe_workers] Statuses: {results!r}")
         return {"success": True, "result": results}
     except Exception as e:
         _LOGGER.error(
-            f"[describe_workers] Failed to get worker descriptions: {e!r}", exc_info=True
+            f"[describe_workers] Failed to get worker descriptions: {e!r}",
+            exc_info=True,
         )
         return {"success": False, "error": str(e), "isError": True}
 

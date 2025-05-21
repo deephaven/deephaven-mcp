@@ -185,6 +185,7 @@ Type: dict[str, type | tuple[type, ...]]
 
 class WorkerConfigurationError(Exception):
     """Raised when a worker's configuration cannot be retrieved or is invalid."""
+
     pass
 
 
@@ -313,7 +314,9 @@ class ConfigManager:
 
         if worker_name not in workers:
             _LOGGER.error(f"Worker {worker_name} not found in configuration")
-            raise WorkerConfigurationError(f"Worker {worker_name} not found in configuration")
+            raise WorkerConfigurationError(
+                f"Worker {worker_name} not found in configuration"
+            )
 
         _LOGGER.debug(f"Returning config for worker: {worker_name}")
         return cast(dict[str, Any], workers[worker_name])
