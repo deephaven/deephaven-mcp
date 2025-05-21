@@ -150,11 +150,11 @@ async def main():
             print(f"Error calling worker_names: {e}")
 
     # 4. table_schemas (call with no args, then with sample args)
-    print("\nCalling tool: table_schemas (no args)")
+    print("\nCalling tool: table_schemas (1 arg)")
     if "table_schemas" in tool_map:
         try:
             result = await tool_map["table_schemas"].run_json(
-                {}, cancellation_token=CancellationToken()
+                {"worker_name": "worker1"}, cancellation_token=CancellationToken()
             )
             print(f"Result for table_schemas (no args): {result}")
         except Exception as e:
@@ -175,7 +175,7 @@ async def main():
     if "run_script" in tool_map:
         try:
             result = await tool_map["run_script"].run_json(
-                {"script": "print('hello world')"},
+                {"worker_name": "worker1", "script": "print('hello world')"},
                 cancellation_token=CancellationToken(),
             )
             print(f"Result for run_script: {result}")
