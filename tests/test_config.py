@@ -9,6 +9,8 @@ from unittest import mock
 import pytest
 import pytest_asyncio
 
+from deephaven_mcp.config import WorkerConfigurationError
+
 # TODO: needed?
 # Ensure local source is used for imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../src")))
@@ -306,7 +308,7 @@ async def test_get_worker_config():
     await cm.set_config_cache(VALID_CONFIG)
     cfg = await cm.get_worker_config("local")
     assert cfg["host"] == "localhost"
-    with pytest.raises(RuntimeError):
+    with pytest.raises(WorkerConfigurationError):
         await cm.get_worker_config("nonexistent")
 
 

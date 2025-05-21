@@ -427,9 +427,9 @@ On error:
 
 **Description**: This tool reloads the worker configuration from the file specified in `DH_MCP_CONFIG_FILE` and clears all active sessions. It's useful after changing the worker configuration to ensure changes are immediately applied. The tool uses an asyncio.Lock to ensure thread safety and atomicity of the operation.
 
-##### `worker_statuses`
+##### `describe_workers`
 
-**Purpose**: List all configured Deephaven workers and check their availability status.
+**Purpose**: Describe all configured Deephaven workers, including their availability status and programming language.
 
 **Parameters**: None
 
@@ -438,8 +438,18 @@ On error:
 {
   "success": true,
   "result": [
-    {"worker": "worker_name_1", "available": true},
-    {"worker": "worker_name_2", "available": false}
+    {
+      "worker": "worker_name_1",
+      "available": true,
+      "programming_language": "python",
+      "deephaven_core_version": "1.2.3",
+      "deephaven_enterprise_version": "4.5.6"
+    },
+    {
+      "worker": "worker_name_2",
+      "available": false,
+      "programming_language": "groovy"
+    }
   ]
 }
 ```
@@ -714,9 +724,11 @@ The Deephaven MCP Docs Server exposes a single MCP-compatible tool:
     ```python
     [
         {"role": "user", "content": "How do I install Deephaven?"},
-        {"role": "assistant", "content": "To install Deephaven, ..."}  
+        {"role": "assistant", "content": "To install Deephaven, ..."}
     ]
     ```
+  - `deephaven_core_version` (optional): The version of Deephaven Community Core installed for the relevant worker. Providing this enables the documentation assistant to tailor its answers for greater accuracy.
+  - `deephaven_enterprise_version` (optional): The version of Deephaven Core+ (Enterprise) installed for the relevant worker. Providing this enables the documentation assistant to tailor its answers for greater accuracy.
 - **Returns**: String containing the assistant's response message
 - **Error Handling**: If the underlying LLM API call fails, an `OpenAIClientError` is raised with a descriptive error message. Common errors include:
     - Invalid or missing API keys
@@ -727,6 +739,7 @@ The Deephaven MCP Docs Server exposes a single MCP-compatible tool:
 - **Usage Notes**:
   - This tool is asynchronous and should be awaited when used programmatically
   - For multi-turn conversations, providing conversation history improves contextual understanding
+  - Providing Deephaven version arguments for a worker will result in more accurate and context-specific answers.
   - Powered by Inkeep's LLM API service for retrieving documentation-specific responses
 
 **Example (programmatic use):**
@@ -739,7 +752,9 @@ async def get_docs_answer():
         history=[
             {"role": "user", "content": "Hello"},
             {"role": "assistant", "content": "Hi! How can I help you with Deephaven today?"}
-        ]
+        ],
+        deephaven_core_version="1.2.3",
+        deephaven_enterprise_version="4.5.6"
     )
     return response
 ```
@@ -833,7 +848,7 @@ The [MCP Inspector](https://github.com/modelcontextprotocol/inspector) is a web-
 4. **Connect to the MCP server via SSE**:
    - Open the Inspector in your browser (URL shown in terminal, typically `http://localhost:6274`)
    - In the Inspector UI, select "Connect" and enter the SSE URL (e.g., `http://localhost:8000/sse`)
-   - Explore and invoke tools like `refresh`, `worker_statuses`, `table_schemas` and `run_script`
+   - Explore and invoke tools like `refresh`, `describe_workers`, `table_schemas` and `run_script`
 
 #### With Docs Server
 
@@ -949,10 +964,10 @@ Both servers can be used programmatically within Python applications:
 from deephaven_mcp.community import mcp_server, run_server
 
 # Use the MCP tools directly (synchronous)
-from deephaven_mcp.community._mcp import refresh, worker_statuses, table_schemas, run_script
+from deephaven_mcp.community._mcp import refresh, describe_workers, table_schemas, run_script
 
 # Example: Get status of all workers
-result = worker_statuses(context)  # Requires MCP context
+result = describe_workers(context)  # Requires MCP context
 
 # Or start the server with a specific transport
 run_server(transport="sse")  # Starts SSE server
@@ -1060,6 +1075,25 @@ Both servers expose their tools through FastMCP, following the Model Context Pro
   > This sets up Git hooks that automatically run code formatters and linters before each commit.
 
 ### Development Commands
+
+#### Code Quality & Pre-commit Checks
+
+To help maintain a consistent and high-quality codebase, the [`bin/precommit.sh`](../bin/precommit.sh) script is provided. This script will:
+
+- Sort Python imports using [**isort**](https://pycqa.github.io/isort/)
+- Format code using [**black**](https://black.readthedocs.io/)
+- Lint code using [**ruff**](https://docs.astral.sh/ruff/) (with autofix)
+- Perform static type checking using [**mypy**](https://mypy-lang.org/)
+
+**How to run:**
+
+```sh
+bin/precommit.sh
+```
+
+You should run this script before every commit or pull request. If any step fails, the script will stop and print an error. Fix the reported issues and rerun the script until it completes successfully. Only commit code that passes all pre-commit checks.
+
+You may also configure this script as a git pre-commit hook or run it in your CI pipeline to enforce code quality for all contributors.
 
 ```sh
 # Run tests with pytest

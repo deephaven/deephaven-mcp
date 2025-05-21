@@ -150,15 +150,15 @@ async def main():
             print(f"Error calling worker_names: {e}")
 
     # 4. table_schemas (call with no args, then with sample args)
-    print("\nCalling tool: table_schemas (no args)")
+    print("\nCalling tool: table_schemas (1 arg)")
     if "table_schemas" in tool_map:
         try:
             result = await tool_map["table_schemas"].run_json(
-                {}, cancellation_token=CancellationToken()
+                {"worker_name": "worker1"}, cancellation_token=CancellationToken()
             )
-            print(f"Result for table_schemas (no args): {result}")
+            print(f"Result for table_schemas (1 arg): {result}")
         except Exception as e:
-            print(f"Error calling table_schemas (no args): {e}")
+            print(f"Error calling table_schemas (1 arg): {e}")
         # Try with sample args
         print("\nCalling tool: table_schemas (sample args)")
         try:
@@ -175,24 +175,24 @@ async def main():
     if "run_script" in tool_map:
         try:
             result = await tool_map["run_script"].run_json(
-                {"script": "print('hello world')"},
+                {"worker_name": "worker1", "script": "print('hello world')"},
                 cancellation_token=CancellationToken(),
             )
             print(f"Result for run_script: {result}")
         except Exception as e:
             print(f"Error calling run_script: {e}")
 
-    # 6. worker_statuses
-    print("\nCalling tool: worker_statuses")
-    if "worker_statuses" in tool_map:
+    # 6. describe_workers
+    print("\nCalling tool: describe_workers")
+    if "describe_workers" in tool_map:
         try:
-            result = await tool_map["worker_statuses"].run_json(
+            result = await tool_map["describe_workers"].run_json(
                 {},
                 cancellation_token=CancellationToken(),
             )
-            print(f"Result for worker_statuses: {result}")
+            print(f"Result for describe_workers: {result}")
         except Exception as e:
-            print(f"Error calling worker_statuses: {e}")
+            print(f"Error calling describe_workers: {e}")
 
     # 7. pip_packages (requires worker_name)
     print("\nCalling tool: pip_packages (sample args)")

@@ -25,7 +25,6 @@ See individual tool docstrings for full argument, return, and error details.
 
 import asyncio
 import logging
-import textwrap
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -170,11 +169,14 @@ async def refresh(context: Context) -> dict:
 
 
 @mcp_server.tool()
-async def worker_statuses(context: Context) -> dict:
+async def describe_workers(context: Context) -> dict:
     """
-    MCP Tool: List all configured Deephaven workers and their availability status.
+    MCP Tool: Describe all configured Deephaven workers, including availability and programming language.
 
-    This tool returns the list of all worker names currently defined in the loaded configuration, along with a boolean indicating whether each worker is available (i.e., a session can be created for the worker). Configuration and session management are accessed via dependency injection using the MCPRequest context.
+    This tool returns the list of all worker names currently defined in the loaded configuration, along with:
+      - a boolean indicating whether each worker is available (i.e., a session can be created for the worker)
+      - the programming language for each worker (from the worker's 'session_type', defaulting to 'python')
+    Configuration and session management are accessed via dependency injection using the MCPRequest context.
 
     Args:
         context (Context): The FastMCP Context for this tool call.
@@ -182,21 +184,36 @@ async def worker_statuses(context: Context) -> dict:
     Returns:
         dict: Structured result object with the following keys:
             - 'success' (bool): True if statuses were retrieved successfully, False otherwise.
-            - 'result' (list[dict], optional): List of dicts with keys 'worker' (str) and 'available' (bool).
+            - 'result' (list[dict], optional): List of dicts with keys:
+                - 'worker' (str): Worker name
+                - 'available' (bool): Whether the worker is available
+                - 'programming_language' (str): Programming language for the worker (e.g., 'python', 'groovy')
+                - 'deephaven_core_version' (str, optional): Deephaven Core version (if available)
+                - 'deephaven_enterprise_version' (str, optional): Deephaven Core+ (Enterprise) version (if available)
             - 'error' (str, optional): Error message if retrieval failed. Omitted on success.
             - 'isError' (bool, optional): Present and True if this is an error response (i.e., success is False).
 
     Example Successful Response:
-        {'success': True, 'result': [{'worker': 'local', 'available': True}, {'worker': 'remote1', 'available': False}, ...]}
+        {
+            'success': True,
+            'result': [
+                {'worker': 'local', 'available': True, 'programming_language': 'python', 'deephaven_core_version': '1.2.3', 'deephaven_enterprise_version': '4.5.6'},
+                {'worker': 'remote1', 'available': False, 'programming_language': 'groovy'}
+            ]
+        }
 
     Example Error Response:
-        {'success': False, 'error': 'Failed to check worker statuses: ...', 'isError': True}
+        {
+            'success': False,
+            'error': "WorkerConfigurationError: Worker nonexistent not found in configuration",
+            'isError': True
+        }
 
     Logging:
         - Logs tool invocation, checked workers, statuses, and error details at INFO/ERROR levels.
     """
     _LOGGER.info(
-        "[worker_statuses] Invoked: retrieving status of all configured workers."
+        "[describe_workers] Invoked: retrieving status of all configured workers."
     )
     try:
         config_manager = context.request_context.lifespan_context["config_manager"]
@@ -209,14 +226,53 @@ async def worker_statuses(context: Context) -> dict:
                 session = await session_manager.get_or_create_session(name)
                 available = session is not None and session.is_alive
             except Exception as e:
-                _LOGGER.warning(f"[worker_statuses] Worker '{name}' unavailable: {e!r}")
+                _LOGGER.warning(
+                    f"[describe_workers] Worker '{name}' unavailable: {e!r}"
+                )
                 available = False
-            results.append({"worker": name, "available": available})
-        _LOGGER.info(f"[worker_statuses] Statuses: {results!r}")
+
+            # Get programming_language from worker config
+            try:
+                worker_cfg = await config_manager.get_worker_config(name)
+                programming_language = str(
+                    worker_cfg.get("session_type", "python")
+                ).lower()
+            except Exception as e:
+                _LOGGER.error(
+                    f"[describe_workers] Could not retrieve config for worker '{name}': {e!r}"
+                )
+                return {"success": False, "error": str(e), "isError": True}
+
+            result_dict = {
+                "worker": name,
+                "available": available,
+                "programming_language": programming_language,
+            }
+
+            # Only add versions if Python
+            if programming_language == "python" and available:
+                try:
+                    core_version, enterprise_version = await sessions.get_dh_versions(
+                        session
+                    )
+                    if core_version is not None:
+                        result_dict["deephaven_core_version"] = core_version
+                    if enterprise_version is not None:
+                        result_dict["deephaven_enterprise_version"] = enterprise_version
+                except Exception as e:
+                    _LOGGER.warning(
+                        f"[describe_workers] Could not get versions for worker '{name}': {e!r}"
+                    )
+
+            # TODO: Support getting deephaven versions for other languages
+
+            results.append(result_dict)
+        _LOGGER.info(f"[describe_workers] Statuses: {results!r}")
         return {"success": True, "result": results}
     except Exception as e:
         _LOGGER.error(
-            f"[worker_statuses] Failed to get worker statuses: {e!r}", exc_info=True
+            f"[describe_workers] Failed to get worker descriptions: {e!r}",
+            exc_info=True,
         )
         return {"success": False, "error": str(e), "isError": True}
 
@@ -279,7 +335,7 @@ async def table_schemas(
 
         for table_name in selected_table_names:
             try:
-                meta_table = await sessions.get_table(session, table_name)
+                meta_table = await sessions.get_meta_table(session, table_name)
                 # meta_table is a pyarrow.Table with columns: 'Name', 'DataType', etc.
                 schema = [
                     {"name": row["Name"], "type": row["DataType"]}
@@ -420,37 +476,13 @@ async def pip_packages(context: Context, worker_name: str) -> dict:
         session = await session_manager.get_or_create_session(worker_name)
         _LOGGER.info(f"[pip_packages] Session established for worker: '{worker_name}'")
 
-        # Script to create a table with the pip list
-        script = textwrap.dedent(
-            """
-            from deephaven import new_table
-            from deephaven.column import string_col
-            import importlib.metadata
-
-            def _make_pip_packages_table():
-                names = []
-                versions = []
-                for dist in importlib.metadata.distributions():
-                    names.append(dist.metadata["Name"])
-                    versions.append(dist.version)
-                return new_table([
-                    string_col("Package", names),
-                    string_col("Version", versions),
-                ])
-
-            _pip_packages_table = _make_pip_packages_table()
-        """
-        )
-
-        await asyncio.to_thread(session.run_script, script)
+        # Run the pip packages script and get the table in one step
         _LOGGER.info(
-            f"[pip_packages] Script executed successfully on worker: '{worker_name}'"
+            f"[pip_packages] Getting pip packages table for worker: '{worker_name}'"
         )
-
-        # Get the table using a thread for sync operations
-        arrow_table = await sessions.get_table(session, "_pip_packages_table")
+        arrow_table = await sessions.get_pip_packages_table(session)
         _LOGGER.info(
-            f"[pip_packages] Table retrieved successfully on worker: '{worker_name}'"
+            f"[pip_packages] Pip packages table retrieved successfully for worker: '{worker_name}'"
         )
 
         # Convert the Arrow table to a list of dicts
