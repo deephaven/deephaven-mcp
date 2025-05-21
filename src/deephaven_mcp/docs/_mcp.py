@@ -163,9 +163,17 @@ async def docs_chat(
         )
 
     if programming_language:
-        system_prompts.append(
-            f"Worker environment: Programming language: {programming_language}"
-        )
+        # Trim whitespace and validate against supported languages
+        programming_language = programming_language.strip().lower()
+        supported_languages = {"python", "groovy"}
+        if programming_language in supported_languages:
+            system_prompts.append(
+                f"Worker environment: Programming language: {programming_language}"
+            )
+        else:
+            raise ValueError(
+                f"Unsupported programming language: {programming_language}. Supported languages are: {', '.join(supported_languages)}."
+            )
 
     return await inkeep_client.chat(
         prompt=prompt, history=history, system_prompts=system_prompts
