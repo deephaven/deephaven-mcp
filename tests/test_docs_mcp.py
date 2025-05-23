@@ -6,8 +6,6 @@ import types
 
 import pytest
 from starlette.requests import Request
-import importlib
-import sys
 
 
 def test_env_var_required(monkeypatch):
