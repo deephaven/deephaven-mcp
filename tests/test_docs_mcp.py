@@ -6,6 +6,8 @@ import types
 
 import pytest
 from starlette.requests import Request
+import importlib
+import sys
 
 
 def test_env_var_required(monkeypatch):
@@ -133,9 +135,6 @@ def test_docs_chat_with_neither_version(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_health_check_direct(monkeypatch):
-    import importlib
-    import sys
-
     monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
     sys.modules.pop("deephaven_mcp.docs._mcp", None)
     mod = importlib.import_module("deephaven_mcp.docs._mcp")
