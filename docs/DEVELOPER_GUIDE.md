@@ -4,7 +4,7 @@
 
 > **Project repository:** [https://github.com/deephaven/deephaven-mcp](https://github.com/deephaven/deephaven-mcp)
 
-> **Note:** This document contains low-level technical details for contributors working on the [deephaven-mcp/mcp-community](https://github.com/deephaven/deephaven-mcp/mcp-community) project. **End users seeking high-level usage and onboarding information should refer to the main documentation in the [`../README.md`](../README.md).**
+> **Note:** This document contains low-level technical details for contributors working on the [deephaven-mcp](https://github.com/deephaven/deephaven-mcp) project. **End users seeking high-level usage and onboarding information should refer to the main documentation in the [`../README.md`](../README.md).**
 
 This repository houses the Python-based Model Context Protocol (MCP) servers for Deephaven:
 1. **Deephaven MCP Community Server**: Orchestrates Deephaven Community Core nodes.
@@ -75,7 +75,7 @@ This repository houses the Python-based Model Context Protocol (MCP) servers for
 
 ### About This Project
 
-The [deephaven-mcp/mcp-community](https://github.com/deephaven/deephaven-mcp/mcp-community) project provides Python implementations of two Model Context Protocol (MCP) servers:
+The [deephaven-mcp](https://github.com/deephaven/deephaven-mcp) project provides Python implementations of two Model Context Protocol (MCP) servers:
 
 1. **Deephaven MCP Community Server**:
    * Enables orchestration, inspection, and management of Deephaven Community Core worker nodes via the MCP protocol
@@ -111,44 +111,21 @@ Both servers are designed for integration with MCP-compatible tools like the [MC
 
 **Community Server Architecture:**
 
-```
-          +----------------------+
-          |   MCP Inspector      |
-          | Claude Desktop, etc. |
-          +----------+-----------+
-                     |
-              SSE/stdio (MCP)
-                     |
-           +---------v---------+
-           |   MCP Server      |
-           |  (Community)      |
-           +---------+---------+
-                     |
-         +-----------+-----------+
-         |                       |
-+--------v--------+     +--------v--------+
-| Deephaven Core  | ... | Deephaven Core  |
-| Worker (worker1)|     | Worker (workerN)|
-+-----------------+     +-----------------+
+```mermaid
+graph TD
+    A[Clients: MCP Inspector / Claude Desktop / etc.] -- SSE/stdio (MCP) --> B(MCP Community Server);
+    B -- Manages --> C(Deephaven Core Worker 1);
+    B -- Manages --> D(Deephaven Core Worker N);
 ```
 
 Clients (Inspector, Claude Desktop) connect to the MCP Server via SSE or stdio. The MCP Server manages multiple Deephaven Community Core workers. The architecture allows for scalable worker management and flexible client integrations.
 
 **Docs Server Architecture:**
 
-```
-+--------------------+
-|  User/Client/API   |
-+---------+----------+
-          |
-      HTTP/MCP
-          |
-+---------v----------+
-|   MCP Docs Server  |
-|   (FastAPI, LLM)   |
-+---------+----------+
-          |
-  [Deephaven Docs]
+```mermaid
+graph TD
+    A[User/Client/API] -- HTTP/MCP --> B(MCP Docs Server - FastAPI, LLM);
+    B -- Accesses --> C[Deephaven Documentation Corpus];
 ```
 
 Users or API clients send natural language questions or documentation queries over HTTP using the Model Context Protocol (MCP). These requests are received by the server, which is built on FastAPI and powered by a large language model (LLM) via the Inkeep API.
@@ -1297,7 +1274,7 @@ The script will create multiple concurrent connections and send requests to the 
    - For stdio, check the command path and environment variables
 
 6. **Missing Dependencies:**
-   - Ensure all Python dependencies are installed (`uv pip install .[dev]`)
+   - Ensure all Python dependencies are installed (`uv pip install ".[dev]"`)
    - Java must be installed and in PATH for running Deephaven test servers
 
 7. **Session Errors:**
