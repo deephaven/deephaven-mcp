@@ -256,47 +256,6 @@ A: Yes! See the example above.
 
 ---
 
-## Code Quality, Testing, and Linting
-
-**Run all tests:**
-```sh
-uv run pytest
-```
-
-**Sort imports:**
-```sh
-uv run isort . --skip _version.py --skip .venv
-```
-
-**Check import sorting only:**
-```sh
-uv run isort . --check-only --diff --skip _version.py --skip .venv
-```
-
-**Format code:**
-```sh
-uv run black . --exclude '(_version.py|.venv)'
-```
-
-**Lint code:**
-```sh
-uv run ruff check src --fix --exclude _version.py --exclude .venv
-```
-
-**Type checking:**
-```sh
-uv run mypy src/
-```
-
-**Pre-commit hooks:**
-```sh
-uv pip install pre-commit
-pre-commit install
-bin/precommit.sh
-```
-
----
-
 ## Tips & Troubleshooting
 
 - `uv` can be used as a drop-in replacement for most pip and python commands.
