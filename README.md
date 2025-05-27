@@ -23,12 +23,13 @@
 
 Deephaven MCP, which implements the [Model Context Protocol (MCP) standard](https://spec.modelcontextprotocol.io/), provides tools to orchestrate, inspect, and interact with [Deephaven Community Core](https://deephaven.io/) servers, and to access conversational documentation via LLM-powered Docs Servers. It's designed for data scientists, engineers, and anyone looking to leverage Deephaven's capabilities through programmatic interfaces or integrated LLM tools.
 
-### What is Deephaven MCP?
+### Deephaven MCP Components
 
-Deephaven MCP consists of two main server components:
+#### Community Server
+Manages and connects to multiple [Deephaven Community Core](https://deephaven.io/) worker nodes. This allows for unified control and interaction with your Deephaven instances from various client applications.
 
-*   **Community Server**: Manages and connects to multiple [Deephaven Community Core](https://deephaven.io/) worker nodes. This allows for unified control and interaction with your Deephaven instances from various client applications.
-*   **Docs Server**: Provides access to an LLM-powered conversational Q&A interface for Deephaven documentation. Get answers to your Deephaven questions in natural language.
+#### Docs Server
+Provides access to an LLM-powered conversational Q&A interface for Deephaven documentation. Get answers to your Deephaven questions in natural language.
 
 ### Key Use Cases
 
