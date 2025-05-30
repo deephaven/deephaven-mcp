@@ -94,8 +94,8 @@ where = ["src"]
 
 [tool.setuptools_scm]
 write_to = "src/deephaven_mcp/_version.py"
-version_scheme = "post-release"
-local_scheme = "node-and-date"
+version_scheme = "python-simplified-semver"
+local_scheme = "no-local-version"
 fallback_version = "0.0.0"
 
 # Black configuration for code formatting
