@@ -63,7 +63,6 @@ graph TD
 
 ## Prerequisites
 
-*   **Git**: For cloning the repository. ([Installation Guide](https://git-scm.com/book/en/v2/Getting-Started-Installing-Git))
 *   **Python**: Version 3.9 or later. ([Download Python](https://www.python.org/downloads/))
 *   **Access to [Deephaven Community Core](https://deephaven.io/) instance(s):** To use the [MCP Community Server](#community-server) for interacting with Deephaven, you will need one or more [Deephaven Community Core](https://deephaven.io/) instances running and network-accessible.
 *   **Choose your Python environment setup method:**
@@ -74,33 +73,24 @@ graph TD
 
 ## Installation & Initial Setup
 
-### Clone the Repository
+The recommended way to install `deephaven-mcp` is from PyPI. This provides the latest stable release and is suitable for most users.
 
-First, clone the `deephaven-mcp` repository to your local machine:
+### Installing from PyPI (Recommended for Users)
 
-```sh
-git clone https://github.com/deephaven/deephaven-mcp.git
-cd deephaven-mcp
-```
-*Note: The main server packages and their [`pyproject.toml`](pyproject.toml) are located in this `deephaven-mcp` root directory. Commands below are run from this root directory.*
+Choose one of the following Python environment and package management tools:
 
-### Set Up Environment and Install Dependencies
+#### Option A: Using `uv` (Fast, Recommended)
 
-Choose one of the following options based on your preference from the [Prerequisites](#prerequisites) section.
-
-#### Option A: Using `uv` (Recommended)
-
-If you have [`uv`](docs/UV.md) installed, run the following command from the `deephaven-mcp` (root) directory:
+If you have [`uv`](docs/UV.md) installed (or install it via `pip install uv`), run:
 
 ```sh
-uv pip install ".[dev]"
+uv pip install deephaven-mcp
 ```
-This command creates a virtual environment (if one isn't active and `UV_AUTO_CREATE_VENV` is not `false`) and installs all necessary dependencies, including `dh-mcp-community`, `dh-mcp-docs`, and [`mcp-proxy`](https://github.com/modelcontextprotocol/mcp-proxy) if they are specified as project dependencies or extras.
-If [`uv`](docs/UV.md) creates or uses a virtual environment (typically `.venv` in the project root), remember to activate it (e.g., `source .venv/bin/activate` or `.venv\Scripts\activate`) in any new terminal session for manual command-line operations or if your LLM tool doesn't manage environment activation.
+This command installs `deephaven-mcp` and its dependencies. [`uv`](docs/UV.md) may create or use a [virtual environment](https://docs.python.org/3/library/venv.html) (typically `.venv` in your current directory if `UV_AUTO_CREATE_VENV` is not `false`, or a globally managed one). If a virtual environment is used, remember to activate it (e.g., `source .venv/bin/activate` on macOS/Linux or `.venv\Scripts\activate` on Windows) for manual command-line use of `dh-mcp-community` or `dh-mcp-docs`, or if your LLM tool requires an active environment.
 
-#### Option B: Using `pip` and `venv`
+#### Option B: Using Standard `pip` and `venv`
 
-1.  **Create a virtual environment** (e.g., named `.venv`) in the `deephaven-mcp` (root) directory:
+1.  **Create a virtual environment** (e.g., named `.venv`):
     ```sh
     python -m venv .venv
     ```
@@ -113,11 +103,11 @@ If [`uv`](docs/UV.md) creates or uses a virtual environment (typically `.venv` i
         ```sh
         .venv\Scripts\activate
         ```
-3.  **Install dependencies** into the activated virtual environment (from the `deephaven-mcp` root directory):
+3.  **Install `deephaven-mcp`** into the activated virtual environment:
     ```sh
-    pip install ".[dev]"
+    pip install deephaven-mcp
     ```
-    Remember to activate this virtual environment (`source .venv/bin/activate` or `.venv\Scripts\activate`) in any new terminal session where you intend to run these tools manually or if your LLM tool doesn't manage the environment activation itself when spawning processes.
+    Ensure this virtual environment is active in any terminal session where you intend to run `dh-mcp-community` or `dh-mcp-docs` manually, or if your LLM tool requires an active environment when spawning these processes.
 
 ---
 
@@ -309,7 +299,7 @@ After restarting your LLM tool, the first step is to verify that the MCP servers
 *   You should see `deephaven-community` and `deephaven-docs` (or the names you configured in the `mcpServers` object) listed.
 *   Attempt to connect to or interact with one of them (e.g., by listing available [Deephaven Community Core](https://deephaven.io/) workers via the `deephaven-community` server).
 
-If the servers are not listed or you encounter errors at this stage, please proceed to the [Troubleshooting](#6-troubleshooting) section for guidance.
+If the servers are not listed or you encounter errors at this stage, please proceed to the [Troubleshooting](#troubleshooting) section for guidance.
 
 ---
 
@@ -332,7 +322,7 @@ If the servers are not listed or you encounter errors at this stage, please proc
 *   **`command not found` for `dh-mcp-community` or [`mcp-proxy`](https://github.com/modelcontextprotocol/mcp-proxy) (venv option in LLM tool logs):**
     *   Double-check that the `command` field in your JSON config uses the **correct absolute path** to the executable within your `.venv/bin/` (or `.venv\Scripts\`) directory.
 *   **Port Conflicts:** If a server fails to start (check logs), another process might be using the required port (e.g., port 8000 for default SSE).
-*   **Python Errors in Server Logs:** Check the server logs for Python tracebacks. Ensure all dependencies were installed correctly (see [Set Up Environment and Install Dependencies](#set-up-environment-and-install-dependencies)).
+*   **Python Errors in Server Logs:** Check the server logs for Python tracebacks. Ensure all dependencies were installed correctly (see [Installation & Initial Setup](#installation--initial-setup)).
 *   **Worker Configuration Issues:**
         *   If the [Community Server](#community-server) starts but can't connect to [Deephaven Community Core](https://deephaven.io/) workers, verify your `deephaven_workers.json` file (see [The `deephaven_workers.json` File (Defining Your Core Workers)](#the-deephaven_workersjson-file-defining-your-core-workers) for details on its structure and content).
         *   Ensure the target [Deephaven Community Core](https://deephaven.io/) instances are running and network-accessible.
