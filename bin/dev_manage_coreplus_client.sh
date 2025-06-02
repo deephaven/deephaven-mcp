@@ -39,7 +39,8 @@ _determine_version_sort_command() {
 SORT_CMD_V_BASE=$(_determine_version_sort_command)
 
 # --- Configuration ---
-GCS_BUCKET_PATH="gs://illumon-software-repo/jenkins/jdk17/release"
+JDK_VERSION_TAG="jdk17"
+GCS_BUCKET_PATH="gs://illumon-software-repo/jenkins/${JDK_VERSION_TAG}/release"
 DEFAULT_CLIENT_WHEEL_PATTERN="deephaven_coreplus_client*.whl"
 
 GLOBAL_TEMP_FILES=()
@@ -164,7 +165,7 @@ get_tarball_filenames_for_ev() {
   check_tools "gsutil"
   local enterprise_version=$1
   local raw_list
-  raw_list=$(run_gsutil ls "${GCS_BUCKET_PATH}/${enterprise_version}/deephaven-coreplus-*-1.${enterprise_version}.*-jdk17.tgz")
+  raw_list=$(run_gsutil ls "${GCS_BUCKET_PATH}/${enterprise_version}/deephaven-coreplus-*-1.${enterprise_version}.*-${JDK_VERSION_TAG}.tgz")
   if [ $? -ne 0 ]; then return 1; fi
   if [ -z "$raw_list" ]; then return 1; fi # No matching tarballs
   echo "$raw_list" | xargs -n1 basename || return 1 # Extract just the filename from each GCS path
@@ -191,7 +192,7 @@ fn_list_point_releases() {
   
   local all_prs
   all_prs=$(get_tarball_filenames_for_ev "$enterprise_version" |
-    sed -n "s/deephaven-coreplus-.*-1\\.${enterprise_version}\\.//; s/-jdk17\\.tgz//p" | # Extract point release from tarball name
+    sed -n "s/deephaven-coreplus-.*-1\\.${enterprise_version}\\.//; s/-${JDK_VERSION_TAG}\\.tgz//p" | # Extract point release from tarball name
     sort -u)
 
   if [ -z "$all_prs" ]; then
@@ -239,7 +240,7 @@ fn_list_community_versions() {
 
   echo "Available community versions for Enterprise Version ${ev_to_use}, Point Release ${pr_to_use}:" >&2
   local raw_list
-  raw_list=$(run_gsutil ls "${GCS_BUCKET_PATH}/${ev_to_use}/deephaven-coreplus-*-1.${ev_to_use}.${pr_to_use}-jdk17.tgz")
+  raw_list=$(run_gsutil ls "${GCS_BUCKET_PATH}/${ev_to_use}/deephaven-coreplus-*-1.${ev_to_use}.${pr_to_use}-${JDK_VERSION_TAG}.tgz")
   if [ $? -ne 0 ]; then return 1; fi
   if [ -z "$raw_list" ]; then
     # echo "No community versions found for EV ${ev_to_use} and PR ${pr_to_use} or error listing them." >&2
@@ -248,7 +249,7 @@ fn_list_community_versions() {
   echo "$raw_list" | \
     xargs -n1 basename | \
     # Extract community version from tarball name
-    sed -n "s/deephaven-coreplus-//; s/-1\\.${ev_to_use}\\.${pr_to_use}-jdk17\\.tgz//p" | \
+    sed -n "s/deephaven-coreplus-//; s/-1\\.${ev_to_use}\\.${pr_to_use}-${JDK_VERSION_TAG}\\.tgz//p" | \
     "${SORT_CMD_V_BASE}" -uV || return 1 # This final return 1 is if sed/sort fails, not gsutil
 }
 
@@ -273,7 +274,7 @@ fn_list_point_releases_for_ev_and_cv() {
   local all_prs
   all_prs=$(get_tarball_filenames_for_ev "$enterprise_version" | \
     grep "deephaven-coreplus-${community_version}-1\\.${enterprise_version}\\." | \ # Filter tarballs matching the specific CV and EV
-    sed -n "s/deephaven-coreplus-${community_version}-1\\.${enterprise_version}\\.//; s/-jdk17\\.tgz//p" | \ # Extract point release from filtered tarball names
+    sed -n "s/deephaven-coreplus-${community_version}-1\\.${enterprise_version}\\.//; s/-${JDK_VERSION_TAG}\\.tgz//p" | \ # Extract point release from filtered tarball names
     sort -u)
 
   if [ -z "$all_prs" ]; then
@@ -383,7 +384,7 @@ fn_install_wheel() {
   echo "  Community Version:        ${community_version}" >&2
   echo "------------------------------- " >&2
 
-  local coreplus_tarball_name="deephaven-coreplus-${community_version}-1.${enterprise_version}.${point_release}-jdk17.tgz"
+  local coreplus_tarball_name="deephaven-coreplus-${community_version}-1.${enterprise_version}.${point_release}-${JDK_VERSION_TAG}.tgz"
   local full_gcs_tarball_path="${GCS_BUCKET_PATH}/${enterprise_version}/${coreplus_tarball_name}"
   
   local temp_dir_name="tmp_coreplus_install_$$" # Unique temp dir name
