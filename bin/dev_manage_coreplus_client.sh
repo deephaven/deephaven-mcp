@@ -40,7 +40,8 @@ SORT_CMD_V_BASE=$(_determine_version_sort_command)
 
 # --- Configuration ---
 JDK_VERSION_TAG="jdk17"
-GCS_BUCKET_PATH="gs://illumon-software-repo/jenkins/${JDK_VERSION_TAG}/release"
+_GCS_JENKINS_BASE_PATH="gs://illumon-software-repo/jenkins/${JDK_VERSION_TAG}"
+GCS_BUCKET_PATH="${_GCS_JENKINS_BASE_PATH}/release" # Default to release, may be overridden by --rc
 DEFAULT_CLIENT_WHEEL_PATTERN="deephaven_coreplus_client*.whl"
 
 GLOBAL_TEMP_FILES=()
@@ -61,13 +62,19 @@ _register_temp_file() { GLOBAL_TEMP_FILES+=("$1"); }
 
 # Function to print usage
 usage() {
-  echo "Usage: $0 [command]"
+  echo "Usage: $0 [--rc <RC_CODENAME>] <command> [command_options]"
+  echo
+  echo "Global Options:"
+  echo "  --rc <RC_CODENAME>   Target a specific Release Candidate (e.g., --rc gplus)."
+  echo "                       This option modifies the GCS path for fetching versions."
+  echo "                       Must be specified before the command."
   echo
   echo "Commands:"
-  echo "  list-enterprise-versions                               List available enterprise versions."
-  echo "  list-point-releases [<EV>]             List available point releases. Defaults to latest enterprise version if not specified."
+  echo "  list-enterprise-versions                             List available enterprise versions."
+  echo "  list-point-releases [<EV>]                           List available point releases. Defaults to latest enterprise version if not specified."
   echo "  list-community-versions [<EV> [<PR>]]                List available community versions. Defaults to latest EV and latest PR for that EV."
-  echo "  list-latest-versions                                   List the latest enterprise version and its corresponding latest point release and community version."
+  echo "  list-latest-versions                                 List the latest enterprise version and its corresponding latest point release and community version."
+  echo "  list-rc-versions                                     List available RC versions (e.g., gplus, silverheels)."
   echo "  install [--ev <EV>] [--pr <PR>] [--cv <CV>]            Install the client wheel."
   echo "                                                         If versions are not provided, the latest available will be used."
   echo "                                                         EV: Enterprise Version (e.g., 20240517)"
@@ -80,6 +87,7 @@ usage() {
   echo "  $0 install --ev 20240517 --pr 483 --cv 0.39.1"
   echo "  $0 install # Installs the latest versions"
   echo "  $0 list-latest-versions # Lists the latest EV and its corresponding latest PR and CV"
+  echo "  $0 list-rc-versions"
   exit 1
 }
 
@@ -316,6 +324,42 @@ get_latest_community_version() {
 }
 
 
+# Function to list available RC versions from GCS
+fn_list_rc_versions() {
+  check_tools "gsutil"
+  echo "Available RC versions (subdirectories under .../rc/):" >&2
+  local rc_path_base="${_GCS_JENKINS_BASE_PATH}/rc/"
+
+  local raw_list
+  local gsutil_exit_code
+  raw_list=$(run_gsutil ls "${rc_path_base}")
+  gsutil_exit_code=$?
+
+  if [ ${gsutil_exit_code} -ne 0 ]; then
+    echo "ERROR: Failed to list contents of ${rc_path_base} (gsutil exit code: ${gsutil_exit_code})" >&2
+    return 1
+  fi
+
+  if [ -z "$raw_list" ]; then
+    echo "No RC versions found at ${rc_path_base}" >&2
+    return 0 # Not an error, just no RCs
+  fi
+
+  local processed_list
+  processed_list=$(echo "$raw_list" | xargs -n1 basename | sed 's|/$||' | sort)
+
+  if [ -z "$processed_list" ]; then
+    # This case implies gsutil returned something, but it didn't look like directory names
+    # or something unexpected happened during processing.
+    echo "No RC versions found, or an issue processing the list from ${rc_path_base}" >&2
+    echo "Raw output from gsutil was:" >&2
+    echo "$raw_list" >&2
+    return 1 # Indicate an unexpected situation
+  else
+    echo "$processed_list"
+  fi
+}
+
 # --- Function to List Latest Full Version Info ---
 fn_list_latest_versions() {
   check_tools "gsutil"
@@ -500,9 +544,30 @@ fn_install_wheel() {
 
 # --- Main Script Logic ---
 
-if [ $# -eq 0 ]; then usage; fi
+# Parse global options like --rc first
+# Initialize _RC_VERSION_FROM_CLI in case it's referenced later, though its primary use is now localized.
+_RC_VERSION_FROM_CLI=""
 
-COMMAND=$1
+# Check for --rc option as the first argument.
+# Use ${1:-} to be safe if $1 is not set (e.g. script called with no arguments at all).
+if [ "${1:-}" == "--rc" ]; then
+  if [[ -z "${2:-}" || "${2:0:1}" == "-" ]]; then # Check if $2 (value for --rc) is empty or another option.
+    echo "ERROR: --rc option requires a non-option argument (the RC version)." >&2
+    usage
+  fi
+  _RC_VERSION_FROM_CLI="$2"
+  GCS_BUCKET_PATH="${_GCS_JENKINS_BASE_PATH}/rc/${_RC_VERSION_FROM_CLI}"
+  echo "INFO: Targeting RC version: ${_RC_VERSION_FROM_CLI}. GCS Path: ${GCS_BUCKET_PATH}" >&2
+  shift 2 # Consume --rc and its value.
+fi
+# If --rc was not used, GCS_BUCKET_PATH retains its default value set earlier in the script.
+
+# If no command is provided (i.e., $# is 0 after potentially shifting for --rc), show usage.
+if [ "$#" -eq 0 ]; then
+  usage # The usage function also exits.
+fi
+
+COMMAND="${1:-$DEFAULT_COMMAND}"
 shift
 
 case "$COMMAND" in
@@ -546,6 +611,9 @@ case "$COMMAND" in
     ;;
   list-latest-versions)
     fn_list_latest_versions
+    ;;
+  list-rc-versions)
+    fn_list_rc_versions | sed 's/^/  /'
     ;;
   *)
     echo "ERROR: Unknown command: $COMMAND" >&2
