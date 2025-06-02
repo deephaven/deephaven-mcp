@@ -61,6 +61,24 @@ pip install uv
 ```
 Or see the [uv installation guide](https://github.com/astral-sh/uv#installation) for other options and the latest instructions.
 
+### Creating a Virtual Environment with `uv`
+
+Once [`uv`](https://github.com/astral-sh/uv) is installed, it's highly recommended to create and use a virtual environment for your project. This isolates dependencies and ensures consistency.
+
+1.  **Create a virtual environment (e.g., named `.venv`) with a specific Python version:**
+    Use the `-p` option to specify your desired Python interpreter (e.g., Python 3.9, 3.10, or a full path to an executable):
+    ```sh
+    uv venv .venv -p 3.9
+    ```
+    Replace `3.9` with your target Python version or path.
+
+2.  **(Optional) Activate the virtual environment:**
+    *   On macOS/Linux: `source .venv/bin/activate`
+    *   On Windows (PowerShell): `.venv\Scripts\Activate.ps1`
+    *   On Windows (CMD): `.venv\Scripts\activate.bat`
+
+After activating, any `uv` commands (like `uv pip install ...` or `uv run ...`) will operate within this environment.
+
 ---
 
 ## Typical Workflows with `uv`

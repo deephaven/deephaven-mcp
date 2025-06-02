@@ -461,7 +461,7 @@ fn_install_wheel() {
 
   # Try to determine the currently installed grpcio version and clean it
   echo "Checking for existing grpcio installation..." >&2
-  current_grpcio_version=$(uv pip show grpcio 2>/dev/null | awk '/^Version:/ {print $2}' | tr -d '[:space:]')
+  current_grpcio_version=$( (uv pip show grpcio || true) 2>/dev/null | awk '/^Version:/ {print $2}' | tr -d '[:space:]' )
 
   if [ -n "${current_grpcio_version}" ]; then
     echo "Found existing grpcio version: '${current_grpcio_version}'. Will attempt to override grpcio to this version using process substitution." >&2
