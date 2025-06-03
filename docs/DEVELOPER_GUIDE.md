@@ -1049,6 +1049,12 @@ These steps outline how to set up a development environment specifically for wor
 
 After these steps, your virtual environment will be configured for Core Plus client development.
 
+> **Tip:** You can generate or regenerate the entire Core Plus development environment in one line:
+> ```sh
+> rm -rf .venv && uv venv -p 3.12 && ./bin/dev_manage_coreplus_client.sh install && uv pip install ".[dev,coreplus]"
+> ```
+> This will remove any existing virtual environment, create a new one, install the Core Plus client, and set up all project dependencies in a single command.
+
 ### Advanced Development Techniques
 
 - **Run the server directly (development mode):**
