@@ -14,6 +14,11 @@
 set -euo pipefail
 # set -x # Uncomment for debugging
 
+die() {
+  echo "ERROR: $*" >&2
+  exit 1
+}
+
 # Function to determine the correct version sort command
 _determine_version_sort_command() {
   # Test system sort -V
@@ -62,34 +67,87 @@ _register_temp_file() { GLOBAL_TEMP_FILES+=("$1"); }
 
 # Function to print usage
 usage() {
-  echo "Usage: $0 [--rc <RC_CODENAME>] <command> [command_options]"
+  echo "Usage: $0 <command> [options]"
   echo
-  echo "Global Options:"
-  echo "  --rc <RC_CODENAME>   Target a specific Release Candidate (e.g., --rc gplus)."
-  echo "                       This option modifies the GCS path for fetching versions."
-  echo "                       Must be specified before the command."
+  echo "All arguments are optional and may be specified as flags or positionally. Defaults are used if not provided."
+  echo
+  echo "Options:"
+  echo "  --channel <channel>      Release channel (e.g., prod, gplus, etc)"
+  echo "  --ev <enterprise_ver>    Enterprise version (e.g., 20240517)"
+  echo "  --pr <point_release>     Point release (e.g., 483 or 250506093038c2cba50b47)"
+  echo "  --cv <community_ver>     Community version (e.g., 0.41.0rc1)"
   echo
   echo "Commands:"
-  echo "  list-enterprise-versions                             List available enterprise versions."
-  echo "  list-point-releases [<EV>]                           List available point releases. Defaults to latest enterprise version if not specified."
-  echo "  list-community-versions [<EV> [<PR>]]                List available community versions. Defaults to latest EV and latest PR for that EV."
-  echo "  list-latest-versions                                 List the latest enterprise version and its corresponding latest point release and community version."
-  echo "  list-rc-versions                                     List available RC versions (e.g., gplus, silverheels)."
-  echo "  install [--ev <EV>] [--pr <PR>] [--cv <CV>]            Install the client wheel."
-  echo "                                                         If versions are not provided, the latest available will be used."
-  echo "                                                         EV: Enterprise Version (e.g., 20240517)"
-  echo "                                                         PR: Enterprise Point Release (e.g., 483)"
-  echo "                                                         CV: Community Version (e.g., 0.39.1)"
+  echo "  list-release-channels                      List all release channels (RC codenames + prod)."
+  echo "  list-enterprise-versions                   List enterprise versions (optionally for a channel)."
+  echo "  list-point-releases                        List point releases (optionally for a channel and EV)."
+  echo "  list-community-versions                    List community versions (optionally for a channel, EV, PR)."
+  echo "  resolve-install-versions                   Resolve install versions (optionally for channel, EV, PR, CV)."
+  echo "  install                                    Install the client wheel for the resolved versions."
+  echo "  uninstall                                  Uninstall deephaven-coreplus-client from the current environment."
   echo
   echo "Examples:"
-  echo "  $0 list-enterprise-versions"
-  echo "  $0 list-point-releases 20240517"
-  echo "  $0 install --ev 20240517 --pr 483 --cv 0.39.1"
-  echo "  $0 install # Installs the latest versions"
-  echo "  $0 list-latest-versions # Lists the latest EV and its corresponding latest PR and CV"
-  echo "  $0 list-rc-versions"
+  echo "  $0 list-point-releases"
+  echo "  $0 list-point-releases --ev 20240517"
+  echo "  $0 list-point-releases --channel gplus --ev 20250219"
+  echo "  $0 list-community-versions --pr 250506093038c2cba50b47"
+  echo "  $0 uninstall"
   exit 1
 }
+
+# Parse optional CLI arguments as flags or positionally
+parse_args() {
+  positional_args=()  # Always initialize array first for strict mode
+  # Initialize to avoid unbound variable errors
+  parsed_channel=""
+  parsed_ev=""
+  parsed_pr=""
+  parsed_cv=""
+  # Defaults
+  default_channel="prod"
+  default_ev="$(list_enterprise_versions_for_channel prod | tail -n 1)"
+  default_pr="$(list_point_releases_for_channel_and_ev prod "$default_ev" | tail -n 1)"
+  default_cv=""
+  # Parse
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --channel)
+        parsed_channel="$2"; shift 2;;
+      --ev)
+        parsed_ev="$2"; shift 2;;
+      --pr)
+        parsed_pr="$2"; shift 2;;
+      --cv)
+        parsed_cv="$2"; shift 2;;
+      -h|--help)
+        usage; exit 0;;
+      --*)
+        die "Unknown argument: $1";;
+      -*)
+        die "Unknown argument: $1";;
+      *)
+        positional_args+=("$1"); shift;;
+    esac
+  done
+  # Safe expansion for set -- to avoid unbound errors
+  if [ ${#positional_args[@]} -gt 0 ]; then
+    set -- "${positional_args[@]}"
+  else
+    set --
+  fi
+  # Fill from positional if not set
+  : "${parsed_channel:=${1:-$default_channel}}"
+  : "${parsed_ev:=${2:-$default_ev}}"
+  : "${parsed_pr:=${3:-$default_pr}}"
+  : "${parsed_cv:=${4:-$default_cv}}"
+  # Export resolved vars in lowercase
+  channel="$parsed_channel"
+  ev="$parsed_ev"
+  pr="$parsed_pr"
+  cv="$parsed_cv"
+  export channel ev pr cv
+}
+
 
 # Function to check for required tools
 # Usage: check_tools "tool1" "tool2" ...
@@ -149,277 +207,159 @@ run_gsutil() {
   return 0
 }
 
-# --- Listing Functions ---
+# --- Modular Version Discovery Functions ---
 
-# List available enterprise versions (directories under GCS_BUCKET_PATH)
-fn_list_enterprise_versions() {
+# 1. List all release channels (RC codenames + prod)
+list_release_channels() {
   check_tools "gsutil"
-  local raw_list
-  raw_list=$(run_gsutil ls -d "${GCS_BUCKET_PATH}/*")
-  if [ $? -ne 0 ]; then return 1; fi # run_gsutil already printed a detailed error
-
-  if [ -z "$raw_list" ]; then
-    # This means no directories found, not necessarily a gsutil error itself.
-    # Depending on context, this might be an error or just an empty list.
-    # For internal calls (like get_latest), an empty output is expected to be handled.
-    return 1 # Or simply echo nothing and let caller decide
-  fi
-
-  echo "$raw_list" | sed "s|${GCS_BUCKET_PATH}/||; s|/||" | grep -E '^[0-9]+$' | "${SORT_CMD_V_BASE}" -V || return 1 # Extract dir name, filter for numeric (version-like) names, and version sort
-}
-
-# Extract tarball names for a given enterprise version
-get_tarball_filenames_for_ev() {
-  check_tools "gsutil"
-  local enterprise_version=$1
-  local raw_list
-  raw_list=$(run_gsutil ls "${GCS_BUCKET_PATH}/${enterprise_version}/deephaven-coreplus-*-1.${enterprise_version}.*-${JDK_VERSION_TAG}.tgz")
-  if [ $? -ne 0 ]; then return 1; fi
-  if [ -z "$raw_list" ]; then return 1; fi # No matching tarballs
-  echo "$raw_list" | xargs -n1 basename || return 1 # Extract just the filename from each GCS path
-}
-
-# Function to list point releases for a given enterprise version (defaults to latest EV if not specified)
-fn_list_point_releases() {
-  check_tools "gsutil"
-  local enterprise_version="$1"
-  local using_latest_ev=false
-
-  if [ -z "$enterprise_version" ]; then
-    echo "No enterprise version specified, attempting to use the latest..." >&2
-    enterprise_version=$(get_latest_enterprise_version)
-    if [ -z "$enterprise_version" ]; then
-      echo "ERROR: Could not determine the latest enterprise version." >&2
-      return 1
-    fi
-    using_latest_ev=true
-    echo "Using latest Enterprise Version: ${enterprise_version}" >&2
-  fi
-
-  echo "Available point releases for Enterprise Version ${enterprise_version}:" >&2 # Outputting only data
-  
-  local all_prs
-  all_prs=$(get_tarball_filenames_for_ev "$enterprise_version" |
-    sed -n "s/deephaven-coreplus-.*-1\\.${enterprise_version}\\.//; s/-${JDK_VERSION_TAG}\\.tgz//p" | # Extract point release from tarball name
-    sort -u)
-
-  if [ -z "$all_prs" ]; then
-    # echo "No point releases found for EV ${enterprise_version} or error listing them." >&2
-    return 1
-  fi
-
-  # Separate numeric and alphanumeric PRs
-  local numeric_prs=$(echo "$all_prs" | grep -E '^[0-9]+$' | sort -n || true)
-  local alphanumeric_prs=$(echo "$all_prs" | grep -vE '^[0-9]+$' | sort || true)
-
-  if [ -n "$numeric_prs" ]; then
-    echo "$numeric_prs"
-  fi
-  if [ -n "$alphanumeric_prs" ]; then
-    echo "$alphanumeric_prs"
-  fi
-}
-
-# Function to list community versions for a given EV and PR (defaults to latest EV and/or latest PR if not specified)
-fn_list_community_versions() {
-  check_tools "gsutil"
-  local ev_arg="$1"
-  local pr_arg="$2"
-  local ev_to_use
-  local pr_to_use
-
-  if [ -z "$ev_arg" ]; then
-    echo "No enterprise version specified, attempting to use the latest..." >&2
-    ev_to_use=$(get_latest_enterprise_version)
-    if [ -z "$ev_to_use" ]; then echo "ERROR: Could not determine the latest enterprise version." >&2; return 1; fi
-    echo "Using latest Enterprise Version: ${ev_to_use}" >&2
-  else
-    ev_to_use="$ev_arg"
-  fi
-
-  if [ -z "$pr_arg" ]; then
-    echo "No point release specified for EV ${ev_to_use}, attempting to use the latest..." >&2
-    pr_to_use=$(get_latest_point_release "$ev_to_use")
-    if [ -z "$pr_to_use" ]; then echo "ERROR: Could not determine the latest point release for EV ${ev_to_use}." >&2; return 1; fi
-    echo "Using latest Point Release for EV ${ev_to_use}: ${pr_to_use}" >&2
-  else
-    pr_to_use="$pr_arg"
-  fi
-
-  echo "Available community versions for Enterprise Version ${ev_to_use}, Point Release ${pr_to_use}:" >&2
-  local raw_list
-  raw_list=$(run_gsutil ls "${GCS_BUCKET_PATH}/${ev_to_use}/deephaven-coreplus-*-1.${ev_to_use}.${pr_to_use}-${JDK_VERSION_TAG}.tgz")
-  if [ $? -ne 0 ]; then return 1; fi
-  if [ -z "$raw_list" ]; then
-    # echo "No community versions found for EV ${ev_to_use} and PR ${pr_to_use} or error listing them." >&2
-    return 1 # No matching tarballs
-  fi
-  echo "$raw_list" | \
-    xargs -n1 basename | \
-    # Extract community version from tarball name
-    sed -n "s/deephaven-coreplus-//; s/-1\\.${ev_to_use}\\.${pr_to_use}-${JDK_VERSION_TAG}\\.tgz//p" | \
-    "${SORT_CMD_V_BASE}" -uV || return 1 # This final return 1 is if sed/sort fails, not gsutil
-}
-
-# Retrieves the latest enterprise version by listing and taking the last sorted one.
-get_latest_enterprise_version() {
-  fn_list_enterprise_versions | tail -n 1
-}
-
-# Retrieves the latest point release for a given enterprise version.
-# Expects enterprise_version as $1.
-get_latest_point_release() {
-  local enterprise_version=$1
-  fn_list_point_releases "$enterprise_version" | tail -n 1
-}
-
-# Function to list point releases for a given enterprise version AND community version
-fn_list_point_releases_for_ev_and_cv() {
-  check_tools "gsutil"
-  local enterprise_version="$1"
-  local community_version="$2"
-
-  local all_prs
-  all_prs=$(get_tarball_filenames_for_ev "$enterprise_version" | \
-    grep "deephaven-coreplus-${community_version}-1\\.${enterprise_version}\\." | \ # Filter tarballs matching the specific CV and EV
-    sed -n "s/deephaven-coreplus-${community_version}-1\\.${enterprise_version}\\.//; s/-${JDK_VERSION_TAG}\\.tgz//p" | \ # Extract point release from filtered tarball names
-    sort -u)
-
-  if [ -z "$all_prs" ]; then
-    # echo "No point releases found for EV ${enterprise_version} and CV ${community_version} or error listing them." >&2
-    return 1
-  fi
-
-  # Separate numeric and alphanumeric PRs
-  local numeric_prs=$(echo "$all_prs" | grep -E '^[0-9]+$' | sort -n || true)
-  local alphanumeric_prs=$(echo "$all_prs" | grep -vE '^[0-9]+$' | sort || true)
-
-  if [ -n "$numeric_prs" ]; then
-    echo "$numeric_prs"
-  fi
-  if [ -n "$alphanumeric_prs" ]; then
-    echo "$alphanumeric_prs"
-  fi
-}
-
-# Function to get the latest point release for a given enterprise version AND community version
-get_latest_point_release_for_ev_and_cv() {
-  local enterprise_version="$1"
-  local community_version="$2"
-  fn_list_point_releases_for_ev_and_cv "$enterprise_version" "$community_version" | tail -n 1
-}
-
-# Retrieves the latest community version for a given enterprise version and point release.
-# Expects enterprise_version as $1 and point_release as $2.
-get_latest_community_version() {
-  local enterprise_version="$1"
-  local point_release="$2"
-  # This function now needs EV and PR to be meaningful in the new context.
-  # It's called by fn_list_latest_versions, which will provide both.
-  if [ -z "$enterprise_version" ] || [ -z "$point_release" ]; then
-    echo "ERROR (internal): get_latest_community_version requires EV and PR." >&2
-    return 1
-  fi
-  fn_list_community_versions "$enterprise_version" "$point_release" | tail -n 1
-}
-
-
-# Function to list available RC versions from GCS
-fn_list_rc_versions() {
-  check_tools "gsutil"
-  echo "Available RC versions (subdirectories under .../rc/):" >&2
   local rc_path_base="${_GCS_JENKINS_BASE_PATH}/rc/"
-
-  local raw_list
-  local gsutil_exit_code
-  raw_list=$(run_gsutil ls "${rc_path_base}")
-  gsutil_exit_code=$?
-
-  if [ ${gsutil_exit_code} -ne 0 ]; then
-    echo "ERROR: Failed to list contents of ${rc_path_base} (gsutil exit code: ${gsutil_exit_code})" >&2
-    return 1
-  fi
-
-  if [ -z "$raw_list" ]; then
-    echo "No RC versions found at ${rc_path_base}" >&2
-    return 0 # Not an error, just no RCs
-  fi
-
+  local rc_list
+  rc_list=$(run_gsutil ls "${rc_path_base}") || rc_list=""
   local processed_list
-  processed_list=$(echo "$raw_list" | xargs -n1 basename | sed 's|/$||' | sort)
-
-  if [ -z "$processed_list" ]; then
-    # This case implies gsutil returned something, but it didn't look like directory names
-    # or something unexpected happened during processing.
-    echo "No RC versions found, or an issue processing the list from ${rc_path_base}" >&2
-    echo "Raw output from gsutil was:" >&2
-    echo "$raw_list" >&2
-    return 1 # Indicate an unexpected situation
-  else
+  processed_list=$(echo "$rc_list" | xargs -n1 basename | sed 's|/$||' | sort)
+  echo "prod"
+  if [ -n "$processed_list" ]; then
     echo "$processed_list"
   fi
 }
 
-# --- Function to List Latest Full Version Info ---
-fn_list_latest_versions() {
+# 2. List enterprise versions for a channel (prod or RC)
+list_enterprise_versions_for_channel() {
   check_tools "gsutil"
-  echo "Determining latest consistent set of versions..." >&2
-  local latest_ev
-  latest_ev=$(get_latest_enterprise_version)
-  if [ -z "$latest_ev" ]; then echo "ERROR: Could not determine the latest enterprise version." >&2; return 1; fi
-
-  local latest_pr_for_ev
-  latest_pr_for_ev=$(get_latest_point_release "$latest_ev") # Gets latest PR for the EV, across all CVs
-  if [ -z "$latest_pr_for_ev" ]; then echo "ERROR: Could not determine the latest point release for EV ${latest_ev}." >&2; return 1; fi
-
-  local latest_cv_for_ev_pr
-  latest_cv_for_ev_pr=$(get_latest_community_version "$latest_ev" "$latest_pr_for_ev") # Gets latest CV for this specific EV & PR
-  if [ -z "$latest_cv_for_ev_pr" ]; then
-    echo "ERROR: Could not determine the latest community version for EV ${latest_ev} and PR ${latest_pr_for_ev}." >&2
-    echo "This might indicate no tarballs exist for this specific EV/PR combination, or an issue with GCS listing." >&2
-    return 1
+  local channel="$1"
+  if [ "$channel" = "prod" ]; then
+    local path="${_GCS_JENKINS_BASE_PATH}/release"
+    local raw_list
+    raw_list=$(run_gsutil ls -d "$path/*") || raw_list=""
+    echo "$raw_list" | sed "s|$path/||; s|/||" | grep -E '^[0-9]+$' | ${SORT_CMD_V_BASE} -V
+  else
+    local rc_path="${_GCS_JENKINS_BASE_PATH}/rc/${channel}"
+    local files
+    files=$(run_gsutil ls "$rc_path/*" 2>/dev/null) || files=""
+    # Extract 8-digit enterprise version from any filename containing '-1.<EV>.'
+    echo "$files" | \
+      sed -n 's/.*-1\.\([0-9]\{8\}\)\..*/\1/p' | \
+      sort -uV
   fi
-
-  echo "Latest consistent versions found:"
-  echo "  Enterprise Version: ${latest_ev}"
-  echo "  Point Release:      ${latest_pr_for_ev}"
-  echo "  Community Version:  ${latest_cv_for_ev_pr}"
-  echo "(These versions form a consistent set from available tarballs)"
 }
 
+
+# 3. List point releases for a channel and EV
+list_point_releases_for_channel_and_ev() {
+  check_tools "gsutil"
+  local channel="$1"
+  local ev="$2"
+  local path
+  if [ "$channel" = "prod" ]; then
+    path="${_GCS_JENKINS_BASE_PATH}/release/${ev}"
+    local files
+    files=$(run_gsutil ls "$path/deephaven-coreplus-*-1.${ev}.*-${JDK_VERSION_TAG}.tgz" 2>/dev/null) || files=""
+    pr_list=$(echo "$files" | sed -n "s/.*-1\.${ev}\.\(.*\)-${JDK_VERSION_TAG}\.tgz/\1/p" | sort -u)
+    echo "$pr_list" | awk '/^[0-9]{3}$/ { print "A" $0; next } { print "B" $0 }' | sort | sed 's/^[AB]//'
+  else
+    path="${_GCS_JENKINS_BASE_PATH}/rc/${channel}"
+    local files
+    files=$(run_gsutil ls "$path/*" 2>/dev/null) || files=""
+    filtered=$(echo "$files" | grep 'deephaven-coreplus-' | grep -- "-1.${ev}." || true)
+    echo "$filtered" | \
+      sed -n "s/.*-1\.${ev}\.\([^-\.]*\).*/\1/p" | \
+      sort -u
+  fi
+}
+
+# 4. List community versions for a channel, EV, PR
+list_community_versions_for_channel_ev_pr() {
+  check_tools "gsutil"
+  local channel="$1"
+  local ev="$2"
+  local pr="$3"
+  local path
+  if [ "$channel" = "prod" ]; then
+    path="${_GCS_JENKINS_BASE_PATH}/release/${ev}"
+    local files
+    files=$(run_gsutil ls "$path/deephaven-coreplus-*-1.${ev}.${pr}-${JDK_VERSION_TAG}.tgz" 2>/dev/null) || files=""
+    echo "$files" | sed -n "s|.*/deephaven-coreplus-\([^-]*\)-1\.${ev}\.${pr}-${JDK_VERSION_TAG}\.tgz|\1|p" | sort -u
+  else
+    path="${_GCS_JENKINS_BASE_PATH}/rc/${channel}"
+    local files
+    files=$(run_gsutil ls "${_GCS_JENKINS_BASE_PATH}/rc/${channel}/deephaven-coreplus-*-1.${ev}.${pr}*.tgz" 2>/dev/null) || files=""
+    echo "$files" | sed -n "s|.*/deephaven-coreplus-\(.*\)-1\.${ev}\.${pr}.*\.tgz|\1|p" | sort -u
+  fi
+}
+
+# 5. Resolve install versions (channel, EV, PR, CV)
+resolve_install_versions() {
+  local channel="${1:-}"
+  local ev="${2:-}"
+  local pr="${3:-}"
+  local cv="${4:-}"
+
+  # Channel
+  if [ -z "$channel" ]; then
+    channel=$(list_release_channels | head -n1)
+  fi
+  # EV
+  if [ -z "$ev" ]; then
+    ev=$(list_enterprise_versions_for_channel "$channel" | tail -n1)
+  fi
+  # PR
+  if [ -z "$pr" ]; then
+    pr=$(list_point_releases_for_channel_and_ev "$channel" "$ev" | tail -n1)
+  fi
+  # CV
+  if [ -z "$cv" ]; then
+    cv=$(list_community_versions_for_channel_ev_pr "$channel" "$ev" "$pr" | tail -n1)
+  fi
+  echo "$channel $ev $pr $cv"
+}
+
+# --- Listing Functions REMOVED (replaced by modular functions above) ---
 
 # --- Installation Function ---
 fn_install_wheel() {
   check_tools "gsutil" "uv" "find"
   
-  local enterprise_version_arg=$1
-  local point_release_arg=$2
-  local community_version_arg=$3
+  # Uses global _CONTEXT_EV, _CONTEXT_PR, _CONTEXT_CV
+  echo "Determining versions for installation based on global context..." >&2
+  echo "  Context EV: ${_CONTEXT_EV:-Not set}" >&2
+  echo "  Context PR: ${_CONTEXT_PR:-Not set}" >&2
+  echo "  Context CV: ${_CONTEXT_CV:-Not set}" >&2
+  echo "  Context RC: ${_CONTEXT_RC_CODENAME:-Not set (using release path)}" >&2
 
-  echo "Determining versions for installation..." >&2
-
-  local enterprise_version=${enterprise_version_arg}
+  local enterprise_version=${_CONTEXT_EV}
   if [ -z "$enterprise_version" ]; then
-    echo "Enterprise version not provided, attempting to find the latest..." >&2
-    enterprise_version=$(get_latest_enterprise_version)
-    if [ -z "$enterprise_version" ]; then echo "ERROR: Could not determine the latest enterprise version." >&2; exit 1; fi
-    echo "Using latest enterprise version: ${enterprise_version}" >&2
+    echo "Enterprise version not set in global context, attempting to find the latest..." >&2
+    enterprise_version=$(get_latest_enterprise_version) # This function respects GCS_BUCKET_PATH (i.e. --rc)
+    if [ -z "$enterprise_version" ]; then
+      echo "ERROR: Could not determine the latest enterprise version from ${GCS_BUCKET_PATH}." >&2
+      return 1
+    fi
+    echo "Using latest enterprise version: $enterprise_version" >&2
   fi
 
-  local point_release=${point_release_arg}
+  local point_release=${_CONTEXT_PR}
   if [ -z "$point_release" ]; then
-    echo "Point release not provided for EV ${enterprise_version}, attempting to find the latest..." >&2
+    # If EV was context-specified but PR was not, find latest PR for that EV.
+    # If EV was also not context-specified (and thus found above), find latest PR for that found EV.
+    echo "Point release not set in global context for EV $enterprise_version, attempting to find the latest..." >&2
     point_release=$(get_latest_point_release "$enterprise_version")
-    if [ -z "$point_release" ]; then echo "ERROR: Could not determine the latest point release for EV ${enterprise_version}." >&2; exit 1; fi
-    echo "Using latest point release for EV ${enterprise_version}: ${point_release}" >&2
+    if [ -z "$point_release" ]; then
+      echo "ERROR: Could not determine the latest point release for EV $enterprise_version from ${GCS_BUCKET_PATH}." >&2
+      return 1
+    fi
+    echo "Using latest point release for EV $enterprise_version: $point_release" >&2
   fi
 
-  local community_version=${community_version_arg}
+  local community_version=${_CONTEXT_CV}
   if [ -z "$community_version" ]; then
-    echo "Community version not provided for EV ${enterprise_version} and PR ${point_release}, attempting to find the latest..." >&2
+    # Similar logic for CV: if EV/PR were context-specified or found, find latest CV for them.
+    echo "Community version not set in global context for EV $enterprise_version PR $point_release, attempting to find the latest..." >&2
     community_version=$(get_latest_community_version "$enterprise_version" "$point_release")
-    if [ -z "$community_version" ]; then echo "ERROR: Could not determine the latest community version for EV ${enterprise_version} and PR ${point_release}." >&2; exit 1; fi
-    echo "Using latest community version for EV ${enterprise_version}, PR ${point_release}: ${community_version}" >&2
+    if [ -z "$community_version" ]; then
+      echo "ERROR: Could not determine the latest community version for EV $enterprise_version PR $point_release from ${GCS_BUCKET_PATH}." >&2
+      return 1
+    fi
+    echo "Using latest community version for EV $enterprise_version PR $point_release: $community_version" >&2
   fi
 
   echo "--- Selected for installation --- " >&2
@@ -542,81 +482,111 @@ fn_install_wheel() {
 }
 
 
+install_coreplus_client() {
+  # Usage: install_coreplus_client <channel> <ev> <pr> <cv>
+  channel="$1"
+  ev="$2"
+  pr="$3"
+  cv="$4"
+  : "${JDK_VERSION_TAG:?JDK_VERSION_TAG must be set (e.g., jdk17)}"
+  set -e
+  tmpdir=$(mktemp -d)
+  trap 'rm -rf "$tmpdir"' EXIT INT TERM
+
+  base_path="gs://illumon-software-repo/jenkins/${JDK_VERSION_TAG}"
+  subdir="release/${ev}"
+  [ "$channel" != "prod" ] && subdir="rc/${channel}"
+  artifact_path="${base_path}/${subdir}/deephaven-coreplus-${cv}-1.${ev}.${pr}-${JDK_VERSION_TAG}.tgz"
+
+  echo "Fetching artifact: $artifact_path" >&2
+  gsutil cp "$artifact_path" "$tmpdir/" || die "Failed to fetch artifact from $artifact_path"
+  artifact_file=$(ls "$tmpdir"/deephaven-coreplus-*.tgz)
+
+  if [[ "$artifact_file" == *.tgz ]]; then
+    echo "Extracting $artifact_file to $tmpdir" >&2
+    tar -xzf "$artifact_file" -C "$tmpdir" || die "Failed to extract $artifact_file"
+    whl_file=$(find "$tmpdir" -type f -name 'deephaven_coreplus_client-*.whl' | head -n 1)
+    if [ -z "$whl_file" ]; then
+      die "No deephaven_coreplus_client-*.whl file found inside $artifact_file"
+    fi
+    # --- grpcio override logic ---
+    # This section handles a specific dependency constraint for 'grpcio'.
+    # The client wheel being installed might have its own 'grpcio' version requirements
+    # that could conflict with the 'grpcio' version already in use by other critical
+    # packages in the environment (e.g., pydeephaven).
+    # To prevent 'uv' from upgrading or downgrading the existing 'grpcio', potentially
+    # breaking other parts of the system, we explicitly tell 'uv' to use the currently
+    # installed version of 'grpcio'.
+    #
+    # The 'uv pip install --override' command expects a file path as its argument,
+    # where the file contains the package==version specifiers.
+    # Instead of creating, writing to, and then deleting a temporary file,
+    # we use Bash's process substitution feature: <(echo "grpcio==${current_grpcio_version}").
+    # Bash executes the 'echo' command and provides its output via a special file
+    # descriptor (e.g., /dev/fd/63) that 'uv' can read like a file. This avoids
+    # manual temporary file management and keeps the script cleaner, provided 'uv'
+    # correctly handles reading from such file descriptors.
+    local current_grpcio_version
+    local cmd_args=()
+    echo "Checking for existing grpcio installation..." >&2
+    current_grpcio_version=$( (uv pip show grpcio || true) 2>/dev/null | awk '/^Version:/ {print $2}' | tr -d '[:space:]' )
+    if [ -n "$current_grpcio_version" ]; then
+      echo "Found existing grpcio version: '$current_grpcio_version'. Will attempt to override grpcio to this version using process substitution." >&2
+      cmd_args+=(--override <(echo "grpcio==${current_grpcio_version}"))
+    else
+      echo "No existing grpcio installation found. grpcio will be installed based on wheel's dependencies if required." >&2
+    fi
+    # --- end grpcio override logic ---
+    cmd_args+=(--no-cache-dir --only-binary :all: "$whl_file")
+    echo "Installing wheel using uv: uv pip install [1m${cmd_args[@]}[0m" >&2
+    # shellcheck disable=SC2290 # process substitution is intentional
+    if ! uv pip install "${cmd_args[@]}"; then
+      die "Failed to install $whl_file using uv."
+    fi
+    echo "Successfully installed $whl_file" >&2
+  else
+    die "Downloaded artifact is not a .tgz: $artifact_file"
+  fi
+  echo "Install complete." >&2
+}
+
 # --- Main Script Logic ---
 
-# Parse global options like --rc first
-# Initialize _RC_VERSION_FROM_CLI in case it's referenced later, though its primary use is now localized.
-_RC_VERSION_FROM_CLI=""
-
-# Check for --rc option as the first argument.
-# Use ${1:-} to be safe if $1 is not set (e.g. script called with no arguments at all).
-if [ "${1:-}" == "--rc" ]; then
-  if [[ -z "${2:-}" || "${2:0:1}" == "-" ]]; then # Check if $2 (value for --rc) is empty or another option.
-    echo "ERROR: --rc option requires a non-option argument (the RC version)." >&2
-    usage
-  fi
-  _RC_VERSION_FROM_CLI="$2"
-  GCS_BUCKET_PATH="${_GCS_JENKINS_BASE_PATH}/rc/${_RC_VERSION_FROM_CLI}"
-  echo "INFO: Targeting RC version: ${_RC_VERSION_FROM_CLI}. GCS Path: ${GCS_BUCKET_PATH}" >&2
-  shift 2 # Consume --rc and its value.
-fi
-# If --rc was not used, GCS_BUCKET_PATH retains its default value set earlier in the script.
-
-# If no command is provided (i.e., $# is 0 after potentially shifting for --rc), show usage.
-if [ "$#" -eq 0 ]; then
-  usage # The usage function also exits.
-fi
-
-COMMAND="${1:-$DEFAULT_COMMAND}"
-shift
+if [ $# -lt 1 ]; then usage; fi
+COMMAND="$1"; shift
 
 case "$COMMAND" in
+  list-release-channels)
+    list_release_channels
+    ;;
   list-enterprise-versions)
-    fn_list_enterprise_versions | sed 's/^/  /' # Add indentation for direct output
+    parse_args "$@"
+    list_enterprise_versions_for_channel "$channel"
     ;;
   list-point-releases)
-    fn_list_point_releases "${1:-}" | sed 's/^/  /' # Functions now handle missing EV and messaging
+    parse_args "$@"
+    list_point_releases_for_channel_and_ev "$channel" "$ev"
     ;;
   list-community-versions)
-    fn_list_community_versions "${1:-}" "${2:-}" | sed 's/^/  /' # Function now handles missing EV/PR and messaging
+    parse_args "$@"
+    list_community_versions_for_channel_ev_pr "$channel" "$ev" "$pr"
+    ;;
+  resolve-install-versions)
+    parse_args "$@"
+    resolve_install_versions "$channel" "$ev" "$pr" "$cv"
     ;;
   install)
-    INSTALL_EV=""
-    INSTALL_PR=""
-    INSTALL_CV=""
-    # Parse options for the install command (--ev, --pr, --cv)
-    while [ $# -gt 0 ]; do
-      local current_opt="$1"
-      case "$current_opt" in
-        --ev)
-          if [[ -z "${2:-}" || "${2:0:2}" == "--" ]]; then
-            echo "ERROR: --ev option requires a value (got: '${2:-}')." >&2; usage
-          fi
-          INSTALL_EV="$2"; shift 2 ;;
-        --pr)
-          if [[ -z "${2:-}" || "${2:0:2}" == "--" ]]; then
-            echo "ERROR: --pr option requires a value (got: '${2:-}')." >&2; usage
-          fi
-          INSTALL_PR="$2"; shift 2 ;;
-        --cv)
-          if [[ -z "${2:-}" || "${2:0:2}" == "--" ]]; then
-            echo "ERROR: --cv option requires a value (got: '${2:-}')." >&2; usage
-          fi
-          INSTALL_CV="$2"; shift 2 ;;
-        *)
-          echo "ERROR: Unknown option for install: $current_opt" >&2; usage ;;
-      esac
-    done
-    fn_install_wheel "$INSTALL_EV" "$INSTALL_PR" "$INSTALL_CV"
+    parse_args "$@"
+    set -- $(resolve_install_versions "$channel" "$ev" "$pr" "$cv")
+    channel="$1"; ev="$2"; pr="$3"; cv="$4"
+    install_coreplus_client "$channel" "$ev" "$pr" "$cv"
     ;;
-  list-latest-versions)
-    fn_list_latest_versions
-    ;;
-  list-rc-versions)
-    fn_list_rc_versions | sed 's/^/  /'
+  uninstall)
+    echo "Uninstalling deephaven-coreplus-client from the current environment..." >&2
+    uv pip uninstall -y deephaven-coreplus-client || die "Failed to uninstall deephaven-coreplus-client"
+    echo "deephaven-coreplus-client has been uninstalled." >&2
     ;;
   *)
-    echo "ERROR: Unknown command: $COMMAND" >&2
     usage
     ;;
 esac
