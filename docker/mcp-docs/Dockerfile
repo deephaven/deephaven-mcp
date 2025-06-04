@@ -51,5 +51,8 @@ RUN uv venv && uv pip install ".[dev]"
 # Expose the default port used by the docs MCP server (8000)
 EXPOSE 8000
 
+# Always bind the docs server to all interfaces by default
+ENV MCP_DOCS_HOST=0.0.0.0
+
 # Run the docs MCP server using the script entrypoint (dh-mcp-docs) defined in pyproject.toml
 CMD ["uv", "run", "dh-mcp-docs", "--transport", "sse"]
