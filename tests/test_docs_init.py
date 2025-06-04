@@ -141,7 +141,7 @@ def test_import_docs_init():
 
 
 def test_run_server_host_env(monkeypatch):
-    """Test that run_server uses a server instance bound to 0.0.0.0 regardless of env vars."""
+    """Test that run_server uses the MCP_DOCS_HOST env var to bind the server to the specified host (e.g., 0.0.0.0)."""
     monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
     monkeypatch.setenv("MCP_DOCS_HOST", "0.0.0.0")
     sys.modules.pop("deephaven_mcp.docs.__init__", None)
