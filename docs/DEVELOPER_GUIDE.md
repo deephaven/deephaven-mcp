@@ -1163,11 +1163,16 @@ deephaven-mcp/
 │   ├── mcp_community_test_client.py
 │   ├── mcp_docs_test_client.py
 │   └── mcp_docs_stress_sse.py
-├── docker/
-│   └── mcp-docs/
-│       ├── Dockerfile            # Dockerfile for the MCP Docs server
-│       ├── docker-compose.yml    # Docker Compose config for the MCP Docs server
-│       └── README.md             # Docker usage notes for the MCP Docs server
+├── ops/
+│   ├── docker/
+│   │   └── mcp-docs/
+│   │       ├── Dockerfile            # Dockerfile for the MCP Docs server
+│   │       ├── docker-compose.yml    # Docker Compose config for the MCP Docs server
+│   │       └── README.md             # Docker usage notes for the MCP Docs server
+│   └── terraform/
+│       ├── backend-bucket/           # Terraform configs for GCS backend state
+│       ├── docker-repo/              # Terraform configs for Docker Artifact Registry
+│       └── mcp-docs/                 # Terraform configs for MCP Docs infra (Cloud Run, DNS, etc.)
 ├── docs/                         # Documentation
 │   └── DEVELOPER_GUIDE.md        # This developer & contributor guide
 ├── pyproject.toml                # Package metadata and dependencies

@@ -1,6 +1,6 @@
 # Docker Assets Directory
 
-This directory contains all Docker-related assets for the Deephaven MCP project. Each service with Docker support has its own subdirectory for clarity and maintainability.
+This directory contains all Docker-related assets for the Deephaven MCP project. Each service with Docker support has its own subdirectory under `ops/docker/` for clarity and maintainability.
 
 ## Structure & Conventions
 
@@ -12,7 +12,7 @@ This directory contains all Docker-related assets for the Deephaven MCP project.
 Example:
 
 ```
-/docker/
+/ops/docker/
   mcp-docs/
     Dockerfile
     docker-compose.yml
@@ -24,9 +24,9 @@ Example:
 ```
 
 ## MCP Docs Server Example
-See [`docker/mcp-docs/README.md`](mcp-docs/README.md) for details on building and running the MCP Docs server container.
+See [`mcp-docs/README.md`](mcp-docs/README.md) for details on building and running the MCP Docs server container.
 
 ## Adding a New Service
-1. Create a new subdirectory under `/docker/` (e.g., `/docker/my-service/`).
+1. Create a new subdirectory under `/ops/docker/` (e.g., `/ops/docker/my-service/`).
 2. Add your `Dockerfile`, optional `docker-compose.yml`, and documentation.
 3. Update CI/CD workflows as needed to reference your new Docker assets.

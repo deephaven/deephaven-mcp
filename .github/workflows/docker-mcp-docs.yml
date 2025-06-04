@@ -2,7 +2,7 @@ name: Build and Publish MCP Docs Docker Image
 
 # ============================================================================
 # This workflow builds and publishes the MCP Docs Docker image to Google Artifact Registry,
-# and redeploys the service using Terraform via admin/run_terraform.sh.
+# and redeploys the service using Terraform via ops/run_terraform.sh.
 #
 # Deephaven MCP Docs: Docker Build & Deploy Workflow
 #
@@ -11,15 +11,15 @@ name: Build and Publish MCP Docs Docker Image
 # ---
 #
 # Directory Structure:
-# - Dockerfile and Compose file for the docs server: docker/mcp-docs/
-#     * [`docker/mcp-docs/Dockerfile`](../../docker/mcp-docs/Dockerfile)
-#     * [`docker/mcp-docs/docker-compose.yml`](../../docker/mcp-docs/docker-compose.yml)
-# - Terraform and supporting scripts: admin/ (e.g., admin/run_terraform.sh, admin/terraform/)
+# - Dockerfile and Compose file for the docs server: ops/docker/mcp-docs/
+#     * [`ops/docker/mcp-docs/Dockerfile`](../../ops/docker/mcp-docs/Dockerfile)
+#     * [`ops/docker/mcp-docs/docker-compose.yml`](../../ops/docker/mcp-docs/docker-compose.yml)
+# - Terraform and supporting scripts: ops/ (e.g., ops/run_terraform.sh, ops/terraform/)
 # - .env is expected at the project root for local runs; in CI/CD, INKEEP_API_KEY is set via a GitHub secret.
 #
 # Build Context:
 # - The Docker build context is the repo root (.), so all code/assets are accessible to the Dockerfile.
-# - The workflow uses docker/mcp-docs/Dockerfile for building the image.
+# - The workflow uses ops/docker/mcp-docs/Dockerfile for building the image.
 #
 # Service Account & Secrets Requirements:
 # - A Google Cloud service account with the following roles (principle of least privilege):
@@ -56,7 +56,7 @@ name: Build and Publish MCP Docs Docker Image
 # - Remove unused keys in the Google Cloud Console.
 #
 # References:
-# - Terraform module: admin/terraform/service-account/README.md
+# - Terraform module: ops/terraform/service-account/README.md
 # - GCP IAM docs: https://cloud.google.com/iam/docs/creating-managing-service-accounts
 # - GitHub Actions secrets: https://docs.github.com/en/actions/security-guides/encrypted-secrets
 #
@@ -113,11 +113,9 @@ jobs:
         id: set_image_tag
         run: |
           if [ "${{ github.ref }}" == "refs/heads/main" ]; then
-            echo "IMAGE_TAG=prod"
-            echo "IMAGE_TAG=prod" >> $GITHUB_ENV
+            echo "tag=prod" >> $GITHUB_OUTPUT
           else
-            echo "IMAGE_TAG=dev"
-            echo "IMAGE_TAG=dev" >> $GITHUB_ENV
+            echo "tag=dev" >> $GITHUB_OUTPUT
           fi
 
       # Build and push the Docker image to Artifact Registry
@@ -126,9 +124,9 @@ jobs:
         uses: docker/build-push-action@v2
         with:
           context: .
-          file: docker/mcp-docs/Dockerfile
+          file: ops/docker/mcp-docs/Dockerfile
           push: true
-          tags: ${{ env.DOCKER_REPO }}/mcp-docs:${{ env.IMAGE_TAG }}
+          tags: ${{ env.DOCKER_REPO }}/mcp-docs:${{ steps.set_image_tag.outputs.tag }}
 
   # ---------------------------------------------------------------------------
   # Redeploy job: triggers after image build/push, runs Terraform deployment
@@ -148,11 +146,9 @@ jobs:
         id: set_workspace
         run: |
           if [ "${{ github.ref }}" == "refs/heads/main" ]; then
-            echo "WORKSPACE=prod"
-            echo "WORKSPACE=prod" >> $GITHUB_ENV
+            echo "ws=prod" >> $GITHUB_OUTPUT
           else
-            echo "WORKSPACE=dev"
-            echo "WORKSPACE=dev" >> $GITHUB_ENV
+            echo "ws=dev" >> $GITHUB_OUTPUT
           fi
 
       # Authenticate to Google Cloud for deployment permissions
@@ -173,4 +169,4 @@ jobs:
 
       - name: Deploy to Cloud Run
         run: |
-          ./admin/run_terraform.sh ${{ env.WORKSPACE }} redeploy-image
+          ./ops/run_terraform.sh ${{ steps.set_workspace.outputs.ws }} redeploy-image

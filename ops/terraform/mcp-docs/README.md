@@ -47,8 +47,8 @@ INKEEP_API_KEY=your-inkeep-api-key-here
 In CI/CD (GitHub Actions), the key is injected automatically from repository secrets.
 
 ## Directory Structure
-- `admin/terraform/mcp-docs/` - This directory (Terraform configs for MCP Docs)
-- `admin/run_terraform.sh` - Helper script for all Terraform operations
+- `ops/terraform/mcp-docs/` - This directory (Terraform configs for MCP Docs)
+- `ops/run_terraform.sh` - Helper script for all Terraform operations
 - `.env` - Secrets file (project root, **never commit to git**)
 
 ## References

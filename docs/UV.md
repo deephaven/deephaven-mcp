@@ -287,7 +287,6 @@ A: Yes! See the example above.
 ## Further Reading
 
 - See the [Developer & Contributor Guide](DEVELOPER_GUIDE.md) for advanced workflows, integration, and troubleshooting.
-- For Docker usage, see the `docker/` directory and related documentation.
 - For more on MCP Inspector and integration methods, see the Developer Guide.
 - [uv documentation](https://github.com/astral-sh/uv)
 - [python-dotenv](https://github.com/theskumar/python-dotenv)
