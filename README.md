@@ -81,12 +81,24 @@ Choose one of the following Python environment and package management tools:
 
 #### Option A: Using `uv` (Fast, Recommended)
 
-If you have [`uv`](docs/UV.md) installed (or install it via `pip install uv`), run:
+If you have [`uv`](docs/UV.md) installed (or install it via `pip install uv`):
 
-```sh
-uv pip install deephaven-mcp
-```
-This command installs `deephaven-mcp` and its dependencies. [`uv`](docs/UV.md) may create or use a [virtual environment](https://docs.python.org/3/library/venv.html) (typically `.venv` in your current directory if `UV_AUTO_CREATE_VENV` is not `false`, or a globally managed one). If a virtual environment is used, remember to activate it (e.g., `source .venv/bin/activate` on macOS/Linux or `.venv\Scripts\activate` on Windows) for manual command-line use of `dh-mcp-community` or `dh-mcp-docs`, or if your LLM tool requires an active environment.
+1.  **Create and activate a virtual environment with your desired Python version:**
+    [uv](docs/UV.md) works best when operating within a virtual environment. To create one (e.g., named `.venv`) using a specific Python interpreter (e.g., Python 3.9), run:
+    ```sh
+    uv venv .venv -p 3.9 
+    ```
+    Replace `3.9` with your target Python version (e.g., `3.10`, `3.11`) or the full path to a Python executable.
+    Then, activate it:
+    *   On macOS/Linux: `source .venv/bin/activate`
+    *   On Windows (PowerShell): `.venv\Scripts\Activate.ps1`
+    *   On Windows (CMD): `.venv\Scripts\activate.bat`
+
+2.  **Install `deephaven-mcp`:**
+    ```sh
+    uv pip install deephaven-mcp
+    ```
+This command installs `deephaven-mcp` and its dependencies into the active virtual environment. If you skipped the explicit virtual environment creation step above, [`uv`](docs/UV.md) might still create or use one automatically (typically `.venv` in your current directory if `UV_AUTO_CREATE_VENV` is not `false`, or a globally managed one). In any case where a virtual environment is used (either explicitly created or automatically by `uv`), ensure it remains active for manual command-line use of `dh-mcp-community` or `dh-mcp-docs`, or if your LLM tool requires an active environment.
 
 #### Option B: Using Standard `pip` and `venv`
 

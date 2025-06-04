@@ -28,12 +28,15 @@ __all__ = ["mcp_server", "run_server"]
 _LOGGER = logging.getLogger(__name__)
 
 
-def run_server(transport: Literal["stdio", "sse", "streamable-http"] = "stdio") -> None:
+def run_server(
+    transport: Literal["stdio", "sse", "streamable-http"],
+) -> None:
     """
     Start the MCP server with the specified transport.
 
     Args:
-        transport (str, optional): The transport type ('stdio' or 'sse' or 'streamable-http'). Defaults to 'stdio'.
+        transport (str, optional): The transport type ('stdio', 'sse', or 'streamable-http')
+
     """
     # Set stream based on transport
     # stdio MCP servers log to stderr so that they don't pollute the communication channel
@@ -64,7 +67,7 @@ def main() -> None:
     Parses CLI arguments using argparse and starts the MCP server with the specified transport.
 
     Arguments:
-        -t, --transport: Transport type for the MCP server ('stdio', 'sse', or 'streamable-http'). Default: 'stdio'.
+        -t, --transport: Transport type for the MCP server ('stdio', 'sse', or 'streamable-http'). Default: 'sse'.
     """
     import argparse
 
@@ -73,7 +76,7 @@ def main() -> None:
         "-t",
         "--transport",
         choices=["stdio", "sse", "streamable-http"],
-        default="stdio",
+        default="sse",
         help="Transport type for the MCP server (stdio, sse, or streamable-http). Default: stdio",
     )
     args = parser.parse_args()

@@ -11,6 +11,7 @@ Key Features:
 
 Environment Variables:
     INKEEP_API_KEY: The API key for authenticating with the Inkeep-powered LLM API. Must be set in the environment.
+    MCP_DOCS_HOST: The host to bind the FastMCP server to. Defaults to 127.0.0.1 (localhost). Set to 0.0.0.0 for external access.
 
 Server:
     - mcp_server (FastMCP): The MCP server instance exposing all registered tools.
@@ -58,11 +59,18 @@ OpenAIClient: Configured for Inkeep-powered Deephaven documentation Q&A.
 This client is injected into tools for agentic and programmatic use. It should not be instantiated directly by users.
 """
 
-mcp_server = FastMCP("deephaven-mcp-docs")
+mcp_docs_host = os.environ.get("MCP_DOCS_HOST", "127.0.0.1")
+"""
+str: The host to bind the FastMCP server to. Defaults to 127.0.0.1 (localhost).
+Set MCP_DOCS_HOST to '0.0.0.0' for external access, or another interface as needed.
+"""
+
+mcp_server = FastMCP("deephaven-mcp-docs", host=mcp_docs_host)
 """
 FastMCP: The server instance for the Deephaven documentation tools.
 - All tools decorated with @mcp_server.tool are registered here and discoverable by agentic frameworks.
 - The server is intended for use in MCP-compatible orchestration environments.
+- Host binding is controlled by the MCP_DOCS_HOST environment variable (default: 127.0.0.1).
 """
 
 

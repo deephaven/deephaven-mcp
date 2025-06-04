@@ -32,7 +32,7 @@ dependencies = [
     "mcp[cli]>=1.9.0",          # CLI and fastmcp server
     "mcp-proxy",                # SSE/Streamable-HTTP proxy support
     # Deephaven integration
-    "pydeephaven>=0.39.1",      # Deephaven Python API
+    "pydeephaven>=0.39",      # Deephaven Python API
     # Docs/LLM and web server dependencies
     "fastapi>=0.100.0",         # FastAPI web framework for Docs server
     "uvicorn[standard]>=0.23.0",# ASGI server for FastAPI
@@ -64,13 +64,17 @@ dev = [
 
     # Development and CI
     "pre-commit>=3.4.0",   # Git hooks management
-    "deephaven-server>=0.38.0", # Deephaven server for integration tests
+    "deephaven-server>=0.38", # Deephaven server for integration tests
 
     # Testing frameworks and tools
     "pytest>=8.0.0",           # Main test framework
     "pytest-asyncio>=0.23.0",  # Async test support for pytest
     "pytest-cov>=4.1.0",       # Code coverage reporting for pytest
     "httpx[cli]>=0.24.0"       # HTTP client for integration and stress tests
+]
+coreplus = [
+    # TODO: get deephaven-coreplus-client on PyPI
+    # "deephaven-coreplus-client"  # Not on PyPI; installed via the dev_manage_coreplus_client.sh script.
 ]
 
 [project.urls]
@@ -118,7 +122,7 @@ profile = "black"  # Use black's style for import sorting
 # Pytest configuration for testing
 [tool.pytest.ini_options]
 testpaths = ["tests"]  # Directory containing test files
-addopts = "--cov=deephaven_mcp --cov-report=term-missing"  # Enable code coverage reporting
+addopts = "-W error --cov=deephaven_mcp --cov-report=term --cov-report=xml"
 python_files = ["test_*.py"]  # Test file naming pattern
 python_classes = ["Test"]  # Test class naming pattern
 python_functions = ["test_"]  # Test function naming pattern
