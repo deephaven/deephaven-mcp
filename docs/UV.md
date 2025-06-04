@@ -2,7 +2,7 @@
 
 [`uv`](https://github.com/astral-sh/uv) is a fast Python package manager and workflow tool. This project uses `uv` for installing dependencies, running scripts, and managing virtual environments in a reproducible way.
 
-> **Note:** Using `uv` is recommended for consistency, but it is not strictly required. You could use `pip` and standard Python tools instead; however, only `uv`-based workflows are documented here.
+> **Note:** Using [`uv`](https://github.com/astral-sh/uv) is recommended for consistency, but it is not strictly required. You could use `pip` and standard Python tools instead; however, only `uv`-based workflows are documented here.
 
 ---
 
@@ -77,7 +77,7 @@ Once [`uv`](https://github.com/astral-sh/uv) is installed, it's highly recommend
     *   On Windows (PowerShell): `.venv\Scripts\Activate.ps1`
     *   On Windows (CMD): `.venv\Scripts\activate.bat`
 
-After activating, any `uv` commands (like `uv pip install ...` or `uv run ...`) will operate within this environment.
+After activating, any [`uv`](https://github.com/astral-sh/uv) commands (like `uv pip install ...` or `uv run ...`) will operate within this environment.
 
 ---
 
