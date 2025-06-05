@@ -218,7 +218,7 @@ async def describe_workers(context: Context) -> dict:
     try:
         config_manager = context.request_context.lifespan_context["config_manager"]
         session_manager = context.request_context.lifespan_context["session_manager"]
-        names = await config_manager.get_worker_names()
+        names = await config_manager.get_community_session_names()
         results = []
         for name in names:
             try:
@@ -233,7 +233,7 @@ async def describe_workers(context: Context) -> dict:
 
             # Get programming_language from worker config
             try:
-                worker_cfg = await config_manager.get_worker_config(name)
+                worker_cfg = await config_manager.get_community_session_config(name)
                 programming_language = str(
                     worker_cfg.get("session_type", "python")
                 ).lower()

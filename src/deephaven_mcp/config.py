@@ -1,13 +1,13 @@
 """
 Async Deephaven MCP configuration management.
 
-This module provides async functions to load, validate, and manage configuration for Deephaven workers from a JSON file.
+This module provides async functions to load, validate, and manage configuration for Deephaven MCP from a JSON file. 
 Configuration is loaded from a file specified by the DH_MCP_CONFIG_FILE environment variable using native async file I/O (aiofiles).
 
 Features:
     - Coroutine-safe, cached loading of configuration using asyncio.Lock.
     - Strict validation of configuration structure and values.
-    - Helper functions to access worker-specific config, and worker names.
+    - Helper functions to access community session-specific config, and community session names.
     - Logging of configuration loading, environment variable value, and validation steps.
     - Uses aiofiles for non-blocking, native async config file reads.
 
@@ -15,28 +15,28 @@ Configuration Schema:
 ---------------------
 The configuration file must be a JSON object with exactly two top-level keys:
 
-  - workers (dict, required):
-      A dictionary mapping worker names (str) to worker configuration dicts.
-      Each worker configuration dict may contain any of the following fields (all are optional):
+  - community_sessions (dict, required):
+      A dictionary mapping community session names (str) to client session configuration dicts. Each configuration defines how to connect to a specific community worker.
+      Each community session configuration dict may contain any of the following fields (all are optional):
 
-        - host (str): Hostname or IP address of the worker.
-        - port (int): Port number for the worker connection.
+        - host (str): Hostname or IP address of the community worker.
+        - port (int): Port number for the community worker connection.
         - auth_type (str): Authentication type. Allowed values include:
             * "token": Use a bearer token for authentication.
             * "basic": Use HTTP Basic authentication.
             * "anonymous": No authentication required.
         - auth_token (str): The authentication token or password. May be empty if auth_type is "anonymous".
-        - never_timeout (bool): If True, sessions to this worker never time out.
-        - session_type (str): Session management mode. Allowed values include:
-            * "single": Only one session is maintained per worker.
-            * "multi": Multiple sessions may be created per worker.
+        - never_timeout (bool): If True, sessions to this community worker never time out.
+        - session_type (str): Programming language for the session. Common values include:
+            * "python": For Python-based Deephaven instances.
+            * "groovy": For Groovy-based Deephaven instances.
         - use_tls (bool): Whether to use TLS/SSL for the connection.
         - tls_root_certs (str): Path to a PEM file containing root certificates to trust for TLS.
         - client_cert_chain (str): Path to a PEM file containing the client certificate chain for mutual TLS.
         - client_private_key (str): Path to a PEM file containing the client private key for mutual TLS.
 
       Notes:
-        - All fields are optional; if a field is omitted, the consuming code may use an internal default value for that field, or the feature may be disabled. There is no default or fallback worker—every worker must be explicitly configured and selected by name.
+        - All fields are optional; if a field is omitted, the consuming code may use an internal default value for that field, or the feature may be disabled. There is no default or fallback—every community session (connection to a worker) must be explicitly configured and selected by name.
         - All file paths should be absolute, or relative to the process working directory.
         - If use_tls is True and any of the optional TLS fields are provided, they must point to valid PEM files.
         - Sensitive fields (auth_token, client_private_key) are redacted from logs for security.
@@ -45,13 +45,13 @@ The configuration file must be a JSON object with exactly two top-level keys:
 Validation rules:
   - All required fields must be present and have the correct type.
   - All field values must be valid (see allowed values above).
-  - No unknown fields are permitted in worker configs.
+  - No unknown fields are permitted in configs.
   - If TLS fields are provided, referenced files must exist and be readable.
 
 Configuration JSON Specification:
 ---------------------------------
 - The configuration file must be a JSON object with one top-level key:
-    - "workers": a dictionary mapping worker names to worker configuration dicts
+    - "community_sessions": a dictionary mapping community session names to client session configuration dicts for connecting to community workers.
 
 Example Valid Configuration:
 ---------------------------
@@ -59,14 +59,14 @@ The configuration file should look like the following (see field explanations be
 
 ```json
 {
-    "workers": {
+    "community_sessions": {
         "local": {
             "host": "localhost",  // str: Hostname or IP address
             "port": 10000,        // int: Port number
             "auth_type": "token", // str: Authentication type ("token", "basic", "none")
             "auth_token": "your-token-here", // str: Authentication token
             "never_timeout": true, // bool: Whether sessions should never timeout
-            "session_type": "single", // str: "single" or "multi"
+            "session_type": "python", // str: Programming language ("python", "groovy", etc.)
             "use_tls": true,      // bool: Whether to use TLS/SSL
             "tls_root_certs": "/path/to/certs.pem", // str: Path to TLS root certificates
             "client_cert_chain": "/path/to/client-cert.pem", // str: Path to client certificate chain
@@ -78,7 +78,7 @@ The configuration file should look like the following (see field explanations be
             "auth_type": "basic",
             "auth_token": "basic-auth-token",
             "never_timeout": false,
-            "session_type": "multi",
+            "session_type": "groovy",
             "use_tls": true
         }
     },
@@ -90,7 +90,7 @@ Example Invalid Configurations:
 1. Invalid: Missing required top-level keys
 ```json
 {
-    "workers": {}
+    "community_sessions": {}
 }
 ```
 
@@ -98,7 +98,7 @@ Example Invalid Configurations:
 2. Invalid: Worker field with wrong type
 ```json
 {
-    "workers": {
+    "community_sessions": {
         "local": {
             "host": 12345,  // Should be a string, not an integer
             "port": "not-a-port"  // Should be an integer, not a string
@@ -115,18 +115,18 @@ Performance Considerations:
 
 Usage Patterns:
 ---------------
-- The configuration **must** include a 'workers' dictionary as a top-level key.
-- Loading a worker configuration:
-    >>> config = await get_worker_config('local')
-    >>> connection = connect(**config)
-- Listing available workers:
-    >>> workers = await get_worker_names()
-    >>> for worker in workers:
-    ...     print(f"Available worker: {worker}")
+- The configuration **must** include a 'community_sessions' dictionary as a top-level key. This dictionary holds configurations for client sessions connecting to community workers.
+- Loading a community session configuration:
+    >>> session_config = await get_community_session_config('local_session_name')  # Example session name
+    >>> connection = connect(**session_config)  # Assuming connect uses the session_config
+- Listing available configured community sessions:
+    >>> session_names = await get_community_session_names()
+    >>> for session_name in session_names:
+    ...     print(f"Available community session: {session_name}")
 
 Environment Variables:
 ---------------------
-- DH_MCP_CONFIG_FILE: Path to the Deephaven worker configuration JSON file.
+- DH_MCP_CONFIG_FILE: Path to the Deephaven MCP configuration JSON file.
 
 Security:
 ---------
@@ -153,19 +153,37 @@ from typing import Any, cast
 
 import aiofiles
 
+
+def redact_community_session_config(session_config: dict[str, Any]) -> dict[str, Any]:
+    """Redacts sensitive fields from a community session configuration dictionary.
+
+    Creates a shallow copy of the input dictionary and redacts 'auth_token'
+    if it exists.
+
+    Args:
+        session_config (dict[str, Any]): The community session configuration.
+
+    Returns:
+        dict[str, Any]: A new dictionary with sensitive fields redacted.
+    """
+    config_copy = session_config.copy()
+    if "auth_token" in config_copy:
+        config_copy["auth_token"] = "[REDACTED]"
+    return config_copy
+
 _LOGGER = logging.getLogger(__name__)
 
 CONFIG_ENV_VAR = "DH_MCP_CONFIG_FILE"
 """
-str: Name of the environment variable specifying the path to the Deephaven worker config file.
+str: Name of the environment variable specifying the path to the Deephaven MCP config file.
 """
 
 _REQUIRED_FIELDS: list[str] = []
 """
-list[str]: List of required fields for each worker configuration dictionary.
+list[str]: List of required fields for each community session configuration dictionary.
 """
 
-_ALLOWED_WORKER_FIELDS = {
+_ALLOWED_COMMUNITY_SESSION_FIELDS = {
     "host": str,
     "port": int,
     "auth_type": str,
@@ -178,22 +196,22 @@ _ALLOWED_WORKER_FIELDS = {
     "client_private_key": (str, type(None)),
 }
 """
-Dictionary of allowed worker configuration fields and their expected types.
+Dictionary of allowed community session configuration fields and their expected types.
 Type: dict[str, type | tuple[type, ...]]
 """
 
 
-class WorkerConfigurationError(Exception):
-    """Raised when a worker's configuration cannot be retrieved or is invalid."""
+class CommunitySessionConfigurationError(Exception):
+    """Raised when a community session's configuration cannot be retrieved or is invalid."""
 
     pass
 
 
 class ConfigManager:
     """
-    Async configuration manager for Deephaven MCP worker configuration.
+    Async configuration manager for Deephaven MCP configuration.
 
-    This class encapsulates all logic for loading, validating, and caching the configuration used by Deephaven MCP workers. The configuration must include a 'workers' dictionary as a required top-level key. All configuration operations, including retrieving worker-specific configurations, depend on this key being present and valid. All configuration access and mutation should go through an instance of this class (typically DEFAULT_CONFIG_MANAGER).
+    This class encapsulates all logic for loading, validating, and caching the configuration for Deephaven MCP.  
     """
 
     def __init__(self) -> None:
@@ -235,7 +253,7 @@ class ConfigManager:
             None
 
         Example:
-            >>> await config.DEFAULT_CONFIG_MANAGER.set_config_cache({'workers': {...}})
+            >>> await config.DEFAULT_CONFIG_MANAGER.set_config_cache({'community_sessions': {'example_session': {...}}})
         """
         async with self._lock:
             self._cache = self.validate_config(config)
@@ -257,7 +275,7 @@ class ConfigManager:
             >>> import os
             >>> os.environ['DH_MCP_CONFIG_FILE'] = '/path/to/config.json'
             >>> config_dict = await config.DEFAULT_CONFIG_MANAGER.get_config()
-            >>> config_dict['workers']['local']['host']
+            >>> config_dict['community_sessions']['local_session_name']['host']
             'localhost'
         """
         _LOGGER.debug("Loading Deephaven worker configuration...")
@@ -288,58 +306,58 @@ class ConfigManager:
             validated = self.validate_config(data)
             self._cache = validated
             _LOGGER.info(
-                f"Deephaven worker configuration loaded and validated successfully in {perf_counter() - start_time:.3f} seconds"
+                f"Deephaven community session configuration loaded and validated successfully in {perf_counter() - start_time:.3f} seconds"
             )
             return validated
 
-    async def get_worker_config(self, worker_name: str) -> dict[str, Any]:
+    async def get_community_session_config(self, session_name: str) -> dict[str, Any]:
         """
-        Retrieve the configuration dictionary for a specific worker.
+        Retrieves the configuration for a specific community session by its name.
 
         Args:
-            worker_name (str): The name of the worker to retrieve. This argument is required.
+            session_name (str): The name of the community session to retrieve. This argument is required.
 
         Returns:
-            Dict[str, Any]: The configuration dictionary for the specified worker.
+            dict[str, Any]: The configuration dictionary for the specified community session.
 
         Raises:
-            WorkerConfigurationError: If the specified worker is not found in the configuration.
+            CommunitySessionConfigurationError: If the community session is not found or config is invalid.
 
         Example:
-            >>> worker_cfg = await config.DEFAULT_CONFIG_MANAGER.get_worker_config('local')
+            >>> local_session_config = await config.DEFAULT_CONFIG_MANAGER.get_community_session_config('local_session_name')
         """
-        _LOGGER.debug(f"Getting worker config for worker: {worker_name!r}")
+        _LOGGER.debug(f"Getting community session config for session: {session_name!r}")
         config = await self.get_config()
-        workers = config.get("workers", {})
+        community_sessions_map = config.get("community_sessions", {})
 
-        if worker_name not in workers:
-            _LOGGER.error(f"Worker {worker_name} not found in configuration")
-            raise WorkerConfigurationError(
-                f"Worker {worker_name} not found in configuration"
+        if session_name not in community_sessions_map:
+            _LOGGER.error(f"Community session {session_name} not found in configuration")
+            raise CommunitySessionConfigurationError(
+                f"Community session {session_name} not found in configuration"
             )
 
-        _LOGGER.debug(f"Returning config for worker: {worker_name}")
-        return cast(dict[str, Any], workers[worker_name])
+        _LOGGER.debug(f"Retrieved configuration for community session '{session_name}': {redact_community_session_config(community_sessions_map[session_name])}")
+        return cast(dict[str, Any], community_sessions_map[session_name])
 
-    async def get_worker_names(self) -> list[str]:
+    async def get_community_session_names(self) -> list[str]:
         """
-        Get a list of all configured Deephaven worker names from the loaded configuration.
+        Retrieves a list of all configured community session names.
 
         Returns:
-            list[str]: List of all worker names defined in the configuration.
+            list[str]: A list of community session names.
 
         Example:
-            >>> workers = await config.DEFAULT_CONFIG_MANAGER.get_worker_names()
-            >>> for worker in workers:
-            ...     print(f"Available worker: {worker}")
+            >>> session_names = await config.DEFAULT_CONFIG_MANAGER.get_community_session_names()
+            >>> for session_name in session_names:
+            ...     print(f"Available community session: {session_name}")
         """
-        _LOGGER.debug("Getting list of all worker names")
+        _LOGGER.debug("Getting list of all community session names")
         config = await self.get_config()
-        workers = config.get("workers", {})
-        worker_names = list(workers.keys())
+        community_sessions_map = config.get("community_sessions", {})
+        session_names = list(community_sessions_map.keys())
 
-        _LOGGER.debug(f"Found {len(worker_names)} worker(s): {worker_names}")
-        return worker_names
+        _LOGGER.debug(f"Found {len(session_names)} community session(s): {session_names}")
+        return session_names
 
     @staticmethod
     def validate_config(config: dict[str, Any]) -> dict[str, Any]:
@@ -347,7 +365,7 @@ class ConfigManager:
         Validate the Deephaven worker configuration dictionary.
 
         Args:
-            config (Dict[str, Any]): The configuration dictionary to validate. Must include a 'workers' dictionary as a top-level key.
+            config (Dict[str, Any]): The configuration dictionary to validate. Must include a 'community_sessions' dictionary as a top-level key.
 
         Returns:
             Dict[str, Any]: The validated configuration dictionary. This may be a normalized or cleaned version of the input.
@@ -356,89 +374,89 @@ class ConfigManager:
             ValueError: If the config is missing required keys, has unknown keys, has invalid field types, or is otherwise invalid.
 
         Example:
-            >>> valid = ConfigManager.validate_config({'workers': {'local': {...}}})
+            >>> valid = ConfigManager.validate_config({'community_sessions': {'local_session': {...}}})
         """
-        required_top_level = {"workers"}
+        required_top_level = {"community_sessions"}
         allowed_top_level = required_top_level
         top_level_keys = set(config.keys())
 
         unknown_keys = top_level_keys - allowed_top_level
         if unknown_keys:
             _LOGGER.error(
-                f"Unknown top-level keys in Deephaven worker config: {unknown_keys}"
+                f"Unknown top-level keys in Deephaven community session config: {unknown_keys}"
             )
             raise ValueError(
-                f"Unknown top-level keys in Deephaven worker config: {unknown_keys}"
+                f"Unknown top-level keys in Deephaven community session config: {unknown_keys}"
             )
 
         missing_keys = required_top_level - top_level_keys
         if missing_keys:
             _LOGGER.error(
-                f"Missing required top-level keys in Deephaven worker config: {missing_keys}"
+                f"Missing required top-level keys in Deephaven community session config: {missing_keys}"
             )
             raise ValueError(
-                f"Missing required top-level keys in Deephaven worker config: {missing_keys}"
+                f"Missing required top-level keys in Deephaven community session config: {missing_keys}"
             )
 
-        workers = config["workers"]
-        if not isinstance(workers, dict):
+        community_sessions_map = config["community_sessions"]
+        if not isinstance(community_sessions_map, dict):
             raise ValueError(
-                "'workers' must be a dictionary in Deephaven worker config"
+                "'community_sessions' must be a dictionary in Deephaven community session config"
             )
-        if not workers:
-            _LOGGER.error("No workers defined in Deephaven worker config")
-            raise ValueError("No workers defined in Deephaven worker config")
+        if not community_sessions_map:
+            _LOGGER.error("No community sessions defined in Deephaven community session config")
+            raise ValueError("No community sessions defined in Deephaven community session config")
 
-        for worker_name, worker_config in workers.items():
-            ConfigManager._validate_worker_config(worker_name, worker_config)
+        for session_name, session_config in community_sessions_map.items():
+            ConfigManager._validate_community_session_config(session_name, session_config)
 
         return config
 
     @staticmethod
-    def _validate_worker_config(
-        worker_name: str, worker_config: dict[str, Any]
+    def _validate_community_session_config(
+        session_name: str, session_config: dict[str, Any]
     ) -> None:
         """
-        Validate the configuration dictionary for a single Deephaven worker.
+        Validate the configuration dictionary for a single Deephaven community session.
 
         Args:
-            worker_name (str): The name of the worker being validated.
-            worker_config (dict[str, Any]): The configuration dictionary for the worker.
+            session_name (str): The name of the community session being validated.
+            session_config (dict[str, Any]): The configuration dictionary for the community session.
 
         Raises:
-            ValueError: If the worker config is not a dictionary, is missing required fields,
+            ValueError: If the community session config is not a dictionary, is missing required fields,
                 contains unknown fields, or contains fields with invalid types.
         """
-        if not isinstance(worker_config, dict):
-            raise ValueError(f"Worker config for {worker_name} must be a dictionary.")
+        if not isinstance(session_config, dict):
+            raise ValueError(f"Configuration for community session '{session_name}' must be a dictionary.")
 
         missing_fields = [
-            field for field in _REQUIRED_FIELDS if field not in worker_config
+            field for field in _REQUIRED_FIELDS if field not in session_config
         ]
         if missing_fields:
             _LOGGER.error(
-                f"Missing required fields in worker config for {worker_name}: {missing_fields}"
+                f"Missing required fields in community session config for {session_name}: {missing_fields}"
             )
             raise ValueError(
-                f"Missing required fields in worker config for {worker_name}: {missing_fields}"
+                f"Missing required fields in community session config for {session_name}: {missing_fields}"
             )
 
-        for field, value in worker_config.items():
-            if field not in _ALLOWED_WORKER_FIELDS:
+        for field_name, field_value in session_config.items():
+            if field_name not in _ALLOWED_COMMUNITY_SESSION_FIELDS:
                 _LOGGER.error(
-                    f"Unknown field '{field}' in worker config for {worker_name}"
+                    f"Unknown field '{field_name}' in community session config for {session_name}"
                 )
                 raise ValueError(
-                    f"Unknown field '{field}' in worker config for {worker_name}"
+                    f"Unknown field '{field_name}' in community session config for {session_name}"
                 )
 
-            allowed_types = _ALLOWED_WORKER_FIELDS[field]
+            allowed_types = _ALLOWED_COMMUNITY_SESSION_FIELDS[field_name]
             if not isinstance(allowed_types, tuple):
                 allowed_types = (allowed_types,)
-            if not isinstance(value, allowed_types):
+            if not isinstance(field_value, allowed_types):
                 _LOGGER.error(
-                    f"Field '{field}' in worker config for {worker_name} must be of type {allowed_types}"
+                    f"Field '{field_name}' in community session config for {session_name} must be of type {allowed_types}"
                 )
                 raise ValueError(
-                    f"Field '{field}' in worker config for {worker_name} must be of type {allowed_types}"
+                    f"Field '{field_name}' in community session config for {session_name} must be of type {allowed_types}"
                 )

@@ -27,9 +27,9 @@ from deephaven_mcp.community._sessions import (
 def mock_config_manager():
     # Create a MagicMock for ConfigManager, with async methods
     mock = MagicMock()
-    mock.get_worker_config = AsyncMock(return_value={"host": "localhost"})
+    mock.get_community_session_config = AsyncMock(return_value={"host": "localhost"})
     mock.get_config = AsyncMock(
-        return_value={"workers": {"local": {"host": "localhost"}}}
+        return_value={"community_sessions": {"local": {"host": "localhost"}}}
     )
     return mock
 

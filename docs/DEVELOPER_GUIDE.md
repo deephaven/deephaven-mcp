@@ -136,18 +136,18 @@ Users or API clients send natural language questions or documentation queries ov
 ### Community Server Quick Start
 
 1. **Set up worker configuration:**
-   Create a JSON configuration file for your Deephaven workers:
+   Create a JSON configuration file for your Deephaven MCP:
    ```json
    {
-     "workers": {
-       "local_worker": {
+     "community_sessions": {
+       "local_session": {
          "host": "localhost",
          "port": 10000
        }
      }
    }
    ```
-   Save this as `deephaven_workers.json` in your project directory.
+   Save this as `deephaven_mcp.json` in your project directory.
 
 2. **Start a test Deephaven server in one terminal:**
    ```bash
@@ -158,7 +158,7 @@ Users or API clients send natural language questions or documentation queries ov
 
 3. **Run the Community Server:**
    ```sh
-   DH_MCP_CONFIG_FILE=deephaven_workers.json uv run dh-mcp-community --transport sse
+   DH_MCP_CONFIG_FILE=deephaven_mcp.json uv run dh-mcp-community --transport sse
    ```
 
 4. **Test with the MCP Inspector:**
@@ -224,20 +224,20 @@ Key architectural features include:
 > Set `DH_MCP_CONFIG_FILE` before running the MCP server or test client. Environment variables can also be loaded from `.env` files using [python-dotenv](https://github.com/theskumar/python-dotenv).
 
 ##### Worker Configuration File Specification (`DH_MCP_CONFIG_FILE`)
-The MCP Community server requires a JSON configuration file specified by the `DH_MCP_CONFIG_FILE` environment variable. This file describes the available Deephaven Community Core workers and must be a JSON object with a top-level `workers` key. The path should be absolute for reliability across different working directories.
+The Deephaven MCP server requires a JSON configuration file specified by the `DH_MCP_CONFIG_FILE` environment variable. This file describes the available Deephaven MCP session configurations and must be a JSON object with a top-level `community_sessions` key. The path should be absolute for reliability across different working directories.
 
 **Configuration Schema:**
 
 ```json
 {
-  "workers": {                  // Required top-level object mapping worker names to configs
+  "community_sessions": {                  // Required top-level object mapping session names to configs
     "worker_name": {          // Each worker has its own named configuration block
       "host": "localhost",    // String: Hostname or IP address of the worker
       "port": 10000,          // Integer: Port number for the worker connection
       "auth_type": "token",   // String: "token", "basic", or "anonymous"
       "auth_token": "...",    // String: Authentication token or password (if needed)
       "never_timeout": true,  // Boolean: If true, sessions to this worker never time out
-      "session_type": "multi", // String: "single" (one session) or "multi" (multiple sessions)
+      "session_type": "python", // String: Programming language for the session (e.g., "python", "groovy")
       "use_tls": true,        // Boolean: Whether to use TLS/SSL for the connection
       "tls_root_certs": "...", // String: Path to PEM file with root certificates
       "client_cert_chain": "...", // String: Path to PEM file with client cert chain
@@ -255,28 +255,28 @@ The MCP Community server requires a JSON configuration file specified by the `DH
 
 ```json
 {
-  "workers": {
-    "local": {
+  "community_sessions": {
+    "local_session": {
       "host": "localhost",
       "port": 10000,
       "auth_type": "anonymous"
     },
-    "prod": {
+    "prod_session": {
       "host": "deephaven-server.example.com",
       "port": 10000,
       "auth_type": "token",
       "auth_token": "your-token-here",
       "use_tls": true,
       "never_timeout": true,
-      "session_type": "single"
+      "session_type": "python"
     },
-    "secure_worker": {
+    "secure_session": {
       "host": "secure.deephaven.io",
       "port": 10002,
       "auth_type": "token",
       "auth_token": "your_bearer_token_here",
       "never_timeout": true,
-      "session_type": "multi",
+      "session_type": "groovy",
       "use_tls": true,
       "tls_root_certs": "/path/to/trusted_cas.pem",
       "client_cert_chain": "/path/to/client_cert_and_chain.pem",
@@ -288,7 +288,7 @@ The MCP Community server requires a JSON configuration file specified by the `DH
 
 **Fields:**
 The configuration file must be a JSON object with one top-level key:
-*   `workers` (object, required): A map where keys are unique worker names (strings) and values are worker configuration objects.
+*   `community_sessions` (object, required): A map where keys are unique session names (strings) and values are session configuration objects.
     *   Each worker configuration object can contain the following fields. All fields within an individual worker's configuration are optional from the perspective of the configuration parser. However, fields like `host` and `port` are practically necessary for a worker to function.
         *   `host` (string): Hostname or IP address of the Deephaven worker.
         *   `port` (integer): Port number for the Deephaven worker connection.
@@ -328,14 +328,14 @@ Follow these steps to start the Community Server:
 *   **SSE Transport (for web/Inspector):**
     ```sh
     # Default port (8000)
-    DH_MCP_CONFIG_FILE=/path/to/workers.json uv run dh-mcp-community --transport sse
+    DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json uv run dh-mcp-community --transport sse
     
     # Custom port (8001)
-    PORT=8001 DH_MCP_CONFIG_FILE=/path/to/workers.json uv run dh-mcp-community --transport sse
+    PORT=8001 DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json uv run dh-mcp-community --transport sse
     ```
 *   **stdio Transport (for direct/subprocess use):**
     ```sh
-    DH_MCP_CONFIG_FILE=/path/to/workers.json uv run dh-mcp-community --transport stdio
+    DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json uv run dh-mcp-community --transport stdio
     ```
 
 #### Using the Community Server
@@ -818,7 +818,7 @@ The [MCP Inspector](https://github.com/modelcontextprotocol/inspector) is a web-
 
 2. **Start the MCP Community server in SSE mode** (in another terminal):
    ```sh
-   DH_MCP_CONFIG_FILE=/path/to/deephaven_workers.json uv run dh-mcp-community --transport sse
+   DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json uv run dh-mcp-community --transport sse
    ```
 
 3. **Start the MCP Inspector** (in a third terminal):
@@ -872,7 +872,7 @@ Claude Desktop is very useful for debugging and interactively exploring MCP serv
              "dh-mcp-community"
            ],
            "env": {
-             "DH_MCP_CONFIG_FILE": "/path/to/deephaven_workers.json"
+             "DH_MCP_CONFIG_FILE": "/path/to/deephaven_mcp.json"
            }
          },
          "mcp-docs": {
@@ -909,7 +909,7 @@ For troubleshooting Claude Desktop MCP integration, log files are located at:
 
 1. Ensure the MCP Community Server is running in SSE mode:
    ```sh
-   DH_MCP_CONFIG_FILE=/path/to/workers.json uv run dh-mcp-community --transport sse
+   DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json uv run dh-mcp-community --transport sse
    ```
 
 2. Run `mcp-proxy` to connect to your running MCP server:
@@ -1017,7 +1017,7 @@ Both servers expose their tools through FastMCP, following the Model Context Pro
 
 3. **Run the MCP Community server** (in another terminal):
    ```sh
-   DH_MCP_CONFIG_FILE=/path/to/workers.json uv run dh-mcp-community --transport sse
+   DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json uv run dh-mcp-community --transport sse
    ```
 
 4. **Use the MCP Inspector or test client** to validate your changes.
@@ -1301,7 +1301,7 @@ The script will create multiple concurrent connections and send requests to the 
    - Fix: Verify the file path and permissions
 
 2. **Invalid JSON/Schema in Config:**
-   - Double-check your worker config file for syntax errors or unsupported fields
+   - Double-check your Deephaven MCP config file for syntax errors or unsupported fields
    - Use a JSON validator if unsure about the format
    - Common errors: missing commas, unquoted keys, trailing commas
 

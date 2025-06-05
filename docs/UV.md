@@ -36,7 +36,7 @@
     ```
 3. Run the Community Server:
     ```sh
-    DH_MCP_CONFIG_FILE=deephaven_workers.json uv run dh-mcp-community --transport sse
+    DH_MCP_CONFIG_FILE=deephaven_mcp.json uv run dh-mcp-community --transport sse
     ```
 4. Run tests:
     ```sh
@@ -101,7 +101,7 @@ This will install all dependencies to exactly match your lock file(s) for reprod
 **Community Server (SSE):**
 
 ```sh
-DH_MCP_CONFIG_FILE=deephaven_workers.json uv run dh-mcp-community --transport sse
+DH_MCP_CONFIG_FILE=deephaven_mcp.json uv run dh-mcp-community --transport sse
 ```
 
 **Docs Server (SSE):**
@@ -169,7 +169,7 @@ Create a `.env` file in your project root for local development:
 
 ```env
 # .env example
-DH_MCP_CONFIG_FILE=/absolute/path/to/deephaven_workers.json
+DH_MCP_CONFIG_FILE=/absolute/path/to/deephaven_mcp.json
 INKEEP_API_KEY=your-inkeep-api-key
 OPENAI_API_KEY=your-optional-openai-key
 PYTHONLOGLEVEL=DEBUG
