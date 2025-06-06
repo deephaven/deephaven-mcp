@@ -178,9 +178,10 @@ async def test_get_config_logs_enterprise_systems(monkeypatch, caplog):
         },
         "enterprise_systems": {
             "ent_prod": {
-                "connection_json_url": "https://prod.example.com/connection.json",
-                "auth_type": "api_key",
-                "api_key": "prod_api_key_value",
+                "connection_json_url": "https://enterprise.example.com/iris/connection.json",
+                "auth_type": "password",
+                "username": "prod_user",
+                "password": "prod_password_value",
             },
             "ent_staging": {
                 "connection_json_url": "https://staging.example.com/connection.json",
@@ -224,7 +225,7 @@ async def test_get_config_logs_enterprise_systems(monkeypatch, caplog):
     assert "Configured Enterprise Systems:" in log_text
     
     expected_ent_prod_details = valid_config_with_enterprise['enterprise_systems']['ent_prod'].copy()
-    expected_ent_prod_details['api_key'] = '[REDACTED]'
+    expected_ent_prod_details['password'] = '[REDACTED]'
     assert f"  System 'ent_prod': {expected_ent_prod_details}" in log_text
     
     expected_ent_staging_details = valid_config_with_enterprise['enterprise_systems']['ent_staging'].copy()
@@ -556,7 +557,7 @@ async def test_validate_enterprise_systems_config_logs_non_dict_map(monkeypatch,
     config_file_path = "/fake/path/enterprise_non_dict_map.json"
     monkeypatch.setenv(config.CONFIG_ENV_VAR, config_file_path)
     # 'enterprise_systems' is a list, not a dict
-    invalid_config_data = {"enterprise_systems": [{"name": "sys1", "api_key": "key1"}]}
+    invalid_config_data = {"enterprise_systems": [{"name": "sys1", "auth_type": "password", "username": "user1", "password": "key1"}]}
 
     mock_file_read_content = mock.AsyncMock(return_value=json.dumps(invalid_config_data).encode('utf-8'))
     mock_async_context_manager = mock.AsyncMock()
@@ -580,7 +581,7 @@ async def test_validate_enterprise_systems_config_logs_non_dict_map(monkeypatch,
 
     # Check the debug log from validate_enterprise_systems_config
     # It should log the string representation of the list as passed.
-    assert "Validating enterprise_systems configuration: [{'name': 'sys1', 'api_key': 'key1'}]" in caplog.text
+    assert "Validating enterprise_systems configuration: [{'name': 'sys1', 'auth_type': 'password', 'username': 'user1', 'password': 'key1'}]" in caplog.text
     assert specific_error_detail in caplog.text # From validate_enterprise_systems_config
     assert f"Configuration validation failed for {config_file_path} due to specific session/system error: {specific_error_detail}" in caplog.text # From get_config
 
@@ -605,7 +606,7 @@ async def test_validate_enterprise_systems_config_logs_non_dict_item_in_map(monk
     monkeypatch.setenv(config.CONFIG_ENV_VAR, config_file_path)
     invalid_config_data = {
         "enterprise_systems": {
-            "good_system": {"connection_json_url": "http://good", "auth_type": "api_key", "api_key": "secretkey"},
+            "good_system": {"connection_json_url": "http://good", "auth_type": "password", "username": "gooduser", "password": "secretkey"},
             "bad_system_item": "this is not a dict" # Malformed item
         }
     }
@@ -633,7 +634,7 @@ async def test_validate_enterprise_systems_config_logs_non_dict_item_in_map(monk
 
     # Check the debug log from validate_enterprise_systems_config
     # 'good_system' should be redacted, 'bad_system_item' should be as-is.
-    expected_log_map_str = "{'good_system': {'connection_json_url': 'http://good', 'auth_type': 'api_key', 'api_key': '[REDACTED]'}, 'bad_system_item': 'this is not a dict'}"
+    expected_log_map_str = "{'good_system': {'connection_json_url': 'http://good', 'auth_type': 'password', 'username': 'gooduser', 'password': '[REDACTED]'}, 'bad_system_item': 'this is not a dict'}"
     assert f"Validating enterprise_systems configuration: {expected_log_map_str}" in caplog.text
     assert specific_error_detail in caplog.text # From _validate_single_enterprise_system
     assert f"Configuration validation failed for {config_file_path} due to specific session/system error: {specific_error_detail}" in caplog.text # From get_config
@@ -745,8 +746,9 @@ def test_validate_single_enterprise_system_invalid_connection_json_url_type(capl
     # Config with 'connection_json_url' of wrong type
     invalid_config = {
         "connection_json_url": 12345, # Not a string
-        "auth_type": "api_key",
-        "api_key": "dummy_key_for_valid_auth"
+        "auth_type": "password",
+        "username": "dummy_user",
+        "password": "dummy_key_for_valid_auth",
     }
     # Ensure the type name in the message matches Python's output for int
     url_type_name = type(invalid_config['connection_json_url']).__name__ 
@@ -766,7 +768,6 @@ def test_validate_single_enterprise_system_invalid_connection_json_url_type(capl
             found_log = True
             break
     assert found_log, f"Expected ERROR log message '{expected_error_message}' not found. Logs: {caplog.text}"
-
 
 def test_validate_single_enterprise_system_missing_auth_type(caplog):
     """
@@ -866,7 +867,6 @@ def test_validate_single_enterprise_system_unknown_auth_type_value(caplog):
             break
     assert found_log, f"Expected ERROR log message '{expected_error_message}' not found. Logs: {caplog.text}"
 
-
 def test_validate_single_enterprise_system_unknown_key(caplog):
     """
     Tests _validate_single_enterprise_system logs a warning for an unknown key.
@@ -878,8 +878,9 @@ def test_validate_single_enterprise_system_unknown_key(caplog):
     system_name = "test_system_unknown_key"
     config_with_unknown_key = {
         "connection_json_url": "http://example.com/connection.json",
-        "auth_type": "api_key",
-        "api_key": "dummy_key_for_valid_auth",
+        "auth_type": "password",
+        "username": "dummy_user",
+        "password": "dummy_key_for_valid_auth",
         "some_unknown_field": "some_value"
     }
     expected_warning_message = f"Unknown field 'some_unknown_field' in enterprise system '{system_name}' configuration. It will be ignored."
@@ -917,8 +918,9 @@ def test_validate_single_enterprise_system_base_field_invalid_tuple_type(monkeyp
 
     invalid_config = {
         "connection_json_url": "http://example.com/connection.json",
-        "auth_type": "api_key",  # Use a valid auth_type
-        "api_key": "dummy_key_for_test",  # Satisfy 'api_key' auth type requirements
+        "auth_type": "password",  # Use a valid auth_type
+        "username": "dummy_user", 
+        "password": "dummy_key_for_test",  # Satisfy 'password' auth type requirements
         "test_base_tuple_field": [1.0, 2.0]  # Use a type not str or int (e.g., list)
     }
 
@@ -956,7 +958,7 @@ def test_validate_single_enterprise_system_auth_specific_field_invalid_tuple_typ
 
     caplog.set_level(logging.DEBUG)
     system_name = "test_system_auth_tuple_type_fail"
-    auth_type_to_test = "api_key"
+    auth_type_to_test = "password"
 
     # Modify _AUTH_SPECIFIC_FIELDS for this test
     original_auth_fields = enterprise_system._AUTH_SPECIFIC_FIELDS
@@ -969,7 +971,7 @@ def test_validate_single_enterprise_system_auth_specific_field_invalid_tuple_typ
     invalid_config = {
         "connection_json_url": "http://example.com/connection.json",
         "auth_type": auth_type_to_test,
-        "api_key": "dummy_key", # Satisfy api_key presence for this auth type
+        "password": "dummy_pass_value", # Satisfy password auth presence
         "test_auth_tuple_field": [1.0, 2.0] # Invalid type (list)
     }
 
@@ -994,107 +996,6 @@ def test_validate_single_enterprise_system_auth_specific_field_invalid_tuple_typ
 
     # Restore original fields to avoid affecting other tests
     monkeypatch.setattr(enterprise_system, "_AUTH_SPECIFIC_FIELDS", original_auth_fields)
-
-def test_validate_single_enterprise_system_api_key_auth_missing_keys(caplog):
-    """
-    Tests _validate_single_enterprise_system for auth_type 'api_key'
-    when both 'api_key' and 'api_key_env_var' are missing.
-    """
-    from deephaven_mcp.config.enterprise_system import _validate_single_enterprise_system, EnterpriseSystemConfigurationError
-    import logging
-    import re
-
-    caplog.set_level(logging.DEBUG)
-    system_name = "test_system_api_key_no_keys"
-    invalid_config = {
-        "connection_json_url": "http://example.com/connection.json",
-        "auth_type": "api_key"
-        # 'api_key' and 'api_key_env_var' are missing
-    }
-    expected_error_message = f"Enterprise system '{system_name}' with auth_type 'api_key' must define 'api_key' or 'api_key_env_var'."
-
-    with pytest.raises(
-        EnterpriseSystemConfigurationError,
-        match=re.escape(expected_error_message),
-    ):
-        _validate_single_enterprise_system(system_name, invalid_config)
-
-    found_log = False
-    for record in caplog.records:
-        if record.name == "deephaven_mcp.config.enterprise_system" and \
-           record.levelname == "ERROR" and \
-           expected_error_message in record.message:
-            found_log = True
-            break
-    assert found_log, f"Expected ERROR log message '{expected_error_message}' not found. Logs: {caplog.text}"
-
-def test_validate_single_enterprise_system_api_key_auth_invalid_api_key_type(caplog):
-    """
-    Tests _validate_single_enterprise_system for auth_type 'api_key'
-    when 'api_key' has an invalid type.
-    """
-    from deephaven_mcp.config.enterprise_system import _validate_single_enterprise_system, EnterpriseSystemConfigurationError
-    import logging
-    import re
-
-    caplog.set_level(logging.DEBUG)
-    system_name = "test_system_api_key_bad_key_type"
-    invalid_config = {
-        "connection_json_url": "http://example.com/connection.json",
-        "auth_type": "api_key",
-        "api_key": 12345 # Not a string
-    }
-    key_type_name = type(invalid_config['api_key']).__name__
-    expected_error_message = f"Field 'api_key' for enterprise system '{system_name}' (auth_type: api_key) must be of type str, but got {key_type_name}."
-
-    with pytest.raises(
-        EnterpriseSystemConfigurationError,
-        match=re.escape(expected_error_message),
-    ):
-        _validate_single_enterprise_system(system_name, invalid_config)
-
-    found_log = False
-    for record in caplog.records:
-        if record.name == "deephaven_mcp.config.enterprise_system" and \
-           record.levelname == "ERROR" and \
-           expected_error_message in record.message:
-            found_log = True
-            break
-    assert found_log, f"Expected ERROR log message '{expected_error_message}' not found. Logs: {caplog.text}"
-
-def test_validate_single_enterprise_system_api_key_auth_invalid_api_key_env_var_type(caplog):
-    """
-    Tests _validate_single_enterprise_system for auth_type 'api_key'
-    when 'api_key_env_var' has an invalid type.
-    """
-    from deephaven_mcp.config.enterprise_system import _validate_single_enterprise_system, EnterpriseSystemConfigurationError
-    import logging
-    import re
-
-    caplog.set_level(logging.DEBUG)
-    system_name = "test_system_api_key_bad_env_var_type"
-    invalid_config = {
-        "connection_json_url": "http://example.com/connection.json",
-        "auth_type": "api_key",
-        "api_key_env_var": 12345 # Not a string
-    }
-    key_type_name = type(invalid_config['api_key_env_var']).__name__
-    expected_error_message = f"Field 'api_key_env_var' for enterprise system '{system_name}' (auth_type: api_key) must be of type str, but got {key_type_name}."
-
-    with pytest.raises(
-        EnterpriseSystemConfigurationError,
-        match=re.escape(expected_error_message),
-    ):
-        _validate_single_enterprise_system(system_name, invalid_config)
-
-    found_log = False
-    for record in caplog.records:
-        if record.name == "deephaven_mcp.config.enterprise_system" and \
-           record.levelname == "ERROR" and \
-           expected_error_message in record.message:
-            found_log = True
-            break
-    assert found_log, f"Expected ERROR log message '{expected_error_message}' not found. Logs: {caplog.text}"
 
 
 def test_validate_single_enterprise_system_password_auth_missing_username(caplog):
@@ -1336,41 +1237,6 @@ def test_validate_single_enterprise_system_private_key_auth_invalid_key_type(cap
             break
     assert found_log, f"Expected ERROR log message '{expected_error_message}' not found. Logs: {caplog.text}"
 
-
-def test_validate_single_enterprise_system_api_key_auth_both_keys_present(caplog):
-    """
-    Tests _validate_single_enterprise_system for auth_type 'api_key'
-    when both 'api_key' and 'api_key_env_var' are present.
-    """
-    from deephaven_mcp.config.enterprise_system import _validate_single_enterprise_system, EnterpriseSystemConfigurationError
-    import logging
-    import re
-
-    caplog.set_level(logging.DEBUG)
-    system_name = "test_system_api_both_keys"
-    invalid_config = {
-        "connection_json_url": "http://example.com/connection.json",
-        "auth_type": "api_key",
-        "api_key": "some_key",
-        "api_key_env_var": "SOME_ENV_VAR"
-    }
-    expected_error_message = f"Enterprise system '{system_name}' with auth_type 'api_key' must not define both 'api_key' and 'api_key_env_var'. Specify one."
-
-    with pytest.raises(
-        EnterpriseSystemConfigurationError,
-        match=re.escape(expected_error_message),
-    ):
-        _validate_single_enterprise_system(system_name, invalid_config)
-
-    found_log = False
-    for record in caplog.records:
-        if record.name == "deephaven_mcp.config.enterprise_system" and \
-           record.levelname == "ERROR" and \
-           expected_error_message in record.message:
-            found_log = True
-            break
-    assert found_log, f"Expected ERROR log message '{expected_error_message}' not found. Logs: {caplog.text}"
-
 def test_validate_single_enterprise_system_password_auth_both_passwords_present(caplog):
     """
     Tests _validate_single_enterprise_system for auth_type 'password'
@@ -1592,8 +1458,9 @@ VALID_ENTERPRISE_SYSTEM_CONFIG_SECTION = {
     "enterprise_systems": {
         "prod_enterprise": {
             "connection_json_url": "https://enterprise.example.com/iris/connection.json",
-            "auth_type": "api_key",
-            "api_key_env_var": "PROD_API_KEY"
+            "auth_type": "password",
+            "username": "prod_user_env",
+            "password_env_var": "PROD_PASSWORD_KEY"
         },
         "dev_enterprise": {
             "connection_json_url": "https://dev.example.com/iris/connection.json",
@@ -1617,7 +1484,7 @@ async def test_get_enterprise_system_config_valid():
 
     system_config = await cm.get_enterprise_system_config("prod_enterprise")
     assert system_config["connection_json_url"] == "https://enterprise.example.com/iris/connection.json"
-    assert system_config["auth_type"] == "api_key"
+    assert system_config["auth_type"] == "password"
 
 @pytest.mark.asyncio
 async def test_get_enterprise_system_config_not_found():

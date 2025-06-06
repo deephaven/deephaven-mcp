@@ -298,16 +298,12 @@ If the `"enterprise_systems"` key is present, it must be a dictionary. Each indi
 *   `connection_json_url` (string, **required**): The URL pointing to the `connection.json` file of the Deephaven Enterprise server. This file provides necessary connection details for the client.
     *   Example: `"https://enterprise.example.com/iris/connection.json"`
 *   `auth_type` (string, **required**): Specifies the authentication method to use. Must be one of the following values:
-    *   `"api_key"`: Authenticate using an API key.
     *   `"password"`: Authenticate using a username and password.
     *   `"private_key"`: Authenticate using a private key (e.g., for service accounts or specific SAML/OAuth setups requiring a private key).
     *   `"none"`: No authentication will be used. This is typically for development or trusted environments and should be used with caution.
     Only configuration keys relevant to the selected `auth_type` (and the general `connection_json_url` and optional TLS keys) should be included. Extraneous keys will be ignored by the application but will generate a warning message in the logs, indicating which keys are unexpected for the chosen authentication method.
 
 *   Conditional Authentication Fields (required based on `auth_type`):
-    *   If `auth_type` is `"api_key"`:
-        *   `api_key` (string): The API key itself.
-        *   **OR** `api_key_env_var` (string): The name of an environment variable that holds the API key. Using an environment variable is recommended for better security. If the `api_key` field is used directly, its value will be redacted in application logs.
     *   If `auth_type` is `"password"`:
         *   `username` (string, **required**): The username for authentication.
         *   And either `password` (string): The password itself.
@@ -325,11 +321,6 @@ If the `"enterprise_systems"` key is present, it must be a dictionary. Each indi
     }
   },
   "enterprise_systems": {
-    "prod_cluster": {
-      "connection_json_url": "https://enterprise.example.com/iris/connection.json",
-      "auth_type": "api_key",
-      "api_key_env_var": "PROD_API_KEY"
-    },
     "staging_env": {
       "connection_json_url": "https://staging.internal/iris/connection.json",
       "auth_type": "password",

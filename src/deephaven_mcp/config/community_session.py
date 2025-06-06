@@ -82,8 +82,9 @@ def validate_community_sessions_config(
             (e.g., config.get('community_sessions')). Can be None if the key is absent.
 
     Raises:
-        ValueError: If community_sessions_map is provided and is not a dict, or if any
-                    individual session config is invalid.
+        CommunitySessionConfigurationError: If `community_sessions_map` is provided and is not a dict,
+            or if any individual session config is invalid (as determined by
+            `validate_single_community_session_config`).
     """
     if community_sessions_map is None:
         # If 'community_sessions' key was absent from config, there's nothing to validate here.
@@ -114,7 +115,10 @@ def validate_single_community_session_config(
         config_item (dict[str, Any]): The configuration dictionary for the session.
 
     Raises:
-        ValueError: If the configuration item is invalid (e.g., unknown fields, wrong types).
+        CommunitySessionConfigurationError: If the configuration item is invalid (e.g., not a
+            dictionary, unknown fields, wrong types, mutually exclusive fields like
+            'auth_token' and 'auth_token_env_var' are both set, or missing required
+            fields if any were defined in `_REQUIRED_FIELDS`).
     """
     if not isinstance(config_item, dict):
         raise CommunitySessionConfigurationError(

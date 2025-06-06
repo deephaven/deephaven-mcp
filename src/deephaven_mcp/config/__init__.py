@@ -13,7 +13,7 @@ Features:
 
 Configuration Schema:
 ---------------------
-The configuration file must be a JSON object. It may contain the following top-level key:
+The configuration file must be a JSON object. It may contain the following top-level keys:
 
   - `community_sessions` (dict, optional):
       A dictionary mapping community session names (str) to client session configuration dicts.
@@ -45,17 +45,45 @@ The configuration file must be a JSON object. It may contain the following top-l
         - Sensitive fields (`auth_token`, `client_private_key`) are redacted from logs for security.
         - Unknown fields are not allowed and will cause validation to fail.
 
+  - `enterprise_systems` (dict, optional):
+      A dictionary mapping enterprise system names (str) to system configuration dicts.
+      If this key is present, its value must be a dictionary (which can be empty).
+      Each enterprise system configuration dict is validated according to the schema defined in
+      `src/deephaven_mcp/config/enterprise_system.py`. Key fields typically include:
+
+        - `connection_json_url` (str): URL to the server's connection.json file.
+        - `auth_type` (str, enum): Authentication type. Allowed values include:
+            * "password": Use username and password for authentication.
+            * "private_key": Use a private key for SAML or similar token-based authentication.
+        - Conditional fields based on `auth_type`:
+            - If `auth_type` is "password":
+                - `username` (str, required): The username.
+                - `password` (str, optional): The password.
+                - `password_env_var` (str, optional): Environment variable for the password.
+                  (Note: `password` and `password_env_var` are mutually exclusive.)
+            - If `auth_type` is "private_key":
+                - `private_key` (str, required): Path to the private key file.
+
+      Notes:
+        - For the detailed schema of individual enterprise system configurations, please refer to the
+          `src/deephaven_mcp/config/enterprise_system.py` module and the DEVELOPER_GUIDE.md.
+        - Sensitive fields are redacted from logs.
+        - Unknown fields within an enterprise system configuration will cause a warning and be ignored, but unknown top-level keys in the main config will fail validation.
+
 Validation rules:
   - If the `community_sessions` key is present, its value must be a dictionary.
   - Within each session configuration, all field values must have the correct type if present.
   - No unknown fields are permitted in session configurations.
   - If TLS fields are provided, referenced files must exist and be readable.
+  - If the `enterprise_systems` key is present, its value must be a dictionary.
+  - Each enterprise system configuration is validated according to its specific schema.
 
 Configuration JSON Specification:
 ---------------------------------
 - The configuration file must be a JSON object.
-- It may optionally contain a `"community_sessions"` top-level key:
-    - `"community_sessions"`: If present, this must be a dictionary mapping community session names to client session configuration dicts for connecting to community workers. It cannot be an empty dictionary if provided.
+- It may optionally contain `"community_sessions"` and/or `"enterprise_systems"` top-level keys:
+    - `"community_sessions"`: If present, this must be a dictionary mapping community session names to client session configuration dicts for connecting to community workers. An empty dictionary is allowed (e.g., {}).
+    - `"enterprise_systems"`: If present, this must be a dictionary mapping enterprise system names to system configuration dicts. An empty dictionary is allowed (e.g., {}). 
 
 Example Valid Configuration (without community_sessions):
 ---------------------------
@@ -88,6 +116,19 @@ Example Valid Configuration (with community_sessions):
             "never_timeout": false,
             "session_type": "groovy",
             "use_tls": true
+        }
+    },
+    "enterprise_systems": {
+        "prod_cluster": {
+            "connection_json_url": "https://enterprise.example.com/iris/connection.json",
+            "auth_type": "api_key",
+            "api_key_env_var": "PROD_CLUSTER_API_KEY"
+        },
+        "dev_system": {
+            "connection_json_url": "http://localhost:8080/iris/connection.json",
+            "auth_type": "password",
+            "username": "dev_user",
+            "password_env_var": "DEV_SYSTEM_PASSWORD"
         }
     }
 }
@@ -137,6 +178,7 @@ Async/Await & I/O:
 ------------------
 - All configuration loading is async and coroutine-safe.
 - File I/O uses `aiofiles` for non-blocking reads.
+
 """
 
 __all__ = [
@@ -185,11 +227,13 @@ str: Name of the environment variable specifying the path to the Deephaven MCP c
 class ConfigManager:
     _REQUIRED_TOP_LEVEL_KEYS: set[str] = (
         set()
-    )  # Defines mandatory top-level keys in the config
+    )
+    """Set of top-level keys that MUST be present in the configuration file."""
     _ALLOWED_TOP_LEVEL_KEYS: set[str] = {
         "community_sessions",
         "enterprise_systems",
-    }  # Defines all allowed top-level keys
+    }
+    """Set of all allowed top-level keys in the configuration file."""
 
     """
     Async configuration manager for Deephaven MCP configuration.
@@ -251,7 +295,7 @@ class ConfigManager:
         returns it; otherwise, loads from disk and validates.
 
         Returns:
-            dict[str, Any]: The loaded and validated configuration dictionary.
+            dict[str, Any]: The loaded and validated configuration dictionary. Returns an empty dictionary if the config file path is not set or the file is empty (but valid JSON like {}). Raises McpConfigurationError or its subclasses on loading, parsing, or validation failures.
 
         Raises:
             RuntimeError: If the `DH_MCP_CONFIG_FILE` environment variable is not set, or the file cannot be read.
@@ -471,11 +515,10 @@ class ConfigManager:
             dict[str, Any]: The validated configuration dictionary.
 
         Raises:
-            ValueError: If the config has unknown top-level keys,
-                        or if 'community_sessions' is present and `validate_community_sessions_config` finds issues.
+            ValueError: If the config has unknown top-level keys and validating specific sections like 'community_sessions' and 'enterprise_systems' if they are present.
 
         Example:
-            >>> validated_config = ConfigManager.validate_config({'community_sessions': {'local_session': {}}})
+            >>> validated_config = ConfigManager.validate_config({'community_sessions': {'local_session': {}}, 'enterprise_systems': {'prod_cluster': {}}})
             >>> validated_config_empty = ConfigManager.validate_config({}) # Also valid
         """
         top_level_keys = set(config.keys())

@@ -13,12 +13,9 @@ _BASE_ENTERPRISE_SYSTEM_FIELDS: dict[str, type | tuple[type, ...]] = {
     "connection_json_url": str,
     "auth_type": str,
 }
+"""Defines the base fields and their expected types for any enterprise system configuration."""
 
 _AUTH_SPECIFIC_FIELDS: dict[str, dict[str, type | tuple[type, ...]]] = {
-    "api_key": {
-        "api_key": str,  # Type if present
-        "api_key_env_var": str, # Type if present
-    },
     "password": {
         "username": str, # Required for this auth_type
         "password": str, # Type if present
@@ -28,6 +25,10 @@ _AUTH_SPECIFIC_FIELDS: dict[str, dict[str, type | tuple[type, ...]]] = {
         "private_key": str, # Required for this auth_type
     }
 }
+"""
+Defines auth-type specific fields and their expected types. 
+Each key is an auth_type, and its value is a dictionary of fields specific to that auth_type.
+"""
 
 
 class EnterpriseSystemConfigurationError(McpConfigurationError):
@@ -38,8 +39,7 @@ class EnterpriseSystemConfigurationError(McpConfigurationError):
 def redact_enterprise_system_config(system_config: dict[str, Any]) -> dict[str, Any]:
     """Redacts sensitive fields from an enterprise system configuration dictionary.
 
-    Creates a shallow copy of the input dictionary and redacts 'api_key'
-    and 'password' if they exist.
+    Creates a shallow copy of the input dictionary and redacts 'password' if it exists.
 
     Args:
         system_config (dict[str, Any]): The enterprise system configuration.
@@ -48,8 +48,6 @@ def redact_enterprise_system_config(system_config: dict[str, Any]) -> dict[str, 
         dict[str, Any]: A new dictionary with sensitive fields redacted.
     """
     config_copy = system_config.copy()
-    if "api_key" in config_copy:
-        config_copy["api_key"] = "[REDACTED]"  # noqa: S105
     if "password" in config_copy:
         config_copy["password"] = "[REDACTED]"  # noqa: S105
     return config_copy
@@ -201,19 +199,8 @@ def _validate_single_enterprise_system(system_name: str, config: Any) -> None:
             raise EnterpriseSystemConfigurationError(msg)
 
     # Specific validation logic based on auth_type (presence of required sub-fields and mutual exclusivity)
-    if auth_type == "api_key":
-        api_key_present = "api_key" in config
-        api_key_env_var_present = "api_key_env_var" in config
-        if api_key_present and api_key_env_var_present:
-            msg = f"Enterprise system '{system_name}' with auth_type 'api_key' must not define both 'api_key' and 'api_key_env_var'. Specify one."
-            _LOGGER.error(msg)
-            raise EnterpriseSystemConfigurationError(msg)
-        if not api_key_present and not api_key_env_var_present:
-            msg = f"Enterprise system '{system_name}' with auth_type 'api_key' must define 'api_key' or 'api_key_env_var'."
-            _LOGGER.error(msg)
-            raise EnterpriseSystemConfigurationError(msg)
 
-    elif auth_type == "password":
+    if auth_type == "password":
         if "username" not in config: # This field is required for 'password' auth_type
              msg = f"Enterprise system '{system_name}' with auth_type 'password' must define 'username'."
              _LOGGER.error(msg)
