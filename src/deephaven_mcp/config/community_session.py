@@ -47,6 +47,24 @@ list[str]: List of required fields for each community session configuration dict
 """
 
 
+def redact_community_session_config(session_config: dict[str, Any]) -> dict[str, Any]:
+    """Redacts sensitive fields from a community session configuration dictionary.
+
+    Creates a shallow copy of the input dictionary and redacts 'auth_token'
+    if it exists.
+
+    Args:
+        session_config (dict[str, Any]): The community session configuration.
+
+    Returns:
+        dict[str, Any]: A new dictionary with sensitive fields redacted.
+    """
+    config_copy = session_config.copy()
+    if "auth_token" in config_copy:
+        config_copy["auth_token"] = "[REDACTED]"  # noqa: S105
+    return config_copy
+
+
 def validate_community_sessions_config(
     community_sessions_map: Any | None,
 ) -> None:
@@ -82,24 +100,6 @@ def validate_community_sessions_config(
 
     for session_name, session_config_item in community_sessions_map.items():
         validate_single_community_session_config(session_name, session_config_item)
-
-
-def redact_community_session_config(session_config: dict[str, Any]) -> dict[str, Any]:
-    """Redacts sensitive fields from a community session configuration dictionary.
-
-    Creates a shallow copy of the input dictionary and redacts 'auth_token'
-    if it exists.
-
-    Args:
-        session_config (dict[str, Any]): The community session configuration.
-
-    Returns:
-        dict[str, Any]: A new dictionary with sensitive fields redacted.
-    """
-    config_copy = session_config.copy()
-    if "auth_token" in config_copy:
-        config_copy["auth_token"] = "[REDACTED]"  # noqa: S105
-    return config_copy
 
 
 def validate_single_community_session_config(
