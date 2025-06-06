@@ -49,23 +49,11 @@ def test_validate_config_unknown_top_level_key():
     bad_config = {"community_sessions": {}, "extra": 1}
     cm = config.ConfigManager()
     with pytest.raises(
-        ValueError, match="Unknown top-level keys in Deephaven community session config: {'extra'}"
+        ValueError,
+        match="Unknown top-level keys in Deephaven community session config: {'extra'}",
     ):
         config.ConfigManager().validate_config(bad_config)
         config.ConfigManager.validate_config(bad_config)
-
-
-def test_validate_config_missing_required_community_session_field(monkeypatch):
-    from deephaven_mcp import config
-
-    monkeypatch.setattr(config, "_REQUIRED_FIELDS", ["host"])
-    bad_config = {"community_sessions": {"local_session": {}}}
-    with pytest.raises(
-        ValueError,
-        match=r"Missing required fields in community session config for local_session: \['host'\]",
-    ):
-        config.ConfigManager.validate_config(bad_config)
-    monkeypatch.setattr(config, "_REQUIRED_FIELDS", [])
 
 
 def test_validate_config_invalid_schema():
@@ -136,7 +124,8 @@ async def test_get_config_sets_cache_and_logs(monkeypatch, caplog):
     assert cfg == valid_config
     assert cm._cache == valid_config
     assert any(
-        "Deephaven community session configuration loaded and validated successfully" in r
+        "Deephaven community session configuration loaded and validated successfully"
+        in r
         for r in caplog.text.splitlines()
     )
 
@@ -223,56 +212,6 @@ async def test_get_config_missing_env(monkeypatch):
         await config.ConfigManager().get_config()
 
 
-def test_validate_config_community_sessions_not_dict():
-    from deephaven_mcp import config
-
-    bad_config = {"community_sessions": ["not", "a", "dict"]}
-    with pytest.raises(
-        ValueError, match="'community_sessions' must be a dictionary in Deephaven community session config"
-    ):
-        config.ConfigManager.validate_config(bad_config)
-
-
-def test_validate_config_community_sessions_empty():
-    from deephaven_mcp import config
-
-    bad_config = {"community_sessions": {}}
-    with pytest.raises(
-        ValueError, match="No community sessions defined in Deephaven community session config"
-    ):
-        config.ConfigManager.validate_config(bad_config)
-
-
-def test_validate_config_community_session_config_not_dict():
-    from deephaven_mcp import config
-
-    bad_config = {"community_sessions": {"local_session": "not_a_dict"}}
-    with pytest.raises(
-        ValueError, match="Configuration for community session 'local_session' must be a dictionary"
-    ):
-        config.ConfigManager.validate_config(bad_config)
-
-
-def test_validate_config_unknown_community_session_field():
-    from deephaven_mcp import config
-
-    bad_config = {"community_sessions": {"local_session": {"foo": 1}}}
-    with pytest.raises(
-        ValueError, match="Unknown field 'foo' in community session config for local_session"
-    ):
-        config.ConfigManager.validate_config(bad_config)
-
-
-def test_validate_config_community_session_field_wrong_type():
-    from deephaven_mcp import config
-
-    bad_config = {"community_sessions": {"local_session": {"host": 123}}}
-    with pytest.raises(
-        ValueError, match=r"Field 'host' in community session config for local_session must be of type \(<class 'str'>,\)"
-    ):
-        config.ConfigManager.validate_config(bad_config)
-
-
 @pytest.mark.asyncio
 async def test_clear_config_cache_community_sessions_2():
     from deephaven_mcp import config
@@ -296,7 +235,10 @@ async def test_get_community_session_config_2():
     await cm.set_config_cache(VALID_CONFIG)
     cfg = await cm.get_community_session_config("local")
     assert cfg["host"] == "localhost"
-    with pytest.raises(CommunitySessionConfigurationError, match="Community session nonexistent not found in configuration"):
+    with pytest.raises(
+        CommunitySessionConfigurationError,
+        match="Community session nonexistent not found in configuration",
+    ):
         await cm.get_community_session_config("nonexistent")
 
 

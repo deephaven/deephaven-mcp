@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from deephaven_mcp import config
 import deephaven_mcp.community._mcp as mcp_mod
+from deephaven_mcp import config
 
 
 class MockRequestContext:
@@ -218,7 +218,9 @@ async def test_describe_workers_all_available_no_versions(monkeypatch):
 async def test_describe_workers_some_unavailable(monkeypatch):
     config_manager = MagicMock()
     session_manager = MagicMock()
-    config_manager.get_community_session_names = AsyncMock(return_value=["w1", "w2", "w3"])
+    config_manager.get_community_session_names = AsyncMock(
+        return_value=["w1", "w2", "w3"]
+    )
     alive_session = MagicMock(is_alive=True)
     dead_session = MagicMock(is_alive=False)
 
@@ -328,7 +330,9 @@ async def test_describe_workers_versions_error(monkeypatch):
 async def test_describe_workers_some_unavailable_with_versions(monkeypatch):
     config_manager = MagicMock()
     session_manager = MagicMock()
-    config_manager.get_community_session_names = AsyncMock(return_value=["w1", "w2", "w3"])
+    config_manager.get_community_session_names = AsyncMock(
+        return_value=["w1", "w2", "w3"]
+    )
     alive_session = MagicMock(is_alive=True)
     dead_session = MagicMock(is_alive=False)
 
@@ -398,7 +402,9 @@ async def test_describe_workers_worker_config_error(monkeypatch):
 async def test_describe_workers_config_error(monkeypatch):
     config_manager = MagicMock()
     session_manager = MagicMock()
-    config_manager.get_community_session_names = AsyncMock(side_effect=Exception("fail-cfg"))
+    config_manager.get_community_session_names = AsyncMock(
+        side_effect=Exception("fail-cfg")
+    )
     context = MockContext(
         {
             "config_manager": config_manager,

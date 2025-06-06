@@ -1,7 +1,7 @@
 """
 Async Deephaven MCP configuration management.
 
-This module provides async functions to load, validate, and manage configuration for Deephaven MCP from a JSON file. 
+This module provides async functions to load, validate, and manage configuration for Deephaven MCP from a JSON file.
 Configuration is loaded from a file specified by the DH_MCP_CONFIG_FILE environment variable using native async file I/O (aiofiles).
 
 Features:
@@ -153,23 +153,11 @@ from typing import Any, cast
 
 import aiofiles
 
-
-def redact_community_session_config(session_config: dict[str, Any]) -> dict[str, Any]:
-    """Redacts sensitive fields from a community session configuration dictionary.
-
-    Creates a shallow copy of the input dictionary and redacts 'auth_token'
-    if it exists.
-
-    Args:
-        session_config (dict[str, Any]): The community session configuration.
-
-    Returns:
-        dict[str, Any]: A new dictionary with sensitive fields redacted.
-    """
-    config_copy = session_config.copy()
-    if "auth_token" in config_copy:
-        config_copy["auth_token"] = "[REDACTED]"
-    return config_copy
+from .community_session import (
+    CommunitySessionConfigurationError,
+    redact_community_session_config,
+    validate_community_sessions_config,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -178,40 +166,12 @@ CONFIG_ENV_VAR = "DH_MCP_CONFIG_FILE"
 str: Name of the environment variable specifying the path to the Deephaven MCP config file.
 """
 
-_REQUIRED_FIELDS: list[str] = []
-"""
-list[str]: List of required fields for each community session configuration dictionary.
-"""
-
-_ALLOWED_COMMUNITY_SESSION_FIELDS = {
-    "host": str,
-    "port": int,
-    "auth_type": str,
-    "auth_token": str,
-    "never_timeout": bool,
-    "session_type": str,
-    "use_tls": bool,
-    "tls_root_certs": (str, type(None)),
-    "client_cert_chain": (str, type(None)),
-    "client_private_key": (str, type(None)),
-}
-"""
-Dictionary of allowed community session configuration fields and their expected types.
-Type: dict[str, type | tuple[type, ...]]
-"""
-
-
-class CommunitySessionConfigurationError(Exception):
-    """Raised when a community session's configuration cannot be retrieved or is invalid."""
-
-    pass
-
 
 class ConfigManager:
     """
     Async configuration manager for Deephaven MCP configuration.
 
-    This class encapsulates all logic for loading, validating, and caching the configuration for Deephaven MCP.  
+    This class encapsulates all logic for loading, validating, and caching the configuration for Deephaven MCP.
     """
 
     def __init__(self) -> None:
@@ -331,12 +291,16 @@ class ConfigManager:
         community_sessions_map = config.get("community_sessions", {})
 
         if session_name not in community_sessions_map:
-            _LOGGER.error(f"Community session {session_name} not found in configuration")
+            _LOGGER.error(
+                f"Community session {session_name} not found in configuration"
+            )
             raise CommunitySessionConfigurationError(
                 f"Community session {session_name} not found in configuration"
             )
 
-        _LOGGER.debug(f"Retrieved configuration for community session '{session_name}': {redact_community_session_config(community_sessions_map[session_name])}")
+        _LOGGER.debug(
+            f"Retrieved configuration for community session '{session_name}': {redact_community_session_config(community_sessions_map[session_name])}"
+        )
         return cast(dict[str, Any], community_sessions_map[session_name])
 
     async def get_community_session_names(self) -> list[str]:
@@ -356,7 +320,9 @@ class ConfigManager:
         community_sessions_map = config.get("community_sessions", {})
         session_names = list(community_sessions_map.keys())
 
-        _LOGGER.debug(f"Found {len(session_names)} community session(s): {session_names}")
+        _LOGGER.debug(
+            f"Found {len(session_names)} community session(s): {session_names}"
+        )
         return session_names
 
     @staticmethod
@@ -398,65 +364,7 @@ class ConfigManager:
                 f"Missing required top-level keys in Deephaven community session config: {missing_keys}"
             )
 
-        community_sessions_map = config["community_sessions"]
-        if not isinstance(community_sessions_map, dict):
-            raise ValueError(
-                "'community_sessions' must be a dictionary in Deephaven community session config"
-            )
-        if not community_sessions_map:
-            _LOGGER.error("No community sessions defined in Deephaven community session config")
-            raise ValueError("No community sessions defined in Deephaven community session config")
-
-        for session_name, session_config in community_sessions_map.items():
-            ConfigManager._validate_community_session_config(session_name, session_config)
+        # Validate the 'community_sessions' structure and its contents
+        validate_community_sessions_config(config["community_sessions"])
 
         return config
-
-    @staticmethod
-    def _validate_community_session_config(
-        session_name: str, session_config: dict[str, Any]
-    ) -> None:
-        """
-        Validate the configuration dictionary for a single Deephaven community session.
-
-        Args:
-            session_name (str): The name of the community session being validated.
-            session_config (dict[str, Any]): The configuration dictionary for the community session.
-
-        Raises:
-            ValueError: If the community session config is not a dictionary, is missing required fields,
-                contains unknown fields, or contains fields with invalid types.
-        """
-        if not isinstance(session_config, dict):
-            raise ValueError(f"Configuration for community session '{session_name}' must be a dictionary.")
-
-        missing_fields = [
-            field for field in _REQUIRED_FIELDS if field not in session_config
-        ]
-        if missing_fields:
-            _LOGGER.error(
-                f"Missing required fields in community session config for {session_name}: {missing_fields}"
-            )
-            raise ValueError(
-                f"Missing required fields in community session config for {session_name}: {missing_fields}"
-            )
-
-        for field_name, field_value in session_config.items():
-            if field_name not in _ALLOWED_COMMUNITY_SESSION_FIELDS:
-                _LOGGER.error(
-                    f"Unknown field '{field_name}' in community session config for {session_name}"
-                )
-                raise ValueError(
-                    f"Unknown field '{field_name}' in community session config for {session_name}"
-                )
-
-            allowed_types = _ALLOWED_COMMUNITY_SESSION_FIELDS[field_name]
-            if not isinstance(allowed_types, tuple):
-                allowed_types = (allowed_types,)
-            if not isinstance(field_value, allowed_types):
-                _LOGGER.error(
-                    f"Field '{field_name}' in community session config for {session_name} must be of type {allowed_types}"
-                )
-                raise ValueError(
-                    f"Field '{field_name}' in community session config for {session_name} must be of type {allowed_types}"
-                )
