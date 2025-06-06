@@ -152,6 +152,11 @@ from .community_session import (
     redact_community_session_config,
     validate_community_sessions_config,
 )
+from .enterprise_session import (
+    validate_enterprise_sessions_config,
+    EnterpriseSessionConfigurationError,  
+)
+
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -166,7 +171,8 @@ class ConfigManager:
         set()
     )  # Defines mandatory top-level keys in the config
     _ALLOWED_TOP_LEVEL_KEYS: set[str] = {
-        "community_sessions"
+        "community_sessions",
+        "enterprise_sessions",
     }  # Defines all allowed top-level keys
 
     """
@@ -333,15 +339,80 @@ class ConfigManager:
         )
         return session_names
 
+    async def get_enterprise_session_config(self, session_name: str) -> dict[str, Any]:
+        """
+        Retrieves the configuration for a specific enterprise session by its name.
+
+        Args:
+            session_name (str): The name of the enterprise session to retrieve. Required.
+
+        Returns:
+            dict[str, Any]: The configuration dictionary for the specified enterprise session.
+
+        Raises:
+            EnterpriseSessionConfigurationError: If the enterprise session is not found.
+
+        Example:
+            >>> # Assuming config_manager is an instance of ConfigManager
+            >>> enterprise_config = await config_manager.get_enterprise_session_config('prod_cluster')
+        """
+        _LOGGER.debug(f"Getting enterprise session config for session: {session_name!r}")
+        config = await self.get_config()
+        enterprise_sessions_map = config.get("enterprise_sessions", {})
+
+        if not isinstance(enterprise_sessions_map, dict) or session_name not in enterprise_sessions_map:
+            _LOGGER.error(
+                f"Enterprise session '{session_name}' not found in configuration or 'enterprise_sessions' is not a dict."
+            )
+            raise EnterpriseSessionConfigurationError(
+                f"Enterprise session '{session_name}' not found in configuration."
+            )
+        
+        # TODO: Implement redaction for enterprise sessions if needed, similar to community sessions.
+        # For now, returning the raw config.
+        _LOGGER.debug(
+            f"Retrieved configuration for enterprise session '{session_name}': {enterprise_sessions_map[session_name]}" # Add redaction if sensitive
+        )
+        return cast(dict[str, Any], enterprise_sessions_map[session_name])
+
+    async def get_enterprise_session_names(self) -> list[str]:
+        """
+        Retrieves a list of all configured enterprise session names.
+
+        Returns:
+            list[str]: A list of enterprise session names.
+
+        Example:
+            >>> # Assuming config_manager is an instance of ConfigManager
+            >>> session_names = await config_manager.get_enterprise_session_names()
+            >>> for session_name in session_names:
+            ...     print(f"Available enterprise session: {session_name}")
+        """
+        _LOGGER.debug("Getting list of all enterprise session names")
+        config = await self.get_config()
+        enterprise_sessions_map = config.get("enterprise_sessions", {})
+        
+        if not isinstance(enterprise_sessions_map, dict):
+             _LOGGER.warning("'enterprise_sessions' is not a dictionary, returning empty list of names.")
+             return []
+
+        session_names = list(enterprise_sessions_map.keys())
+
+        _LOGGER.debug(
+            f"Found {len(session_names)} enterprise session(s): {session_names}"
+        )
+        return session_names
+
     @staticmethod
     def validate_config(config: dict[str, Any]) -> dict[str, Any]:
         """
         Validate the Deephaven MCP application configuration dictionary.
 
         Ensures that the configuration has the correct top-level structure.
-        The 'community_sessions' key is optional. If present, it delegates to
-        `validate_community_sessions_config` for detailed validation of its content.
-        Only known top-level keys are allowed (currently only 'community_sessions').
+        The 'community_sessions' and 'enterprise_sessions' keys are optional. If present, they delegate to
+        their respective validation functions (`validate_community_sessions_config` and
+        `validate_enterprise_sessions_config`) for detailed validation of their content.
+        Only known top-level keys are allowed.
 
         Args:
             config (dict[str, Any]): The configuration dictionary to validate.
@@ -380,9 +451,12 @@ class ConfigManager:
                 f"Unknown top-level keys in Deephaven MCP config: {unknown_keys}"
             )
 
-        # Validate the 'community_sessions' structure and its contents if the key exists
-        if "community_sessions" in config:
-            validate_community_sessions_config(config["community_sessions"])
-        # If "community_sessions" is not in config, it's considered valid (meaning no sessions configured)
+        # Validate 'community_sessions' if present
+        if "community_sessions" in top_level_keys:
+            validate_community_sessions_config(config.get("community_sessions"))
+
+        # Validate 'enterprise_sessions' if present
+        if "enterprise_sessions" in top_level_keys:
+            validate_enterprise_sessions_config(config.get("enterprise_sessions"))
 
         return config

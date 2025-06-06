@@ -9,14 +9,17 @@ from unittest import mock
 import pytest
 import pytest_asyncio
 
-from deephaven_mcp.config import CommunitySessionConfigurationError
+from deephaven_mcp.config import (
+    CommunitySessionConfigurationError,
+    EnterpriseSessionConfigurationError,
+)
 
 # TODO: needed?
 # Ensure local source is used for imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../src")))
 
 # --- Constants and helpers ---
-VALID_CONFIG = {
+VALID_COMMUNITY_SESSIONS_CONFIG = {
     "community_sessions": {
         "local": {
             "host": "localhost",
@@ -31,7 +34,7 @@ VALID_CONFIG = {
 }
 
 
-MINIMAL_CONFIG = {"community_sessions": {"local_session": {}}}
+MINIMAL_COMMUNITY_SESSIONS_CONFIG = {"community_sessions": {"local_session": {}}}
 
 
 # --- Fixtures ---
@@ -80,7 +83,7 @@ def test_validate_config_invalid_schema():
     from deephaven_mcp import config
 
     # Case: Minimal config is valid
-    valid_config = MINIMAL_CONFIG.copy()
+    valid_config = MINIMAL_COMMUNITY_SESSIONS_CONFIG.copy()
     assert config.ConfigManager.validate_config(valid_config) == valid_config
     # Case: Empty config (missing community_sessions key) is also valid
     empty_config = {}
@@ -93,7 +96,7 @@ async def test_get_config_valid():
     from deephaven_mcp import config
 
     cm = config.ConfigManager()
-    await cm.set_config_cache(VALID_CONFIG)
+    await cm.set_config_cache(VALID_COMMUNITY_SESSIONS_CONFIG)
     cfg = await cm.get_config()
     assert "community_sessions" in cfg
     assert "local" in cfg["community_sessions"]
@@ -249,7 +252,7 @@ async def test_get_community_session_names():
     from deephaven_mcp import config
 
     cm = config.ConfigManager()
-    await cm.set_config_cache(VALID_CONFIG)
+    await cm.set_config_cache(VALID_COMMUNITY_SESSIONS_CONFIG)
     names = await cm.get_community_session_names()
     assert "local" in names
 
@@ -305,7 +308,7 @@ async def test_get_community_session_config_2():
     from deephaven_mcp import config
 
     cm = config.ConfigManager()
-    await cm.set_config_cache(VALID_CONFIG)
+    await cm.set_config_cache(VALID_COMMUNITY_SESSIONS_CONFIG)
     cfg = await cm.get_community_session_config("local")
     assert cfg["host"] == "localhost"
     with pytest.raises(
@@ -320,6 +323,115 @@ async def test_get_community_session_names_2():
     from deephaven_mcp import config
 
     cm = config.ConfigManager()
-    await cm.set_config_cache(VALID_CONFIG)
+    await cm.set_config_cache(VALID_COMMUNITY_SESSIONS_CONFIG)
     names = await cm.get_community_session_names()
     assert "local" in names
+
+
+# --- Enterprise Session Config Access Tests ---
+
+VALID_ENTERPRISE_CONFIG_SECTION = {
+    "enterprise_sessions": {
+        "prod_cluster": {
+            "connection_json_url": "https://enterprise.example.com/iris/connection.json",
+            "auth_type": "api_key",
+            "api_key_env_var": "PROD_API_KEY"
+        },
+        "staging_cluster": {
+            "connection_json_url": "https://staging.example.com/iris/connection.json",
+            "auth_type": "password",
+            "username": "testuser",
+            "password_env_var": "STAGING_PASS_ENV"
+        }
+    }
+}
+
+@pytest.mark.asyncio
+async def test_get_enterprise_session_config_valid():
+    from deephaven_mcp import config
+    cm = config.ConfigManager()
+    # VALID_COMMUNITY_SESSIONS_CONFIG is defined globally in this test file
+    full_config = {
+        "community_sessions": VALID_COMMUNITY_SESSIONS_CONFIG.get("community_sessions", {}), 
+        **VALID_ENTERPRISE_CONFIG_SECTION
+    }
+    await cm.set_config_cache(full_config)
+
+    session_config = await cm.get_enterprise_session_config("prod_cluster")
+    assert session_config["connection_json_url"] == "https://enterprise.example.com/iris/connection.json"
+    assert session_config["auth_type"] == "api_key"
+
+@pytest.mark.asyncio
+async def test_get_enterprise_session_config_not_found():
+    from deephaven_mcp import config
+    cm = config.ConfigManager()
+    await cm.set_config_cache(VALID_ENTERPRISE_CONFIG_SECTION) 
+    with pytest.raises(EnterpriseSessionConfigurationError, match="Enterprise session 'non_existent_session' not found"):
+        await cm.get_enterprise_session_config("non_existent_session")
+
+@pytest.mark.asyncio
+async def test_get_enterprise_session_config_key_missing(): # When 'enterprise_sessions' itself is missing
+    from deephaven_mcp import config
+    cm = config.ConfigManager()
+    await cm.set_config_cache({}) # Empty config
+    with pytest.raises(EnterpriseSessionConfigurationError, match="Enterprise session 'any_session' not found"):
+        await cm.get_enterprise_session_config("any_session")
+
+@pytest.mark.asyncio
+async def test_get_enterprise_session_config_not_a_dict(): # When 'enterprise_sessions' is not a dict
+    from deephaven_mcp import config
+    from unittest import mock
+
+    cm = config.ConfigManager()
+    # Mock get_config to return a config where 'enterprise_sessions' is not a dictionary
+    bad_config_data = {"enterprise_sessions": "not_a_dictionary"}
+    async_mock_get_config = mock.AsyncMock(return_value=bad_config_data)
+
+    with mock.patch.object(cm, 'get_config', new=async_mock_get_config):
+        with pytest.raises(EnterpriseSessionConfigurationError, match="Enterprise session 'any_session' not found"):
+            await cm.get_enterprise_session_config("any_session")
+
+@pytest.mark.asyncio
+async def test_get_enterprise_session_names_valid(caplog):
+    from deephaven_mcp import config
+    cm = config.ConfigManager()
+    await cm.set_config_cache(VALID_ENTERPRISE_CONFIG_SECTION)
+    with caplog.at_level("DEBUG"):
+        session_names = await cm.get_enterprise_session_names()
+    # Sort for comparison as dict key order is not guaranteed for older Pythons
+    assert sorted(session_names) == sorted(["prod_cluster", "staging_cluster"])
+    assert "Found 2 enterprise session(s)" in caplog.text
+
+@pytest.mark.asyncio
+async def test_get_enterprise_session_names_empty_config(): # When 'enterprise_sessions' is an empty dict
+    from deephaven_mcp import config
+    cm = config.ConfigManager()
+    await cm.set_config_cache({"enterprise_sessions": {}})
+    session_names = await cm.get_enterprise_session_names()
+    assert session_names == []
+
+@pytest.mark.asyncio
+async def test_get_enterprise_session_names_key_missing(): # When 'enterprise_sessions' key is absent
+    from deephaven_mcp import config
+    cm = config.ConfigManager()
+    await cm.set_config_cache({}) 
+    session_names = await cm.get_enterprise_session_names()
+    assert session_names == []
+
+@pytest.mark.asyncio
+async def test_get_enterprise_session_names_not_a_dict(caplog): # When 'enterprise_sessions' is not a dict
+    from deephaven_mcp import config
+    from unittest import mock
+
+    cm = config.ConfigManager()
+    # Mock get_config to return a config where 'enterprise_sessions' is not a dictionary
+    bad_config_data = {"enterprise_sessions": "not_a_dictionary"}
+    async_mock_get_config = mock.AsyncMock(return_value=bad_config_data)
+
+    with mock.patch.object(cm, 'get_config', new=async_mock_get_config):
+        with caplog.at_level("WARNING"):
+            session_names = await cm.get_enterprise_session_names()
+    
+    assert session_names == []
+    assert "'enterprise_sessions' is not a dictionary, returning empty list of names." in caplog.text
+
