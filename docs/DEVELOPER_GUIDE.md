@@ -23,7 +23,6 @@ This repository houses the Python-based Model Context Protocol (MCP) servers for
 - [Quick Start Guide](#quick-start-guide)
   - [Community Server Quick Start](#community-server-quick-start)
   - [Docs Server Quick Start](#docs-server-quick-start)
-- [Command Line Entry Points](#command-line-entry-points)
 - [MCP Server Implementations](#mcp-server-implementations)
   - [Community Server](#community-server)
     - [Overview](#community-server-overview)

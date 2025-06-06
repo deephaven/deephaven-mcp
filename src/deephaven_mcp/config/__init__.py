@@ -45,7 +45,7 @@ The configuration file must be a JSON object. It may contain the following top-l
         - Unknown fields are not allowed and will cause validation to fail.
 
 Validation rules:
-  - If the `community_sessions` key is present, its value must be a non-empty dictionary.
+  - If the `community_sessions` key is present, its value must be a dictionary.
   - Within each session configuration, all field values must have the correct type if present.
   - No unknown fields are permitted in session configurations.
   - If TLS fields are provided, referenced files must exist and be readable.
