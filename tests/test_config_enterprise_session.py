@@ -132,15 +132,15 @@ def test_validate_enterprise_sessions_not_a_dict():
             {"connection_json_url": "http://test", "auth_type": "password", "username": "user", "password_env_var": 123},
             "'password_env_var'.*must be a string"
         ),
-        # SAML Auth Type Tests
+        # Private Key Auth Type Tests
         (
-            "saml_missing_key_path",
-            {"connection_json_url": "http://test", "auth_type": "saml_private_key"},
+            "private_key_missing_key_path",
+            {"connection_json_url": "http://test", "auth_type": "private_key"},
             "requires 'private_key_path'"
         ),
         (
-            "saml_invalid_key_path_type",
-            {"connection_json_url": "http://test", "auth_type": "saml_private_key", "private_key_path": 123},
+            "private_key_invalid_key_path_type",
+            {"connection_json_url": "http://test", "auth_type": "private_key", "private_key_path": 123},
             "'private_key_path'.*must be a string"
         )
         # Unknown key warning (does not raise error)
@@ -180,10 +180,10 @@ def test_single_enterprise_session_invalid_configs(session_name, session_config,
             "Unknown key 'api_key' in enterprise session 'password_with_api_key' configuration (auth_type: password)"
         ),
         (
-            "saml_with_password", "saml_private_key",
+            "private_key_with_password", "private_key",
             {"private_key_path": "/path/key.pem", "password": "secret"},
             "password",
-            "Unknown key 'password' in enterprise session 'saml_with_password' configuration (auth_type: saml_private_key)"
+            "Unknown key 'password' in enterprise session 'private_key_with_password' configuration (auth_type: private_key)"
         ),
         (
             "api_key_with_multiple_unknown", "api_key",
@@ -209,7 +209,7 @@ def test_validate_single_session_unknown_key_warnings(
             base_config["username"] = "default_user"
         if "password" not in config_override and "password_env_var" not in config_override:
             base_config["password_env_var"] = "DEFAULT_PASS_ENV"
-    elif auth_type == "saml_private_key" and "private_key_path" not in config_override:
+    elif auth_type == "private_key" and "private_key_path" not in config_override:
         base_config["private_key_path"] = "/default/path.pem"
 
     full_session_config = {**base_config, **config_override}

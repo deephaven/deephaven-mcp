@@ -4,9 +4,11 @@ Validation logic for the 'enterprise_sessions' section of the Deephaven MCP conf
 import logging
 from typing import Any
 
+from . import McpConfigurationError
+
 _LOGGER = logging.getLogger(__name__)
 
-class EnterpriseSessionConfigurationError(ValueError):
+class EnterpriseSessionConfigurationError(McpConfigurationError):
     """Custom exception for errors in enterprise session configuration."""
     pass
 
@@ -81,7 +83,7 @@ def _validate_single_enterprise_session(session_name: str, config: Any) -> None:
         raise EnterpriseSessionConfigurationError(msg)
 
     auth_type = config["auth_type"]
-    allowed_auth_types = {"api_key", "password", "saml_private_key"}
+    allowed_auth_types = {"api_key", "password", "private_key", "none"}
     if not isinstance(auth_type, str) or auth_type not in allowed_auth_types:
         msg = f"'auth_type' for enterprise session '{session_name}' must be one of {allowed_auth_types}, but got '{auth_type}'."
         _LOGGER.error(msg)
@@ -95,7 +97,7 @@ def _validate_single_enterprise_session(session_name: str, config: Any) -> None:
         known_session_keys.update(["api_key", "api_key_env_var"])
     elif auth_type == "password":
         known_session_keys.update(["username", "password", "password_env_var"])
-    elif auth_type == "saml_private_key":
+    elif auth_type == "private_key":
         known_session_keys.update(["private_key_path"])
 
     # Check for unknown keys first. This must happen after 'auth_type' is validated and 'known_session_keys' is built.
@@ -140,9 +142,9 @@ def _validate_single_enterprise_session(session_name: str, config: Any) -> None:
             _LOGGER.error(msg)
             raise EnterpriseSessionConfigurationError(msg)
 
-    elif auth_type == "saml_private_key":
+    elif auth_type == "private_key":
         if "private_key_path" not in config:
-            msg = f"Enterprise session '{session_name}' with auth_type 'saml_private_key' requires 'private_key_path'."
+            msg = f"Enterprise session '{session_name}' with auth_type 'private_key' requires 'private_key_path'."
             _LOGGER.error(msg)
             raise EnterpriseSessionConfigurationError(msg)
         if not isinstance(config["private_key_path"], str):

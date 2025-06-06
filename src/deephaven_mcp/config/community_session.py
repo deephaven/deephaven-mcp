@@ -12,10 +12,12 @@ import logging
 import types
 from typing import Any
 
+from . import McpConfigurationError
+
 _LOGGER = logging.getLogger(__name__)
 
 
-class CommunitySessionConfigurationError(Exception):
+class CommunitySessionConfigurationError(McpConfigurationError):
     """Raised when a community session's configuration cannot be retrieved or is invalid."""
 
     pass

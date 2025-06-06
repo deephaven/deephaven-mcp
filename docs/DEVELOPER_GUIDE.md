@@ -300,7 +300,8 @@ If the `"enterprise_sessions"` key is present, it must be a dictionary. Each ind
 *   `auth_type` (string, **required**): Specifies the authentication method to use. Must be one of the following values:
     *   `"api_key"`: Authenticate using an API key.
     *   `"password"`: Authenticate using a username and password.
-    *   `"saml_private_key"`: Authenticate using a SAML private key (for service accounts or specific SAML setups).
+    *   `"private_key"`: Authenticate using a private key (e.g., for service accounts or specific SAML/OAuth setups requiring a private key).
+    *   `"none"`: No authentication will be used. This is typically for development or trusted environments and should be used with caution.
     Only configuration keys relevant to the selected `auth_type` (and the general `connection_json_url` and optional TLS keys) should be included. Extraneous keys will be ignored by the application but will generate a warning message in the logs, indicating which keys are unexpected for the chosen authentication method.
 
 *   Conditional Authentication Fields (required based on `auth_type`):
@@ -311,8 +312,8 @@ If the `"enterprise_sessions"` key is present, it must be a dictionary. Each ind
         *   `username` (string, **required**): The username for authentication.
         *   And either `password` (string): The password itself.
         *   **OR** `password_env_var` (string): The name of an environment variable that holds the password. Using an environment variable is recommended.
-    *   If `auth_type` is `"saml_private_key"`:
-        *   `private_key_path` (string, **required**): The absolute file system path to the SAML private key file (e.g., a `.pem` file).
+    *   If `auth_type` is `"private_key"`:
+        *   `private_key_path` (string, **required**): The absolute file system path to the private key file (e.g., a `.pem` file).
 **Example `deephaven_mcp.json` with Enterprise Sessions:**
 
 ```json
@@ -335,9 +336,9 @@ If the `"enterprise_sessions"` key is present, it must be a dictionary. Each ind
       "username": "test_user",
       "password_env_var": "STAGING_PASSWORD"
     },
-    "analytics_saml": {
+    "analytics_private_key_auth": {
         "connection_json_url": "https://analytics.dept.com/iris/connection.json",
-        "auth_type": "saml_private_key",
+        "auth_type": "private_key",
         "private_key_path": "/secure/keys/analytics_service_account.key"
     }
   }

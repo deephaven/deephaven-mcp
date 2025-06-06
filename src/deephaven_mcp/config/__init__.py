@@ -138,6 +138,14 @@ Async/Await & I/O:
 - File I/O uses `aiofiles` for non-blocking reads.
 """
 
+__all__ = [
+    "McpConfigurationError",
+    "CommunitySessionConfigurationError",
+    "EnterpriseSessionConfigurationError",
+    "ConfigManager",
+    "CONFIG_ENV_VAR",
+]
+
 import asyncio
 import json
 import logging
@@ -146,6 +154,12 @@ from time import perf_counter
 from typing import Any, cast
 
 import aiofiles
+
+
+class McpConfigurationError(ValueError):
+    """Base class for all Deephaven MCP configuration errors."""
+    pass
+
 
 from .community_session import (
     CommunitySessionConfigurationError,

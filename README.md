@@ -168,7 +168,7 @@ The `enterprise_sessions` key in `deephaven_mcp.json` is a dictionary mapping cu
 *   `auth_type` (string): Specifies the authentication method. Must be one of:
     *   `"api_key"`: For API key-based authentication.
     *   `"password"`: For username/password authentication.
-    *   `"saml_private_key"`: For SAML authentication using a private key.
+    *   `"private_key"`: For authentication using a private key (e.g., SAML or other private key-based auth).
     *   `"none"`: For no authentication (use with caution, typically for development or trusted environments).
 
 **Conditional Fields (based on `auth_type`):**
@@ -182,8 +182,8 @@ The `enterprise_sessions` key in `deephaven_mcp.json` is a dictionary mapping cu
     *   One of the following must be provided for the password:
         *   `password` (string): The password itself.
         *   `password_env_var` (string): The name of an environment variable that holds the password (e.g., `"MY_ENTERPRISE_PASSWORD"`).
-*   **If `auth_type` is `"saml_private_key"`:**
-    *   `private_key_path` (string): The absolute path to the SAML private key file (e.g., `"/path/to/your/private_key.pem"`) (required).
+*   **If `auth_type` is `"private_key"`:**
+    *   `private_key_path` (string): The absolute path to the private key file (e.g., `"/path/to/your/private_key.pem"`) (required).
 
 *Note: All paths, like `private_key_path`, should be absolute and accessible by the MCP server process.*
 
