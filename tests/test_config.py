@@ -146,11 +146,91 @@ async def test_get_config_sets_cache_and_logs(monkeypatch, caplog):
         cfg = await cm.get_config()
     assert cfg == valid_config
     assert cm._cache == valid_config
-    assert any(
-        "Deephaven community session configuration loaded and validated successfully"
-        in r
-        for r in caplog.text.splitlines()
+
+    # Check for the new log messages
+    log_text = caplog.text
+    assert "Deephaven MCP configuration loaded and validated successfully" in log_text
+    assert "Configured Community Sessions:" in log_text
+    # Construct expected redacted session string carefully
+    expected_session_details = valid_config['community_sessions']['local'].copy()
+    expected_session_details['auth_token'] = '[REDACTED]'
+    assert f"  Session 'local': {expected_session_details}" in log_text
+    assert "No Enterprise Systems configured." in log_text
+
+
+@pytest.mark.asyncio
+async def test_get_config_logs_enterprise_systems(monkeypatch, caplog):
+    import importlib
+    import json
+    from unittest import mock
+
+    from deephaven_mcp import config
+
+    # Prepare a valid config JSON string with both community and enterprise systems
+    valid_config_with_enterprise = {
+        "community_sessions": {
+            "comm_local": {
+                "host": "localhost",
+                "port": 10000,
+                "auth_type": "token",
+                "auth_token": "comm_token_val",
+            }
+        },
+        "enterprise_systems": {
+            "ent_prod": {
+                "connection_json_url": "https://prod.example.com/connection.json",
+                "auth_type": "api_key",
+                "api_key": "prod_api_key_value",
+            },
+            "ent_staging": {
+                "connection_json_url": "https://staging.example.com/connection.json",
+                "auth_type": "password",
+                "username": "staging_user",
+                "password": "staging_password_value",
+            }
+        }
+    }
+    config_json = json.dumps(valid_config_with_enterprise)
+
+    monkeypatch.setenv("DH_MCP_CONFIG_FILE", "/fake/path/config_with_enterprise.json")
+    aiofiles_mock = mock.Mock()
+    aiofiles_open_ctx = mock.AsyncMock()
+    aiofiles_open_ctx.__aenter__.return_value.read = mock.AsyncMock(
+        return_value=config_json
     )
+    aiofiles_mock.open = mock.Mock(return_value=aiofiles_open_ctx)
+    monkeypatch.setitem(
+        importlib.import_module("aiofiles").__dict__, "open", aiofiles_mock.open
+    )
+
+    cm = config.ConfigManager()
+    await cm.clear_config_cache()
+    with caplog.at_level("INFO"):
+        cfg = await cm.get_config()
+
+    assert cfg == valid_config_with_enterprise
+    assert cm._cache == valid_config_with_enterprise
+
+    log_text = caplog.text
+    assert "Deephaven MCP configuration loaded and validated successfully" in log_text
+
+    # Check community session logs
+    assert "Configured Community Sessions:" in log_text
+    expected_comm_session_details = valid_config_with_enterprise['community_sessions']['comm_local'].copy()
+    expected_comm_session_details['auth_token'] = '[REDACTED]'
+    assert f"  Session 'comm_local': {expected_comm_session_details}" in log_text
+
+    # Check enterprise system logs
+    assert "Configured Enterprise Systems:" in log_text
+    
+    expected_ent_prod_details = valid_config_with_enterprise['enterprise_systems']['ent_prod'].copy()
+    expected_ent_prod_details['api_key'] = '[REDACTED]'
+    assert f"  System 'ent_prod': {expected_ent_prod_details}" in log_text
+    
+    expected_ent_staging_details = valid_config_with_enterprise['enterprise_systems']['ent_staging'].copy()
+    expected_ent_staging_details['password'] = '[REDACTED]'
+    assert f"  System 'ent_staging': {expected_ent_staging_details}" in log_text
+
 
 
 @pytest.mark.asyncio
@@ -440,7 +520,7 @@ async def test_get_config_invalid_enterprise_system_schema_from_file(monkeypatch
 
     cm = config.ConfigManager()
     # The 'connection_json_url' error is raised first by validate_enterprise_systems_config
-    specific_error_detail = "'connection_json_url' for enterprise system 'bad_system' must be a string, but got int."
+    specific_error_detail = "Field 'connection_json_url' for enterprise system 'bad_system' must be of type str, but got int."
     # This is the message from EnterpriseSystemConfigurationError
     expected_mcp_error_message = f"Configuration validation failed for {config_file_path}: {specific_error_detail}"
     final_match_regex = re.escape(expected_mcp_error_message)
@@ -457,6 +537,910 @@ async def test_get_config_invalid_enterprise_system_schema_from_file(monkeypatch
     assert f"Configuration validation failed for {config_file_path} due to specific session/system error: {specific_error_detail}" in caplog.text
 
     aiofiles.open = original_aio_open
+
+
+@pytest.mark.asyncio
+async def test_validate_enterprise_systems_config_logs_non_dict_map(monkeypatch, caplog):
+    """
+    Tests that validate_enterprise_systems_config correctly logs and raises an error
+    when 'enterprise_systems' is not a dictionary, ensuring the logging redaction
+    path for non-dict maps is covered.
+    """
+    from deephaven_mcp import config
+    import aiofiles
+    import json
+    from unittest import mock
+    import re
+    import logging # Added for caplog.set_level
+
+    config_file_path = "/fake/path/enterprise_non_dict_map.json"
+    monkeypatch.setenv(config.CONFIG_ENV_VAR, config_file_path)
+    # 'enterprise_systems' is a list, not a dict
+    invalid_config_data = {"enterprise_systems": [{"name": "sys1", "api_key": "key1"}]}
+
+    mock_file_read_content = mock.AsyncMock(return_value=json.dumps(invalid_config_data).encode('utf-8'))
+    mock_async_context_manager = mock.AsyncMock()
+    mock_async_context_manager.__aenter__.return_value.read = mock_file_read_content
+    
+    original_aio_open = aiofiles.open
+    aiofiles.open = mock.MagicMock(return_value=mock_async_context_manager)
+
+    cm = config.ConfigManager()
+    caplog.set_level(logging.DEBUG, logger="deephaven_mcp.config") # For validate_enterprise_systems_config debug log
+    
+    specific_error_detail = "'enterprise_systems' must be a dictionary, but got type list."
+    expected_mcp_error_message = f"Configuration validation failed for {config_file_path}: {specific_error_detail}"
+    final_match_regex = re.escape(expected_mcp_error_message)
+
+    with pytest.raises(
+        config.McpConfigurationError,
+        match=final_match_regex,
+    ):
+        await cm.get_config()
+
+    # Check the debug log from validate_enterprise_systems_config
+    # It should log the string representation of the list as passed.
+    assert "Validating enterprise_systems configuration: [{'name': 'sys1', 'api_key': 'key1'}]" in caplog.text
+    assert specific_error_detail in caplog.text # From validate_enterprise_systems_config
+    assert f"Configuration validation failed for {config_file_path} due to specific session/system error: {specific_error_detail}" in caplog.text # From get_config
+
+    aiofiles.open = original_aio_open
+
+
+@pytest.mark.asyncio
+async def test_validate_enterprise_systems_config_logs_non_dict_item_in_map(monkeypatch, caplog):
+    """
+    Tests that validate_enterprise_systems_config correctly logs and raises an error
+    when an item within 'enterprise_systems' is not a dictionary, ensuring the
+    logging redaction path for non-dict items in the map is covered.
+    """
+    from deephaven_mcp import config
+    import aiofiles
+    import json
+    from unittest import mock
+    import re
+    import logging # Added for caplog.set_level
+
+    config_file_path = "/fake/path/enterprise_non_dict_item.json"
+    monkeypatch.setenv(config.CONFIG_ENV_VAR, config_file_path)
+    invalid_config_data = {
+        "enterprise_systems": {
+            "good_system": {"connection_json_url": "http://good", "auth_type": "api_key", "api_key": "secretkey"},
+            "bad_system_item": "this is not a dict" # Malformed item
+        }
+    }
+
+    mock_file_read_content = mock.AsyncMock(return_value=json.dumps(invalid_config_data).encode('utf-8'))
+    mock_async_context_manager = mock.AsyncMock()
+    mock_async_context_manager.__aenter__.return_value.read = mock_file_read_content
+    
+    original_aio_open = aiofiles.open
+    aiofiles.open = mock.MagicMock(return_value=mock_async_context_manager)
+
+    cm = config.ConfigManager()
+    caplog.set_level(logging.DEBUG, logger="deephaven_mcp.config")
+
+    # Error from _validate_single_enterprise_system for 'bad_system_item'
+    specific_error_detail = "Enterprise system 'bad_system_item' configuration must be a dictionary, but got str."
+    expected_mcp_error_message = f"Configuration validation failed for {config_file_path}: {specific_error_detail}"
+    final_match_regex = re.escape(expected_mcp_error_message)
+
+    with pytest.raises(
+        config.McpConfigurationError,
+        match=final_match_regex,
+    ):
+        await cm.get_config()
+
+    # Check the debug log from validate_enterprise_systems_config
+    # 'good_system' should be redacted, 'bad_system_item' should be as-is.
+    expected_log_map_str = "{'good_system': {'connection_json_url': 'http://good', 'auth_type': 'api_key', 'api_key': '[REDACTED]'}, 'bad_system_item': 'this is not a dict'}"
+    assert f"Validating enterprise_systems configuration: {expected_log_map_str}" in caplog.text
+    assert specific_error_detail in caplog.text # From _validate_single_enterprise_system
+    assert f"Configuration validation failed for {config_file_path} due to specific session/system error: {specific_error_detail}" in caplog.text # From get_config
+    
+    aiofiles.open = original_aio_open
+
+
+def test_validate_enterprise_systems_config_is_none_direct_call(caplog):
+    """
+    Tests that validate_enterprise_systems_config handles the case where
+    'enterprise_systems' key is not present (evaluates to None) when called directly.
+    This should be a valid scenario and log a specific DEBUG message.
+    """
+    from deephaven_mcp.config.enterprise_system import validate_enterprise_systems_config
+    import logging
+
+    caplog.set_level(logging.DEBUG)
+    
+    # Directly call the function being tested
+    validate_enterprise_systems_config(None)
+
+    expected_log_message = "'enterprise_systems' key is not present, which is valid."
+    found_log = False
+    for record in caplog.records:
+        if record.name == "deephaven_mcp.config.enterprise_system" and \
+           record.levelname == "DEBUG" and \
+           expected_log_message in record.message:
+            found_log = True
+            break
+    assert found_log, f"Expected DEBUG log message '{expected_log_message}' not found from enterprise_system logger. Logs: {caplog.text}"
+
+
+@pytest.mark.asyncio # Marking async for consistency, though not strictly needed by this test's direct call
+async def test_validate_enterprise_systems_config_invalid_system_name_type(caplog):
+    """
+    Tests that validate_enterprise_systems_config raises an error if a system name
+    (key in enterprise_systems map) is not a string, when called directly.
+    """
+    from deephaven_mcp.config.enterprise_system import validate_enterprise_systems_config, EnterpriseSystemConfigurationError
+    import logging
+    import re
+
+    caplog.set_level(logging.DEBUG) # Capture all debug logs, including from enterprise_system
+
+    invalid_enterprise_map = {
+        123: {"connection_json_url": "http://example.com", "auth_type": "none"} # Invalid system name (int)
+    }
+
+    specific_error_detail = "Enterprise system name must be a string, but got int: 123."
+    
+    with pytest.raises(
+        EnterpriseSystemConfigurationError, # Expecting the direct error from the validation function
+        match=re.escape(specific_error_detail),
+    ):
+        validate_enterprise_systems_config(invalid_enterprise_map)
+
+    # Verify that the specific error was logged by the enterprise_system logger
+    found_log = False
+    for record in caplog.records:
+        if record.name == "deephaven_mcp.config.enterprise_system" and \
+           record.levelname == "ERROR" and \
+           specific_error_detail in record.message:
+            found_log = True
+            break
+    assert found_log, f"Expected ERROR log message '{specific_error_detail}' not found from enterprise_system logger."
+
+
+def test_validate_single_enterprise_system_missing_connection_json_url(caplog):
+    """
+    Tests _validate_single_enterprise_system when 'connection_json_url' is missing.
+    """
+    from deephaven_mcp.config.enterprise_system import _validate_single_enterprise_system, EnterpriseSystemConfigurationError
+    import logging
+    import re
+
+    caplog.set_level(logging.DEBUG) # Capture all logs for thorough checking
+    system_name = "test_system_no_url"
+    # Config missing 'connection_json_url'
+    invalid_config = {
+        "auth_type": "none" 
+    }
+    expected_error_message = f"Required field 'connection_json_url' missing in enterprise system '{system_name}'."
+
+    with pytest.raises(
+        EnterpriseSystemConfigurationError,
+        match=re.escape(expected_error_message),
+    ):
+        _validate_single_enterprise_system(system_name, invalid_config)
+
+    found_log = False
+    for record in caplog.records:
+        if record.name == "deephaven_mcp.config.enterprise_system" and \
+           record.levelname == "ERROR" and \
+           expected_error_message in record.message:
+            found_log = True
+            break
+    assert found_log, f"Expected ERROR log message '{expected_error_message}' not found. Logs: {caplog.text}"
+
+def test_validate_single_enterprise_system_invalid_connection_json_url_type(caplog):
+    """
+    Tests _validate_single_enterprise_system when 'connection_json_url' is not a string.
+    """
+    from deephaven_mcp.config.enterprise_system import _validate_single_enterprise_system, EnterpriseSystemConfigurationError
+    import logging
+    import re
+
+    caplog.set_level(logging.DEBUG)
+    system_name = "test_system_bad_url_type"
+    # Config with 'connection_json_url' of wrong type
+    invalid_config = {
+        "connection_json_url": 12345, # Not a string
+        "auth_type": "api_key",
+        "api_key": "dummy_key_for_valid_auth"
+    }
+    # Ensure the type name in the message matches Python's output for int
+    url_type_name = type(invalid_config['connection_json_url']).__name__ 
+    expected_error_message = f"Field 'connection_json_url' for enterprise system '{system_name}' must be of type str, but got {url_type_name}."
+
+    with pytest.raises(
+        EnterpriseSystemConfigurationError,
+        match=re.escape(expected_error_message),
+    ):
+        _validate_single_enterprise_system(system_name, invalid_config)
+
+    found_log = False
+    for record in caplog.records:
+        if record.name == "deephaven_mcp.config.enterprise_system" and \
+           record.levelname == "ERROR" and \
+           expected_error_message in record.message:
+            found_log = True
+            break
+    assert found_log, f"Expected ERROR log message '{expected_error_message}' not found. Logs: {caplog.text}"
+
+
+def test_validate_single_enterprise_system_missing_auth_type(caplog):
+    """
+    Tests _validate_single_enterprise_system when 'auth_type' is missing.
+    """
+    from deephaven_mcp.config.enterprise_system import _validate_single_enterprise_system, EnterpriseSystemConfigurationError
+    import logging
+    import re
+
+    caplog.set_level(logging.DEBUG)
+    system_name = "test_system_no_auth_type"
+    invalid_config = {
+        "connection_json_url": "http://example.com/connection.json"
+        # 'auth_type' is missing
+    }
+    expected_error_message = f"Required field 'auth_type' missing in enterprise system '{system_name}'."
+
+    with pytest.raises(
+        EnterpriseSystemConfigurationError,
+        match=re.escape(expected_error_message),
+    ):
+        _validate_single_enterprise_system(system_name, invalid_config)
+
+    found_log = False
+    for record in caplog.records:
+        if record.name == "deephaven_mcp.config.enterprise_system" and \
+           record.levelname == "ERROR" and \
+           expected_error_message in record.message:
+            found_log = True
+            break
+    assert found_log, f"Expected ERROR log message '{expected_error_message}' not found. Logs: {caplog.text}"
+
+def test_validate_single_enterprise_system_invalid_auth_type_type(caplog):
+    """
+    Tests _validate_single_enterprise_system when 'auth_type' is not a string.
+    """
+    from deephaven_mcp.config.enterprise_system import _validate_single_enterprise_system, EnterpriseSystemConfigurationError
+    import logging
+    import re
+
+    caplog.set_level(logging.DEBUG)
+    system_name = "test_system_bad_auth_type_type"
+    invalid_config = {
+        "connection_json_url": "http://example.com/connection.json",
+        "auth_type": 123 # Not a string
+    }
+    auth_type_val = invalid_config['auth_type']
+    auth_type_name = type(auth_type_val).__name__
+    # This tests when auth_type itself is not a string, so it's a base field type error
+    expected_error_message = f"Field 'auth_type' for enterprise system '{system_name}' must be of type str, but got {auth_type_name}."
+
+
+    with pytest.raises(
+        EnterpriseSystemConfigurationError,
+        match=re.escape(expected_error_message),
+    ):
+        _validate_single_enterprise_system(system_name, invalid_config)
+
+    found_log = False
+    for record in caplog.records:
+        if record.name == "deephaven_mcp.config.enterprise_system" and \
+           record.levelname == "ERROR" and \
+           expected_error_message in record.message:
+            found_log = True
+            break
+    assert found_log, f"Expected ERROR log message '{expected_error_message}' not found. Logs: {caplog.text}"
+
+def test_validate_single_enterprise_system_unknown_auth_type_value(caplog):
+    """
+    Tests _validate_single_enterprise_system when 'auth_type' is an unknown string value.
+    """
+    from deephaven_mcp.config.enterprise_system import _validate_single_enterprise_system, EnterpriseSystemConfigurationError, _AUTH_SPECIFIC_FIELDS
+    import logging
+    import re
+
+    caplog.set_level(logging.DEBUG)
+    system_name = "test_system_unknown_auth_value"
+    invalid_config = {
+        "connection_json_url": "http://example.com/connection.json",
+        "auth_type": "unknown_auth_method" # Unknown string value
+    }
+    allowed_types_str = sorted(list(_AUTH_SPECIFIC_FIELDS.keys()))
+    expected_error_message = f"'auth_type' for enterprise system '{system_name}' must be one of {allowed_types_str}, but got '{invalid_config['auth_type']}'."
+
+    with pytest.raises(
+        EnterpriseSystemConfigurationError,
+        match=re.escape(expected_error_message),
+    ):
+        _validate_single_enterprise_system(system_name, invalid_config)
+
+    found_log = False
+    for record in caplog.records:
+        if record.name == "deephaven_mcp.config.enterprise_system" and \
+           record.levelname == "ERROR" and \
+           expected_error_message in record.message:
+            found_log = True
+            break
+    assert found_log, f"Expected ERROR log message '{expected_error_message}' not found. Logs: {caplog.text}"
+
+
+def test_validate_single_enterprise_system_unknown_key(caplog):
+    """
+    Tests _validate_single_enterprise_system logs a warning for an unknown key.
+    """
+    from deephaven_mcp.config.enterprise_system import _validate_single_enterprise_system
+    import logging
+
+    caplog.set_level(logging.WARNING) # We only care about the warning here
+    system_name = "test_system_unknown_key"
+    config_with_unknown_key = {
+        "connection_json_url": "http://example.com/connection.json",
+        "auth_type": "api_key",
+        "api_key": "dummy_key_for_valid_auth",
+        "some_unknown_field": "some_value"
+    }
+    expected_warning_message = f"Unknown field 'some_unknown_field' in enterprise system '{system_name}' configuration. It will be ignored."
+
+    # This should not raise an error, only log a warning
+    _validate_single_enterprise_system(system_name, config_with_unknown_key)
+
+    found_log = False
+    for record in caplog.records:
+        if record.name == "deephaven_mcp.config.enterprise_system" and \
+           record.levelname == "WARNING" and \
+           expected_warning_message in record.message:
+            found_log = True
+            break
+    assert found_log, f"Expected WARNING log message '{expected_warning_message}' not found. Logs: {caplog.text}"
+
+def test_validate_single_enterprise_system_base_field_invalid_tuple_type(monkeypatch, caplog):
+    """
+    Tests _validate_single_enterprise_system when a base field expects a tuple of types
+    and an invalid type is provided.
+    """
+    from deephaven_mcp.config import enterprise_system # Import the module itself
+    from deephaven_mcp.config.enterprise_system import _validate_single_enterprise_system, EnterpriseSystemConfigurationError
+    import logging
+    import re
+
+    caplog.set_level(logging.DEBUG)
+    system_name = "test_system_base_tuple_type_fail"
+
+    # Modify _BASE_ENTERPRISE_SYSTEM_FIELDS for this test
+    original_base_fields = enterprise_system._BASE_ENTERPRISE_SYSTEM_FIELDS
+    patched_base_fields = original_base_fields.copy()
+    patched_base_fields["test_base_tuple_field"] = (str, int) # Expects str OR int
+    monkeypatch.setattr(enterprise_system, "_BASE_ENTERPRISE_SYSTEM_FIELDS", patched_base_fields)
+
+    invalid_config = {
+        "connection_json_url": "http://example.com/connection.json",
+        "auth_type": "api_key",  # Use a valid auth_type
+        "api_key": "dummy_key_for_test",  # Satisfy 'api_key' auth type requirements
+        "test_base_tuple_field": [1.0, 2.0]  # Use a type not str or int (e.g., list)
+    }
+
+    field_value = invalid_config['test_base_tuple_field']
+    expected_types_str = ", ".join(t.__name__ for t in patched_base_fields["test_base_tuple_field"])
+    expected_error_message = f"Field 'test_base_tuple_field' for enterprise system '{system_name}' must be one of types ({expected_types_str}), but got {type(field_value).__name__}."
+
+    with pytest.raises(
+        EnterpriseSystemConfigurationError,
+        match=re.escape(expected_error_message),
+    ):
+        _validate_single_enterprise_system(system_name, invalid_config)
+
+    found_log = False
+    for record in caplog.records:
+        if record.name == "deephaven_mcp.config.enterprise_system" and \
+           record.levelname == "ERROR" and \
+           expected_error_message in record.message:
+            found_log = True
+            break
+    assert found_log, f"Expected ERROR log message '{expected_error_message}' not found. Logs: {caplog.text}"
+
+    # Restore original fields to avoid affecting other tests
+    monkeypatch.setattr(enterprise_system, "_BASE_ENTERPRISE_SYSTEM_FIELDS", original_base_fields)
+
+def test_validate_single_enterprise_system_auth_specific_field_invalid_tuple_type(monkeypatch, caplog):
+    """
+    Tests _validate_single_enterprise_system when an auth-specific field expects a tuple of types
+    and an invalid type is provided.
+    """
+    from deephaven_mcp.config import enterprise_system # Import the module itself
+    from deephaven_mcp.config.enterprise_system import _validate_single_enterprise_system, EnterpriseSystemConfigurationError, _AUTH_SPECIFIC_FIELDS
+    import logging
+    import re
+
+    caplog.set_level(logging.DEBUG)
+    system_name = "test_system_auth_tuple_type_fail"
+    auth_type_to_test = "api_key"
+
+    # Modify _AUTH_SPECIFIC_FIELDS for this test
+    original_auth_fields = enterprise_system._AUTH_SPECIFIC_FIELDS
+    patched_auth_fields = {k: v.copy() for k, v in original_auth_fields.items()} # Deep copy for safety
+    if auth_type_to_test not in patched_auth_fields:
+        patched_auth_fields[auth_type_to_test] = {}
+    patched_auth_fields[auth_type_to_test]["test_auth_tuple_field"] = (str, int) # Expects str OR int
+    monkeypatch.setattr(enterprise_system, "_AUTH_SPECIFIC_FIELDS", patched_auth_fields)
+
+    invalid_config = {
+        "connection_json_url": "http://example.com/connection.json",
+        "auth_type": auth_type_to_test,
+        "api_key": "dummy_key", # Satisfy api_key presence for this auth type
+        "test_auth_tuple_field": [1.0, 2.0] # Invalid type (list)
+    }
+
+    field_value = invalid_config['test_auth_tuple_field']
+    expected_types_str = ", ".join(t.__name__ for t in patched_auth_fields[auth_type_to_test]["test_auth_tuple_field"])
+    expected_error_message = f"Field 'test_auth_tuple_field' for enterprise system '{system_name}' (auth_type: {auth_type_to_test}) must be one of types ({expected_types_str}), but got {type(field_value).__name__}."
+
+    with pytest.raises(
+        EnterpriseSystemConfigurationError,
+        match=re.escape(expected_error_message),
+    ):
+        _validate_single_enterprise_system(system_name, invalid_config)
+
+    found_log = False
+    for record in caplog.records:
+        if record.name == "deephaven_mcp.config.enterprise_system" and \
+           record.levelname == "ERROR" and \
+           expected_error_message in record.message:
+            found_log = True
+            break
+    assert found_log, f"Expected ERROR log message '{expected_error_message}' not found. Logs: {caplog.text}"
+
+    # Restore original fields to avoid affecting other tests
+    monkeypatch.setattr(enterprise_system, "_AUTH_SPECIFIC_FIELDS", original_auth_fields)
+
+def test_validate_single_enterprise_system_api_key_auth_missing_keys(caplog):
+    """
+    Tests _validate_single_enterprise_system for auth_type 'api_key'
+    when both 'api_key' and 'api_key_env_var' are missing.
+    """
+    from deephaven_mcp.config.enterprise_system import _validate_single_enterprise_system, EnterpriseSystemConfigurationError
+    import logging
+    import re
+
+    caplog.set_level(logging.DEBUG)
+    system_name = "test_system_api_key_no_keys"
+    invalid_config = {
+        "connection_json_url": "http://example.com/connection.json",
+        "auth_type": "api_key"
+        # 'api_key' and 'api_key_env_var' are missing
+    }
+    expected_error_message = f"Enterprise system '{system_name}' with auth_type 'api_key' must define 'api_key' or 'api_key_env_var'."
+
+    with pytest.raises(
+        EnterpriseSystemConfigurationError,
+        match=re.escape(expected_error_message),
+    ):
+        _validate_single_enterprise_system(system_name, invalid_config)
+
+    found_log = False
+    for record in caplog.records:
+        if record.name == "deephaven_mcp.config.enterprise_system" and \
+           record.levelname == "ERROR" and \
+           expected_error_message in record.message:
+            found_log = True
+            break
+    assert found_log, f"Expected ERROR log message '{expected_error_message}' not found. Logs: {caplog.text}"
+
+def test_validate_single_enterprise_system_api_key_auth_invalid_api_key_type(caplog):
+    """
+    Tests _validate_single_enterprise_system for auth_type 'api_key'
+    when 'api_key' has an invalid type.
+    """
+    from deephaven_mcp.config.enterprise_system import _validate_single_enterprise_system, EnterpriseSystemConfigurationError
+    import logging
+    import re
+
+    caplog.set_level(logging.DEBUG)
+    system_name = "test_system_api_key_bad_key_type"
+    invalid_config = {
+        "connection_json_url": "http://example.com/connection.json",
+        "auth_type": "api_key",
+        "api_key": 12345 # Not a string
+    }
+    key_type_name = type(invalid_config['api_key']).__name__
+    expected_error_message = f"Field 'api_key' for enterprise system '{system_name}' (auth_type: api_key) must be of type str, but got {key_type_name}."
+
+    with pytest.raises(
+        EnterpriseSystemConfigurationError,
+        match=re.escape(expected_error_message),
+    ):
+        _validate_single_enterprise_system(system_name, invalid_config)
+
+    found_log = False
+    for record in caplog.records:
+        if record.name == "deephaven_mcp.config.enterprise_system" and \
+           record.levelname == "ERROR" and \
+           expected_error_message in record.message:
+            found_log = True
+            break
+    assert found_log, f"Expected ERROR log message '{expected_error_message}' not found. Logs: {caplog.text}"
+
+def test_validate_single_enterprise_system_api_key_auth_invalid_api_key_env_var_type(caplog):
+    """
+    Tests _validate_single_enterprise_system for auth_type 'api_key'
+    when 'api_key_env_var' has an invalid type.
+    """
+    from deephaven_mcp.config.enterprise_system import _validate_single_enterprise_system, EnterpriseSystemConfigurationError
+    import logging
+    import re
+
+    caplog.set_level(logging.DEBUG)
+    system_name = "test_system_api_key_bad_env_var_type"
+    invalid_config = {
+        "connection_json_url": "http://example.com/connection.json",
+        "auth_type": "api_key",
+        "api_key_env_var": 12345 # Not a string
+    }
+    key_type_name = type(invalid_config['api_key_env_var']).__name__
+    expected_error_message = f"Field 'api_key_env_var' for enterprise system '{system_name}' (auth_type: api_key) must be of type str, but got {key_type_name}."
+
+    with pytest.raises(
+        EnterpriseSystemConfigurationError,
+        match=re.escape(expected_error_message),
+    ):
+        _validate_single_enterprise_system(system_name, invalid_config)
+
+    found_log = False
+    for record in caplog.records:
+        if record.name == "deephaven_mcp.config.enterprise_system" and \
+           record.levelname == "ERROR" and \
+           expected_error_message in record.message:
+            found_log = True
+            break
+    assert found_log, f"Expected ERROR log message '{expected_error_message}' not found. Logs: {caplog.text}"
+
+
+def test_validate_single_enterprise_system_password_auth_missing_username(caplog):
+    """
+    Tests _validate_single_enterprise_system for auth_type 'password'
+    when 'username' is missing.
+    """
+    from deephaven_mcp.config.enterprise_system import _validate_single_enterprise_system, EnterpriseSystemConfigurationError
+    import logging
+    import re
+
+    caplog.set_level(logging.DEBUG)
+    system_name = "test_system_pw_auth_no_user"
+    invalid_config = {
+        "connection_json_url": "http://example.com/connection.json",
+        "auth_type": "password"
+        # 'username' is missing
+    }
+    expected_error_message = f"Enterprise system '{system_name}' with auth_type 'password' must define 'username'."
+
+    with pytest.raises(
+        EnterpriseSystemConfigurationError,
+        match=re.escape(expected_error_message),
+    ):
+        _validate_single_enterprise_system(system_name, invalid_config)
+
+    found_log = False
+    for record in caplog.records:
+        if record.name == "deephaven_mcp.config.enterprise_system" and \
+           record.levelname == "ERROR" and \
+           expected_error_message in record.message:
+            found_log = True
+            break
+    assert found_log, f"Expected ERROR log message '{expected_error_message}' not found. Logs: {caplog.text}"
+
+def test_validate_single_enterprise_system_password_auth_invalid_username_type(caplog):
+    """
+    Tests _validate_single_enterprise_system for auth_type 'password'
+    when 'username' has an invalid type.
+    """
+    from deephaven_mcp.config.enterprise_system import _validate_single_enterprise_system, EnterpriseSystemConfigurationError
+    import logging
+    import re
+
+    caplog.set_level(logging.DEBUG)
+    system_name = "test_system_pw_auth_bad_user_type"
+    invalid_config = {
+        "connection_json_url": "http://example.com/connection.json",
+        "auth_type": "password",
+        "username": 12345 # Not a string
+    }
+    key_type_name = type(invalid_config['username']).__name__
+    expected_error_message = f"Field 'username' for enterprise system '{system_name}' (auth_type: password) must be of type str, but got {key_type_name}."
+
+    with pytest.raises(
+        EnterpriseSystemConfigurationError,
+        match=re.escape(expected_error_message),
+    ):
+        _validate_single_enterprise_system(system_name, invalid_config)
+
+    found_log = False
+    for record in caplog.records:
+        if record.name == "deephaven_mcp.config.enterprise_system" and \
+           record.levelname == "ERROR" and \
+           expected_error_message in record.message:
+            found_log = True
+            break
+    assert found_log, f"Expected ERROR log message '{expected_error_message}' not found. Logs: {caplog.text}"
+
+def test_validate_single_enterprise_system_password_auth_missing_password_keys(caplog):
+    """
+    Tests _validate_single_enterprise_system for auth_type 'password'
+    when both 'password' and 'password_env_var' are missing.
+    """
+    from deephaven_mcp.config.enterprise_system import _validate_single_enterprise_system, EnterpriseSystemConfigurationError
+    import logging
+    import re
+
+    caplog.set_level(logging.DEBUG)
+    system_name = "test_system_pw_auth_no_pw_keys"
+    invalid_config = {
+        "connection_json_url": "http://example.com/connection.json",
+        "auth_type": "password",
+        "username": "testuser"
+        # 'password' and 'password_env_var' are missing
+    }
+    expected_error_message = f"Enterprise system '{system_name}' with auth_type 'password' must define 'password' or 'password_env_var'."
+
+    with pytest.raises(
+        EnterpriseSystemConfigurationError,
+        match=re.escape(expected_error_message),
+    ):
+        _validate_single_enterprise_system(system_name, invalid_config)
+
+    found_log = False
+    for record in caplog.records:
+        if record.name == "deephaven_mcp.config.enterprise_system" and \
+           record.levelname == "ERROR" and \
+           expected_error_message in record.message:
+            found_log = True
+            break
+    assert found_log, f"Expected ERROR log message '{expected_error_message}' not found. Logs: {caplog.text}"
+
+
+def test_validate_single_enterprise_system_password_auth_invalid_password_type(caplog):
+    """
+    Tests _validate_single_enterprise_system for auth_type 'password'
+    when 'password' has an invalid type.
+    """
+    from deephaven_mcp.config.enterprise_system import _validate_single_enterprise_system, EnterpriseSystemConfigurationError
+    import logging
+    import re
+
+    caplog.set_level(logging.DEBUG)
+    system_name = "test_system_pw_auth_bad_pw_type"
+    invalid_config = {
+        "connection_json_url": "http://example.com/connection.json",
+        "auth_type": "password",
+        "username": "testuser",
+        "password": 12345 # Not a string
+    }
+    key_type_name = type(invalid_config['password']).__name__
+    expected_error_message = f"Field 'password' for enterprise system '{system_name}' (auth_type: password) must be of type str, but got {key_type_name}."
+
+    with pytest.raises(
+        EnterpriseSystemConfigurationError,
+        match=re.escape(expected_error_message),
+    ):
+        _validate_single_enterprise_system(system_name, invalid_config)
+
+    found_log = False
+    for record in caplog.records:
+        if record.name == "deephaven_mcp.config.enterprise_system" and \
+           record.levelname == "ERROR" and \
+           expected_error_message in record.message:
+            found_log = True
+            break
+    assert found_log, f"Expected ERROR log message '{expected_error_message}' not found. Logs: {caplog.text}"
+
+def test_validate_single_enterprise_system_password_auth_invalid_password_env_var_type(caplog):
+    """
+    Tests _validate_single_enterprise_system for auth_type 'password'
+    when 'password_env_var' has an invalid type.
+    """
+    from deephaven_mcp.config.enterprise_system import _validate_single_enterprise_system, EnterpriseSystemConfigurationError
+    import logging
+    import re
+
+    caplog.set_level(logging.DEBUG)
+    system_name = "test_system_pw_auth_bad_pw_env_type"
+    invalid_config = {
+        "connection_json_url": "http://example.com/connection.json",
+        "auth_type": "password",
+        "username": "testuser",
+        "password_env_var": 12345 # Not a string
+    }
+    key_type_name = type(invalid_config['password_env_var']).__name__
+    expected_error_message = f"Field 'password_env_var' for enterprise system '{system_name}' (auth_type: password) must be of type str, but got {key_type_name}."
+
+    with pytest.raises(
+        EnterpriseSystemConfigurationError,
+        match=re.escape(expected_error_message),
+    ):
+        _validate_single_enterprise_system(system_name, invalid_config)
+
+    found_log = False
+    for record in caplog.records:
+        if record.name == "deephaven_mcp.config.enterprise_system" and \
+           record.levelname == "ERROR" and \
+           expected_error_message in record.message:
+            found_log = True
+            break
+    assert found_log, f"Expected ERROR log message '{expected_error_message}' not found. Logs: {caplog.text}"
+
+def test_validate_single_enterprise_system_private_key_auth_missing_key(caplog):
+    """
+    Tests _validate_single_enterprise_system for auth_type 'private_key'
+    when 'private_key' is missing.
+    """
+    from deephaven_mcp.config.enterprise_system import _validate_single_enterprise_system, EnterpriseSystemConfigurationError
+    import logging
+    import re
+
+    caplog.set_level(logging.DEBUG)
+    system_name = "test_system_pk_auth_no_path"
+    invalid_config = {
+        "connection_json_url": "http://example.com/connection.json",
+        "auth_type": "private_key"
+        # 'private_key' is missing
+    }
+    expected_error_message = f"Enterprise system '{system_name}' with auth_type 'private_key' must define 'private_key'."
+
+    with pytest.raises(
+        EnterpriseSystemConfigurationError,
+        match=re.escape(expected_error_message),
+    ):
+        _validate_single_enterprise_system(system_name, invalid_config)
+
+    found_log = False
+    for record in caplog.records:
+        if record.name == "deephaven_mcp.config.enterprise_system" and \
+           record.levelname == "ERROR" and \
+           expected_error_message in record.message:
+            found_log = True
+            break
+    assert found_log, f"Expected ERROR log message '{expected_error_message}' not found. Logs: {caplog.text}"
+
+def test_validate_single_enterprise_system_private_key_auth_invalid_key_type(caplog):
+    """
+    Tests _validate_single_enterprise_system for auth_type 'private_key'
+    when 'private_key' has an invalid type.
+    """
+    from deephaven_mcp.config.enterprise_system import _validate_single_enterprise_system, EnterpriseSystemConfigurationError
+    import logging
+    import re
+
+    caplog.set_level(logging.DEBUG)
+    system_name = "test_system_pk_auth_bad_path_type"
+    invalid_config = {
+        "connection_json_url": "http://example.com/connection.json",
+        "auth_type": "private_key",
+        "private_key": 12345 # Not a string
+    }
+    key_type_name = type(invalid_config['private_key']).__name__
+    expected_error_message = f"Field 'private_key' for enterprise system '{system_name}' (auth_type: private_key) must be of type str, but got {key_type_name}."
+
+    with pytest.raises(
+        EnterpriseSystemConfigurationError,
+        match=re.escape(expected_error_message),
+    ):
+        _validate_single_enterprise_system(system_name, invalid_config)
+
+    found_log = False
+    for record in caplog.records:
+        if record.name == "deephaven_mcp.config.enterprise_system" and \
+           record.levelname == "ERROR" and \
+           expected_error_message in record.message:
+            found_log = True
+            break
+    assert found_log, f"Expected ERROR log message '{expected_error_message}' not found. Logs: {caplog.text}"
+
+
+def test_validate_single_enterprise_system_api_key_auth_both_keys_present(caplog):
+    """
+    Tests _validate_single_enterprise_system for auth_type 'api_key'
+    when both 'api_key' and 'api_key_env_var' are present.
+    """
+    from deephaven_mcp.config.enterprise_system import _validate_single_enterprise_system, EnterpriseSystemConfigurationError
+    import logging
+    import re
+
+    caplog.set_level(logging.DEBUG)
+    system_name = "test_system_api_both_keys"
+    invalid_config = {
+        "connection_json_url": "http://example.com/connection.json",
+        "auth_type": "api_key",
+        "api_key": "some_key",
+        "api_key_env_var": "SOME_ENV_VAR"
+    }
+    expected_error_message = f"Enterprise system '{system_name}' with auth_type 'api_key' must not define both 'api_key' and 'api_key_env_var'. Specify one."
+
+    with pytest.raises(
+        EnterpriseSystemConfigurationError,
+        match=re.escape(expected_error_message),
+    ):
+        _validate_single_enterprise_system(system_name, invalid_config)
+
+    found_log = False
+    for record in caplog.records:
+        if record.name == "deephaven_mcp.config.enterprise_system" and \
+           record.levelname == "ERROR" and \
+           expected_error_message in record.message:
+            found_log = True
+            break
+    assert found_log, f"Expected ERROR log message '{expected_error_message}' not found. Logs: {caplog.text}"
+
+def test_validate_single_enterprise_system_password_auth_both_passwords_present(caplog):
+    """
+    Tests _validate_single_enterprise_system for auth_type 'password'
+    when both 'password' and 'password_env_var' are present.
+    """
+    from deephaven_mcp.config.enterprise_system import _validate_single_enterprise_system, EnterpriseSystemConfigurationError
+    import logging
+    import re
+
+    caplog.set_level(logging.DEBUG)
+    system_name = "test_system_pw_both_passwords"
+    invalid_config = {
+        "connection_json_url": "http://example.com/connection.json",
+        "auth_type": "password",
+        "username": "testuser",
+        "password": "some_password",
+        "password_env_var": "SOME_PW_ENV_VAR"
+    }
+    expected_error_message = f"Enterprise system '{system_name}' with auth_type 'password' must not define both 'password' and 'password_env_var'. Specify one."
+
+    with pytest.raises(
+        EnterpriseSystemConfigurationError,
+        match=re.escape(expected_error_message),
+    ):
+        _validate_single_enterprise_system(system_name, invalid_config)
+
+    found_log = False
+    for record in caplog.records:
+        if record.name == "deephaven_mcp.config.enterprise_system" and \
+           record.levelname == "ERROR" and \
+           expected_error_message in record.message:
+            found_log = True
+            break
+    assert found_log, f"Expected ERROR log message '{expected_error_message}' not found. Logs: {caplog.text}"
+
+
+
+@pytest.mark.asyncio # Marking async for consistency, though not strictly needed by this test's direct call
+async def test_validate_enterprise_systems_config_invalid_system_name_type(caplog):
+    """
+    Tests that validate_enterprise_systems_config raises an error if a system name
+    (key in enterprise_systems map) is not a string, when called directly.
+    """
+    from deephaven_mcp.config.enterprise_system import validate_enterprise_systems_config, EnterpriseSystemConfigurationError
+    import logging
+    import re
+
+    caplog.set_level(logging.DEBUG) # Capture all debug logs, including from enterprise_system
+
+    invalid_enterprise_map = {
+        123: {"connection_json_url": "http://example.com", "auth_type": "none"} # Invalid system name (int)
+    }
+
+    specific_error_detail = "Enterprise system name must be a string, but got int: 123."
+    
+    with pytest.raises(
+        EnterpriseSystemConfigurationError, # Expecting the direct error from the validation function
+        match=re.escape(specific_error_detail),
+    ):
+        validate_enterprise_systems_config(invalid_enterprise_map)
+
+    # Verify that the specific error was logged by the enterprise_system logger
+    found_log = False
+    for record in caplog.records:
+        if record.name == "deephaven_mcp.config.enterprise_system" and \
+           record.levelname == "ERROR" and \
+           specific_error_detail in record.message:
+            found_log = True
+            break
+    assert found_log, f"Expected ERROR log message '{specific_error_detail}' not found from enterprise_system logger."
 
 
 @pytest.mark.asyncio
@@ -489,11 +1473,11 @@ async def test_get_config_no_community_sessions_key_from_file(monkeypatch, caplo
         cfg = await cm.get_config()
     assert cfg == {}  # Expect an empty dictionary
     assert cm._cache == {}
-    assert any(
-        "Deephaven community session configuration loaded and validated successfully"
-        in r
-        for r in caplog.text.splitlines()
-    )
+    # Check for the new log messages for empty config
+    log_text = caplog.text
+    assert "Deephaven MCP configuration loaded and validated successfully" in log_text
+    assert "No Community Sessions configured." in log_text
+    assert "No Enterprise Systems configured." in log_text
 
     session_names = await cm.get_community_session_names()
     assert session_names == []

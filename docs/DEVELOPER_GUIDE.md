@@ -307,11 +307,11 @@ If the `"enterprise_systems"` key is present, it must be a dictionary. Each indi
 *   Conditional Authentication Fields (required based on `auth_type`):
     *   If `auth_type` is `"api_key"`:
         *   `api_key` (string): The API key itself.
-        *   **OR** `api_key_env_var` (string): The name of an environment variable that holds the API key. Using an environment variable is recommended for better security.
+        *   **OR** `api_key_env_var` (string): The name of an environment variable that holds the API key. Using an environment variable is recommended for better security. If the `api_key` field is used directly, its value will be redacted in application logs.
     *   If `auth_type` is `"password"`:
         *   `username` (string, **required**): The username for authentication.
         *   And either `password` (string): The password itself.
-        *   **OR** `password_env_var` (string): The name of an environment variable that holds the password. Using an environment variable is recommended.
+        *   **OR** `password_env_var` (string): The name of an environment variable that holds the password. Using an environment variable is recommended. If the `password` field is used directly, its value will be redacted in application logs.
     *   If `auth_type` is `"private_key"`:
         *   `private_key_path` (string, **required**): The absolute file system path to the private key file (e.g., a `.pem` file).
 **Example `deephaven_mcp.json` with Enterprise Systems:**

@@ -57,93 +57,92 @@ def test_validate_enterprise_systems_not_a_dict():
     "system_name, system_config, error_match",
     [
         (
-            123, # Invalid session name type
+            123,  # Invalid system name type
             {
-                "connection_json_url": "http://test", 
+                "connection_json_url": "http://test",
                 "auth_type": "api_key",
                 "api_key_env_var": "DUMMY_ENV_VAR"
             },
-            "Enterprise system name must be a string"
+            r"Enterprise system name must be a string"
         ),
         (
-            "test_system", 
-            "not_a_dict", # Invalid system_config type
-            "Configuration for enterprise system 'test_system' must be a dictionary"
+            "test_system_not_dict",
+            "not_a_dict",  # Invalid system_config type
+            r"Enterprise system 'test_system_not_dict' configuration must be a dictionary"
         ),
         (
             "missing_conn_url",
             {"auth_type": "api_key", "api_key_env_var": "DUMMY_ENV_VAR"},
-            "missing required key 'connection_json_url'"
+            r"Required field 'connection_json_url' missing in enterprise system 'missing_conn_url'"
         ),
         (
             "invalid_conn_url_type",
             {"connection_json_url": 123, "auth_type": "api_key", "api_key_env_var": "DUMMY_ENV_VAR"},
-            "'connection_json_url'.*must be a string"
+            r"Field 'connection_json_url' for enterprise system 'invalid_conn_url_type' must be of type str"
         ),
         (
             "missing_auth_type",
             {"connection_json_url": "http://test"},
-            "missing required key 'auth_type'"
+            r"Required field 'auth_type' missing in enterprise system 'missing_auth_type'"
         ),
         (
             "invalid_auth_type_value",
             {"connection_json_url": "http://test", "auth_type": "bad_type"},
-            "'auth_type'.*must be one of"
+            r"'auth_type' for enterprise system 'invalid_auth_type_value' must be one of \['api_key', 'password', 'private_key'\]"
         ),
         # API Key Auth Type Tests
         (
             "api_key_missing_key_or_env",
             {"connection_json_url": "http://test", "auth_type": "api_key"},
-            "requires 'api_key' or 'api_key_env_var'"
+            r"Enterprise system 'api_key_missing_key_or_env' with auth_type 'api_key' must define 'api_key' or 'api_key_env_var'"
         ),
         (
             "api_key_invalid_key_type",
             {"connection_json_url": "http://test", "auth_type": "api_key", "api_key": 123},
-            "'api_key'.*must be a string"
+            r"Field 'api_key' for enterprise system 'api_key_invalid_key_type' \(auth_type: api_key\) must be of type str"
         ),
         (
             "api_key_invalid_env_var_type",
             {"connection_json_url": "http://test", "auth_type": "api_key", "api_key_env_var": 123},
-            "'api_key_env_var'.*must be a string"
+            r"Field 'api_key_env_var' for enterprise system 'api_key_invalid_env_var_type' \(auth_type: api_key\) must be of type str"
         ),
         # Password Auth Type Tests
         (
             "password_missing_username",
             {"connection_json_url": "http://test", "auth_type": "password"},
-            "requires 'username'"
+            r"Enterprise system 'password_missing_username' with auth_type 'password' must define 'username'"
         ),
         (
             "password_invalid_username_type",
             {"connection_json_url": "http://test", "auth_type": "password", "username": 123},
-            "'username'.*must be a string"
+            r"Field 'username' for enterprise system 'password_invalid_username_type' \(auth_type: password\) must be of type str"
         ),
         (
             "password_missing_pass_or_env",
             {"connection_json_url": "http://test", "auth_type": "password", "username": "user"},
-            "requires 'password' or 'password_env_var'"
+            r"Enterprise system 'password_missing_pass_or_env' with auth_type 'password' must define 'password' or 'password_env_var'"
         ),
         (
             "password_invalid_password_type",
             {"connection_json_url": "http://test", "auth_type": "password", "username": "user", "password": 123},
-            "'password'.*must be a string"
+            r"Field 'password' for enterprise system 'password_invalid_password_type' \(auth_type: password\) must be of type str"
         ),
         (
             "password_invalid_password_env_var_type",
             {"connection_json_url": "http://test", "auth_type": "password", "username": "user", "password_env_var": 123},
-            "'password_env_var'.*must be a string"
+            r"Field 'password_env_var' for enterprise system 'password_invalid_password_env_var_type' \(auth_type: password\) must be of type str"
         ),
         # Private Key Auth Type Tests
         (
-            "private_key_missing_key_path",
+            "private_key_missing_key", # Renamed from private_key_missing_key_path
             {"connection_json_url": "http://test", "auth_type": "private_key"},
-            "requires 'private_key_path'"
+            r"Enterprise system 'private_key_missing_key' with auth_type 'private_key' must define 'private_key'"
         ),
         (
-            "private_key_invalid_key_path_type",
-            {"connection_json_url": "http://test", "auth_type": "private_key", "private_key_path": 123},
-            "'private_key_path'.*must be a string"
+            "private_key_invalid_key_type", # Renamed from private_key_invalid_key_path_type
+            {"connection_json_url": "http://test", "auth_type": "private_key", "private_key": 123},
+            r"Field 'private_key' for enterprise system 'private_key_invalid_key_type' \(auth_type: private_key\) must be of type str"
         )
-        # Unknown key warning (does not raise error)
     ]
 )
 def test_single_enterprise_system_invalid_configs(system_name, system_config, error_match):
@@ -165,36 +164,42 @@ def test_single_enterprise_system_invalid_configs(system_name, system_config, er
         validate_enterprise_systems_config(config_map)
 
 @pytest.mark.parametrize(
-    "system_name, auth_type, config_override, unknown_key, expected_warning_match",
+    "system_name, auth_type, config_override, unknown_key_to_check, expected_warning_substring",
     [
         (
             "api_key_with_username", "api_key",
             {"api_key_env_var": "KEY", "username": "test_user"},
             "username",
-            "Unknown key 'username' in enterprise system 'api_key_with_username' configuration (auth_type: api_key)"
+            "Unknown field 'username' in enterprise system 'api_key_with_username' configuration. It will be ignored."
         ),
         (
             "password_with_api_key", "password",
             {"username": "user", "password_env_var": "PASS", "api_key": "some_key"},
             "api_key",
-            "Unknown key 'api_key' in enterprise system 'password_with_api_key' configuration (auth_type: password)"
+            "Unknown field 'api_key' in enterprise system 'password_with_api_key' configuration. It will be ignored."
         ),
         (
             "private_key_with_password", "private_key",
-            {"private_key_path": "/path/key.pem", "password": "secret"},
+            {"private_key": "/path/key.pem", "password": "secret"}, # Changed private_key_path to private_key
             "password",
-            "Unknown key 'password' in enterprise system 'private_key_with_password' configuration (auth_type: private_key)"
+            "Unknown field 'password' in enterprise system 'private_key_with_password' configuration. It will be ignored."
         ),
         (
             "api_key_with_multiple_unknown", "api_key",
-            {"api_key_env_var": "KEY", "username": "user", "private_key_path": "path"},
-            ["username", "private_key_path"], # Test one, the loop will catch others
-            "Unknown key 'username' in enterprise system 'api_key_with_multiple_unknown' configuration (auth_type: api_key)"
+            {"api_key_env_var": "KEY", "username": "user", "private_key": "path"}, # Changed private_key_path to private_key
+            "username", # We'll check for one of the unknown keys' warning
+            "Unknown field 'username' in enterprise system 'api_key_with_multiple_unknown' configuration. It will be ignored."
+        ),
+        (
+            "api_key_with_multiple_unknown_check_other", "api_key",
+            {"api_key_env_var": "KEY", "username": "user", "private_key": "path"}, # Changed private_key_path to private_key
+            "private_key", # Check for the other unknown key's warning in a separate case
+            "Unknown field 'private_key' in enterprise system 'api_key_with_multiple_unknown_check_other' configuration. It will be ignored."
         ),
     ]
 )
 def test_validate_single_system_unknown_key_warnings(
-    caplog, system_name, auth_type, config_override, unknown_key, expected_warning_match
+    caplog, system_name, auth_type, config_override, unknown_key_to_check, expected_warning_substring
 ):
     """Test that unknown keys for a given auth_type log a warning but don't error."""
     base_config = {
@@ -209,16 +214,24 @@ def test_validate_single_system_unknown_key_warnings(
         base_config["username"] = "dummy_user"
         base_config["password_env_var"] = "DUMMY_PASS_ENV_VAR"
     elif auth_type == "private_key":
-        base_config["private_key_path"] = "/dummy/path/to/key.pem"
+        base_config["private_key"] = "/dummy/path/to/key.pem"
 
     full_system_config = {**base_config, **config_override}
     config_to_validate = {system_name: full_system_config}
 
     validate_enterprise_systems_config(config_to_validate)
 
-    found_warning = False
-    for record in caplog.records:
-        if record.levelname == "WARNING" and expected_warning_match in record.message:
-            found_warning = True
-            break
-    assert found_warning, f"Expected warning '{expected_warning_match}' not found in logs: {caplog.text}"
+    warning_found = any(
+        record.levelname == "WARNING" and expected_warning_substring in record.message
+        for record in caplog.records
+    )
+    assert warning_found, f"Expected warning substring '{expected_warning_substring}' not found in logs: {caplog.text}"
+
+    # Additionally, ensure that for 'api_key_with_multiple_unknown', both warnings are present if that's the system_name
+    if system_name == "api_key_with_multiple_unknown":
+        expected_warning_private_key = f"Unknown field 'private_key' in enterprise system '{system_name}' configuration. It will be ignored."
+        private_key_warning_found = any(
+            record.levelname == "WARNING" and expected_warning_private_key in record.message
+            for record in caplog.records
+        )
+        assert private_key_warning_found, f"Expected warning for 'private_key' not found for {system_name}: {caplog.text}"

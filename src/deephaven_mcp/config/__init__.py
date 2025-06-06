@@ -170,6 +170,7 @@ from .community_session import (
 from .enterprise_system import (
     EnterpriseSystemConfigurationError,
     validate_enterprise_systems_config,
+    redact_enterprise_system_config,
 )
 
 
@@ -310,9 +311,24 @@ class ConfigManager:
                 raise
 
             self._cache = validated_data
-            _LOGGER.info(
-                f"Deephaven community session configuration loaded and validated successfully in {perf_counter() - start_time:.3f} seconds"
-            )
+            _LOGGER.info(f"Deephaven MCP configuration loaded and validated successfully in {perf_counter() - start_time:.3f} seconds")
+
+            community_sessions = validated_data.get("community_sessions", {})
+            if community_sessions:
+                _LOGGER.info("Configured Community Sessions:")
+                for name, details in community_sessions.items():
+                    _LOGGER.info(f"  Session '{name}': {redact_community_session_config(details)}")
+            else:
+                _LOGGER.info("No Community Sessions configured.")
+
+            enterprise_systems = validated_data.get("enterprise_systems", {})
+            if enterprise_systems:
+                _LOGGER.info("Configured Enterprise Systems:")
+                for name, details in enterprise_systems.items():
+                    _LOGGER.info(f"  System '{name}': {redact_enterprise_system_config(details)}")
+            else:
+                _LOGGER.info("No Enterprise Systems configured.")
+
             return validated_data
 
     async def get_community_session_config(self, session_name: str) -> dict[str, Any]:
