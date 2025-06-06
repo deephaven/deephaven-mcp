@@ -45,7 +45,7 @@ list[str]: List of required fields for each community session configuration dict
 
 
 def validate_community_sessions_config(
-    community_sessions_map: dict[str, Any] | None,
+    community_sessions_map: Any | None,
 ) -> None:
     """
     Validate the overall 'community_sessions' part of the configuration, if present.

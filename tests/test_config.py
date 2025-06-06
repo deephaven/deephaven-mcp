@@ -60,7 +60,9 @@ def test_validate_config_missing_required_key(monkeypatch):
     from deephaven_mcp import config
 
     # Temporarily set required keys for this test
-    monkeypatch.setattr(config.ConfigManager, "_REQUIRED_TOP_LEVEL_KEYS", {"must_have_this"})
+    monkeypatch.setattr(
+        config.ConfigManager, "_REQUIRED_TOP_LEVEL_KEYS", {"must_have_this"}
+    )
 
     # Config missing the temporarily required key
     bad_config = {"community_sessions": {}}
@@ -180,7 +182,6 @@ async def test_get_config_invalid_json(monkeypatch):
         await cm.get_config()
 
 
-
 @pytest.mark.asyncio
 async def test_get_config_no_community_sessions_key_from_file(monkeypatch, caplog):
     import importlib
@@ -259,7 +260,7 @@ async def test_get_community_session_config_no_community_sessions_key():
 
     empty_config = {}
     cm = config.ConfigManager()
-    await cm.set_config_cache(empty_config) # Should not raise an error
+    await cm.set_config_cache(empty_config)  # Should not raise an error
 
     # Check that getting session names returns an empty list
     session_names = await cm.get_community_session_names()

@@ -162,8 +162,12 @@ str: Name of the environment variable specifying the path to the Deephaven MCP c
 
 
 class ConfigManager:
-    _REQUIRED_TOP_LEVEL_KEYS: set[str] = set()  # Defines mandatory top-level keys in the config
-    _ALLOWED_TOP_LEVEL_KEYS: set[str] = {"community_sessions"}  # Defines all allowed top-level keys
+    _REQUIRED_TOP_LEVEL_KEYS: set[str] = (
+        set()
+    )  # Defines mandatory top-level keys in the config
+    _ALLOWED_TOP_LEVEL_KEYS: set[str] = {
+        "community_sessions"
+    }  # Defines all allowed top-level keys
 
     """
     Async configuration manager for Deephaven MCP configuration.
