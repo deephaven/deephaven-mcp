@@ -50,7 +50,7 @@ def test_validate_config_unknown_top_level_key():
     cm = config.ConfigManager()
     with pytest.raises(
         ValueError,
-        match="Unknown top-level keys in Deephaven community session config: {'extra'}",
+        match="Unknown top-level keys in Deephaven MCP config: {'extra'}",
     ):
         config.ConfigManager().validate_config(bad_config)
         config.ConfigManager.validate_config(bad_config)
@@ -196,7 +196,7 @@ async def test_get_community_session_config_no_community_sessions_key():
     bad_config = {}
     with pytest.raises(
         ValueError,
-        match="Missing required top-level keys in Deephaven community session config: {'community_sessions'}",
+        match="Missing required top-level keys in Deephaven MCP config: {'community_sessions'}",
     ):
         await config.ConfigManager().set_config_cache(bad_config)
 

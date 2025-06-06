@@ -23,6 +23,7 @@ This repository houses the Python-based Model Context Protocol (MCP) servers for
 - [Quick Start Guide](#quick-start-guide)
   - [Community Server Quick Start](#community-server-quick-start)
   - [Docs Server Quick Start](#docs-server-quick-start)
+- [Command Line Entry Points](#command-line-entry-points)
 - [MCP Server Implementations](#mcp-server-implementations)
   - [Community Server](#community-server)
     - [Overview](#community-server-overview)
@@ -59,6 +60,7 @@ This repository houses the Python-based Model Context Protocol (MCP) servers for
   - [Performance Testing](#performance-testing)
     - [Usage Example](#usage-example)
     - [Arguments](#arguments)
+  - [Project Structure](#project-structure)
 - [Troubleshooting](#troubleshooting)
   - [Session Management](#session-management)
   - [Common Errors & Solutions](#common-errors--solutions)
@@ -215,66 +217,63 @@ Key architectural features include:
 
 #### Community Server Configuration
 
+The Deephaven MCP Community Server relies on a JSON configuration file to define the [Deephaven Community Core](https://deephaven.io/) instances it can connect to and manage. This configuration is crucial for the server to operate correctly.
+
 ##### Environment Variables
-| Variable                | Required | Description                                                  | Where Used                |
-|-------------------------|----------|--------------------------------------------------------------|---------------------------|
-| `DH_MCP_CONFIG_FILE`    | Yes      | Path to worker config JSON file for MCP server and clients.   | MCP Server, Test Client   |
-| `PYTHONLOGLEVEL`        | No       | Python logging level (e.g., DEBUG, INFO).                    | Server, Client (optional) |
 
-> Set `DH_MCP_CONFIG_FILE` before running the MCP server or test client. Environment variables can also be loaded from `.env` files using [python-dotenv](https://github.com/theskumar/python-dotenv).
+The Community Server's behavior can be controlled by the following environment variables:
 
-##### Worker Configuration File Specification (`DH_MCP_CONFIG_FILE`)
-The Deephaven MCP server requires a JSON configuration file specified by the `DH_MCP_CONFIG_FILE` environment variable. This file describes the available Deephaven MCP session configurations and must be a JSON object with a top-level `community_sessions` key. The path should be absolute for reliability across different working directories.
+| Variable             | Required | Description                                                                                                                                                              | Where Used              |
+|----------------------|----------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------|
+| `DH_MCP_CONFIG_FILE` | Yes      | Path to the `deephaven_mcp.json` configuration file. The MCP Community Server discovers the location of this file via this environment variable. You must set this variable to the absolute path of your configuration file before starting the server. If this variable is not set, the server will fail to start, logging an error. <br><br>Example: <br>`export DH_MCP_CONFIG_FILE="/home/user/project/config/deephaven_mcp.json"` <br>`# Now run the server` <br>`uv run dh-mcp-community --transport sse`                                 | MCP Server, Test Client |
+| `PYTHONLOGLEVEL`     | No       | Sets the Python logging level for the server (e.g., `DEBUG`, `INFO`, `WARNING`, `ERROR`).                                                                                    | Server (optional)       |
 
-**Configuration Schema:**
+> Environment variables can also be loaded from `.env` files using [python-dotenv](https://github.com/theskumar/python-dotenv) if it's integrated into the project's startup mechanism.
 
-```json
-{
-  "community_sessions": {                  // Required top-level object mapping session names to configs
-    "worker_name": {          // Each worker has its own named configuration block
-      "host": "localhost",    // String: Hostname or IP address of the worker
-      "port": 10000,          // Integer: Port number for the worker connection
-      "auth_type": "token",   // String: "token", "basic", or "anonymous"
-      "auth_token": "...",    // String: Authentication token or password (if needed)
-      "never_timeout": true,  // Boolean: If true, sessions to this worker never time out
-      "session_type": "python", // String: Programming language for the session (e.g., "python", "groovy")
-      "use_tls": true,        // Boolean: Whether to use TLS/SSL for the connection
-      "tls_root_certs": "...", // String: Path to PEM file with root certificates
-      "client_cert_chain": "...", // String: Path to PEM file with client cert chain
-      "client_private_key": "..." // String: Path to PEM file with client private key
-    }
-  }
-}
-```
+##### The `deephaven_mcp.json` File
 
-**Notes:**
-- All fields are optional
-- Sensitive fields like `auth_token` are automatically redacted in logs
+**Purpose and Structure:**
 
-**Example Configuration:**
+*   The configuration file (conventionally named `deephaven_mcp.json`, though any name can be used) must be a JSON object.
+*   It must contain a single top-level key named `"community_sessions"`.
+*   The value of `"community_sessions"` is an object where each key is a unique, arbitrary string identifying a session (e.g., `"local_dev"`, `"prod_cluster_main"`).
+*   The value associated with each session name is a configuration object detailing how to connect to that specific Deephaven Community Core worker.
+
+**Community Session Configuration Fields:**
+
+All fields within a session's configuration object are optional. If a field is omitted, the server or client library may use default behaviors or the corresponding feature might be disabled.
+
+*   `host` (string): Hostname or IP address of the Deephaven Community Core worker (e.g., `"localhost"`).
+*   `port` (integer): Port number for the worker connection (e.g., `10000`).
+*   `auth_type` (string): Authentication method. Supported values include:
+    *   `"token"`: For token-based authentication (e.g., Deephaven's PSK).
+    *   `"basic"`: For username/password based HTTP Basic authentication.
+    *   `"anonymous"`: For connections requiring no authentication.
+*   `auth_token` (string): The authentication token or password. Its meaning depends on `auth_type`.
+    *   For `"token"`: The pre-shared key or bearer token.
+    *   For `"basic"`: Typically the password. If the server expects `username:password` combined, provide it here. Consult the Deephaven server's authentication guide.
+*   `never_timeout` (boolean): If `true`, the MCP server attempts to configure the session to this worker to prevent timeouts. Server-side settings might still enforce timeouts.
+*   `session_type` (string): Specifies the programming language for the session (e.g., `"python"`, `"groovy"`).
+*   `use_tls` (boolean): Set to `true` if the connection to the worker requires TLS/SSL encryption.
+*   `tls_root_certs` (string, optional): Absolute path to a PEM file containing trusted root CA certificates for TLS verification. If omitted, system CAs might be used, or verification behavior depends on the client library.
+*   `client_cert_chain` (string, optional): Absolute path to a PEM file containing the client's TLS certificate chain. Used for client-side certificate authentication (mTLS).
+*   `client_private_key` (string, optional): Absolute path to a PEM file containing the client's private key, corresponding to the `client_cert_chain`. Used for mTLS.
+
+**Example `deephaven_mcp.json`:**
 
 ```json
 {
   "community_sessions": {
-    "local_session": {
+    "my_local_deephaven": {
       "host": "localhost",
       "port": 10000,
-      "auth_type": "anonymous"
-    },
-    "prod_session": {
-      "host": "deephaven-server.example.com",
-      "port": 10000,
-      "auth_type": "token",
-      "auth_token": "your-token-here",
-      "use_tls": true,
-      "never_timeout": true,
       "session_type": "python"
     },
-    "secure_session": {
-      "host": "secure.deephaven.io",
-      "port": 10002,
+    "secure_remote_worker": {
+      "host": "secure.deephaven.example.com",
+      "port": 10001,
       "auth_type": "token",
-      "auth_token": "your_bearer_token_here",
+      "auth_token": "your-secret-api-token-here",
       "never_timeout": true,
       "session_type": "groovy",
       "use_tls": true,
@@ -286,18 +285,13 @@ The Deephaven MCP server requires a JSON configuration file specified by the `DH
 }
 ```
 
-**Fields:**
-The configuration file must be a JSON object with one top-level key:
-*   `community_sessions` (object, required): A map where keys are unique session names (strings) and values are session configuration objects.
-    *   Each worker configuration object can contain the following fields. All fields within an individual worker's configuration are optional from the perspective of the configuration parser. However, fields like `host` and `port` are practically necessary for a worker to function.
-        *   `host` (string): Hostname or IP address of the Deephaven worker.
-        *   `port` (integer): Port number for the Deephaven worker connection.
-        *   `auth_type` (string): Authentication type. Supported values:
-            *   `"anonymous"`: No authentication is used.
-            *   `"basic"`: HTTP Basic authentication. Credentials are typically provided via the `auth_token` field (e.g., base64 encoded "user:password").
-            *   `"token"`: Bearer token authentication. The token is provided via the `auth_token` field.
-        *   `auth_token` (string): The authentication token or password string. This field is used when `auth_type` is `"basic"` or `"token"`.
-        *   `never_timeout` (boolean): If `true`, sessions established with this worker should ideally not time out.
+**Security Considerations:**
+
+The `deephaven_mcp.json` file can contain sensitive credentials (`auth_token`, paths to private keys). Protect this file with strict filesystem permissions (e.g., `chmod 600 path/to/your/deephaven_mcp.json` on Unix-like systems).
+
+**File Paths:**
+
+Ensure any file paths specified in the configuration (e.g., for TLS certificates) are absolute and accessible by the user/process running the MCP Community Server.
 
 #### Running the Community Server
 

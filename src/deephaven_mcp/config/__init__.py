@@ -13,64 +13,63 @@ Features:
 
 Configuration Schema:
 ---------------------
-The configuration file must be a JSON object with exactly two top-level keys:
+The configuration file must be a JSON object with one top-level key:
 
-  - community_sessions (dict, required):
-      A dictionary mapping community session names (str) to client session configuration dicts. Each configuration defines how to connect to a specific community worker.
+  - `community_sessions` (dict, required):
+      A dictionary mapping community session names (str) to client session configuration dicts.
+      Each configuration defines how to connect to a specific community worker.
       Each community session configuration dict may contain any of the following fields (all are optional):
 
-        - host (str): Hostname or IP address of the community worker.
-        - port (int): Port number for the community worker connection.
-        - auth_type (str): Authentication type. Allowed values include:
+        - `host` (str): Hostname or IP address of the community worker.
+        - `port` (int): Port number for the community worker connection.
+        - `auth_type` (str): Authentication type. Allowed values include:
             * "token": Use a bearer token for authentication.
             * "basic": Use HTTP Basic authentication.
             * "anonymous": No authentication required.
-        - auth_token (str): The authentication token or password. May be empty if auth_type is "anonymous".
-        - never_timeout (bool): If True, sessions to this community worker never time out.
-        - session_type (str): Programming language for the session. Common values include:
+        - `auth_token` (str): The authentication token or password. May be empty if `auth_type` is "anonymous".
+        - `never_timeout` (bool): If True, sessions to this community worker never time out.
+        - `session_type` (str): Programming language for the session. Common values include:
             * "python": For Python-based Deephaven instances.
             * "groovy": For Groovy-based Deephaven instances.
-        - use_tls (bool): Whether to use TLS/SSL for the connection.
-        - tls_root_certs (str): Path to a PEM file containing root certificates to trust for TLS.
-        - client_cert_chain (str): Path to a PEM file containing the client certificate chain for mutual TLS.
-        - client_private_key (str): Path to a PEM file containing the client private key for mutual TLS.
+        - `use_tls` (bool): Whether to use TLS/SSL for the connection.
+        - `tls_root_certs` (str, optional): Path to a PEM file containing root certificates to trust for TLS.
+        - `client_cert_chain` (str, optional): Path to a PEM file containing the client certificate chain for mutual TLS.
+        - `client_private_key` (str, optional): Path to a PEM file containing the client private key for mutual TLS.
 
       Notes:
-        - All fields are optional; if a field is omitted, the consuming code may use an internal default value for that field, or the feature may be disabled. There is no default or fallback—every community session (connection to a worker) must be explicitly configured and selected by name.
+        - All fields are optional; if a field is omitted, the consuming code may use an internal default value for that field, or the feature may be disabled.
         - All file paths should be absolute, or relative to the process working directory.
-        - If use_tls is True and any of the optional TLS fields are provided, they must point to valid PEM files.
-        - Sensitive fields (auth_token, client_private_key) are redacted from logs for security.
+        - If `use_tls` is True and any of the optional TLS fields are provided, they must point to valid PEM files.
+        - Sensitive fields (`auth_token`, `client_private_key`) are redacted from logs for security.
         - Unknown fields are not allowed and will cause validation to fail.
 
 Validation rules:
-  - All required fields must be present and have the correct type.
-  - All field values must be valid (see allowed values above).
-  - No unknown fields are permitted in configs.
+  - The `community_sessions` key must be present and its value must be a non-empty dictionary.
+  - Within each session configuration, all field values must have the correct type if present.
+  - No unknown fields are permitted in session configurations.
   - If TLS fields are provided, referenced files must exist and be readable.
 
 Configuration JSON Specification:
 ---------------------------------
 - The configuration file must be a JSON object with one top-level key:
-    - "community_sessions": a dictionary mapping community session names to client session configuration dicts for connecting to community workers.
+    - `"community_sessions"`: a dictionary mapping community session names to client session configuration dicts for connecting to community workers.
 
 Example Valid Configuration:
 ---------------------------
-The configuration file should look like the following (see field explanations below):
-
 ```json
 {
     "community_sessions": {
         "local": {
-            "host": "localhost",  // str: Hostname or IP address
-            "port": 10000,        // int: Port number
-            "auth_type": "token", // str: Authentication type ("token", "basic", "none")
-            "auth_token": "your-token-here", // str: Authentication token
-            "never_timeout": true, // bool: Whether sessions should never timeout
-            "session_type": "python", // str: Programming language ("python", "groovy", etc.)
-            "use_tls": true,      // bool: Whether to use TLS/SSL
-            "tls_root_certs": "/path/to/certs.pem", // str: Path to TLS root certificates
-            "client_cert_chain": "/path/to/client-cert.pem", // str: Path to client certificate chain
-            "client_private_key": "/path/to/client-key.pem"  // str: Path to client private key
+            "host": "localhost",
+            "port": 10000,
+            "auth_type": "token",
+            "auth_token": "your-token-here",
+            "never_timeout": true,
+            "session_type": "python",
+            "use_tls": true,
+            "tls_root_certs": "/path/to/certs.pem",
+            "client_cert_chain": "/path/to/client-cert.pem",
+            "client_private_key": "/path/to/client-key.pem"
         },
         "remote": {
             "host": "remote-server.example.com",
@@ -81,21 +80,21 @@ The configuration file should look like the following (see field explanations be
             "session_type": "groovy",
             "use_tls": true
         }
-    },
+    }
 }
 ```
 
 Example Invalid Configurations:
 ------------------------------
-1. Invalid: Missing required top-level keys
+1. Invalid: `community_sessions` is empty
 ```json
 {
     "community_sessions": {}
 }
 ```
+(Reason: The `community_sessions` dictionary cannot be empty.)
 
-
-2. Invalid: Worker field with wrong type
+2. Invalid: Session field with wrong type
 ```json
 {
     "community_sessions": {
@@ -110,23 +109,23 @@ Example Invalid Configurations:
 Performance Considerations:
 --------------------------
 - Uses native async file I/O (aiofiles) to avoid blocking the event loop.
-- Employs an asyncio.Lock to ensure coroutine-safe, cached configuration loading.
+- Employs an `asyncio.Lock` to ensure coroutine-safe, cached configuration loading.
 - Designed for high-throughput, concurrent environments.
 
 Usage Patterns:
----------------
-- The configuration **must** include a 'community_sessions' dictionary as a top-level key. This dictionary holds configurations for client sessions connecting to community workers.
+-----------------------------------------------------------------------------
+- The configuration **must** include a `community_sessions` dictionary as a top-level key.
 - Loading a community session configuration:
-    >>> session_config = await get_community_session_config('local_session_name')  # Example session name
-    >>> connection = connect(**session_config)  # Assuming connect uses the session_config
+    >>> session_config = await config_manager.get_community_session_config('local_session_name')
+    >>> # connection = connect(**session_config)  # Example usage
 - Listing available configured community sessions:
-    >>> session_names = await get_community_session_names()
+    >>> session_names = await config_manager.get_community_session_names()
     >>> for session_name in session_names:
     ...     print(f"Available community session: {session_name}")
 
 Environment Variables:
 ---------------------
-- DH_MCP_CONFIG_FILE: Path to the Deephaven MCP configuration JSON file.
+- `DH_MCP_CONFIG_FILE`: Path to the Deephaven MCP configuration JSON file.
 
 Security:
 ---------
@@ -136,12 +135,7 @@ Security:
 Async/Await & I/O:
 ------------------
 - All configuration loading is async and coroutine-safe.
-- File I/O uses aiofiles for non-blocking reads.
-
-Async/Await & I/O:
-------------------
-- All configuration loading is async and coroutine-safe.
-- File I/O uses aiofiles for non-blocking reads.
+- File I/O uses `aiofiles` for non-blocking reads.
 """
 
 import asyncio
@@ -194,7 +188,8 @@ class ConfigManager:
             None
 
         Example:
-            >>> await config.DEFAULT_CONFIG_MANAGER.clear_config_cache()
+            >>> # Assuming config_manager is an instance of ConfigManager
+            >>> await config_manager.clear_config_cache()
         """
         _LOGGER.debug("Clearing Deephaven configuration cache...")
         async with self._lock:
@@ -207,44 +202,48 @@ class ConfigManager:
         Set the in-memory configuration cache (coroutine-safe, for testing only).
 
         Args:
-            config (Dict[str, Any]): The configuration dictionary to set as the cache. This will be validated before caching.
+            config (dict[str, Any]): The configuration dictionary to set as the cache. This will be validated before caching.
 
         Returns:
             None
 
         Example:
-            >>> await config.DEFAULT_CONFIG_MANAGER.set_config_cache({'community_sessions': {'example_session': {...}}})
+            >>> # Assuming config_manager is an instance of ConfigManager
+            >>> await config_manager.set_config_cache({'community_sessions': {'example_session': {}}})
         """
         async with self._lock:
             self._cache = self.validate_config(config)
 
     async def get_config(self) -> dict[str, Any]:
         """
-        Load and validate the Deephaven worker configuration from disk (coroutine-safe).
+        Load and validate the Deephaven MCP application configuration from disk (coroutine-safe).
 
-        Uses aiofiles for async file I/O and caches the result. If the cache is present, returns it; otherwise, loads from disk and validates.
+        Uses `aiofiles` for async file I/O and caches the result. If the cache is present,
+        returns it; otherwise, loads from disk and validates.
 
         Returns:
-            Dict[str, Any]: The loaded and validated configuration dictionary.
+            dict[str, Any]: The loaded and validated configuration dictionary.
 
         Raises:
-            RuntimeError: If the environment variable is not set, or the file cannot be read.
-            ValueError: If the config file is invalid, contains unknown keys, or fails validation.
+            RuntimeError: If the `DH_MCP_CONFIG_FILE` environment variable is not set, or the file cannot be read.
+            ValueError: If the config file is invalid (e.g., not JSON, missing required keys, incorrect types).
 
         Example:
-            >>> import os
-            >>> os.environ['DH_MCP_CONFIG_FILE'] = '/path/to/config.json'
-            >>> config_dict = await config.DEFAULT_CONFIG_MANAGER.get_config()
-            >>> config_dict['community_sessions']['local_session_name']['host']
+            >>> # Assuming config_manager is an instance of ConfigManager
+            >>> # and DH_MCP_CONFIG_FILE is set appropriately
+            >>> # import os
+            >>> # os.environ['DH_MCP_CONFIG_FILE'] = '/path/to/config.json'
+            >>> config_dict = await config_manager.get_config()
+            >>> print(config_dict['community_sessions']['local_session_name']['host'])
             'localhost'
         """
-        _LOGGER.debug("Loading Deephaven worker configuration...")
+        _LOGGER.debug("Loading Deephaven MCP application configuration...")
         async with self._lock:
             if self._cache is not None:
-                _LOGGER.debug("Using cached Deephaven worker configuration.")
+                _LOGGER.debug("Using cached Deephaven MCP application configuration.")
                 return self._cache
 
-            _LOGGER.info("Loading Deephaven worker configuration from disk...")
+            _LOGGER.info("Loading Deephaven MCP application configuration from disk...")
             start_time = perf_counter()
 
             if CONFIG_ENV_VAR not in os.environ:
@@ -284,7 +283,8 @@ class ConfigManager:
             CommunitySessionConfigurationError: If the community session is not found or config is invalid.
 
         Example:
-            >>> local_session_config = await config.DEFAULT_CONFIG_MANAGER.get_community_session_config('local_session_name')
+            >>> # Assuming config_manager is an instance of ConfigManager
+            >>> local_session_config = await config_manager.get_community_session_config('local_session_name')
         """
         _LOGGER.debug(f"Getting community session config for session: {session_name!r}")
         config = await self.get_config()
@@ -311,7 +311,8 @@ class ConfigManager:
             list[str]: A list of community session names.
 
         Example:
-            >>> session_names = await config.DEFAULT_CONFIG_MANAGER.get_community_session_names()
+            >>> # Assuming config_manager is an instance of ConfigManager
+            >>> session_names = await config_manager.get_community_session_names()
             >>> for session_name in session_names:
             ...     print(f"Available community session: {session_name}")
         """
@@ -328,19 +329,25 @@ class ConfigManager:
     @staticmethod
     def validate_config(config: dict[str, Any]) -> dict[str, Any]:
         """
-        Validate the Deephaven worker configuration dictionary.
+        Validate the Deephaven MCP application configuration dictionary.
+
+        Ensures that the configuration has the correct top-level structure, specifically
+        requiring a 'community_sessions' key, and then delegates to
+        `validate_community_sessions_config` for detailed validation of its content.
 
         Args:
-            config (Dict[str, Any]): The configuration dictionary to validate. Must include a 'community_sessions' dictionary as a top-level key.
+            config (dict[str, Any]): The configuration dictionary to validate.
+                                     Must include a 'community_sessions' dictionary as a top-level key.
 
         Returns:
-            Dict[str, Any]: The validated configuration dictionary. This may be a normalized or cleaned version of the input.
+            dict[str, Any]: The validated configuration dictionary.
 
         Raises:
-            ValueError: If the config is missing required keys, has unknown keys, has invalid field types, or is otherwise invalid.
+            ValueError: If the config is missing the 'community_sessions' key, has other unknown top-level keys,
+                        or if `validate_community_sessions_config` finds issues.
 
         Example:
-            >>> valid = ConfigManager.validate_config({'community_sessions': {'local_session': {...}}})
+            >>> validated_config = ConfigManager.validate_config({'community_sessions': {'local_session': {}}})
         """
         required_top_level = {"community_sessions"}
         allowed_top_level = required_top_level
@@ -349,19 +356,19 @@ class ConfigManager:
         unknown_keys = top_level_keys - allowed_top_level
         if unknown_keys:
             _LOGGER.error(
-                f"Unknown top-level keys in Deephaven community session config: {unknown_keys}"
+                f"Unknown top-level keys in Deephaven MCP config: {unknown_keys}"
             )
             raise ValueError(
-                f"Unknown top-level keys in Deephaven community session config: {unknown_keys}"
+                f"Unknown top-level keys in Deephaven MCP config: {unknown_keys}"
             )
 
         missing_keys = required_top_level - top_level_keys
         if missing_keys:
             _LOGGER.error(
-                f"Missing required top-level keys in Deephaven community session config: {missing_keys}"
+                f"Missing required top-level keys in Deephaven MCP config: {missing_keys}"
             )
             raise ValueError(
-                f"Missing required top-level keys in Deephaven community session config: {missing_keys}"
+                f"Missing required top-level keys in Deephaven MCP config: {missing_keys}"
             )
 
         # Validate the 'community_sessions' structure and its contents
