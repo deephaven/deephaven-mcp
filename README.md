@@ -138,11 +138,11 @@ The [Deephaven MCP Community Server](#community-server) requires a JSON configur
     *   If this key is present, its value must be an object (which can be empty, e.g., `{}`) where each key is a unique session name (e.g., `"local_session"`, `"prod_cluster_1_session"`) and the value is a configuration object for that session. An empty object signifies no sessions are configured under this key.
     *   If this key is absent from the JSON file, it is treated as a valid configuration with no community sessions defined.
 
-In addition to `"community_sessions"`, the `deephaven_mcp.json` file can optionally include an `"enterprise_sessions"` key for configuring connections to Deephaven Enterprise instances. The configuration details for both `community_sessions` and `enterprise_sessions` are provided below.
+In addition to `"community_sessions"`, the `deephaven_mcp.json` file can optionally include an `"enterprise_systems"` key for configuring connections to Deephaven Enterprise instances. The configuration details for both `community_sessions` and `enterprise_systems` are provided below.
 
 #### Community Session Configuration Fields
 
-*The fields listed below pertain to **community sessions**. All community session fields are optional. Default values are applied by the server if a field is omitted. Configuration fields for **enterprise sessions** are detailed in a subsequent section.*
+*The fields listed below pertain to **community sessions**. All community session fields are optional. Default values are applied by the server if a field is omitted. Configuration fields for **enterprise systems** are detailed in a subsequent section.*
 
 *   `host` (string): Hostname or IP address of the [Deephaven Community Core](https://deephaven.io/) worker (e.g., `"localhost"`).
 *   `port` (integer): Port number for the worker connection (e.g., `10000`).
@@ -158,9 +158,9 @@ In addition to `"community_sessions"`, the `deephaven_mcp.json` file can optiona
 *   `client_cert_chain` (string): Absolute path to a PEM file containing the client's TLS certificate chain. Used for client-side certificate authentication (mTLS).
 *   `client_private_key` (string): Absolute path to a PEM file containing the client's private key. Used for client-side certificate authentication (mTLS).
 
-#### Enterprise Session Configuration Fields
+#### Enterprise System Configuration Fields
 
-The `enterprise_sessions` key in `deephaven_mcp.json` is a dictionary mapping custom session names (e.g., `"prod_cluster"`, `"data_science_env"`) to their specific configuration objects. Each configuration object supports the following fields:
+The `enterprise_systems` key in `deephaven_mcp.json` is a dictionary mapping custom system names (e.g., `"prod_cluster"`, `"data_science_env"`) to their specific configuration objects. Each configuration object supports the following fields:
 
 **Required Fields:**
 

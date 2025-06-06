@@ -76,7 +76,7 @@ def validate_community_sessions_config(
             "'community_sessions' must be a dictionary in Deephaven community session config, got %s",
             type(community_sessions_map).__name__,
         )
-        raise ValueError(
+        raise CommunitySessionConfigurationError(
             "'community_sessions' must be a dictionary in Deephaven community session config"
         )
 
@@ -117,13 +117,13 @@ def validate_single_community_session_config(
         ValueError: If the configuration item is invalid (e.g., unknown fields, wrong types).
     """
     if not isinstance(config_item, dict):
-        raise ValueError(
+        raise CommunitySessionConfigurationError(
             f"Community session config for {session_name} must be a dictionary, got {type(config_item)}"
         )
 
     for field_name, field_value in config_item.items():
         if field_name not in _ALLOWED_COMMUNITY_SESSION_FIELDS:
-            raise ValueError(
+            raise CommunitySessionConfigurationError(
                 f"Unknown field '{field_name}' in community session config for {session_name}"
             )
 
@@ -131,12 +131,12 @@ def validate_single_community_session_config(
         if isinstance(allowed_types, tuple):
             if not isinstance(field_value, allowed_types):
                 expected_type_names = ", ".join(t.__name__ for t in allowed_types)
-                raise ValueError(
+                raise CommunitySessionConfigurationError(
                     f"Field '{field_name}' in community session config for {session_name} "
                     f"must be one of types ({expected_type_names}), got {type(field_value).__name__}"
                 )
         elif not isinstance(field_value, allowed_types):
-            raise ValueError(
+            raise CommunitySessionConfigurationError(
                 f"Field '{field_name}' in community session config for {session_name} "
                 f"must be of type {allowed_types.__name__}, got {type(field_value).__name__}"
             )

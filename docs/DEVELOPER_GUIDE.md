@@ -291,9 +291,9 @@ All fields within a session's configuration object are optional. If a field is o
 
 #### Enterprise Server Configuration
 
-The `deephaven_mcp.json` file can also optionally include a top-level key named `"enterprise_sessions"` to configure connections to Deephaven Enterprise instances. This key holds a dictionary where each entry maps a custom session name (e.g., `"prod_cluster"`, `"data_science_env"`) to its specific configuration object.
+The `deephaven_mcp.json` file can also optionally include a top-level key named `"enterprise_systems"` to configure connections to Deephaven Enterprise instances. This key holds a dictionary where each entry maps a custom system name (e.g., `"prod_cluster"`, `"data_science_env"`) to its specific configuration object.
 
-If the `"enterprise_sessions"` key is present, it must be a dictionary. Each individual enterprise session configuration within this dictionary supports the following fields:
+If the `"enterprise_systems"` key is present, it must be a dictionary. Each individual enterprise system configuration within this dictionary supports the following fields:
 
 *   `connection_json_url` (string, **required**): The URL pointing to the `connection.json` file of the Deephaven Enterprise server. This file provides necessary connection details for the client.
     *   Example: `"https://enterprise.example.com/iris/connection.json"`
@@ -314,7 +314,7 @@ If the `"enterprise_sessions"` key is present, it must be a dictionary. Each ind
         *   **OR** `password_env_var` (string): The name of an environment variable that holds the password. Using an environment variable is recommended.
     *   If `auth_type` is `"private_key"`:
         *   `private_key_path` (string, **required**): The absolute file system path to the private key file (e.g., a `.pem` file).
-**Example `deephaven_mcp.json` with Enterprise Sessions:**
+**Example `deephaven_mcp.json` with Enterprise Systems:**
 
 ```json
 {
@@ -324,7 +324,7 @@ If the `"enterprise_sessions"` key is present, it must be a dictionary. Each ind
       "port": 10000
     }
   },
-  "enterprise_sessions": {
+  "enterprise_systems": {
     "prod_cluster": {
       "connection_json_url": "https://enterprise.example.com/iris/connection.json",
       "auth_type": "api_key",
