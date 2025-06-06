@@ -250,12 +250,11 @@ All fields within a session's configuration object are optional. If a field is o
 *   `host` (string): Hostname or IP address of the Deephaven Community Core worker (e.g., `"localhost"`).
 *   `port` (integer): Port number for the worker connection (e.g., `10000`).
 *   `auth_type` (string): Authentication method. Supported values include:
-    *   `"token"`: For token-based authentication (e.g., Deephaven's PSK).
-    *   `"basic"`: For username/password based HTTP Basic authentication.
+    *   `"token"`: For token-based authentication (e.g., Deephaven's PSK). The actual token value (pre-shared key or bearer token) is supplied via `auth_token` or `auth_token_env_var`.
+    *   `"basic"`: For username/password based HTTP Basic authentication. The password (or combined `username:password`) is supplied via `auth_token` or `auth_token_env_var`. Consult the Deephaven server's authentication guide for specifics.
     *   `"anonymous"`: For connections requiring no authentication.
-*   `auth_token` (string): The authentication token or password. Its meaning depends on `auth_type`.
-    *   For `"token"`: The pre-shared key or bearer token.
-    *   For `"basic"`: Typically the password. If the server expects `username:password` combined, provide it here. Consult the Deephaven server's authentication guide.
+*   `auth_token` (string, optional): The direct authentication token or password. Use this OR `auth_token_env_var`, but not both. Required if `auth_type` is `"token"` or `"basic"` and `auth_token_env_var` is not specified.
+*   `auth_token_env_var` (string, optional): The name of an environment variable from which to read the authentication token. Use this OR `auth_token`, but not both. If specified, the token will be sourced from this environment variable.
 *   `never_timeout` (boolean): If `true`, the MCP server attempts to configure the session to this worker to prevent timeouts. Server-side settings might still enforce timeouts.
 *   `session_type` (string): Specifies the programming language for the session (e.g., `"python"`, `"groovy"`).
 *   `use_tls` (boolean): Set to `true` if the connection to the worker requires TLS/SSL encryption.
@@ -277,7 +276,8 @@ All fields within a session's configuration object are optional. If a field is o
       "host": "secure.deephaven.example.com",
       "port": 10001,
       "auth_type": "token",
-      "auth_token": "your-secret-api-token-here",
+      // "auth_token": "your-secret-api-token-here", // Option 1: Direct token (less secure for shared configs)
+      "auth_token_env_var": "MY_REMOTE_TOKEN_ENV_VAR", // Option 2: Token from environment variable (recommended)
       "never_timeout": true,
       "session_type": "groovy",
       "use_tls": true,

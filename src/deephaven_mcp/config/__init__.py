@@ -27,7 +27,8 @@ The configuration file must be a JSON object. It may contain the following top-l
             * "token": Use a bearer token for authentication.
             * "basic": Use HTTP Basic authentication.
             * "anonymous": No authentication required.
-        - `auth_token` (str): The authentication token or password. May be empty if `auth_type` is "anonymous".
+        - `auth_token` (str, optional): The direct authentication token or password. May be empty if `auth_type` is "anonymous". Use this OR `auth_token_env_var`, but not both.
+        - `auth_token_env_var` (str, optional): The name of an environment variable from which to read the authentication token. Use this OR `auth_token`, but not both.
         - `never_timeout` (bool): If True, sessions to this community worker never time out.
         - `session_type` (str): Programming language for the session. Common values include:
             * "python": For Python-based Deephaven instances.

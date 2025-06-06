@@ -27,7 +27,8 @@ _ALLOWED_COMMUNITY_SESSION_FIELDS: dict[str, type | tuple[type, type]] = {
     "host": str,
     "port": int,
     "auth_type": str,
-    "auth_token": str,
+    "auth_token": str,  # Direct authentication token
+    "auth_token_env_var": str, # Environment variable for auth token
     "never_timeout": bool,
     "session_type": str,
     "use_tls": bool,
@@ -139,6 +140,13 @@ def validate_single_community_session_config(
                 f"Field '{field_name}' in community session config for {session_name} "
                 f"must be of type {allowed_types.__name__}, got {type(field_value).__name__}"
             )
+
+    # Check for mutual exclusivity of auth_token and auth_token_env_var
+    if "auth_token" in config_item and "auth_token_env_var" in config_item:
+        raise CommunitySessionConfigurationError(
+            f"In community session config for '{session_name}', both 'auth_token' and 'auth_token_env_var' are set. "
+            "Please use only one."
+        )
 
     for required_field in _REQUIRED_FIELDS:
         if required_field not in config_item:

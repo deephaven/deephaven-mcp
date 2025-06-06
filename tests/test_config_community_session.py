@@ -21,6 +21,7 @@ def test_redact_community_session_config():
         "port": 10000,
         "auth_type": "token",
         "auth_token": "sensitive_token_value",
+        "auth_token_env_var": "MY_ENV_VAR_NAME",
         "session_type": "python",
         "client_private_key": "/path/to/key.pem",  # Path, not sensitive content
     }
@@ -30,6 +31,7 @@ def test_redact_community_session_config():
     assert redacted["port"] == 10000
     assert redacted["auth_type"] == "token"
     assert redacted["auth_token"] == "[REDACTED]"
+    assert redacted["auth_token_env_var"] == "MY_ENV_VAR_NAME"
     assert redacted["session_type"] == "python"
     assert redacted["client_private_key"] == "/path/to/key.pem"
     assert "sensitive_token_value" not in redacted.values()
@@ -143,6 +145,30 @@ def test_validate_single_cs_missing_required_field(monkeypatch):
     ):
         validate_single_community_session_config("local_session", bad_config)
     # monkeypatch automatically undoes the change after the test.
+
+
+def test_validate_single_cs_auth_token_and_env_var_exclusive():
+    """Test validation fails if both 'auth_token' and 'auth_token_env_var' are provided."""
+    config_item = {
+        "auth_token": "some_token",
+        "auth_token_env_var": "SOME_ENV_VAR",
+    }
+    with pytest.raises(
+        CommunitySessionConfigurationError,
+        match="In community session config for 'test_both_auth', both 'auth_token' and 'auth_token_env_var' are set. Please use only one.",
+    ):
+        validate_single_community_session_config("test_both_auth", config_item)
+
+
+def test_validate_single_cs_valid_with_auth_token_env_var():
+    """Test a valid config with only auth_token_env_var passes."""
+    config_item = {
+        "auth_token_env_var": "MY_TOKEN_VAR",
+    }
+    try:
+        validate_single_community_session_config("test_env_var_only", config_item)
+    except CommunitySessionConfigurationError as e:
+        pytest.fail(f"Valid config with auth_token_env_var raised error: {e}")
 
 
 # --- Validation Tests for the overall community_sessions map ---

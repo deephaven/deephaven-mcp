@@ -27,6 +27,7 @@ Dependencies:
 
 import asyncio
 import logging
+import os
 import textwrap
 import time
 from types import TracebackType
@@ -325,7 +326,23 @@ class SessionManager:
         host = worker_cfg.get("host", None)
         port = worker_cfg.get("port", None)
         auth_type = worker_cfg.get("auth_type", "Anonymous")
-        auth_token = worker_cfg.get("auth_token", "")
+        auth_token = worker_cfg.get("auth_token")  # Will be None if not set
+        auth_token_env_var = worker_cfg.get("auth_token_env_var")
+
+        if auth_token_env_var:
+            _LOGGER.info(f"Attempting to read auth token from environment variable: {auth_token_env_var}")
+            token_from_env = os.getenv(auth_token_env_var)
+            if token_from_env is not None:
+                auth_token = token_from_env
+                _LOGGER.info(f"Successfully read auth token from environment variable {auth_token_env_var}.")
+            else:
+                auth_token = ""  # Default to empty if env var is specified but not found
+                _LOGGER.warning(
+                    f"Environment variable {auth_token_env_var} specified for auth_token but not found. Using empty token."
+                )
+        elif auth_token is None:
+            # If neither auth_token_env_var nor auth_token is provided, default to empty string.
+            auth_token = ""
         never_timeout = worker_cfg.get("never_timeout", False)
         session_type = worker_cfg.get("session_type", "python")
         use_tls = worker_cfg.get("use_tls", False)
