@@ -133,8 +133,10 @@ This section explains how to configure the [Deephaven MCP Community Server](#com
 
 The [Deephaven MCP Community Server](#community-server) requires a JSON configuration file that describes the [Deephaven Community Core](https://deephaven.io/) worker instances it can connect to. 
 
-*   The file must be a JSON object with a top-level key named `"community_sessions"`.
-*   The value of `"community_sessions"` is an object where each key is a unique session name (e.g., `"local_session"`, `"prod_cluster_1_session"`) and the value is a configuration object for that session.
+*   The file must be a JSON object. It can be an empty object `{}` if no community sessions are to be configured.
+*   Optionally, it can contain a top-level key named `"community_sessions"`.
+    *   If this key is present, its value must be an object (which can be empty, e.g., `{}`) where each key is a unique session name (e.g., `"local_session"`, `"prod_cluster_1_session"`) and the value is a configuration object for that session. An empty object signifies no sessions are configured under this key.
+    *   If this key is absent from the JSON file, it is treated as a valid configuration with no community sessions defined.
 
 #### Community Session Configuration Fields
 

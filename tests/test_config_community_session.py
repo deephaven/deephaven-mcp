@@ -163,19 +163,25 @@ def test_validate_community_sessions_valid(monkeypatch):
 
 
 def test_validate_community_sessions_not_dict():
-    """Test validation fails if community_sessions_map is not a dictionary."""
+    """Test validation fails if community_sessions_map is not a dictionary (when provided)."""
+    # Case: community_sessions_map is None (key was absent) - should pass (return None)
+    try:
+        validate_community_sessions_config(None)
+    except ValueError as e:
+        pytest.fail(f"validate_community_sessions_config(None) raised ValueError: {e}")
+
+    # Case: community_sessions_map is not a dict (e.g., string) - should fail
     with pytest.raises(ValueError, match="'community_sessions' must be a dictionary"):
         validate_community_sessions_config("not_a_dict")
-    with pytest.raises(ValueError, match="'community_sessions' must be a dictionary"):
-        validate_community_sessions_config(None)
+
+    # Case: community_sessions_map is not a dict (e.g., list) - should fail
     with pytest.raises(ValueError, match="'community_sessions' must be a dictionary"):
         validate_community_sessions_config([{"session1": {}}])
 
 
 def test_validate_community_sessions_empty_dict():
-    """Test validation fails if community_sessions_map is an empty dictionary."""
-    with pytest.raises(ValueError, match="No community sessions defined"):
-        validate_community_sessions_config({})
+    """Test validation passes if community_sessions_map is an empty dictionary."""
+    validate_community_sessions_config({})  # Should not raise any exception
 
 
 @patch(

@@ -234,10 +234,11 @@ The Community Server's behavior can be controlled by the following environment v
 
 **Purpose and Structure:**
 
-*   The configuration file (conventionally named `deephaven_mcp.json`, though any name can be used) must be a JSON object.
-*   It must contain a single top-level key named `"community_sessions"`.
-*   The value of `"community_sessions"` is an object where each key is a unique, arbitrary string identifying a session (e.g., `"local_dev"`, `"prod_cluster_main"`).
-*   The value associated with each session name is a configuration object detailing how to connect to that specific Deephaven Community Core worker.
+*   The configuration file (conventionally named `deephaven_mcp.json`, though any name can be used) defines these connections. It's a JSON object that can optionally contain a top-level key `"community_sessions"`.
+*   If `"community_sessions"` is present, its value must be an object (which can be empty, e.g., `{}`) mapping user-defined session names to their specific configurations. An empty object signifies no sessions are configured under this key.
+*   If `"community_sessions"` is absent, or if the `deephaven_mcp.json` file itself is an empty JSON object (e.g., `{}`), it signifies that no community sessions are configured. This is a valid state.
+
+All fields within an individual community session's configuration (if `"community_sessions"` is present) are also optional. The structure of these individual session configurations is detailed below.
 
 **Community Session Configuration Fields:**
 

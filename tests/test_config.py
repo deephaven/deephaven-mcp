@@ -56,16 +56,33 @@ def test_validate_config_unknown_top_level_key():
         config.ConfigManager.validate_config(bad_config)
 
 
+def test_validate_config_missing_required_key(monkeypatch):
+    from deephaven_mcp import config
+
+    # Temporarily set required keys for this test
+    monkeypatch.setattr(config.ConfigManager, "_REQUIRED_TOP_LEVEL_KEYS", {"must_have_this"})
+
+    # Config missing the temporarily required key
+    bad_config = {"community_sessions": {}}
+    with pytest.raises(
+        ValueError,
+        match="Missing required top-level keys in Deephaven MCP config: {'must_have_this'}",
+    ):
+        config.ConfigManager.validate_config(bad_config)
+
+    # Reset to default after test if necessary, though monkeypatch handles cleanup
+    # monkeypatch.setattr(config.ConfigManager, "_REQUIRED_TOP_LEVEL_KEYS", set())
+
+
 def test_validate_config_invalid_schema():
     from deephaven_mcp import config
 
     # Case: Minimal config is valid
     valid_config = MINIMAL_CONFIG.copy()
     assert config.ConfigManager.validate_config(valid_config) == valid_config
-    # Case: Missing community_sessions key
-    bad_config = {}
-    with pytest.raises(ValueError):
-        config.ConfigManager.validate_config(bad_config)
+    # Case: Empty config (missing community_sessions key) is also valid
+    empty_config = {}
+    assert config.ConfigManager.validate_config(empty_config) == empty_config
 
 
 # --- Config loading tests ---
@@ -163,6 +180,53 @@ async def test_get_config_invalid_json(monkeypatch):
         await cm.get_config()
 
 
+
+@pytest.mark.asyncio
+async def test_get_config_no_community_sessions_key_from_file(monkeypatch, caplog):
+    import importlib
+    import json
+    from unittest import mock
+
+    from deephaven_mcp import config
+
+    # Prepare an empty config JSON string
+    empty_config_json = "{}"
+
+    # Patch environment variable
+    monkeypatch.setenv("DH_MCP_CONFIG_FILE", "/fake/path/empty_config.json")
+    # Patch aiofiles.open to return our empty config JSON
+    aiofiles_mock = mock.Mock()
+    aiofiles_open_ctx = mock.AsyncMock()
+    aiofiles_open_ctx.__aenter__.return_value.read = mock.AsyncMock(
+        return_value=empty_config_json
+    )
+    aiofiles_mock.open = mock.Mock(return_value=aiofiles_open_ctx)
+    monkeypatch.setitem(
+        importlib.import_module("aiofiles").__dict__, "open", aiofiles_mock.open
+    )
+
+    cm = config.ConfigManager()
+    await cm.clear_config_cache()
+    with caplog.at_level("INFO"):
+        cfg = await cm.get_config()
+    assert cfg == {}  # Expect an empty dictionary
+    assert cm._cache == {}
+    assert any(
+        "Deephaven community session configuration loaded and validated successfully"
+        in r
+        for r in caplog.text.splitlines()
+    )
+
+    session_names = await cm.get_community_session_names()
+    assert session_names == []
+
+    with pytest.raises(
+        CommunitySessionConfigurationError,
+        match="Community session any_session_name not found in configuration",
+    ):
+        await cm.get_community_session_config("any_session_name")
+
+
 # --- Cache and worker config tests ---
 @pytest.mark.asyncio
 async def test_clear_config_cache_community_sessions_1():
@@ -193,12 +257,20 @@ async def test_get_community_session_names():
 async def test_get_community_session_config_no_community_sessions_key():
     from deephaven_mcp import config
 
-    bad_config = {}
+    empty_config = {}
+    cm = config.ConfigManager()
+    await cm.set_config_cache(empty_config) # Should not raise an error
+
+    # Check that getting session names returns an empty list
+    session_names = await cm.get_community_session_names()
+    assert session_names == []
+
+    # Check that trying to get a specific session config raises an error
     with pytest.raises(
-        ValueError,
-        match="Missing required top-level keys in Deephaven MCP config: {'community_sessions'}",
+        CommunitySessionConfigurationError,
+        match="Community session any_session_name not found in configuration",
     ):
-        await config.ConfigManager().set_config_cache(bad_config)
+        await cm.get_community_session_config("any_session_name")
 
 
 @pytest.mark.asyncio

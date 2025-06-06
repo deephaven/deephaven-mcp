@@ -48,19 +48,26 @@ def validate_community_sessions_config(
     community_sessions_map: dict[str, Any] | None,
 ) -> None:
     """
-    Validate the overall 'community_sessions' part of the configuration.
+    Validate the overall 'community_sessions' part of the configuration, if present.
 
-    This checks that 'community_sessions' is a non-empty dictionary and that
-    each individual session configuration within it is valid.
+    If `community_sessions_map` is None (i.e., the 'community_sessions' key was absent
+    from the main configuration), this function does nothing.
+    If `community_sessions_map` is provided, this checks that it's a dictionary
+    and that each individual session configuration within it is valid.
+    An empty dictionary is allowed, signifying no sessions are configured under this key.
 
     Args:
-        community_sessions_map (dict[str, Any]): The dictionary of community sessions
-                                                 (e.g., config['community_sessions']).
+        community_sessions_map (dict[str, Any] | None): The dictionary of community sessions
+            (e.g., config.get('community_sessions')). Can be None if the key is absent.
 
     Raises:
-        ValueError: If community_sessions_map is not a dict, is empty, or if any
+        ValueError: If community_sessions_map is provided and is not a dict, or if any
                     individual session config is invalid.
     """
+    if community_sessions_map is None:
+        # If 'community_sessions' key was absent from config, there's nothing to validate here.
+        return
+
     if not isinstance(community_sessions_map, dict):
         _LOGGER.error(
             "'community_sessions' must be a dictionary in Deephaven community session config, got %s",
@@ -68,14 +75,6 @@ def validate_community_sessions_config(
         )
         raise ValueError(
             "'community_sessions' must be a dictionary in Deephaven community session config"
-        )
-
-    if not community_sessions_map:
-        _LOGGER.error(
-            "No community sessions defined in Deephaven community session config"
-        )
-        raise ValueError(
-            "No community sessions defined in Deephaven community session config"
         )
 
     for session_name, session_config_item in community_sessions_map.items():

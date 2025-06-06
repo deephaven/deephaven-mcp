@@ -13,11 +13,12 @@ Features:
 
 Configuration Schema:
 ---------------------
-The configuration file must be a JSON object with one top-level key:
+The configuration file must be a JSON object. It may contain the following top-level key:
 
-  - `community_sessions` (dict, required):
+  - `community_sessions` (dict, optional):
       A dictionary mapping community session names (str) to client session configuration dicts.
-      Each configuration defines how to connect to a specific community worker.
+      If this key is present, its value must be a dictionary (which can be empty, e.g., {}).
+      If this key is absent, it implies no community sessions are configured.
       Each community session configuration dict may contain any of the following fields (all are optional):
 
         - `host` (str): Hostname or IP address of the community worker.
@@ -44,17 +45,24 @@ The configuration file must be a JSON object with one top-level key:
         - Unknown fields are not allowed and will cause validation to fail.
 
 Validation rules:
-  - The `community_sessions` key must be present and its value must be a non-empty dictionary.
+  - If the `community_sessions` key is present, its value must be a non-empty dictionary.
   - Within each session configuration, all field values must have the correct type if present.
   - No unknown fields are permitted in session configurations.
   - If TLS fields are provided, referenced files must exist and be readable.
 
 Configuration JSON Specification:
 ---------------------------------
-- The configuration file must be a JSON object with one top-level key:
-    - `"community_sessions"`: a dictionary mapping community session names to client session configuration dicts for connecting to community workers.
+- The configuration file must be a JSON object.
+- It may optionally contain a `"community_sessions"` top-level key:
+    - `"community_sessions"`: If present, this must be a dictionary mapping community session names to client session configuration dicts for connecting to community workers. It cannot be an empty dictionary if provided.
 
-Example Valid Configuration:
+Example Valid Configuration (without community_sessions):
+---------------------------
+```json
+{}
+```
+
+Example Valid Configuration (with community_sessions):
 ---------------------------
 ```json
 {
@@ -86,15 +94,7 @@ Example Valid Configuration:
 
 Example Invalid Configurations:
 ------------------------------
-1. Invalid: `community_sessions` is empty
-```json
-{
-    "community_sessions": {}
-}
-```
-(Reason: The `community_sessions` dictionary cannot be empty.)
-
-2. Invalid: Session field with wrong type
+1. Invalid: Session field with wrong type
 ```json
 {
     "community_sessions": {
@@ -114,7 +114,7 @@ Performance Considerations:
 
 Usage Patterns:
 -----------------------------------------------------------------------------
-- The configuration **must** include a `community_sessions` dictionary as a top-level key.
+- The configuration may optionally include a `community_sessions` dictionary as a top-level key.
 - Loading a community session configuration:
     >>> session_config = await config_manager.get_community_session_config('local_session_name')
     >>> # connection = connect(**session_config)  # Example usage
@@ -162,6 +162,9 @@ str: Name of the environment variable specifying the path to the Deephaven MCP c
 
 
 class ConfigManager:
+    _REQUIRED_TOP_LEVEL_KEYS: set[str] = set()  # Defines mandatory top-level keys in the config
+    _ALLOWED_TOP_LEVEL_KEYS: set[str] = {"community_sessions"}  # Defines all allowed top-level keys
+
     """
     Async configuration manager for Deephaven MCP configuration.
 
@@ -331,38 +334,30 @@ class ConfigManager:
         """
         Validate the Deephaven MCP application configuration dictionary.
 
-        Ensures that the configuration has the correct top-level structure, specifically
-        requiring a 'community_sessions' key, and then delegates to
+        Ensures that the configuration has the correct top-level structure.
+        The 'community_sessions' key is optional. If present, it delegates to
         `validate_community_sessions_config` for detailed validation of its content.
+        Only known top-level keys are allowed (currently only 'community_sessions').
 
         Args:
             config (dict[str, Any]): The configuration dictionary to validate.
-                                     Must include a 'community_sessions' dictionary as a top-level key.
+                                     May optionally include a 'community_sessions' dictionary as a top-level key.
 
         Returns:
             dict[str, Any]: The validated configuration dictionary.
 
         Raises:
-            ValueError: If the config is missing the 'community_sessions' key, has other unknown top-level keys,
-                        or if `validate_community_sessions_config` finds issues.
+            ValueError: If the config has unknown top-level keys,
+                        or if 'community_sessions' is present and `validate_community_sessions_config` finds issues.
 
         Example:
             >>> validated_config = ConfigManager.validate_config({'community_sessions': {'local_session': {}}})
+            >>> validated_config_empty = ConfigManager.validate_config({}) # Also valid
         """
-        required_top_level = {"community_sessions"}
-        allowed_top_level = required_top_level
         top_level_keys = set(config.keys())
 
-        unknown_keys = top_level_keys - allowed_top_level
-        if unknown_keys:
-            _LOGGER.error(
-                f"Unknown top-level keys in Deephaven MCP config: {unknown_keys}"
-            )
-            raise ValueError(
-                f"Unknown top-level keys in Deephaven MCP config: {unknown_keys}"
-            )
-
-        missing_keys = required_top_level - top_level_keys
+        # Check for missing required keys
+        missing_keys = ConfigManager._REQUIRED_TOP_LEVEL_KEYS - top_level_keys
         if missing_keys:
             _LOGGER.error(
                 f"Missing required top-level keys in Deephaven MCP config: {missing_keys}"
@@ -371,7 +366,19 @@ class ConfigManager:
                 f"Missing required top-level keys in Deephaven MCP config: {missing_keys}"
             )
 
-        # Validate the 'community_sessions' structure and its contents
-        validate_community_sessions_config(config["community_sessions"])
+        # Check for unknown keys (keys present that are not in allowed_top_level)
+        unknown_keys = top_level_keys - ConfigManager._ALLOWED_TOP_LEVEL_KEYS
+        if unknown_keys:
+            _LOGGER.error(
+                f"Unknown top-level keys in Deephaven MCP config: {unknown_keys}"
+            )
+            raise ValueError(
+                f"Unknown top-level keys in Deephaven MCP config: {unknown_keys}"
+            )
+
+        # Validate the 'community_sessions' structure and its contents if the key exists
+        if "community_sessions" in config:
+            validate_community_sessions_config(config["community_sessions"])
+        # If "community_sessions" is not in config, it's considered valid (meaning no sessions configured)
 
         return config
