@@ -9,7 +9,7 @@
 - [Overview](#overview)
 - [Prerequisites](#prerequisites)
 - [Installation & Initial Setup](#installation--initial-setup)
-- [Configure MCP Server's Access to Deephaven Community Core](#configure-mcp-servers-access-to-deephaven-community-core)
+- [Configuring `deephaven_mcp.json`](#configuring-deephaven_mcpjson)
 - [Configure Your LLM Tool to Use MCP Servers](#configure-your-llm-tool-to-use-mcp-servers)
 - [Troubleshooting](#troubleshooting)
 - [Contributing](#contributing)
@@ -123,11 +123,11 @@ This command installs `deephaven-mcp` and its dependencies into the active virtu
 
 ---
 
-## Configure MCP Server's Access to Deephaven Community Core
+## Configuring `deephaven_mcp.json`
 
 This section explains how to configure the [Deephaven MCP Community Server](#community-server) to connect to and manage your [Deephaven Community Core](https://deephaven.io/) instances. This involves creating a [community session definition file](#the-deephaven_mcp.json-file-defining-your-community-sessions) and understanding how the server locates this file.
 
-### The `deephaven_mcp.json` File (Defining Your Community Sessions)
+### The `deephaven_mcp.json` File
 
 #### Purpose and Structure
 
@@ -138,9 +138,11 @@ The [Deephaven MCP Community Server](#community-server) requires a JSON configur
     *   If this key is present, its value must be an object (which can be empty, e.g., `{}`) where each key is a unique session name (e.g., `"local_session"`, `"prod_cluster_1_session"`) and the value is a configuration object for that session. An empty object signifies no sessions are configured under this key.
     *   If this key is absent from the JSON file, it is treated as a valid configuration with no community sessions defined.
 
+In addition to `"community_sessions"`, the `deephaven_mcp.json` file can optionally include an `"enterprise_systems"` key for configuring connections to Deephaven Enterprise instances. The configuration details for both `community_sessions` and `enterprise_systems` are provided below.
+
 #### Community Session Configuration Fields
 
-*All fields are optional. Default values are applied by the server if a field is omitted.*
+*The fields listed below pertain to **community sessions**. All community session fields are optional. Default values are applied by the server if a field is omitted. Configuration fields for **enterprise systems** are detailed in a subsequent section.*
 
 *   `host` (string): Hostname or IP address of the [Deephaven Community Core](https://deephaven.io/) worker (e.g., `"localhost"`).
 *   `port` (integer): Port number for the worker connection (e.g., `10000`).
@@ -156,6 +158,29 @@ The [Deephaven MCP Community Server](#community-server) requires a JSON configur
 *   `client_cert_chain` (string): Absolute path to a PEM file containing the client's TLS certificate chain. Used for client-side certificate authentication (mTLS).
 *   `client_private_key` (string): Absolute path to a PEM file containing the client's private key. Used for client-side certificate authentication (mTLS).
 
+#### Enterprise System Configuration Fields
+
+The `enterprise_systems` key in `deephaven_mcp.json` is a dictionary mapping custom system names (e.g., `"prod_cluster"`, `"data_science_env"`) to their specific configuration objects. Each configuration object supports the following fields:
+
+**Required Fields:**
+
+*   `connection_json_url` (string): URL to the Deephaven Enterprise server's `connection.json` file (e.g., `"https://enterprise.example.com/iris/connection.json"`). This file provides the necessary details for the client to connect to the server.
+*   `auth_type` (string): Specifies the authentication method. Must be one of:
+    *   `"password"`: For username/password authentication.
+    *   `"private_key"`: For authentication using a private key (e.g., SAML or other private key-based auth).
+
+**Conditional Fields (based on `auth_type`):**
+
+*   **If `auth_type` is `"password"`:**
+    *   `username` (string): The username for authentication (required).
+    *   One of the following must be provided for the password:
+        *   `password` (string): The password itself.
+        *   `password_env_var` (string): The name of an environment variable that holds the password (e.g., `"MY_ENTERPRISE_PASSWORD"`).
+*   **If `auth_type` is `"private_key"`:**
+    *   `private_key_path` (string): The absolute path to the private key file (e.g., `"/path/to/your/private_key.pem"`) (required).
+
+*Note: All paths, like `private_key_path`, should be absolute and accessible by the MCP server process.*
+
 #### Example `deephaven_mcp.json`
 
 ```json
@@ -163,21 +188,34 @@ The [Deephaven MCP Community Server](#community-server) requires a JSON configur
   "community_sessions": {
     "my_local_deephaven": {
       "host": "localhost",
-      "port": 10000
+      "port": 10000,
+      "session_type": "python"
     },
-    "secure_remote_worker": {
+    "secure_community_worker": {
       "host": "secure.deephaven.example.com",
       "port": 10001,
       "auth_type": "token",
-      "auth_token": "your-secret-api-token-here",
+      "auth_token": "your-community-secret-api-token-here",
       "use_tls": true,
-      "tls_root_certs": "/path/to/root.crt",
-      "client_cert_chain": "/path/to/client.crt",
-      "client_private_key": "/path/to/client.key"
+      "tls_root_certs": "/path/to/community_root.crt"
+    }
+  },
+  "enterprise_sessions": {
+    "prod_enterprise_cluster": {
+      "connection_json_url": "https://enterprise.example.com/iris/connection.json",
+      "auth_type": "api_key",
+      "api_key_env_var": "PROD_ENTERPRISE_API_KEY"
+    },
+    "staging_enterprise_env": {
+      "connection_json_url": "https://staging.enterprise.example.com/iris/connection.json",
+      "auth_type": "password",
+      "username": "testuser",
+      "password_env_var": "STAGING_USER_PASSWORD"
     }
   }
 }
 ```
+
 
 #### Security Note for `deephaven_mcp.json`
 

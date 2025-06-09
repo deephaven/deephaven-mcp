@@ -12,20 +12,17 @@ import logging
 import types
 from typing import Any
 
+from .errors import CommunitySessionConfigurationError
+
 _LOGGER = logging.getLogger(__name__)
-
-
-class CommunitySessionConfigurationError(Exception):
-    """Raised when a community session's configuration cannot be retrieved or is invalid."""
-
-    pass
 
 
 _ALLOWED_COMMUNITY_SESSION_FIELDS: dict[str, type | tuple[type, type]] = {
     "host": str,
     "port": int,
     "auth_type": str,
-    "auth_token": str,
+    "auth_token": str,  # Direct authentication token
+    "auth_token_env_var": str,  # Environment variable for auth token
     "never_timeout": bool,
     "session_type": str,
     "use_tls": bool,
@@ -42,43 +39,6 @@ _REQUIRED_FIELDS: list[str] = []
 """
 list[str]: List of required fields for each community session configuration dictionary.
 """
-
-
-def validate_community_sessions_config(
-    community_sessions_map: Any | None,
-) -> None:
-    """
-    Validate the overall 'community_sessions' part of the configuration, if present.
-
-    If `community_sessions_map` is None (i.e., the 'community_sessions' key was absent
-    from the main configuration), this function does nothing.
-    If `community_sessions_map` is provided, this checks that it's a dictionary
-    and that each individual session configuration within it is valid.
-    An empty dictionary is allowed, signifying no sessions are configured under this key.
-
-    Args:
-        community_sessions_map (dict[str, Any] | None): The dictionary of community sessions
-            (e.g., config.get('community_sessions')). Can be None if the key is absent.
-
-    Raises:
-        ValueError: If community_sessions_map is provided and is not a dict, or if any
-                    individual session config is invalid.
-    """
-    if community_sessions_map is None:
-        # If 'community_sessions' key was absent from config, there's nothing to validate here.
-        return
-
-    if not isinstance(community_sessions_map, dict):
-        _LOGGER.error(
-            "'community_sessions' must be a dictionary in Deephaven community session config, got %s",
-            type(community_sessions_map).__name__,
-        )
-        raise ValueError(
-            "'community_sessions' must be a dictionary in Deephaven community session config"
-        )
-
-    for session_name, session_config_item in community_sessions_map.items():
-        validate_single_community_session_config(session_name, session_config_item)
 
 
 def redact_community_session_config(session_config: dict[str, Any]) -> dict[str, Any]:
@@ -99,6 +59,44 @@ def redact_community_session_config(session_config: dict[str, Any]) -> dict[str,
     return config_copy
 
 
+def validate_community_sessions_config(
+    community_sessions_map: Any | None,
+) -> None:
+    """
+    Validate the overall 'community_sessions' part of the configuration, if present.
+
+    If `community_sessions_map` is None (i.e., the 'community_sessions' key was absent
+    from the main configuration), this function does nothing.
+    If `community_sessions_map` is provided, this checks that it's a dictionary
+    and that each individual session configuration within it is valid.
+    An empty dictionary is allowed, signifying no sessions are configured under this key.
+
+    Args:
+        community_sessions_map (dict[str, Any] | None): The dictionary of community sessions
+            (e.g., config.get('community_sessions')). Can be None if the key is absent.
+
+    Raises:
+        CommunitySessionConfigurationError: If `community_sessions_map` is provided and is not a dict,
+            or if any individual session config is invalid (as determined by
+            `validate_single_community_session_config`).
+    """
+    if community_sessions_map is None:
+        # If 'community_sessions' key was absent from config, there's nothing to validate here.
+        return
+
+    if not isinstance(community_sessions_map, dict):
+        _LOGGER.error(
+            "'community_sessions' must be a dictionary in Deephaven community session config, got %s",
+            type(community_sessions_map).__name__,
+        )
+        raise CommunitySessionConfigurationError(
+            "'community_sessions' must be a dictionary in Deephaven community session config"
+        )
+
+    for session_name, session_config_item in community_sessions_map.items():
+        validate_single_community_session_config(session_name, session_config_item)
+
+
 def validate_single_community_session_config(
     session_name: str,
     config_item: dict[str, Any],
@@ -111,16 +109,19 @@ def validate_single_community_session_config(
         config_item (dict[str, Any]): The configuration dictionary for the session.
 
     Raises:
-        ValueError: If the configuration item is invalid (e.g., unknown fields, wrong types).
+        CommunitySessionConfigurationError: If the configuration item is invalid (e.g., not a
+            dictionary, unknown fields, wrong types, mutually exclusive fields like
+            'auth_token' and 'auth_token_env_var' are both set, or missing required
+            fields if any were defined in `_REQUIRED_FIELDS`).
     """
     if not isinstance(config_item, dict):
-        raise ValueError(
+        raise CommunitySessionConfigurationError(
             f"Community session config for {session_name} must be a dictionary, got {type(config_item)}"
         )
 
     for field_name, field_value in config_item.items():
         if field_name not in _ALLOWED_COMMUNITY_SESSION_FIELDS:
-            raise ValueError(
+            raise CommunitySessionConfigurationError(
                 f"Unknown field '{field_name}' in community session config for {session_name}"
             )
 
@@ -128,18 +129,25 @@ def validate_single_community_session_config(
         if isinstance(allowed_types, tuple):
             if not isinstance(field_value, allowed_types):
                 expected_type_names = ", ".join(t.__name__ for t in allowed_types)
-                raise ValueError(
+                raise CommunitySessionConfigurationError(
                     f"Field '{field_name}' in community session config for {session_name} "
                     f"must be one of types ({expected_type_names}), got {type(field_value).__name__}"
                 )
         elif not isinstance(field_value, allowed_types):
-            raise ValueError(
+            raise CommunitySessionConfigurationError(
                 f"Field '{field_name}' in community session config for {session_name} "
                 f"must be of type {allowed_types.__name__}, got {type(field_value).__name__}"
             )
 
+    # Check for mutual exclusivity of auth_token and auth_token_env_var
+    if "auth_token" in config_item and "auth_token_env_var" in config_item:
+        raise CommunitySessionConfigurationError(
+            f"In community session config for '{session_name}', both 'auth_token' and 'auth_token_env_var' are set. "
+            "Please use only one."
+        )
+
     for required_field in _REQUIRED_FIELDS:
         if required_field not in config_item:
-            raise ValueError(
+            raise CommunitySessionConfigurationError(
                 f"Missing required field '{required_field}' in community session config for {session_name}"
             )

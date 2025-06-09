@@ -26,7 +26,8 @@ This repository houses the Python-based Model Context Protocol (MCP) servers for
 - [MCP Server Implementations](#mcp-server-implementations)
   - [Community Server](#community-server)
     - [Overview](#community-server-overview)
-    - [Configuration](#community-server-configuration)
+    - [Community Sessions Configuration](#community-sessions-configuration)
+    - [Enterprise Server Configuration](#enterprise-server-configuration)
     - [Running the Community Server](#running-the-community-server)
     - [Using the Community Server](#using-the-community-server)
     - [Community Server Tools](#community-server-tools)
@@ -214,13 +215,13 @@ Key architectural features include:
 - **Async-First Design**: Built around [asyncio](https://docs.python.org/3/library/asyncio.html) for high-concurrency performance and non-blocking operations.
 - **Configurable Session Behavior**: Supports worker configuration options such as `never_timeout` to control session persistence and lifecycle management.
 
-#### Community Server Configuration
+##### Core Configuration File (`deephaven_mcp.json`)
 
-The Deephaven MCP Community Server relies on a JSON configuration file to define the [Deephaven Community Core](https://deephaven.io/) instances it can connect to and manage. This configuration is crucial for the server to operate correctly.
+The Deephaven MCP Community Server relies on a JSON configuration file (conventionally named `deephaven_mcp.json`, though any name can be used) to define the Deephaven instances it can connect to and manage. This configuration is crucial for the server to operate correctly.
 
-##### Environment Variables
+###### Environment Variables
 
-The Community Server's behavior can be controlled by the following environment variables:
+The Community Server's behavior, particularly how it finds its configuration, can be controlled by the following environment variables:
 
 | Variable             | Required | Description                                                                                                                                                              | Where Used              |
 |----------------------|----------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------|
@@ -229,15 +230,18 @@ The Community Server's behavior can be controlled by the following environment v
 
 > Environment variables can also be loaded from `.env` files using [python-dotenv](https://github.com/theskumar/python-dotenv) if it's integrated into the project's startup mechanism.
 
-##### The `deephaven_mcp.json` File
+###### File Structure Overview
 
-**Purpose and Structure:**
+The `deephaven_mcp.json` file is a JSON object that can contain two primary top-level keys: `"community_sessions"` and `"enterprise_sessions"`. Both are optional.
 
-*   The configuration file (conventionally named `deephaven_mcp.json`, though any name can be used) defines these connections. It's a JSON object that can optionally contain a top-level key `"community_sessions"`.
-*   If `"community_sessions"` is present, its value must be an object (which can be empty, e.g., `{}`) mapping user-defined session names to their specific configurations. An empty object signifies no sessions are configured under this key.
-*   If `"community_sessions"` is absent, or if the `deephaven_mcp.json` file itself is an empty JSON object (e.g., `{}`), it signifies that no community sessions are configured. This is a valid state.
+*   `"community_sessions"`: If present, its value must be an object mapping user-defined session names to their specific configurations for Deephaven Community Core instances. Details for these configurations are below.
+*   `"enterprise_sessions"`: If present, its value must be an object mapping user-defined session names to their specific configurations for Deephaven Enterprise instances. Details for these configurations are provided in a subsequent section.
 
-All fields within an individual community session's configuration (if `"community_sessions"` is present) are also optional. The structure of these individual session configurations is detailed below.
+If both keys are absent, or if the `deephaven_mcp.json` file itself is an empty JSON object (e.g., `{}`), it signifies that no sessions of either type are configured. This is a valid state.
+
+#### Community Sessions Configuration
+
+This section details the configuration for individual sessions listed under the `"community_sessions"` key in the `deephaven_mcp.json` file.
 
 **Community Session Configuration Fields:**
 
@@ -246,12 +250,11 @@ All fields within a session's configuration object are optional. If a field is o
 *   `host` (string): Hostname or IP address of the Deephaven Community Core worker (e.g., `"localhost"`).
 *   `port` (integer): Port number for the worker connection (e.g., `10000`).
 *   `auth_type` (string): Authentication method. Supported values include:
-    *   `"token"`: For token-based authentication (e.g., Deephaven's PSK).
-    *   `"basic"`: For username/password based HTTP Basic authentication.
+    *   `"token"`: For token-based authentication (e.g., Deephaven's PSK). The actual token value (pre-shared key or bearer token) is supplied via `auth_token` or `auth_token_env_var`.
+    *   `"basic"`: For username/password based HTTP Basic authentication. The password (or combined `username:password`) is supplied via `auth_token` or `auth_token_env_var`. Consult the Deephaven server's authentication guide for specifics.
     *   `"anonymous"`: For connections requiring no authentication.
-*   `auth_token` (string): The authentication token or password. Its meaning depends on `auth_type`.
-    *   For `"token"`: The pre-shared key or bearer token.
-    *   For `"basic"`: Typically the password. If the server expects `username:password` combined, provide it here. Consult the Deephaven server's authentication guide.
+*   `auth_token` (string, optional): The direct authentication token or password. Use this OR `auth_token_env_var`, but not both. Required if `auth_type` is `"token"` or `"basic"` and `auth_token_env_var` is not specified.
+*   `auth_token_env_var` (string, optional): The name of an environment variable from which to read the authentication token. Use this OR `auth_token`, but not both. If specified, the token will be sourced from this environment variable.
 *   `never_timeout` (boolean): If `true`, the MCP server attempts to configure the session to this worker to prevent timeouts. Server-side settings might still enforce timeouts.
 *   `session_type` (string): Specifies the programming language for the session (e.g., `"python"`, `"groovy"`).
 *   `use_tls` (boolean): Set to `true` if the connection to the worker requires TLS/SSL encryption.
@@ -273,7 +276,8 @@ All fields within a session's configuration object are optional. If a field is o
       "host": "secure.deephaven.example.com",
       "port": 10001,
       "auth_type": "token",
-      "auth_token": "your-secret-api-token-here",
+      // "auth_token": "your-secret-api-token-here", // Option 1: Direct token (less secure for shared configs)
+      "auth_token_env_var": "MY_REMOTE_TOKEN_ENV_VAR", // Option 2: Token from environment variable (recommended)
       "never_timeout": true,
       "session_type": "groovy",
       "use_tls": true,
@@ -284,6 +288,56 @@ All fields within a session's configuration object are optional. If a field is o
   }
 }
 ```
+
+#### Enterprise Server Configuration
+
+The `deephaven_mcp.json` file can also optionally include a top-level key named `"enterprise_systems"` to configure connections to Deephaven Enterprise instances. This key holds a dictionary where each entry maps a custom system name (e.g., `"prod_cluster"`, `"data_science_env"`) to its specific configuration object.
+
+If the `"enterprise_systems"` key is present, it must be a dictionary. Each individual enterprise system configuration within this dictionary supports the following fields:
+
+*   `connection_json_url` (string, **required**): The URL pointing to the `connection.json` file of the Deephaven Enterprise server. This file provides necessary connection details for the client.
+    *   Example: `"https://enterprise.example.com/iris/connection.json"`
+*   `auth_type` (string, **required**): Specifies the authentication method to use. Must be one of the following values:
+    *   `"password"`: Authenticate using a username and password.
+    *   `"private_key"`: Authenticate using a private key (e.g., for service accounts or specific SAML/OAuth setups requiring a private key).
+    *   `"none"`: No authentication will be used. This is typically for development or trusted environments and should be used with caution.
+    Only configuration keys relevant to the selected `auth_type` (and the general `connection_json_url` and optional TLS keys) should be included. Extraneous keys will be ignored by the application but will generate a warning message in the logs, indicating which keys are unexpected for the chosen authentication method.
+
+*   Conditional Authentication Fields (required based on `auth_type`):
+    *   If `auth_type` is `"password"`:
+        *   `username` (string, **required**): The username for authentication.
+        *   And either `password` (string): The password itself.
+        *   **OR** `password_env_var` (string): The name of an environment variable that holds the password. Using an environment variable is recommended. If the `password` field is used directly, its value will be redacted in application logs.
+    *   If `auth_type` is `"private_key"`:
+        *   `private_key_path` (string, **required**): The absolute file system path to the private key file (e.g., a `.pem` file).
+**Example `deephaven_mcp.json` with Enterprise Systems:**
+
+```json
+{
+  "community_sessions": {
+    "local_dev": {
+      "host": "localhost",
+      "port": 10000
+    }
+  },
+  "enterprise_systems": {
+    "staging_env": {
+      "connection_json_url": "https://staging.internal/iris/connection.json",
+      "auth_type": "password",
+      "username": "test_user",
+      "password_env_var": "STAGING_PASSWORD"
+    },
+    "analytics_private_key_auth": {
+        "connection_json_url": "https://analytics.dept.com/iris/connection.json",
+        "auth_type": "private_key",
+        "private_key_path": "/secure/keys/analytics_service_account.key"
+    }
+  }
+}
+```
+
+This structure allows for flexible configuration of multiple Deephaven Enterprise instances alongside community sessions within a single `deephaven_mcp.json` file.
+
 
 **Security Considerations:**
 

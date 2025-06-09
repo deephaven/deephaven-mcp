@@ -188,6 +188,62 @@ async def test_get_session_parameters_file_error(monkeypatch):
         await mgr._get_session_parameters(cfg)
 
 
+@pytest.mark.asyncio
+async def test_get_session_parameters_auth_token_from_env_var(
+    session_manager, monkeypatch
+):
+    """Test auth_token is sourced from environment variable when auth_token_env_var is set."""
+    env_var_name = "MY_TEST_TOKEN_VAR"
+    expected_token = "token_from_environment"
+    monkeypatch.setenv(env_var_name, expected_token)
+
+    worker_cfg = {
+        "auth_token_env_var": env_var_name,
+        # As per config validation, auth_token should not be present if auth_token_env_var is.
+    }
+    params = await session_manager._get_session_parameters(worker_cfg)
+    assert params["auth_token"] == expected_token
+    monkeypatch.delenv(env_var_name)  # Clean up
+
+
+@pytest.mark.asyncio
+async def test_get_session_parameters_auth_token_env_var_not_set(
+    session_manager, monkeypatch, caplog
+):
+    """Test auth_token is empty and warning logged if auth_token_env_var is set but env var is not."""
+    env_var_name = "MY_MISSING_TOKEN_VAR"
+    monkeypatch.delenv(env_var_name, raising=False)  # Ensure it's not set
+
+    worker_cfg = {
+        "auth_token_env_var": env_var_name,
+    }
+    params = await session_manager._get_session_parameters(worker_cfg)
+    assert params["auth_token"] == ""
+    assert (
+        f"Environment variable {env_var_name} specified for auth_token but not found. Using empty token."
+        in caplog.text
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_session_parameters_auth_token_from_config(session_manager):
+    """Test auth_token is sourced from config when auth_token_env_var is not set."""
+    expected_token = "token_from_config_direct"
+    worker_cfg = {
+        "auth_token": expected_token,
+    }
+    params = await session_manager._get_session_parameters(worker_cfg)
+    assert params["auth_token"] == expected_token
+
+
+@pytest.mark.asyncio
+async def test_get_session_parameters_no_auth_token_provided(session_manager):
+    """Test auth_token is empty if neither auth_token nor auth_token_env_var is provided."""
+    worker_cfg = {"host": "localhost"}  # Some other config, but no auth token fields
+    params = await session_manager._get_session_parameters(worker_cfg)
+    assert params["auth_token"] == ""
+
+
 def test_redact_sensitive_session_fields_empty():
     mgr = SessionManager(mock_config_manager)
     # No sensitive values

@@ -13,7 +13,7 @@ Features:
 
 Configuration Schema:
 ---------------------
-The configuration file must be a JSON object. It may contain the following top-level key:
+The configuration file must be a JSON object. It may contain the following top-level keys:
 
   - `community_sessions` (dict, optional):
       A dictionary mapping community session names (str) to client session configuration dicts.
@@ -27,7 +27,8 @@ The configuration file must be a JSON object. It may contain the following top-l
             * "token": Use a bearer token for authentication.
             * "basic": Use HTTP Basic authentication.
             * "anonymous": No authentication required.
-        - `auth_token` (str): The authentication token or password. May be empty if `auth_type` is "anonymous".
+        - `auth_token` (str, optional): The direct authentication token or password. May be empty if `auth_type` is "anonymous". Use this OR `auth_token_env_var`, but not both.
+        - `auth_token_env_var` (str, optional): The name of an environment variable from which to read the authentication token. Use this OR `auth_token`, but not both.
         - `never_timeout` (bool): If True, sessions to this community worker never time out.
         - `session_type` (str): Programming language for the session. Common values include:
             * "python": For Python-based Deephaven instances.
@@ -44,17 +45,45 @@ The configuration file must be a JSON object. It may contain the following top-l
         - Sensitive fields (`auth_token`, `client_private_key`) are redacted from logs for security.
         - Unknown fields are not allowed and will cause validation to fail.
 
+  - `enterprise_systems` (dict, optional):
+      A dictionary mapping enterprise system names (str) to system configuration dicts.
+      If this key is present, its value must be a dictionary (which can be empty).
+      Each enterprise system configuration dict is validated according to the schema defined in
+      `src/deephaven_mcp/config/enterprise_system.py`. Key fields typically include:
+
+        - `connection_json_url` (str): URL to the server's connection.json file.
+        - `auth_type` (str, enum): Authentication type. Allowed values include:
+            * "password": Use username and password for authentication.
+            * "private_key": Use a private key for SAML or similar token-based authentication.
+        - Conditional fields based on `auth_type`:
+            - If `auth_type` is "password":
+                - `username` (str, required): The username.
+                - `password` (str, optional): The password.
+                - `password_env_var` (str, optional): Environment variable for the password.
+                  (Note: `password` and `password_env_var` are mutually exclusive.)
+            - If `auth_type` is "private_key":
+                - `private_key` (str, required): Path to the private key file.
+
+      Notes:
+        - For the detailed schema of individual enterprise system configurations, please refer to the
+          `src/deephaven_mcp/config/enterprise_system.py` module and the DEVELOPER_GUIDE.md.
+        - Sensitive fields are redacted from logs.
+        - Unknown fields within an enterprise system configuration will cause a warning and be ignored, but unknown top-level keys in the main config will fail validation.
+
 Validation rules:
   - If the `community_sessions` key is present, its value must be a dictionary.
   - Within each session configuration, all field values must have the correct type if present.
   - No unknown fields are permitted in session configurations.
   - If TLS fields are provided, referenced files must exist and be readable.
+  - If the `enterprise_systems` key is present, its value must be a dictionary.
+  - Each enterprise system configuration is validated according to its specific schema.
 
 Configuration JSON Specification:
 ---------------------------------
 - The configuration file must be a JSON object.
-- It may optionally contain a `"community_sessions"` top-level key:
-    - `"community_sessions"`: If present, this must be a dictionary mapping community session names to client session configuration dicts for connecting to community workers. It cannot be an empty dictionary if provided.
+- It may optionally contain `"community_sessions"` and/or `"enterprise_systems"` top-level keys:
+    - `"community_sessions"`: If present, this must be a dictionary mapping community session names to client session configuration dicts for connecting to community workers. An empty dictionary is allowed (e.g., {}).
+    - `"enterprise_systems"`: If present, this must be a dictionary mapping enterprise system names to system configuration dicts. An empty dictionary is allowed (e.g., {}).
 
 Example Valid Configuration (without community_sessions):
 ---------------------------
@@ -87,6 +116,19 @@ Example Valid Configuration (with community_sessions):
             "never_timeout": false,
             "session_type": "groovy",
             "use_tls": true
+        }
+    },
+    "enterprise_systems": {
+        "prod_cluster": {
+            "connection_json_url": "https://enterprise.example.com/iris/connection.json",
+            "auth_type": "api_key",
+            "api_key_env_var": "PROD_CLUSTER_API_KEY"
+        },
+        "dev_system": {
+            "connection_json_url": "http://localhost:8080/iris/connection.json",
+            "auth_type": "password",
+            "username": "dev_user",
+            "password_env_var": "DEV_SYSTEM_PASSWORD"
         }
     }
 }
@@ -136,7 +178,16 @@ Async/Await & I/O:
 ------------------
 - All configuration loading is async and coroutine-safe.
 - File I/O uses `aiofiles` for non-blocking reads.
+
 """
+
+__all__ = [
+    "McpConfigurationError",
+    "CommunitySessionConfigurationError",
+    "EnterpriseSystemConfigurationError",
+    "ConfigManager",
+    "CONFIG_ENV_VAR",
+]
 
 import asyncio
 import json
@@ -148,9 +199,17 @@ from typing import Any, cast
 import aiofiles
 
 from .community_session import (
-    CommunitySessionConfigurationError,
     redact_community_session_config,
     validate_community_sessions_config,
+)
+from .enterprise_system import (
+    redact_enterprise_system_config,
+    validate_enterprise_systems_config,
+)
+from .errors import (
+    CommunitySessionConfigurationError,
+    EnterpriseSystemConfigurationError,
+    McpConfigurationError,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -162,12 +221,10 @@ str: Name of the environment variable specifying the path to the Deephaven MCP c
 
 
 class ConfigManager:
-    _REQUIRED_TOP_LEVEL_KEYS: set[str] = (
-        set()
-    )  # Defines mandatory top-level keys in the config
-    _ALLOWED_TOP_LEVEL_KEYS: set[str] = {
-        "community_sessions"
-    }  # Defines all allowed top-level keys
+    _REQUIRED_TOP_LEVEL_KEYS: set[str] = set()
+    """Set of top-level keys that MUST be present in the configuration file."""
+    _ALLOWED_TOP_LEVEL_KEYS: set[str] = {"community_sessions", "enterprise_systems"}
+    """Set of all allowed top-level keys in the configuration file."""
 
     """
     Async configuration manager for Deephaven MCP configuration.
@@ -229,7 +286,7 @@ class ConfigManager:
         returns it; otherwise, loads from disk and validates.
 
         Returns:
-            dict[str, Any]: The loaded and validated configuration dictionary.
+            dict[str, Any]: The loaded and validated configuration dictionary. Returns an empty dictionary if the config file path is not set or the file is empty (but valid JSON like {}). Raises McpConfigurationError or its subclasses on loading, parsing, or validation failures.
 
         Raises:
             RuntimeError: If the `DH_MCP_CONFIG_FILE` environment variable is not set, or the file cannot be read.
@@ -262,19 +319,89 @@ class ConfigManager:
                 f"Environment variable {CONFIG_ENV_VAR} is set to: {config_path}"
             )
 
-            try:
-                async with aiofiles.open(config_path) as f:
-                    data = json.loads(await f.read())
-            except Exception as e:
-                _LOGGER.error(f"Failed to load config file {config_path}: {e}")
-                raise
+            data = await self._load_config_from_file(config_path)
 
-            validated = self.validate_config(data)
-            self._cache = validated
+            try:
+                validated_data = self.validate_config(data)
+            except (
+                CommunitySessionConfigurationError,
+                EnterpriseSystemConfigurationError,
+            ) as specific_e:
+                _LOGGER.error(
+                    f"Configuration validation failed for {config_path}: {specific_e}"
+                )
+                raise McpConfigurationError(
+                    f"Configuration validation failed: {specific_e}"
+                ) from specific_e
+            except ValueError as ve:
+                _LOGGER.error(
+                    f"General configuration validation error for {config_path}: {ve}"
+                )
+                raise McpConfigurationError(
+                    f"General configuration validation error: {ve}"
+                ) from ve
+
+            self._cache = validated_data
+            end_time = perf_counter()
+            duration_ms = (end_time - start_time) * 1000
             _LOGGER.info(
-                f"Deephaven community session configuration loaded and validated successfully in {perf_counter() - start_time:.3f} seconds"
+                f"Successfully loaded and validated Deephaven MCP application configuration from {config_path} in {duration_ms:.2f}ms."
             )
-            return validated
+
+            # Log configured sessions after successful load and validation
+            community_sessions = self._cache.get("community_sessions", {})
+            if community_sessions:
+                _LOGGER.info("Configured Community Sessions:")
+                for name, details in community_sessions.items():
+                    _LOGGER.info(
+                        f"  Session '{name}': {redact_community_session_config(details)}"
+                    )
+            else:
+                _LOGGER.info("No Community Sessions configured.")
+
+            enterprise_systems = self._cache.get("enterprise_systems", {})
+            if enterprise_systems:
+                _LOGGER.info("Configured Enterprise Systems:")
+                for name, details in enterprise_systems.items():
+                    _LOGGER.info(
+                        f"  System '{name}': {redact_enterprise_system_config(details)}"
+                    )
+            else:
+                _LOGGER.info("No Enterprise Systems configured.")
+
+            return self._cache
+
+    async def _load_config_from_file(self, config_path: str) -> dict[str, Any]:
+        """Load and parse configuration from a JSON file."""
+        try:
+            async with aiofiles.open(config_path) as f:
+                content = await f.read()
+            # Ensure the result is a dictionary for type checking
+            return cast(dict[str, Any], json.loads(content))
+        except FileNotFoundError:
+            _LOGGER.error(f"Configuration file not found: {config_path}")
+            raise McpConfigurationError(
+                f"Configuration file not found: {config_path}"
+            ) from None
+        except PermissionError:
+            _LOGGER.error(
+                f"Permission denied when trying to read configuration file: {config_path}"
+            )
+            raise McpConfigurationError(
+                f"Permission denied when trying to read configuration file: {config_path}"
+            ) from None
+        except json.JSONDecodeError as e:
+            _LOGGER.error(f"Invalid JSON in configuration file {config_path}: {e}")
+            raise McpConfigurationError(
+                f"Invalid JSON in configuration file {config_path}: {e}"
+            ) from e
+        except Exception as e:  # Catch other potential IOErrors or unexpected issues
+            _LOGGER.error(
+                f"Unexpected error loading or parsing config file {config_path}: {e}"
+            )
+            raise McpConfigurationError(
+                f"Unexpected error loading or parsing config file {config_path}: {e}"
+            ) from e
 
     async def get_community_session_config(self, session_name: str) -> dict[str, Any]:
         """
@@ -333,15 +460,83 @@ class ConfigManager:
         )
         return session_names
 
+    async def get_enterprise_system_config(self, system_name: str) -> dict[str, Any]:
+        """
+        Retrieves the configuration for a specific enterprise system by its name.
+
+        Args:
+            system_name (str): The name of the enterprise system configuration to retrieve. Required.
+
+        Returns:
+            dict[str, Any]: The configuration dictionary for the specified enterprise system.
+
+        Raises:
+            EnterpriseSystemConfigurationError: If the enterprise system configuration is not found.
+
+        Example:
+            >>> # Assuming config_manager is an instance of ConfigManager
+            >>> enterprise_system_config = await config_manager.get_enterprise_system_config('prod_cluster')
+        """
+        _LOGGER.debug(f"Getting enterprise system config for system: {system_name!r}")
+        config = await self.get_config()
+        enterprise_systems_map = config.get("enterprise_systems", {})
+
+        if (
+            not isinstance(enterprise_systems_map, dict)
+            or system_name not in enterprise_systems_map
+        ):
+            _LOGGER.error(
+                f"Enterprise system '{system_name}' not found in configuration or 'enterprise_systems' is not a dict."
+            )
+            raise EnterpriseSystemConfigurationError(
+                f"Enterprise system '{system_name}' not found in configuration."
+            )
+
+        # TODO: Implement redaction for enterprise systems if needed, similar to community sessions.
+        # For now, returning the raw config.
+        _LOGGER.debug(
+            f"Retrieved configuration for enterprise system '{system_name}': {enterprise_systems_map[system_name]}"  # Add redaction if sensitive
+        )
+        return cast(dict[str, Any], enterprise_systems_map[system_name])
+
+    async def get_all_enterprise_system_names(self) -> list[str]:
+        """
+        Retrieves a list of all configured enterprise system names.
+
+        Returns:
+            list[str]: A list of enterprise system configuration names.
+
+        Example:
+            >>> # Assuming config_manager is an instance of ConfigManager
+            >>> system_names = await config_manager.get_all_enterprise_system_names()
+            >>> for system_name in system_names:
+            ...     print(f"Available enterprise system: {system_name}")
+        """
+        _LOGGER.debug("Getting list of all enterprise system names")
+        config = await self.get_config()
+        enterprise_systems_map = config.get("enterprise_systems", {})
+
+        if not isinstance(enterprise_systems_map, dict):
+            _LOGGER.warning(
+                "'enterprise_systems' is not a dictionary, returning empty list of names."
+            )
+            return []
+
+        system_names = list(enterprise_systems_map.keys())
+
+        _LOGGER.debug(f"Found {len(system_names)} enterprise system(s): {system_names}")
+        return system_names
+
     @staticmethod
     def validate_config(config: dict[str, Any]) -> dict[str, Any]:
         """
         Validate the Deephaven MCP application configuration dictionary.
 
         Ensures that the configuration has the correct top-level structure.
-        The 'community_sessions' key is optional. If present, it delegates to
-        `validate_community_sessions_config` for detailed validation of its content.
-        Only known top-level keys are allowed (currently only 'community_sessions').
+        The 'community_sessions' and 'enterprise_systems' keys are optional. If present, they delegate to
+        their respective validation functions (`validate_community_sessions_config` and
+        `validate_enterprise_systems_config`) for detailed validation of their content.
+        Only known top-level keys are allowed.
 
         Args:
             config (dict[str, Any]): The configuration dictionary to validate.
@@ -351,11 +546,10 @@ class ConfigManager:
             dict[str, Any]: The validated configuration dictionary.
 
         Raises:
-            ValueError: If the config has unknown top-level keys,
-                        or if 'community_sessions' is present and `validate_community_sessions_config` finds issues.
+            ValueError: If the config has unknown top-level keys and validating specific sections like 'community_sessions' and 'enterprise_systems' if they are present.
 
         Example:
-            >>> validated_config = ConfigManager.validate_config({'community_sessions': {'local_session': {}}})
+            >>> validated_config = ConfigManager.validate_config({'community_sessions': {'local_session': {}}, 'enterprise_systems': {'prod_cluster': {}}})
             >>> validated_config_empty = ConfigManager.validate_config({}) # Also valid
         """
         top_level_keys = set(config.keys())
@@ -366,7 +560,7 @@ class ConfigManager:
             _LOGGER.error(
                 f"Missing required top-level keys in Deephaven MCP config: {missing_keys}"
             )
-            raise ValueError(
+            raise McpConfigurationError(
                 f"Missing required top-level keys in Deephaven MCP config: {missing_keys}"
             )
 
@@ -376,13 +570,17 @@ class ConfigManager:
             _LOGGER.error(
                 f"Unknown top-level keys in Deephaven MCP config: {unknown_keys}"
             )
-            raise ValueError(
+            raise McpConfigurationError(
                 f"Unknown top-level keys in Deephaven MCP config: {unknown_keys}"
             )
 
-        # Validate the 'community_sessions' structure and its contents if the key exists
-        if "community_sessions" in config:
+        # Validate 'community_sessions' if present
+        if "community_sessions" in top_level_keys:
             validate_community_sessions_config(config["community_sessions"])
-        # If "community_sessions" is not in config, it's considered valid (meaning no sessions configured)
 
+        # Validate 'enterprise_systems' if present
+        if "enterprise_systems" in top_level_keys:
+            validate_enterprise_systems_config(config["enterprise_systems"])
+
+        _LOGGER.info("Configuration validation passed.")
         return config
