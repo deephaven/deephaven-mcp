@@ -148,6 +148,7 @@ async def test_describe_workers_all_available_with_versions(monkeypatch):
     config_manager = MagicMock()
     session_manager = MagicMock()
     config_manager.get_community_session_names = AsyncMock(return_value=["w1", "w2"])
+    config_manager.get_config = AsyncMock(return_value={"community_sessions": {"w1": {"session_type": "python"}, "w2": {"session_type": "python"}}})
     alive_session = MagicMock(is_alive=True)
     session_manager.get_or_create_session = AsyncMock(return_value=alive_session)
     config_manager.get_community_session_config = AsyncMock(
@@ -189,6 +190,7 @@ async def test_describe_workers_all_available_no_versions(monkeypatch):
     config_manager = MagicMock()
     session_manager = MagicMock()
     config_manager.get_community_session_names = AsyncMock(return_value=["w1", "w2"])
+    config_manager.get_config = AsyncMock(return_value={"community_sessions": {"w1": {"session_type": "python"}, "w2": {"session_type": "python"}}})
     alive_session = MagicMock(is_alive=True)
     session_manager.get_or_create_session = AsyncMock(return_value=alive_session)
     config_manager.get_community_session_config = AsyncMock(
@@ -221,6 +223,7 @@ async def test_describe_workers_some_unavailable(monkeypatch):
     config_manager.get_community_session_names = AsyncMock(
         return_value=["w1", "w2", "w3"]
     )
+    config_manager.get_config = AsyncMock(return_value={"community_sessions": {"w1": {"session_type": "python"}, "w2": {"session_type": "python"}, "w3": {"session_type": "python"}}})
     alive_session = MagicMock(is_alive=True)
     dead_session = MagicMock(is_alive=False)
 
@@ -268,6 +271,7 @@ async def test_describe_workers_non_python(monkeypatch):
     config_manager = MagicMock()
     session_manager = MagicMock()
     config_manager.get_community_session_names = AsyncMock(return_value=["w1"])
+    config_manager.get_config = AsyncMock(return_value={"community_sessions": {"w1": {"session_type": "groovy"}}})
     alive_session = MagicMock(is_alive=True)
     session_manager.get_or_create_session = AsyncMock(return_value=alive_session)
     config_manager.get_community_session_config = AsyncMock(
@@ -299,6 +303,7 @@ async def test_describe_workers_versions_error(monkeypatch):
     config_manager = MagicMock()
     session_manager = MagicMock()
     config_manager.get_community_session_names = AsyncMock(return_value=["w1"])
+    config_manager.get_config = AsyncMock(return_value={"community_sessions": {"w1": {"session_type": "python"}}})
     alive_session = MagicMock(is_alive=True)
     session_manager.get_or_create_session = AsyncMock(return_value=alive_session)
     config_manager.get_community_session_config = AsyncMock(
@@ -333,6 +338,7 @@ async def test_describe_workers_some_unavailable_with_versions(monkeypatch):
     config_manager.get_community_session_names = AsyncMock(
         return_value=["w1", "w2", "w3"]
     )
+    config_manager.get_config = AsyncMock(return_value={"community_sessions": {"w1": {"session_type": "python"}, "w2": {"session_type": "python"}, "w3": {"session_type": "python"}}})
     alive_session = MagicMock(is_alive=True)
     dead_session = MagicMock(is_alive=False)
 
@@ -350,7 +356,7 @@ async def test_describe_workers_some_unavailable_with_versions(monkeypatch):
     )
     # Only w1 is alive, w2 fails, w3 is dead
     monkeypatch.setattr(
-        mcp_mod.sessions, "get_dh_versions", AsyncMock(return_value=("1.2.3", None))
+        mcp_mod.sessions, "get_dh_versions", AsyncMock(return_value=("1.2.3", "4.5.6"))
     )
     context = MockContext(
         {
@@ -367,18 +373,19 @@ async def test_describe_workers_some_unavailable_with_versions(monkeypatch):
                 "available": True,
                 "programming_language": "python",
                 "deephaven_core_version": "1.2.3",
+                "deephaven_enterprise_version": "4.5.6",
             },
             {"worker": "w2", "available": False, "programming_language": "python"},
             {"worker": "w3", "available": False, "programming_language": "python"},
         ],
     }
 
-
 @pytest.mark.asyncio
 async def test_describe_workers_worker_config_error(monkeypatch):
     config_manager = MagicMock()
     session_manager = MagicMock()
     config_manager.get_community_session_names = AsyncMock(return_value=["w1"])
+    config_manager.get_config = AsyncMock(return_value={"community_sessions": {"w1": {"session_type": "python"}}})
     # Simulate get_worker_config raising an exception
     config_manager.get_community_session_config = AsyncMock(
         side_effect=config.CommunitySessionConfigurationError("config-fail")
@@ -402,9 +409,7 @@ async def test_describe_workers_worker_config_error(monkeypatch):
 async def test_describe_workers_config_error(monkeypatch):
     config_manager = MagicMock()
     session_manager = MagicMock()
-    config_manager.get_community_session_names = AsyncMock(
-        side_effect=Exception("fail-cfg")
-    )
+    config_manager.get_config = AsyncMock(side_effect=Exception("fail-cfg"))
     context = MockContext(
         {
             "config_manager": config_manager,

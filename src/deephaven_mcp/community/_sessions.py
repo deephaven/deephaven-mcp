@@ -456,9 +456,7 @@ class SessionManager:
 
             # At this point, we need to create a new session and update the cache
             _LOGGER.info(f"Creating new session for worker: {worker_name}")
-            worker_cfg = await self._config_manager.get_community_session_config(
-                worker_name
-            )
+            worker_cfg = await config.get_named_config(self._config_manager, "community_sessions", worker_name)
             session_params = await self._get_session_parameters(worker_cfg)
 
             # Redact sensitive info for logging

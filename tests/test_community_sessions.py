@@ -277,6 +277,9 @@ async def test_get_or_create_session_liveness_exception(
     session_manager._config_manager.get_worker_config = AsyncMock(
         return_value={"host": "localhost"}
     )
+    session_manager._config_manager.get_config = AsyncMock(
+        return_value={"community_sessions": {"foo": {"host": "localhost"}}}
+    )
     monkeypatch.setattr("deephaven_mcp.community._sessions.Session", MagicMock())
     await session_manager.get_or_create_session("foo")
     assert any("Error checking session liveness" in r for r in caplog.text.splitlines())
@@ -454,6 +457,9 @@ async def test_get_or_create_session_reuses_alive(monkeypatch, session_manager):
     session_manager._config_manager.get_worker_config = AsyncMock(
         return_value={"host": "localhost"}
     )
+    session_manager._config_manager.get_config = AsyncMock(
+        return_value={"community_sessions": {"foo": {"host": "localhost"}}}
+    )
     monkeypatch.setattr("deephaven_mcp.community._sessions.Session", MagicMock())
     result = await session_manager.get_or_create_session("foo")
     assert result is session
@@ -465,6 +471,9 @@ async def test_get_or_create_session_creates_new(monkeypatch, session_manager):
     fake_config = {"host": "localhost"}
     session_manager._config_manager.get_worker_config = AsyncMock(
         return_value=fake_config
+    )
+    session_manager._config_manager.get_config = AsyncMock(
+        return_value={"community_sessions": {"foo": {"host": "localhost"}}}
     )
     monkeypatch.setattr(
         SessionManager,
@@ -487,6 +496,10 @@ async def test_get_or_create_session_handles_dead(monkeypatch, session_manager):
     fake_config = {"host": "localhost"}
     session_manager._config_manager.get_worker_config = AsyncMock(
         return_value=fake_config
+    )
+    # Patch get_config to include 'community_sessions: {"foo": ...}'
+    session_manager._config_manager.get_config = AsyncMock(
+        return_value={"community_sessions": {"foo": {"host": "localhost"}}}
     )
     monkeypatch.setattr(
         SessionManager,
