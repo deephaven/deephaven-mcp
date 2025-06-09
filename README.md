@@ -166,17 +166,11 @@ The `enterprise_systems` key in `deephaven_mcp.json` is a dictionary mapping cus
 
 *   `connection_json_url` (string): URL to the Deephaven Enterprise server's `connection.json` file (e.g., `"https://enterprise.example.com/iris/connection.json"`). This file provides the necessary details for the client to connect to the server.
 *   `auth_type` (string): Specifies the authentication method. Must be one of:
-    *   `"api_key"`: For API key-based authentication.
     *   `"password"`: For username/password authentication.
     *   `"private_key"`: For authentication using a private key (e.g., SAML or other private key-based auth).
-    *   `"none"`: For no authentication (use with caution, typically for development or trusted environments).
 
 **Conditional Fields (based on `auth_type`):**
 
-*   **If `auth_type` is `"api_key"`:**
-    *   One of the following must be provided:
-        *   `api_key` (string): The API key itself.
-        *   `api_key_env_var` (string): The name of an environment variable that holds the API key (e.g., `"MY_ENTERPRISE_API_KEY"`).
 *   **If `auth_type` is `"password"`:**
     *   `username` (string): The username for authentication (required).
     *   One of the following must be provided for the password:
