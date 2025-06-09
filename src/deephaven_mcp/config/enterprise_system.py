@@ -125,7 +125,8 @@ def validate_enterprise_systems_config(enterprise_systems_map: Any | None) -> No
 
 
 def _validate_single_enterprise_system(system_name: str, config: Any) -> None:
-    """Validate a single enterprise system's configuration dictionary.
+    """
+    Validate a single enterprise system's configuration dictionary.
 
     Args:
         system_name (str): The name of the enterprise system.
@@ -134,22 +135,38 @@ def _validate_single_enterprise_system(system_name: str, config: Any) -> None:
     Raises:
         EnterpriseSystemConfigurationError: If the configuration is invalid.
     """
+    _validate_enterprise_system_base_fields(system_name, config)
+    auth_type, all_allowed_fields = _validate_and_get_auth_type(system_name, config)
+    _validate_enterprise_system_auth_specific_fields(
+        system_name, config, auth_type, all_allowed_fields
+    )
+    _validate_enterprise_system_auth_type_logic(system_name, config, auth_type)
+
+
+def _validate_enterprise_system_base_fields(system_name: str, config: Any) -> None:
+    """
+    Validate that the enterprise system config is a dict and that all base fields are present and of correct type.
+
+    Args:
+        system_name (str): The name of the enterprise system.
+        config (Any): The configuration dictionary for the system.
+
+    Raises:
+        EnterpriseSystemConfigurationError: If the config is not a dict, or if any base field is missing or of wrong type.
+    """
     if not isinstance(config, dict):
         msg = f"Enterprise system '{system_name}' configuration must be a dictionary, but got {type(config).__name__}."
         _LOGGER.error(msg)
         raise EnterpriseSystemConfigurationError(msg)
 
-    # Validate presence and type of base fields first
     for field_name, expected_type in _BASE_ENTERPRISE_SYSTEM_FIELDS.items():
         if field_name not in config:
             msg = f"Required field '{field_name}' missing in enterprise system '{system_name}'."
             _LOGGER.error(msg)
             raise EnterpriseSystemConfigurationError(msg)
-
         field_value = config[field_name]
-        if isinstance(
-            expected_type, tuple
-        ):  # Handles (type, types.NoneType) for optional fields
+
+        if isinstance(expected_type, tuple):
             if not isinstance(field_value, expected_type):
                 expected_type_names = ", ".join(t.__name__ for t in expected_type)
                 msg = (
@@ -166,41 +183,56 @@ def _validate_single_enterprise_system(system_name: str, config: Any) -> None:
             _LOGGER.error(msg)
             raise EnterpriseSystemConfigurationError(msg)
 
-    auth_type = config.get(
-        "auth_type"
-    )  # Already validated to be a string by the loop above
+
+def _validate_and_get_auth_type(
+    system_name: str, config: dict[str, Any]
+) -> tuple[str, dict[str, type | tuple[type, ...]]]:
+    """
+    Validate the 'auth_type' field and return it along with the allowed fields for that auth_type.
+
+    Args:
+        system_name (str): The name of the enterprise system.
+        config (dict[str, Any]): The configuration dictionary for the system.
+
+    Returns:
+        Tuple[str, dict[str, type | tuple[type, ...]]]: The auth_type and a dict of all allowed fields for this auth_type.
+
+    Raises:
+        EnterpriseSystemConfigurationError: If 'auth_type' is missing or invalid.
+    """
+    auth_type = config.get("auth_type")
     if auth_type not in _AUTH_SPECIFIC_FIELDS:
         allowed_types_str = sorted(_AUTH_SPECIFIC_FIELDS.keys())
         msg = f"'auth_type' for enterprise system '{system_name}' must be one of {allowed_types_str}, but got '{auth_type}'."
         _LOGGER.error(msg)
         raise EnterpriseSystemConfigurationError(msg)
 
-    # Determine all allowed fields for this auth_type
     current_auth_specific_fields_schema = _AUTH_SPECIFIC_FIELDS.get(auth_type, {})
     all_allowed_fields_for_this_auth_type = {
         **_BASE_ENTERPRISE_SYSTEM_FIELDS,
         **current_auth_specific_fields_schema,
     }
+    return auth_type, all_allowed_fields_for_this_auth_type
 
-    # Validate types of auth-specific fields and check for unknown fields
+
+def _validate_enterprise_system_auth_specific_fields(
+    system_name: str,
+    config: dict[str, Any],
+    auth_type: str,
+    all_allowed_fields_for_this_auth_type: dict[str, type | tuple[type, ...]],
+) -> None:
     for field_name, field_value in config.items():
-        if (
-            field_name in _BASE_ENTERPRISE_SYSTEM_FIELDS
-        ):  # Base fields already type-checked
+        if field_name in _BASE_ENTERPRISE_SYSTEM_FIELDS:
             continue
 
         if field_name not in all_allowed_fields_for_this_auth_type:
-            # This will also catch TLS options if they are not in _KNOWN_TLS_OPTIONS and not part of the core schema.
-            # If _KNOWN_TLS_OPTIONS are to be silently ignored (not warned), that logic needs to be explicit here.
-            # Any field not in the defined schema (base + auth-specific) is warned as unknown.
             _LOGGER.warning(
                 "Unknown field '%s' in enterprise system '%s' configuration. It will be ignored.",
                 field_name,
                 system_name,
             )
-            continue  # Skip type checking for unknown fields
+            continue
 
-        # Type check for auth-specific fields (already known to be in all_allowed_fields_for_this_auth_type)
         expected_type = all_allowed_fields_for_this_auth_type[field_name]
         if isinstance(expected_type, tuple):
             if not isinstance(field_value, expected_type):
@@ -219,14 +251,26 @@ def _validate_single_enterprise_system(system_name: str, config: Any) -> None:
             _LOGGER.error(msg)
             raise EnterpriseSystemConfigurationError(msg)
 
-    # Specific validation logic based on auth_type (presence of required sub-fields and mutual exclusivity)
 
+def _validate_enterprise_system_auth_type_logic(
+    system_name: str, config: dict[str, Any], auth_type: str
+) -> None:
+    """
+    Perform additional validation logic specific to the given auth_type (e.g., required sub-fields, mutual exclusivity).
+
+    Args:
+        system_name (str): The name of the enterprise system.
+        config (dict[str, Any]): The configuration dictionary for the system.
+        auth_type (str): The authentication type for the system.
+
+    Raises:
+        EnterpriseSystemConfigurationError: If any auth-type-specific validation fails.
+    """
     if auth_type == "password":
-        if "username" not in config:  # This field is required for 'password' auth_type
+        if "username" not in config:
             msg = f"Enterprise system '{system_name}' with auth_type 'password' must define 'username'."
             _LOGGER.error(msg)
             raise EnterpriseSystemConfigurationError(msg)
-        # Type of 'username' is already checked by the loop above.
 
         password_present = "password" in config
         password_env_var_present = "password_env_var" in config
@@ -238,12 +282,8 @@ def _validate_single_enterprise_system(system_name: str, config: Any) -> None:
             msg = f"Enterprise system '{system_name}' with auth_type 'password' must define 'password' or 'password_env_var'."
             _LOGGER.error(msg)
             raise EnterpriseSystemConfigurationError(msg)
-
     elif auth_type == "private_key":
-        if (
-            "private_key" not in config
-        ):  # This field is required for 'private_key' auth_type
+        if "private_key" not in config:
             msg = f"Enterprise system '{system_name}' with auth_type 'private_key' must define 'private_key'."
             _LOGGER.error(msg)
             raise EnterpriseSystemConfigurationError(msg)
-        # Type of 'private_key' is already checked by the loop above.

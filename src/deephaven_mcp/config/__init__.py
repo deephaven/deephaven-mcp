@@ -376,7 +376,8 @@ class ConfigManager:
         try:
             async with aiofiles.open(config_path) as f:
                 content = await f.read()
-            return json.loads(content)
+            # Ensure the result is a dictionary for type checking
+            return cast(dict[str, Any], json.loads(content))
         except FileNotFoundError:
             _LOGGER.error(f"Configuration file not found: {config_path}")
             raise McpConfigurationError(
