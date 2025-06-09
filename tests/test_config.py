@@ -1,29 +1,32 @@
 """
 Comprehensive test suite for deephaven_mcp.config (public/private functions, 100% coverage, up-to-date with latest refactor).
 """
-import os
-import json
-import pytest
+
 import asyncio
-from unittest import mock
+import json
 import logging
+import os
 import re
+from unittest import mock
 
 import aiofiles
+import pytest
+
 from deephaven_mcp.config import (
-    ConfigManager,
-    get_named_config,
-    get_all_config_names,
-    validate_config,
-    _load_config_from_file,
-    _load_and_validate_config,
-    _get_config_path,
-    _log_config_summary,
-    McpConfigurationError,
-    CommunitySessionConfigurationError,
-    EnterpriseSystemConfigurationError,
     CONFIG_ENV_VAR,
+    CommunitySessionConfigurationError,
+    ConfigManager,
+    EnterpriseSystemConfigurationError,
+    McpConfigurationError,
+    _get_config_path,
+    _load_and_validate_config,
+    _load_config_from_file,
+    _log_config_summary,
+    get_all_config_names,
+    get_named_config,
+    validate_config,
 )
+
 
 # --- Fixtures and helpers ---
 @pytest.fixture
@@ -41,6 +44,7 @@ def valid_community_config():
             }
         }
     }
+
 
 @pytest.fixture
 def valid_enterprise_config():
@@ -60,9 +64,11 @@ def valid_enterprise_config():
         }
     }
 
+
 @pytest.fixture
 def valid_full_config(valid_community_config, valid_enterprise_config):
     return {**valid_community_config, **valid_enterprise_config}
+
 
 @pytest.fixture(autouse=True)
 def clear_env():
@@ -73,52 +79,67 @@ def clear_env():
     if old is not None:
         os.environ[CONFIG_ENV_VAR] = old
 
+
 # --- Top-level config validation ---
 def test_validate_config_accepts_empty():
     assert validate_config({}) == {}
 
+
 def test_validate_config_accepts_community_only(valid_community_config):
     assert validate_config(valid_community_config) == valid_community_config
+
 
 def test_validate_config_accepts_enterprise_only(valid_enterprise_config):
     assert validate_config(valid_enterprise_config) == valid_enterprise_config
 
+
 def test_validate_config_accepts_full(valid_full_config):
     assert validate_config(valid_full_config) == valid_full_config
+
 
 def test_validate_config_rejects_unknown_top_level():
     with pytest.raises(McpConfigurationError):
         validate_config({"foo": {}})
 
+
 # --- Community session validation ---
 from deephaven_mcp.config.community_session import (
+    redact_community_session_config,
     validate_community_sessions_config,
     validate_single_community_session_config,
-    redact_community_session_config,
 )
+
 
 def test_community_sessions_accepts_empty():
     validate_community_sessions_config({})
+
 
 def test_community_sessions_rejects_non_dict():
     with pytest.raises(CommunitySessionConfigurationError):
         validate_community_sessions_config([])
 
+
 def test_community_sessions_rejects_non_dict_item():
     with pytest.raises(CommunitySessionConfigurationError):
         validate_community_sessions_config({"foo": []})
+
 
 def test_community_sessions_unknown_field():
     with pytest.raises(CommunitySessionConfigurationError):
         validate_single_community_session_config("foo", {"host": "localhost", "bad": 1})
 
+
 def test_community_sessions_wrong_type():
     with pytest.raises(CommunitySessionConfigurationError):
         validate_single_community_session_config("foo", {"host": 1})
 
+
 def test_community_sessions_mutual_exclusive_auth_token():
     with pytest.raises(CommunitySessionConfigurationError):
-        validate_single_community_session_config("foo", {"auth_token": "a", "auth_token_env_var": "b"})
+        validate_single_community_session_config(
+            "foo", {"auth_token": "a", "auth_token_env_var": "b"}
+        )
+
 
 def test_community_sessions_redact():
     d = {"auth_token": "secret", "host": "localhost"}
@@ -126,84 +147,167 @@ def test_community_sessions_redact():
     assert redacted["auth_token"] == "[REDACTED]"
     assert redacted["host"] == "localhost"
 
+
 # --- Enterprise system validation ---
 from deephaven_mcp.config.enterprise_system import (
-    validate_enterprise_systems_config,
-    redact_enterprise_system_config,
-    _validate_single_enterprise_system,
     _validate_and_get_auth_type,
+    _validate_single_enterprise_system,
+    redact_enterprise_system_config,
+    validate_enterprise_systems_config,
 )
+
 
 def test_enterprise_systems_accepts_empty():
     validate_enterprise_systems_config({})
+
 
 def test_enterprise_systems_rejects_non_dict():
     with pytest.raises(EnterpriseSystemConfigurationError):
         validate_enterprise_systems_config([])
 
+
 def test_enterprise_systems_rejects_non_dict_item():
     with pytest.raises(EnterpriseSystemConfigurationError):
         validate_enterprise_systems_config({"foo": []})
+
 
 def test_enterprise_systems_invalid_system_name_type():
     with pytest.raises(EnterpriseSystemConfigurationError):
         validate_enterprise_systems_config({1: {}})
 
+
 def test_enterprise_systems_missing_connection_json_url():
     with pytest.raises(EnterpriseSystemConfigurationError):
         _validate_single_enterprise_system("foo", {"auth_type": "password"})
 
+
 def test_enterprise_systems_invalid_connection_json_url_type():
     with pytest.raises(EnterpriseSystemConfigurationError):
-        _validate_single_enterprise_system("foo", {"connection_json_url": 1, "auth_type": "password"})
+        _validate_single_enterprise_system(
+            "foo", {"connection_json_url": 1, "auth_type": "password"}
+        )
+
 
 def test_enterprise_systems_missing_auth_type():
     with pytest.raises(EnterpriseSystemConfigurationError):
         _validate_single_enterprise_system("foo", {"connection_json_url": "url"})
 
+
 def test_enterprise_systems_invalid_auth_type_type():
     with pytest.raises(EnterpriseSystemConfigurationError):
-        _validate_single_enterprise_system("foo", {"connection_json_url": "url", "auth_type": 1})
+        _validate_single_enterprise_system(
+            "foo", {"connection_json_url": "url", "auth_type": 1}
+        )
+
 
 def test_enterprise_systems_unknown_auth_type():
     with pytest.raises(EnterpriseSystemConfigurationError):
-        _validate_single_enterprise_system("foo", {"connection_json_url": "url", "auth_type": "badtype"})
+        _validate_single_enterprise_system(
+            "foo", {"connection_json_url": "url", "auth_type": "badtype"}
+        )
+
 
 def test_enterprise_systems_unknown_key():
     # Should log a warning but not raise
-    _validate_single_enterprise_system("foo", {"connection_json_url": "url", "auth_type": "password", "username": "u", "password": "p", "bad": 1})
+    _validate_single_enterprise_system(
+        "foo",
+        {
+            "connection_json_url": "url",
+            "auth_type": "password",
+            "username": "u",
+            "password": "p",
+            "bad": 1,
+        },
+    )
+
 
 def test_enterprise_systems_password_auth_missing_username():
     with pytest.raises(EnterpriseSystemConfigurationError):
-        _validate_single_enterprise_system("foo", {"connection_json_url": "url", "auth_type": "password", "password": "p"})
+        _validate_single_enterprise_system(
+            "foo",
+            {"connection_json_url": "url", "auth_type": "password", "password": "p"},
+        )
+
 
 def test_enterprise_systems_password_auth_invalid_username_type():
     with pytest.raises(EnterpriseSystemConfigurationError):
-        _validate_single_enterprise_system("foo", {"connection_json_url": "url", "auth_type": "password", "username": 1, "password": "p"})
+        _validate_single_enterprise_system(
+            "foo",
+            {
+                "connection_json_url": "url",
+                "auth_type": "password",
+                "username": 1,
+                "password": "p",
+            },
+        )
+
 
 def test_enterprise_systems_password_auth_missing_password_keys():
     with pytest.raises(EnterpriseSystemConfigurationError):
-        _validate_single_enterprise_system("foo", {"connection_json_url": "url", "auth_type": "password", "username": "u"})
+        _validate_single_enterprise_system(
+            "foo",
+            {"connection_json_url": "url", "auth_type": "password", "username": "u"},
+        )
+
 
 def test_enterprise_systems_password_auth_invalid_password_type():
     with pytest.raises(EnterpriseSystemConfigurationError):
-        _validate_single_enterprise_system("foo", {"connection_json_url": "url", "auth_type": "password", "username": "u", "password": 1})
+        _validate_single_enterprise_system(
+            "foo",
+            {
+                "connection_json_url": "url",
+                "auth_type": "password",
+                "username": "u",
+                "password": 1,
+            },
+        )
+
 
 def test_enterprise_systems_password_auth_invalid_password_env_var_type():
     with pytest.raises(EnterpriseSystemConfigurationError):
-        _validate_single_enterprise_system("foo", {"connection_json_url": "url", "auth_type": "password", "username": "u", "password_env_var": 1})
+        _validate_single_enterprise_system(
+            "foo",
+            {
+                "connection_json_url": "url",
+                "auth_type": "password",
+                "username": "u",
+                "password_env_var": 1,
+            },
+        )
+
 
 def test_enterprise_systems_password_auth_both_passwords_present():
     with pytest.raises(EnterpriseSystemConfigurationError):
-        _validate_single_enterprise_system("foo", {"connection_json_url": "url", "auth_type": "password", "username": "u", "password": "p", "password_env_var": "env"})
+        _validate_single_enterprise_system(
+            "foo",
+            {
+                "connection_json_url": "url",
+                "auth_type": "password",
+                "username": "u",
+                "password": "p",
+                "password_env_var": "env",
+            },
+        )
+
 
 def test_enterprise_systems_private_key_auth_missing_key():
     with pytest.raises(EnterpriseSystemConfigurationError):
-        _validate_single_enterprise_system("foo", {"connection_json_url": "url", "auth_type": "private_key"})
+        _validate_single_enterprise_system(
+            "foo", {"connection_json_url": "url", "auth_type": "private_key"}
+        )
+
 
 def test_enterprise_systems_private_key_auth_invalid_key_type():
     with pytest.raises(EnterpriseSystemConfigurationError):
-        _validate_single_enterprise_system("foo", {"connection_json_url": "url", "auth_type": "private_key", "private_key": 1})
+        _validate_single_enterprise_system(
+            "foo",
+            {
+                "connection_json_url": "url",
+                "auth_type": "private_key",
+                "private_key": 1,
+            },
+        )
+
 
 def test_enterprise_systems_redact():
     d = {"password": "secret", "connection_json_url": "url"}
@@ -211,9 +315,13 @@ def test_enterprise_systems_redact():
     assert redacted["password"] == "[REDACTED]"
     assert redacted["connection_json_url"] == "url"
 
+
 def test_validate_and_get_auth_type_invalid():
     with pytest.raises(EnterpriseSystemConfigurationError):
-        _validate_and_get_auth_type("foo", {"connection_json_url": "url", "auth_type": "badtype"})
+        _validate_and_get_auth_type(
+            "foo", {"connection_json_url": "url", "auth_type": "badtype"}
+        )
+
 
 # --- ConfigManager cache/async/IO ---
 
@@ -1540,10 +1648,7 @@ async def test_get_config_no_community_sessions_key_from_file(monkeypatch, caplo
     assert cm._cache == {}
     # Check for the new log messages for empty config
     log_text = caplog.text
-    assert (
-        "Configuration validation passed."
-        in log_text
-    )
+    assert "Configuration validation passed." in log_text
     assert "No Community Sessions configured." in log_text
     assert "No Enterprise Systems configured." in log_text
 
@@ -1561,6 +1666,7 @@ async def test_get_config_no_community_sessions_key_from_file(monkeypatch, caplo
 
 import pytest
 
+
 @pytest.mark.asyncio
 async def test_get_named_config_invalid_section():
     cm = ConfigManager()
@@ -1568,16 +1674,30 @@ async def test_get_named_config_invalid_section():
     with pytest.raises(ValueError, match="Invalid section: not_a_section"):
         await get_named_config(cm, "not_a_section", "foo")
 
+
 @pytest.mark.asyncio
 async def test_get_named_config_invalid_name_enterprise_systems():
     cm = ConfigManager()
-    cm._cache = {"enterprise_systems": {"foo": {"connection_json_url": "url", "auth_type": "api_key", "api_key": "SECRET"}}}
-    with pytest.raises(ValueError, match="Config for 'enterprise_systems:bar' not found in configuration"):
+    cm._cache = {
+        "enterprise_systems": {
+            "foo": {
+                "connection_json_url": "url",
+                "auth_type": "api_key",
+                "api_key": "SECRET",
+            }
+        }
+    }
+    with pytest.raises(
+        ValueError,
+        match="Config for 'enterprise_systems:bar' not found in configuration",
+    ):
         await get_named_config(cm, "enterprise_systems", "bar")
+
 
 @pytest.mark.asyncio
 async def test_config_manager_set_and_clear_cache():
     from deephaven_mcp import config
+
     cm = config.ConfigManager()
     await cm.set_config_cache({"community_sessions": {"a_session": {}}})
     cfg1 = await cm.get_config()
@@ -1588,33 +1708,45 @@ async def test_config_manager_set_and_clear_cache():
     assert "b_session" in cfg2["community_sessions"]
     assert "a_session" not in cfg2["community_sessions"]
 
+
 @pytest.mark.asyncio
 async def test_get_config_missing_env(monkeypatch):
     from deephaven_mcp import config
+
     monkeypatch.delenv("DH_MCP_CONFIG_FILE", raising=False)
     with pytest.raises(
         RuntimeError, match="Environment variable DH_MCP_CONFIG_FILE is not set"
     ):
         await config.ConfigManager().get_config()
 
+
 @pytest.mark.asyncio
 async def test_validate_config_missing_required_key_runtime(monkeypatch, caplog):
     import json
     from unittest import mock
+
     import aiofiles
+
     from deephaven_mcp import config
+
     # Patch the module-level _REQUIRED_TOP_LEVEL_KEYS
     monkeypatch.setattr(config, "_REQUIRED_TOP_LEVEL_KEYS", {"must_have_this"})
     config_file_path = "/fake/path/missing_required_key.json"
     monkeypatch.setenv("DH_MCP_CONFIG_FILE", config_file_path)
     config_data = {"community_sessions": {}}
     aiofiles_open_ctx = mock.AsyncMock()
-    aiofiles_open_ctx.__aenter__.return_value.read = mock.AsyncMock(return_value=json.dumps(config_data))
+    aiofiles_open_ctx.__aenter__.return_value.read = mock.AsyncMock(
+        return_value=json.dumps(config_data)
+    )
     monkeypatch.setattr(aiofiles, "open", mock.Mock(return_value=aiofiles_open_ctx))
     cm = config.ConfigManager()
     await cm.clear_config_cache()
-    with pytest.raises(config.McpConfigurationError, match="Missing required top-level keys in Deephaven MCP config: {'must_have_this'}"):
+    with pytest.raises(
+        config.McpConfigurationError,
+        match="Missing required top-level keys in Deephaven MCP config: {'must_have_this'}",
+    ):
         await cm.get_config()
+
 
 @pytest.mark.asyncio
 async def test_get_named_config_success():
@@ -1624,10 +1756,13 @@ async def test_get_named_config_success():
     result = await get_named_config(cm, "community_sessions", "foo")
     assert result == {"host": "localhost"}
 
+
 @pytest.mark.asyncio
 async def test_get_all_config_names_returns_keys():
     cm = ConfigManager()
-    config = {"community_sessions": {"a": {"host": "localhost"}, "b": {"host": "localhost"}}}
+    config = {
+        "community_sessions": {"a": {"host": "localhost"}, "b": {"host": "localhost"}}
+    }
     await cm.set_config_cache(config)
     names = await get_all_config_names(cm, "community_sessions")
     assert set(names) == {"a", "b"}
@@ -1638,25 +1773,34 @@ async def test_get_all_config_names_returns_keys():
     names3 = await get_all_config_names(cm, "enterprise_systems")
     assert names3 == []
 
+
 @pytest.mark.asyncio
 async def test_get_all_config_names_not_dict_raises():
     cm = ConfigManager()
     config = {"community_sessions": "not_a_dict"}
-    with pytest.raises(CommunitySessionConfigurationError, match="'community_sessions' must be a dictionary in Deephaven community session config"):
+    with pytest.raises(
+        CommunitySessionConfigurationError,
+        match="'community_sessions' must be a dictionary in Deephaven community session config",
+    ):
         await cm.set_config_cache(config)
+
 
 @pytest.mark.asyncio
 async def test_named_config_missing():
     cm = ConfigManager()
     config = {"community_sessions": {"foo": {"host": "localhost"}}}
     await cm.set_config_cache(config)
-    with pytest.raises(ValueError, match="Config for 'community_sessions:bar' not found in configuration"):
+    with pytest.raises(
+        ValueError,
+        match="Config for 'community_sessions:bar' not found in configuration",
+    ):
         await get_named_config(cm, "community_sessions", "bar")
 
 
 @pytest.mark.asyncio
 async def test_get_all_config_names_returns_empty_for_non_dict_section(caplog):
     from deephaven_mcp import config
+
     cm = config.ConfigManager()
     # Set a valid config
     cm._cache = {"not_a_section": "not_a_dict"}
@@ -1664,11 +1808,17 @@ async def test_get_all_config_names_returns_empty_for_non_dict_section(caplog):
     # Call with a non-dict section
     result = await get_all_config_names(cm, "not_a_section")
     assert result == []
-    assert "'not_a_section' is not a dictionary, returning empty list of names." in caplog.text
+    assert (
+        "'not_a_section' is not a dictionary, returning empty list of names."
+        in caplog.text
+    )
 
-import aiofiles
+
 import json
 from unittest import mock
+
+import aiofiles
+
 from deephaven_mcp import config
 
 
@@ -1678,7 +1828,11 @@ def test_log_config_summary_enterprise_systems_present(caplog):
     caplog.set_level("INFO", logger="deephaven_mcp.config.__init__")
     test_config = {
         "enterprise_systems": {
-            "prod": {"connection_json_url": "url", "auth_type": "api_key", "api_key": "SECRET"}
+            "prod": {
+                "connection_json_url": "url",
+                "auth_type": "api_key",
+                "api_key": "SECRET",
+            }
         }
     }
     config._log_config_summary(test_config)
@@ -1702,47 +1856,72 @@ def test_log_config_summary_no_enterprise_systems(caplog):
     config._log_config_summary({"enterprise_systems": {}})
     assert "No Enterprise Systems configured." in caplog.text
 
+
 @pytest.mark.asyncio
 async def test_load_config_from_file_filenotfound(monkeypatch):
     monkeypatch.setattr(aiofiles, "open", mock.Mock(side_effect=FileNotFoundError))
-    with pytest.raises(config.McpConfigurationError, match="Configuration file not found: /does/not/exist.json"):
+    with pytest.raises(
+        config.McpConfigurationError,
+        match="Configuration file not found: /does/not/exist.json",
+    ):
         await config._load_config_from_file("/does/not/exist.json")
+
 
 @pytest.mark.asyncio
 async def test_load_config_from_file_permissionerror(monkeypatch):
     monkeypatch.setattr(aiofiles, "open", mock.Mock(side_effect=PermissionError))
-    with pytest.raises(config.McpConfigurationError, match="Permission denied when trying to read configuration file: /no/perm.json"):
+    with pytest.raises(
+        config.McpConfigurationError,
+        match="Permission denied when trying to read configuration file: /no/perm.json",
+    ):
         await config._load_config_from_file("/no/perm.json")
+
 
 @pytest.mark.asyncio
 async def test_load_config_from_file_jsondecodeerror(monkeypatch):
     class DummyJSONDecodeError(json.JSONDecodeError):
         def __init__(self):
             super().__init__("msg", "doc", 0)
+
     aiofiles_open_ctx = mock.AsyncMock()
-    aiofiles_open_ctx.__aenter__.return_value.read = mock.AsyncMock(return_value="not json")
+    aiofiles_open_ctx.__aenter__.return_value.read = mock.AsyncMock(
+        return_value="not json"
+    )
     monkeypatch.setattr(aiofiles, "open", mock.Mock(return_value=aiofiles_open_ctx))
     orig_json_loads = json.loads
+
     def raise_json_decode_error(*args, **kwargs):
         raise DummyJSONDecodeError()
+
     monkeypatch.setattr(json, "loads", raise_json_decode_error)
-    with pytest.raises(config.McpConfigurationError, match="Invalid JSON in configuration file /bad.json"):
+    with pytest.raises(
+        config.McpConfigurationError,
+        match="Invalid JSON in configuration file /bad.json",
+    ):
         await config._load_config_from_file("/bad.json")
     monkeypatch.setattr(json, "loads", orig_json_loads)
+
 
 @pytest.mark.asyncio
 async def test_load_and_validate_config_valueerror(monkeypatch):
     # Patch validate_config to raise ValueError
-    monkeypatch.setattr(config, "validate_config", mock.Mock(side_effect=ValueError("bad value")))
+    monkeypatch.setattr(
+        config, "validate_config", mock.Mock(side_effect=ValueError("bad value"))
+    )
     aiofiles_open_ctx = mock.AsyncMock()
     aiofiles_open_ctx.__aenter__.return_value.read = mock.AsyncMock(return_value="{}")
     monkeypatch.setattr(aiofiles, "open", mock.Mock(return_value=aiofiles_open_ctx))
-    with pytest.raises(config.McpConfigurationError, match="General configuration validation error: bad value"):
+    with pytest.raises(
+        config.McpConfigurationError,
+        match="General configuration validation error: bad value",
+    ):
         await config._load_and_validate_config("/any.json")
 
 
 @pytest.mark.asyncio
-async def test_validate_enterprise_systems_config_logs_non_dict_item_in_map(monkeypatch, caplog):
+async def test_validate_enterprise_systems_config_logs_non_dict_item_in_map(
+    monkeypatch, caplog
+):
     """
     Tests that validate_enterprise_systems_config correctly logs and raises an error
     when an item within 'enterprise_systems' is not a dictionary, ensuring the
@@ -1751,16 +1930,28 @@ async def test_validate_enterprise_systems_config_logs_non_dict_item_in_map(monk
     import logging
     import re
     from unittest import mock
+
     import aiofiles
+
     from deephaven_mcp import config
+
     config_file_path = "/fake/path/enterprise_non_dict_item.json"
     monkeypatch.setenv("DH_MCP_CONFIG_FILE", config_file_path)
-    config_data = {"enterprise_systems": {
-        "good_system": {"connection_json_url": "http://good", "auth_type": "password", "username": "gooduser", "password": "goodpass"},
-        "bad_system_item": "this is not a dict"
-    }}
+    config_data = {
+        "enterprise_systems": {
+            "good_system": {
+                "connection_json_url": "http://good",
+                "auth_type": "password",
+                "username": "gooduser",
+                "password": "goodpass",
+            },
+            "bad_system_item": "this is not a dict",
+        }
+    }
     aiofiles_open_ctx = mock.AsyncMock()
-    aiofiles_open_ctx.__aenter__.return_value.read = mock.AsyncMock(return_value=json.dumps(config_data))
+    aiofiles_open_ctx.__aenter__.return_value.read = mock.AsyncMock(
+        return_value=json.dumps(config_data)
+    )
     monkeypatch.setattr(aiofiles, "open", mock.Mock(return_value=aiofiles_open_ctx))
     caplog.set_level(logging.DEBUG)
     cm = config.ConfigManager()
@@ -1770,6 +1961,12 @@ async def test_validate_enterprise_systems_config_logs_non_dict_item_in_map(monk
     specific_error_detail = "Enterprise system 'bad_system_item' configuration must be a dictionary, but got str."
     assert specific_error_detail in str(excinfo.value)
     expected_log_map_str = "{'good_system': {'connection_json_url': 'http://good', 'auth_type': 'password', 'username': 'gooduser', 'password': '[REDACTED]'}, 'bad_system_item': 'this is not a dict'}"
-    assert f"Validating enterprise_systems configuration: {expected_log_map_str}" in caplog.text
+    assert (
+        f"Validating enterprise_systems configuration: {expected_log_map_str}"
+        in caplog.text
+    )
     assert specific_error_detail in caplog.text
-    assert f"Configuration validation failed for {config_file_path}: {specific_error_detail}" in caplog.text
+    assert (
+        f"Configuration validation failed for {config_file_path}: {specific_error_detail}"
+        in caplog.text
+    )

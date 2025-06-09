@@ -193,8 +193,8 @@ import asyncio
 import json
 import logging
 import os
-from time import perf_counter
-from typing import Any, cast, Callable
+from collections.abc import Callable
+from typing import Any, cast
 
 import aiofiles
 
@@ -226,7 +226,6 @@ _ALLOWED_TOP_LEVEL_KEYS: set[str] = {"community_sessions", "enterprise_systems"}
 
 
 class ConfigManager:
-
     """
     Async configuration manager for Deephaven MCP configuration.
 
@@ -341,7 +340,6 @@ async def get_named_config(
         config_manager (ConfigManager): The ConfigManager instance to use for config retrieval.
         section (str): The top-level config section (e.g., 'community_sessions', 'enterprise_systems').
         name (str): The specific item name to retrieve.
-        redact_fn (Callable): Function to redact sensitive fields for logging.
 
     Returns:
         dict[str, Any]: The configuration dictionary for the specified item.
@@ -354,6 +352,7 @@ async def get_named_config(
     section_map = config.get(section, {})
 
     # get redact fn
+    redact_fn: Callable[[dict[str, Any]], dict[str, Any]]
     if section == "community_sessions":
         redact_fn = redact_community_session_config
     elif section == "enterprise_systems":
@@ -367,7 +366,7 @@ async def get_named_config(
     _LOGGER.debug(
         f"Retrieved configuration for '{section}:{name}': {redact_fn(section_map[name])}"
     )
-    return section_map[name]
+    return cast(dict[str, Any], section_map[name])
 
 
 async def get_all_config_names(
@@ -388,7 +387,9 @@ async def get_all_config_names(
     config = await config_manager.get_config()
     section_map = config.get(section, {})
     if not isinstance(section_map, dict):
-        _LOGGER.warning(f"'{section}' is not a dictionary, returning empty list of names.")
+        _LOGGER.warning(
+            f"'{section}' is not a dictionary, returning empty list of names."
+        )
         return []
     names = list(section_map.keys())
     _LOGGER.debug(f"Found {len(names)} {section} item(s): {names}")
@@ -418,16 +419,28 @@ async def _load_config_from_file(config_path: str) -> dict[str, Any]:
         return cast(dict[str, Any], json.loads(content))
     except FileNotFoundError:
         _LOGGER.error(f"Configuration file not found: {config_path}")
-        raise McpConfigurationError(f"Configuration file not found: {config_path}") from None
+        raise McpConfigurationError(
+            f"Configuration file not found: {config_path}"
+        ) from None
     except PermissionError:
-        _LOGGER.error(f"Permission denied when trying to read configuration file: {config_path}")
-        raise McpConfigurationError(f"Permission denied when trying to read configuration file: {config_path}") from None
+        _LOGGER.error(
+            f"Permission denied when trying to read configuration file: {config_path}"
+        )
+        raise McpConfigurationError(
+            f"Permission denied when trying to read configuration file: {config_path}"
+        ) from None
     except json.JSONDecodeError as e:
         _LOGGER.error(f"Invalid JSON in configuration file {config_path}: {e}")
-        raise McpConfigurationError(f"Invalid JSON in configuration file {config_path}: {e}") from e
+        raise McpConfigurationError(
+            f"Invalid JSON in configuration file {config_path}: {e}"
+        ) from e
     except Exception as e:
-        _LOGGER.error(f"Unexpected error loading or parsing config file {config_path}: {e}")
-        raise McpConfigurationError(f"Unexpected error loading or parsing config file {config_path}: {e}") from e
+        _LOGGER.error(
+            f"Unexpected error loading or parsing config file {config_path}: {e}"
+        )
+        raise McpConfigurationError(
+            f"Unexpected error loading or parsing config file {config_path}: {e}"
+        ) from e
 
 
 def _get_config_path() -> str:
@@ -480,12 +493,21 @@ async def _load_and_validate_config(config_path: str) -> dict[str, Any]:
     try:
         data = await _load_config_from_file(config_path)
         return validate_config(data)
-    except (CommunitySessionConfigurationError, EnterpriseSystemConfigurationError) as specific_e:
-        _LOGGER.error(f"Configuration validation failed for {config_path}: {specific_e}")
-        raise McpConfigurationError(f"Configuration validation failed: {specific_e}") from specific_e
+    except (
+        CommunitySessionConfigurationError,
+        EnterpriseSystemConfigurationError,
+    ) as specific_e:
+        _LOGGER.error(
+            f"Configuration validation failed for {config_path}: {specific_e}"
+        )
+        raise McpConfigurationError(
+            f"Configuration validation failed: {specific_e}"
+        ) from specific_e
     except ValueError as ve:
         _LOGGER.error(f"General configuration validation error for {config_path}: {ve}")
-        raise McpConfigurationError(f"General configuration validation error: {ve}") from ve
+        raise McpConfigurationError(
+            f"General configuration validation error: {ve}"
+        ) from ve
     except Exception as e:
         _LOGGER.error(f"Error loading configuration file {config_path}: {e}")
         raise McpConfigurationError(f"Error loading configuration file: {e}") from e
@@ -509,14 +531,18 @@ def _log_config_summary(config: dict[str, Any]) -> None:
     if community_sessions:
         _LOGGER.info("Configured Community Sessions:")
         for name, details in community_sessions.items():
-            _LOGGER.info(f"  Session '{name}': {redact_community_session_config(details)}")
+            _LOGGER.info(
+                f"  Session '{name}': {redact_community_session_config(details)}"
+            )
     else:
         _LOGGER.info("No Community Sessions configured.")
     enterprise_systems = config.get("enterprise_systems", {})
     if enterprise_systems:
         _LOGGER.info("Configured Enterprise Systems:")
         for name, details in enterprise_systems.items():
-            _LOGGER.info(f"  System '{name}': {redact_enterprise_system_config(details)}")
+            _LOGGER.info(
+                f"  System '{name}': {redact_enterprise_system_config(details)}"
+            )
     else:
         _LOGGER.info("No Enterprise Systems configured.")
 
@@ -584,12 +610,18 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
     # Check for missing required keys
     missing_keys = _REQUIRED_TOP_LEVEL_KEYS - top_level_keys
     if missing_keys:
-        _LOGGER.error(f"Missing required top-level keys in Deephaven MCP config: {missing_keys}")
-        raise McpConfigurationError(f"Missing required top-level keys in Deephaven MCP config: {missing_keys}")
+        _LOGGER.error(
+            f"Missing required top-level keys in Deephaven MCP config: {missing_keys}"
+        )
+        raise McpConfigurationError(
+            f"Missing required top-level keys in Deephaven MCP config: {missing_keys}"
+        )
     unknown_keys = top_level_keys - _ALLOWED_TOP_LEVEL_KEYS
     if unknown_keys:
         _LOGGER.error(f"Unknown top-level keys in Deephaven MCP config: {unknown_keys}")
-        raise McpConfigurationError(f"Unknown top-level keys in Deephaven MCP config: {unknown_keys}")
+        raise McpConfigurationError(
+            f"Unknown top-level keys in Deephaven MCP config: {unknown_keys}"
+        )
     if "community_sessions" in top_level_keys:
         validate_community_sessions_config(config["community_sessions"])
 
