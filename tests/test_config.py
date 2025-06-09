@@ -84,6 +84,7 @@ def test_validate_config_missing_required_key(monkeypatch):
 
 def test_validate_config_allows_empty_and_various_valid_shapes():
     from deephaven_mcp import config
+
     cm = config.ConfigManager()
     # Empty config is valid
     assert cm.validate_config({}) == {}
@@ -95,43 +96,69 @@ def test_validate_config_allows_empty_and_various_valid_shapes():
     both = {"community_sessions": {}, "enterprise_systems": {}}
     assert cm.validate_config(both) == both
     # Empty dicts with one session/system
-    assert cm.validate_config({"community_sessions": {"foo": {}}, "enterprise_systems": {}})["community_sessions"]["foo"] == {}
+    assert (
+        cm.validate_config(
+            {"community_sessions": {"foo": {}}, "enterprise_systems": {}}
+        )["community_sessions"]["foo"]
+        == {}
+    )
     # An enterprise system config with missing required fields should raise an error
     import pytest
+
     with pytest.raises(Exception):
-        cm.validate_config({"community_sessions": {}, "enterprise_systems": {"bar": {}}})
+        cm.validate_config(
+            {"community_sessions": {}, "enterprise_systems": {"bar": {}}}
+        )
 
 
 def test_validate_config_rejects_unknown_top_level_keys():
     from deephaven_mcp import config
+
     cm = config.ConfigManager()
     bad = {"community_sessions": {}, "enterprise_systems": {}, "extra": 1}
-    with pytest.raises(config.McpConfigurationError, match=r"Unknown top-level keys in Deephaven MCP config: {'extra'}"):
+    with pytest.raises(
+        config.McpConfigurationError,
+        match=r"Unknown top-level keys in Deephaven MCP config: {'extra'}",
+    ):
         cm.validate_config(bad)
 
 
 def test_validate_config_rejects_unknown_fields_in_community_sessions():
     from deephaven_mcp import config
+
     cm = config.ConfigManager()
     bad = {"community_sessions": {"foo": {"host": "x", "unknown_field": 1}}}
-    with pytest.raises(config.CommunitySessionConfigurationError, match=r"Unknown field 'unknown_field' in community session config for foo"):
+    with pytest.raises(
+        config.CommunitySessionConfigurationError,
+        match=r"Unknown field 'unknown_field' in community session config for foo",
+    ):
         cm.validate_config(bad)
 
 
 def test_validate_config_enforces_field_types():
     from deephaven_mcp import config
+
     cm = config.ConfigManager()
     bad = {"community_sessions": {"foo": {"host": 123}}}
-    with pytest.raises(config.CommunitySessionConfigurationError, match=r"Field 'host' in community session config for foo must be of type str, got int"):
+    with pytest.raises(
+        config.CommunitySessionConfigurationError,
+        match=r"Field 'host' in community session config for foo must be of type str, got int",
+    ):
         cm.validate_config(bad)
 
 
 def test_validate_config_mutual_exclusivity_auth_token_fields():
     from deephaven_mcp import config
+
     cm = config.ConfigManager()
     # Both auth_token and auth_token_env_var present
-    bad = {"community_sessions": {"foo": {"auth_token": "a", "auth_token_env_var": "ENV"}}}
-    with pytest.raises(config.CommunitySessionConfigurationError, match=r"In community session config for 'foo', both 'auth_token' and 'auth_token_env_var' are set\. Please use only one\."):
+    bad = {
+        "community_sessions": {"foo": {"auth_token": "a", "auth_token_env_var": "ENV"}}
+    }
+    with pytest.raises(
+        config.CommunitySessionConfigurationError,
+        match=r"In community session config for 'foo', both 'auth_token' and 'auth_token_env_var' are set\. Please use only one\.",
+    ):
         cm.validate_config(bad)
 
 
@@ -193,7 +220,10 @@ async def test_get_config_sets_cache_and_logs(monkeypatch, caplog):
 
     # Check for the new log messages
     log_text = caplog.text
-    assert "Successfully loaded and validated Deephaven MCP application configuration" in log_text
+    assert (
+        "Successfully loaded and validated Deephaven MCP application configuration"
+        in log_text
+    )
     assert "Configured Community Sessions:" in log_text
     # Construct expected redacted session string carefully
     expected_session_details = valid_config["community_sessions"]["local"].copy()
@@ -257,7 +287,10 @@ async def test_get_config_logs_enterprise_systems(monkeypatch, caplog):
     assert cm._cache == valid_config_with_enterprise
 
     log_text = caplog.text
-    assert "Successfully loaded and validated Deephaven MCP application configuration" in log_text
+    assert (
+        "Successfully loaded and validated Deephaven MCP application configuration"
+        in log_text
+    )
 
     # Check community session logs
     assert "Configured Community Sessions:" in log_text
@@ -309,7 +342,9 @@ async def test_get_config_invalid_json(monkeypatch):
         importlib.import_module("aiofiles").__dict__, "open", aiofiles_mock.open
     )
     cm = config.ConfigManager()
-    with pytest.raises(config.McpConfigurationError, match="Invalid JSON in configuration file"):
+    with pytest.raises(
+        config.McpConfigurationError, match="Invalid JSON in configuration file"
+    ):
         await cm.get_config()
 
 
@@ -335,6 +370,7 @@ async def test_get_config_general_value_error(monkeypatch, caplog):
     # Patch validate_config to raise ValueError (not a config error subclass)
     import importlib
     from unittest import mock
+
     from deephaven_mcp import config
 
     monkeypatch.setenv("DH_MCP_CONFIG_FILE", "/fake/path/config.json")
@@ -342,14 +378,30 @@ async def test_get_config_general_value_error(monkeypatch, caplog):
     aiofiles_open_ctx = mock.AsyncMock()
     aiofiles_open_ctx.__aenter__.return_value.read = mock.AsyncMock(return_value="{}")
     aiofiles_mock.open = mock.Mock(return_value=aiofiles_open_ctx)
-    monkeypatch.setitem(importlib.import_module("aiofiles").__dict__, "open", aiofiles_mock.open)
+    monkeypatch.setitem(
+        importlib.import_module("aiofiles").__dict__, "open", aiofiles_mock.open
+    )
 
     # Patch validate_config to raise ValueError
-    monkeypatch.setattr(config.ConfigManager, "validate_config", staticmethod(lambda _: (_ for _ in ()).throw(ValueError("some general validation error!"))))
+    monkeypatch.setattr(
+        config.ConfigManager,
+        "validate_config",
+        staticmethod(
+            lambda _: (_ for _ in ()).throw(
+                ValueError("some general validation error!")
+            )
+        ),
+    )
     cm = config.ConfigManager()
-    with pytest.raises(config.McpConfigurationError, match="General configuration validation error: some general validation error!"):
+    with pytest.raises(
+        config.McpConfigurationError,
+        match="General configuration validation error: some general validation error!",
+    ):
         await cm.get_config()
-    assert "General configuration validation error for /fake/path/config.json: some general validation error!" in caplog.text
+    assert (
+        "General configuration validation error for /fake/path/config.json: some general validation error!"
+        in caplog.text
+    )
 
 
 @pytest.mark.asyncio
@@ -582,7 +634,9 @@ async def test_get_config_invalid_community_session_schema_from_file(
     cm = config.ConfigManager()
     specific_error_detail = "Field 'host' in community session config for bad_session must be of type str, got int"
     # This is the message from CommunitySessionConfigurationError
-    expected_mcp_error_message = f"Configuration validation failed: {specific_error_detail}"
+    expected_mcp_error_message = (
+        f"Configuration validation failed: {specific_error_detail}"
+    )
     final_match_regex = re.escape(expected_mcp_error_message)
 
     with pytest.raises(
@@ -638,7 +692,9 @@ async def test_get_config_invalid_enterprise_system_schema_from_file(
     # The 'connection_json_url' error is raised first by validate_enterprise_systems_config
     specific_error_detail = "Field 'connection_json_url' for enterprise system 'bad_system' must be of type str, but got int."
     # This is the message from EnterpriseSystemConfigurationError
-    expected_mcp_error_message = f"Configuration validation failed: {specific_error_detail}"
+    expected_mcp_error_message = (
+        f"Configuration validation failed: {specific_error_detail}"
+    )
     final_match_regex = re.escape(expected_mcp_error_message)
 
     with pytest.raises(
@@ -707,7 +763,9 @@ async def test_validate_enterprise_systems_config_logs_non_dict_map(
     specific_error_detail = (
         "'enterprise_systems' must be a dictionary, but got type list."
     )
-    expected_mcp_error_message = f"Configuration validation failed: {specific_error_detail}"
+    expected_mcp_error_message = (
+        f"Configuration validation failed: {specific_error_detail}"
+    )
     final_match_regex = re.escape(expected_mcp_error_message)
 
     with pytest.raises(
@@ -1698,7 +1756,10 @@ async def test_get_config_no_community_sessions_key_from_file(monkeypatch, caplo
     assert cm._cache == {}
     # Check for the new log messages for empty config
     log_text = caplog.text
-    assert "Successfully loaded and validated Deephaven MCP application configuration" in log_text
+    assert (
+        "Successfully loaded and validated Deephaven MCP application configuration"
+        in log_text
+    )
     assert "No Community Sessions configured." in log_text
     assert "No Enterprise Systems configured." in log_text
 

@@ -3,12 +3,12 @@
 import pytest
 
 from deephaven_mcp.config.enterprise_system import (
-    validate_enterprise_systems_config,
-    redact_enterprise_systems_map,
-    redact_enterprise_system_config,
-    EnterpriseSystemConfigurationError,
-    _BASE_ENTERPRISE_SYSTEM_FIELDS,
     _AUTH_SPECIFIC_FIELDS,
+    _BASE_ENTERPRISE_SYSTEM_FIELDS,
+    EnterpriseSystemConfigurationError,
+    redact_enterprise_system_config,
+    redact_enterprise_systems_map,
+    validate_enterprise_systems_config,
 )
 
 # --- Tests for validate_enterprise_systems_config --- #
@@ -66,16 +66,17 @@ def test_validate_enterprise_systems_not_a_dict():
 
 # --- Tests for redact_enterprise_systems_map --- #
 
+
 def test_redact_enterprise_system_config_with_password():
     """Test redacting a config with a password field."""
     config = {
         "connection_json_url": "http://test",
         "auth_type": "password",
         "username": "test_user",
-        "password": "sensitive_password"
+        "password": "sensitive_password",
     }
     redacted = redact_enterprise_system_config(config)
-    
+
     # Password should be redacted
     assert redacted["password"] == "[REDACTED]"
     # Other fields should remain unchanged
@@ -91,10 +92,10 @@ def test_redact_enterprise_system_config_without_password():
     config = {
         "connection_json_url": "http://test",
         "auth_type": "private_key",
-        "private_key": "/path/to/key"
+        "private_key": "/path/to/key",
     }
     redacted = redact_enterprise_system_config(config)
-    
+
     # Config should be unchanged
     assert redacted == config
     # Should be the same object (shallow copy)
@@ -105,7 +106,7 @@ def test_redact_enterprise_system_config_empty():
     """Test redacting an empty config."""
     config = {}
     redacted = redact_enterprise_system_config(config)
-    
+
     assert redacted == {}
     assert redacted is not config
 
@@ -132,6 +133,7 @@ def test_redact_enterprise_systems_map_single_system_with_password():
     }
     assert redact_enterprise_systems_map(config_map) == expected
 
+
 def test_redact_enterprise_systems_map_single_system_without_password():
     """Test a single system without a password field."""
     config_map = {
@@ -146,47 +148,33 @@ def test_redact_enterprise_systems_map_single_system_without_password():
     # Expect no changes as 'password' key is not present
     assert redact_enterprise_systems_map(config_map) == config_map
 
+
 def test_redact_enterprise_systems_map_multiple_systems_mixed():
     """Test multiple systems, some with passwords, some without."""
     config_map = {
-        "sys1_pw": {
-            "password": "secret1",
-            "id": 1
-        },
-        "sys2_no_pw": {
-            "username": "user2",
-            "id": 2
-        },
-        "sys3_pw": {
-            "password": "secret3",
-            "id": 3
-        },
+        "sys1_pw": {"password": "secret1", "id": 1},
+        "sys2_no_pw": {"username": "user2", "id": 2},
+        "sys3_pw": {"password": "secret3", "id": 3},
     }
     expected = {
-        "sys1_pw": {
-            "password": "[REDACTED]",
-            "id": 1
-        },
-        "sys2_no_pw": {
-            "username": "user2",
-            "id": 2
-        },
-        "sys3_pw": {
-            "password": "[REDACTED]",
-            "id": 3
-        },
+        "sys1_pw": {"password": "[REDACTED]", "id": 1},
+        "sys2_no_pw": {"username": "user2", "id": 2},
+        "sys3_pw": {"password": "[REDACTED]", "id": 3},
     }
     assert redact_enterprise_systems_map(config_map) == expected
+
 
 def test_redact_enterprise_systems_map_empty():
     """Test with an empty enterprise_systems map."""
     assert redact_enterprise_systems_map({}) == {}
+
 
 def test_redact_enterprise_systems_map_item_not_a_dict():
     """Test when a system config item is not a dictionary (should be included as-is)."""
     config_map = {"sys1": "this_is_not_a_dict"}
     result = redact_enterprise_systems_map(config_map)
     assert result == {"sys1": "this_is_not_a_dict"}
+
 
 def test_redact_enterprise_systems_map_item_is_none():
     """Test when a system config item is None (should be included as-is)."""
@@ -314,9 +302,9 @@ def test_redact_enterprise_systems_map_item_is_none():
                 "username": "test_user",
                 "password_env_var": "TEST_PASS_ENV",
                 "unknown_field1": 123,
-                "unknown_field2": "value"
+                "unknown_field2": "value",
             },
-            None  # No error expected, just warnings
+            None,  # No error expected, just warnings
         ),
         (
             "pw_auth_both_passwords",
@@ -327,7 +315,7 @@ def test_redact_enterprise_systems_map_item_is_none():
                 "password": "actual_password_value",
                 "password_env_var": "PASSWORD_ENV_VAR_NAME",
             },
-            r"Enterprise system 'pw_auth_both_passwords' with auth_type 'password' must not define both 'password' and 'password_env_var'. Specify one."
+            r"Enterprise system 'pw_auth_both_passwords' with auth_type 'password' must not define both 'password' and 'password_env_var'. Specify one.",
         ),
     ],
 )
@@ -349,14 +337,16 @@ def test_single_enterprise_system_invalid_configs(
             with pytest.raises(EnterpriseSystemConfigurationError, match=error_match):
                 validate_enterprise_systems_config({system_name: system_config})
             return  # End test here for this specific case
-        
+
     if error_match is None:
         # This is a valid config that should pass validation (may log warnings)
         validate_enterprise_systems_config(config_map)
         # Verify that unknown fields were logged as warnings
-        if any(field.startswith('unknown_field') for field in system_config):
-            assert any("Unknown field 'unknown_field" in record.message 
-                      for record in caplog.records)
+        if any(field.startswith("unknown_field") for field in system_config):
+            assert any(
+                "Unknown field 'unknown_field" in record.message
+                for record in caplog.records
+            )
     else:
         with pytest.raises(EnterpriseSystemConfigurationError, match=error_match):
             validate_enterprise_systems_config(config_map)
@@ -425,34 +415,34 @@ def test_validate_single_system_with_optional_fields():
     # which is used for optional fields (like tls_root_cert_path if it were added)
     # Since we don't have any optional fields right now, we'll test the code path
     # by temporarily adding a test field
-    
+
     # Save original state
     original_base_fields = dict(_BASE_ENTERPRISE_SYSTEM_FIELDS)
     original_auth_fields = dict(_AUTH_SPECIFIC_FIELDS)
-    
+
     try:
         # Add a test optional field
         _BASE_ENTERPRISE_SYSTEM_FIELDS["test_optional_field"] = (str, type(None))
-        
+
         # Test with None value (should pass)
         config = {
             "connection_json_url": "http://test",
             "auth_type": "password",
             "username": "test_user",
             "password_env_var": "TEST_PASS_ENV",
-            "test_optional_field": None
+            "test_optional_field": None,
         }
         validate_enterprise_systems_config({"test_system": config})
-        
+
         # Test with string value (should pass)
         config["test_optional_field"] = "test_value"
         validate_enterprise_systems_config({"test_system": config})
-        
+
         # Test with invalid type (should fail)
         config["test_optional_field"] = 123
         with pytest.raises(
             EnterpriseSystemConfigurationError,
-            match=r"Field 'test_optional_field' for enterprise system 'test_system' must be one of types \(str, NoneType\), but got int"
+            match=r"Field 'test_optional_field' for enterprise system 'test_system' must be one of types \(str, NoneType\), but got int",
         ):
             validate_enterprise_systems_config({"test_system": config})
     finally:
@@ -472,14 +462,16 @@ def test_validate_system_with_unknown_fields(caplog):
         "username": "test_user",
         "password_env_var": "TEST_PASS_ENV",
         "unknown_field1": "value1",
-        "unknown_field2": 123
+        "unknown_field2": 123,
     }
-    
+
     # Should not raise an exception
     validate_enterprise_systems_config({"test_system": config})
-    
+
     # Check that warnings were logged for the unknown fields
-    warning_messages = [record.message for record in caplog.records if record.levelname == "WARNING"]
+    warning_messages = [
+        record.message for record in caplog.records if record.levelname == "WARNING"
+    ]
     assert any("unknown_field1" in msg for msg in warning_messages)
     assert any("unknown_field2" in msg for msg in warning_messages)
     assert all("will be ignored" in msg for msg in warning_messages)
@@ -490,24 +482,24 @@ def test_tuple_type_validation_error_message():
     # Save original state
     original_base_fields = dict(_BASE_ENTERPRISE_SYSTEM_FIELDS)
     original_auth_fields = dict(_AUTH_SPECIFIC_FIELDS)
-    
+
     try:
         # Add a test field with tuple type
         _BASE_ENTERPRISE_SYSTEM_FIELDS["test_tuple_field"] = (str, int, type(None))
-        
+
         # Test with invalid type
         config = {
             "connection_json_url": "http://test",
             "auth_type": "password",
             "username": "test_user",
             "password_env_var": "TEST_PASS_ENV",
-            "test_tuple_field": 3.14  # float is not in (str, int, NoneType)
+            "test_tuple_field": 3.14,  # float is not in (str, int, NoneType)
         }
-        
+
         with pytest.raises(
             EnterpriseSystemConfigurationError,
             match=r"Field 'test_tuple_field' for enterprise system 'test_system' "
-                  r"must be one of types \(str, int, NoneType\), but got float\."
+            r"must be one of types \(str, int, NoneType\), but got float\.",
         ):
             validate_enterprise_systems_config({"test_system": config})
     finally:
@@ -525,12 +517,16 @@ def test_tuple_type_validation_error_message_auth_specific():
     original_auth_fields = dict(_AUTH_SPECIFIC_FIELDS)
     try:
         # Add a test field with tuple type to private_key auth
-        _AUTH_SPECIFIC_FIELDS["private_key"]["test_tuple_field"] = (str, int, type(None))
+        _AUTH_SPECIFIC_FIELDS["private_key"]["test_tuple_field"] = (
+            str,
+            int,
+            type(None),
+        )
         config = {
             "connection_json_url": "http://test",
             "auth_type": "private_key",
             "private_key": "/dummy/path",
-            "test_tuple_field": 3.14  # float is not in (str, int, NoneType)
+            "test_tuple_field": 3.14,  # float is not in (str, int, NoneType)
         }
         with pytest.raises(
             EnterpriseSystemConfigurationError,

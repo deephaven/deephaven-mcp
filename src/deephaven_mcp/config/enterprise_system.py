@@ -48,7 +48,10 @@ def redact_enterprise_system_config(system_config: dict[str, Any]) -> dict[str, 
         config_copy["password"] = "[REDACTED]"  # noqa: S105
     return config_copy
 
-def redact_enterprise_systems_map(enterprise_systems_map: dict[str, Any]) -> dict[str, Any]:
+
+def redact_enterprise_systems_map(
+    enterprise_systems_map: dict[str, Any],
+) -> dict[str, Any]:
     """
     Redacts sensitive fields from an enterprise systems map dictionary.
 

@@ -197,11 +197,17 @@ def test_validate_community_sessions_not_dict():
         pytest.fail(f"validate_community_sessions_config(None) raised ValueError: {e}")
 
     # Case: community_sessions_map is not a dict (e.g., string) - should fail
-    with pytest.raises(CommunitySessionConfigurationError, match="'community_sessions' must be a dictionary in Deephaven community session config"):
+    with pytest.raises(
+        CommunitySessionConfigurationError,
+        match="'community_sessions' must be a dictionary in Deephaven community session config",
+    ):
         validate_community_sessions_config("not_a_dict")
 
     # Case: community_sessions_map is not a dict (e.g., list) - should fail
-    with pytest.raises(CommunitySessionConfigurationError, match="'community_sessions' must be a dictionary in Deephaven community session config"):
+    with pytest.raises(
+        CommunitySessionConfigurationError,
+        match="'community_sessions' must be a dictionary in Deephaven community session config",
+    ):
         validate_community_sessions_config([{"session1": {}}])
 
 
