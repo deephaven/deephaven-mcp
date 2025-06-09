@@ -12,15 +12,9 @@ import logging
 import types
 from typing import Any
 
-from . import McpConfigurationError
+from .errors import CommunitySessionConfigurationError
 
 _LOGGER = logging.getLogger(__name__)
-
-
-class CommunitySessionConfigurationError(McpConfigurationError):
-    """Raised when a community session's configuration cannot be retrieved or is invalid."""
-
-    pass
 
 
 _ALLOWED_COMMUNITY_SESSION_FIELDS: dict[str, type | tuple[type, type]] = {
@@ -28,7 +22,7 @@ _ALLOWED_COMMUNITY_SESSION_FIELDS: dict[str, type | tuple[type, type]] = {
     "port": int,
     "auth_type": str,
     "auth_token": str,  # Direct authentication token
-    "auth_token_env_var": str, # Environment variable for auth token
+    "auth_token_env_var": str,  # Environment variable for auth token
     "never_timeout": bool,
     "session_type": str,
     "use_tls": bool,
@@ -154,6 +148,6 @@ def validate_single_community_session_config(
 
     for required_field in _REQUIRED_FIELDS:
         if required_field not in config_item:
-            raise ValueError(
+            raise CommunitySessionConfigurationError(
                 f"Missing required field '{required_field}' in community session config for {session_name}"
             )

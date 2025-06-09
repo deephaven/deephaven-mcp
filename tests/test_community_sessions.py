@@ -189,7 +189,9 @@ async def test_get_session_parameters_file_error(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_get_session_parameters_auth_token_from_env_var(session_manager, monkeypatch):
+async def test_get_session_parameters_auth_token_from_env_var(
+    session_manager, monkeypatch
+):
     """Test auth_token is sourced from environment variable when auth_token_env_var is set."""
     env_var_name = "MY_TEST_TOKEN_VAR"
     expected_token = "token_from_environment"
@@ -201,11 +203,13 @@ async def test_get_session_parameters_auth_token_from_env_var(session_manager, m
     }
     params = await session_manager._get_session_parameters(worker_cfg)
     assert params["auth_token"] == expected_token
-    monkeypatch.delenv(env_var_name) # Clean up
+    monkeypatch.delenv(env_var_name)  # Clean up
 
 
 @pytest.mark.asyncio
-async def test_get_session_parameters_auth_token_env_var_not_set(session_manager, monkeypatch, caplog):
+async def test_get_session_parameters_auth_token_env_var_not_set(
+    session_manager, monkeypatch, caplog
+):
     """Test auth_token is empty and warning logged if auth_token_env_var is set but env var is not."""
     env_var_name = "MY_MISSING_TOKEN_VAR"
     monkeypatch.delenv(env_var_name, raising=False)  # Ensure it's not set
@@ -215,7 +219,10 @@ async def test_get_session_parameters_auth_token_env_var_not_set(session_manager
     }
     params = await session_manager._get_session_parameters(worker_cfg)
     assert params["auth_token"] == ""
-    assert f"Environment variable {env_var_name} specified for auth_token but not found. Using empty token." in caplog.text
+    assert (
+        f"Environment variable {env_var_name} specified for auth_token but not found. Using empty token."
+        in caplog.text
+    )
 
 
 @pytest.mark.asyncio
@@ -232,9 +239,7 @@ async def test_get_session_parameters_auth_token_from_config(session_manager):
 @pytest.mark.asyncio
 async def test_get_session_parameters_no_auth_token_provided(session_manager):
     """Test auth_token is empty if neither auth_token nor auth_token_env_var is provided."""
-    worker_cfg = {
-        "host": "localhost"  # Some other config, but no auth token fields
-    }
+    worker_cfg = {"host": "localhost"}  # Some other config, but no auth token fields
     params = await session_manager._get_session_parameters(worker_cfg)
     assert params["auth_token"] == ""
 

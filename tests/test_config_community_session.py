@@ -86,8 +86,8 @@ def test_validate_single_cs_valid_full():
 def test_validate_single_cs_config_not_dict():
     """Test validation fails if the session config item itself is not a dictionary."""
     with pytest.raises(
-        ValueError,
-        match="Community session config for session_not_dict must be a dictionary, got <class 'str'>",
+        CommunitySessionConfigurationError,
+        match=r"Community session config for session_not_dict must be a dictionary, got <class 'str'>",
     ):
         validate_single_community_session_config("session_not_dict", "not_a_dict")
 
@@ -96,7 +96,7 @@ def test_validate_single_cs_unknown_field_foo():
     """Test validation fails for an unknown field 'foo'. (Adapted from test_config.py)"""
     bad_config = {"host": "localhost", "foo": 1}
     with pytest.raises(
-        ValueError,
+        CommunitySessionConfigurationError,
         match="Unknown field 'foo' in community session config for local_session",
     ):
         validate_single_community_session_config("local_session", bad_config)
@@ -106,7 +106,7 @@ def test_validate_single_cs_field_wrong_type_host():
     """Test validation fails if 'host' field has wrong type (int instead of str). (Adapted from test_config.py)"""
     bad_config = {"host": 123}  # host should be str
     with pytest.raises(
-        ValueError,
+        CommunitySessionConfigurationError,
         match="Field 'host' in community session config for local_session must be of type str, got int",
     ):
         validate_single_community_session_config("local_session", bad_config)
@@ -116,17 +116,17 @@ def test_validate_single_cs_field_wrong_type_port():
     """Test validation fails if 'port' field has wrong type (str instead of int)."""
     bad_config = {"port": "10000"}  # port should be int
     with pytest.raises(
-        ValueError,
+        CommunitySessionConfigurationError,
         match="Field 'port' in community session config for local_session must be of type int, got str",
     ):
         validate_single_community_session_config("local_session", bad_config)
 
 
 def test_validate_single_cs_wrong_type_in_tuple_tls_root_certs():
-    """Test validation for 'tls_root_certs' allowing (str, NoneType)."""
-    bad_config = {"tls_root_certs": 123}  # Should be str or None
+    """Test validation fails if 'tls_root_certs' field has wrong type (int instead of str or None)."""
+    bad_config = {"host": "localhost", "tls_root_certs": 123}
     with pytest.raises(
-        ValueError,
+        CommunitySessionConfigurationError,
         match=r"Field 'tls_root_certs' in community session config for test_session must be one of types \(str, NoneType\), got int",
     ):
         validate_single_community_session_config("test_session", bad_config)
@@ -140,7 +140,7 @@ def test_validate_single_cs_missing_required_field(monkeypatch):
     )
     bad_config = {"port": 10000}  # Missing 'host'
     with pytest.raises(
-        ValueError,
+        CommunitySessionConfigurationError,
         match="Missing required field 'host' in community session config for local_session",
     ):
         validate_single_community_session_config("local_session", bad_config)
@@ -197,11 +197,11 @@ def test_validate_community_sessions_not_dict():
         pytest.fail(f"validate_community_sessions_config(None) raised ValueError: {e}")
 
     # Case: community_sessions_map is not a dict (e.g., string) - should fail
-    with pytest.raises(ValueError, match="'community_sessions' must be a dictionary"):
+    with pytest.raises(CommunitySessionConfigurationError, match="'community_sessions' must be a dictionary in Deephaven community session config"):
         validate_community_sessions_config("not_a_dict")
 
     # Case: community_sessions_map is not a dict (e.g., list) - should fail
-    with pytest.raises(ValueError, match="'community_sessions' must be a dictionary"):
+    with pytest.raises(CommunitySessionConfigurationError, match="'community_sessions' must be a dictionary in Deephaven community session config"):
         validate_community_sessions_config([{"session1": {}}])
 
 

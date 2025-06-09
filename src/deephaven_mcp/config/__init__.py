@@ -83,7 +83,7 @@ Configuration JSON Specification:
 - The configuration file must be a JSON object.
 - It may optionally contain `"community_sessions"` and/or `"enterprise_systems"` top-level keys:
     - `"community_sessions"`: If present, this must be a dictionary mapping community session names to client session configuration dicts for connecting to community workers. An empty dictionary is allowed (e.g., {}).
-    - `"enterprise_systems"`: If present, this must be a dictionary mapping enterprise system names to system configuration dicts. An empty dictionary is allowed (e.g., {}). 
+    - `"enterprise_systems"`: If present, this must be a dictionary mapping enterprise system names to system configuration dicts. An empty dictionary is allowed (e.g., {}).
 
 Example Valid Configuration (without community_sessions):
 ---------------------------
@@ -198,23 +198,19 @@ from typing import Any, cast
 
 import aiofiles
 
-
-class McpConfigurationError(ValueError):
-    """Base class for all Deephaven MCP configuration errors."""
-    pass
-
-
-from .community_session import (
+from .errors import (
+    McpConfigurationError,
     CommunitySessionConfigurationError,
+    EnterpriseSystemConfigurationError,
+)
+from .community_session import (
     redact_community_session_config,
     validate_community_sessions_config,
 )
 from .enterprise_system import (
-    EnterpriseSystemConfigurationError,
-    validate_enterprise_systems_config,
     redact_enterprise_system_config,
+    validate_enterprise_systems_config,
 )
-
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -225,14 +221,9 @@ str: Name of the environment variable specifying the path to the Deephaven MCP c
 
 
 class ConfigManager:
-    _REQUIRED_TOP_LEVEL_KEYS: set[str] = (
-        set()
-    )
+    _REQUIRED_TOP_LEVEL_KEYS: set[str] = set()
     """Set of top-level keys that MUST be present in the configuration file."""
-    _ALLOWED_TOP_LEVEL_KEYS: set[str] = {
-        "community_sessions",
-        "enterprise_systems",
-    }
+    _ALLOWED_TOP_LEVEL_KEYS: set[str] = {"community_sessions", "enterprise_systems"}
     """Set of all allowed top-level keys in the configuration file."""
 
     """
@@ -328,52 +319,88 @@ class ConfigManager:
                 f"Environment variable {CONFIG_ENV_VAR} is set to: {config_path}"
             )
 
-            try:
-                async with aiofiles.open(config_path, mode="r") as f:
-                    content = await f.read()
-                data = json.loads(content)
-            except FileNotFoundError:
-                _LOGGER.error(f"Configuration file not found: {config_path}")
-                raise McpConfigurationError(f"Configuration file not found: {config_path}")
-            except PermissionError:
-                _LOGGER.error(f"Permission denied when trying to read configuration file: {config_path}")
-                raise McpConfigurationError(f"Permission denied when trying to read configuration file: {config_path}")
-            except json.JSONDecodeError as e:
-                _LOGGER.error(f"Invalid JSON in configuration file {config_path}: {e}")
-                raise McpConfigurationError(f"Invalid JSON in configuration file {config_path}: {e}")
-            except Exception as e: # Catch other potential IOErrors or unexpected issues
-                _LOGGER.error(f"Unexpected error loading or parsing config file {config_path}: {e}")
-                raise McpConfigurationError(f"Unexpected error loading or parsing config file {config_path}: {e}")
+            data = await self._load_config_from_file(config_path)
 
             try:
                 validated_data = self.validate_config(data)
-            except (CommunitySessionConfigurationError, EnterpriseSystemConfigurationError) as specific_e:
-                _LOGGER.error(f"Configuration validation failed for {config_path} due to specific session/system error: {specific_e}")
-                raise McpConfigurationError(f"Configuration validation failed for {config_path}: {specific_e}") from specific_e
-            except McpConfigurationError as e: # Handles McpConfigurationError from validate_config's top-level checks
-                _LOGGER.error(f"Configuration validation failed for {config_path}: {e}")
-                raise
+            except (
+                CommunitySessionConfigurationError,
+                EnterpriseSystemConfigurationError,
+            ) as specific_e:
+                _LOGGER.error(
+                    f"Configuration validation failed for {config_path}: {specific_e}"
+                )
+                raise McpConfigurationError(
+                    f"Configuration validation failed: {specific_e}"
+                ) from specific_e
+            except ValueError as ve:
+                _LOGGER.error(
+                    f"General configuration validation error for {config_path}: {ve}"
+                )
+                raise McpConfigurationError(
+                    f"General configuration validation error: {ve}"
+                ) from ve
 
             self._cache = validated_data
-            _LOGGER.info(f"Deephaven MCP configuration loaded and validated successfully in {perf_counter() - start_time:.3f} seconds")
+            end_time = perf_counter()
+            duration_ms = (end_time - start_time) * 1000
+            _LOGGER.info(
+                f"Successfully loaded and validated Deephaven MCP application configuration from {config_path} in {duration_ms:.2f}ms."
+            )
 
-            community_sessions = validated_data.get("community_sessions", {})
+            # Log configured sessions after successful load and validation
+            community_sessions = self._cache.get("community_sessions", {})
             if community_sessions:
                 _LOGGER.info("Configured Community Sessions:")
                 for name, details in community_sessions.items():
-                    _LOGGER.info(f"  Session '{name}': {redact_community_session_config(details)}")
+                    _LOGGER.info(
+                        f"  Session '{name}': {redact_community_session_config(details)}"
+                    )
             else:
                 _LOGGER.info("No Community Sessions configured.")
 
-            enterprise_systems = validated_data.get("enterprise_systems", {})
+            enterprise_systems = self._cache.get("enterprise_systems", {})
             if enterprise_systems:
                 _LOGGER.info("Configured Enterprise Systems:")
                 for name, details in enterprise_systems.items():
-                    _LOGGER.info(f"  System '{name}': {redact_enterprise_system_config(details)}")
+                    _LOGGER.info(
+                        f"  System '{name}': {redact_enterprise_system_config(details)}"
+                    )
             else:
                 _LOGGER.info("No Enterprise Systems configured.")
 
-            return validated_data
+            return self._cache
+
+    async def _load_config_from_file(self, config_path: str) -> dict[str, Any]:
+        """Load and parse configuration from a JSON file."""
+        try:
+            async with aiofiles.open(config_path) as f:
+                content = await f.read()
+            return json.loads(content)
+        except FileNotFoundError:
+            _LOGGER.error(f"Configuration file not found: {config_path}")
+            raise McpConfigurationError(
+                f"Configuration file not found: {config_path}"
+            ) from None
+        except PermissionError:
+            _LOGGER.error(
+                f"Permission denied when trying to read configuration file: {config_path}"
+            )
+            raise McpConfigurationError(
+                f"Permission denied when trying to read configuration file: {config_path}"
+            ) from None
+        except json.JSONDecodeError as e:
+            _LOGGER.error(f"Invalid JSON in configuration file {config_path}: {e}")
+            raise McpConfigurationError(
+                f"Invalid JSON in configuration file {config_path}: {e}"
+            ) from e
+        except Exception as e:  # Catch other potential IOErrors or unexpected issues
+            _LOGGER.error(
+                f"Unexpected error loading or parsing config file {config_path}: {e}"
+            )
+            raise McpConfigurationError(
+                f"Unexpected error loading or parsing config file {config_path}: {e}"
+            ) from e
 
     async def get_community_session_config(self, session_name: str) -> dict[str, Any]:
         """
@@ -453,18 +480,21 @@ class ConfigManager:
         config = await self.get_config()
         enterprise_systems_map = config.get("enterprise_systems", {})
 
-        if not isinstance(enterprise_systems_map, dict) or system_name not in enterprise_systems_map:
+        if (
+            not isinstance(enterprise_systems_map, dict)
+            or system_name not in enterprise_systems_map
+        ):
             _LOGGER.error(
                 f"Enterprise system '{system_name}' not found in configuration or 'enterprise_systems' is not a dict."
             )
             raise EnterpriseSystemConfigurationError(
                 f"Enterprise system '{system_name}' not found in configuration."
             )
-        
+
         # TODO: Implement redaction for enterprise systems if needed, similar to community sessions.
         # For now, returning the raw config.
         _LOGGER.debug(
-            f"Retrieved configuration for enterprise system '{system_name}': {enterprise_systems_map[system_name]}" # Add redaction if sensitive
+            f"Retrieved configuration for enterprise system '{system_name}': {enterprise_systems_map[system_name]}"  # Add redaction if sensitive
         )
         return cast(dict[str, Any], enterprise_systems_map[system_name])
 
@@ -484,16 +514,16 @@ class ConfigManager:
         _LOGGER.debug("Getting list of all enterprise system names")
         config = await self.get_config()
         enterprise_systems_map = config.get("enterprise_systems", {})
-        
+
         if not isinstance(enterprise_systems_map, dict):
-             _LOGGER.warning("'enterprise_systems' is not a dictionary, returning empty list of names.")
-             return []
+            _LOGGER.warning(
+                "'enterprise_systems' is not a dictionary, returning empty list of names."
+            )
+            return []
 
         system_names = list(enterprise_systems_map.keys())
 
-        _LOGGER.debug(
-            f"Found {len(system_names)} enterprise system(s): {system_names}"
-        )
+        _LOGGER.debug(f"Found {len(system_names)} enterprise system(s): {system_names}")
         return system_names
 
     @staticmethod
