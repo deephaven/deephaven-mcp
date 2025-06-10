@@ -1903,7 +1903,7 @@ async def test_load_config_from_file_jsondecodeerror(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def testload_and_validate_config_valueerror(monkeypatch):
+async def test_load_and_validate_config_valueerror(monkeypatch):
     # Patch validate_config to raise ValueError
     monkeypatch.setattr(
         config, "validate_config", mock.Mock(side_effect=ValueError("bad value"))
