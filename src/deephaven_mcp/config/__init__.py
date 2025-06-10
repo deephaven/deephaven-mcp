@@ -187,6 +187,11 @@ __all__ = [
     "EnterpriseSystemConfigurationError",
     "ConfigManager",
     "CONFIG_ENV_VAR",
+    "validate_config",
+    "get_named_config",
+    "get_all_config_names",
+    "get_config_path",
+    "load_and_validate_config",
 ]
 
 import asyncio
@@ -261,14 +266,13 @@ class ConfigManager:
 
         _LOGGER.debug("Configuration cache cleared.")
 
-    async def set_config_cache(self, config: dict[str, Any]) -> None:
+    async def _set_config_cache(self, config: dict[str, Any]) -> None:
         """
-        Set the in-memory configuration cache (coroutine-safe, for testing only).
+        PRIVATE: Set the in-memory configuration cache (coroutine-safe, for testing/internal use only).
 
-        This method allows tests or advanced users to inject a configuration dictionary directly
-        into the manager's cache, bypassing file I/O. The configuration will be validated before
-        being cached. This is useful for unit tests or scenarios where you want to avoid
-        reading from disk.
+        This private method allows tests or advanced users to inject a configuration dictionary directly
+        into the manager's cache, bypassing file I/O. The configuration will be validated before caching.
+        This is useful for unit tests or scenarios where you want to avoid reading from disk.
 
         Args:
             config (dict[str, Any]): The configuration dictionary to set as the cache. This will be validated before caching.
@@ -281,7 +285,7 @@ class ConfigManager:
 
         Example:
             >>> # Assuming config_manager is an instance of ConfigManager
-            >>> await config_manager.set_config_cache({'community_sessions': {'example_session': {}}})
+            >>> await config_manager._set_config_cache({'community_sessions': {'example_session': {}}})
         """
         async with self._lock:
             self._cache = validate_config(config)
@@ -321,8 +325,8 @@ class ConfigManager:
                 _LOGGER.debug("Using cached Deephaven MCP application configuration.")
                 return self._cache
 
-            config_path = _get_config_path()
-            validated = await _load_and_validate_config(config_path)
+            config_path = get_config_path()
+            validated = await load_and_validate_config(config_path)
             self._cache = validated
             _log_config_summary(validated)
             return validated
@@ -443,7 +447,7 @@ async def _load_config_from_file(config_path: str) -> dict[str, Any]:
         ) from e
 
 
-def _get_config_path() -> str:
+def get_config_path() -> str:
     """
     Retrieve the configuration file path from the environment variable.
 
@@ -457,7 +461,7 @@ def _get_config_path() -> str:
 
     Example:
         >>> os.environ['DH_MCP_CONFIG_FILE'] = '/path/to/config.json'
-        >>> path = _get_config_path()
+        >>> path = get_config_path()
         >>> print(path)
         '/path/to/config.json'
     """
@@ -469,7 +473,7 @@ def _get_config_path() -> str:
     return config_path
 
 
-async def _load_and_validate_config(config_path: str) -> dict[str, Any]:
+async def load_and_validate_config(config_path: str) -> dict[str, Any]:
     """
     Load and validate the Deephaven MCP configuration from a JSON file.
 

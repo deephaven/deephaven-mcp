@@ -18,8 +18,8 @@ from deephaven_mcp.config import (
     ConfigManager,
     EnterpriseSystemConfigurationError,
     McpConfigurationError,
-    _get_config_path,
-    _load_and_validate_config,
+    get_config_path,
+    load_and_validate_config,
     _load_config_from_file,
     _log_config_summary,
     get_all_config_names,
@@ -151,7 +151,7 @@ def test_community_sessions_redact():
 # --- Enterprise system validation ---
 from deephaven_mcp.config.enterprise_system import (
     _validate_and_get_auth_type,
-    _validate_single_enterprise_system,
+    validate_single_enterprise_system,
     redact_enterprise_system_config,
     validate_enterprise_systems_config,
 )
@@ -178,38 +178,38 @@ def test_enterprise_systems_invalid_system_name_type():
 
 def test_enterprise_systems_missing_connection_json_url():
     with pytest.raises(EnterpriseSystemConfigurationError):
-        _validate_single_enterprise_system("foo", {"auth_type": "password"})
+        validate_single_enterprise_system("foo", {"auth_type": "password"})
 
 
 def test_enterprise_systems_invalid_connection_json_url_type():
     with pytest.raises(EnterpriseSystemConfigurationError):
-        _validate_single_enterprise_system(
+        validate_single_enterprise_system(
             "foo", {"connection_json_url": 1, "auth_type": "password"}
         )
 
 
 def test_enterprise_systems_missing_auth_type():
     with pytest.raises(EnterpriseSystemConfigurationError):
-        _validate_single_enterprise_system("foo", {"connection_json_url": "url"})
+        validate_single_enterprise_system("foo", {"connection_json_url": "url"})
 
 
 def test_enterprise_systems_invalid_auth_type_type():
     with pytest.raises(EnterpriseSystemConfigurationError):
-        _validate_single_enterprise_system(
+        validate_single_enterprise_system(
             "foo", {"connection_json_url": "url", "auth_type": 1}
         )
 
 
 def test_enterprise_systems_unknown_auth_type():
     with pytest.raises(EnterpriseSystemConfigurationError):
-        _validate_single_enterprise_system(
+        validate_single_enterprise_system(
             "foo", {"connection_json_url": "url", "auth_type": "badtype"}
         )
 
 
 def test_enterprise_systems_unknown_key():
     # Should log a warning but not raise
-    _validate_single_enterprise_system(
+    validate_single_enterprise_system(
         "foo",
         {
             "connection_json_url": "url",
@@ -223,7 +223,7 @@ def test_enterprise_systems_unknown_key():
 
 def test_enterprise_systems_password_auth_missing_username():
     with pytest.raises(EnterpriseSystemConfigurationError):
-        _validate_single_enterprise_system(
+        validate_single_enterprise_system(
             "foo",
             {"connection_json_url": "url", "auth_type": "password", "password": "p"},
         )
@@ -231,7 +231,7 @@ def test_enterprise_systems_password_auth_missing_username():
 
 def test_enterprise_systems_password_auth_invalid_username_type():
     with pytest.raises(EnterpriseSystemConfigurationError):
-        _validate_single_enterprise_system(
+        validate_single_enterprise_system(
             "foo",
             {
                 "connection_json_url": "url",
@@ -244,7 +244,7 @@ def test_enterprise_systems_password_auth_invalid_username_type():
 
 def test_enterprise_systems_password_auth_missing_password_keys():
     with pytest.raises(EnterpriseSystemConfigurationError):
-        _validate_single_enterprise_system(
+        validate_single_enterprise_system(
             "foo",
             {"connection_json_url": "url", "auth_type": "password", "username": "u"},
         )
@@ -252,7 +252,7 @@ def test_enterprise_systems_password_auth_missing_password_keys():
 
 def test_enterprise_systems_password_auth_invalid_password_type():
     with pytest.raises(EnterpriseSystemConfigurationError):
-        _validate_single_enterprise_system(
+        validate_single_enterprise_system(
             "foo",
             {
                 "connection_json_url": "url",
@@ -265,7 +265,7 @@ def test_enterprise_systems_password_auth_invalid_password_type():
 
 def test_enterprise_systems_password_auth_invalid_password_env_var_type():
     with pytest.raises(EnterpriseSystemConfigurationError):
-        _validate_single_enterprise_system(
+        validate_single_enterprise_system(
             "foo",
             {
                 "connection_json_url": "url",
@@ -278,7 +278,7 @@ def test_enterprise_systems_password_auth_invalid_password_env_var_type():
 
 def test_enterprise_systems_password_auth_both_passwords_present():
     with pytest.raises(EnterpriseSystemConfigurationError):
-        _validate_single_enterprise_system(
+        validate_single_enterprise_system(
             "foo",
             {
                 "connection_json_url": "url",
@@ -292,14 +292,14 @@ def test_enterprise_systems_password_auth_both_passwords_present():
 
 def test_enterprise_systems_private_key_auth_missing_key():
     with pytest.raises(EnterpriseSystemConfigurationError):
-        _validate_single_enterprise_system(
+        validate_single_enterprise_system(
             "foo", {"connection_json_url": "url", "auth_type": "private_key"}
         )
 
 
 def test_enterprise_systems_private_key_auth_invalid_key_type():
     with pytest.raises(EnterpriseSystemConfigurationError):
-        _validate_single_enterprise_system(
+        validate_single_enterprise_system(
             "foo",
             {
                 "connection_json_url": "url",
@@ -727,7 +727,7 @@ async def test_validate_enterprise_systems_config_logs_non_dict_item_in_map(
     cm = config.ConfigManager()
     caplog.set_level(logging.DEBUG, logger="deephaven_mcp.config")
 
-    # Error from _validate_single_enterprise_system for 'bad_system_item'
+    # Error from validate_single_enterprise_system for 'bad_system_item'
     specific_error_detail = "Enterprise system 'bad_system_item' configuration must be a dictionary, but got str."
 
     with pytest.raises(
@@ -745,7 +745,7 @@ async def test_validate_enterprise_systems_config_logs_non_dict_item_in_map(
     )
     assert (
         specific_error_detail in caplog.text
-    )  # From _validate_single_enterprise_system
+    )  # From validate_single_enterprise_system
     assert (
         f"Configuration validation failed for {config_file_path}: {specific_error_detail}"
         in caplog.text
@@ -834,16 +834,16 @@ async def test_validate_enterprise_systems_config_invalid_system_name_type(caplo
     ), f"Expected ERROR log message '{specific_error_detail}' not found from enterprise_system logger."
 
 
-def test_validate_single_enterprise_system_missing_connection_json_url(caplog):
+def testvalidate_single_enterprise_system_missing_connection_json_url(caplog):
     """
-    Tests _validate_single_enterprise_system when 'connection_json_url' is missing.
+    Tests validate_single_enterprise_system when 'connection_json_url' is missing.
     """
     import logging
     import re
 
     from deephaven_mcp.config.enterprise_system import (
         EnterpriseSystemConfigurationError,
-        _validate_single_enterprise_system,
+        validate_single_enterprise_system,
     )
 
     caplog.set_level(logging.DEBUG)  # Capture all logs for thorough checking
@@ -856,7 +856,7 @@ def test_validate_single_enterprise_system_missing_connection_json_url(caplog):
         EnterpriseSystemConfigurationError,
         match=re.escape(expected_error_message),
     ):
-        _validate_single_enterprise_system(system_name, invalid_config)
+        validate_single_enterprise_system(system_name, invalid_config)
 
     found_log = False
     for record in caplog.records:
@@ -872,16 +872,16 @@ def test_validate_single_enterprise_system_missing_connection_json_url(caplog):
     ), f"Expected ERROR log message '{expected_error_message}' not found. Logs: {caplog.text}"
 
 
-def test_validate_single_enterprise_system_invalid_connection_json_url_type(caplog):
+def testvalidate_single_enterprise_system_invalid_connection_json_url_type(caplog):
     """
-    Tests _validate_single_enterprise_system when 'connection_json_url' is not a string.
+    Tests validate_single_enterprise_system when 'connection_json_url' is not a string.
     """
     import logging
     import re
 
     from deephaven_mcp.config.enterprise_system import (
         EnterpriseSystemConfigurationError,
-        _validate_single_enterprise_system,
+        validate_single_enterprise_system,
     )
 
     caplog.set_level(logging.DEBUG)
@@ -901,7 +901,7 @@ def test_validate_single_enterprise_system_invalid_connection_json_url_type(capl
         EnterpriseSystemConfigurationError,
         match=re.escape(expected_error_message),
     ):
-        _validate_single_enterprise_system(system_name, invalid_config)
+        validate_single_enterprise_system(system_name, invalid_config)
 
     found_log = False
     for record in caplog.records:
@@ -917,16 +917,16 @@ def test_validate_single_enterprise_system_invalid_connection_json_url_type(capl
     ), f"Expected ERROR log message '{expected_error_message}' not found. Logs: {caplog.text}"
 
 
-def test_validate_single_enterprise_system_missing_auth_type(caplog):
+def testvalidate_single_enterprise_system_missing_auth_type(caplog):
     """
-    Tests _validate_single_enterprise_system when 'auth_type' is missing.
+    Tests validate_single_enterprise_system when 'auth_type' is missing.
     """
     import logging
     import re
 
     from deephaven_mcp.config.enterprise_system import (
         EnterpriseSystemConfigurationError,
-        _validate_single_enterprise_system,
+        validate_single_enterprise_system,
     )
 
     caplog.set_level(logging.DEBUG)
@@ -943,7 +943,7 @@ def test_validate_single_enterprise_system_missing_auth_type(caplog):
         EnterpriseSystemConfigurationError,
         match=re.escape(expected_error_message),
     ):
-        _validate_single_enterprise_system(system_name, invalid_config)
+        validate_single_enterprise_system(system_name, invalid_config)
 
     found_log = False
     for record in caplog.records:
@@ -959,16 +959,16 @@ def test_validate_single_enterprise_system_missing_auth_type(caplog):
     ), f"Expected ERROR log message '{expected_error_message}' not found. Logs: {caplog.text}"
 
 
-def test_validate_single_enterprise_system_invalid_auth_type_type(caplog):
+def testvalidate_single_enterprise_system_invalid_auth_type_type(caplog):
     """
-    Tests _validate_single_enterprise_system when 'auth_type' is not a string.
+    Tests validate_single_enterprise_system when 'auth_type' is not a string.
     """
     import logging
     import re
 
     from deephaven_mcp.config.enterprise_system import (
         EnterpriseSystemConfigurationError,
-        _validate_single_enterprise_system,
+        validate_single_enterprise_system,
     )
 
     caplog.set_level(logging.DEBUG)
@@ -986,7 +986,7 @@ def test_validate_single_enterprise_system_invalid_auth_type_type(caplog):
         EnterpriseSystemConfigurationError,
         match=re.escape(expected_error_message),
     ):
-        _validate_single_enterprise_system(system_name, invalid_config)
+        validate_single_enterprise_system(system_name, invalid_config)
 
     found_log = False
     for record in caplog.records:
@@ -1002,9 +1002,9 @@ def test_validate_single_enterprise_system_invalid_auth_type_type(caplog):
     ), f"Expected ERROR log message '{expected_error_message}' not found. Logs: {caplog.text}"
 
 
-def test_validate_single_enterprise_system_unknown_auth_type_value(caplog):
+def testvalidate_single_enterprise_system_unknown_auth_type_value(caplog):
     """
-    Tests _validate_single_enterprise_system when 'auth_type' is an unknown string value.
+    Tests validate_single_enterprise_system when 'auth_type' is an unknown string value.
     """
     import logging
     import re
@@ -1012,7 +1012,7 @@ def test_validate_single_enterprise_system_unknown_auth_type_value(caplog):
     from deephaven_mcp.config.enterprise_system import (
         _AUTH_SPECIFIC_FIELDS,
         EnterpriseSystemConfigurationError,
-        _validate_single_enterprise_system,
+        validate_single_enterprise_system,
     )
 
     caplog.set_level(logging.DEBUG)
@@ -1028,7 +1028,7 @@ def test_validate_single_enterprise_system_unknown_auth_type_value(caplog):
         EnterpriseSystemConfigurationError,
         match=re.escape(expected_error_message),
     ):
-        _validate_single_enterprise_system(system_name, invalid_config)
+        validate_single_enterprise_system(system_name, invalid_config)
 
     found_log = False
     for record in caplog.records:
@@ -1044,14 +1044,14 @@ def test_validate_single_enterprise_system_unknown_auth_type_value(caplog):
     ), f"Expected ERROR log message '{expected_error_message}' not found. Logs: {caplog.text}"
 
 
-def test_validate_single_enterprise_system_unknown_key(caplog):
+def testvalidate_single_enterprise_system_unknown_key(caplog):
     """
-    Tests _validate_single_enterprise_system logs a warning for an unknown key.
+    Tests validate_single_enterprise_system logs a warning for an unknown key.
     """
     import logging
 
     from deephaven_mcp.config.enterprise_system import (
-        _validate_single_enterprise_system,
+        validate_single_enterprise_system,
     )
 
     caplog.set_level(logging.WARNING)  # We only care about the warning here
@@ -1066,7 +1066,7 @@ def test_validate_single_enterprise_system_unknown_key(caplog):
     expected_warning_message = f"Unknown field 'some_unknown_field' in enterprise system '{system_name}' configuration. It will be ignored."
 
     # This should not raise an error, only log a warning
-    _validate_single_enterprise_system(system_name, config_with_unknown_key)
+    validate_single_enterprise_system(system_name, config_with_unknown_key)
 
     found_log = False
     for record in caplog.records:
@@ -1082,11 +1082,11 @@ def test_validate_single_enterprise_system_unknown_key(caplog):
     ), f"Expected WARNING log message '{expected_warning_message}' not found. Logs: {caplog.text}"
 
 
-def test_validate_single_enterprise_system_base_field_invalid_tuple_type(
+def testvalidate_single_enterprise_system_base_field_invalid_tuple_type(
     monkeypatch, caplog
 ):
     """
-    Tests _validate_single_enterprise_system when a base field expects a tuple of types
+    Tests validate_single_enterprise_system when a base field expects a tuple of types
     and an invalid type is provided.
     """
     import logging
@@ -1095,7 +1095,7 @@ def test_validate_single_enterprise_system_base_field_invalid_tuple_type(
     from deephaven_mcp.config import enterprise_system  # Import the module itself
     from deephaven_mcp.config.enterprise_system import (
         EnterpriseSystemConfigurationError,
-        _validate_single_enterprise_system,
+        validate_single_enterprise_system,
     )
 
     caplog.set_level(logging.DEBUG)
@@ -1127,7 +1127,7 @@ def test_validate_single_enterprise_system_base_field_invalid_tuple_type(
         EnterpriseSystemConfigurationError,
         match=re.escape(expected_error_message),
     ):
-        _validate_single_enterprise_system(system_name, invalid_config)
+        validate_single_enterprise_system(system_name, invalid_config)
 
     found_log = False
     for record in caplog.records:
@@ -1148,11 +1148,11 @@ def test_validate_single_enterprise_system_base_field_invalid_tuple_type(
     )
 
 
-def test_validate_single_enterprise_system_auth_specific_field_invalid_tuple_type(
+def testvalidate_single_enterprise_system_auth_specific_field_invalid_tuple_type(
     monkeypatch, caplog
 ):
     """
-    Tests _validate_single_enterprise_system when an auth-specific field expects a tuple of types
+    Tests validate_single_enterprise_system when an auth-specific field expects a tuple of types
     and an invalid type is provided.
     """
     import logging
@@ -1162,7 +1162,7 @@ def test_validate_single_enterprise_system_auth_specific_field_invalid_tuple_typ
     from deephaven_mcp.config.enterprise_system import (
         _AUTH_SPECIFIC_FIELDS,
         EnterpriseSystemConfigurationError,
-        _validate_single_enterprise_system,
+        validate_single_enterprise_system,
     )
 
     caplog.set_level(logging.DEBUG)
@@ -1200,7 +1200,7 @@ def test_validate_single_enterprise_system_auth_specific_field_invalid_tuple_typ
         EnterpriseSystemConfigurationError,
         match=re.escape(expected_error_message),
     ):
-        _validate_single_enterprise_system(system_name, invalid_config)
+        validate_single_enterprise_system(system_name, invalid_config)
 
     found_log = False
     for record in caplog.records:
@@ -1221,9 +1221,9 @@ def test_validate_single_enterprise_system_auth_specific_field_invalid_tuple_typ
     )
 
 
-def test_validate_single_enterprise_system_password_auth_missing_username(caplog):
+def testvalidate_single_enterprise_system_password_auth_missing_username(caplog):
     """
-    Tests _validate_single_enterprise_system for auth_type 'password'
+    Tests validate_single_enterprise_system for auth_type 'password'
     when 'username' is missing.
     """
     import logging
@@ -1231,7 +1231,7 @@ def test_validate_single_enterprise_system_password_auth_missing_username(caplog
 
     from deephaven_mcp.config.enterprise_system import (
         EnterpriseSystemConfigurationError,
-        _validate_single_enterprise_system,
+        validate_single_enterprise_system,
     )
 
     caplog.set_level(logging.DEBUG)
@@ -1247,7 +1247,7 @@ def test_validate_single_enterprise_system_password_auth_missing_username(caplog
         EnterpriseSystemConfigurationError,
         match=re.escape(expected_error_message),
     ):
-        _validate_single_enterprise_system(system_name, invalid_config)
+        validate_single_enterprise_system(system_name, invalid_config)
 
     found_log = False
     for record in caplog.records:
@@ -1263,9 +1263,9 @@ def test_validate_single_enterprise_system_password_auth_missing_username(caplog
     ), f"Expected ERROR log message '{expected_error_message}' not found. Logs: {caplog.text}"
 
 
-def test_validate_single_enterprise_system_password_auth_invalid_username_type(caplog):
+def testvalidate_single_enterprise_system_password_auth_invalid_username_type(caplog):
     """
-    Tests _validate_single_enterprise_system for auth_type 'password'
+    Tests validate_single_enterprise_system for auth_type 'password'
     when 'username' has an invalid type.
     """
     import logging
@@ -1273,7 +1273,7 @@ def test_validate_single_enterprise_system_password_auth_invalid_username_type(c
 
     from deephaven_mcp.config.enterprise_system import (
         EnterpriseSystemConfigurationError,
-        _validate_single_enterprise_system,
+        validate_single_enterprise_system,
     )
 
     caplog.set_level(logging.DEBUG)
@@ -1290,7 +1290,7 @@ def test_validate_single_enterprise_system_password_auth_invalid_username_type(c
         EnterpriseSystemConfigurationError,
         match=re.escape(expected_error_message),
     ):
-        _validate_single_enterprise_system(system_name, invalid_config)
+        validate_single_enterprise_system(system_name, invalid_config)
 
     found_log = False
     for record in caplog.records:
@@ -1306,9 +1306,9 @@ def test_validate_single_enterprise_system_password_auth_invalid_username_type(c
     ), f"Expected ERROR log message '{expected_error_message}' not found. Logs: {caplog.text}"
 
 
-def test_validate_single_enterprise_system_password_auth_missing_password_keys(caplog):
+def testvalidate_single_enterprise_system_password_auth_missing_password_keys(caplog):
     """
-    Tests _validate_single_enterprise_system for auth_type 'password'
+    Tests validate_single_enterprise_system for auth_type 'password'
     when both 'password' and 'password_env_var' are missing.
     """
     import logging
@@ -1316,7 +1316,7 @@ def test_validate_single_enterprise_system_password_auth_missing_password_keys(c
 
     from deephaven_mcp.config.enterprise_system import (
         EnterpriseSystemConfigurationError,
-        _validate_single_enterprise_system,
+        validate_single_enterprise_system,
     )
 
     caplog.set_level(logging.DEBUG)
@@ -1333,7 +1333,7 @@ def test_validate_single_enterprise_system_password_auth_missing_password_keys(c
         EnterpriseSystemConfigurationError,
         match=re.escape(expected_error_message),
     ):
-        _validate_single_enterprise_system(system_name, invalid_config)
+        validate_single_enterprise_system(system_name, invalid_config)
 
     found_log = False
     for record in caplog.records:
@@ -1349,9 +1349,9 @@ def test_validate_single_enterprise_system_password_auth_missing_password_keys(c
     ), f"Expected ERROR log message '{expected_error_message}' not found. Logs: {caplog.text}"
 
 
-def test_validate_single_enterprise_system_password_auth_invalid_password_type(caplog):
+def testvalidate_single_enterprise_system_password_auth_invalid_password_type(caplog):
     """
-    Tests _validate_single_enterprise_system for auth_type 'password'
+    Tests validate_single_enterprise_system for auth_type 'password'
     when 'password' has an invalid type.
     """
     import logging
@@ -1359,7 +1359,7 @@ def test_validate_single_enterprise_system_password_auth_invalid_password_type(c
 
     from deephaven_mcp.config.enterprise_system import (
         EnterpriseSystemConfigurationError,
-        _validate_single_enterprise_system,
+        validate_single_enterprise_system,
     )
 
     caplog.set_level(logging.DEBUG)
@@ -1377,7 +1377,7 @@ def test_validate_single_enterprise_system_password_auth_invalid_password_type(c
         EnterpriseSystemConfigurationError,
         match=re.escape(expected_error_message),
     ):
-        _validate_single_enterprise_system(system_name, invalid_config)
+        validate_single_enterprise_system(system_name, invalid_config)
 
     found_log = False
     for record in caplog.records:
@@ -1393,11 +1393,11 @@ def test_validate_single_enterprise_system_password_auth_invalid_password_type(c
     ), f"Expected ERROR log message '{expected_error_message}' not found. Logs: {caplog.text}"
 
 
-def test_validate_single_enterprise_system_password_auth_invalid_password_env_var_type(
+def testvalidate_single_enterprise_system_password_auth_invalid_password_env_var_type(
     caplog,
 ):
     """
-    Tests _validate_single_enterprise_system for auth_type 'password'
+    Tests validate_single_enterprise_system for auth_type 'password'
     when 'password_env_var' has an invalid type.
     """
     import logging
@@ -1405,7 +1405,7 @@ def test_validate_single_enterprise_system_password_auth_invalid_password_env_va
 
     from deephaven_mcp.config.enterprise_system import (
         EnterpriseSystemConfigurationError,
-        _validate_single_enterprise_system,
+        validate_single_enterprise_system,
     )
 
     caplog.set_level(logging.DEBUG)
@@ -1423,7 +1423,7 @@ def test_validate_single_enterprise_system_password_auth_invalid_password_env_va
         EnterpriseSystemConfigurationError,
         match=re.escape(expected_error_message),
     ):
-        _validate_single_enterprise_system(system_name, invalid_config)
+        validate_single_enterprise_system(system_name, invalid_config)
 
     found_log = False
     for record in caplog.records:
@@ -1439,9 +1439,9 @@ def test_validate_single_enterprise_system_password_auth_invalid_password_env_va
     ), f"Expected ERROR log message '{expected_error_message}' not found. Logs: {caplog.text}"
 
 
-def test_validate_single_enterprise_system_private_key_auth_missing_key(caplog):
+def testvalidate_single_enterprise_system_private_key_auth_missing_key(caplog):
     """
-    Tests _validate_single_enterprise_system for auth_type 'private_key'
+    Tests validate_single_enterprise_system for auth_type 'private_key'
     when 'private_key' is missing.
     """
     import logging
@@ -1449,7 +1449,7 @@ def test_validate_single_enterprise_system_private_key_auth_missing_key(caplog):
 
     from deephaven_mcp.config.enterprise_system import (
         EnterpriseSystemConfigurationError,
-        _validate_single_enterprise_system,
+        validate_single_enterprise_system,
     )
 
     caplog.set_level(logging.DEBUG)
@@ -1465,7 +1465,7 @@ def test_validate_single_enterprise_system_private_key_auth_missing_key(caplog):
         EnterpriseSystemConfigurationError,
         match=re.escape(expected_error_message),
     ):
-        _validate_single_enterprise_system(system_name, invalid_config)
+        validate_single_enterprise_system(system_name, invalid_config)
 
     found_log = False
     for record in caplog.records:
@@ -1481,9 +1481,9 @@ def test_validate_single_enterprise_system_private_key_auth_missing_key(caplog):
     ), f"Expected ERROR log message '{expected_error_message}' not found. Logs: {caplog.text}"
 
 
-def test_validate_single_enterprise_system_private_key_auth_invalid_key_type(caplog):
+def testvalidate_single_enterprise_system_private_key_auth_invalid_key_type(caplog):
     """
-    Tests _validate_single_enterprise_system for auth_type 'private_key'
+    Tests validate_single_enterprise_system for auth_type 'private_key'
     when 'private_key' has an invalid type.
     """
     import logging
@@ -1491,7 +1491,7 @@ def test_validate_single_enterprise_system_private_key_auth_invalid_key_type(cap
 
     from deephaven_mcp.config.enterprise_system import (
         EnterpriseSystemConfigurationError,
-        _validate_single_enterprise_system,
+        validate_single_enterprise_system,
     )
 
     caplog.set_level(logging.DEBUG)
@@ -1508,7 +1508,7 @@ def test_validate_single_enterprise_system_private_key_auth_invalid_key_type(cap
         EnterpriseSystemConfigurationError,
         match=re.escape(expected_error_message),
     ):
-        _validate_single_enterprise_system(system_name, invalid_config)
+        validate_single_enterprise_system(system_name, invalid_config)
 
     found_log = False
     for record in caplog.records:
@@ -1524,9 +1524,9 @@ def test_validate_single_enterprise_system_private_key_auth_invalid_key_type(cap
     ), f"Expected ERROR log message '{expected_error_message}' not found. Logs: {caplog.text}"
 
 
-def test_validate_single_enterprise_system_password_auth_both_passwords_present(caplog):
+def testvalidate_single_enterprise_system_password_auth_both_passwords_present(caplog):
     """
-    Tests _validate_single_enterprise_system for auth_type 'password'
+    Tests validate_single_enterprise_system for auth_type 'password'
     when both 'password' and 'password_env_var' are present.
     """
     import logging
@@ -1534,7 +1534,7 @@ def test_validate_single_enterprise_system_password_auth_both_passwords_present(
 
     from deephaven_mcp.config.enterprise_system import (
         EnterpriseSystemConfigurationError,
-        _validate_single_enterprise_system,
+        validate_single_enterprise_system,
     )
 
     caplog.set_level(logging.DEBUG)
@@ -1552,7 +1552,7 @@ def test_validate_single_enterprise_system_password_auth_both_passwords_present(
         EnterpriseSystemConfigurationError,
         match=re.escape(expected_error_message),
     ):
-        _validate_single_enterprise_system(system_name, invalid_config)
+        validate_single_enterprise_system(system_name, invalid_config)
 
     found_log = False
     for record in caplog.records:
@@ -1699,11 +1699,11 @@ async def test_config_manager_set_and_clear_cache():
     from deephaven_mcp import config
 
     cm = config.ConfigManager()
-    await cm.set_config_cache({"community_sessions": {"a_session": {}}})
+    await cm._set_config_cache({"community_sessions": {"a_session": {}}})
     cfg1 = await cm.get_config()
     assert "a_session" in cfg1["community_sessions"]
     await cm.clear_config_cache()
-    await cm.set_config_cache({"community_sessions": {"b_session": {}}})
+    await cm._set_config_cache({"community_sessions": {"b_session": {}}})
     cfg2 = await cm.get_config()
     assert "b_session" in cfg2["community_sessions"]
     assert "a_session" not in cfg2["community_sessions"]
@@ -1752,7 +1752,7 @@ async def test_validate_config_missing_required_key_runtime(monkeypatch, caplog)
 async def test_get_named_config_success():
     cm = ConfigManager()
     config = {"community_sessions": {"foo": {"host": "localhost"}}}
-    await cm.set_config_cache(config)
+    await cm._set_config_cache(config)
     result = await get_named_config(cm, "community_sessions", "foo")
     assert result == {"host": "localhost"}
 
@@ -1763,13 +1763,13 @@ async def test_get_all_config_names_returns_keys():
     config = {
         "community_sessions": {"a": {"host": "localhost"}, "b": {"host": "localhost"}}
     }
-    await cm.set_config_cache(config)
+    await cm._set_config_cache(config)
     names = await get_all_config_names(cm, "community_sessions")
     assert set(names) == {"a", "b"}
-    await cm.set_config_cache({"community_sessions": {}})
+    await cm._set_config_cache({"community_sessions": {}})
     names2 = await get_all_config_names(cm, "community_sessions")
     assert names2 == []
-    await cm.set_config_cache({"community_sessions": {}})
+    await cm._set_config_cache({"community_sessions": {}})
     names3 = await get_all_config_names(cm, "enterprise_systems")
     assert names3 == []
 
@@ -1782,14 +1782,14 @@ async def test_get_all_config_names_not_dict_raises():
         CommunitySessionConfigurationError,
         match="'community_sessions' must be a dictionary in Deephaven community session config",
     ):
-        await cm.set_config_cache(config)
+        await cm._set_config_cache(config)
 
 
 @pytest.mark.asyncio
 async def test_named_config_missing():
     cm = ConfigManager()
     config = {"community_sessions": {"foo": {"host": "localhost"}}}
-    await cm.set_config_cache(config)
+    await cm._set_config_cache(config)
     with pytest.raises(
         ValueError,
         match="Config for 'community_sessions:bar' not found in configuration",
@@ -1903,7 +1903,7 @@ async def test_load_config_from_file_jsondecodeerror(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_load_and_validate_config_valueerror(monkeypatch):
+async def testload_and_validate_config_valueerror(monkeypatch):
     # Patch validate_config to raise ValueError
     monkeypatch.setattr(
         config, "validate_config", mock.Mock(side_effect=ValueError("bad value"))
@@ -1915,7 +1915,7 @@ async def test_load_and_validate_config_valueerror(monkeypatch):
         config.McpConfigurationError,
         match="General configuration validation error: bad value",
     ):
-        await config._load_and_validate_config("/any.json")
+        await config.load_and_validate_config("/any.json")
 
 
 @pytest.mark.asyncio
