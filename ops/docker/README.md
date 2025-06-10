@@ -4,7 +4,7 @@ This directory contains all Docker-related assets for the Deephaven MCP project.
 
 ## Structure & Conventions
 
-- Each service (e.g., `mcp-docs`, `mcp-community`) should have its own subdirectory containing:
+- Each service (e.g., `mcp-docs`, `mcp-systems`) should have its own subdirectory containing:
   - `Dockerfile` — Build instructions for the service's container image
   - `docker-compose.yml` — (Optional) Compose file for local orchestration
   - `README.md` — (Optional) Service-specific Docker usage notes
@@ -17,7 +17,7 @@ Example:
     Dockerfile
     docker-compose.yml
     README.md
-  mcp-community/
+  mcp-systems/
     Dockerfile
     docker-compose.yml
     README.md

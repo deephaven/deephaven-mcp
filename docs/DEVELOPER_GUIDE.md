@@ -7,7 +7,7 @@
 > **Note:** This document contains low-level technical details for contributors working on the [deephaven-mcp](https://github.com/deephaven/deephaven-mcp) project. **End users seeking high-level usage and onboarding information should refer to the main documentation in the [`../README.md`](../README.md).**
 
 This repository houses the Python-based Model Context Protocol (MCP) servers for Deephaven:
-1. **Deephaven MCP Community Server**: Orchestrates Deephaven Community Core nodes.
+1. **Deephaven MCP Systems Server**: Orchestrates Deephaven Community Core worker nodes.
 2. **Deephaven MCP Docs Server**: Provides conversational Q&A about Deephaven documentation.
 
 > **Requirements**: [Python](https://www.python.org/) 3.10 or later is required to run these servers.
@@ -21,17 +21,17 @@ This repository houses the Python-based Model Context Protocol (MCP) servers for
   - [Key Features](#key-features)
   - [System Architecture](#system-architecture)
 - [Quick Start Guide](#quick-start-guide)
-  - [Community Server Quick Start](#community-server-quick-start)
+  - [Systems Server Quick Start](#systems-server-quick-start)
   - [Docs Server Quick Start](#docs-server-quick-start)
 - [MCP Server Implementations](#mcp-server-implementations)
-  - [Community Server](#community-server)
-    - [Overview](#community-server-overview)
-    - [Community Sessions Configuration](#community-sessions-configuration)
+  - [Systems Server](#systems-server)
+    - [Overview](#systems-server-overview)
+    - [Systems Sessions Configuration](#systems-sessions-configuration)
     - [Enterprise Server Configuration](#enterprise-server-configuration)
-    - [Running the Community Server](#running-the-community-server)
-    - [Using the Community Server](#using-the-community-server)
-    - [Community Server Tools](#community-server-tools)
-    - [Community Server Test Components](#community-server-test-components)
+    - [Running the Systems Server](#running-the-systems-server)
+    - [Using the Systems Server](#using-the-systems-server)
+    - [Systems Server Tools](#systems-server-tools)
+    - [Systems Server Test Components](#systems-server-test-components)
   - [Docs Server](#docs-server)
     - [Docs Server Overview](#docs-server-overview)
     - [Docs Server Configuration](#docs-server-configuration)
@@ -41,15 +41,15 @@ This repository houses the Python-based Model Context Protocol (MCP) servers for
     - [Docs Server Test Components](#docs-server-test-components)
 - [Integration Methods](#integration-methods)
   - [MCP Inspector](#mcp-inspector)
-    - [With Community Server](#with-community-server)
+    - [With Systems Server](#with-systems-server)
     - [With Docs Server](#with-docs-server)
   - [Claude Desktop](#claude-desktop)
     - [Configuration](#configuration)
   - [mcp-proxy](#mcp-proxy)
-    - [With Community Server](#with-community-server-1)
+    - [With Systems Server](#with-systems-server-1)
     - [With Docs Server](#with-docs-server-1)
   - [Programmatic API](#programmatic-api)
-    - [Community Server Example](#community-server-example)
+    - [Systems Server Example](#systems-server-example)
     - [Docs Server Example](#docs-server-example)
 - [Development](#development)
   - [Development Workflow](#development-workflow)
@@ -80,12 +80,12 @@ This repository houses the Python-based Model Context Protocol (MCP) servers for
 
 The [deephaven-mcp](https://github.com/deephaven/deephaven-mcp) project provides Python implementations of two Model Context Protocol (MCP) servers:
 
-1. **Deephaven MCP Community Server**:
+1. **Deephaven MCP Systems Server**:
    * Enables orchestration, inspection, and management of Deephaven Community Core worker nodes via the MCP protocol
    * Built with [FastMCP](https://github.com/jlowin/fastmcp)
    * Exposes tools for refreshing configuration, listing workers, inspecting table schemas, and running scripts
    * Maintains [PyDeephaven](https://github.com/deephaven/deephaven-core/tree/main/py) client sessions to each configured worker, with sophisticated session management.
-   * The Community Server orchestrates multiple Deephaven Core worker nodes, providing a unified interface for managing workers, their sessions, and data through the Model Context Protocol (MCP). It includes sophisticated session management with automatic caching, concurrent access safety, and lifecycle management.
+   * The Systems Server orchestrates multiple Deephaven Community Core worker nodes, providing a unified interface for managing workers, their sessions, and data through the Model Context Protocol (MCP). It includes sophisticated session management with automatic caching, concurrent access safety, and lifecycle management.
 
 2. **Deephaven MCP Docs Server**:
    * Offers an agentic, LLM-powered API for Deephaven documentation Q&A and chat
@@ -96,7 +96,7 @@ Both servers are designed for integration with MCP-compatible tools like the [MC
 
 ### Key Features
 
-**Community Server Features:**
+**Systems Server Features:**
 * **MCP Server:** Implements the MCP protocol for Deephaven Community Core workers
 * **Multiple Transports:** Supports both SSE (for web) and stdio (for local/subprocess) communication
 * **Configurable:** Loads worker configuration from a JSON file or environment variable
@@ -112,13 +112,13 @@ Both servers are designed for integration with MCP-compatible tools like the [MC
 
 ### System Architecture
 
-**Community Server Architecture:**
+**Systems Server Architecture:**
 
 ```mermaid
 graph TD
-    A[Clients: MCP Inspector / Claude Desktop / etc.] -- SSE/stdio (MCP) --> B(MCP Community Server);
-    B -- Manages --> C(Deephaven Core Worker 1);
-    B -- Manages --> D(Deephaven Core Worker N);
+    A[Clients: MCP Inspector / Claude Desktop / etc.] -- SSE/stdio (MCP) --> B(MCP Systems Server);
+    B -- Manages --> C(Deephaven Community Core Worker 1);
+    B -- Manages --> D(Deephaven Community Core Worker N);
 ```
 
 Clients (Inspector, Claude Desktop) connect to the MCP Server via SSE or stdio. The MCP Server manages multiple Deephaven Community Core workers. The architecture allows for scalable worker management and flexible client integrations.
@@ -135,7 +135,7 @@ Users or API clients send natural language questions or documentation queries ov
 
 ## Quick Start Guide
 
-### Community Server Quick Start
+### Systems Server Quick Start
 
 1. **Set up worker configuration:**
    Create a JSON configuration file for your Deephaven MCP:
@@ -158,9 +158,9 @@ Users or API clients send natural language questions or documentation queries ov
    
    > This script is located at [`../scripts/run_deephaven_test_server.py`](../scripts/run_deephaven_test_server.py) and creates a local Deephaven server with test data.
 
-3. **Run the Community Server:**
+3. **Run the Systems Server:**
    ```sh
-   DH_MCP_CONFIG_FILE=deephaven_mcp.json uv run dh-mcp-community --transport sse
+   DH_MCP_CONFIG_FILE=deephaven_mcp.json uv run dh-mcp-systems --transport sse
    ```
 
 4. **Test with the MCP Inspector:**
@@ -193,18 +193,18 @@ This package registers the following console entry points for easy command-line 
 
 | Command | Description | Source |
 |---------|-------------|--------|
-| `dh-mcp-community` | Start the Community Server | `deephaven_mcp.community:main` |
+| `dh-mcp-systems` | Start the Systems Server | `deephaven_mcp.systems:main` |
 | `dh-mcp-docs` | Start the Docs Server | `deephaven_mcp.docs:main` |
 
 These commands are automatically available in your PATH after installing the package.
 
 ## MCP Server Implementations
 
-### Community Server
+### Systems Server
 
-#### Community Server Overview
+#### Systems Server Overview
 
-The Deephaven MCP Community Server is an [MCP](https://github.com/modelcontextprotocol/spec)-compatible server (built with [FastMCP](https://github.com/jlowin/fastmcp)) that provides tools for interacting with Deephaven Community Core instances.
+The Deephaven MCP Systems Server is an [MCP](https://github.com/modelcontextprotocol/spec)-compatible server (built with [FastMCP](https://github.com/jlowin/fastmcp)) that provides tools for interacting with Deephaven Community Core instances.
 
 Key architectural features include:
 
@@ -217,15 +217,15 @@ Key architectural features include:
 
 ##### Core Configuration File (`deephaven_mcp.json`)
 
-The Deephaven MCP Community Server relies on a JSON configuration file (conventionally named `deephaven_mcp.json`, though any name can be used) to define the Deephaven instances it can connect to and manage. This configuration is crucial for the server to operate correctly.
+The Deephaven MCP Systems Server relies on a JSON configuration file (conventionally named `deephaven_mcp.json`, though any name can be used) to define the Deephaven instances it can connect to and manage. This configuration is crucial for the server to operate correctly.
 
 ###### Environment Variables
 
-The Community Server's behavior, particularly how it finds its configuration, can be controlled by the following environment variables:
+The Systems Server's behavior, particularly how it finds its configuration, can be controlled by the following environment variables:
 
 | Variable             | Required | Description                                                                                                                                                              | Where Used              |
 |----------------------|----------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------|
-| `DH_MCP_CONFIG_FILE` | Yes      | Path to the `deephaven_mcp.json` configuration file. The MCP Community Server discovers the location of this file via this environment variable. You must set this variable to the absolute path of your configuration file before starting the server. If this variable is not set, the server will fail to start, logging an error. <br><br>Example: <br>`export DH_MCP_CONFIG_FILE="/home/user/project/config/deephaven_mcp.json"` <br>`# Now run the server` <br>`uv run dh-mcp-community --transport sse`                                 | MCP Server, Test Client |
+| `DH_MCP_CONFIG_FILE` | Yes      | Path to the `deephaven_mcp.json` configuration file. The MCP Systems Server discovers the location of this file via this environment variable. You must set this variable to the absolute path of your configuration file before starting the server. If this variable is not set, the server will fail to start, logging an error. <br><br>Example: <br>`export DH_MCP_CONFIG_FILE="/home/user/project/config/deephaven_mcp.json"` <br>`# Now run the server` <br>`uv run dh-mcp-systems --transport sse`                                 | MCP Server, Test Client |
 | `PYTHONLOGLEVEL`     | No       | Sets the Python logging level for the server (e.g., `DEBUG`, `INFO`, `WARNING`, `ERROR`).                                                                                    | Server (optional)       |
 
 > Environment variables can also be loaded from `.env` files using [python-dotenv](https://github.com/theskumar/python-dotenv) if it's integrated into the project's startup mechanism.
@@ -239,11 +239,11 @@ The `deephaven_mcp.json` file is a JSON object that can contain two primary top-
 
 If both keys are absent, or if the `deephaven_mcp.json` file itself is an empty JSON object (e.g., `{}`), it signifies that no sessions of either type are configured. This is a valid state.
 
-#### Community Sessions Configuration
+#### Systems Sessions Configuration
 
 This section details the configuration for individual sessions listed under the `"community_sessions"` key in the `deephaven_mcp.json` file.
 
-**Community Session Configuration Fields:**
+**Systems Session Configuration Fields:**
 
 All fields within a session's configuration object are optional. If a field is omitted, the server or client library may use default behaviors or the corresponding feature might be disabled.
 
@@ -336,7 +336,7 @@ If the `"enterprise_systems"` key is present, it must be a dictionary. Each indi
 }
 ```
 
-This structure allows for flexible configuration of multiple Deephaven Enterprise instances alongside community sessions within a single `deephaven_mcp.json` file.
+This structure allows for flexible configuration of multiple Deephaven Enterprise instances alongside Community sessions within a single `deephaven_mcp.json` file.
 
 
 **Security Considerations:**
@@ -345,11 +345,11 @@ The `deephaven_mcp.json` file can contain sensitive credentials (`auth_token`, p
 
 **File Paths:**
 
-Ensure any file paths specified in the configuration (e.g., for TLS certificates) are absolute and accessible by the user/process running the MCP Community Server.
+Ensure any file paths specified in the configuration (e.g., for TLS certificates) are absolute and accessible by the user/process running the MCP Systems Server.
 
-#### Running the Community Server
+#### Running the Systems Server
 
-Follow these steps to start the Community Server:
+Follow these steps to start the Systems Server:
 
 1. **Start a Deephaven Core worker**:
       ```sh
@@ -357,9 +357,9 @@ Follow these steps to start the Community Server:
       ```
       This script is located at [`../scripts/run_deephaven_test_server.py`](../scripts/run_deephaven_test_server.py).
 
-2. **Start the MCP Community Server**:
+2. **Start the MCP Systems Server**:
    ```sh
-   uv run dh-mcp-community --transport sse --port 8000
+   uv run dh-mcp-systems --transport sse --port 8000
    ```
 
    Remember to set `DH_MCP_CONFIG_FILE` first.
@@ -376,36 +376,38 @@ Follow these steps to start the Community Server:
 *   **SSE Transport (for web/Inspector):**
     ```sh
     # Default port (8000)
-    DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json uv run dh-mcp-community --transport sse
+    DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json uv run dh-mcp-systems --transport sse
     
     # Custom port (8001)
-    PORT=8001 DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json uv run dh-mcp-community --transport sse
+    PORT=8001 DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json uv run dh-mcp-systems --transport sse
+    # or
+    uv run dh-mcp-systems --transport sse --port 8001
     ```
 *   **stdio Transport (for direct/subprocess use):**
     ```sh
-    DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json uv run dh-mcp-community --transport stdio
+    DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json uv run dh-mcp-systems --transport stdio
     ```
 
-#### Using the Community Server
+#### Using the Systems Server
 
-Once running, you can interact with the Community Server in several ways:
+Once running, you can interact with the Systems Server in several ways:
 
-- Connect using [MCP Inspector](#with-community-server)
+- Connect using [MCP Inspector](#with-systems-server)
 - Use with [Claude Desktop](#claude-desktop)
 - Run the [Test Client](#test-client) script
 - Build your own MCP client application
 
-#### Community Server Tools
+#### Systems Server Tools
 
-The Community Server exposes the following MCP tools, each designed for a specific aspect of Deephaven worker management:
+The Systems Server exposes the following MCP tools, each designed for a specific aspect of Deephaven worker management:
 
-All Community Server tools return responses with a consistent format:
+All Systems Server tools return responses with a consistent format:
 - Success: `{ "success": true, ... }` with additional fields depending on the tool
 - Error: `{ "success": false, "error": { "type": "error_type", "message": "Error description" } }`
 
 #### Error Handling
 
-All Community Server tools use a consistent error response format when encountering problems:
+All Systems Server tools use a consistent error response format when encountering problems:
 
 ```json
 {
@@ -427,7 +429,7 @@ This consistent format makes error handling and response parsing more predictabl
 
 #### MCP Tools
 
-The Community Server provides the following MCP tools:
+The Systems Server provides the following MCP tools:
 
 ##### `refresh`
 
@@ -595,7 +597,7 @@ On error:
 **Description**:  
 This tool connects to the specified Deephaven worker, gathers installed pip packages using Python's [`importlib.metadata`](https://docs.python.org/3/library/importlib.metadata.html), and returns them as a list of dictionaries.
 
-#### Community Server Test Components
+#### Systems Server Test Components
 
 ##### Test Server
 
@@ -622,7 +624,7 @@ uv run scripts/mcp_community_test_client.py --transport {sse|stdio|streamable-ht
 * `--transport`: Choose `sse` (default) or `stdio`
 * `--env`: Pass environment variables as `KEY=VALUE` (e.g., `DH_MCP_CONFIG_FILE=/path/to/config.json`). Can be repeated for multiple variables
 * `--url`: URL for SSE server (default: `http://localhost:8000/sse`)
-* `--stdio-cmd`: Command to launch stdio server (default: `uv run dh-mcp-community --transport stdio`)
+* `--stdio-cmd`: Command to launch stdio server (default: `uv run dh-mcp-systems --transport stdio`)
 
 **Example Usage:**
 ```sh
@@ -634,7 +636,7 @@ uv run scripts/mcp_community_test_client.py --transport stdio --env DH_MCP_CONFI
 ```
 
 > ⚠️ **Prerequisites:** 
-> - You must have a test Deephaven server running (see [Running the Community Server](#running-the-community-server))
+> - You must have a test Deephaven server running (see [Running the Systems Server](#running-the-systems-server))
 > - The MCP Community server must be running (or use `--stdio-cmd` for the client to launch it)
 > - For troubleshooting connection issues, see [Common Errors & Solutions](#common-errors--solutions)
 
@@ -805,7 +807,7 @@ curl http://localhost:8000/health
 - **Availability**: Available in both SSE and stdio transport modes, but only accessible via HTTP when using SSE transport
 - **Authentication**: No authentication or parameters required
 - **Deployment**: Intended for use as a liveness or readiness probe in Kubernetes, Cloud Run, or similar environments
-- **Note**: This endpoint is only available in the Docs Server, not in the Community Server
+- **Note**: This endpoint is only available in the Docs Server, not in the Systems Server
 
 #### Docs Server Test Components
 
@@ -857,7 +859,7 @@ uv run scripts/mcp_docs_test_client.py --prompt "How do I filter this table?" \
 
 The [MCP Inspector](https://github.com/modelcontextprotocol/inspector) is a web-based tool for interactively exploring and testing MCP servers. It provides an intuitive UI for discovering available tools, invoking them, and inspecting responses.
 
-#### With Community Server
+#### With Systems Server
 
 1. **Start a Deephaven Community Core worker** (in one terminal):
    ```sh
@@ -866,7 +868,7 @@ The [MCP Inspector](https://github.com/modelcontextprotocol/inspector) is a web-
 
 2. **Start the MCP Community server in SSE mode** (in another terminal):
    ```sh
-   DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json uv run dh-mcp-community --transport sse
+   DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json uv run dh-mcp-systems --transport sse
    ```
 
 3. **Start the MCP Inspector** (in a third terminal):
@@ -917,7 +919,7 @@ Claude Desktop is very useful for debugging and interactively exploring MCP serv
              "--directory",
              "/path/to/deephaven-mcp/mcp-community",
              "run",
-             "dh-mcp-community"
+             "dh-mcp-systems"
            ],
            "env": {
              "DH_MCP_CONFIG_FILE": "/path/to/deephaven_mcp.json"
@@ -953,11 +955,11 @@ For troubleshooting Claude Desktop MCP integration, log files are located at:
 
 [mcp-proxy](https://github.com/modelcontextprotocol/mcp-proxy) can bridge an MCP server's SSE endpoint to stdio for tools like Claude Desktop. This is useful when connecting to tools that don't natively support SSE. The `mcp-proxy` utility is included as a dependency in this project.
 
-#### With Community Server
+#### With Systems Server
 
-1. Ensure the MCP Community Server is running in SSE mode:
+1. Ensure the MCP Systems Server is running in SSE mode:
    ```sh
-   DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json uv run dh-mcp-community --transport sse
+   DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json uv run dh-mcp-systems --transport sse
    ```
 
 2. Run `mcp-proxy` to connect to your running MCP server:
@@ -986,14 +988,14 @@ For troubleshooting Claude Desktop MCP integration, log files are located at:
 
 Both servers can be used programmatically within Python applications:
 
-#### Community Server Example
+#### Systems Server Example
 
 ```python
 # Import the server components
-from deephaven_mcp.community import mcp_server, run_server
+from deephaven_mcp.systems import mcp_server, run_server
 
 # Use the MCP tools directly (synchronous)
-from deephaven_mcp.community._mcp import refresh, describe_workers, table_schemas, run_script
+from deephaven_mcp.systems._mcp import refresh, describe_workers, table_schemas, run_script
 
 # Example: Get status of all workers
 result = describe_workers(context)  # Requires MCP context
@@ -1065,7 +1067,7 @@ Both servers expose their tools through FastMCP, following the Model Context Pro
 
 3. **Run the MCP Community server** (in another terminal):
    ```sh
-   DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json uv run dh-mcp-community --transport sse
+   DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json uv run dh-mcp-systems --transport sse
    ```
 
 4. **Use the MCP Inspector or test client** to validate your changes.
@@ -1194,19 +1196,38 @@ The codebase is organized as follows:
 deephaven-mcp/
 ├── src/
 │   └── deephaven_mcp/
-│       ├── config.py             # Configuration management and validation
-│       ├── openai.py             # OpenAI API client for LLM integration
-│       ├── community/            # Community Server module
-│       │   ├── __init__.py       # Server entrypoint and CLI interface
-│       │   ├── _mcp.py           # MCP tool implementations
-│       │   └── _sessions.py      # Session management for Deephaven workers
-│       └── docs/                 # Docs Server module
-│           ├── __init__.py       # Server entrypoint and CLI interface
-│           ├── server.py         # FastAPI and FastMCP server setup
-│           └── _mcp.py           # MCP tools (docs_chat) implementation
-├── tests/                        # Unit and integration tests
-│   └── ...
-├── scripts/                      # Utility scripts for dev and testing
+│       ├── __init__.py
+│       ├── _version.py
+│       ├── config/                  # Configuration management and validation
+│       │   ├── __init__.py
+│       │   ├── community_session.py
+│       │   ├── enterprise_system.py
+│       │   └── errors.py
+│       ├── docs/                    # Docs Server module
+│       │   ├── __init__.py
+│       │   └── _mcp.py
+│       ├── enterprise/              # Enterprise Server module
+│       │   └── __init__.py
+│       ├── openai.py                # OpenAI API client for LLM integration
+│       └── systems/                 # Systems Server module
+│           ├── __init__.py
+│           ├── _mcp.py
+│           └── _sessions.py
+├── tests/                           # Unit and integration tests
+│   ├── test__version.py
+│   ├── test_config.py
+│   ├── test_config_community_session.py
+│   ├── test_config_enterprise_system.py
+│   ├── test_config_errors.py
+│   ├── test_docs_init.py
+│   ├── test_docs_mcp.py
+│   ├── test_enterprise_init.py
+│   ├── test_openai.py
+│   ├── test_package_init.py
+│   ├── test_system__mcp.py
+│   ├── test_system_init.py
+│   └── test_system_sessions.py
+├── scripts/                         # Utility scripts for dev and testing
 │   ├── run_deephaven_test_server.py
 │   ├── mcp_community_test_client.py
 │   ├── mcp_docs_test_client.py
@@ -1234,7 +1255,7 @@ The project includes several utility scripts to help with development and testin
 | Script | Purpose | Usage |
 |--------|---------|-------|
 | [`../scripts/run_deephaven_test_server.py`](../scripts/run_deephaven_test_server.py) | Starts a local Deephaven server for testing | `uv run scripts/run_deephaven_test_server.py --table-group simple` |
-| [`../scripts/mcp_community_test_client.py`](../scripts/mcp_community_test_client.py) | Tests the Community Server tools | `uv run scripts/mcp_community_test_client.py --transport sse` |
+| [`../scripts/mcp_community_test_client.py`](../scripts/mcp_community_test_client.py) | Tests the Systems Server tools | `uv run scripts/mcp_community_test_client.py --transport sse` |
 | [`../scripts/mcp_docs_test_client.py`](../scripts/mcp_docs_test_client.py) | Tests the Docs Server chat functionality | `uv run scripts/mcp_docs_test_client.py --prompt "What is Deephaven?"` |
 | [`../scripts/mcp_docs_stress_sse.py`](../scripts/mcp_docs_stress_sse.py) | Stress tests the SSE endpoint | `uv run scripts/mcp_docs_stress_sse.py --sse-url "http://localhost:8000/sse"` |
 

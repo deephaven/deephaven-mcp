@@ -13,7 +13,7 @@ Key Modules:
     - openai: Utilities for interacting with OpenAI-compatible LLM APIs
 
 Usage:
-    - To run a Community Core MCP server, use the `run_server` function from the `community` module or the `dh-mcp-community` CLI entrypoint.
+    - To run a Community Core MCP server, use the `run_server` function from the `community` module or the `dh-mcp-systems` CLI entrypoint.
     - To run a Docs Q&A MCP server, use the `run_server` function from the `docs` module or the `dh-mcp-docs` CLI entrypoint (if enabled in your installation).
 
 See the project README for setup, configuration, and usage details for each server.
