@@ -79,7 +79,7 @@ This will install all dependencies to exactly match your lock file(s) for reprod
 **Systems Server (SSE):**
 
 ```sh
-DH_MCP_CONFIG_FILE=deephaven_mcp.json uv run dh-mcp-systems sessionsport sse
+DH_MCP_CONFIG_FILE=deephaven_mcp.json uv run dh-mcp-systems --transport sse
 ```
 
 **Docs Server (SSE):**
