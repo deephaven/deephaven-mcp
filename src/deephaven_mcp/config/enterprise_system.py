@@ -2,6 +2,13 @@
 Validation logic for the 'enterprise_systems' section of the Deephaven MCP configuration.
 """
 
+__all__ = [
+    "validate_enterprise_systems_config",
+    "validate_single_enterprise_system",
+    "redact_enterprise_system_config",
+    "redact_enterprise_systems_map",
+]
+
 import logging
 from typing import Any
 
@@ -117,14 +124,14 @@ def validate_enterprise_systems_config(enterprise_systems_map: Any | None) -> No
             msg = f"Enterprise system name must be a string, but got {type(system_name).__name__}: {system_name!r}."
             _LOGGER.error(msg)
             raise EnterpriseSystemConfigurationError(msg)
-        _validate_single_enterprise_system(system_name, system_config)
+        validate_single_enterprise_system(system_name, system_config)
 
     _LOGGER.info(
         f"Validation for 'enterprise_systems' passed. Found {len(enterprise_systems_map)} enterprise system(s)."
     )
 
 
-def _validate_single_enterprise_system(system_name: str, config: Any) -> None:
+def validate_single_enterprise_system(system_name: str, config: Any) -> None:
     """
     Validate a single enterprise system's configuration dictionary.
 

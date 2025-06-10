@@ -8,6 +8,12 @@ This module includes:
 - Custom exceptions related to community session configuration errors.
 """
 
+__all__ = [
+    "validate_community_sessions_config",
+    "validate_single_community_session_config",
+    "redact_community_session_config",
+]
+
 import logging
 import types
 from typing import Any
