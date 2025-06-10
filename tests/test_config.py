@@ -18,12 +18,12 @@ from deephaven_mcp.config import (
     ConfigManager,
     EnterpriseSystemConfigurationError,
     McpConfigurationError,
-    get_config_path,
-    load_and_validate_config,
     _load_config_from_file,
     _log_config_summary,
     get_all_config_names,
+    get_config_path,
     get_named_config,
+    load_and_validate_config,
     validate_config,
 )
 
@@ -151,9 +151,9 @@ def test_community_sessions_redact():
 # --- Enterprise system validation ---
 from deephaven_mcp.config.enterprise_system import (
     _validate_and_get_auth_type,
-    validate_single_enterprise_system,
     redact_enterprise_system_config,
     validate_enterprise_systems_config,
+    validate_single_enterprise_system,
 )
 
 
