@@ -151,7 +151,7 @@ async def test_refresh_failure(monkeypatch):
 async def test_describe_workers_all_available_with_versions(monkeypatch):
     config_manager = AsyncMock()
     session_manager = MagicMock()
-    config_manager.get_community_session_config = AsyncMock(return_value=["w1", "w2"])
+    config_manager.get_system_session_names = AsyncMock(return_value=["w1", "w2"])
     config_manager.get_config = AsyncMock(
         return_value={
             "community_sessions": {
