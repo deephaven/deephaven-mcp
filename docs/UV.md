@@ -8,7 +8,6 @@
 
 ## Table of Contents
 
-- [Quick Start](#quick-start)
 - [Why use uv?](#why-use-uv)
 - [Installing uv](#installing-uv)
 - [Typical Workflows](#typical-workflows-with-uv)
@@ -21,27 +20,6 @@
 - [Common Pitfalls & FAQ](#common-pitfalls--faq)
 - [Troubleshooting](#troubleshooting)
 - [Further Reading](#further-reading)
-
----
-
-## Quick Start
-
-1. Install `uv`:
-    ```sh
-    pip install uv
-    ```
-2. Install all project dependencies:
-    ```sh
-    uv pip install ".[dev]"
-    ```
-3. Run the Community Server:
-    ```sh
-    DH_MCP_CONFIG_FILE=deephaven_mcp.json uv run dh-mcp-community --transport sse
-    ```
-4. Run tests:
-    ```sh
-    uv run pytest
-    ```
 
 ---
 
@@ -98,10 +76,10 @@ This will install all dependencies to exactly match your lock file(s) for reprod
 
 ### 3. Running Servers and Scripts
 
-**Community Server (SSE):**
+**Systems Server (SSE):**
 
 ```sh
-DH_MCP_CONFIG_FILE=deephaven_mcp.json uv run dh-mcp-community --transport sse
+DH_MCP_CONFIG_FILE=deephaven_mcp.json uv run dh-mcp-systems --transport sse
 ```
 
 **Docs Server (SSE):**
@@ -154,7 +132,7 @@ uv run scripts/mcp_docs_stress_sse.py --sse-url "http://localhost:8000/sse"
 
 ## Environment Variables with uv
 
-- `DH_MCP_CONFIG_FILE`: Path to worker config JSON file (required for Community Server)
+- `DH_MCP_CONFIG_FILE`: Path to worker config JSON file (required for Systems Server)
 - `INKEEP_API_KEY`: Required for Docs Server
 - `OPENAI_API_KEY`: Optional fallback for Docs Server
 - `PYTHONLOGLEVEL`: Set log verbosity (e.g., DEBUG, INFO)

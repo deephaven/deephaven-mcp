@@ -1,5 +1,5 @@
 """
-Deephaven MCP Community Tools Module
+Deephaven MCP Systems Tools Module
 
 This module defines the set of MCP (Multi-Cluster Platform) tool functions for managing and interacting with Deephaven workers in a multi-server environment. All functions are designed for use as MCP tools and are decorated with @mcp_server.tool().
 
@@ -31,7 +31,7 @@ from contextlib import asynccontextmanager
 import aiofiles
 from mcp.server.fastmcp import Context, FastMCP
 
-import deephaven_mcp.community._sessions as sessions
+import deephaven_mcp.systems._sessions as sessions
 from deephaven_mcp import config
 
 _LOGGER = logging.getLogger(__name__)
@@ -95,9 +95,9 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
         _LOGGER.info("MCP server '%s' shut down.", server.name)
 
 
-mcp_server = FastMCP("deephaven-mcp-community", lifespan=app_lifespan)
+mcp_server = FastMCP("deephaven-mcp-systems", lifespan=app_lifespan)
 """
-FastMCP Server Instance for Deephaven MCP Community Tools
+FastMCP Server Instance for Deephaven MCP Systems Tools
 
 This object is the singleton FastMCP server for the Deephaven MCP community toolset. It is responsible for registering and exposing all MCP tool functions defined in this module (such as refresh, worker_names, table_schemas, and run_script) to the MCP runtime environment.
 

@@ -15,12 +15,12 @@ Usage examples:
     $ python mcp_community_test_client.py --transport sse --url http://localhost:8000/sse
 
     # Connect via stdio
-    $ python mcp_community_test_client.py --transport stdio --stdio-cmd "uv run dh-mcp-community --transport stdio" --env DH_MCP_CONFIG_FILE=/path/to/file.json
+    $ python mcp_community_test_client.py --transport stdio --stdio-cmd "uv run dh-mcp-systems --transport stdio" --env DH_MCP_CONFIG_FILE=/path/to/file.json
 
 Arguments:
     --transport   Transport type: 'sse' (default) or 'stdio'.
     --url         SSE server URL (default: http://localhost:8000/sse).
-    --stdio-cmd   Command to launch stdio server (default: uv run dh-mcp-community --transport stdio).
+    --stdio-cmd   Command to launch stdio server (default: uv run dh-mcp-systems --transport stdio).
     --env         Environment variable for stdio, format KEY=VALUE. Can be specified multiple times.
 
 See the project README for further details.
@@ -61,8 +61,8 @@ def parse_args():
     )
     parser.add_argument(
         "--stdio-cmd",
-        default="uv run dh-mcp-community --transport stdio",
-        help="Stdio server command (pass as a shell string, e.g. 'uv run dh-mcp-community --transport stdio')",
+        default="uv run dh-mcp-systems --transport stdio",
+        help="Stdio server command (pass as a shell string, e.g. 'uv run dh-mcp-systems --transport stdio')",
     )
     parser.add_argument(
         "--env",

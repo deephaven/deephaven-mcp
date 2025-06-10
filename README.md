@@ -25,7 +25,7 @@ Deephaven MCP, which implements the [Model Context Protocol (MCP) standard](http
 
 ### Deephaven MCP Components
 
-#### Community Server
+#### Systems Server
 Manages and connects to multiple [Deephaven Community Core](https://deephaven.io/) worker nodes. This allows for unified control and interaction with your Deephaven instances from various client applications.
 
 #### Docs Server
@@ -39,7 +39,7 @@ Provides access to an LLM-powered conversational Q&A interface for Deephaven doc
 
 ### Architecture Diagrams
 
-#### Community Server Architecture
+#### Systems Server Architecture
 
 ```mermaid
 graph TD
@@ -47,7 +47,7 @@ graph TD
     B -- Manages --> C(Deephaven Core Worker 1);
     B -- Manages --> D(Deephaven Core Worker N);
 ```
-*Clients connect to the [MCP Community Server](#community-server), which in turn manages and communicates with one or more [Deephaven Community Core](https://deephaven.io/) workers.*
+*Clients connect to the [MCP Systems Server](#systems-server-architecture), which in turn manages and communicates with one or more [Deephaven Community Core](https://deephaven.io/) workers.*
 
 #### Docs Server Architecture
 
@@ -64,7 +64,7 @@ graph TD
 ## Prerequisites
 
 *   **Python**: Version 3.9 or later. ([Download Python](https://www.python.org/downloads/))
-*   **Access to [Deephaven Community Core](https://deephaven.io/) instance(s):** To use the [MCP Community Server](#community-server) for interacting with Deephaven, you will need one or more [Deephaven Community Core](https://deephaven.io/) instances running and network-accessible.
+*   **Access to [Deephaven Community Core](https://deephaven.io/) instance(s):** To use the [MCP Systems Server](#systems-server-architecture) for interacting with Deephaven, you will need one or more [Deephaven Community Core](https://deephaven.io/) instances running and network-accessible.
 *   **Choose your Python environment setup method:**
     *   **Option A: `uv` (Recommended)**: A very fast Python package installer and resolver. If you don't have it, you can install it via `pip install uv` or see the [uv installation guide](https://github.com/astral-sh/uv#installation).
     *   **Option B: Standard Python `venv` and `pip`**: Uses Python's built-in [virtual environment (`venv`)](https://docs.python.org/3/library/venv.html) tools and [`pip`](https://pip.pypa.io/en/stable/getting-started/).
@@ -98,7 +98,7 @@ If you have [`uv`](docs/UV.md) installed (or install it via `pip install uv`):
     ```sh
     uv pip install deephaven-mcp
     ```
-This command installs `deephaven-mcp` and its dependencies into the active virtual environment. If you skipped the explicit virtual environment creation step above, [`uv`](docs/UV.md) might still create or use one automatically (typically `.venv` in your current directory if `UV_AUTO_CREATE_VENV` is not `false`, or a globally managed one). In any case where a virtual environment is used (either explicitly created or automatically by `uv`), ensure it remains active for manual command-line use of `dh-mcp-community` or `dh-mcp-docs`, or if your LLM tool requires an active environment.
+This command installs `deephaven-mcp` and its dependencies into the active virtual environment. If you skipped the explicit virtual environment creation step above, [`uv`](docs/UV.md) might still create or use one automatically (typically `.venv` in your current directory if `UV_AUTO_CREATE_VENV` is not `false`, or a globally managed one). In any case where a virtual environment is used (either explicitly created or automatically by `uv`), ensure it remains active for manual command-line use of `dh-mcp-systems` or `dh-mcp-docs`, or if your LLM tool requires an active environment.
 
 #### Option B: Using Standard `pip` and `venv`
 
@@ -119,19 +119,19 @@ This command installs `deephaven-mcp` and its dependencies into the active virtu
     ```sh
     pip install deephaven-mcp
     ```
-    Ensure this virtual environment is active in any terminal session where you intend to run `dh-mcp-community` or `dh-mcp-docs` manually, or if your LLM tool requires an active environment when spawning these processes.
+    Ensure this virtual environment is active in any terminal session where you intend to run `dh-mcp-systems` or `dh-mcp-docs` manually, or if your LLM tool requires an active environment when spawning these processes.
 
 ---
 
 ## Configuring `deephaven_mcp.json`
 
-This section explains how to configure the [Deephaven MCP Community Server](#community-server) to connect to and manage your [Deephaven Community Core](https://deephaven.io/) instances. This involves creating a [community session definition file](#the-deephaven_mcp.json-file-defining-your-community-sessions) and understanding how the server locates this file.
+This section explains how to configure the [Deephaven MCP Systems Server](#community-server) to connect to and manage your [Deephaven Community Core](https://deephaven.io/) instances. This involves creating a [systems session definition file](#the-deephaven_mcpjson-file-defining-your-community-sessions) and understanding how the server locates this file.
 
 ### The `deephaven_mcp.json` File
 
 #### Purpose and Structure
 
-The [Deephaven MCP Community Server](#community-server) requires a JSON configuration file that describes the [Deephaven Community Core](https://deephaven.io/) worker instances it can connect to. 
+The [Deephaven MCP Systems Server](#community-server) requires a JSON configuration file that describes the [Deephaven Community Core](https://deephaven.io/) worker instances it can connect to. 
 
 *   The file must be a JSON object. It can be an empty object `{}` if no community sessions are to be configured.
 *   Optionally, it can contain a top-level key named `"community_sessions"`.
@@ -232,15 +232,15 @@ chmod 600 /path/to/your/deephaven_mcp.json
 
 ### Setting `DH_MCP_CONFIG_FILE` (Informing the MCP Server)
 
-The `DH_MCP_CONFIG_FILE` environment variable tells the [Deephaven MCP Community Server](#community-server) where to find your `deephaven_mcp.json` file (detailed in [The `deephaven_mcp.json` File (Defining Your Community Sessions)](#the-deephaven_mcp.json-file-defining-your-community-sessions)). You will set this environment variable as part of the server launch configuration within your LLM tool, as detailed in the [Configure Your LLM Tool to Use MCP Servers](#configure-your-llm-tool-to-use-mcp-servers) section. 
+The `DH_MCP_CONFIG_FILE` environment variable tells the [Deephaven MCP Systems Server](#community-server) where to find your `deephaven_mcp.json` file (detailed in [The `deephaven_mcp.json` File (Defining Your Community Sessions)](#the-deephaven_mcp.json-file-defining-your-community-sessions)). You will set this environment variable as part of the server launch configuration within your LLM tool, as detailed in the [Configure Your LLM Tool to Use MCP Servers](#configure-your-llm-tool-to-use-mcp-servers) section. 
 
-When launched by an LLM tool, the [MCP Community Server](#community-server) process reads this variable to load your session definitions. For general troubleshooting or if you need to set other environment variables like `PYTHONLOGLEVEL` (e.g., to `DEBUG` for verbose logs), these are also typically set within the LLM tool's MCP server configuration (see [Defining MCP Servers for Your LLM Tool (The `mcpServers` JSON Object)](#defining-mcp-servers-for-your-llm-tool-the-mcpservers-json-object)).
+When launched by an LLM tool, the [MCP Systems Server](#systems-server-architecture) process reads this variable to load your session definitions. For general troubleshooting or if you need to set other environment variables like `PYTHONLOGLEVEL` (e.g., to `DEBUG` for verbose logs), these are also typically set within the LLM tool's MCP server configuration (see [Defining MCP Servers for Your LLM Tool (The `mcpServers` JSON Object)](#defining-mcp-servers-for-your-llm-tool-the-mcpservers-json-object)).
 
 ---
 
 ## Configure Your LLM Tool to Use MCP Servers
 
-This section details how to configure your LLM tool (e.g., [Claude Desktop](https://www.anthropic.com/claude), [GitHub Copilot](https://github.com/features/copilot)) to launch and communicate with the [Deephaven MCP Community Server](#community-server) and the [Deephaven MCP Docs Server](#docs-server). This involves providing a JSON configuration, known as the [`"mcpServers"` object](#defining-mcp-servers-for-your-llm-tool-the-mcpservers-json-object), to your LLM tool.
+This section details how to configure your LLM tool (e.g., [Claude Desktop](https://www.anthropic.com/claude), [GitHub Copilot](https://github.com/features/copilot)) to launch and communicate with the [Deephaven MCP Systems Server](#community-server) and the [Deephaven MCP Docs Server](#docs-server). This involves providing a JSON configuration, known as the [`"mcpServers"` object](#defining-mcp-servers-for-your-llm-tool-the-mcpservers-json-object), to your LLM tool.
 
 ### How LLM Tools Launch MCP Servers (Overview)
 
@@ -248,16 +248,16 @@ LLM tools that support the Model Context Protocol (MCP) can be configured to use
 
 ### Understanding Deephaven Core Worker Status (via MCP)
 
-The [MCP Community Server](#community-server), launched by your LLM tool, will attempt to connect to the [Deephaven Community Core](https://deephaven.io/) instances defined in your `deephaven_mcp.json` file (pointed to by `DH_MCP_CONFIG_FILE` as described in [Setting `DH_MCP_CONFIG_FILE` (Informing the MCP Server)](#setting-dh_mcp_config_file-informing-the-mcp-server)).
+The [MCP Systems Server](#systems-server-architecture), launched by your LLM tool, will attempt to connect to the [Deephaven Community Core](https://deephaven.io/) instances defined in your `deephaven_mcp.json` file (pointed to by `DH_MCP_CONFIG_FILE` as described in [Setting `DH_MCP_CONFIG_FILE` (Informing the MCP Server)](#setting-dh_mcp_config_file-informing-the-mcp-server)).
 
 It's important to understand the following:
-*   **MCP Server Independence**: The [MCP Community Server](#community-server) itself will start and be available to your LLM tool even if some or all configured [Deephaven Community Core](https://deephaven.io/) workers are not currently running or accessible. The LLM tool will be able to list the configured workers and see their status (e.g., unavailable, connected).
-*   **Worker Interaction**: To successfully perform operations on a specific [Deephaven Community Core](https://deephaven.io/) worker (e.g., list tables, execute scripts), that particular worker must be running and network-accessible from the environment where the [MCP Community Server](#community-server) process is executing.
-*   **Configuration is Key**: Ensure your `deephaven_mcp.json` file accurately lists the community session configurations you intend to use. The MCP server uses this configuration to know which sessions to attempt to manage.
+*   **MCP Server Independence**: The [MCP Systems Server](#systems-server-architecture) itself will start and be available to your LLM tool even if some or all configured [Deephaven Community Core](https://deephaven.io/) workers are not currently running or accessible. The LLM tool will be able to list the configured workers and see their status (e.g., unavailable, connected).
+*   **Worker Interaction**: To successfully perform operations on a specific [Deephaven Community Core](https://deephaven.io/) worker (e.g., list tables, execute scripts), that particular worker must be running and network-accessible from the environment where the [MCP Systems Server](#systems-server-architecture) process is executing.
+*   **Configuration is Key**: Ensure your `deephaven_mcp.json` file accurately lists the systems session configurations you intend to use. The MCP server uses this configuration to know which sessions to attempt to manage.
 
 ### Defining MCP Servers for Your LLM Tool (The `mcpServers` JSON Object)
 
-Your LLM tool requires a specific JSON configuration to define how MCP servers are launched. This configuration is structured as a JSON object with a top-level key named `"mcpServers"`. This `"mcpServers"` object tells the tool how to start the [Deephaven MCP Community Server](#community-server) (for interacting with [Deephaven Community Core](https://deephaven.io/)) and the `mcp-proxy` (for interacting with the [Docs Server](#docs-server)).
+Your LLM tool requires a specific JSON configuration to define how MCP servers are launched. This configuration is structured as a JSON object with a top-level key named `"mcpServers"`. This `"mcpServers"` object tells the tool how to start the [Deephaven MCP Systems Server](#community-server) (for interacting with [Deephaven Community Core](https://deephaven.io/)) and the `mcp-proxy` (for interacting with the [Docs Server](#docs-server)).
 
 Depending on your LLM tool, this `"mcpServers"` object might be:
 *   The entire content of a dedicated file (e.g., named `mcp.json` in VS Code).
@@ -272,13 +272,13 @@ Consult your LLM tool's documentation for the precise file name and location. Be
 ```json
 {
   "mcpServers": {
-    "deephaven-community": {
+    "deephaven-systems": {
       "command": "uv",
       "args": [
         "--directory",
         "/full/path/to/deephaven-mcp",
         "run",
-        "dh-mcp-community"
+        "dh-mcp-systems"
       ],
       "env": {
         "DH_MCP_CONFIG_FILE": "/full/path/to/your/deephaven_mcp.json",
@@ -305,8 +305,8 @@ Consult your LLM tool's documentation for the precise file name and location. Be
 ```json
 {
   "mcpServers": {
-    "deephaven-community": {
-      "command": "/full/path/to/your/deephaven-mcp/.venv/bin/dh-mcp-community",
+    "deephaven-systems": {
+      "command": "/full/path/to/your/deephaven-mcp/.venv/bin/dh-mcp-systems",
       "args": [], 
       "env": {
         "DH_MCP_CONFIG_FILE": "/full/path/to/your/deephaven_mcp.json",
@@ -341,15 +341,15 @@ The `"mcpServers"` JSON object, whose structure is detailed in [Defining MCP Ser
 
 ### Restarting Your LLM Tool (Applying the Configuration)
 
-Once you have saved the `"mcpServers"` JSON object in the correct location for your LLM tool, **restart the tool** ([Claude Desktop](https://www.anthropic.com/claude), [VS Code](https://code.visualstudio.com/), [JetBrains IDEs](https://www.jetbrains.com/products/#type=ide), etc.). The configured servers (e.g., `deephaven-community`, `deephaven-docs`) should then be available in its MCP interface.
+Once you have saved the `"mcpServers"` JSON object in the correct location for your LLM tool, **restart the tool** ([Claude Desktop](https://www.anthropic.com/claude), [VS Code](https://code.visualstudio.com/), [JetBrains IDEs](https://www.jetbrains.com/products/#type=ide), etc.). The configured servers (e.g., `deephaven-systems`, `deephaven-docs`) should then be available in its MCP interface.
 
 ### Verifying Your Setup
 
 After restarting your LLM tool, the first step is to verify that the MCP servers are recognized:
 
 *   Open your LLM tool's interface where it lists available MCP servers or data sources.
-*   You should see `deephaven-community` and `deephaven-docs` (or the names you configured in the `mcpServers` object) listed.
-*   Attempt to connect to or interact with one of them (e.g., by listing available [Deephaven Community Core](https://deephaven.io/) workers via the `deephaven-community` server).
+*   You should see `deephaven-systems` and `deephaven-docs` (or the names you configured in the `mcpServers` object) listed.
+*   Attempt to connect to or interact with one of them (e.g., by listing available [Deephaven Community Core](https://deephaven.io/) workers via the `deephaven-systems` server).
 
 If the servers are not listed or you encounter errors at this stage, please proceed to the [Troubleshooting](#troubleshooting) section for guidance.
 
@@ -360,25 +360,25 @@ If the servers are not listed or you encounter errors at this stage, please proc
 *   **LLM Tool Can't Connect / Server Not Found:**
     *   Verify all paths in your LLM tool's JSON configuration are **absolute and correct**.
     *   Ensure `DH_MCP_CONFIG_FILE` environment variable is correctly set in the JSON config and points to a valid worker file.
-    *   Ensure any [Deephaven Community Core](https://deephaven.io/) workers you intend to use (as defined in `deephaven_mcp.json`) are running and accessible from the [MCP Community Server](#community-server)'s environment.
+    *   Ensure any [Deephaven Community Core](https://deephaven.io/) workers you intend to use (as defined in `deephaven_mcp.json`) are running and accessible from the [MCP Systems Server](#systems-server-architecture)'s environment.
     *   Check for typos in server names, commands, or arguments in the JSON config.
     *   Validate the syntax of your JSON configurations (`mcpServers` object in the LLM tool, and `deephaven_mcp.json`). A misplaced comma or incorrect quote can prevent the configuration from being parsed correctly. Use a [JSON validator tool](https://jsonlint.com/) or your IDE's linting features.
         *   Set `PYTHONLOGLEVEL=DEBUG` in the `env` block of your JSON config to get more detailed logs from the MCP servers. For example, [Claude Desktop](https://www.anthropic.com/claude) often saves these to files like `~/Library/Logs/Claude/mcp-server-SERVERNAME.log`. Consult your LLM tool's documentation for specific log file locations.
 *   **Firewall or Network Issues:**
         *   Ensure that there are no firewall rules (local or network) preventing:
-            *   The [MCP Community Server](#community-server) from connecting to your [Deephaven Community Core](https://deephaven.io/) instances on their specified hosts and ports.
+            *   The [MCP Systems Server](#systems-server-architecture) from connecting to your [Deephaven Community Core](https://deephaven.io/) instances on their specified hosts and ports.
             *   Your LLM tool or client from connecting to the `mcp-proxy`'s target URL (`[https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io](https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io)`) if using the [Docs Server](#docs-server).
         *   Test basic network connectivity (e.g., using [`ping`](https://en.wikipedia.org/wiki/Ping_(networking_utility)) or [`curl`](https://curl.se/docs/manpage.html) from the relevant machine) if connections are failing.
 *   **`command not found` for [`uv`](docs/UV.md) (in LLM tool logs):**
     *   Ensure [`uv`](docs/UV.md) is installed and its installation directory is in your system's `PATH` environment variable, accessible by the LLM tool.
-*   **`command not found` for `dh-mcp-community` or [`mcp-proxy`](https://github.com/modelcontextprotocol/mcp-proxy) (venv option in LLM tool logs):**
+*   **`command not found` for `dh-mcp-systems` or [`mcp-proxy`](https://github.com/modelcontextprotocol/mcp-proxy) (venv option in LLM tool logs):**
     *   Double-check that the `command` field in your JSON config uses the **correct absolute path** to the executable within your `.venv/bin/` (or `.venv\Scripts\`) directory.
 *   **Port Conflicts:** If a server fails to start (check logs), another process might be using the required port (e.g., port 8000 for default SSE).
 *   **Python Errors in Server Logs:** Check the server logs for Python tracebacks. Ensure all dependencies were installed correctly (see [Installation & Initial Setup](#installation--initial-setup)).
 *   **Worker Configuration Issues:**
-        *   If the [Community Server](#community-server) starts but can't connect to [Deephaven Community Core](https://deephaven.io/) workers, verify your `deephaven_mcp.json` file (see [The `deephaven_mcp.json` File (Defining Your Community Sessions)](#the-deephaven_mcp.json-file-defining-your-community-sessions) for details on its structure and content).
+        *   If the [Systems Server](#community-server) starts but can't connect to [Deephaven Community Core](https://deephaven.io/) workers, verify your `deephaven_mcp.json` file (see [The `deephaven_mcp.json` File (Defining Your Community Sessions)](#the-deephaven_mcp.json-file-defining-your-community-sessions) for details on its structure and content).
         *   Ensure the target [Deephaven Community Core](https://deephaven.io/) instances are running and network-accessible.
-        *   Confirm that the process running the [MCP Community Server](#community-server) has read permissions for the `deephaven_mcp.json` file itself.
+        *   Confirm that the process running the [MCP Systems Server](#systems-server-architecture) has read permissions for the `deephaven_mcp.json` file itself.
 
 ---
 
@@ -393,7 +393,7 @@ We warmly welcome contributions to Deephaven MCP! Whether it's bug reports, feat
 ## Advanced Usage & Further Information
 
 
-*   **Detailed Server APIs and Tools:** For in-depth information about the tools exposed by the [Community Server](#community-server) (e.g., [`refresh`](docs/DEVELOPER_GUIDE.md#refresh), [`describe_workers`](docs/DEVELOPER_GUIDE.md#describe_workers)) and the [Docs Server](#docs-server) ([`docs_chat`](docs/DEVELOPER_GUIDE.md#docs_chat)), refer to the [Developer & Contributor Guide](docs/DEVELOPER_GUIDE.md).
+*   **Detailed Server APIs and Tools:** For in-depth information about the tools exposed by the [Systems Server](#community-server) (e.g., [`refresh`](docs/DEVELOPER_GUIDE.md#refresh), [`describe_workers`](docs/DEVELOPER_GUIDE.md#describe_workers)) and the [Docs Server](#docs-server) ([`docs_chat`](docs/DEVELOPER_GUIDE.md#docs_chat)), refer to the [Developer & Contributor Guide](docs/DEVELOPER_GUIDE.md).
 *   **`uv` Workflow:** For more details on using `uv` for project management, see [docs/UV.md](docs/UV.md).
 
 ---
@@ -407,4 +407,4 @@ We warmly welcome contributions to Deephaven MCP! Whether it's bug reports, feat
 
 ## License
 
-This project is licensed under the [Apache 2.0 License](./LICENSE). See the [LICENSE](LICENSE) file for details.
+This project is licensed under the [Apache 2.0 License](./LICENSE). See the [LICENSE](./LICENSE) file for details.

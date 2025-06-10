@@ -11,8 +11,8 @@ import pytest
 from pydeephaven import Session
 
 from deephaven_mcp import config
-from deephaven_mcp.community import _sessions
-from deephaven_mcp.community._sessions import (
+from deephaven_mcp.systems import _sessions
+from deephaven_mcp.systems._sessions import (
     SessionCreationError,
     SessionManager,
     _load_bytes,
@@ -27,7 +27,7 @@ from deephaven_mcp.community._sessions import (
 def mock_config_manager():
     # Create a MagicMock for ConfigManager, with async methods
     mock = MagicMock()
-    mock.get_community_session_config = AsyncMock(return_value={"host": "localhost"})
+    mock.get_system_session_config = AsyncMock(return_value={"host": "localhost"})
     mock.get_config = AsyncMock(
         return_value={"community_sessions": {"local": {"host": "localhost"}}}
     )
@@ -148,7 +148,7 @@ async def test_get_session_parameters_with_and_without_files(monkeypatch):
     mgr = SessionManager(mock_config_manager)
     # Patch _load_bytes to simulate file reading
     monkeypatch.setattr(
-        "deephaven_mcp.community._sessions._load_bytes",
+        "deephaven_mcp.systems._sessions._load_bytes",
         AsyncMock(return_value=b"binary"),
     )
     # All fields present (as file paths)
@@ -182,7 +182,7 @@ async def test_get_session_parameters_file_error(monkeypatch):
     async def raise_io(path):
         raise IOError("fail")
 
-    monkeypatch.setattr("deephaven_mcp.community._sessions._load_bytes", raise_io)
+    monkeypatch.setattr("deephaven_mcp.systems._sessions._load_bytes", raise_io)
     cfg = {"tls_root_certs": "/bad/path"}
     with pytest.raises(IOError):
         await mgr._get_session_parameters(cfg)
@@ -256,7 +256,7 @@ async def test_create_session_error(monkeypatch):
     mgr = SessionManager(mock_config_manager)
     # Patch Session to raise
     monkeypatch.setattr(
-        "deephaven_mcp.community._sessions.Session",
+        "deephaven_mcp.systems._sessions.Session",
         MagicMock(side_effect=RuntimeError("fail")),
     )
     with pytest.raises(SessionCreationError) as exc_info:
@@ -280,7 +280,7 @@ async def test_get_or_create_session_liveness_exception(
     session_manager._config_manager.get_config = AsyncMock(
         return_value={"community_sessions": {"foo": {"host": "localhost"}}}
     )
-    monkeypatch.setattr("deephaven_mcp.community._sessions.Session", MagicMock())
+    monkeypatch.setattr("deephaven_mcp.systems._sessions.Session", MagicMock())
     await session_manager.get_or_create_session("foo")
     assert any("Error checking session liveness" in r for r in caplog.text.splitlines())
     assert "foo" in session_manager._cache
@@ -306,9 +306,7 @@ async def test_get_meta_table_success():
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
 
-    with patch(
-        "deephaven_mcp.community._sessions.asyncio.to_thread", new=fake_to_thread
-    ):
+    with patch("deephaven_mcp.systems._sessions.asyncio.to_thread", new=fake_to_thread):
         result = await get_meta_table(session_mock, "foo")
         assert result is arrow_mock
         session_mock.open_table.assert_called_once_with("foo")
@@ -340,9 +338,7 @@ async def test_get_meta_table_to_arrow_error():
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
 
-    with patch(
-        "deephaven_mcp.community._sessions.asyncio.to_thread", new=fake_to_thread
-    ):
+    with patch("deephaven_mcp.systems._sessions.asyncio.to_thread", new=fake_to_thread):
         with pytest.raises(RuntimeError) as excinfo:
             await get_meta_table(session_mock, "foo")
         assert "fail-arrow" in str(excinfo.value)
@@ -460,7 +456,7 @@ async def test_get_or_create_session_reuses_alive(monkeypatch, session_manager):
     session_manager._config_manager.get_config = AsyncMock(
         return_value={"community_sessions": {"foo": {"host": "localhost"}}}
     )
-    monkeypatch.setattr("deephaven_mcp.community._sessions.Session", MagicMock())
+    monkeypatch.setattr("deephaven_mcp.systems._sessions.Session", MagicMock())
     result = await session_manager.get_or_create_session("foo")
     assert result is session
 
@@ -528,7 +524,7 @@ async def test_get_dh_versions_both_versions(monkeypatch):
     arrow_table = MagicMock()
     arrow_table.to_pandas.return_value = df
     monkeypatch.setattr(
-        "deephaven_mcp.community._sessions.get_pip_packages_table",
+        "deephaven_mcp.systems._sessions.get_pip_packages_table",
         AsyncMock(return_value=arrow_table),
     )
     core, coreplus = await get_dh_versions(session)
@@ -547,7 +543,7 @@ async def test_get_dh_versions_only_core(monkeypatch):
     arrow_table = MagicMock()
     arrow_table.to_pandas.return_value = df
     monkeypatch.setattr(
-        "deephaven_mcp.community._sessions.get_pip_packages_table",
+        "deephaven_mcp.systems._sessions.get_pip_packages_table",
         AsyncMock(return_value=arrow_table),
     )
     core, coreplus = await get_dh_versions(session)
@@ -566,7 +562,7 @@ async def test_get_dh_versions_only_coreplus(monkeypatch):
     arrow_table = MagicMock()
     arrow_table.to_pandas.return_value = df
     monkeypatch.setattr(
-        "deephaven_mcp.community._sessions.get_pip_packages_table",
+        "deephaven_mcp.systems._sessions.get_pip_packages_table",
         AsyncMock(return_value=arrow_table),
     )
     core, coreplus = await get_dh_versions(session)
@@ -585,7 +581,7 @@ async def test_get_dh_versions_neither(monkeypatch):
     arrow_table = MagicMock()
     arrow_table.to_pandas.return_value = df
     monkeypatch.setattr(
-        "deephaven_mcp.community._sessions.get_pip_packages_table",
+        "deephaven_mcp.systems._sessions.get_pip_packages_table",
         AsyncMock(return_value=arrow_table),
     )
     core, coreplus = await get_dh_versions(session)
@@ -601,7 +597,7 @@ async def test_get_dh_versions_malformed(monkeypatch):
     arrow_table = MagicMock()
     arrow_table.to_pandas.return_value = df
     monkeypatch.setattr(
-        "deephaven_mcp.community._sessions.get_pip_packages_table",
+        "deephaven_mcp.systems._sessions.get_pip_packages_table",
         AsyncMock(return_value=arrow_table),
     )
     core, coreplus = await get_dh_versions(session)
@@ -613,7 +609,7 @@ async def test_get_dh_versions_malformed(monkeypatch):
 async def test_get_dh_versions_arrow_none(monkeypatch):
     session = MagicMock()
     monkeypatch.setattr(
-        "deephaven_mcp.community._sessions.get_pip_packages_table",
+        "deephaven_mcp.systems._sessions.get_pip_packages_table",
         AsyncMock(return_value=None),
     )
     core, coreplus = await get_dh_versions(session)
@@ -625,7 +621,7 @@ async def test_get_dh_versions_arrow_none(monkeypatch):
 async def test_get_dh_versions_raises(monkeypatch):
     session = MagicMock()
     monkeypatch.setattr(
-        "deephaven_mcp.community._sessions.get_pip_packages_table",
+        "deephaven_mcp.systems._sessions.get_pip_packages_table",
         AsyncMock(side_effect=RuntimeError("fail!")),
     )
     with pytest.raises(RuntimeError, match="fail!"):
