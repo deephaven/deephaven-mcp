@@ -8,10 +8,12 @@ import logging
 import os
 import re
 from unittest import mock
+from unittest.mock import patch
 
 import aiofiles
 import pytest
 
+from deephaven_mcp import config
 from deephaven_mcp.config import (
     CONFIG_ENV_VAR,
     CommunitySessionConfigurationError,
@@ -362,7 +364,7 @@ async def test_get_config_other_os_error_on_read(monkeypatch, caplog):
 
 
 @pytest.mark.asyncio
-async def test_validate_config_missing_required_key_runtime(monkeypatch, caplog):
+async def test_validate_config_missing_required_key_runtime(caplog, monkeypatch):
     import json  # For dumping test config
     from unittest import mock  # For mocking
 
@@ -371,38 +373,38 @@ async def test_validate_config_missing_required_key_runtime(monkeypatch, caplog)
     from deephaven_mcp import config
 
     # Temporarily add a required key
-    # original_required_keys = config.ConfigManager._REQUIRED_TOP_LEVEL_KEYS # monkeypatch handles restoration
-    monkeypatch.setattr(
+    with patch.object(
         config.ConfigManager, "_REQUIRED_TOP_LEVEL_KEYS", {"must_have_this"}
-    )
-
-    cm = config.ConfigManager()
-    invalid_config_data = {"community_sessions": {}}  # Missing 'must_have_this'
-
-    config_file_path = "/fake/path/config_missing_req.json"
-    monkeypatch.setenv(config.CONFIG_ENV_VAR, config_file_path)
-
-    mock_file_read_content = mock.AsyncMock(
-        return_value=json.dumps(invalid_config_data).encode("utf-8")
-    )
-    mock_async_context_manager_req = mock.AsyncMock()
-    mock_async_context_manager_req.__aenter__.return_value.read = mock_file_read_content
-
-    original_aio_open_req = aiofiles.open
-    aiofiles.open = mock.MagicMock(return_value=mock_async_context_manager_req)
-
-    with pytest.raises(
-        config.McpConfigurationError,
-        match=r"Missing required top-level keys in Deephaven MCP config: {'must_have_this'}",
     ):
-        await cm.get_config()  # This will load, then validate
+        cm = config.ConfigManager()
+        invalid_config_data = {"community_sessions": {}}  # Missing 'must_have_this'
 
-    assert (
-        r"Missing required top-level keys in Deephaven MCP config: {'must_have_this'}"
-        in caplog.text
-    )
+        config_file_path = "/fake/path/config_missing_req.json"
+        monkeypatch.setenv(config.CONFIG_ENV_VAR, config_file_path)
 
-    aiofiles.open = original_aio_open_req
+        mock_file_read_content = mock.AsyncMock(
+            return_value=json.dumps(invalid_config_data).encode("utf-8")
+        )
+        mock_async_context_manager_req = mock.AsyncMock()
+        mock_async_context_manager_req.__aenter__.return_value.read = (
+            mock_file_read_content
+        )
+
+        original_aio_open_req = aiofiles.open
+        aiofiles.open = mock.MagicMock(return_value=mock_async_context_manager_req)
+
+        with pytest.raises(
+            config.McpConfigurationError,
+            match=r"Missing required top-level keys in Deephaven MCP config: {'must_have_this'}",
+        ):
+            await cm.get_config()  # This will load, then validate
+
+        assert (
+            r"Missing required top-level keys in Deephaven MCP config: {'must_have_this'}"
+            in caplog.text
+        )
+
+        aiofiles.open = original_aio_open_req
 
 
 @pytest.mark.asyncio
@@ -1082,9 +1084,7 @@ def testvalidate_single_enterprise_system_unknown_key(caplog):
     ), f"Expected WARNING log message '{expected_warning_message}' not found. Logs: {caplog.text}"
 
 
-def testvalidate_single_enterprise_system_base_field_invalid_tuple_type(
-    monkeypatch, caplog
-):
+def testvalidate_single_enterprise_system_base_field_invalid_tuple_type(caplog):
     """
     Tests validate_single_enterprise_system when a base field expects a tuple of types
     and an invalid type is provided.
@@ -1105,17 +1105,19 @@ def testvalidate_single_enterprise_system_base_field_invalid_tuple_type(
     original_base_fields = enterprise_system._BASE_ENTERPRISE_SYSTEM_FIELDS
     patched_base_fields = original_base_fields.copy()
     patched_base_fields["test_base_tuple_field"] = (str, int)  # Expects str OR int
-    monkeypatch.setattr(
+    with patch.object(
         enterprise_system, "_BASE_ENTERPRISE_SYSTEM_FIELDS", patched_base_fields
-    )
-
-    invalid_config = {
-        "connection_json_url": "http://example.com/connection.json",
-        "auth_type": "password",  # Use a valid auth_type
-        "username": "dummy_user",
-        "password": "dummy_key_for_test",  # Satisfy 'password' auth type requirements
-        "test_base_tuple_field": [1.0, 2.0],  # Use a type not str or int (e.g., list)
-    }
+    ):
+        invalid_config = {
+            "connection_json_url": "http://example.com/connection.json",
+            "auth_type": "password",  # Use a valid auth_type
+            "username": "dummy_user",
+            "password": "dummy_key_for_test",  # Satisfy 'password' auth type requirements
+            "test_base_tuple_field": [
+                1.0,
+                2.0,
+            ],  # Use a type not str or int (e.g., list)
+        }
 
     field_value = invalid_config["test_base_tuple_field"]
     expected_types_str = ", ".join(
@@ -1142,14 +1144,9 @@ def testvalidate_single_enterprise_system_base_field_invalid_tuple_type(
         found_log
     ), f"Expected ERROR log message '{expected_error_message}' not found. Logs: {caplog.text}"
 
-    # Restore original fields to avoid affecting other tests
-    monkeypatch.setattr(
-        enterprise_system, "_BASE_ENTERPRISE_SYSTEM_FIELDS", original_base_fields
-    )
-
 
 def testvalidate_single_enterprise_system_auth_specific_field_invalid_tuple_type(
-    monkeypatch, caplog
+    caplog,
 ):
     """
     Tests validate_single_enterprise_system when an auth-specific field expects a tuple of types
@@ -1180,14 +1177,13 @@ def testvalidate_single_enterprise_system_auth_specific_field_invalid_tuple_type
         str,
         int,
     )  # Expects str OR int
-    monkeypatch.setattr(enterprise_system, "_AUTH_SPECIFIC_FIELDS", patched_auth_fields)
-
-    invalid_config = {
-        "connection_json_url": "http://example.com/connection.json",
-        "auth_type": auth_type_to_test,
-        "password": "dummy_pass_value",  # Satisfy password auth presence
-        "test_auth_tuple_field": [1.0, 2.0],  # Invalid type (list)
-    }
+    with patch.object(enterprise_system, "_AUTH_SPECIFIC_FIELDS", patched_auth_fields):
+        invalid_config = {
+            "connection_json_url": "http://example.com/connection.json",
+            "auth_type": auth_type_to_test,
+            "password": "dummy_pass_value",  # Satisfy password auth presence
+            "test_auth_tuple_field": [1.0, 2.0],  # Invalid type (list)
+        }
 
     field_value = invalid_config["test_auth_tuple_field"]
     expected_types_str = ", ".join(
@@ -1214,11 +1210,6 @@ def testvalidate_single_enterprise_system_auth_specific_field_invalid_tuple_type
     assert (
         found_log
     ), f"Expected ERROR log message '{expected_error_message}' not found. Logs: {caplog.text}"
-
-    # Restore original fields to avoid affecting other tests
-    monkeypatch.setattr(
-        enterprise_system, "_AUTH_SPECIFIC_FIELDS", original_auth_fields
-    )
 
 
 def testvalidate_single_enterprise_system_password_auth_missing_username(caplog):
@@ -1629,21 +1620,23 @@ async def test_get_config_no_community_sessions_key_from_file(monkeypatch, caplo
 
     # Patch environment variable
     monkeypatch.setenv("DH_MCP_CONFIG_FILE", "/fake/path/empty_config.json")
-    # Patch aiofiles.open to return our empty config JSON
-    aiofiles_mock = mock.Mock()
-    aiofiles_open_ctx = mock.AsyncMock()
-    aiofiles_open_ctx.__aenter__.return_value.read = mock.AsyncMock(
-        return_value=empty_config_json
-    )
-    aiofiles_mock.open = mock.Mock(return_value=aiofiles_open_ctx)
-    monkeypatch.setitem(
-        importlib.import_module("aiofiles").__dict__, "open", aiofiles_mock.open
-    )
+    # Mock for aiofiles.open
+    mock_aiofiles_open = mock.MagicMock()
+    # Mock for the async context manager returned by aiofiles.open()
+    mock_async_context_manager = mock.AsyncMock()
+    # Mock for the file object yielded by the context manager
+    mock_file_object = mock.AsyncMock()
 
-    cm = config.ConfigManager()
-    await cm.clear_config_cache()
-    with caplog.at_level("INFO"):
-        cfg = await cm.get_config()
+    # Configure the mocks
+    mock_aiofiles_open.return_value = mock_async_context_manager
+    mock_async_context_manager.__aenter__.return_value = mock_file_object
+    mock_file_object.read.return_value = empty_config_json
+
+    with patch("aiofiles.open", mock_aiofiles_open):
+        cm = config.ConfigManager()
+        await cm.clear_config_cache()
+        with caplog.at_level("INFO"):
+            cfg = await cm.get_config()
     assert cfg == {}  # Expect an empty dictionary
     assert cm._cache == {}
     # Check for the new log messages for empty config
@@ -1729,8 +1722,6 @@ async def test_validate_config_missing_required_key_runtime(monkeypatch, caplog)
 
     from deephaven_mcp import config
 
-    # Patch the module-level _REQUIRED_TOP_LEVEL_KEYS
-    monkeypatch.setattr(config, "_REQUIRED_TOP_LEVEL_KEYS", {"must_have_this"})
     config_file_path = "/fake/path/missing_required_key.json"
     monkeypatch.setenv("DH_MCP_CONFIG_FILE", config_file_path)
     config_data = {"community_sessions": {}}
@@ -1738,14 +1729,18 @@ async def test_validate_config_missing_required_key_runtime(monkeypatch, caplog)
     aiofiles_open_ctx.__aenter__.return_value.read = mock.AsyncMock(
         return_value=json.dumps(config_data)
     )
-    monkeypatch.setattr(aiofiles, "open", mock.Mock(return_value=aiofiles_open_ctx))
-    cm = config.ConfigManager()
-    await cm.clear_config_cache()
-    with pytest.raises(
-        config.McpConfigurationError,
-        match="Missing required top-level keys in Deephaven MCP config: {'must_have_this'}",
+
+    with (
+        patch.object(config, "_REQUIRED_TOP_LEVEL_KEYS", {"must_have_this"}),
+        patch("aiofiles.open", mock.Mock(return_value=aiofiles_open_ctx)),
     ):
-        await cm.get_config()
+        cm = config.ConfigManager()
+        await cm.clear_config_cache()
+        with pytest.raises(
+            config.McpConfigurationError,
+            match="Missing required top-level keys in Deephaven MCP config: {'must_have_this'}",
+        ):
+            await cm.get_config()
 
 
 @pytest.mark.asyncio
@@ -1814,14 +1809,6 @@ async def test_get_all_config_names_returns_empty_for_non_dict_section(caplog):
     )
 
 
-import json
-from unittest import mock
-
-import aiofiles
-
-from deephaven_mcp import config
-
-
 def test_log_config_summary_enterprise_systems_present(caplog):
     # Covers lines 509-511: logs 'Configured Enterprise Systems:' and redacted details if present
     caplog.set_level("INFO")  # root logger
@@ -1858,27 +1845,27 @@ def test_log_config_summary_no_enterprise_systems(caplog):
 
 
 @pytest.mark.asyncio
-async def test_load_config_from_file_filenotfound(monkeypatch):
-    monkeypatch.setattr(aiofiles, "open", mock.Mock(side_effect=FileNotFoundError))
-    with pytest.raises(
-        config.McpConfigurationError,
-        match="Configuration file not found: /does/not/exist.json",
-    ):
-        await config._load_config_from_file("/does/not/exist.json")
+async def test_load_config_from_file_filenotfound():
+    with patch.object(aiofiles, "open", mock.Mock(side_effect=FileNotFoundError)):
+        with pytest.raises(
+            config.McpConfigurationError,
+            match="Configuration file not found: /does/not/exist.json",
+        ):
+            await config._load_config_from_file("/does/not/exist.json")
 
 
 @pytest.mark.asyncio
-async def test_load_config_from_file_permissionerror(monkeypatch):
-    monkeypatch.setattr(aiofiles, "open", mock.Mock(side_effect=PermissionError))
-    with pytest.raises(
-        config.McpConfigurationError,
-        match="Permission denied when trying to read configuration file: /no/perm.json",
-    ):
-        await config._load_config_from_file("/no/perm.json")
+async def test_load_config_from_file_permissionerror():
+    with patch.object(aiofiles, "open", mock.Mock(side_effect=PermissionError)):
+        with pytest.raises(
+            config.McpConfigurationError,
+            match="Permission denied when trying to read configuration file: /no/perm.json",
+        ):
+            await config._load_config_from_file("/no/perm.json")
 
 
 @pytest.mark.asyncio
-async def test_load_config_from_file_jsondecodeerror(monkeypatch):
+async def test_load_config_from_file_jsondecodeerror():
     class DummyJSONDecodeError(json.JSONDecodeError):
         def __init__(self):
             super().__init__("msg", "doc", 0)
@@ -1887,35 +1874,38 @@ async def test_load_config_from_file_jsondecodeerror(monkeypatch):
     aiofiles_open_ctx.__aenter__.return_value.read = mock.AsyncMock(
         return_value="not json"
     )
-    monkeypatch.setattr(aiofiles, "open", mock.Mock(return_value=aiofiles_open_ctx))
-    orig_json_loads = json.loads
+    with patch.object(aiofiles, "open", mock.Mock(return_value=aiofiles_open_ctx)):
+        orig_json_loads = json.loads
 
-    def raise_json_decode_error(*args, **kwargs):
-        raise DummyJSONDecodeError()
+        def raise_json_decode_error(*args, **kwargs):
+            raise DummyJSONDecodeError()
 
-    monkeypatch.setattr(json, "loads", raise_json_decode_error)
-    with pytest.raises(
-        config.McpConfigurationError,
-        match="Invalid JSON in configuration file /bad.json",
-    ):
-        await config._load_config_from_file("/bad.json")
-    monkeypatch.setattr(json, "loads", orig_json_loads)
+        with patch.object(json, "loads", raise_json_decode_error):
+            with pytest.raises(
+                config.McpConfigurationError,
+                match="Invalid JSON in configuration file /bad.json",
+            ):
+                await config._load_config_from_file("/bad.json")
+        with patch.object(json, "loads", orig_json_loads):
+            pass
 
 
 @pytest.mark.asyncio
-async def test_load_and_validate_config_valueerror(monkeypatch):
+async def test_load_and_validate_config_valueerror():
     # Patch validate_config to raise ValueError
-    monkeypatch.setattr(
+    with patch.object(
         config, "validate_config", mock.Mock(side_effect=ValueError("bad value"))
-    )
-    aiofiles_open_ctx = mock.AsyncMock()
-    aiofiles_open_ctx.__aenter__.return_value.read = mock.AsyncMock(return_value="{}")
-    monkeypatch.setattr(aiofiles, "open", mock.Mock(return_value=aiofiles_open_ctx))
-    with pytest.raises(
-        config.McpConfigurationError,
-        match="General configuration validation error: bad value",
     ):
-        await config.load_and_validate_config("/any.json")
+        aiofiles_open_ctx = mock.AsyncMock()
+        aiofiles_open_ctx.__aenter__.return_value.read = mock.AsyncMock(
+            return_value="{}"
+        )
+        with patch.object(aiofiles, "open", mock.Mock(return_value=aiofiles_open_ctx)):
+            with pytest.raises(
+                config.McpConfigurationError,
+                match="General configuration validation error: bad value",
+            ):
+                await config.load_and_validate_config("/any.json")
 
 
 @pytest.mark.asyncio
@@ -1952,21 +1942,21 @@ async def test_validate_enterprise_systems_config_logs_non_dict_item_in_map(
     aiofiles_open_ctx.__aenter__.return_value.read = mock.AsyncMock(
         return_value=json.dumps(config_data)
     )
-    monkeypatch.setattr(aiofiles, "open", mock.Mock(return_value=aiofiles_open_ctx))
-    caplog.set_level(logging.DEBUG)
-    cm = config.ConfigManager()
-    await cm.clear_config_cache()
-    with pytest.raises(config.McpConfigurationError) as excinfo:
-        await cm.get_config()
-    specific_error_detail = "Enterprise system 'bad_system_item' configuration must be a dictionary, but got str."
-    assert specific_error_detail in str(excinfo.value)
-    expected_log_map_str = "{'good_system': {'connection_json_url': 'http://good', 'auth_type': 'password', 'username': 'gooduser', 'password': '[REDACTED]'}, 'bad_system_item': 'this is not a dict'}"
-    assert (
-        f"Validating enterprise_systems configuration: {expected_log_map_str}"
-        in caplog.text
-    )
-    assert specific_error_detail in caplog.text
-    assert (
-        f"Configuration validation failed for {config_file_path}: {specific_error_detail}"
-        in caplog.text
-    )
+    with patch("aiofiles.open", mock.Mock(return_value=aiofiles_open_ctx)):
+        caplog.set_level(logging.DEBUG)
+        cm = config.ConfigManager()
+        await cm.clear_config_cache()
+        with pytest.raises(config.McpConfigurationError) as excinfo:
+            await cm.get_config()
+        specific_error_detail = "Enterprise system 'bad_system_item' configuration must be a dictionary, but got str."
+        assert specific_error_detail in str(excinfo.value)
+        expected_log_map_str = "{'good_system': {'connection_json_url': 'http://good', 'auth_type': 'password', 'username': 'gooduser', 'password': '[REDACTED]'}, 'bad_system_item': 'this is not a dict'}"
+        assert (
+            f"Validating enterprise_systems configuration: {expected_log_map_str}"
+            in caplog.text
+        )
+        assert specific_error_detail in caplog.text
+        assert (
+            f"Configuration validation failed for {config_file_path}: {specific_error_detail}"
+            in caplog.text
+        )
