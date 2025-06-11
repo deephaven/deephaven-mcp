@@ -703,6 +703,7 @@ async def test_app_lifespan_yields_context_and_cleans_up():
         ),
     ):
         from deephaven_mcp.mcp_systems_server._mcp import app_lifespan
+
         server = DummyServer()
         async with app_lifespan(server) as context:
             assert context["config_manager"] is config_manager

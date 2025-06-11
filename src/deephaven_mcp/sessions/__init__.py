@@ -24,12 +24,20 @@ Dependencies:
     - Requires aiofiles for async file I/O.
 """
 
-from ._sessions import *
+from ._sessions import (
+    Session,
+    SessionCreationError,
+    SessionManager,
+    get_dh_versions,
+    get_meta_table,
+    get_pip_packages_table,
+)
 
 __all__ = [
     "SessionManager",
     "get_dh_versions",
     "get_pip_packages_table",
+    "get_meta_table",
     "SessionCreationError",
     "Session",
     "SessionManager",

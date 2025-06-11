@@ -182,9 +182,7 @@ async def test_get_session_parameters_file_error(monkeypatch):
     async def raise_io(path):
         raise IOError("fail")
 
-    monkeypatch.setattr(
-        "deephaven_mcp.sessions._sessions._load_bytes", raise_io
-    )
+    monkeypatch.setattr("deephaven_mcp.sessions._sessions._load_bytes", raise_io)
     cfg = {"tls_root_certs": "/bad/path"}
     with pytest.raises(IOError):
         await mgr._get_session_parameters(cfg)
@@ -282,9 +280,7 @@ async def test_get_or_create_session_liveness_exception(
     session_manager._config_manager.get_config = AsyncMock(
         return_value={"community_sessions": {"foo": {"host": "localhost"}}}
     )
-    monkeypatch.setattr(
-        "deephaven_mcp.sessions._sessions.Session", MagicMock()
-    )
+    monkeypatch.setattr("deephaven_mcp.sessions._sessions.Session", MagicMock())
     await session_manager.get_or_create_session("foo")
     assert any("Error checking session liveness" in r for r in caplog.text.splitlines())
     assert "foo" in session_manager._cache
@@ -466,9 +462,7 @@ async def test_get_or_create_session_reuses_alive(monkeypatch, session_manager):
     session_manager._config_manager.get_config = AsyncMock(
         return_value={"community_sessions": {"foo": {"host": "localhost"}}}
     )
-    monkeypatch.setattr(
-        "deephaven_mcp.sessions._sessions.Session", MagicMock()
-    )
+    monkeypatch.setattr("deephaven_mcp.sessions._sessions.Session", MagicMock())
     result = await session_manager.get_or_create_session("foo")
     assert result is session
 
