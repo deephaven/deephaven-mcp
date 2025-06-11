@@ -44,10 +44,13 @@ def test_run_server_async_finally():
             def fake_asyncio_run(coro):
                 try:
                     import asyncio
+
                     asyncio.run(coro)
                 except RuntimeError:
                     import asyncio
+
                     return asyncio.ensure_future(coro)
+
             with patch.object(mod, "asyncio", MagicMock(run=fake_asyncio_run)):
                 mod.os.getenv.return_value = "INFO"
                 with pytest.raises(RuntimeError, match="fail"):

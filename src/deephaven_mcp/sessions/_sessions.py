@@ -33,9 +33,9 @@ import time
 from types import TracebackType
 from typing import Any
 
-import aiofiles
 import pyarrow
 from pydeephaven import Session
+
 from deephaven_mcp import config
 from deephaven_mcp.io import load_bytes
 
@@ -474,7 +474,6 @@ class SessionManager:
                 f"Session cached for worker: {worker_name}. Returning session."
             )
             return session
-
 
 
 async def get_table(session: Session, table_name: str) -> pyarrow.Table:

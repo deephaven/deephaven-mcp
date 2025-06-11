@@ -165,7 +165,9 @@ async def test_describe_workers_all_available_with_versions():
     config_manager.get_community_session_config = AsyncMock(
         return_value={"session_type": "python"}
     )
-    with patch.object(mcp_mod.sessions, "get_dh_versions", AsyncMock(return_value=("1.2.3", "4.5.6"))) as mock_get_dh_versions:
+    with patch.object(
+        mcp_mod.sessions, "get_dh_versions", AsyncMock(return_value=("1.2.3", "4.5.6"))
+    ) as mock_get_dh_versions:
         context = MockContext(
             {
                 "config_manager": config_manager,
@@ -213,7 +215,9 @@ async def test_describe_workers_all_available_no_versions():
         return_value={"session_type": "python"}
     )
     # Both versions are None
-    with patch.object(mcp_mod.sessions, "get_dh_versions", AsyncMock(return_value=(None, None))) as mock_get_dh_versions:
+    with patch.object(
+        mcp_mod.sessions, "get_dh_versions", AsyncMock(return_value=(None, None))
+    ) as mock_get_dh_versions:
         context = MockContext(
             {
                 "config_manager": config_manager,
@@ -262,7 +266,9 @@ async def test_describe_workers_some_unavailable():
         return_value={"session_type": "python"}
     )
     # Only w1 is alive, w2 fails, w3 is dead
-    with patch.object(mcp_mod.sessions, "get_dh_versions", AsyncMock(return_value=("1.2.3", None))) as mock_get_dh_versions:
+    with patch.object(
+        mcp_mod.sessions, "get_dh_versions", AsyncMock(return_value=("1.2.3", None))
+    ) as mock_get_dh_versions:
         context = MockContext(
             {
                 "config_manager": config_manager,
@@ -300,7 +306,11 @@ async def test_describe_workers_non_python():
         return_value={"session_type": "groovy"}
     )
     # Should never call get_dh_versions for non-python
-    with patch.object(mcp_mod.sessions, "get_dh_versions", AsyncMock(side_effect=Exception("should not be called"))) as mock_get_dh_versions:
+    with patch.object(
+        mcp_mod.sessions,
+        "get_dh_versions",
+        AsyncMock(side_effect=Exception("should not be called")),
+    ) as mock_get_dh_versions:
         context = MockContext(
             {
                 "config_manager": config_manager,
@@ -330,7 +340,11 @@ async def test_describe_workers_versions_error():
         return_value={"session_type": "python"}
     )
     # get_dh_versions throws
-    with patch.object(mcp_mod.sessions, "get_dh_versions", AsyncMock(side_effect=Exception("fail-version"))) as mock_get_dh_versions:
+    with patch.object(
+        mcp_mod.sessions,
+        "get_dh_versions",
+        AsyncMock(side_effect=Exception("fail-version")),
+    ) as mock_get_dh_versions:
         context = MockContext(
             {
                 "config_manager": config_manager,
@@ -379,7 +393,9 @@ async def test_describe_workers_some_unavailable_with_versions():
         return_value={"session_type": "python"}
     )
     # Only w1 is alive, w2 fails, w3 is dead
-    with patch.object(mcp_mod.sessions, "get_dh_versions", AsyncMock(return_value=("1.2.3", "4.5.6"))) as mock_get_dh_versions:
+    with patch.object(
+        mcp_mod.sessions, "get_dh_versions", AsyncMock(return_value=("1.2.3", "4.5.6"))
+    ) as mock_get_dh_versions:
         context = MockContext(
             {
                 "config_manager": config_manager,

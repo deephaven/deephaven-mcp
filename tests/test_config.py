@@ -8,16 +8,12 @@ import logging
 import os
 import re
 from unittest import mock
-import json
-from unittest import mock
 from unittest.mock import patch
 
 import aiofiles
-
-from deephaven_mcp import config
-
 import pytest
 
+from deephaven_mcp import config
 from deephaven_mcp.config import (
     CONFIG_ENV_VAR,
     CommunitySessionConfigurationError,
@@ -377,7 +373,9 @@ async def test_validate_config_missing_required_key_runtime(caplog, monkeypatch)
     from deephaven_mcp import config
 
     # Temporarily add a required key
-    with patch.object(config.ConfigManager, "_REQUIRED_TOP_LEVEL_KEYS", {"must_have_this"}):
+    with patch.object(
+        config.ConfigManager, "_REQUIRED_TOP_LEVEL_KEYS", {"must_have_this"}
+    ):
         cm = config.ConfigManager()
         invalid_config_data = {"community_sessions": {}}  # Missing 'must_have_this'
 
@@ -388,7 +386,9 @@ async def test_validate_config_missing_required_key_runtime(caplog, monkeypatch)
             return_value=json.dumps(invalid_config_data).encode("utf-8")
         )
         mock_async_context_manager_req = mock.AsyncMock()
-        mock_async_context_manager_req.__aenter__.return_value.read = mock_file_read_content
+        mock_async_context_manager_req.__aenter__.return_value.read = (
+            mock_file_read_content
+        )
 
         original_aio_open_req = aiofiles.open
         aiofiles.open = mock.MagicMock(return_value=mock_async_context_manager_req)
@@ -1084,9 +1084,7 @@ def testvalidate_single_enterprise_system_unknown_key(caplog):
     ), f"Expected WARNING log message '{expected_warning_message}' not found. Logs: {caplog.text}"
 
 
-def testvalidate_single_enterprise_system_base_field_invalid_tuple_type(
-    caplog
-):
+def testvalidate_single_enterprise_system_base_field_invalid_tuple_type(caplog):
     """
     Tests validate_single_enterprise_system when a base field expects a tuple of types
     and an invalid type is provided.
@@ -1107,14 +1105,19 @@ def testvalidate_single_enterprise_system_base_field_invalid_tuple_type(
     original_base_fields = enterprise_system._BASE_ENTERPRISE_SYSTEM_FIELDS
     patched_base_fields = original_base_fields.copy()
     patched_base_fields["test_base_tuple_field"] = (str, int)  # Expects str OR int
-    with patch.object(enterprise_system, "_BASE_ENTERPRISE_SYSTEM_FIELDS", patched_base_fields):
+    with patch.object(
+        enterprise_system, "_BASE_ENTERPRISE_SYSTEM_FIELDS", patched_base_fields
+    ):
         invalid_config = {
-        "connection_json_url": "http://example.com/connection.json",
-        "auth_type": "password",  # Use a valid auth_type
-        "username": "dummy_user",
-        "password": "dummy_key_for_test",  # Satisfy 'password' auth type requirements
-        "test_base_tuple_field": [1.0, 2.0],  # Use a type not str or int (e.g., list)
-    }
+            "connection_json_url": "http://example.com/connection.json",
+            "auth_type": "password",  # Use a valid auth_type
+            "username": "dummy_user",
+            "password": "dummy_key_for_test",  # Satisfy 'password' auth type requirements
+            "test_base_tuple_field": [
+                1.0,
+                2.0,
+            ],  # Use a type not str or int (e.g., list)
+        }
 
     field_value = invalid_config["test_base_tuple_field"]
     expected_types_str = ", ".join(
@@ -1142,9 +1145,8 @@ def testvalidate_single_enterprise_system_base_field_invalid_tuple_type(
     ), f"Expected ERROR log message '{expected_error_message}' not found. Logs: {caplog.text}"
 
 
-
 def testvalidate_single_enterprise_system_auth_specific_field_invalid_tuple_type(
-    caplog
+    caplog,
 ):
     """
     Tests validate_single_enterprise_system when an auth-specific field expects a tuple of types
@@ -1177,11 +1179,11 @@ def testvalidate_single_enterprise_system_auth_specific_field_invalid_tuple_type
     )  # Expects str OR int
     with patch.object(enterprise_system, "_AUTH_SPECIFIC_FIELDS", patched_auth_fields):
         invalid_config = {
-        "connection_json_url": "http://example.com/connection.json",
-        "auth_type": auth_type_to_test,
-        "password": "dummy_pass_value",  # Satisfy password auth presence
-        "test_auth_tuple_field": [1.0, 2.0],  # Invalid type (list)
-    }
+            "connection_json_url": "http://example.com/connection.json",
+            "auth_type": auth_type_to_test,
+            "password": "dummy_pass_value",  # Satisfy password auth presence
+            "test_auth_tuple_field": [1.0, 2.0],  # Invalid type (list)
+        }
 
     field_value = invalid_config["test_auth_tuple_field"]
     expected_types_str = ", ".join(
@@ -1208,7 +1210,6 @@ def testvalidate_single_enterprise_system_auth_specific_field_invalid_tuple_type
     assert (
         found_log
     ), f"Expected ERROR log message '{expected_error_message}' not found. Logs: {caplog.text}"
-
 
 
 def testvalidate_single_enterprise_system_password_auth_missing_username(caplog):
@@ -1728,15 +1729,17 @@ async def test_validate_config_missing_required_key_runtime(monkeypatch, caplog)
     aiofiles_open_ctx.__aenter__.return_value.read = mock.AsyncMock(
         return_value=json.dumps(config_data)
     )
-    
-    with patch.object(config, "_REQUIRED_TOP_LEVEL_KEYS", {"must_have_this"}), \
-         patch("aiofiles.open", mock.Mock(return_value=aiofiles_open_ctx)):
+
+    with (
+        patch.object(config, "_REQUIRED_TOP_LEVEL_KEYS", {"must_have_this"}),
+        patch("aiofiles.open", mock.Mock(return_value=aiofiles_open_ctx)),
+    ):
         cm = config.ConfigManager()
         await cm.clear_config_cache()
         with pytest.raises(
-        config.McpConfigurationError,
-        match="Missing required top-level keys in Deephaven MCP config: {'must_have_this'}",
-    ):
+            config.McpConfigurationError,
+            match="Missing required top-level keys in Deephaven MCP config: {'must_have_this'}",
+        ):
             await cm.get_config()
 
 
@@ -1804,8 +1807,6 @@ async def test_get_all_config_names_returns_empty_for_non_dict_section(caplog):
         "'not_a_section' is not a dictionary, returning empty list of names."
         in caplog.text
     )
-
-
 
 
 def test_log_config_summary_enterprise_systems_present(caplog):
@@ -1892,9 +1893,13 @@ async def test_load_config_from_file_jsondecodeerror():
 @pytest.mark.asyncio
 async def test_load_and_validate_config_valueerror():
     # Patch validate_config to raise ValueError
-    with patch.object(config, "validate_config", mock.Mock(side_effect=ValueError("bad value"))):
+    with patch.object(
+        config, "validate_config", mock.Mock(side_effect=ValueError("bad value"))
+    ):
         aiofiles_open_ctx = mock.AsyncMock()
-        aiofiles_open_ctx.__aenter__.return_value.read = mock.AsyncMock(return_value="{}")
+        aiofiles_open_ctx.__aenter__.return_value.read = mock.AsyncMock(
+            return_value="{}"
+        )
         with patch.object(aiofiles, "open", mock.Mock(return_value=aiofiles_open_ctx)):
             with pytest.raises(
                 config.McpConfigurationError,

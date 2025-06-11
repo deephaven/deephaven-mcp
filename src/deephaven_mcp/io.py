@@ -15,13 +15,15 @@ Example:
     cert_bytes = await load_bytes('/path/to/cert.pem')
 
 """
-import aiofiles
+
 import logging
-from typing import Optional
+
+import aiofiles
 
 _LOGGER = logging.getLogger(__name__)
 
-async def load_bytes(path: Optional[str]) -> Optional[bytes]:
+
+async def load_bytes(path: str | None) -> bytes | None:
     """
     Asynchronously load the contents of a binary file.
 
