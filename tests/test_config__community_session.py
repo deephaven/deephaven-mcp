@@ -9,8 +9,11 @@ from deephaven_mcp.config._community_session import (
     validate_community_sessions_config,
     validate_single_community_session_config,
 )
-from deephaven_mcp.config._errors import CommunitySessionConfigurationError
-
+from deephaven_mcp.config._community_session import (
+    redact_community_session_config,
+    validate_community_sessions_config,
+    validate_single_community_session_config,
+)
 # --- Redaction Tests ---
 
 
