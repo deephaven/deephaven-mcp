@@ -699,7 +699,10 @@ async def test_app_lifespan_yields_context_and_cleans_up():
             "deephaven_mcp.mcp_systems_server._mcp.sessions.SessionManager",
             return_value=session_manager,
         ),
-        patch("deephaven_mcp.mcp_systems_server._mcp.asyncio.Lock", return_value=refresh_lock),
+        patch(
+            "deephaven_mcp.mcp_systems_server._mcp.asyncio.Lock",
+            return_value=refresh_lock,
+        ),
     ):
         server = DummyServer()
         async with app_lifespan(server) as context:
