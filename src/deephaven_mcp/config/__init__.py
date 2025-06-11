@@ -224,7 +224,7 @@ from ._enterprise_system import (
     validate_enterprise_systems_config,
     validate_single_enterprise_system,
 )
-from .errors import (
+from ._errors import (
     CommunitySessionConfigurationError,
     EnterpriseSystemConfigurationError,
     McpConfigurationError,
