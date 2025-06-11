@@ -160,7 +160,7 @@ Users or API clients send natural language questions or documentation queries ov
 
 3. **Run the Systems Server:**
    ```sh
-   DH_MCP_CONFIG_FILE=deephaven_mcp.json uv run dh-mcp-systems --transport sse
+   DH_MCP_CONFIG_FILE=deephaven_mcp.json uv run dh-mcp-systems-server --transport sse
    ```
 
 4. **Test with the MCP Inspector:**
@@ -178,7 +178,7 @@ Users or API clients send natural language questions or documentation queries ov
    
 2. **Run the Docs Server:**
    ```sh
-   uv run dh-mcp-docs --transport sse
+   uv run dh-mcp-docs-server --transport sse
    ```
 
 3. **Test with the MCP Inspector:**
@@ -193,8 +193,8 @@ This package registers the following console entry points for easy command-line 
 
 | Command | Description | Source |
 |---------|-------------|--------|
-| `dh-mcp-systems` | Start the Systems Server | `deephaven_mcp.systems:main` |
-| `dh-mcp-docs` | Start the Docs Server | `deephaven_mcp.docs:main` |
+| `dh-mcp-systems-server` | Start the Systems Server | `deephaven_mcp.mcp_systems_server:main` |
+| `dh-mcp-docs-server` | Start the Docs Server | `deephaven_mcp.mcp_docs_server:main` |
 
 These commands are automatically available in your PATH after installing the package.
 
@@ -225,7 +225,7 @@ The Systems Server's behavior, particularly how it finds its configuration, can 
 
 | Variable             | Required | Description                                                                                                                                                              | Where Used              |
 |----------------------|----------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------|
-| `DH_MCP_CONFIG_FILE` | Yes      | Path to the `deephaven_mcp.json` configuration file. The MCP Systems Server discovers the location of this file via this environment variable. You must set this variable to the absolute path of your configuration file before starting the server. If this variable is not set, the server will fail to start, logging an error. <br><br>Example: <br>`export DH_MCP_CONFIG_FILE="/home/user/project/config/deephaven_mcp.json"` <br>`# Now run the server` <br>`uv run dh-mcp-systems --transport sse`                                 | MCP Server, Test Client |
+| `DH_MCP_CONFIG_FILE` | Yes      | Path to the `deephaven_mcp.json` configuration file. The MCP Systems Server discovers the location of this file via this environment variable. You must set this variable to the absolute path of your configuration file before starting the server. If this variable is not set, the server will fail to start, logging an error. <br><br>Example: <br>`export DH_MCP_CONFIG_FILE="/home/user/project/config/deephaven_mcp.json"` <br>`# Now run the server` <br>`uv run dh-mcp-systems-server --transport sse`                                 | MCP Server, Test Client |
 | `PYTHONLOGLEVEL`     | No       | Sets the Python logging level for the server (e.g., `DEBUG`, `INFO`, `WARNING`, `ERROR`).                                                                                    | Server (optional)       |
 
 > Environment variables can also be loaded from `.env` files using [python-dotenv](https://github.com/theskumar/python-dotenv) if it's integrated into the project's startup mechanism.
@@ -359,7 +359,7 @@ Follow these steps to start the Systems Server:
 
 2. **Start the MCP Systems Server**:
    ```sh
-   uv run dh-mcp-systems --transport sse --port 8000
+   uv run dh-mcp-systems-server --transport sse --port 8000
    ```
 
    Remember to set `DH_MCP_CONFIG_FILE` first.
@@ -376,16 +376,16 @@ Follow these steps to start the Systems Server:
 *   **SSE Transport (for web/Inspector):**
     ```sh
     # Default port (8000)
-    DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json uv run dh-mcp-systems --transport sse
+    DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json uv run dh-mcp-systems-server --transport sse
     
     # Custom port (8001)
-    PORT=8001 DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json uv run dh-mcp-systems --transport sse
+    PORT=8001 DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json uv run dh-mcp-systems-server --transport sse
     # or
-    uv run dh-mcp-systems --transport sse --port 8001
+    uv run dh-mcp-systems-server --transport sse --port 8001
     ```
 *   **stdio Transport (for direct/subprocess use):**
     ```sh
-    DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json uv run dh-mcp-systems --transport stdio
+    DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json uv run dh-mcp-systems-server --transport stdio
     ```
 
 #### Using the Systems Server
@@ -624,7 +624,7 @@ uv run scripts/mcp_community_test_client.py --transport {sse|stdio|streamable-ht
 * `--transport`: Choose `sse` (default) or `stdio`
 * `--env`: Pass environment variables as `KEY=VALUE` (e.g., `DH_MCP_CONFIG_FILE=/path/to/config.json`). Can be repeated for multiple variables
 * `--url`: URL for SSE server (default: `http://localhost:8000/sse`)
-* `--stdio-cmd`: Command to launch stdio server (default: `uv run dh-mcp-systems --transport stdio`)
+* `--stdio-cmd`: Command to launch stdio server (default: `uv run dh-mcp-systems-server --transport stdio`)
 
 **Example Usage:**
 ```sh
@@ -723,18 +723,18 @@ Ensure `INKEEP_API_KEY` is set before running the Docs Server.
 
 ```sh
 # Default port (8000)
-INKEEP_API_KEY=your-api-key uv run dh-mcp-docs --transport sse
+INKEEP_API_KEY=your-api-key uv run dh-mcp-docs-server --transport sse
 
 # Custom port (8001)
-INKEEP_API_KEY=your-api-key uv run dh-mcp-docs --transport sse --port 8001
+INKEEP_API_KEY=your-api-key uv run dh-mcp-docs-server --transport sse --port 8001
 # or
-PORT=8001 INKEEP_API_KEY=your-api-key uv run dh-mcp-docs --transport sse
+PORT=8001 INKEEP_API_KEY=your-api-key uv run dh-mcp-docs-server --transport sse
 ```
 
 ##### stdio Transport Mode
 
 ```sh
-INKEEP_API_KEY=your-api-key uv run dh-mcp-docs --transport stdio
+INKEEP_API_KEY=your-api-key uv run dh-mcp-docs-server --transport stdio
 ```
 
 > **Note:** The SSE transport is useful for interactive testing with tools like MCP Inspector, while stdio transport is better for integration with LLM platforms like Claude.
@@ -774,7 +774,7 @@ The Deephaven MCP Docs Server exposes a single MCP-compatible tool:
 
 **Example (programmatic use):**
 ```python
-from deephaven_mcp.docs._mcp import docs_chat
+from deephaven_mcp.mcp_docs_server._mcp import docs_chat
 
 async def get_docs_answer():
     response = await docs_chat(
@@ -821,7 +821,7 @@ A Python script is provided for testing the MCP Docs tool and validating server 
 - `--transport`: Choose `sse` or `stdio` (default: `sse`)
 - `--env`: Pass environment variables as `KEY=VALUE` (can be repeated; for stdio mode)
 - `--url`: URL for SSE server (default: `http://localhost:8000/sse`)
-- `--stdio-cmd`: Command to launch stdio server (default: `uv run dh-mcp-docs --transport stdio`)
+- `--stdio-cmd`: Command to launch stdio server (default: `uv run dh-mcp-docs-server --transport stdio`)
 - `--prompt`: Prompt/question to send to the docs_chat tool (required)
 - `--history`: Optional chat history (JSON string) for multi-turn conversations
 
@@ -868,7 +868,7 @@ The [MCP Inspector](https://github.com/modelcontextprotocol/inspector) is a web-
 
 2. **Start the MCP Community server in SSE mode** (in another terminal):
    ```sh
-   DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json uv run dh-mcp-systems --transport sse
+   DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json uv run dh-mcp-systems-server --transport sse
    ```
 
 3. **Start the MCP Inspector** (in a third terminal):
@@ -885,7 +885,7 @@ The [MCP Inspector](https://github.com/modelcontextprotocol/inspector) is a web-
 
 1. **Start the MCP Docs server in SSE mode** (in a terminal):
    ```sh
-   INKEEP_API_KEY=your-api-key uv run dh-mcp-docs --transport sse
+   INKEEP_API_KEY=your-api-key uv run dh-mcp-docs-server --transport sse
    ```
 
 2. **Start the MCP Inspector** (in another terminal):
@@ -919,7 +919,7 @@ Claude Desktop is very useful for debugging and interactively exploring MCP serv
              "--directory",
              "/path/to/deephaven-mcp/mcp-community",
              "run",
-             "dh-mcp-systems"
+             "dh-mcp-systems-server"
            ],
            "env": {
              "DH_MCP_CONFIG_FILE": "/path/to/deephaven_mcp.json"
@@ -931,7 +931,7 @@ Claude Desktop is very useful for debugging and interactively exploring MCP serv
              "--directory",
              "/path/to/deephaven-mcp/mcp-community",
              "run",
-             "dh-mcp-docs"
+             "dh-mcp-docs-server"
            ],
            "env": {
              "INKEEP_API_KEY": "your-inkeep-api-key"
@@ -959,7 +959,7 @@ For troubleshooting Claude Desktop MCP integration, log files are located at:
 
 1. Ensure the MCP Systems Server is running in SSE mode:
    ```sh
-   DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json uv run dh-mcp-systems --transport sse
+   DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json uv run dh-mcp-systems-server --transport sse
    ```
 
 2. Run `mcp-proxy` to connect to your running MCP server:
@@ -974,7 +974,7 @@ For troubleshooting Claude Desktop MCP integration, log files are located at:
 
 1. Ensure the MCP Docs Server is running in SSE mode:
    ```sh
-   INKEEP_API_KEY=your-api-key uv run dh-mcp-docs --transport sse
+   INKEEP_API_KEY=your-api-key uv run dh-mcp-docs-server --transport sse
    ```
 
 2. Run `mcp-proxy`:
@@ -992,10 +992,10 @@ Both servers can be used programmatically within Python applications:
 
 ```python
 # Import the server components
-from deephaven_mcp.systems import mcp_server, run_server
+from deephaven_mcp.mcp_systems_server import mcp_server, run_server
 
 # Use the MCP tools directly (synchronous)
-from deephaven_mcp.systems._mcp import refresh, describe_workers, table_schemas, run_script
+from deephaven_mcp.mcp_systems_server._mcp import refresh, describe_workers, table_schemas, run_script
 
 # Example: Get status of all workers
 result = describe_workers(context)  # Requires MCP context
@@ -1008,10 +1008,10 @@ run_server(transport="sse")  # Starts SSE server
 
 ```python
 # Import the server components
-from deephaven_mcp.docs import mcp_server, run_server
+from deephaven_mcp.mcp_docs_server import mcp_server, run_server
 
 # Use the docs_chat tool directly (asynchronous)
-from deephaven_mcp.docs._mcp import docs_chat
+from deephaven_mcp.mcp_docs_server._mcp import docs_chat
 
 # Example: Get documentation answer
 async def get_answer():
@@ -1067,7 +1067,7 @@ Both servers expose their tools through FastMCP, following the Model Context Pro
 
 3. **Run the MCP Community server** (in another terminal):
    ```sh
-   DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json uv run dh-mcp-systems --transport sse
+   DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json uv run dh-mcp-systems-server --transport sse
    ```
 
 4. **Use the MCP Inspector or test client** to validate your changes.
@@ -1203,30 +1203,30 @@ deephaven-mcp/
 │       │   ├── community_session.py
 │       │   ├── enterprise_system.py
 │       │   └── errors.py
-│       ├── docs/                    # Docs Server module
+│       ├── mcp_docs_server/         # Docs Server module
 │       │   ├── __init__.py
 │       │   └── _mcp.py
+│       ├── mcp_systems_server/      # Systems Server module
+│       │   ├── __init__.py
+│       │   ├── _mcp.py
+│       │   └── _sessions.py
 │       ├── enterprise/              # Enterprise Server module
 │       │   └── __init__.py
-│       ├── openai.py                # OpenAI API client for LLM integration
-│       └── systems/                 # Systems Server module
-│           ├── __init__.py
-│           ├── _mcp.py
-│           └── _sessions.py
+│       └── openai.py                # OpenAI API client for LLM integration
 ├── tests/                           # Unit and integration tests
 │   ├── test__version.py
 │   ├── test_config.py
-│   ├── test_config_community_session.py
-│   ├── test_config_enterprise_system.py
+│   ├── test_config__community_session.py
+│   ├── test_config__enterprise_system.py
 │   ├── test_config_errors.py
-│   ├── test_docs_init.py
-│   ├── test_docs_mcp.py
+│   ├── test_mcp_docs_server_init.py
+│   ├── test_mcp_docs_server_mcp.py
 │   ├── test_enterprise_init.py
 │   ├── test_openai.py
 │   ├── test_package_init.py
-│   ├── test_system__mcp.py
-│   ├── test_system_init.py
-│   └── test_system_sessions.py
+│   ├── test_mcp_systems_server__mcp.py
+│   ├── test_mcp_systems_server_init.py
+│   └── test_mcp_systems_server_sessions.py
 ├── scripts/                         # Utility scripts for dev and testing
 │   ├── run_deephaven_test_server.py
 │   ├── mcp_community_test_client.py

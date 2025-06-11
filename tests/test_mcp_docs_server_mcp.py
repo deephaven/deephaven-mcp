@@ -9,7 +9,7 @@ from starlette.requests import Request
 
 
 def test_all_exports():
-    import deephaven_mcp.docs._mcp as mcp_mod
+    import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
 
     assert hasattr(mcp_mod, "mcp_server")
     assert "mcp_server" in mcp_mod.__all__
@@ -19,17 +19,17 @@ def test_env_var_required(monkeypatch):
     # Remove INKEEP_API_KEY if present
     monkeypatch.delenv("INKEEP_API_KEY", raising=False)
     # Remove module from sys.modules to force reload
-    sys.modules.pop("deephaven_mcp.docs._mcp", None)
+    sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
     with pytest.raises(RuntimeError) as excinfo:
-        importlib.import_module("deephaven_mcp.docs._mcp")
+        importlib.import_module("deephaven_mcp.mcp_docs_server._mcp")
     assert "INKEEP_API_KEY environment variable must be set" in str(excinfo.value)
 
 
 def test_mcp_server_and_docs_chat(monkeypatch):
     # Set INKEEP_API_KEY so import works
     monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
-    sys.modules.pop("deephaven_mcp.docs._mcp", None)
-    mod = importlib.import_module("deephaven_mcp.docs._mcp")
+    sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
+    mod = importlib.import_module("deephaven_mcp.mcp_docs_server._mcp")
     from mcp.server.fastmcp import FastMCP
 
     assert hasattr(mod, "mcp_server")
@@ -57,8 +57,8 @@ class DummyOpenAIClient:
 
 def test_docs_chat_programming_language(monkeypatch):
     monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
-    sys.modules.pop("deephaven_mcp.docs._mcp", None)
-    import deephaven_mcp.docs._mcp as mcp_mod
+    sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
+    import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
 
     dummy_client = DummyOpenAIClient(response="lang!")
     mcp_mod.inkeep_client = dummy_client
@@ -71,8 +71,8 @@ def test_docs_chat_programming_language(monkeypatch):
 
 def test_docs_chat_programming_language_invalid(monkeypatch):
     monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
-    sys.modules.pop("deephaven_mcp.docs._mcp", None)
-    import deephaven_mcp.docs._mcp as mcp_mod
+    sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
+    import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
 
     dummy_client = DummyOpenAIClient(response="should not matter")
     mcp_mod.inkeep_client = dummy_client
@@ -84,8 +84,8 @@ def test_docs_chat_programming_language_invalid(monkeypatch):
 
 def test_docs_chat_success(monkeypatch):
     monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
-    sys.modules.pop("deephaven_mcp.docs._mcp", None)
-    import deephaven_mcp.docs._mcp as mcp_mod
+    sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
+    import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
 
     # Patch inkeep_client with dummy
     mcp_mod.inkeep_client = DummyOpenAIClient(response="Hello from docs!")
@@ -98,8 +98,8 @@ def test_docs_chat_success(monkeypatch):
 
 def test_docs_chat_with_core_version(monkeypatch):
     monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
-    sys.modules.pop("deephaven_mcp.docs._mcp", None)
-    import deephaven_mcp.docs._mcp as mcp_mod
+    sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
+    import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
 
     dummy_client = DummyOpenAIClient(response="core!")
     mcp_mod.inkeep_client = dummy_client
@@ -118,8 +118,8 @@ def test_docs_chat_with_core_version(monkeypatch):
 
 def test_docs_chat_with_enterprise_version(monkeypatch):
     monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
-    sys.modules.pop("deephaven_mcp.docs._mcp", None)
-    import deephaven_mcp.docs._mcp as mcp_mod
+    sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
+    import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
 
     dummy_client = DummyOpenAIClient(response="coreplus!")
     mcp_mod.inkeep_client = dummy_client
@@ -138,8 +138,8 @@ def test_docs_chat_with_enterprise_version(monkeypatch):
 
 def test_docs_chat_with_both_versions(monkeypatch):
     monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
-    sys.modules.pop("deephaven_mcp.docs._mcp", None)
-    import deephaven_mcp.docs._mcp as mcp_mod
+    sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
+    import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
 
     dummy_client = DummyOpenAIClient(response="both!")
     mcp_mod.inkeep_client = dummy_client
@@ -160,8 +160,8 @@ def test_docs_chat_with_both_versions(monkeypatch):
 
 def test_docs_chat_with_neither_version(monkeypatch):
     monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
-    sys.modules.pop("deephaven_mcp.docs._mcp", None)
-    import deephaven_mcp.docs._mcp as mcp_mod
+    sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
+    import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
 
     dummy_client = DummyOpenAIClient(response="no version!")
     mcp_mod.inkeep_client = dummy_client
@@ -179,8 +179,8 @@ def test_docs_chat_with_neither_version(monkeypatch):
 @pytest.mark.asyncio
 async def test_health_check_direct(monkeypatch):
     monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
-    sys.modules.pop("deephaven_mcp.docs._mcp", None)
-    mod = importlib.import_module("deephaven_mcp.docs._mcp")
+    sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
+    mod = importlib.import_module("deephaven_mcp.mcp_docs_server._mcp")
     # Minimal ASGI scope for Request
     scope = {"type": "http", "method": "GET", "path": "/health"}
     req = Request(scope)
@@ -193,8 +193,8 @@ def test_docs_chat_error(monkeypatch):
     from deephaven_mcp.openai import OpenAIClientError
 
     monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
-    sys.modules.pop("deephaven_mcp.docs._mcp", None)
-    import deephaven_mcp.docs._mcp as mcp_mod
+    sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
+    import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
 
     # Patch inkeep_client with dummy that raises
     mcp_mod.inkeep_client = DummyOpenAIClient(exc=OpenAIClientError("fail!"))

@@ -23,7 +23,7 @@ Usage:
     Import this module and use the registered tools via MCP-compatible agent frameworks, or invoke directly for backend automation.
 
 Example (agentic usage):
-    >>> from deephaven_mcp.docs._mcp import mcp_server
+    >>> from deephaven_mcp.mcp_docs_server._mcp import mcp_server
     >>> response = await mcp_server.tools['docs_chat'](prompt="How do I install Deephaven?")
     >>> print(response)
     To install Deephaven, ...

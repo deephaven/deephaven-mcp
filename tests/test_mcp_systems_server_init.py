@@ -9,7 +9,7 @@ import pytest
 
 
 def test_module_all_exports():
-    import deephaven_mcp.systems as mod
+    import deephaven_mcp.mcp_systems_server as mod
 
     # __all__ should include mcp_server and run_server
     assert hasattr(mod, "mcp_server")
@@ -19,7 +19,7 @@ def test_module_all_exports():
 
 
 def test_run_server_async_finally(monkeypatch):
-    import deephaven_mcp.systems as mod
+    import deephaven_mcp.mcp_systems_server as mod
 
     monkeypatch.setattr(mod, "_LOGGER", MagicMock())
     monkeypatch.setattr(mod, "os", MagicMock())
@@ -56,7 +56,7 @@ def test_run_server_async_finally(monkeypatch):
 
 
 def test_run_server_stdio(monkeypatch):
-    import deephaven_mcp.systems as mod
+    import deephaven_mcp.mcp_systems_server as mod
 
     # Patch all side effects
     monkeypatch.setattr(mod, "_LOGGER", MagicMock())
@@ -79,7 +79,7 @@ def test_run_server_stdio(monkeypatch):
 
 
 def test_run_server_sse(monkeypatch):
-    import deephaven_mcp.systems as mod
+    import deephaven_mcp.mcp_systems_server as mod
 
     monkeypatch.setattr(mod, "_LOGGER", MagicMock())
     monkeypatch.setattr(mod, "os", MagicMock())
@@ -94,7 +94,7 @@ def test_run_server_sse(monkeypatch):
 
 
 def test_run_server_async_logic(monkeypatch):
-    import deephaven_mcp.systems as mod
+    import deephaven_mcp.mcp_systems_server as mod
 
     monkeypatch.setattr(mod, "_LOGGER", MagicMock())
     monkeypatch.setattr(mod, "os", MagicMock())
@@ -111,7 +111,7 @@ def test_run_server_async_logic(monkeypatch):
 
 
 def test_main_calls_run_server():
-    import deephaven_mcp.systems as mod
+    import deephaven_mcp.mcp_systems_server as mod
 
     with (
         patch("sys.argv", ["prog", "--transport", "sse"]),
