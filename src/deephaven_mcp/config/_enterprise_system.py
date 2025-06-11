@@ -12,7 +12,7 @@ __all__ = [
 import logging
 from typing import Any
 
-from .errors import EnterpriseSystemConfigurationError
+from ._errors import EnterpriseSystemConfigurationError
 
 _LOGGER = logging.getLogger(__name__)
 

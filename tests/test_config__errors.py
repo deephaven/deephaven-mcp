@@ -1,6 +1,6 @@
 import pytest
 
-from deephaven_mcp.config import errors
+from deephaven_mcp.config import _errors as errors
 
 
 def test_mcp_configuration_error_is_exception():

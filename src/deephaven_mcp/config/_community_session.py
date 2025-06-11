@@ -18,7 +18,7 @@ import logging
 import types
 from typing import Any
 
-from .errors import CommunitySessionConfigurationError
+from ._errors import CommunitySessionConfigurationError
 
 _LOGGER = logging.getLogger(__name__)
 
