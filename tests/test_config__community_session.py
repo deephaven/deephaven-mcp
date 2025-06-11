@@ -132,19 +132,16 @@ def test_validate_single_cs_wrong_type_in_tuple_tls_root_certs():
         validate_single_community_session_config("test_session", bad_config)
 
 
-def test_validate_single_cs_missing_required_field(monkeypatch):
+def test_validate_single_cs_missing_required_field():
     """Test validation raises ValueError if a required field (e.g., 'host') is missing."""
-    # Must patch _REQUIRED_FIELDS in the *actual* module where it's defined and used.
-    monkeypatch.setattr(
-        "deephaven_mcp.config._community_session._REQUIRED_FIELDS", ["host"]
-    )
-    bad_config = {"port": 10000}  # Missing 'host'
-    with pytest.raises(
-        CommunitySessionConfigurationError,
-        match="Missing required field 'host' in community session config for local_session",
-    ):
-        validate_single_community_session_config("local_session", bad_config)
-    # monkeypatch automatically undoes the change after the test.
+    # Patch _REQUIRED_FIELDS in the actual module where it's defined and used.
+    with patch("deephaven_mcp.config._community_session._REQUIRED_FIELDS", ["host"]):
+        bad_config = {"port": 10000}  # Missing 'host'
+        with pytest.raises(
+            CommunitySessionConfigurationError,
+            match="Missing required field 'host' in community session config for local_session",
+        ):
+            validate_single_community_session_config("local_session", bad_config)
 
 
 def test_validate_single_cs_auth_token_and_env_var_exclusive():
@@ -174,18 +171,18 @@ def test_validate_single_cs_valid_with_auth_token_env_var():
 # --- Validation Tests for the overall community_sessions map ---
 
 
-def test_validate_community_sessions_valid(monkeypatch):
+def test_validate_community_sessions_valid():
     """Test that a valid community_sessions map passes validation."""
-    # Temporarily ensure _REQUIRED_FIELDS is empty for this test, or mock validate_single_community_session_config
-    monkeypatch.setattr("deephaven_mcp.config._community_session._REQUIRED_FIELDS", [])
-    valid_sessions_map = {
-        "session1": {"host": "localhost"},
-        "session2": {"host": "remote", "port": 9999},
-    }
-    try:
-        validate_community_sessions_config(valid_sessions_map)
-    except ValueError as e:
-        pytest.fail(f"Valid community_sessions_map raised ValueError: {e}")
+    # Temporarily ensure _REQUIRED_FIELDS is empty for this test
+    with patch("deephaven_mcp.config._community_session._REQUIRED_FIELDS", []):
+        valid_sessions_map = {
+            "session1": {"host": "localhost"},
+            "session2": {"host": "remote", "port": 9999},
+        }
+        try:
+            validate_community_sessions_config(valid_sessions_map)
+        except ValueError as e:
+            pytest.fail(f"Valid community_sessions_map raised ValueError: {e}")
 
 
 def test_validate_community_sessions_not_dict():

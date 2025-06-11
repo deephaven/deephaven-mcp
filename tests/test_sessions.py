@@ -7,6 +7,7 @@ import types
 from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 import pyarrow
+import logging
 from pydeephaven import Session
 
 from deephaven_mcp import config
@@ -149,17 +150,17 @@ async def test_get_session_parameters_with_and_without_files():
 
 
 @pytest.mark.asyncio
-async def test_get_session_parameters_file_error(monkeypatch):
+async def test_get_session_parameters_file_error():
     mgr = SessionManager(mock_config_manager)
 
     # Patch load_bytes to raise
     async def raise_io(path):
         raise IOError("fail")
 
-    monkeypatch.setattr("deephaven_mcp.io.load_bytes", raise_io)
-    cfg = {"tls_root_certs": "/bad/path"}
-    with pytest.raises(IOError):
-        await mgr._get_session_parameters(cfg)
+    with patch("deephaven_mcp.sessions._sessions.load_bytes", new=raise_io):
+        cfg = {"tls_root_certs": "/bad/path"}
+        with pytest.raises(IOError):
+            await mgr._get_session_parameters(cfg)
 
 
 @pytest.mark.asyncio
@@ -226,38 +227,27 @@ def test_redact_sensitive_session_fields_empty():
 
 
 @pytest.mark.asyncio
-async def test_create_session_error(monkeypatch):
+async def test_create_session_error():
     mgr = SessionManager(mock_config_manager)
     # Patch Session to raise
-    monkeypatch.setattr(
-        "deephaven_mcp.sessions._sessions.Session",
-        MagicMock(side_effect=RuntimeError("fail")),
-    )
-    with pytest.raises(SessionCreationError) as exc_info:
-        await mgr._create_session(host="localhost")
-    assert "fail" in str(exc_info.value)
+    with patch("deephaven_mcp.sessions._sessions.Session", new=MagicMock(side_effect=RuntimeError("fail"))):
+        with pytest.raises(SessionCreationError) as exc_info:
+            await mgr._create_session(host="localhost")
+        assert "fail" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
-async def test_get_or_create_session_liveness_exception(
-    monkeypatch, session_manager, caplog
-):
+async def test_get_or_create_session_liveness_exception(session_manager, caplog):
     # Simulate exception in session.is_alive
     bad_session = MagicMock(spec=Session)
-    type(bad_session).is_alive = property(
-        lambda self: (_ for _ in ()).throw(Exception("fail"))
-    )
+    type(bad_session).is_alive = property(lambda self: (_ for _ in ()).throw(Exception("fail")))
     session_manager._cache["foo"] = bad_session
-    session_manager._config_manager.get_worker_config = AsyncMock(
-        return_value={"host": "localhost"}
-    )
-    session_manager._config_manager.get_config = AsyncMock(
-        return_value={"community_sessions": {"foo": {"host": "localhost"}}}
-    )
-    monkeypatch.setattr("deephaven_mcp.sessions._sessions.Session", MagicMock())
-    await session_manager.get_or_create_session("foo")
-    assert any("Error checking session liveness" in r for r in caplog.text.splitlines())
-    assert "foo" in session_manager._cache
+    session_manager._config_manager.get_worker_config = AsyncMock(return_value={"host": "localhost"})
+    session_manager._config_manager.get_config = AsyncMock(return_value={"community_sessions": {"foo": {"host": "localhost"}}})
+    with patch("deephaven_mcp.sessions._sessions.Session", new=MagicMock()):
+        await session_manager.get_or_create_session("foo")
+        assert any("Error checking session liveness" in r for r in caplog.text.splitlines())
+        assert "foo" in session_manager._cache
 
 
 # --- Tests for get_meta_table ---
@@ -327,65 +317,59 @@ async def test_get_meta_table_to_arrow_error():
 
 # --- Tests for get_pip_packages_table ---
 
-import logging
 
 
 @pytest.mark.asyncio
-async def test_get_pip_packages_table_success(monkeypatch, caplog):
+async def test_get_pip_packages_table_success(caplog):
     session_mock = MagicMock()
 
     # Patch asyncio.to_thread to run synchronously
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
 
-    monkeypatch.setattr(_sessions.asyncio, "to_thread", fake_to_thread)
-    # Patch get_table to return a sentinel
-    arrow_mock = MagicMock()
-    monkeypatch.setattr(_sessions, "get_table", AsyncMock(return_value=arrow_mock))
-    # Should log all steps
-    with caplog.at_level(logging.INFO):
-        result = await _sessions.get_pip_packages_table(session_mock)
-    assert result is arrow_mock
-    assert "Running pip packages script in session..." in caplog.text
-    assert "Script executed successfully." in caplog.text
-    assert "Table retrieved successfully." in caplog.text
-    session_mock.run_script.assert_called_once()
-    _sessions.get_table.assert_awaited_once_with(session_mock, "_pip_packages_table")
+    with patch.object(_sessions.asyncio, "to_thread", fake_to_thread):
+        # Patch get_table to return a sentinel
+        arrow_mock = MagicMock()
+        with patch.object(_sessions, "get_table", AsyncMock(return_value=arrow_mock)) as mock_get_table:
+            # Should log all steps
+            with caplog.at_level(logging.INFO):
+                result = await _sessions.get_pip_packages_table(session_mock)
+            assert result is arrow_mock
+            assert "Running pip packages script in session..." in caplog.text
+            assert "Script executed successfully." in caplog.text
+            assert "Table retrieved successfully." in caplog.text
+            session_mock.run_script.assert_called_once()
+            mock_get_table.assert_awaited_once_with(session_mock, "_pip_packages_table")
 
 
 @pytest.mark.asyncio
-async def test_get_pip_packages_table_script_failure(monkeypatch):
+async def test_get_pip_packages_table_script_failure():
     session_mock = MagicMock()
 
-    # Patch asyncio.to_thread to raise when running script
     async def fake_to_thread(fn, *args, **kwargs):
         if fn == session_mock.run_script:
             raise RuntimeError("fail-script")
         return fn(*args, **kwargs)
 
-    monkeypatch.setattr(_sessions.asyncio, "to_thread", fake_to_thread)
-    with pytest.raises(RuntimeError, match="fail-script"):
-        await _sessions.get_pip_packages_table(session_mock)
+    with patch("deephaven_mcp.sessions._sessions.asyncio.to_thread", new=fake_to_thread):
+        with pytest.raises(RuntimeError, match="fail-script"):
+            await _sessions.get_pip_packages_table(session_mock)
     # No assertion on run_script: exception is raised before call
 
 
 @pytest.mark.asyncio
-async def test_get_pip_packages_table_table_failure(monkeypatch):
+async def test_get_pip_packages_table_table_failure():
     session_mock = MagicMock()
 
-    # Patch asyncio.to_thread to run synchronously
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
 
-    monkeypatch.setattr(_sessions.asyncio, "to_thread", fake_to_thread)
-    # Patch get_table to raise
-    monkeypatch.setattr(
-        _sessions, "get_table", AsyncMock(side_effect=RuntimeError("fail-table"))
-    )
-    with pytest.raises(RuntimeError, match="fail-table"):
-        await _sessions.get_pip_packages_table(session_mock)
-    session_mock.run_script.assert_called_once()
-    _sessions.get_table.assert_awaited_once_with(session_mock, "_pip_packages_table")
+    with patch("deephaven_mcp.sessions._sessions.asyncio.to_thread", new=fake_to_thread), \
+         patch("deephaven_mcp.sessions._sessions.get_table", new=AsyncMock(side_effect=RuntimeError("fail-table"))):
+        with pytest.raises(RuntimeError, match="fail-table"):
+            await _sessions.get_pip_packages_table(session_mock)
+        session_mock.run_script.assert_called_once()
+        _sessions.get_table.assert_awaited_once_with(session_mock, "_pip_packages_table")
 
 
 # --- Tests for get_table ---
@@ -424,77 +408,52 @@ async def test_get_table_to_arrow_error():
 
 # --- Tests for get_or_create_session ---
 @pytest.mark.asyncio
-async def test_get_or_create_session_reuses_alive(monkeypatch, session_manager):
+async def test_get_or_create_session_reuses_alive(session_manager):
     session = MagicMock(spec=Session)
     session.is_alive = True
     session.host = "localhost"
     session.port = 10000
     session_manager._cache["foo"] = session
-    session_manager._config_manager.get_worker_config = AsyncMock(
-        return_value={"host": "localhost"}
-    )
-    session_manager._config_manager.get_config = AsyncMock(
-        return_value={"community_sessions": {"foo": {"host": "localhost"}}}
-    )
-    monkeypatch.setattr("deephaven_mcp.sessions._sessions.Session", MagicMock())
-    result = await session_manager.get_or_create_session("foo")
-    assert result is session
+    session_manager._config_manager.get_worker_config = AsyncMock(return_value={"host": "localhost"})
+    session_manager._config_manager.get_config = AsyncMock(return_value={"community_sessions": {"foo": {"host": "localhost"}}})
+    with patch("deephaven_mcp.sessions._sessions.Session", new=MagicMock()):
+        result = await session_manager.get_or_create_session("foo")
+        assert result is session
 
 
 @pytest.mark.asyncio
-async def test_get_or_create_session_creates_new(monkeypatch, session_manager):
+async def test_get_or_create_session_creates_new(session_manager):
     session_manager._cache.clear()
     fake_config = {"host": "localhost"}
-    session_manager._config_manager.get_worker_config = AsyncMock(
-        return_value=fake_config
-    )
-    session_manager._config_manager.get_config = AsyncMock(
-        return_value={"community_sessions": {"foo": {"host": "localhost"}}}
-    )
-    monkeypatch.setattr(
-        SessionManager,
-        "_get_session_parameters",
-        AsyncMock(return_value={"host": "localhost"}),
-    )
-    monkeypatch.setattr(
-        SessionManager, "_create_session", AsyncMock(return_value="SESSION")
-    )
-    result = await session_manager.get_or_create_session("foo")
-    assert result == "SESSION"
-    assert session_manager._cache["foo"] == "SESSION"
+    session_manager._config_manager.get_worker_config = AsyncMock(return_value=fake_config)
+    session_manager._config_manager.get_config = AsyncMock(return_value={"community_sessions": {"foo": {"host": "localhost"}}})
+    with patch.object(SessionManager, "_get_session_parameters", new=AsyncMock(return_value={"host": "localhost"})), \
+         patch.object(SessionManager, "_create_session", new=AsyncMock(return_value="SESSION")):
+        result = await session_manager.get_or_create_session("foo")
+        assert result == "SESSION"
+        assert session_manager._cache["foo"] == "SESSION"
 
 
 @pytest.mark.asyncio
-async def test_get_or_create_session_handles_dead(monkeypatch, session_manager):
+async def test_get_or_create_session_handles_dead(session_manager):
     session = MagicMock(spec=Session)
     session.is_alive = False
     session_manager._cache["foo"] = session
     fake_config = {"host": "localhost"}
-    session_manager._config_manager.get_worker_config = AsyncMock(
-        return_value=fake_config
-    )
-    # Patch get_config to include 'community_sessions: {"foo": ...}'
-    session_manager._config_manager.get_config = AsyncMock(
-        return_value={"community_sessions": {"foo": {"host": "localhost"}}}
-    )
-    monkeypatch.setattr(
-        SessionManager,
-        "_get_session_parameters",
-        AsyncMock(return_value={"host": "localhost"}),
-    )
-    monkeypatch.setattr(
-        SessionManager, "_create_session", AsyncMock(return_value="SESSION")
-    )
-    result = await session_manager.get_or_create_session("foo")
-    assert result == "SESSION"
-    assert session_manager._cache["foo"] == "SESSION"
+    session_manager._config_manager.get_worker_config = AsyncMock(return_value=fake_config)
+    session_manager._config_manager.get_config = AsyncMock(return_value={"community_sessions": {"foo": {"host": "localhost"}}})
+    with patch.object(SessionManager, "_get_session_parameters", new=AsyncMock(return_value={"host": "localhost"})), \
+         patch.object(SessionManager, "_create_session", new=AsyncMock(return_value="SESSION")):
+        result = await session_manager.get_or_create_session("foo")
+        assert result == "SESSION"
+        assert session_manager._cache["foo"] == "SESSION"
 
 
 # --- Tests for get_dh_versions ---
 
 
 @pytest.mark.asyncio
-async def test_get_dh_versions_both_versions(monkeypatch):
+async def test_get_dh_versions_both_versions():
     session = MagicMock()
     df = MagicMock()
     df.to_dict.return_value = [
@@ -503,17 +462,14 @@ async def test_get_dh_versions_both_versions(monkeypatch):
     ]
     arrow_table = MagicMock()
     arrow_table.to_pandas.return_value = df
-    monkeypatch.setattr(
-        "deephaven_mcp.sessions._sessions.get_pip_packages_table",
-        AsyncMock(return_value=arrow_table),
-    )
-    core, coreplus = await get_dh_versions(session)
-    assert core == "1.2.3"
-    assert coreplus == "4.5.6"
+    with patch("deephaven_mcp.sessions._sessions.get_pip_packages_table", new=AsyncMock(return_value=arrow_table)):
+        core, coreplus = await get_dh_versions(session)
+        assert core == "1.2.3"
+        assert coreplus == "4.5.6"
 
 
 @pytest.mark.asyncio
-async def test_get_dh_versions_only_core(monkeypatch):
+async def test_get_dh_versions_only_core():
     session = MagicMock()
     df = MagicMock()
     df.to_dict.return_value = [
@@ -522,17 +478,14 @@ async def test_get_dh_versions_only_core(monkeypatch):
     ]
     arrow_table = MagicMock()
     arrow_table.to_pandas.return_value = df
-    monkeypatch.setattr(
-        "deephaven_mcp.sessions._sessions.get_pip_packages_table",
-        AsyncMock(return_value=arrow_table),
-    )
-    core, coreplus = await get_dh_versions(session)
-    assert core == "1.2.3"
-    assert coreplus is None
+    with patch("deephaven_mcp.sessions._sessions.get_pip_packages_table", new=AsyncMock(return_value=arrow_table)):
+        core, coreplus = await get_dh_versions(session)
+        assert core == "1.2.3"
+        assert coreplus is None
 
 
 @pytest.mark.asyncio
-async def test_get_dh_versions_only_coreplus(monkeypatch):
+async def test_get_dh_versions_only_coreplus():
     session = MagicMock()
     df = MagicMock()
     df.to_dict.return_value = [
@@ -541,17 +494,14 @@ async def test_get_dh_versions_only_coreplus(monkeypatch):
     ]
     arrow_table = MagicMock()
     arrow_table.to_pandas.return_value = df
-    monkeypatch.setattr(
-        "deephaven_mcp.sessions._sessions.get_pip_packages_table",
-        AsyncMock(return_value=arrow_table),
-    )
-    core, coreplus = await get_dh_versions(session)
-    assert core is None
-    assert coreplus == "4.5.6"
+    with patch("deephaven_mcp.sessions._sessions.get_pip_packages_table", new=AsyncMock(return_value=arrow_table)):
+        core, coreplus = await get_dh_versions(session)
+        assert core is None
+        assert coreplus == "4.5.6"
 
 
 @pytest.mark.asyncio
-async def test_get_dh_versions_neither(monkeypatch):
+async def test_get_dh_versions_neither():
     session = MagicMock()
     df = MagicMock()
     df.to_dict.return_value = [
@@ -560,49 +510,40 @@ async def test_get_dh_versions_neither(monkeypatch):
     ]
     arrow_table = MagicMock()
     arrow_table.to_pandas.return_value = df
-    monkeypatch.setattr(
-        "deephaven_mcp.sessions._sessions.get_pip_packages_table",
-        AsyncMock(return_value=arrow_table),
-    )
-    core, coreplus = await get_dh_versions(session)
-    assert core is None
-    assert coreplus is None
+    with patch("deephaven_mcp.sessions._sessions.get_pip_packages_table", new=AsyncMock(return_value=arrow_table)):
+        core, coreplus = await get_dh_versions(session)
+        assert core is None
+        assert coreplus is None
 
 
 @pytest.mark.asyncio
-async def test_get_dh_versions_malformed(monkeypatch):
+async def test_get_dh_versions_malformed():
     session = MagicMock()
     df = MagicMock()
     df.to_dict.return_value = [{"NotPackage": "foo", "NotVersion": "bar"}]
     arrow_table = MagicMock()
     arrow_table.to_pandas.return_value = df
-    monkeypatch.setattr(
+    with patch(
         "deephaven_mcp.sessions._sessions.get_pip_packages_table",
         AsyncMock(return_value=arrow_table),
-    )
-    core, coreplus = await get_dh_versions(session)
-    assert core is None
-    assert coreplus is None
+    ):
+        core, coreplus = await get_dh_versions(session)
+        assert core is None
+        assert coreplus is None
 
 
 @pytest.mark.asyncio
-async def test_get_dh_versions_arrow_none(monkeypatch):
+async def test_get_dh_versions_arrow_none():
     session = MagicMock()
-    monkeypatch.setattr(
-        "deephaven_mcp.sessions._sessions.get_pip_packages_table",
-        AsyncMock(return_value=None),
-    )
-    core, coreplus = await get_dh_versions(session)
-    assert core is None
-    assert coreplus is None
+    with patch("deephaven_mcp.sessions._sessions.get_pip_packages_table", new=AsyncMock(return_value=None)):
+        core, coreplus = await get_dh_versions(session)
+        assert core is None
+        assert coreplus is None
 
 
 @pytest.mark.asyncio
-async def test_get_dh_versions_raises(monkeypatch):
+async def test_get_dh_versions_raises():
     session = MagicMock()
-    monkeypatch.setattr(
-        "deephaven_mcp.sessions._sessions.get_pip_packages_table",
-        AsyncMock(side_effect=RuntimeError("fail!")),
-    )
-    with pytest.raises(RuntimeError, match="fail!"):
-        await get_dh_versions(session)
+    with patch("deephaven_mcp.sessions._sessions.get_pip_packages_table", new=AsyncMock(side_effect=RuntimeError("fail!"))):
+        with pytest.raises(RuntimeError, match="fail!"):
+            await get_dh_versions(session)
