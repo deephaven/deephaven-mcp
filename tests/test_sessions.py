@@ -10,15 +10,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pyarrow
 import pytest
 from pydeephaven import Session
+from deephaven_mcp.sessions._queries import get_dh_versions
 
 from deephaven_mcp import config
 from deephaven_mcp.sessions import _sessions
 from deephaven_mcp.sessions._sessions import (
     SessionCreationError,
     SessionManager,
-    get_dh_versions,
-    get_meta_table,
-    get_table,
 )
 
 
@@ -266,172 +264,6 @@ async def test_get_or_create_session_liveness_exception(session_manager, caplog)
         assert "foo" in session_manager._cache
 
 
-# --- Tests for get_meta_table ---
-
-
-@pytest.mark.asyncio
-async def test_get_meta_table_success():
-    session_mock = MagicMock()
-    table_mock = MagicMock()
-    meta_table_mock = MagicMock()
-    arrow_mock = object()
-    session_mock.open_table.return_value = table_mock
-    type(table_mock).meta_table = property(lambda self: meta_table_mock)
-
-    def to_arrow():
-        return arrow_mock
-
-    meta_table_mock.to_arrow = to_arrow
-
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
-    with patch(
-        "deephaven_mcp.sessions._sessions.asyncio.to_thread",
-        new=fake_to_thread,
-    ):
-        result = await get_meta_table(session_mock, "foo")
-        assert result is arrow_mock
-        session_mock.open_table.assert_called_once_with("foo")
-
-
-@pytest.mark.asyncio
-async def test_get_meta_table_open_table_error():
-    session_mock = MagicMock()
-    session_mock.open_table.side_effect = RuntimeError("fail-open")
-    with pytest.raises(RuntimeError) as excinfo:
-        await get_meta_table(session_mock, "foo")
-    assert "fail-open" in str(excinfo.value)
-    session_mock.open_table.assert_called_once_with("foo")
-
-
-@pytest.mark.asyncio
-async def test_get_meta_table_to_arrow_error():
-    session_mock = MagicMock()
-    table_mock = MagicMock()
-    meta_table_mock = MagicMock()
-    session_mock.open_table.return_value = table_mock
-    type(table_mock).meta_table = property(lambda self: meta_table_mock)
-
-    def to_arrow():
-        raise RuntimeError("fail-arrow")
-
-    meta_table_mock.to_arrow = to_arrow
-
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
-    with patch(
-        "deephaven_mcp.sessions._sessions.asyncio.to_thread",
-        new=fake_to_thread,
-    ):
-        with pytest.raises(RuntimeError) as excinfo:
-            await get_meta_table(session_mock, "foo")
-        assert "fail-arrow" in str(excinfo.value)
-        session_mock.open_table.assert_called_once_with("foo")
-
-
-# --- Tests for get_pip_packages_table ---
-
-
-@pytest.mark.asyncio
-async def test_get_pip_packages_table_success(caplog):
-    session_mock = MagicMock()
-
-    # Patch asyncio.to_thread to run synchronously
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
-    with patch.object(_sessions.asyncio, "to_thread", fake_to_thread):
-        # Patch get_table to return a sentinel
-        arrow_mock = MagicMock()
-        with patch.object(
-            _sessions, "get_table", AsyncMock(return_value=arrow_mock)
-        ) as mock_get_table:
-            # Should log all steps
-            with caplog.at_level(logging.INFO):
-                result = await _sessions.get_pip_packages_table(session_mock)
-            assert result is arrow_mock
-            assert "Running pip packages script in session..." in caplog.text
-            assert "Script executed successfully." in caplog.text
-            assert "Table retrieved successfully." in caplog.text
-            session_mock.run_script.assert_called_once()
-            mock_get_table.assert_awaited_once_with(session_mock, "_pip_packages_table")
-
-
-@pytest.mark.asyncio
-async def test_get_pip_packages_table_script_failure():
-    session_mock = MagicMock()
-
-    async def fake_to_thread(fn, *args, **kwargs):
-        if fn == session_mock.run_script:
-            raise RuntimeError("fail-script")
-        return fn(*args, **kwargs)
-
-    with patch(
-        "deephaven_mcp.sessions._sessions.asyncio.to_thread", new=fake_to_thread
-    ):
-        with pytest.raises(RuntimeError, match="fail-script"):
-            await _sessions.get_pip_packages_table(session_mock)
-    # No assertion on run_script: exception is raised before call
-
-
-@pytest.mark.asyncio
-async def test_get_pip_packages_table_table_failure():
-    session_mock = MagicMock()
-
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
-    with (
-        patch("deephaven_mcp.sessions._sessions.asyncio.to_thread", new=fake_to_thread),
-        patch(
-            "deephaven_mcp.sessions._sessions.get_table",
-            new=AsyncMock(side_effect=RuntimeError("fail-table")),
-        ),
-    ):
-        with pytest.raises(RuntimeError, match="fail-table"):
-            await _sessions.get_pip_packages_table(session_mock)
-        session_mock.run_script.assert_called_once()
-        _sessions.get_table.assert_awaited_once_with(
-            session_mock, "_pip_packages_table"
-        )
-
-
-# --- Tests for get_table ---
-
-
-@pytest.mark.asyncio
-async def test_get_table_success():
-    table_mock = MagicMock()
-    arrow_mock = MagicMock(spec=pyarrow.Table)
-    table_mock.to_arrow = MagicMock(return_value=arrow_mock)
-    session_mock = MagicMock()
-    session_mock.open_table = MagicMock(return_value=table_mock)
-    result = await get_table(session_mock, "foo")
-    assert result is arrow_mock
-    session_mock.open_table.assert_called_once_with("foo")
-    table_mock.to_arrow.assert_called_once()
-
-
-@pytest.mark.asyncio
-async def test_get_table_open_table_error():
-    session_mock = MagicMock()
-    session_mock.open_table = MagicMock(side_effect=RuntimeError("fail open"))
-    with pytest.raises(RuntimeError, match="fail open"):
-        await get_table(session_mock, "foo")
-
-
-@pytest.mark.asyncio
-async def test_get_table_to_arrow_error():
-    table_mock = MagicMock()
-    table_mock.to_arrow = MagicMock(side_effect=RuntimeError("fail arrow"))
-    session_mock = MagicMock()
-    session_mock.open_table = MagicMock(return_value=table_mock)
-    with pytest.raises(RuntimeError, match="fail arrow"):
-        await get_table(session_mock, "foo")
-
-
 # --- Tests for get_or_create_session ---
 @pytest.mark.asyncio
 async def test_get_or_create_session_reuses_alive(session_manager):
@@ -501,52 +333,6 @@ async def test_get_or_create_session_handles_dead(session_manager):
         result = await session_manager.get_or_create_session("foo")
         assert result == "SESSION"
         assert session_manager._cache["foo"] == "SESSION"
-
-
-# --- Tests for get_dh_versions ---
-
-
-@pytest.mark.asyncio
-async def test_get_dh_versions_both_versions():
-    session = MagicMock()
-    df = MagicMock()
-    df.to_dict.return_value = [
-        {"Package": "deephaven-core", "Version": "1.2.3"},
-        {"Package": "deephaven_coreplus_worker", "Version": "4.5.6"},
-    ]
-    arrow_table = MagicMock()
-    arrow_table.to_pandas.return_value = df
-    with patch(
-        "deephaven_mcp.sessions._sessions.get_pip_packages_table",
-        new=AsyncMock(return_value=arrow_table),
-    ):
-        core, coreplus = await get_dh_versions(session)
-        assert core == "1.2.3"
-        assert coreplus == "4.5.6"
-
-
-@pytest.mark.asyncio
-async def test_get_dh_versions_only_core():
-    session = MagicMock()
-    df = MagicMock()
-    df.to_dict.return_value = [
-        {"Package": "deephaven-core", "Version": "1.2.3"},
-        {"Package": "numpy", "Version": "2.0.0"},
-    ]
-    arrow_table = MagicMock()
-    arrow_table.to_pandas.return_value = df
-    with patch(
-        "deephaven_mcp.sessions._sessions.get_pip_packages_table",
-        new=AsyncMock(return_value=arrow_table),
-    ):
-        core, coreplus = await get_dh_versions(session)
-        assert core == "1.2.3"
-        assert coreplus is None
-
-
-@pytest.mark.asyncio
-async def test_get_dh_versions_only_coreplus():
-    session = MagicMock()
     df = MagicMock()
     df.to_dict.return_value = [
         {"Package": "deephaven_coreplus_worker", "Version": "4.5.6"},
@@ -555,7 +341,7 @@ async def test_get_dh_versions_only_coreplus():
     arrow_table = MagicMock()
     arrow_table.to_pandas.return_value = df
     with patch(
-        "deephaven_mcp.sessions._sessions.get_pip_packages_table",
+        "deephaven_mcp.sessions._queries.get_pip_packages_table",
         new=AsyncMock(return_value=arrow_table),
     ):
         core, coreplus = await get_dh_versions(session)
@@ -574,7 +360,7 @@ async def test_get_dh_versions_neither():
     arrow_table = MagicMock()
     arrow_table.to_pandas.return_value = df
     with patch(
-        "deephaven_mcp.sessions._sessions.get_pip_packages_table",
+        "deephaven_mcp.sessions._queries.get_pip_packages_table",
         new=AsyncMock(return_value=arrow_table),
     ):
         core, coreplus = await get_dh_versions(session)
@@ -590,8 +376,8 @@ async def test_get_dh_versions_malformed():
     arrow_table = MagicMock()
     arrow_table.to_pandas.return_value = df
     with patch(
-        "deephaven_mcp.sessions._sessions.get_pip_packages_table",
-        AsyncMock(return_value=arrow_table),
+        "deephaven_mcp.sessions._queries.get_pip_packages_table",
+        new=AsyncMock(return_value=arrow_table),
     ):
         core, coreplus = await get_dh_versions(session)
         assert core is None
@@ -602,7 +388,7 @@ async def test_get_dh_versions_malformed():
 async def test_get_dh_versions_arrow_none():
     session = MagicMock()
     with patch(
-        "deephaven_mcp.sessions._sessions.get_pip_packages_table",
+        "deephaven_mcp.sessions._queries.get_pip_packages_table",
         new=AsyncMock(return_value=None),
     ):
         core, coreplus = await get_dh_versions(session)
@@ -614,7 +400,7 @@ async def test_get_dh_versions_arrow_none():
 async def test_get_dh_versions_raises():
     session = MagicMock()
     with patch(
-        "deephaven_mcp.sessions._sessions.get_pip_packages_table",
+        "deephaven_mcp.sessions._queries.get_pip_packages_table",
         new=AsyncMock(side_effect=RuntimeError("fail!")),
     ):
         with pytest.raises(RuntimeError, match="fail!"):
