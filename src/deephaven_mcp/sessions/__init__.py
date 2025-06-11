@@ -1,4 +1,3 @@
-# sessions/__init__.py
 """
 Async session management for Deephaven workers.
 
@@ -24,9 +23,9 @@ Dependencies:
     - Requires aiofiles for async file I/O.
 """
 
+from ._errors import SessionCreationError
 from ._sessions import (
     Session,
-    SessionCreationError,
     SessionManager,
     get_dh_versions,
     get_meta_table,
@@ -40,5 +39,4 @@ __all__ = [
     "get_meta_table",
     "SessionCreationError",
     "Session",
-    "SessionManager",
 ]

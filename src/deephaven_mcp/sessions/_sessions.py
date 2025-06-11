@@ -39,13 +39,9 @@ from pydeephaven import Session
 
 from deephaven_mcp import config
 
+from ._errors import SessionCreationError
+
 _LOGGER = logging.getLogger(__name__)
-
-
-class SessionCreationError(Exception):
-    """Raised when a Deephaven Session cannot be created."""
-
-    pass
 
 
 class SessionManager:
