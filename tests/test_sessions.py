@@ -5,9 +5,8 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../s
 
 import types
 from unittest.mock import AsyncMock, MagicMock, patch
-
-import pyarrow
 import pytest
+import pyarrow
 from pydeephaven import Session
 
 from deephaven_mcp import config
@@ -15,7 +14,6 @@ from deephaven_mcp.sessions import _sessions
 from deephaven_mcp.sessions._sessions import (
     SessionCreationError,
     SessionManager,
-    _load_bytes,
     get_dh_versions,
     get_meta_table,
     get_table,
@@ -44,27 +42,6 @@ def fake_session():
     s = MagicMock(spec=Session)
     s.is_alive = True
     return s
-
-
-# --- Tests for _load_bytes ---
-@pytest.mark.asyncio
-async def test_load_bytes_reads_file(tmp_path):
-    file_path = tmp_path / "cert.pem"
-    content = b"test-bytes"
-    file_path.write_bytes(content)
-    result = await _load_bytes(str(file_path))
-    assert result == content
-
-
-@pytest.mark.asyncio
-async def test_load_bytes_none():
-    assert await _load_bytes(None) is None
-
-
-@pytest.mark.asyncio
-async def test_load_bytes_error(tmp_path, caplog):
-    with pytest.raises(Exception):
-        await _load_bytes("/nonexistent/path/to/file")
 
 
 # --- Tests for SessionManager._redact_sensitive_session_fields ---
@@ -144,45 +121,42 @@ async def test_clear_all_sessions_calls_close(session_manager):
 
 
 @pytest.mark.asyncio
-async def test_get_session_parameters_with_and_without_files(monkeypatch):
+async def test_get_session_parameters_with_and_without_files():
     mgr = SessionManager(mock_config_manager)
-    # Patch _load_bytes to simulate file reading
-    monkeypatch.setattr(
-        "deephaven_mcp.sessions._sessions._load_bytes",
-        AsyncMock(return_value=b"binary"),
-    )
-    # All fields present (as file paths)
-    cfg = {
-        "host": "localhost",
-        "port": 10000,
-        "auth_type": "token",
-        "auth_token": "tok",
-        "never_timeout": True,
-        "session_type": "python",
-        "use_tls": True,
-        "tls_root_certs": "/tmp/root.pem",
-        "client_cert_chain": "/tmp/chain.pem",
-        "client_private_key": "/tmp/key.pem",
-    }
-    params = await mgr._get_session_parameters(cfg)
-    assert params["tls_root_certs"] == b"binary"
-    assert params["client_cert_chain"] == b"binary"
-    assert params["client_private_key"] == b"binary"
-    # No files present
-    cfg = {"host": "localhost"}
-    params = await mgr._get_session_parameters(cfg)
-    assert params["host"] == "localhost"
+    from unittest.mock import AsyncMock, patch
+    with patch("deephaven_mcp.sessions._sessions.load_bytes", new=AsyncMock(return_value=b"binary")):
+        # All fields present (as file paths)
+        cfg = {
+            "host": "localhost",
+            "port": 10000,
+            "auth_type": "token",
+            "auth_token": "tok",
+            "never_timeout": True,
+            "session_type": "python",
+            "use_tls": True,
+            "tls_root_certs": "/tmp/root.pem",
+            "client_cert_chain": "/tmp/chain.pem",
+            "client_private_key": "/tmp/key.pem",
+        }
+        params = await mgr._get_session_parameters(cfg)
+        assert params["tls_root_certs"] == b"binary"
+        assert params["client_cert_chain"] == b"binary"
+        assert params["client_private_key"] == b"binary"
+        # No files present
+        cfg = {"host": "localhost"}
+        params = await mgr._get_session_parameters(cfg)
+        assert params["host"] == "localhost"
 
 
 @pytest.mark.asyncio
 async def test_get_session_parameters_file_error(monkeypatch):
     mgr = SessionManager(mock_config_manager)
 
-    # Patch _load_bytes to raise
+    # Patch load_bytes to raise
     async def raise_io(path):
         raise IOError("fail")
 
-    monkeypatch.setattr("deephaven_mcp.sessions._sessions._load_bytes", raise_io)
+    monkeypatch.setattr("deephaven_mcp.io.load_bytes", raise_io)
     cfg = {"tls_root_certs": "/bad/path"}
     with pytest.raises(IOError):
         await mgr._get_session_parameters(cfg)

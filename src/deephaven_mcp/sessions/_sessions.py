@@ -36,8 +36,8 @@ from typing import Any
 import aiofiles
 import pyarrow
 from pydeephaven import Session
-
 from deephaven_mcp import config
+from deephaven_mcp.io import load_bytes
 
 from ._errors import SessionCreationError
 
@@ -356,7 +356,7 @@ class SessionManager:
             _LOGGER.info(
                 f"Loading TLS root certs from: {worker_cfg.get('tls_root_certs')}"
             )
-            tls_root_certs = await _load_bytes(tls_root_certs)
+            tls_root_certs = await load_bytes(tls_root_certs)
             _LOGGER.info("Loaded TLS root certs successfully.")
         else:
             _LOGGER.debug("No TLS root certs provided for session.")
@@ -365,7 +365,7 @@ class SessionManager:
             _LOGGER.info(
                 f"Loading client cert chain from: {worker_cfg.get('client_cert_chain')}"
             )
-            client_cert_chain = await _load_bytes(client_cert_chain)
+            client_cert_chain = await load_bytes(client_cert_chain)
             _LOGGER.info("Loaded client cert chain successfully.")
         else:
             _LOGGER.debug("No client cert chain provided for session.")
@@ -374,7 +374,7 @@ class SessionManager:
             _LOGGER.info(
                 f"Loading client private key from: {worker_cfg.get('client_private_key')}"
             )
-            client_private_key = await _load_bytes(client_private_key)
+            client_private_key = await load_bytes(client_private_key)
             _LOGGER.info("Loaded client private key successfully.")
         else:
             _LOGGER.debug("No client private key provided for session.")
@@ -475,41 +475,6 @@ class SessionManager:
             )
             return session
 
-
-async def _load_bytes(path: str | None) -> bytes | None:
-    """
-    Asynchronously load the contents of a binary file.
-
-    This helper is used to read certificate and private key files for secure Deephaven session creation.
-    It is designed to be coroutine-safe and leverages aiofiles for non-blocking I/O.
-
-    Args:
-        path (Optional[str]): Path to the file to load. If None, returns None.
-
-    Returns:
-        Optional[bytes]: The contents of the file as bytes, or None if the path is None.
-
-    Raises:
-        Exception: Propagates any exceptions encountered during file I/O (e.g., file not found, permission denied).
-
-    Side Effects:
-        - Logs the file path being loaded (info level).
-        - Logs and re-raises any exceptions encountered (error level).
-
-    Example:
-        >>> cert_bytes = await _load_bytes('/path/to/cert.pem')
-        >>> if cert_bytes is not None:
-        ...     # Use cert_bytes for TLS configuration
-    """
-    _LOGGER.info(f"Loading binary file: {path}")
-    if path is None:
-        return None
-    try:
-        async with aiofiles.open(path, "rb") as f:
-            return await f.read()
-    except Exception as e:
-        _LOGGER.error(f"Failed to load binary file: {path}: {e}")
-        raise
 
 
 async def get_table(session: Session, table_name: str) -> pyarrow.Table:
