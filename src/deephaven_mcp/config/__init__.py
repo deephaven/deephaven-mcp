@@ -182,6 +182,7 @@ Async/Await & I/O:
 """
 
 __all__ = [
+    # Errors and core config
     "McpConfigurationError",
     "CommunitySessionConfigurationError",
     "EnterpriseSystemConfigurationError",
@@ -192,6 +193,15 @@ __all__ = [
     "get_all_config_names",
     "get_config_path",
     "load_and_validate_config",
+    # Community session API
+    "validate_community_sessions_config",
+    "validate_single_community_session_config",
+    "redact_community_session_config",
+    # Enterprise system API
+    "validate_enterprise_systems_config",
+    "validate_single_enterprise_system",
+    "redact_enterprise_system_config",
+    "redact_enterprise_systems_map",
 ]
 
 import asyncio
@@ -203,13 +213,16 @@ from typing import Any, cast
 
 import aiofiles
 
-from .community_session import (
-    redact_community_session_config,
+from ._community_session import (
     validate_community_sessions_config,
+    validate_single_community_session_config,
+    redact_community_session_config,
 )
-from .enterprise_system import (
-    redact_enterprise_system_config,
+from ._enterprise_system import (
     validate_enterprise_systems_config,
+    validate_single_enterprise_system,
+    redact_enterprise_system_config,
+    redact_enterprise_systems_map,
 )
 from .errors import (
     CommunitySessionConfigurationError,

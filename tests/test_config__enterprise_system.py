@@ -2,7 +2,7 @@
 
 import pytest
 
-from deephaven_mcp.config.enterprise_system import (
+from deephaven_mcp.config._enterprise_system import (
     _AUTH_SPECIFIC_FIELDS,
     _BASE_ENTERPRISE_SYSTEM_FIELDS,
     EnterpriseSystemConfigurationError,

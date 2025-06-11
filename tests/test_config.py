@@ -103,7 +103,7 @@ def test_validate_config_rejects_unknown_top_level():
 
 
 # --- Community session validation ---
-from deephaven_mcp.config.community_session import (
+from deephaven_mcp.config._community_session import (
     redact_community_session_config,
     validate_community_sessions_config,
     validate_single_community_session_config,
@@ -149,7 +149,7 @@ def test_community_sessions_redact():
 
 
 # --- Enterprise system validation ---
-from deephaven_mcp.config.enterprise_system import (
+from deephaven_mcp.config._enterprise_system import (
     _validate_and_get_auth_type,
     redact_enterprise_system_config,
     validate_enterprise_systems_config,
@@ -762,7 +762,7 @@ def test_validate_enterprise_systems_config_is_none_direct_call(caplog):
     """
     import logging
 
-    from deephaven_mcp.config.enterprise_system import (
+    from deephaven_mcp.config._enterprise_system import (
         validate_enterprise_systems_config,
     )
 
@@ -775,7 +775,7 @@ def test_validate_enterprise_systems_config_is_none_direct_call(caplog):
     found_log = False
     for record in caplog.records:
         if (
-            record.name == "deephaven_mcp.config.enterprise_system"
+            record.name == "deephaven_mcp.config._enterprise_system"
             and record.levelname == "DEBUG"
             and expected_log_message in record.message
         ):
@@ -795,7 +795,7 @@ async def test_validate_enterprise_systems_config_invalid_system_name_type(caplo
     import logging
     import re
 
-    from deephaven_mcp.config.enterprise_system import (
+    from deephaven_mcp.config._enterprise_system import (
         EnterpriseSystemConfigurationError,
         validate_enterprise_systems_config,
     )
@@ -823,7 +823,7 @@ async def test_validate_enterprise_systems_config_invalid_system_name_type(caplo
     found_log = False
     for record in caplog.records:
         if (
-            record.name == "deephaven_mcp.config.enterprise_system"
+            record.name == "deephaven_mcp.config._enterprise_system"
             and record.levelname == "ERROR"
             and specific_error_detail in record.message
         ):
@@ -841,7 +841,7 @@ def testvalidate_single_enterprise_system_missing_connection_json_url(caplog):
     import logging
     import re
 
-    from deephaven_mcp.config.enterprise_system import (
+    from deephaven_mcp.config._enterprise_system import (
         EnterpriseSystemConfigurationError,
         validate_single_enterprise_system,
     )
@@ -861,7 +861,7 @@ def testvalidate_single_enterprise_system_missing_connection_json_url(caplog):
     found_log = False
     for record in caplog.records:
         if (
-            record.name == "deephaven_mcp.config.enterprise_system"
+            record.name == "deephaven_mcp.config._enterprise_system"
             and record.levelname == "ERROR"
             and expected_error_message in record.message
         ):
@@ -879,7 +879,7 @@ def testvalidate_single_enterprise_system_invalid_connection_json_url_type(caplo
     import logging
     import re
 
-    from deephaven_mcp.config.enterprise_system import (
+    from deephaven_mcp.config._enterprise_system import (
         EnterpriseSystemConfigurationError,
         validate_single_enterprise_system,
     )
@@ -906,7 +906,7 @@ def testvalidate_single_enterprise_system_invalid_connection_json_url_type(caplo
     found_log = False
     for record in caplog.records:
         if (
-            record.name == "deephaven_mcp.config.enterprise_system"
+            record.name == "deephaven_mcp.config._enterprise_system"
             and record.levelname == "ERROR"
             and expected_error_message in record.message
         ):
@@ -924,7 +924,7 @@ def testvalidate_single_enterprise_system_missing_auth_type(caplog):
     import logging
     import re
 
-    from deephaven_mcp.config.enterprise_system import (
+    from deephaven_mcp.config._enterprise_system import (
         EnterpriseSystemConfigurationError,
         validate_single_enterprise_system,
     )
@@ -948,7 +948,7 @@ def testvalidate_single_enterprise_system_missing_auth_type(caplog):
     found_log = False
     for record in caplog.records:
         if (
-            record.name == "deephaven_mcp.config.enterprise_system"
+            record.name == "deephaven_mcp.config._enterprise_system"
             and record.levelname == "ERROR"
             and expected_error_message in record.message
         ):
@@ -966,7 +966,7 @@ def testvalidate_single_enterprise_system_invalid_auth_type_type(caplog):
     import logging
     import re
 
-    from deephaven_mcp.config.enterprise_system import (
+    from deephaven_mcp.config._enterprise_system import (
         EnterpriseSystemConfigurationError,
         validate_single_enterprise_system,
     )
@@ -991,7 +991,7 @@ def testvalidate_single_enterprise_system_invalid_auth_type_type(caplog):
     found_log = False
     for record in caplog.records:
         if (
-            record.name == "deephaven_mcp.config.enterprise_system"
+            record.name == "deephaven_mcp.config._enterprise_system"
             and record.levelname == "ERROR"
             and expected_error_message in record.message
         ):
@@ -1009,7 +1009,7 @@ def testvalidate_single_enterprise_system_unknown_auth_type_value(caplog):
     import logging
     import re
 
-    from deephaven_mcp.config.enterprise_system import (
+    from deephaven_mcp.config._enterprise_system import (
         _AUTH_SPECIFIC_FIELDS,
         EnterpriseSystemConfigurationError,
         validate_single_enterprise_system,
@@ -1033,7 +1033,7 @@ def testvalidate_single_enterprise_system_unknown_auth_type_value(caplog):
     found_log = False
     for record in caplog.records:
         if (
-            record.name == "deephaven_mcp.config.enterprise_system"
+            record.name == "deephaven_mcp.config._enterprise_system"
             and record.levelname == "ERROR"
             and expected_error_message in record.message
         ):
@@ -1050,7 +1050,7 @@ def testvalidate_single_enterprise_system_unknown_key(caplog):
     """
     import logging
 
-    from deephaven_mcp.config.enterprise_system import (
+    from deephaven_mcp.config._enterprise_system import (
         validate_single_enterprise_system,
     )
 
@@ -1071,7 +1071,7 @@ def testvalidate_single_enterprise_system_unknown_key(caplog):
     found_log = False
     for record in caplog.records:
         if (
-            record.name == "deephaven_mcp.config.enterprise_system"
+            record.name == "deephaven_mcp.config._enterprise_system"
             and record.levelname == "WARNING"
             and expected_warning_message in record.message
         ):
@@ -1093,7 +1093,7 @@ def testvalidate_single_enterprise_system_base_field_invalid_tuple_type(
     import re
 
     from deephaven_mcp.config import enterprise_system  # Import the module itself
-    from deephaven_mcp.config.enterprise_system import (
+    from deephaven_mcp.config._enterprise_system import (
         EnterpriseSystemConfigurationError,
         validate_single_enterprise_system,
     )
@@ -1132,7 +1132,7 @@ def testvalidate_single_enterprise_system_base_field_invalid_tuple_type(
     found_log = False
     for record in caplog.records:
         if (
-            record.name == "deephaven_mcp.config.enterprise_system"
+            record.name == "deephaven_mcp.config._enterprise_system"
             and record.levelname == "ERROR"
             and expected_error_message in record.message
         ):
@@ -1159,7 +1159,7 @@ def testvalidate_single_enterprise_system_auth_specific_field_invalid_tuple_type
     import re
 
     from deephaven_mcp.config import enterprise_system  # Import the module itself
-    from deephaven_mcp.config.enterprise_system import (
+    from deephaven_mcp.config._enterprise_system import (
         _AUTH_SPECIFIC_FIELDS,
         EnterpriseSystemConfigurationError,
         validate_single_enterprise_system,
@@ -1205,7 +1205,7 @@ def testvalidate_single_enterprise_system_auth_specific_field_invalid_tuple_type
     found_log = False
     for record in caplog.records:
         if (
-            record.name == "deephaven_mcp.config.enterprise_system"
+            record.name == "deephaven_mcp.config._enterprise_system"
             and record.levelname == "ERROR"
             and expected_error_message in record.message
         ):
@@ -1229,7 +1229,7 @@ def testvalidate_single_enterprise_system_password_auth_missing_username(caplog)
     import logging
     import re
 
-    from deephaven_mcp.config.enterprise_system import (
+    from deephaven_mcp.config._enterprise_system import (
         EnterpriseSystemConfigurationError,
         validate_single_enterprise_system,
     )
@@ -1252,7 +1252,7 @@ def testvalidate_single_enterprise_system_password_auth_missing_username(caplog)
     found_log = False
     for record in caplog.records:
         if (
-            record.name == "deephaven_mcp.config.enterprise_system"
+            record.name == "deephaven_mcp.config._enterprise_system"
             and record.levelname == "ERROR"
             and expected_error_message in record.message
         ):
@@ -1271,7 +1271,7 @@ def testvalidate_single_enterprise_system_password_auth_invalid_username_type(ca
     import logging
     import re
 
-    from deephaven_mcp.config.enterprise_system import (
+    from deephaven_mcp.config._enterprise_system import (
         EnterpriseSystemConfigurationError,
         validate_single_enterprise_system,
     )
@@ -1295,7 +1295,7 @@ def testvalidate_single_enterprise_system_password_auth_invalid_username_type(ca
     found_log = False
     for record in caplog.records:
         if (
-            record.name == "deephaven_mcp.config.enterprise_system"
+            record.name == "deephaven_mcp.config._enterprise_system"
             and record.levelname == "ERROR"
             and expected_error_message in record.message
         ):
@@ -1314,7 +1314,7 @@ def testvalidate_single_enterprise_system_password_auth_missing_password_keys(ca
     import logging
     import re
 
-    from deephaven_mcp.config.enterprise_system import (
+    from deephaven_mcp.config._enterprise_system import (
         EnterpriseSystemConfigurationError,
         validate_single_enterprise_system,
     )
@@ -1338,7 +1338,7 @@ def testvalidate_single_enterprise_system_password_auth_missing_password_keys(ca
     found_log = False
     for record in caplog.records:
         if (
-            record.name == "deephaven_mcp.config.enterprise_system"
+            record.name == "deephaven_mcp.config._enterprise_system"
             and record.levelname == "ERROR"
             and expected_error_message in record.message
         ):
@@ -1357,7 +1357,7 @@ def testvalidate_single_enterprise_system_password_auth_invalid_password_type(ca
     import logging
     import re
 
-    from deephaven_mcp.config.enterprise_system import (
+    from deephaven_mcp.config._enterprise_system import (
         EnterpriseSystemConfigurationError,
         validate_single_enterprise_system,
     )
@@ -1382,7 +1382,7 @@ def testvalidate_single_enterprise_system_password_auth_invalid_password_type(ca
     found_log = False
     for record in caplog.records:
         if (
-            record.name == "deephaven_mcp.config.enterprise_system"
+            record.name == "deephaven_mcp.config._enterprise_system"
             and record.levelname == "ERROR"
             and expected_error_message in record.message
         ):
@@ -1403,7 +1403,7 @@ def testvalidate_single_enterprise_system_password_auth_invalid_password_env_var
     import logging
     import re
 
-    from deephaven_mcp.config.enterprise_system import (
+    from deephaven_mcp.config._enterprise_system import (
         EnterpriseSystemConfigurationError,
         validate_single_enterprise_system,
     )
@@ -1428,7 +1428,7 @@ def testvalidate_single_enterprise_system_password_auth_invalid_password_env_var
     found_log = False
     for record in caplog.records:
         if (
-            record.name == "deephaven_mcp.config.enterprise_system"
+            record.name == "deephaven_mcp.config._enterprise_system"
             and record.levelname == "ERROR"
             and expected_error_message in record.message
         ):
@@ -1447,7 +1447,7 @@ def testvalidate_single_enterprise_system_private_key_auth_missing_key(caplog):
     import logging
     import re
 
-    from deephaven_mcp.config.enterprise_system import (
+    from deephaven_mcp.config._enterprise_system import (
         EnterpriseSystemConfigurationError,
         validate_single_enterprise_system,
     )
@@ -1470,7 +1470,7 @@ def testvalidate_single_enterprise_system_private_key_auth_missing_key(caplog):
     found_log = False
     for record in caplog.records:
         if (
-            record.name == "deephaven_mcp.config.enterprise_system"
+            record.name == "deephaven_mcp.config._enterprise_system"
             and record.levelname == "ERROR"
             and expected_error_message in record.message
         ):
@@ -1489,7 +1489,7 @@ def testvalidate_single_enterprise_system_private_key_auth_invalid_key_type(capl
     import logging
     import re
 
-    from deephaven_mcp.config.enterprise_system import (
+    from deephaven_mcp.config._enterprise_system import (
         EnterpriseSystemConfigurationError,
         validate_single_enterprise_system,
     )
@@ -1513,7 +1513,7 @@ def testvalidate_single_enterprise_system_private_key_auth_invalid_key_type(capl
     found_log = False
     for record in caplog.records:
         if (
-            record.name == "deephaven_mcp.config.enterprise_system"
+            record.name == "deephaven_mcp.config._enterprise_system"
             and record.levelname == "ERROR"
             and expected_error_message in record.message
         ):
@@ -1532,7 +1532,7 @@ def testvalidate_single_enterprise_system_password_auth_both_passwords_present(c
     import logging
     import re
 
-    from deephaven_mcp.config.enterprise_system import (
+    from deephaven_mcp.config._enterprise_system import (
         EnterpriseSystemConfigurationError,
         validate_single_enterprise_system,
     )
@@ -1557,7 +1557,7 @@ def testvalidate_single_enterprise_system_password_auth_both_passwords_present(c
     found_log = False
     for record in caplog.records:
         if (
-            record.name == "deephaven_mcp.config.enterprise_system"
+            record.name == "deephaven_mcp.config._enterprise_system"
             and record.levelname == "ERROR"
             and expected_error_message in record.message
         ):
@@ -1577,7 +1577,7 @@ async def test_validate_enterprise_systems_config_invalid_system_name_type(caplo
     import logging
     import re
 
-    from deephaven_mcp.config.enterprise_system import (
+    from deephaven_mcp.config._enterprise_system import (
         EnterpriseSystemConfigurationError,
         validate_enterprise_systems_config,
     )
@@ -1605,7 +1605,7 @@ async def test_validate_enterprise_systems_config_invalid_system_name_type(caplo
     found_log = False
     for record in caplog.records:
         if (
-            record.name == "deephaven_mcp.config.enterprise_system"
+            record.name == "deephaven_mcp.config._enterprise_system"
             and record.levelname == "ERROR"
             and specific_error_detail in record.message
         ):
