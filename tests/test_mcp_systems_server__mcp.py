@@ -1,5 +1,5 @@
 """
-Tests for the deephaven_mcp.systems server and tools.
+Tests for the deephaven_mcp.mcp_systems_server server and tools.
 """
 
 import asyncio
@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-import deephaven_mcp.systems._mcp as mcp_mod
+import deephaven_mcp.mcp_systems_server._mcp as mcp_mod
 from deephaven_mcp import config
 
 
@@ -679,7 +679,7 @@ async def test_run_script_both_none(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_app_lifespan_yields_context_and_cleans_up():
-    from deephaven_mcp.systems._mcp import app_lifespan
+    from deephaven_mcp.mcp_systems_server._mcp import app_lifespan
 
     class DummyServer:
         name = "dummy-server"
@@ -692,14 +692,17 @@ async def test_app_lifespan_yields_context_and_cleans_up():
 
     with (
         patch(
-            "deephaven_mcp.systems._mcp.config.ConfigManager",
+            "deephaven_mcp.mcp_systems_server._mcp.config.ConfigManager",
             return_value=config_manager,
         ),
         patch(
-            "deephaven_mcp.systems._mcp.sessions.SessionManager",
+            "deephaven_mcp.mcp_systems_server._mcp.sessions.SessionManager",
             return_value=session_manager,
         ),
-        patch("deephaven_mcp.systems._mcp.asyncio.Lock", return_value=refresh_lock),
+        patch(
+            "deephaven_mcp.mcp_systems_server._mcp.asyncio.Lock",
+            return_value=refresh_lock,
+        ),
     ):
         server = DummyServer()
         async with app_lifespan(server) as context:
@@ -825,7 +828,7 @@ async def test_pip_packages_success(monkeypatch):
     mock_get_or_create_session = AsyncMock(return_value=MagicMock())
 
     with patch(
-        "deephaven_mcp.systems._sessions.get_pip_packages_table",
+        "deephaven_mcp.mcp_systems_server._sessions.get_pip_packages_table",
         mock_get_pip_packages_table,
     ):
         mock_manager = AsyncMock()
@@ -857,7 +860,7 @@ async def test_pip_packages_empty(monkeypatch):
         {"session_manager": mock_manager, "config_manager": AsyncMock()}
     )
     with patch(
-        "deephaven_mcp.systems._sessions.get_pip_packages_table",
+        "deephaven_mcp.mcp_systems_server._sessions.get_pip_packages_table",
         mock_get_pip_packages_table,
     ):
         result = await mcp_mod.pip_packages(context, worker_name="test_worker")
@@ -883,7 +886,7 @@ async def test_pip_packages_malformed_data(monkeypatch):
         {"session_manager": mock_manager, "config_manager": AsyncMock()}
     )
     with patch(
-        "deephaven_mcp.systems._sessions.get_pip_packages_table",
+        "deephaven_mcp.mcp_systems_server._sessions.get_pip_packages_table",
         mock_get_pip_packages_table,
     ):
         result = await mcp_mod.pip_packages(context, worker_name="test_worker")
@@ -901,7 +904,7 @@ async def test_pip_packages_error(monkeypatch):
     mock_get_or_create_session = AsyncMock(return_value=MagicMock())
 
     with patch(
-        "deephaven_mcp.systems._sessions.get_pip_packages_table",
+        "deephaven_mcp.mcp_systems_server._sessions.get_pip_packages_table",
         mock_get_pip_packages_table,
     ):
         mock_manager = AsyncMock()
@@ -925,7 +928,7 @@ async def test_pip_packages_worker_not_found(monkeypatch):
     mock_get_or_create_session = AsyncMock(side_effect=ValueError("Worker not found"))
 
     with patch(
-        "deephaven_mcp.systems._sessions.get_pip_packages_table",
+        "deephaven_mcp.mcp_systems_server._sessions.get_pip_packages_table",
         mock_get_pip_packages_table,
     ):
         mock_manager = AsyncMock()

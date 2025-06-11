@@ -1,5 +1,5 @@
 """
-deephaven_mcp.docs package
+deephaven_mcp.mcp_docs_server package
 
 This module serves as the entrypoint for the Deephaven MCP Docs server package. It provides access to the MCP server instance (`mcp_server`) and the `run_server` entrypoint for starting the server.
 
@@ -10,7 +10,7 @@ Exports:
     - run_server: Function to start the MCP server with the specified transport.
 
 Usage:
-    from deephaven_mcp.docs import mcp_server, run_server
+    from deephaven_mcp.mcp_docs_server import mcp_server, run_server
     run_server("stdio")
 
 See the project README for configuration details, available tools, and usage examples.

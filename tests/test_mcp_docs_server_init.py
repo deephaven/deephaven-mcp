@@ -10,8 +10,8 @@ import pytest
 
 def test_module_exports(monkeypatch):
     monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
-    sys.modules.pop("deephaven_mcp.docs.__init__", None)
-    mod = importlib.import_module("deephaven_mcp.docs.__init__")
+    sys.modules.pop("deephaven_mcp.mcp_docs_server.__init__", None)
+    mod = importlib.import_module("deephaven_mcp.mcp_docs_server.__init__")
     assert hasattr(mod, "mcp_server")
     assert hasattr(mod, "run_server")
     assert hasattr(mod, "main")
@@ -22,8 +22,8 @@ def test_module_exports(monkeypatch):
 
 def test_run_server_stdio(monkeypatch):
     monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
-    sys.modules.pop("deephaven_mcp.docs.__init__", None)
-    mod = importlib.import_module("deephaven_mcp.docs.__init__")
+    sys.modules.pop("deephaven_mcp.mcp_docs_server.__init__", None)
+    mod = importlib.import_module("deephaven_mcp.mcp_docs_server.__init__")
     called = {}
 
     class DummyServer:
@@ -43,8 +43,8 @@ def test_run_server_stdio(monkeypatch):
 
 def test_run_server_sse(monkeypatch):
     monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
-    sys.modules.pop("deephaven_mcp.docs.__init__", None)
-    mod = importlib.import_module("deephaven_mcp.docs.__init__")
+    sys.modules.pop("deephaven_mcp.mcp_docs_server.__init__", None)
+    mod = importlib.import_module("deephaven_mcp.mcp_docs_server.__init__")
     called = {}
 
     class DummyServer:
@@ -62,8 +62,8 @@ def test_run_server_sse(monkeypatch):
 
 def test_main_invokes_run_server(monkeypatch):
     monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
-    sys.modules.pop("deephaven_mcp.docs.__init__", None)
-    mod = importlib.import_module("deephaven_mcp.docs.__init__")
+    sys.modules.pop("deephaven_mcp.mcp_docs_server.__init__", None)
+    mod = importlib.import_module("deephaven_mcp.mcp_docs_server.__init__")
     called = {}
     monkeypatch.setattr(
         mod,
@@ -78,8 +78,8 @@ def test_main_invokes_run_server(monkeypatch):
 def test_run_server_binds_to_default_host(monkeypatch):
     """Test that run_server uses a server instance bound to 0.0.0.0 regardless of env vars."""
     monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
-    sys.modules.pop("deephaven_mcp.docs.__init__", None)
-    mod = importlib.import_module("deephaven_mcp.docs.__init__")
+    sys.modules.pop("deephaven_mcp.mcp_docs_server.__init__", None)
+    mod = importlib.import_module("deephaven_mcp.mcp_docs_server.__init__")
     called = {}
 
     class DummyServer:
@@ -103,8 +103,8 @@ def test_run_server_binds_to_default_host(monkeypatch):
 def test_run_server_exception_logs_stopped(monkeypatch, caplog):
     """Test that the 'stopped' log is emitted even if mcp_server.run raises an exception."""
     monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
-    sys.modules.pop("deephaven_mcp.docs.__init__", None)
-    mod = importlib.import_module("deephaven_mcp.docs.__init__")
+    sys.modules.pop("deephaven_mcp.mcp_docs_server.__init__", None)
+    mod = importlib.import_module("deephaven_mcp.mcp_docs_server.__init__")
 
     class DummyServer:
         name = "dummy"
@@ -126,7 +126,7 @@ def test_run_server_exception_logs_stopped(monkeypatch, caplog):
 def test_docs_module_main_invocation():
     """Test CLI entrypoint via subprocess for 100% coverage."""
     result = subprocess.run(
-        [sys.executable, "-m", "deephaven_mcp.docs.__init__", "-t", "stdio"],
+        [sys.executable, "-m", "deephaven_mcp.mcp_docs_server.__init__", "-t", "stdio"],
         env={**os.environ, "INKEEP_API_KEY": "dummy-key"},
         capture_output=True,
         text=True,
@@ -136,16 +136,16 @@ def test_docs_module_main_invocation():
 
 
 def test_import_docs_init():
-    sys.modules.pop("deephaven_mcp.docs.__init__", None)
-    importlib.import_module("deephaven_mcp.docs.__init__")
+    sys.modules.pop("deephaven_mcp.mcp_docs_server.__init__", None)
+    importlib.import_module("deephaven_mcp.mcp_docs_server.__init__")
 
 
 def test_run_server_host_env(monkeypatch):
     """Test that run_server uses the MCP_DOCS_HOST env var to bind the server to the specified host (e.g., 0.0.0.0)."""
     monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
     monkeypatch.setenv("MCP_DOCS_HOST", "0.0.0.0")
-    sys.modules.pop("deephaven_mcp.docs.__init__", None)
-    mod = importlib.import_module("deephaven_mcp.docs.__init__")
+    sys.modules.pop("deephaven_mcp.mcp_docs_server.__init__", None)
+    mod = importlib.import_module("deephaven_mcp.mcp_docs_server.__init__")
     called = {}
 
     class DummyServer:

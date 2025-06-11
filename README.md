@@ -98,7 +98,7 @@ If you have [`uv`](docs/UV.md) installed (or install it via `pip install uv`):
     ```sh
     uv pip install deephaven-mcp
     ```
-This command installs `deephaven-mcp` and its dependencies into the active virtual environment. If you skipped the explicit virtual environment creation step above, [`uv`](docs/UV.md) might still create or use one automatically (typically `.venv` in your current directory if `UV_AUTO_CREATE_VENV` is not `false`, or a globally managed one). In any case where a virtual environment is used (either explicitly created or automatically by `uv`), ensure it remains active for manual command-line use of `dh-mcp-systems` or `dh-mcp-docs`, or if your LLM tool requires an active environment.
+This command installs `deephaven-mcp` and its dependencies into the active virtual environment. If you skipped the explicit virtual environment creation step above, [`uv`](docs/UV.md) might still create or use one automatically (typically `.venv` in your current directory if `UV_AUTO_CREATE_VENV` is not `false`, or a globally managed one). In any case where a virtual environment is used (either explicitly created or automatically by `uv`), ensure it remains active for manual command-line use of `dh-mcp-systems-server` or `dh-mcp-docs-server`, or if your LLM tool requires an active environment.
 
 #### Option B: Using Standard `pip` and `venv`
 
@@ -119,7 +119,7 @@ This command installs `deephaven-mcp` and its dependencies into the active virtu
     ```sh
     pip install deephaven-mcp
     ```
-    Ensure this virtual environment is active in any terminal session where you intend to run `dh-mcp-systems` or `dh-mcp-docs` manually, or if your LLM tool requires an active environment when spawning these processes.
+    Ensure this virtual environment is active in any terminal session where you intend to run `dh-mcp-systems-server` or `dh-mcp-docs-server` manually, or if your LLM tool requires an active environment when spawning these processes.
 
 ---
 
@@ -278,7 +278,7 @@ Consult your LLM tool's documentation for the precise file name and location. Be
         "--directory",
         "/full/path/to/deephaven-mcp",
         "run",
-        "dh-mcp-systems"
+        "dh-mcp-systems-server"
       ],
       "env": {
         "DH_MCP_CONFIG_FILE": "/full/path/to/your/deephaven_mcp.json",
@@ -306,7 +306,7 @@ Consult your LLM tool's documentation for the precise file name and location. Be
 {
   "mcpServers": {
     "deephaven-systems": {
-      "command": "/full/path/to/your/deephaven-mcp/.venv/bin/dh-mcp-systems",
+      "command": "/full/path/to/your/deephaven-mcp/.venv/bin/dh-mcp-systems-server",
       "args": [], 
       "env": {
         "DH_MCP_CONFIG_FILE": "/full/path/to/your/deephaven_mcp.json",
@@ -371,7 +371,7 @@ If the servers are not listed or you encounter errors at this stage, please proc
         *   Test basic network connectivity (e.g., using [`ping`](https://en.wikipedia.org/wiki/Ping_(networking_utility)) or [`curl`](https://curl.se/docs/manpage.html) from the relevant machine) if connections are failing.
 *   **`command not found` for [`uv`](docs/UV.md) (in LLM tool logs):**
     *   Ensure [`uv`](docs/UV.md) is installed and its installation directory is in your system's `PATH` environment variable, accessible by the LLM tool.
-*   **`command not found` for `dh-mcp-systems` or [`mcp-proxy`](https://github.com/modelcontextprotocol/mcp-proxy) (venv option in LLM tool logs):**
+*   **`command not found` for `dh-mcp-systems-server` or [`mcp-proxy`](https://github.com/modelcontextprotocol/mcp-proxy) (venv option in LLM tool logs):**
     *   Double-check that the `command` field in your JSON config uses the **correct absolute path** to the executable within your `.venv/bin/` (or `.venv\Scripts\`) directory.
 *   **Port Conflicts:** If a server fails to start (check logs), another process might be using the required port (e.g., port 8000 for default SSE).
 *   **Python Errors in Server Logs:** Check the server logs for Python tracebacks. Ensure all dependencies were installed correctly (see [Installation & Initial Setup](#installation--initial-setup)).

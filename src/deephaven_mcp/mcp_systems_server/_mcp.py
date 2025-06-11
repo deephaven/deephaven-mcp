@@ -31,7 +31,7 @@ from contextlib import asynccontextmanager
 import aiofiles
 from mcp.server.fastmcp import Context, FastMCP
 
-import deephaven_mcp.systems._sessions as sessions
+import deephaven_mcp.mcp_systems_server._sessions as sessions
 from deephaven_mcp import config
 
 _LOGGER = logging.getLogger(__name__)
