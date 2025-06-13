@@ -64,17 +64,21 @@ async def get_pip_packages_table(session: Session) -> pyarrow.Table:
         >>> arrow_table = await get_pip_packages_table(session)
     """
     script = """
-    from deephaven import new_table, string_col
-    import importlib.metadata as importlib_metadata
-    names = []
-    versions = []
-    for dist in importlib_metadata.distributions():
-        names.append(dist.metadata['Name'])
-        versions.append(dist.version)
-    result = new_table([
-        string_col('Package', names),
-        string_col('Version', versions),
-    ])
+    
+    def _make_pip_packages_table():
+        from deephaven import new_table, string_col
+        import importlib.metadata as importlib_metadata
+        names = []
+        versions = []
+        for dist in importlib_metadata.distributions():
+            names.append(dist.metadata['Name'])
+            versions.append(dist.version)
+        return new_table([
+            string_col('Package', names),
+            string_col('Version', versions),
+        ])
+    
+    _pip_packages_table = _make_pip_packages_table()
     """
     _LOGGER.info("Running pip packages script in session...")
     await asyncio.to_thread(session.run_script, script)
