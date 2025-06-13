@@ -76,7 +76,7 @@ async def test_close_session_safely_handles_exceptions(caplog):
     session = MagicMock(spec=Session)
     session.is_alive = True
     session.close.side_effect = Exception("fail-close")
-    await close_session_safely("worker1", session)
+    await close_session_safely(session, "worker1")
     assert any("Failed to close session" in r for r in caplog.text.splitlines())
 
 
@@ -130,7 +130,7 @@ async def test_close_session_safely_is_alive_raises(caplog):
         return False
 
     type(session).is_alive = property(is_alive_side_effect)
-    await close_session_safely("worker3", session)
+    await close_session_safely(session, "worker3")
     assert any(
         "Failed to close session" in r or "Error" in r for r in caplog.text.splitlines()
     )
@@ -217,7 +217,7 @@ async def test_close_session_safely_closes_alive(session_manager):
     session = MagicMock(spec=Session)
     session.is_alive = True
     session.close = MagicMock()
-    await close_session_safely("worker1", session)
+    await close_session_safely(session, "session1")
     session.close.assert_called_once()
 
 
@@ -226,7 +226,7 @@ async def test_close_session_safely_already_closed(session_manager):
     session = MagicMock(spec=Session)
     session.is_alive = False
     session.close = MagicMock()
-    await close_session_safely("worker1", session)
+    await close_session_safely(session, "session1")
     session.close.assert_not_called()
 
 
@@ -235,7 +235,7 @@ async def test_close_session_safely_raises(session_manager, caplog):
     session = MagicMock(spec=Session)
     session.is_alive = True
     session.close.side_effect = Exception("fail-close")
-    await close_session_safely("worker1", session)
+    await close_session_safely(session, "session1")
     assert any("Failed to close session" in r for r in caplog.text.splitlines())
 
 
@@ -256,7 +256,7 @@ async def test_clear_all_sessions_calls_close(session_manager):
     session = MagicMock(spec=Session)
     session.is_alive = True
     session.close = MagicMock()
-    session_manager._cache["worker1"] = session
+    session_manager._cache["session1"] = session
     await session_manager.clear_all_sessions()
     session.close.assert_called_once()
 
