@@ -44,6 +44,140 @@ from ._errors import SessionCreationError
 _LOGGER = logging.getLogger(__name__)
 
 
+def redact_sensitive_session_fields(config: dict[str, Any], redact_binary_values: bool = True) -> dict[str, Any]:
+    """
+    Return a copy of a session config dictionary with sensitive values redacted for safe logging.
+    Redacts authentication tokens and, by default, any sensitive fields that are binary data.
+    """
+    redacted = dict(config)
+    sensitive_keys = [
+        "auth_token",
+        "tls_root_certs",
+        "client_cert_chain",
+        "client_private_key",
+    ]
+    for key in sensitive_keys:
+        if key in redacted and redacted[key]:
+            if key == "auth_token":
+                redacted[key] = "REDACTED"
+            elif redact_binary_values and isinstance(redacted[key], (bytes, bytearray)):
+                redacted[key] = "REDACTED"
+    return redacted
+
+async def create_session(**kwargs: Any) -> Session:
+    """
+    Create and return a new Deephaven Session instance in a background thread.
+    Raises SessionCreationError if session creation fails.
+    """
+    log_kwargs = redact_sensitive_session_fields(kwargs)
+    _LOGGER.info(f"Creating new Deephaven Session with config: {log_kwargs}")
+    try:
+        session = await asyncio.to_thread(Session, **kwargs)
+    except Exception as e:
+        _LOGGER.warning(
+            f"Failed to create Deephaven Session with config: {log_kwargs}: {e}"
+        )
+        raise SessionCreationError(
+            f"Failed to create Deephaven Session with config: {log_kwargs}: {e}"
+        ) from e
+    _LOGGER.info(f"Successfully created Deephaven Session: {session}")
+    return session
+
+async def get_session_parameters(worker_cfg: dict[str, Any]) -> dict[str, Any]:
+    """
+    Prepare and return the configuration dictionary for Deephaven Session creation.
+    Loads certificate/key files as needed (using async I/O), redacts sensitive info for logging,
+    and returns a dictionary of parameters ready to be passed to pydeephaven.Session.
+    """
+    log_cfg = redact_sensitive_session_fields(worker_cfg)
+    _LOGGER.info(f"Session configuration: {log_cfg}")
+    host = worker_cfg.get("host", None)
+    port = worker_cfg.get("port", None)
+    auth_type = worker_cfg.get("auth_type", "Anonymous")
+    auth_token = worker_cfg.get("auth_token")
+    auth_token_env_var = worker_cfg.get("auth_token_env_var")
+    if auth_token_env_var:
+        _LOGGER.info(
+            f"Attempting to read auth token from environment variable: {auth_token_env_var}"
+        )
+        token_from_env = os.getenv(auth_token_env_var)
+        if token_from_env is not None:
+            auth_token = token_from_env
+            _LOGGER.info(
+                f"Successfully read auth token from environment variable {auth_token_env_var}."
+            )
+        else:
+            auth_token = ""
+            _LOGGER.warning(
+                f"Environment variable {auth_token_env_var} specified for auth_token but not found. Using empty token."
+            )
+    elif auth_token is None:
+        auth_token = ""
+    never_timeout = worker_cfg.get("never_timeout", False)
+    session_type = worker_cfg.get("session_type", "python")
+    use_tls = worker_cfg.get("use_tls", False)
+    tls_root_certs = worker_cfg.get("tls_root_certs", None)
+    client_cert_chain = worker_cfg.get("client_cert_chain", None)
+    client_private_key = worker_cfg.get("client_private_key", None)
+    if tls_root_certs:
+        _LOGGER.info(
+            f"Loading TLS root certs from: {worker_cfg.get('tls_root_certs')}"
+        )
+        tls_root_certs = await load_bytes(tls_root_certs)
+        _LOGGER.info("Loaded TLS root certs successfully.")
+    else:
+        _LOGGER.debug("No TLS root certs provided for session.")
+    if client_cert_chain:
+        _LOGGER.info(
+            f"Loading client cert chain from: {worker_cfg.get('client_cert_chain')}"
+        )
+        client_cert_chain = await load_bytes(client_cert_chain)
+        _LOGGER.info("Loaded client cert chain successfully.")
+    else:
+        _LOGGER.debug("No client cert chain provided for session.")
+    if client_private_key:
+        _LOGGER.info(
+            f"Loading client private key from: {worker_cfg.get('client_private_key')}"
+        )
+        client_private_key = await load_bytes(client_private_key)
+        _LOGGER.info("Loaded client private key successfully.")
+    else:
+        _LOGGER.debug("No client private key provided for session.")
+    session_config = {
+        "host": host,
+        "port": port,
+        "auth_type": auth_type,
+        "auth_token": auth_token,
+        "never_timeout": never_timeout,
+        "session_type": session_type,
+        "use_tls": use_tls,
+        "tls_root_certs": tls_root_certs,
+        "client_cert_chain": client_cert_chain,
+        "client_private_key": client_private_key,
+    }
+    log_cfg = redact_sensitive_session_fields(session_config)
+    _LOGGER.info(f"Prepared Deephaven Session config: {log_cfg}")
+    return session_config
+
+async def close_session_safely(worker_key: str, session: Session) -> None:
+    """
+    Attempt to safely close a Deephaven session if it is alive. Used for resource cleanup.
+    Any exceptions during closure are logged and do not prevent cleanup of other sessions.
+    """
+    try:
+        if session.is_alive:
+            _LOGGER.info(f"Closing alive session for worker: {worker_key}")
+            await asyncio.to_thread(session.close)
+            _LOGGER.info(f"Successfully closed session for worker: {worker_key}")
+        else:
+            _LOGGER.debug(f"Session for worker '{worker_key}' is already closed")
+    except Exception as e:
+        _LOGGER.error(f"Failed to close session for worker '{worker_key}': {e}")
+        _LOGGER.debug(
+            f"Session state after error: is_alive={session.is_alive}",
+            exc_info=True,
+        )
+
 class SessionManager:
     """
     Manages Deephaven Session objects, including creation, caching, and lifecycle.
@@ -153,7 +287,7 @@ class SessionManager:
             num_sessions = len(self._cache)
             _LOGGER.info(f"Processing {num_sessions} cached sessions...")
             for worker_key, session in list(self._cache.items()):
-                await self._close_session_safely(worker_key, session)
+                await close_session_safely(worker_key, session)
             self._cache.clear()
             _LOGGER.info(
                 f"Session cache cleared. Processed {num_sessions} sessions in {time.time() - start_time:.2f}s"
@@ -194,209 +328,6 @@ class SessionManager:
                 f"Session state after error: is_alive={session.is_alive}",
                 exc_info=True,
             )
-
-    def _redact_sensitive_session_fields(
-        self, config: dict[str, Any], redact_binary_values: bool = True
-    ) -> dict[str, Any]:
-        """
-        Return a copy of a session config dictionary with sensitive values redacted for safe logging.
-
-        This method is used to sanitize session configuration dictionaries before logging, to prevent accidental leakage of secrets or binary credentials. It redacts authentication tokens and, by default, any sensitive fields that are binary data.
-
-        Args:
-            config (dict): The configuration dictionary to redact.
-            redact_binary_values (bool, optional):
-                If True (default), redact sensitive fields if their values are binary (bytes/bytearray); file paths are preserved if they are strings.
-                If False, only redact always-sensitive values (e.g., auth_token); file paths are shown even if they point to secrets.
-
-        Returns:
-            dict: A shallow copy of the input config with sensitive values redacted as appropriate.
-
-        Redacted Fields:
-            - 'auth_token' (always redacted if present and non-empty)
-            - 'tls_root_certs', 'client_cert_chain', 'client_private_key':
-                - Redacted if value is bytes/bytearray and redact_binary_values is True
-                - File paths (str) are preserved unless redact_binary_values is explicitly set to True and you want to hide them
-
-        Security Rationale:
-            Redacting these fields prevents accidental leakage of secrets and binary credentials in logs.
-
-        Example:
-            >>> cfg = {'auth_token': 'abc', 'client_private_key': b'secret'}
-            >>> mgr._redact_sensitive_session_fields(cfg)
-            {'auth_token': 'REDACTED', 'client_private_key': 'REDACTED'}
-        """
-        redacted = dict(config)
-        sensitive_keys = [
-            "auth_token",
-            "tls_root_certs",
-            "client_cert_chain",
-            "client_private_key",
-        ]
-        for key in sensitive_keys:
-            if key in redacted and redacted[key]:
-                # Redact if binary (bytes) or if always sensitive (auth_token)
-                if key == "auth_token":
-                    redacted[key] = "REDACTED"
-                elif redact_binary_values and isinstance(
-                    redacted[key], bytes | bytearray
-                ):
-                    redacted[key] = "REDACTED"
-        return redacted
-
-    async def _create_session(self, **kwargs: Any) -> Session:
-        """
-        Create and return a new Deephaven Session instance in a background thread.
-
-        This helper is separated for testability and can be patched or mocked in unit tests.
-        All session configuration parameters should be passed as keyword arguments. Sensitive values are redacted in logs.
-
-        Args:
-            **kwargs: All configuration options for pydeephaven.Session (host, port, auth_token, etc.)
-
-        Returns:
-            Session: A configured Deephaven Session instance.
-
-        Error Handling:
-            - Any exceptions during session creation will raise SessionCreationError with details.
-
-        Raises:
-            SessionCreationError: If the session could not be created for any reason.
-
-        Example:
-            session = await mgr._create_session(host='localhost', port=10000)
-        """
-        log_kwargs = self._redact_sensitive_session_fields(kwargs)
-        _LOGGER.info(f"Creating new Deephaven Session with config: {log_kwargs}")
-
-        try:
-            session = await asyncio.to_thread(Session, **kwargs)
-        except Exception as e:
-            _LOGGER.warning(
-                f"Failed to create Deephaven Session with config: {log_kwargs}: {e}"
-            )
-            raise SessionCreationError(
-                f"Failed to create Deephaven Session with config: {log_kwargs}: {e}"
-            ) from e
-
-        _LOGGER.info(f"Successfully created Deephaven Session: {session}")
-        return session
-
-    async def _get_session_parameters(
-        self, worker_cfg: dict[str, Any]
-    ) -> dict[str, Any]:
-        """
-        Prepare and return the configuration dictionary for Deephaven Session creation.
-
-        This method loads certificate/key files as needed (using async I/O), redacts sensitive info for logging,
-        and returns a dictionary of parameters ready to be passed to pydeephaven.Session. It is always used before
-        session creation and ensures all configuration is normalized and safe for logging.
-
-        Args:
-            worker_cfg (dict): The worker configuration dictionary. May include:
-                - host (str): Deephaven server host
-                - port (int): Deephaven server port
-                - auth_type (str): Authentication type
-                - auth_token (str): Authentication token
-                - never_timeout (bool): Disable session timeout
-                - session_type (str): Session type (e.g., 'python')
-                - use_tls (bool): Use TLS/SSL
-                - tls_root_certs (str/bytes): Path or bytes for TLS root certs
-                - client_cert_chain (str/bytes): Path or bytes for client cert chain
-                - client_private_key (str/bytes): Path or bytes for client private key
-                - worker_name (str): Optional, for logging context
-
-        Returns:
-            dict: Dictionary of parameters for Session creation, normalized and ready for pydeephaven.Session.
-
-        Error Handling:
-            - Any exceptions during file loading will propagate to the caller.
-            - No required fields are enforced at this layer; missing fields are passed as None or omitted.
-
-        Example:
-            params = await mgr._get_session_parameters({'host': 'localhost', 'port': 10000})
-        """
-        log_cfg = self._redact_sensitive_session_fields(worker_cfg)
-        _LOGGER.info(f"Session configuration: {log_cfg}")
-
-        host = worker_cfg.get("host", None)
-        port = worker_cfg.get("port", None)
-        auth_type = worker_cfg.get("auth_type", "Anonymous")
-        auth_token = worker_cfg.get("auth_token")  # Will be None if not set
-        auth_token_env_var = worker_cfg.get("auth_token_env_var")
-
-        if auth_token_env_var:
-            _LOGGER.info(
-                f"Attempting to read auth token from environment variable: {auth_token_env_var}"
-            )
-            token_from_env = os.getenv(auth_token_env_var)
-            if token_from_env is not None:
-                auth_token = token_from_env
-                _LOGGER.info(
-                    f"Successfully read auth token from environment variable {auth_token_env_var}."
-                )
-            else:
-                auth_token = (
-                    ""  # Default to empty if env var is specified but not found
-                )
-                _LOGGER.warning(
-                    f"Environment variable {auth_token_env_var} specified for auth_token but not found. Using empty token."
-                )
-        elif auth_token is None:
-            # If neither auth_token_env_var nor auth_token is provided, default to empty string.
-            auth_token = ""
-        never_timeout = worker_cfg.get("never_timeout", False)
-        session_type = worker_cfg.get("session_type", "python")
-        use_tls = worker_cfg.get("use_tls", False)
-        tls_root_certs = worker_cfg.get("tls_root_certs", None)
-        client_cert_chain = worker_cfg.get("client_cert_chain", None)
-        client_private_key = worker_cfg.get("client_private_key", None)
-
-        if tls_root_certs:
-            _LOGGER.info(
-                f"Loading TLS root certs from: {worker_cfg.get('tls_root_certs')}"
-            )
-            tls_root_certs = await load_bytes(tls_root_certs)
-            _LOGGER.info("Loaded TLS root certs successfully.")
-        else:
-            _LOGGER.debug("No TLS root certs provided for session.")
-
-        if client_cert_chain:
-            _LOGGER.info(
-                f"Loading client cert chain from: {worker_cfg.get('client_cert_chain')}"
-            )
-            client_cert_chain = await load_bytes(client_cert_chain)
-            _LOGGER.info("Loaded client cert chain successfully.")
-        else:
-            _LOGGER.debug("No client cert chain provided for session.")
-
-        if client_private_key:
-            _LOGGER.info(
-                f"Loading client private key from: {worker_cfg.get('client_private_key')}"
-            )
-            client_private_key = await load_bytes(client_private_key)
-            _LOGGER.info("Loaded client private key successfully.")
-        else:
-            _LOGGER.debug("No client private key provided for session.")
-
-        session_config = {
-            "host": host,
-            "port": port,
-            "auth_type": auth_type,
-            "auth_token": auth_token,
-            "never_timeout": never_timeout,
-            "session_type": session_type,
-            "use_tls": use_tls,
-            "tls_root_certs": tls_root_certs,
-            "client_cert_chain": client_cert_chain,
-            "client_private_key": client_private_key,
-        }
-
-        # Log final prepared config (file paths may have been replaced by binary values)
-        log_cfg = self._redact_sensitive_session_fields(session_config)
-        _LOGGER.info(f"Prepared Deephaven Session config: {log_cfg}")
-
-        return session_config
 
     async def get_or_create_session(self, worker_name: str) -> Session:
         """
@@ -455,17 +386,13 @@ class SessionManager:
             worker_cfg = await config.get_named_config(
                 self._config_manager, "community_sessions", worker_name
             )
-            session_params = await self._get_session_parameters(worker_cfg)
-
-            # Redact sensitive info for logging
-            log_cfg = self._redact_sensitive_session_fields(session_params)
+            session_params = await get_session_parameters(worker_cfg)
+            log_cfg = redact_sensitive_session_fields(session_params)
             log_cfg["worker_name"] = worker_name
             _LOGGER.info(
                 f"Creating new Deephaven Session with config: (worker cache key: {worker_name}) {log_cfg}"
             )
-
-            session = await self._create_session(**session_params)
-
+            session = await create_session(**session_params)
             _LOGGER.info(
                 f"Successfully created session for worker: {worker_name}, adding to cache."
             )
