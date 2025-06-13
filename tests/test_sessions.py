@@ -122,27 +122,67 @@ async def test_session_manager_delegates_to_helpers():
         return_value={"community_sessions": {"workerY": {"host": "localhost"}}}
     )
     mgr = SessionManager(mock_cfg_mgr)
-    with (
-        patch(
-            "deephaven_mcp.sessions._sessions.get_session_parameters",
-            new=AsyncMock(return_value={"host": "localhost"}),
-        ) as mock_params,
-        patch(
-            "deephaven_mcp.sessions._sessions.create_session",
-            new=AsyncMock(return_value="SESSION"),
-        ) as mock_create,
-    ):
+    with patch(
+        "deephaven_mcp.sessions._sessions.create_session_for_worker",
+        new=AsyncMock(return_value="SESSION"),
+    ) as mock_create_worker:
         result = await mgr.get_or_create_session("workerY")
-    mock_params.assert_called_once()
-    mock_create.assert_called_once()
+    mock_create_worker.assert_called_once_with(mock_cfg_mgr, "workerY")
     assert result == "SESSION"
 
 
-@pytest.fixture
-def fake_session():
-    s = MagicMock(spec=Session)
-    s.is_alive = True
-    return s
+@pytest.mark.asyncio
+async def test_create_session_for_worker(monkeypatch):
+    async def fake_get_named_config(cfg_mgr, section, name):
+        assert section == "community_sessions"
+        assert name == "workerZ"
+        return {"host": "localhost"}
+
+    async def fake_get_session_parameters(cfg):
+        assert cfg["host"] == "localhost"
+        return {"host": "localhost"}
+
+    async def fake_create_session(**kwargs):
+        assert kwargs["host"] == "localhost"
+        return "SESSION"
+
+    monkeypatch.setattr("deephaven_mcp.sessions._sessions.config.get_named_config", fake_get_named_config)
+    monkeypatch.setattr("deephaven_mcp.sessions._sessions.get_session_parameters", fake_get_session_parameters)
+    monkeypatch.setattr("deephaven_mcp.sessions._sessions.create_session", fake_create_session)
+
+    from deephaven_mcp.sessions._sessions import create_session_for_worker
+    cfg_mgr = MagicMock()
+    session = await create_session_for_worker(cfg_mgr, "workerZ")
+    assert session == "SESSION"
+
+
+@pytest.mark.asyncio
+async def test_create_session_for_worker_config_fail(monkeypatch):
+    async def fake_get_named_config(cfg_mgr, section, name):
+        raise RuntimeError("fail-config")
+
+    monkeypatch.setattr("deephaven_mcp.sessions._sessions.config.get_named_config", fake_get_named_config)
+    from deephaven_mcp.sessions._sessions import create_session_for_worker
+    cfg_mgr = MagicMock()
+    with pytest.raises(RuntimeError):
+        await create_session_for_worker(cfg_mgr, "workerZ")
+
+
+@pytest.mark.asyncio
+async def test_create_session_for_worker_session_fail(monkeypatch):
+    async def fake_get_named_config(cfg_mgr, section, name):
+        return {"host": "localhost"}
+    async def fake_get_session_parameters(cfg):
+        return {"host": "localhost"}
+    async def fake_create_session(**kwargs):
+        raise RuntimeError("fail-create")
+    monkeypatch.setattr("deephaven_mcp.sessions._sessions.config.get_named_config", fake_get_named_config)
+    monkeypatch.setattr("deephaven_mcp.sessions._sessions.get_session_parameters", fake_get_session_parameters)
+    monkeypatch.setattr("deephaven_mcp.sessions._sessions.create_session", fake_create_session)
+    from deephaven_mcp.sessions._sessions import create_session_for_worker
+    cfg_mgr = MagicMock()
+    with pytest.raises(RuntimeError):
+        await create_session_for_worker(cfg_mgr, "workerZ")
 
 
 # --- Tests for SessionManager._close_session_safely ---

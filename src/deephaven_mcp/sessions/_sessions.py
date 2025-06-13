@@ -137,6 +137,31 @@ async def get_session_parameters(worker_cfg: dict[str, Any]) -> dict[str, Any]:
     _LOGGER.info(f"Prepared Deephaven Session config: {log_cfg}")
     return session_config
 
+async def create_session_for_worker(config_manager: config.ConfigManager, session_name: str) -> Session:
+    """
+    Create and return a new Deephaven Session for the given worker/session name.
+
+    This helper looks up the worker configuration, gathers session parameters, logs the (redacted) config,
+    and creates the session. It does not handle caching.
+
+    Args:
+        session_name (str): The name of the worker/session.
+        config_manager: The config manager to use for config lookup.
+
+    Returns:
+        Session: A new Deephaven Session instance.
+    """
+    _LOGGER.info(f"Creating new session: {session_name}")
+    worker_cfg = await config.get_named_config(config_manager, "community_sessions", session_name)
+    session_params = await get_session_parameters(worker_cfg)
+    log_cfg = redact_community_session_config(session_params)
+    log_cfg["session_name"] = session_name
+    _LOGGER.info(
+        f"Creating new Deephaven Session with config: (worker cache key: {session_name}) {log_cfg}"
+    )
+    session = await create_session(**session_params)
+    _LOGGER.info(f"Successfully created session: {session_name}")
+    return session
 
 
 
@@ -308,23 +333,13 @@ class SessionManager:
                         f"Error checking session liveness for worker '{session_name}': {e}. Recreating session."
                     )
 
-            # At this point, we need to create a new session and update the cache
-            _LOGGER.info(f"Creating new session for worker: {session_name}")
-            worker_cfg = await config.get_named_config(
-                self._config_manager, "community_sessions", session_name
-            )
-            session_params = await get_session_parameters(worker_cfg)
-            log_cfg = redact_community_session_config(session_params)
-            log_cfg["session_name"] = session_name
-            _LOGGER.info(
-                f"Creating new Deephaven Session with config: (worker cache key: {session_name}) {log_cfg}"
-            )
-            session = await create_session(**session_params)
-            _LOGGER.info(
-                f"Successfully created session for worker: {session_name}, adding to cache."
-            )
+            # At this point, we need to create a new session
+            session = await create_session_for_worker(self._config_manager, session_name)
             self._cache[session_name] = session
             _LOGGER.info(
                 f"Session cached for worker: {session_name}. Returning session."
             )
             return session
+
+
+
