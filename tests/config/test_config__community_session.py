@@ -15,7 +15,7 @@ from deephaven_mcp.config._community_session import (
 
 
 def test_redact_community_session_config():
-    """Test that auth_token is redacted and other fields are not."""
+    """Test that all sensitive fields are redacted according to unified logic."""
     original_config = {
         "host": "localhost",
         "port": 10000,
@@ -23,7 +23,9 @@ def test_redact_community_session_config():
         "auth_token": "sensitive_token_value",
         "auth_token_env_var": "MY_ENV_VAR_NAME",
         "session_type": "python",
-        "client_private_key": "/path/to/key.pem",  # Path, not sensitive content
+        "tls_root_certs": b"binaryca",
+        "client_cert_chain": b"binarychain",
+        "client_private_key": b"binarykey",
     }
     redacted = redact_community_session_config(original_config)
 
@@ -33,10 +35,94 @@ def test_redact_community_session_config():
     assert redacted["auth_token"] == "[REDACTED]"
     assert redacted["auth_token_env_var"] == "MY_ENV_VAR_NAME"
     assert redacted["session_type"] == "python"
-    assert redacted["client_private_key"] == "/path/to/key.pem"
+    assert redacted["tls_root_certs"] == "[REDACTED]"
+    assert redacted["client_cert_chain"] == "[REDACTED]"
+    assert redacted["client_private_key"] == "[REDACTED]"
     assert "sensitive_token_value" not in redacted.values()
+    assert b"binaryca" not in redacted.values()
+    assert b"binarychain" not in redacted.values()
+    assert b"binarykey" not in redacted.values()
     # Ensure original is not modified
     assert original_config["auth_token"] == "sensitive_token_value"
+    assert original_config["tls_root_certs"] == b"binaryca"
+    assert original_config["client_cert_chain"] == b"binarychain"
+    assert original_config["client_private_key"] == b"binarykey"
+
+
+def test_redact_community_session_config_comprehensive():
+    # All sensitive keys, string and binary
+    config = {
+        "auth_token": "secret",
+        "tls_root_certs": b"bytes",
+        "client_cert_chain": b"chain-bytes",
+        "client_private_key": b"key-bytes",
+        "foo": "bar",
+    }
+    # Default: redact all sensitive fields
+    redacted = redact_community_session_config(config)
+    assert redacted["auth_token"] == "[REDACTED]"
+    assert redacted["tls_root_certs"] == "[REDACTED]"
+    assert redacted["client_cert_chain"] == "[REDACTED]"
+    assert redacted["client_private_key"] == "[REDACTED]"
+    assert redacted["foo"] == "bar"
+    # redact_binary_values=False: only auth_token is redacted, binary fields are not
+    config = {"auth_token": "tok", "tls_root_certs": b"binary"}
+    redacted = redact_community_session_config(config, redact_binary_values=False)
+    assert redacted["auth_token"] == "[REDACTED]"
+    assert redacted["tls_root_certs"] == b"binary"
+
+
+def test_redact_community_session_config_empty():
+    # No sensitive values
+    cfg = {"foo": "bar"}
+    assert redact_community_session_config(cfg) == cfg
+
+
+import pytest
+
+
+def test_redact_community_session_config_edge_cases():
+    # Empty config
+    assert redact_community_session_config({}) == {}
+    # Unexpected types
+    cfg = {"auth_token": 123, "tls_root_certs": None, "foo": b"bar"}
+    result = redact_community_session_config(cfg)
+    assert result["auth_token"] == "[REDACTED]"
+    assert result["tls_root_certs"] is None
+    assert result["foo"] == b"bar"
+
+    """Test that all sensitive fields are redacted according to unified logic."""
+    original_config = {
+        "host": "localhost",
+        "port": 10000,
+        "auth_type": "token",
+        "auth_token": "sensitive_token_value",
+        "auth_token_env_var": "MY_ENV_VAR_NAME",
+        "session_type": "python",
+        "tls_root_certs": b"binaryca",
+        "client_cert_chain": b"binarychain",
+        "client_private_key": b"binarykey",
+    }
+    redacted = redact_community_session_config(original_config)
+
+    assert redacted["host"] == "localhost"
+    assert redacted["port"] == 10000
+    assert redacted["auth_type"] == "token"
+    assert redacted["auth_token"] == "[REDACTED]"
+    assert redacted["auth_token_env_var"] == "MY_ENV_VAR_NAME"
+    assert redacted["session_type"] == "python"
+    assert redacted["tls_root_certs"] == "[REDACTED]"
+    assert redacted["client_cert_chain"] == "[REDACTED]"
+    assert redacted["client_private_key"] == "[REDACTED]"
+    assert "sensitive_token_value" not in redacted.values()
+    assert b"binaryca" not in redacted.values()
+    assert b"binarychain" not in redacted.values()
+    assert b"binarykey" not in redacted.values()
+    # Ensure original is not modified
+    assert original_config["auth_token"] == "sensitive_token_value"
+    assert original_config["tls_root_certs"] == b"binaryca"
+    assert original_config["client_cert_chain"] == b"binarychain"
+    assert original_config["client_private_key"] == b"binarykey"
 
 
 def test_redact_community_session_config_no_token():
