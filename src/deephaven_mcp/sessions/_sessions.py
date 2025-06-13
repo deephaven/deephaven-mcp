@@ -37,8 +37,8 @@ from pydeephaven import Session
 from deephaven_mcp import config
 from deephaven_mcp.config._community_session import redact_community_session_config
 from deephaven_mcp.io import load_bytes
-from ._lifecycle import close_session_safely
-from ._lifecycle_community import create_session, get_session_parameters, create_session_for_worker
+from ._lifecycle.shared import close_session_safely
+from ._lifecycle.community import create_session, _get_session_parameters, create_session_for_worker
 from ._errors import SessionCreationError
 
 _LOGGER = logging.getLogger(__name__)

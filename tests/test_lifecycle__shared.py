@@ -3,10 +3,11 @@ import asyncio
 import logging
 from unittest.mock import MagicMock
 from pydeephaven import Session
-from deephaven_mcp.sessions._lifecycle import close_session_safely
+from deephaven_mcp.sessions._lifecycle.shared import close_session_safely
 
 @pytest.mark.asyncio
 async def test_close_session_safely_closes_alive_session(caplog):
+    caplog.set_level(logging.INFO)
     session = MagicMock(spec=Session)
     session.is_alive = True
     session.close = MagicMock()

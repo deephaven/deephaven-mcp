@@ -10,6 +10,7 @@ import os
 import asyncio
 from typing import Any
 from pydeephaven import Session
+from deephaven_mcp.sessions._errors import SessionCreationError
 from deephaven_mcp import config
 from deephaven_mcp.config._community_session import redact_community_session_config
 from deephaven_mcp.io import load_bytes
@@ -40,14 +41,13 @@ async def create_session(**kwargs: Any) -> Session:
         _LOGGER.warning(
             f"[Community] Failed to create Deephaven Community (Core) Session with config: {log_kwargs}: {e}"
         )
-        from ._errors import SessionCreationError
         raise SessionCreationError(
             f"Failed to create Deephaven Community (Core) Session with config: {log_kwargs}: {e}"
         ) from e
     _LOGGER.info(f"[Community] Successfully created Deephaven Community (Core) Session: {session}")
     return session
 
-async def get_session_parameters(worker_cfg: dict[str, Any]) -> dict[str, Any]:
+async def _get_session_parameters(worker_cfg: dict[str, Any]) -> dict[str, Any]:
     """
     Prepare and return a configuration dictionary for Deephaven Community (Core) Session creation.
 
@@ -151,7 +151,7 @@ async def create_session_for_worker(config_manager: config.ConfigManager, sessio
     """
     _LOGGER.info(f"[Community] Creating new Deephaven Community (Core) session: {session_name}")
     worker_cfg = await config.get_named_config(config_manager, "community_sessions", session_name)
-    session_params = await get_session_parameters(worker_cfg)
+    session_params = await _get_session_parameters(worker_cfg)
     log_cfg = redact_community_session_config(session_params)
     log_cfg["session_name"] = session_name
     _LOGGER.info(
