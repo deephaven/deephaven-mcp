@@ -43,7 +43,6 @@ def session_manager(mock_config_manager):
 # --- Additional Robustness Tests ---
 
 
-
 @pytest.mark.asyncio
 async def test_create_session_error_handling():
     # Should raise SessionCreationError on failure
@@ -54,8 +53,12 @@ async def test_create_session_error_handling():
         with pytest.raises(SessionCreationError) as exc_info:
             await create_session(host="localhost")
         # Check error message contains context and original error
-        assert "Failed to create Deephaven Community (Core) Session" in str(exc_info.value)
-        assert "fail" in str(exc_info.value) or (exc_info.value.__cause__ and "fail" in str(exc_info.value.__cause__))
+        assert "Failed to create Deephaven Community (Core) Session" in str(
+            exc_info.value
+        )
+        assert "fail" in str(exc_info.value) or (
+            exc_info.value.__cause__ and "fail" in str(exc_info.value.__cause__)
+        )
 
 
 @pytest.mark.asyncio
@@ -96,6 +99,7 @@ async def test_session_manager_concurrent_get_or_create_session():
     assert all(r is mock_session for r in results)
     # Only one session should have been created (simulate by call_count if using fake_create_session)
 
+
 @pytest.mark.asyncio
 async def test_session_manager_concurrent_get_or_create_session_failure():
     mock_cfg_mgr = AsyncMock()
@@ -110,8 +114,12 @@ async def test_session_manager_concurrent_get_or_create_session_failure():
     ):
         with pytest.raises(SessionCreationError) as exc_info:
             await mgr.get_or_create_session("workerX")
-        assert "Failed to create Deephaven Community (Core) Session" in str(exc_info.value)
-        assert "fail" in str(exc_info.value) or (exc_info.value.__cause__ and "fail" in str(exc_info.value.__cause__))
+        assert "Failed to create Deephaven Community (Core) Session" in str(
+            exc_info.value
+        )
+        assert "fail" in str(exc_info.value) or (
+            exc_info.value.__cause__ and "fail" in str(exc_info.value.__cause__)
+        )
 
 
 @pytest.mark.asyncio
@@ -129,7 +137,6 @@ async def test_session_manager_delegates_to_helpers():
         result = await mgr.get_or_create_session("workerY")
     mock_create_worker.assert_called_once_with(mock_cfg_mgr, "workerY")
     assert result == "SESSION"
-
 
 
 # --- Tests for SessionManager context manager ---
@@ -154,8 +161,6 @@ async def test_clear_all_sessions_calls_close(session_manager):
     session.close.assert_called_once()
 
 
-
-
 @pytest.mark.asyncio
 async def test_create_session_error():
     # Patch Session to raise
@@ -166,8 +171,12 @@ async def test_create_session_error():
         with pytest.raises(SessionCreationError) as exc_info:
             await create_session(host="localhost")
         # Check error message contains context and original error
-        assert "Failed to create Deephaven Community (Core) Session" in str(exc_info.value)
-        assert "fail" in str(exc_info.value) or (exc_info.value.__cause__ and "fail" in str(exc_info.value.__cause__))
+        assert "Failed to create Deephaven Community (Core) Session" in str(
+            exc_info.value
+        )
+        assert "fail" in str(exc_info.value) or (
+            exc_info.value.__cause__ and "fail" in str(exc_info.value.__cause__)
+        )
 
 
 @pytest.mark.asyncio

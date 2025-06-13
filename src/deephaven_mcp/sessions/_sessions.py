@@ -27,19 +27,17 @@ Dependencies:
 
 import asyncio
 import logging
-import os
 import time
 from types import TracebackType
-from typing import Any
 
 from pydeephaven import Session
 
 from deephaven_mcp import config
-from deephaven_mcp.config._community_session import redact_community_session_config
-from deephaven_mcp.io import load_bytes
+
+from ._lifecycle.community import (
+    create_session_for_worker,
+)
 from ._lifecycle.shared import close_session_safely
-from ._lifecycle.community import create_session, _get_session_parameters, create_session_for_worker
-from ._errors import SessionCreationError
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -159,7 +157,6 @@ class SessionManager:
                 f"Session cache cleared. Processed {num_sessions} sessions in {time.time() - start_time:.2f}s"
             )
 
-
     async def get_or_create_session(self, session_name: str) -> Session:
         """
         Retrieve a cached Deephaven session for the specified worker, or create and cache a new one if needed.
@@ -213,12 +210,11 @@ class SessionManager:
                     )
 
             # At this point, we need to create a new session
-            session = await create_session_for_worker(self._config_manager, session_name)
+            session = await create_session_for_worker(
+                self._config_manager, session_name
+            )
             self._cache[session_name] = session
             _LOGGER.info(
                 f"Session cached for worker: {session_name}. Returning session."
             )
             return session
-
-
-

@@ -5,17 +5,21 @@ Provides coroutine-compatible helpers for creating, configuring, and instantiati
 Intended for use by session managers and orchestration logic for Deephaven Community (Core) clusters. All functions are async and raise
 SessionCreationError on failure.
 """
+
+import asyncio
 import logging
 import os
-import asyncio
 from typing import Any
+
 from pydeephaven import Session
-from deephaven_mcp.sessions._errors import SessionCreationError
+
 from deephaven_mcp import config
 from deephaven_mcp.config._community_session import redact_community_session_config
 from deephaven_mcp.io import load_bytes
+from deephaven_mcp.sessions._errors import SessionCreationError
 
 _LOGGER = logging.getLogger(__name__)
+
 
 async def create_session(**kwargs: Any) -> Session:
     """
@@ -34,7 +38,9 @@ async def create_session(**kwargs: Any) -> Session:
         SessionCreationError: If session creation fails for any reason.
     """
     log_kwargs = redact_community_session_config(kwargs)
-    _LOGGER.info(f"[Community] Creating new Deephaven Community (Core) Session with config: {log_kwargs}")
+    _LOGGER.info(
+        f"[Community] Creating new Deephaven Community (Core) Session with config: {log_kwargs}"
+    )
     try:
         session = await asyncio.to_thread(Session, **kwargs)
     except Exception as e:
@@ -44,8 +50,11 @@ async def create_session(**kwargs: Any) -> Session:
         raise SessionCreationError(
             f"Failed to create Deephaven Community (Core) Session with config: {log_kwargs}: {e}"
         ) from e
-    _LOGGER.info(f"[Community] Successfully created Deephaven Community (Core) Session: {session}")
+    _LOGGER.info(
+        f"[Community] Successfully created Deephaven Community (Core) Session: {session}"
+    )
     return session
+
 
 async def _get_session_parameters(worker_cfg: dict[str, Any]) -> dict[str, Any]:
     """
@@ -91,7 +100,9 @@ async def _get_session_parameters(worker_cfg: dict[str, Any]) -> dict[str, Any]:
     client_cert_chain = worker_cfg.get("client_cert_chain", None)
     client_private_key = worker_cfg.get("client_private_key", None)
     if tls_root_certs:
-        _LOGGER.info(f"[Community] Loading TLS root certs from: {worker_cfg.get('tls_root_certs')}")
+        _LOGGER.info(
+            f"[Community] Loading TLS root certs from: {worker_cfg.get('tls_root_certs')}"
+        )
         tls_root_certs = await load_bytes(tls_root_certs)
         _LOGGER.info("[Community] Loaded TLS root certs successfully.")
     else:
@@ -103,7 +114,9 @@ async def _get_session_parameters(worker_cfg: dict[str, Any]) -> dict[str, Any]:
         client_cert_chain = await load_bytes(client_cert_chain)
         _LOGGER.info("[Community] Loaded client cert chain successfully.")
     else:
-        _LOGGER.debug("[Community] No client cert chain provided for community session.")
+        _LOGGER.debug(
+            "[Community] No client cert chain provided for community session."
+        )
     if client_private_key:
         _LOGGER.info(
             f"[Community] Loading client private key from: {worker_cfg.get('client_private_key')}"
@@ -111,7 +124,9 @@ async def _get_session_parameters(worker_cfg: dict[str, Any]) -> dict[str, Any]:
         client_private_key = await load_bytes(client_private_key)
         _LOGGER.info("[Community] Loaded client private key successfully.")
     else:
-        _LOGGER.debug("[Community] No client private key provided for community session.")
+        _LOGGER.debug(
+            "[Community] No client private key provided for community session."
+        )
     session_config = {
         "host": host,
         "port": port,
@@ -125,10 +140,15 @@ async def _get_session_parameters(worker_cfg: dict[str, Any]) -> dict[str, Any]:
         "client_private_key": client_private_key,
     }
     log_cfg = redact_community_session_config(session_config)
-    _LOGGER.info(f"[Community] Prepared Deephaven Community (Core) Session config: {log_cfg}")
+    _LOGGER.info(
+        f"[Community] Prepared Deephaven Community (Core) Session config: {log_cfg}"
+    )
     return session_config
 
-async def create_session_for_worker(config_manager: config.ConfigManager, session_name: str) -> Session:
+
+async def create_session_for_worker(
+    config_manager: config.ConfigManager, session_name: str
+) -> Session:
     """
     Asynchronously create and return a new Deephaven Community (Core) Session for the given worker/session name.
 
@@ -149,8 +169,12 @@ async def create_session_for_worker(config_manager: config.ConfigManager, sessio
     Raises:
         SessionCreationError: If session creation fails.
     """
-    _LOGGER.info(f"[Community] Creating new Deephaven Community (Core) session: {session_name}")
-    worker_cfg = await config.get_named_config(config_manager, "community_sessions", session_name)
+    _LOGGER.info(
+        f"[Community] Creating new Deephaven Community (Core) session: {session_name}"
+    )
+    worker_cfg = await config.get_named_config(
+        config_manager, "community_sessions", session_name
+    )
     session_params = await _get_session_parameters(worker_cfg)
     log_cfg = redact_community_session_config(session_params)
     log_cfg["session_name"] = session_name
@@ -158,5 +182,7 @@ async def create_session_for_worker(config_manager: config.ConfigManager, sessio
         f"[Community] Creating new Deephaven Community (Core) Session with config: (worker cache key: {session_name}) {log_cfg}"
     )
     session = await create_session(**session_params)
-    _LOGGER.info(f"[Community] Successfully created Deephaven Community (Core) session: {session_name}")
+    _LOGGER.info(
+        f"[Community] Successfully created Deephaven Community (Core) session: {session_name}"
+    )
     return session

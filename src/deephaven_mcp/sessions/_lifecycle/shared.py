@@ -6,9 +6,11 @@ This module provides coroutine-compatible utilities for safely closing sessions 
 
 import asyncio
 import logging
+
 from pydeephaven import Session
 
 _LOGGER = logging.getLogger(__name__)
+
 
 async def close_session_safely(session: Session, session_name: str) -> None:
     """
