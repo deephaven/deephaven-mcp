@@ -16,12 +16,9 @@ from deephaven_mcp import config
 from deephaven_mcp.config._community_session import redact_community_session_config
 from deephaven_mcp.sessions import _sessions
 from deephaven_mcp.sessions._queries import get_dh_versions
-from deephaven_mcp.sessions._sessions import (
-    SessionCreationError,
-    SessionManager,
-    create_session,
-)
-
+from deephaven_mcp.sessions._errors import SessionCreationError
+from deephaven_mcp.sessions._sessions import SessionManager
+from deephaven_mcp.sessions._lifecycle.community import create_session
 
 # --- Fixtures and helpers ---
 @pytest.fixture
