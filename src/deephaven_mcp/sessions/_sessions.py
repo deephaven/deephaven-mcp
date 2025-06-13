@@ -37,7 +37,7 @@ from pydeephaven import Session
 from deephaven_mcp import config
 from deephaven_mcp.config._community_session import redact_community_session_config
 from deephaven_mcp.io import load_bytes
-
+from ._lifecycle import close_session_safely
 from ._errors import SessionCreationError
 
 _LOGGER = logging.getLogger(__name__)
@@ -138,29 +138,6 @@ async def get_session_parameters(worker_cfg: dict[str, Any]) -> dict[str, Any]:
     return session_config
 
 
-async def close_session_safely(session: Session, session_name: str) -> None:
-    """
-    Safely close a Deephaven session for the given worker name, if it is alive.
-
-    Args:
-        session (Session): The Deephaven session instance to close.
-        session_name (str): The name or key identifying the worker/session owner.
-
-    Any exceptions during closure are logged and do not prevent cleanup of other sessions.
-    """
-    try:
-        if session.is_alive:
-            _LOGGER.info(f"Closing alive session: {session_name}")
-            await asyncio.to_thread(session.close)
-            _LOGGER.info(f"Successfully closed session: {session_name}")
-        else:
-            _LOGGER.debug(f"Session '{session_name}' is already closed")
-    except Exception as e:
-        _LOGGER.error(f"Failed to close session: {session_name}: {e}")
-        _LOGGER.debug(
-            f"Session state after error: {session_name} is_alive={session.is_alive}",
-            exc_info=True,
-        )
 
 
 class SessionManager:
@@ -278,41 +255,6 @@ class SessionManager:
                 f"Session cache cleared. Processed {num_sessions} sessions in {time.time() - start_time:.2f}s"
             )
 
-    @staticmethod
-    async def _close_session_safely(worker_key: str, session: Session) -> None:
-        """
-        Attempt to safely close a Deephaven session if it is alive.
-
-        Used internally by clear_all_sessions for resource cleanup. If the session is alive, it is closed
-        in a background thread using asyncio.to_thread. Any exceptions during closure are logged and do not prevent cleanup of other sessions.
-
-        Args:
-            worker_key (str): The cache key for the worker (used for logging).
-            session (Session): The Deephaven Session object to close.
-
-        Returns:
-            None
-
-        Error Handling:
-            - Exceptions during session closure are logged but do not propagate.
-            - Session state after error is logged for debugging.
-
-        Example:
-            await SessionManager._close_session_safely('worker1', session)
-        """
-        try:
-            if session.is_alive:
-                _LOGGER.info(f"Closing alive session for worker: {worker_key}")
-                await asyncio.to_thread(session.close)
-                _LOGGER.info(f"Successfully closed session for worker: {worker_key}")
-            else:
-                _LOGGER.debug(f"Session for worker '{worker_key}' is already closed")
-        except Exception as e:
-            _LOGGER.error(f"Failed to close session for worker '{worker_key}': {e}")
-            _LOGGER.debug(
-                f"Session state after error: is_alive={session.is_alive}",
-                exc_info=True,
-            )
 
     async def get_or_create_session(self, session_name: str) -> Session:
         """

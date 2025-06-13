@@ -19,7 +19,6 @@ from deephaven_mcp.sessions._queries import get_dh_versions
 from deephaven_mcp.sessions._sessions import (
     SessionCreationError,
     SessionManager,
-    close_session_safely,
     create_session,
     get_session_parameters,
 )
@@ -69,71 +68,6 @@ async def test_create_session_error_handling():
             await create_session(host="localhost")
         assert "fail-create" in str(exc_info.value)
 
-
-@pytest.mark.asyncio
-async def test_close_session_safely_handles_exceptions(caplog):
-    # Should log and not raise on error (close raises)
-    session = MagicMock(spec=Session)
-    session.is_alive = True
-    session.close.side_effect = Exception("fail-close")
-    await close_session_safely(session, "worker1")
-    assert any("Failed to close session" in r for r in caplog.text.splitlines())
-
-
-@pytest.mark.asyncio
-async def test_static_close_session_safely_already_closed(caplog):
-    caplog.set_level("DEBUG")
-    session = MagicMock(spec=Session)
-    session.is_alive = False
-    await SessionManager._close_session_safely("workerX", session)
-    assert any("is already closed" in r for r in caplog.text.splitlines())
-
-
-@pytest.mark.asyncio
-async def test_static_close_session_safely_close_raises(caplog):
-    session = MagicMock(spec=Session)
-    session.is_alive = True
-    session.close.side_effect = Exception("fail-close")
-    await SessionManager._close_session_safely("workerY", session)
-    assert any("Failed to close session" in r for r in caplog.text.splitlines())
-
-
-@pytest.mark.asyncio
-async def test_static_close_session_safely_close_success(caplog):
-    caplog.set_level("INFO")
-    session = MagicMock(spec=Session)
-    session.is_alive = True
-    session.close.side_effect = None  # No error
-    await SessionManager._close_session_safely("workerZ", session)
-    assert any("Successfully closed session" in r for r in caplog.text.splitlines())
-
-
-@pytest.mark.asyncio
-async def test_close_session_safely_already_closed(caplog):
-    # Should log debug if session is already closed (is_alive is False)
-    session = MagicMock(spec=Session)
-    session.is_alive = False
-    await close_session_safely("worker2", session)
-    assert any("already closed" in r for r in caplog.text.splitlines())
-
-
-@pytest.mark.asyncio
-async def test_close_session_safely_is_alive_raises(caplog):
-    # Should log error if is_alive raises (raise once, then return False)
-    session = MagicMock(spec=Session)
-    calls = {"count": 0}
-
-    def is_alive_side_effect(self):
-        if calls["count"] == 0:
-            calls["count"] += 1
-            raise Exception("fail-attr")
-        return False
-
-    type(session).is_alive = property(is_alive_side_effect)
-    await close_session_safely(session, "worker3")
-    assert any(
-        "Failed to close session" in r or "Error" in r for r in caplog.text.splitlines()
-    )
 
 
 @pytest.mark.asyncio
@@ -212,31 +146,10 @@ def fake_session():
 
 
 # --- Tests for SessionManager._close_session_safely ---
-@pytest.mark.asyncio
-async def test_close_session_safely_closes_alive(session_manager):
-    session = MagicMock(spec=Session)
-    session.is_alive = True
-    session.close = MagicMock()
-    await close_session_safely(session, "session1")
-    session.close.assert_called_once()
 
 
-@pytest.mark.asyncio
-async def test_close_session_safely_already_closed(session_manager):
-    session = MagicMock(spec=Session)
-    session.is_alive = False
-    session.close = MagicMock()
-    await close_session_safely(session, "session1")
-    session.close.assert_not_called()
 
 
-@pytest.mark.asyncio
-async def test_close_session_safely_raises(session_manager, caplog):
-    session = MagicMock(spec=Session)
-    session.is_alive = True
-    session.close.side_effect = Exception("fail-close")
-    await close_session_safely(session, "session1")
-    assert any("Failed to close session" in r for r in caplog.text.splitlines())
 
 
 # --- Tests for SessionManager context manager ---
