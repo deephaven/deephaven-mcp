@@ -21,7 +21,6 @@ async def test_close_session_safely_closes_alive_session(caplog):
 
 @pytest.mark.asyncio
 async def test_close_session_safely_skips_closed_session(caplog):
-    import logging
 
     caplog.set_level(logging.DEBUG)
     session = MagicMock(spec=Session)
