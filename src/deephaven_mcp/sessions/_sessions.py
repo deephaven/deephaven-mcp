@@ -28,15 +28,14 @@ Dependencies:
 import asyncio
 import logging
 import os
-import textwrap
 import time
 from types import TracebackType
 from typing import Any
 
-import pyarrow
 from pydeephaven import Session
 
 from deephaven_mcp import config
+from deephaven_mcp.config._community_session import redact_community_session_config
 from deephaven_mcp.io import load_bytes
 
 from ._errors import SessionCreationError
@@ -44,32 +43,12 @@ from ._errors import SessionCreationError
 _LOGGER = logging.getLogger(__name__)
 
 
-def redact_sensitive_session_fields(config: dict[str, Any], redact_binary_values: bool = True) -> dict[str, Any]:
-    """
-    Return a copy of a session config dictionary with sensitive values redacted for safe logging.
-    Redacts authentication tokens and, by default, any sensitive fields that are binary data.
-    """
-    redacted = dict(config)
-    sensitive_keys = [
-        "auth_token",
-        "tls_root_certs",
-        "client_cert_chain",
-        "client_private_key",
-    ]
-    for key in sensitive_keys:
-        if key in redacted and redacted[key]:
-            if key == "auth_token":
-                redacted[key] = "REDACTED"
-            elif redact_binary_values and isinstance(redacted[key], (bytes, bytearray)):
-                redacted[key] = "REDACTED"
-    return redacted
-
 async def create_session(**kwargs: Any) -> Session:
     """
     Create and return a new Deephaven Session instance in a background thread.
     Raises SessionCreationError if session creation fails.
     """
-    log_kwargs = redact_sensitive_session_fields(kwargs)
+    log_kwargs = redact_community_session_config(kwargs)
     _LOGGER.info(f"Creating new Deephaven Session with config: {log_kwargs}")
     try:
         session = await asyncio.to_thread(Session, **kwargs)
@@ -83,13 +62,14 @@ async def create_session(**kwargs: Any) -> Session:
     _LOGGER.info(f"Successfully created Deephaven Session: {session}")
     return session
 
+
 async def get_session_parameters(worker_cfg: dict[str, Any]) -> dict[str, Any]:
     """
     Prepare and return the configuration dictionary for Deephaven Session creation.
     Loads certificate/key files as needed (using async I/O), redacts sensitive info for logging,
     and returns a dictionary of parameters ready to be passed to pydeephaven.Session.
     """
-    log_cfg = redact_sensitive_session_fields(worker_cfg)
+    log_cfg = redact_community_session_config(worker_cfg)
     _LOGGER.info(f"Session configuration: {log_cfg}")
     host = worker_cfg.get("host", None)
     port = worker_cfg.get("port", None)
@@ -120,9 +100,7 @@ async def get_session_parameters(worker_cfg: dict[str, Any]) -> dict[str, Any]:
     client_cert_chain = worker_cfg.get("client_cert_chain", None)
     client_private_key = worker_cfg.get("client_private_key", None)
     if tls_root_certs:
-        _LOGGER.info(
-            f"Loading TLS root certs from: {worker_cfg.get('tls_root_certs')}"
-        )
+        _LOGGER.info(f"Loading TLS root certs from: {worker_cfg.get('tls_root_certs')}")
         tls_root_certs = await load_bytes(tls_root_certs)
         _LOGGER.info("Loaded TLS root certs successfully.")
     else:
@@ -155,9 +133,10 @@ async def get_session_parameters(worker_cfg: dict[str, Any]) -> dict[str, Any]:
         "client_cert_chain": client_cert_chain,
         "client_private_key": client_private_key,
     }
-    log_cfg = redact_sensitive_session_fields(session_config)
+    log_cfg = redact_community_session_config(session_config)
     _LOGGER.info(f"Prepared Deephaven Session config: {log_cfg}")
     return session_config
+
 
 async def close_session_safely(worker_key: str, session: Session) -> None:
     """
@@ -177,6 +156,7 @@ async def close_session_safely(worker_key: str, session: Session) -> None:
             f"Session state after error: is_alive={session.is_alive}",
             exc_info=True,
         )
+
 
 class SessionManager:
     """
@@ -387,7 +367,7 @@ class SessionManager:
                 self._config_manager, "community_sessions", worker_name
             )
             session_params = await get_session_parameters(worker_cfg)
-            log_cfg = redact_sensitive_session_fields(session_params)
+            log_cfg = redact_community_session_config(session_params)
             log_cfg["worker_name"] = worker_name
             _LOGGER.info(
                 f"Creating new Deephaven Session with config: (worker cache key: {worker_name}) {log_cfg}"

@@ -15,10 +15,12 @@ All functions are async and intended for internal use by the sessions package.
 
 import asyncio
 import logging
+
 import pyarrow
 from pydeephaven import Session
 
 _LOGGER = logging.getLogger(__name__)
+
 
 async def get_table(session: Session, table_name: str) -> pyarrow.Table:
     """
@@ -32,6 +34,7 @@ async def get_table(session: Session, table_name: str) -> pyarrow.Table:
     table = await asyncio.to_thread(session.open_table, table_name)
     return await asyncio.to_thread(table.to_arrow)
 
+
 async def get_meta_table(session: Session, table_name: str) -> pyarrow.Table:
     """
     Retrieve the meta table (schema/metadata) for a Deephaven table as a pyarrow.Table.
@@ -44,6 +47,7 @@ async def get_meta_table(session: Session, table_name: str) -> pyarrow.Table:
     table = await asyncio.to_thread(session.open_table, table_name)
     meta_table = await asyncio.to_thread(lambda: table.meta_table)
     return await asyncio.to_thread(meta_table.to_arrow)
+
 
 async def get_pip_packages_table(session: Session) -> pyarrow.Table:
     """
@@ -79,6 +83,7 @@ async def get_pip_packages_table(session: Session) -> pyarrow.Table:
     _LOGGER.info("Table retrieved successfully.")
     return arrow_table
 
+
 async def get_dh_versions(session: Session) -> tuple[str | None, str | None]:
     """
     Retrieve the Deephaven Core and Core+ versions installed in a given Deephaven session.
@@ -104,9 +109,7 @@ async def get_dh_versions(session: Session) -> tuple[str | None, str | None]:
         version = pkg.get("Version", "")
         if pkg_name == "deephaven-core" and dh_core_version is None:
             dh_core_version = version
-        elif (
-            pkg_name == "deephaven_coreplus_worker" and dh_coreplus_version is None
-        ):
+        elif pkg_name == "deephaven_coreplus_worker" and dh_coreplus_version is None:
             dh_coreplus_version = version
         if dh_core_version and dh_coreplus_version:
             break

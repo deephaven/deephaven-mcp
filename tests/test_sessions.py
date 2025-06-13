@@ -3,6 +3,7 @@ import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../src")))
 
+import asyncio
 import logging
 import types
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -10,17 +11,17 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pyarrow
 import pytest
 from pydeephaven import Session
-from deephaven_mcp.sessions._queries import get_dh_versions
 
 from deephaven_mcp import config
+from deephaven_mcp.config._community_session import redact_community_session_config
 from deephaven_mcp.sessions import _sessions
+from deephaven_mcp.sessions._queries import get_dh_versions
 from deephaven_mcp.sessions._sessions import (
     SessionCreationError,
     SessionManager,
-    redact_sensitive_session_fields,
-    get_session_parameters,
     close_session_safely,
     create_session,
+    get_session_parameters,
 )
 
 
@@ -42,18 +43,7 @@ def session_manager(mock_config_manager):
 
 
 # --- Additional Robustness Tests ---
-import asyncio
 
-@pytest.mark.asyncio
-async def test_redact_sensitive_session_fields_edge_cases():
-    # Empty config
-    assert redact_sensitive_session_fields({}) == {}
-    # Unexpected types
-    cfg = {"auth_token": 123, "tls_root_certs": None, "foo": b"bar"}
-    result = redact_sensitive_session_fields(cfg)
-    assert result["auth_token"] == "REDACTED"
-    assert result["tls_root_certs"] is None
-    assert result["foo"] == b"bar"
 
 @pytest.mark.asyncio
 async def test_get_session_parameters_missing_fields():
@@ -67,13 +57,18 @@ async def test_get_session_parameters_missing_fields():
     assert params["session_type"] == "python"
     assert params["use_tls"] is False
 
+
 @pytest.mark.asyncio
 async def test_create_session_error_handling():
     # Should raise SessionCreationError on failure
-    with patch("deephaven_mcp.sessions._sessions.Session", new=MagicMock(side_effect=RuntimeError("fail-create"))):
+    with patch(
+        "deephaven_mcp.sessions._sessions.Session",
+        new=MagicMock(side_effect=RuntimeError("fail-create")),
+    ):
         with pytest.raises(SessionCreationError) as exc_info:
             await create_session(host="localhost")
         assert "fail-create" in str(exc_info.value)
+
 
 @pytest.mark.asyncio
 async def test_close_session_safely_handles_exceptions(caplog):
@@ -84,6 +79,7 @@ async def test_close_session_safely_handles_exceptions(caplog):
     await close_session_safely("worker1", session)
     assert any("Failed to close session" in r for r in caplog.text.splitlines())
 
+
 @pytest.mark.asyncio
 async def test_static_close_session_safely_already_closed(caplog):
     caplog.set_level("DEBUG")
@@ -92,6 +88,7 @@ async def test_static_close_session_safely_already_closed(caplog):
     await SessionManager._close_session_safely("workerX", session)
     assert any("is already closed" in r for r in caplog.text.splitlines())
 
+
 @pytest.mark.asyncio
 async def test_static_close_session_safely_close_raises(caplog):
     session = MagicMock(spec=Session)
@@ -99,6 +96,7 @@ async def test_static_close_session_safely_close_raises(caplog):
     session.close.side_effect = Exception("fail-close")
     await SessionManager._close_session_safely("workerY", session)
     assert any("Failed to close session" in r for r in caplog.text.splitlines())
+
 
 @pytest.mark.asyncio
 async def test_static_close_session_safely_close_success(caplog):
@@ -109,6 +107,7 @@ async def test_static_close_session_safely_close_success(caplog):
     await SessionManager._close_session_safely("workerZ", session)
     assert any("Successfully closed session" in r for r in caplog.text.splitlines())
 
+
 @pytest.mark.asyncio
 async def test_close_session_safely_already_closed(caplog):
     # Should log debug if session is already closed (is_alive is False)
@@ -117,42 +116,60 @@ async def test_close_session_safely_already_closed(caplog):
     await close_session_safely("worker2", session)
     assert any("already closed" in r for r in caplog.text.splitlines())
 
+
 @pytest.mark.asyncio
 async def test_close_session_safely_is_alive_raises(caplog):
     # Should log error if is_alive raises (raise once, then return False)
     session = MagicMock(spec=Session)
-    calls = {'count': 0}
+    calls = {"count": 0}
+
     def is_alive_side_effect(self):
-        if calls['count'] == 0:
-            calls['count'] += 1
+        if calls["count"] == 0:
+            calls["count"] += 1
             raise Exception("fail-attr")
         return False
+
     type(session).is_alive = property(is_alive_side_effect)
     await close_session_safely("worker3", session)
-    assert any("Failed to close session" in r or "Error" in r for r in caplog.text.splitlines())
+    assert any(
+        "Failed to close session" in r or "Error" in r for r in caplog.text.splitlines()
+    )
+
 
 @pytest.mark.asyncio
 async def test_session_manager_concurrent_get_or_create_session():
     # Use an AsyncMock for config manager so awaited calls work
     mock_cfg_mgr = AsyncMock()
     mock_cfg_mgr.get_worker_config = AsyncMock(return_value={"host": "localhost"})
-    mock_cfg_mgr.get_config = AsyncMock(return_value={"community_sessions": {"workerX": {"host": "localhost"}}})
+    mock_cfg_mgr.get_config = AsyncMock(
+        return_value={"community_sessions": {"workerX": {"host": "localhost"}}}
+    )
     mgr = SessionManager(mock_cfg_mgr)
     # Patch helpers to simulate slow creation and track calls
     call_count = 0
     # Use a single mock session with is_alive = True
     mock_session = MagicMock()
     mock_session.is_alive = True
+
     async def fake_get_params(cfg):
         await asyncio.sleep(0.05)
         return {"host": "localhost"}
+
     async def fake_create_session(**kwargs):
         nonlocal call_count
         call_count += 1
         await asyncio.sleep(0.05)
         return mock_session
-    with patch("deephaven_mcp.sessions._sessions.get_session_parameters", new=fake_get_params), \
-         patch("deephaven_mcp.sessions._sessions.create_session", new=fake_create_session):
+
+    with (
+        patch(
+            "deephaven_mcp.sessions._sessions.get_session_parameters",
+            new=fake_get_params,
+        ),
+        patch(
+            "deephaven_mcp.sessions._sessions.create_session", new=fake_create_session
+        ),
+    ):
         # Fire off multiple concurrent requests for the same worker
         results = await asyncio.gather(
             *[mgr.get_or_create_session("workerX") for _ in range(5)]
@@ -162,14 +179,25 @@ async def test_session_manager_concurrent_get_or_create_session():
     # Only one session should have been created
     assert call_count == 1
 
+
 @pytest.mark.asyncio
 async def test_session_manager_delegates_to_helpers():
     mock_cfg_mgr = AsyncMock()
     mock_cfg_mgr.get_worker_config = AsyncMock(return_value={"host": "localhost"})
-    mock_cfg_mgr.get_config = AsyncMock(return_value={"community_sessions": {"workerY": {"host": "localhost"}}})
+    mock_cfg_mgr.get_config = AsyncMock(
+        return_value={"community_sessions": {"workerY": {"host": "localhost"}}}
+    )
     mgr = SessionManager(mock_cfg_mgr)
-    with patch("deephaven_mcp.sessions._sessions.get_session_parameters", new=AsyncMock(return_value={"host": "localhost"})) as mock_params, \
-         patch("deephaven_mcp.sessions._sessions.create_session", new=AsyncMock(return_value="SESSION")) as mock_create:
+    with (
+        patch(
+            "deephaven_mcp.sessions._sessions.get_session_parameters",
+            new=AsyncMock(return_value={"host": "localhost"}),
+        ) as mock_params,
+        patch(
+            "deephaven_mcp.sessions._sessions.create_session",
+            new=AsyncMock(return_value="SESSION"),
+        ) as mock_create,
+    ):
         result = await mgr.get_or_create_session("workerY")
     mock_params.assert_called_once()
     mock_create.assert_called_once()
@@ -181,32 +209,6 @@ def fake_session():
     s = MagicMock(spec=Session)
     s.is_alive = True
     return s
-
-
-# --- Tests for SessionManager._redact_sensitive_session_fields ---
-def test_redact_sensitive_session_fields_comprehensive(session_manager):
-    # All sensitive keys, string and binary
-    config = {
-        "auth_token": "secret",
-        "tls_root_certs": b"bytes",
-        "client_cert_chain": b"chain-bytes",
-        "client_private_key": b"key-bytes",
-        "foo": "bar",
-    }
-    # Default: redact all sensitive fields
-    redacted = redact_sensitive_session_fields(config)
-    assert redacted["auth_token"] == "REDACTED"
-    assert redacted["tls_root_certs"] == "REDACTED"
-    assert redacted["client_cert_chain"] == "REDACTED"
-    assert redacted["client_private_key"] == "REDACTED"
-    assert redacted["foo"] == "bar"
-    # redact_binary_values=False: only auth_token is redacted, binary fields are not
-    config = {"auth_token": "tok", "tls_root_certs": b"binary"}
-    redacted = redact_sensitive_session_fields(
-        config, redact_binary_values=False
-    )
-    assert redacted["auth_token"] == "REDACTED"
-    assert redacted["tls_root_certs"] == b"binary"
 
 
 # --- Tests for SessionManager._close_session_safely ---
@@ -359,12 +361,6 @@ async def test_get_session_parameters_no_auth_token_provided(session_manager):
     assert params["auth_token"] == ""
 
 
-def test_redact_sensitive_session_fields_empty():
-    # No sensitive values
-    cfg = {"foo": "bar"}
-    assert redact_sensitive_session_fields(cfg) == cfg
-
-
 @pytest.mark.asyncio
 async def test_create_session_error():
     # Patch Session to raise
@@ -429,8 +425,14 @@ async def test_get_or_create_session_creates_new(session_manager):
         return_value={"community_sessions": {"foo": {"host": "localhost"}}}
     )
     with (
-        patch("deephaven_mcp.sessions._sessions.get_session_parameters", new=AsyncMock(return_value={"host": "localhost"})),
-        patch("deephaven_mcp.sessions._sessions.create_session", new=AsyncMock(return_value="SESSION")),
+        patch(
+            "deephaven_mcp.sessions._sessions.get_session_parameters",
+            new=AsyncMock(return_value={"host": "localhost"}),
+        ),
+        patch(
+            "deephaven_mcp.sessions._sessions.create_session",
+            new=AsyncMock(return_value="SESSION"),
+        ),
     ):
         result = await session_manager.get_or_create_session("foo")
         assert result == "SESSION"
@@ -450,8 +452,14 @@ async def test_get_or_create_session_handles_dead(session_manager):
         return_value={"community_sessions": {"foo": {"host": "localhost"}}}
     )
     with (
-        patch("deephaven_mcp.sessions._sessions.get_session_parameters", new=AsyncMock(return_value={"host": "localhost"})),
-        patch("deephaven_mcp.sessions._sessions.create_session", new=AsyncMock(return_value="SESSION")),
+        patch(
+            "deephaven_mcp.sessions._sessions.get_session_parameters",
+            new=AsyncMock(return_value={"host": "localhost"}),
+        ),
+        patch(
+            "deephaven_mcp.sessions._sessions.create_session",
+            new=AsyncMock(return_value="SESSION"),
+        ),
     ):
         result = await session_manager.get_or_create_session("foo")
         assert result == "SESSION"

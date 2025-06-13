@@ -47,21 +47,38 @@ list[str]: List of required fields for each community session configuration dict
 """
 
 
-def redact_community_session_config(session_config: dict[str, Any]) -> dict[str, Any]:
-    """Redacts sensitive fields from a community session configuration dictionary.
+def redact_community_session_config(
+    session_config: dict[str, Any], redact_binary_values: bool = True
+) -> dict[str, Any]:
+    """
+    Redacts sensitive fields from a community session configuration dictionary.
 
-    Creates a shallow copy of the input dictionary and redacts 'auth_token'
-    if it exists.
+    Creates a shallow copy of the input dictionary and redacts all sensitive fields:
+    - 'auth_token' (always redacted if present)
+    - 'tls_root_certs', 'client_cert_chain', 'client_private_key' (redacted if value is binary and redact_binary_values is True)
 
     Args:
         session_config (dict[str, Any]): The community session configuration.
+        redact_binary_values (bool): Whether to redact binary values for certain fields (default: True).
 
     Returns:
         dict[str, Any]: A new dictionary with sensitive fields redacted.
     """
-    config_copy = session_config.copy()
-    if "auth_token" in config_copy:
-        config_copy["auth_token"] = "[REDACTED]"  # noqa: S105
+    config_copy = dict(session_config)
+    sensitive_keys = [
+        "auth_token",
+        "tls_root_certs",
+        "client_cert_chain",
+        "client_private_key",
+    ]
+    for key in sensitive_keys:
+        if key in config_copy and config_copy[key]:
+            if key == "auth_token":
+                config_copy[key] = "[REDACTED]"  # noqa: S105
+            elif redact_binary_values and isinstance(
+                config_copy[key], bytes | bytearray
+            ):
+                config_copy[key] = "[REDACTED]"
     return config_copy
 
 
