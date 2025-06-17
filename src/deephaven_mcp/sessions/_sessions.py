@@ -50,10 +50,8 @@ class SessionManager:
         - Instantiate with a ConfigManager instance:
             cfg_mgr = ...  # Your ConfigManager
             mgr = SessionManager(cfg_mgr)
-        - Use in async context for deterministic cleanup:
-            async with SessionManager(cfg_mgr) as mgr:
-                ...
-            # Sessions are automatically cleared on exit
+        - Use clear_all_sessions() for explicit cleanup when needed:
+            await mgr.clear_all_sessions()
 
     Notes:
         - Each SessionManager instance is fully isolated and must be provided a ConfigManager.
@@ -76,46 +74,6 @@ class SessionManager:
         self._cache: dict[str, Session] = {}
         self._lock = asyncio.Lock()
         self._config_manager = config_manager
-
-    async def __aenter__(self) -> "SessionManager":
-        """
-        Enter the async context manager for SessionManager.
-
-        Returns:
-            SessionManager: The current instance (self).
-
-        Usage:
-            async with SessionManager() as mgr:
-                # Use mgr to create, cache, and reuse sessions
-                ...
-            # On exit, all sessions are automatically cleaned up.
-        """
-        return self
-
-    async def __aexit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        tb: TracebackType | None,
-    ) -> None:
-        """
-        Exit the async context manager for SessionManager, ensuring resource cleanup.
-
-        On exit, all cached sessions are cleared via clear_all_sessions().
-        This guarantees no lingering sessions after the context block, which is useful for tests,
-        scripts, and advanced workflows that require deterministic resource management.
-
-        Args:
-            exc_type (type): Exception type if raised in the context, else None.
-            exc (Exception): Exception instance if raised, else None.
-            tb (traceback): Traceback if exception was raised, else None.
-
-        Example:
-            async with SessionManager() as mgr:
-                ...
-            # Sessions are cleaned up here
-        """
-        await self.clear_all_sessions()
 
     async def clear_all_sessions(self) -> None:
         """

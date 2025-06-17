@@ -137,14 +137,20 @@ async def test_session_manager_delegates_to_helpers():
     assert result == "SESSION"
 
 
-# --- Tests for SessionManager context manager ---
+# --- Tests for SessionManager cleanup ---
 @pytest.mark.asyncio
-async def test_async_context_manager_clears_sessions():
+async def test_clear_all_sessions_clears_cache():
     mgr = SessionManager(mock_config_manager)
     mgr._cache["foo"] = MagicMock(spec=Session)
     mgr._cache["foo"].is_alive = False
-    async with mgr:
-        assert "foo" in mgr._cache
+    
+    # Verify cache has sessions before clearing
+    assert "foo" in mgr._cache
+    
+    # Clear all sessions
+    await mgr.clear_all_sessions()
+    
+    # Verify cache is empty after clearing
     assert mgr._cache == {}
 
 
