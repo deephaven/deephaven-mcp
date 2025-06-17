@@ -205,7 +205,7 @@ import logging
 import os
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Any, Optional, Type, cast
+from typing import Any, cast
 
 import aiofiles
 
@@ -605,6 +605,99 @@ def _log_config_summary(config: dict[str, Any]) -> None:
         _LOGGER.info(f"Loaded configuration: {redacted_config}")
 
 
+def _validate_unknown_keys(
+    data: dict[str, Any], path: tuple[str, ...], valid_keys: set[str]
+) -> None:
+    """Check for unknown keys at the current path level."""
+    unknown_keys = set(data.keys()) - valid_keys
+    if unknown_keys:
+        _LOGGER.error(f"Unknown keys at config path {path}: {unknown_keys}")
+        raise McpConfigurationError(
+            f"Unknown keys at config path {path}: {unknown_keys}"
+        )
+
+
+def _validate_required_keys(
+    data: dict[str, Any], path: tuple[str, ...], required_keys: set[str]
+) -> None:
+    """Check for missing required keys at the current path level."""
+    missing_keys = required_keys - set(data.keys())
+    if missing_keys:
+        _LOGGER.error(f"Missing required keys at config path {path}: {missing_keys}")
+        raise McpConfigurationError(
+            f"Missing required keys at config path {path}: {missing_keys}"
+        )
+
+
+def _validate_key_type_and_value(
+    key: str, value: Any, spec: "_ConfigPathSpec", path: tuple[str, ...]
+) -> None:
+    """Validate type and value for a single configuration key."""
+    current_path = path + (key,)
+
+    # Type validation
+    if not isinstance(value, spec.expected_type):
+        _LOGGER.error(
+            f"Config path {current_path} must be of type {spec.expected_type.__name__}, got {type(value).__name__}"
+        )
+        raise McpConfigurationError(
+            f"Config path {current_path} must be of type {spec.expected_type.__name__}, got {type(value).__name__}"
+        )
+
+    # Specialized validation
+    if spec.validator:
+        try:
+            spec.validator(value)
+        except (
+            CommunitySessionConfigurationError,
+            EnterpriseSystemConfigurationError,
+        ) as e:
+            raise McpConfigurationError(
+                f"Invalid configuration for {'.'.join(current_path)}: {e}"
+            ) from e
+
+
+def _should_recurse_into_nested_dict(current_path: tuple[str, ...]) -> bool:
+    """Check if there are nested schema paths for the current path."""
+    return any(
+        nested_path[: len(current_path)] == current_path
+        and len(nested_path) > len(current_path)
+        for nested_path in _SCHEMA_PATHS.keys()
+    )
+
+
+def _validate_section(data: dict[str, Any], path: tuple[str, ...]) -> None:
+    """Validate a configuration section in a single pass."""
+    # Get specs for the current path level
+    current_specs = {
+        nested_path[len(path)]: spec
+        for nested_path, spec in _SCHEMA_PATHS.items()
+        if len(nested_path) == len(path) + 1 and nested_path[: len(path)] == path
+    }
+
+    # Check for unknown keys
+    valid_keys = set(current_specs.keys())
+    _validate_unknown_keys(data, path, valid_keys)
+
+    # Check for missing required keys
+    required_keys = {key for key, spec in current_specs.items() if spec.required}
+    _validate_required_keys(data, path, required_keys)
+
+    # Validate each present key
+    for key, value in data.items():
+        if key in current_specs:
+            spec = current_specs[key]
+            current_path = path + (key,)
+
+            _validate_key_type_and_value(key, value, spec, path)
+
+            # Recurse into nested dictionaries
+            if isinstance(value, dict) and _should_recurse_into_nested_dict(
+                current_path
+            ):
+                _validate_section(value, current_path)
+
+
 def validate_config(config: dict[str, Any]) -> dict[str, Any]:
     """
         Validate the Deephaven MCP application configuration dictionary.
@@ -683,72 +776,6 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
     """
     if not isinstance(config, dict):
         raise McpConfigurationError("Configuration must be a dictionary")
-
-    def _validate_section(data: dict[str, Any], path: tuple[str, ...]) -> None:
-        """Validate a configuration section in a single pass."""
-        # Get specs for the current path level
-        current_specs = {
-            nested_path[len(path)]: spec
-            for nested_path, spec in _SCHEMA_PATHS.items()
-            if len(nested_path) == len(path) + 1 and nested_path[: len(path)] == path
-        }
-
-        # Check for unknown keys
-        valid_keys = set(current_specs.keys())
-        unknown_keys = set(data.keys()) - valid_keys
-        if unknown_keys:
-            _LOGGER.error(f"Unknown keys at config path {path}: {unknown_keys}")
-            raise McpConfigurationError(
-                f"Unknown keys at config path {path}: {unknown_keys}"
-            )
-
-        # Check for missing required keys
-        required_keys = {key for key, spec in current_specs.items() if spec.required}
-        missing_keys = required_keys - set(data.keys())
-        if missing_keys:
-            _LOGGER.error(
-                f"Missing required keys at config path {path}: {missing_keys}"
-            )
-            raise McpConfigurationError(
-                f"Missing required keys at config path {path}: {missing_keys}"
-            )
-
-        # Validate each present key
-        for key, value in data.items():
-            if key in current_specs:
-                spec = current_specs[key]
-                current_path = path + (key,)
-
-                # Type validation
-                if not isinstance(value, spec.expected_type):
-                    _LOGGER.error(
-                        f"Config path {current_path} must be of type {spec.expected_type.__name__}, got {type(value).__name__}"
-                    )
-                    raise McpConfigurationError(
-                        f"Config path {current_path} must be of type {spec.expected_type.__name__}, got {type(value).__name__}"
-                    )
-
-                # Specialized validation
-                if spec.validator:
-                    try:
-                        spec.validator(value)
-                    except (
-                        CommunitySessionConfigurationError,
-                        EnterpriseSystemConfigurationError,
-                    ) as e:
-                        raise McpConfigurationError(
-                            f"Invalid configuration for {'.'.join(current_path)}: {e}"
-                        ) from e
-
-                # Recurse into nested dictionaries
-                if isinstance(value, dict):
-                    has_nested_paths = any(
-                        nested_path[: len(current_path)] == current_path
-                        and len(nested_path) > len(current_path)
-                        for nested_path in _SCHEMA_PATHS.keys()
-                    )
-                    if has_nested_paths:
-                        _validate_section(value, current_path)
 
     # Validate the entire configuration
     _validate_section(config, ())
