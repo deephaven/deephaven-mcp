@@ -154,9 +154,11 @@ async def test_describe_workers_all_available_with_versions():
     config_manager.get_system_session_names = AsyncMock(return_value=["w1", "w2"])
     config_manager.get_config = AsyncMock(
         return_value={
-            "community_sessions": {
-                "w1": {"session_type": "python"},
-                "w2": {"session_type": "python"},
+            "community": {
+                "sessions": {
+                    "w1": {"session_type": "python"},
+                    "w2": {"session_type": "python"},
+                }
             }
         }
     )
@@ -203,9 +205,11 @@ async def test_describe_workers_all_available_no_versions():
     config_manager.get_community_session_config = AsyncMock(return_value=["w1", "w2"])
     config_manager.get_config = AsyncMock(
         return_value={
-            "community_sessions": {
-                "w1": {"session_type": "python"},
-                "w2": {"session_type": "python"},
+            "community": {
+                "sessions": {
+                    "w1": {"session_type": "python"},
+                    "w2": {"session_type": "python"},
+                }
             }
         }
     )
@@ -243,10 +247,12 @@ async def test_describe_workers_some_unavailable():
     )
     config_manager.get_config = AsyncMock(
         return_value={
-            "community_sessions": {
-                "w1": {"session_type": "python"},
-                "w2": {"session_type": "python"},
-                "w3": {"session_type": "python"},
+            "community": {
+                "sessions": {
+                    "w1": {"session_type": "python"},
+                    "w2": {"session_type": "python"},
+                    "w3": {"session_type": "python"},
+                }
             }
         }
     )
@@ -298,7 +304,13 @@ async def test_describe_workers_non_python():
     session_manager = AsyncMock()
     config_manager.get_community_session_config = AsyncMock(return_value=["w1"])
     config_manager.get_config = AsyncMock(
-        return_value={"community_sessions": {"w1": {"session_type": "groovy"}}}
+        return_value={
+            "community": {
+                "sessions": {
+                    "w1": {"session_type": "groovy"},
+                }
+            }
+        }
     )
     alive_session = MagicMock(is_alive=True)
     session_manager.get_or_create_session = AsyncMock(return_value=alive_session)
@@ -332,7 +344,13 @@ async def test_describe_workers_versions_error():
     session_manager = AsyncMock()
     config_manager.get_community_session_config = AsyncMock(return_value=["w1"])
     config_manager.get_config = AsyncMock(
-        return_value={"community_sessions": {"w1": {"session_type": "python"}}}
+        return_value={
+            "community": {
+                "sessions": {
+                    "w1": {"session_type": "python"},
+                }
+            }
+        }
     )
     alive_session = MagicMock(is_alive=True)
     session_manager.get_or_create_session = AsyncMock(return_value=alive_session)
@@ -370,10 +388,12 @@ async def test_describe_workers_some_unavailable_with_versions():
     )
     config_manager.get_config = AsyncMock(
         return_value={
-            "community_sessions": {
-                "w1": {"session_type": "python"},
-                "w2": {"session_type": "python"},
-                "w3": {"session_type": "python"},
+            "community": {
+                "sessions": {
+                    "w1": {"session_type": "python"},
+                    "w2": {"session_type": "python"},
+                    "w3": {"session_type": "python"},
+                }
             }
         }
     )
@@ -425,7 +445,13 @@ async def test_describe_workers_worker_config_error():
     session_manager = AsyncMock()
     config_manager.get_community_session_config = AsyncMock(return_value=["w1"])
     config_manager.get_config = AsyncMock(
-        return_value={"community_sessions": {"w1": {"session_type": "python"}}}
+        return_value={
+            "community": {
+                "sessions": {
+                    "w1": {"session_type": "python"},
+                }
+            }
+        }
     )
     # Simulate get_worker_config raising an exception
     config_manager.get_community_session_config = AsyncMock(

@@ -141,10 +141,12 @@ Users or API clients send natural language questions or documentation queries ov
    Create a JSON configuration file for your Deephaven MCP:
    ```json
    {
-     "community_sessions": {
-       "local_session": {
-         "host": "localhost",
-         "port": 10000
+     "community": {
+       "sessions": {
+         "local_session": {
+           "host": "localhost",
+           "port": 10000
+         }
        }
      }
    }
@@ -232,16 +234,16 @@ The Systems Server's behavior, particularly how it finds its configuration, can 
 
 ###### File Structure Overview
 
-The `deephaven_mcp.json` file is a JSON object that can contain two primary top-level keys: `"community_sessions"` and `"enterprise_sessions"`. Both are optional.
+The `deephaven_mcp.json` file is a JSON object that can contain two primary top-level keys: `"community"` and `"enterprise"`. Both are optional.
 
-*   `"community_sessions"`: If present, its value must be an object mapping user-defined session names to their specific configurations for Deephaven Community Core instances. Details for these configurations are below.
-*   `"enterprise_sessions"`: If present, its value must be an object mapping user-defined session names to their specific configurations for Deephaven Enterprise instances. Details for these configurations are provided in a subsequent section.
+*   `"community"`: If present, its value must be an object containing a `"sessions"` key that maps user-defined session names to their specific configurations for Deephaven Community Core instances. Details for these configurations are below.
+*   `"enterprise"`: If present, its value must be an object containing a `"systems"` key that maps user-defined system names to their specific configurations for Deephaven Enterprise instances. Details for these configurations are provided in a subsequent section.
 
 If both keys are absent, or if the `deephaven_mcp.json` file itself is an empty JSON object (e.g., `{}`), it signifies that no sessions of either type are configured. This is a valid state.
 
 #### Systems Sessions Configuration
 
-This section details the configuration for individual sessions listed under the `"community_sessions"` key in the `deephaven_mcp.json` file.
+This section details the configuration for individual sessions listed under the `"community"` → `"sessions"` key in the `deephaven_mcp.json` file.
 
 **Systems Session Configuration Fields:**
 
@@ -266,24 +268,26 @@ All fields within a session's configuration object are optional. If a field is o
 
 ```json
 {
-  "community_sessions": {
-    "my_local_deephaven": {
-      "host": "localhost",
-      "port": 10000,
-      "session_type": "python"
-    },
-    "secure_remote_worker": {
-      "host": "secure.deephaven.example.com",
-      "port": 10001,
-      "auth_type": "token",
-      // "auth_token": "your-secret-api-token-here", // Option 1: Direct token (less secure for shared configs)
-      "auth_token_env_var": "MY_REMOTE_TOKEN_ENV_VAR", // Option 2: Token from environment variable (recommended)
-      "never_timeout": true,
-      "session_type": "groovy",
-      "use_tls": true,
-      "tls_root_certs": "/path/to/trusted_cas.pem",
-      "client_cert_chain": "/path/to/client_cert_and_chain.pem",
-      "client_private_key": "/path/to/client_private_key.pem"
+  "community": {
+    "sessions": {
+      "my_local_deephaven": {
+        "host": "localhost",
+        "port": 10000,
+        "session_type": "python"
+      },
+      "secure_remote_worker": {
+        "host": "secure.deephaven.example.com",
+        "port": 10001,
+        "auth_type": "token",
+        // "auth_token": "your-secret-api-token-here", // Option 1: Direct token (less secure for shared configs)
+        "auth_token_env_var": "MY_REMOTE_TOKEN_ENV_VAR", // Option 2: Token from environment variable (recommended)
+        "never_timeout": true,
+        "session_type": "groovy",
+        "use_tls": true,
+        "tls_root_certs": "/path/to/trusted_cas.pem",
+        "client_cert_chain": "/path/to/client_cert_and_chain.pem",
+        "client_private_key": "/path/to/client_private_key.pem"
+      }
     }
   }
 }
@@ -291,9 +295,9 @@ All fields within a session's configuration object are optional. If a field is o
 
 #### Enterprise Server Configuration
 
-The `deephaven_mcp.json` file can also optionally include a top-level key named `"enterprise_systems"` to configure connections to Deephaven Enterprise instances. This key holds a dictionary where each entry maps a custom system name (e.g., `"prod_cluster"`, `"data_science_env"`) to its specific configuration object.
+The `deephaven_mcp.json` file can also optionally include a top-level key named `"enterprise"` to configure connections to Deephaven Enterprise instances. This key holds a dictionary where each entry maps a custom system name (e.g., `"prod_cluster"`, `"data_science_env"`) to its specific configuration object.
 
-If the `"enterprise_systems"` key is present, it must be a dictionary. Each individual enterprise system configuration within this dictionary supports the following fields:
+If the `"enterprise"` key is present, it must be a dictionary. Each individual enterprise system configuration within this dictionary supports the following fields:
 
 *   `connection_json_url` (string, **required**): The URL pointing to the `connection.json` file of the Deephaven Enterprise server. This file provides necessary connection details for the client.
     *   Example: `"https://enterprise.example.com/iris/connection.json"`
@@ -314,23 +318,27 @@ If the `"enterprise_systems"` key is present, it must be a dictionary. Each indi
 
 ```json
 {
-  "community_sessions": {
-    "local_dev": {
-      "host": "localhost",
-      "port": 10000
+  "community": {
+    "sessions": {
+      "local_dev": {
+        "host": "localhost",
+        "port": 10000
+      }
     }
   },
-  "enterprise_systems": {
-    "staging_env": {
-      "connection_json_url": "https://staging.internal/iris/connection.json",
-      "auth_type": "password",
-      "username": "test_user",
-      "password_env_var": "STAGING_PASSWORD"
-    },
-    "analytics_private_key_auth": {
+  "enterprise": {
+    "systems": {
+      "staging_env": {
+        "connection_json_url": "https://staging.internal/iris/connection.json",
+        "auth_type": "password",
+        "username": "test_user",
+        "password_env_var": "STAGING_PASSWORD"
+      },
+      "analytics_private_key_auth": {
         "connection_json_url": "https://analytics.dept.com/iris/connection.json",
         "auth_type": "private_key",
         "private_key_path": "/secure/keys/analytics_service_account.key"
+      }
     }
   }
 }
@@ -1180,7 +1188,7 @@ uv run isort . --skip _version.py --skip .venv
 uv run isort . --check-only --diff --skip _version.py --skip .venv
 
 # Format code (fixes in place)
-uv run black .
+uv run black . --exclude '(_version.py|.venv)'
 # Check formatting only (no changes)
 uv run black . --check
 
@@ -1198,54 +1206,48 @@ deephaven-mcp/
 │   └── deephaven_mcp/
 │       ├── __init__.py
 │       ├── _version.py
-│       ├── config/                  # Configuration management and validation
+│       ├── config/                    # Configuration management and validation
 │       │   ├── __init__.py
-│       │   ├── community_session.py
-│       │   ├── enterprise_system.py
-│       │   └── errors.py
-│       ├── mcp_docs_server/         # Docs Server module
+│       │   ├── _community_session.py
+│       │   ├── _enterprise_system.py
+│       │   └── _errors.py
+│       ├── io.py                     # I/O utilities
+│       ├── mcp_docs_server/          # Docs Server module
 │       │   ├── __init__.py
 │       │   └── _mcp.py
-│       ├── mcp_systems_server/      # Systems Server module
+│       ├── mcp_systems_server/       # Systems Server module
 │       │   ├── __init__.py
-│       │   ├── _mcp.py
-│       │   └── _sessions.py
-│       ├── enterprise/              # Enterprise Server module
-│       │   └── __init__.py
-│       └── openai.py                # OpenAI API client for LLM integration
+│       │   └── _mcp.py
+│       ├── openai.py                 # OpenAI API client for LLM integration
+│       └── sessions/                 # Session management
+│           ├── __init__.py
+│           ├── _errors.py
+│           ├── _lifecycle/
+│           │   ├── __init__.py
+│           │   ├── community.py
+│           │   └── shared.py
+│           ├── _queries.py
+│           └── _sessions.py
 ├── tests/                           # Unit and integration tests
-│   ├── test__version.py
-│   ├── test_config.py
-│   ├── test_config__community_session.py
-│   ├── test_config__enterprise_system.py
-│   ├── test_config_errors.py
-│   ├── test_mcp_docs_server_init.py
-│   ├── test_mcp_docs_server_mcp.py
-│   ├── test_enterprise_init.py
-│   ├── test_openai.py
-│   ├── test_package_init.py
-│   ├── test_mcp_systems_server__mcp.py
-│   ├── test_mcp_systems_server_init.py
-│   └── test_mcp_systems_server_sessions.py
-├── scripts/                         # Utility scripts for dev and testing
-│   ├── run_deephaven_test_server.py
-│   ├── mcp_community_test_client.py
-│   ├── mcp_docs_test_client.py
-│   └── mcp_docs_stress_sse.py
-├── ops/
+│   ├── config/
+│   ├── lifecycle/
+│   ├── mcp_docs_server/
+│   ├── mcp_systems_server/
+│   ├── openai_tests/
+│   ├── package/
+│   ├── queries/
+│   ├── sessions/
+│   └── testio/
+├── ops/                             # Operations and deployment
 │   ├── docker/
-│   │   └── mcp-docs/
-│   │       ├── Dockerfile            # Dockerfile for the MCP Docs server
-│   │       ├── docker-compose.yml    # Docker Compose config for the MCP Docs server
-│   │       └── README.md             # Docker usage notes for the MCP Docs server
 │   └── terraform/
-│       ├── backend-bucket/           # Terraform configs for GCS backend state
-│       ├── docker-repo/              # Terraform configs for Docker Artifact Registry
-│       └── mcp-docs/                 # Terraform configs for MCP Docs infra (Cloud Run, DNS, etc.)
-├── docs/                         # Documentation
-│   └── DEVELOPER_GUIDE.md        # This developer & contributor guide
-├── pyproject.toml                # Package metadata and dependencies
-└── README.md                     # Main user-facing README
+├── docs/                            # Documentation
+│   ├── DEVELOPER_GUIDE.md
+│   └── UV.md
+├── scripts/                         # Utility scripts
+├── pyproject.toml                   # Python project configuration
+├── README.md
+└── ...
 ```
 
 #### Script References
