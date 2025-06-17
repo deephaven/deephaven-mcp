@@ -199,12 +199,13 @@ __all__ = [
 ]
 
 import asyncio
+import copy
 import json
 import logging
 import os
-import copy
-from typing import Any, Optional, Type, cast, Callable, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from typing import Any, Optional, Type, cast
 
 import aiofiles
 
@@ -232,43 +233,52 @@ CONFIG_ENV_VAR = "DH_MCP_CONFIG_FILE"
 str: Name of the environment variable specifying the path to the Deephaven MCP config file.
 """
 
+
 @dataclass
 class _ConfigPathSpec:
     """Specification for a valid configuration path."""
+
     required: bool
     expected_type: type
-    validator: Optional[Callable[[Any], None]] = None
-    redactor: Optional[Callable[[Any], Any]] = None  # Function to redact sensitive data for logging
+    validator: Callable[[Any], None] | None = None
+    redactor: Callable[[Any], Any] | None = (
+        None  # Function to redact sensitive data for logging
+    )
+
 
 # Schema defining all valid configuration paths
 _SCHEMA_PATHS: dict[tuple[str, ...], _ConfigPathSpec] = {
     ("community",): _ConfigPathSpec(
-        required=False,
-        expected_type=dict,
-        validator=None  # Validated by nested paths
+        required=False, expected_type=dict, validator=None  # Validated by nested paths
     ),
     ("community", "sessions"): _ConfigPathSpec(
         required=False,
         expected_type=dict,
         validator=validate_community_sessions_config,
-        redactor=lambda sessions_dict: {
-            name: redact_community_session_config(config) 
-            for name, config in sessions_dict.items()
-        } if isinstance(sessions_dict, dict) else sessions_dict
+        redactor=lambda sessions_dict: (
+            {
+                name: redact_community_session_config(config)
+                for name, config in sessions_dict.items()
+            }
+            if isinstance(sessions_dict, dict)
+            else sessions_dict
+        ),
     ),
     ("enterprise",): _ConfigPathSpec(
-        required=False,
-        expected_type=dict,
-        validator=None  # Validated by nested paths  
+        required=False, expected_type=dict, validator=None  # Validated by nested paths
     ),
     ("enterprise", "systems"): _ConfigPathSpec(
         required=False,
         expected_type=dict,
         validator=validate_enterprise_systems_config,
-        redactor=lambda systems_dict: {
-            name: redact_enterprise_system_config(config) 
-            for name, config in systems_dict.items()
-        } if isinstance(systems_dict, dict) else systems_dict
+        redactor=lambda systems_dict: (
+            {
+                name: redact_enterprise_system_config(config)
+                for name, config in systems_dict.items()
+            }
+            if isinstance(systems_dict, dict)
+            else systems_dict
+        ),
     ),
 }
 
@@ -374,22 +384,20 @@ class ConfigManager:
             return validated
 
 
-
-
 def get_config_section(
     config: dict[str, Any],
     section: Sequence[str],
 ) -> Any:
     """
     Retrieve a config subsection by path. Raises KeyError if not found.
-    
+
     Args:
         config (dict[str, Any]): The configuration dictionary to navigate.
         section (Sequence[str]): The path to the config section (e.g., ['community', 'sessions', 'foo']).
-    
+
     Returns:
         Any: The config subsection at the given path.
-    
+
     Raises:
         KeyError: If the section path does not exist.
     """
@@ -420,11 +428,15 @@ def get_all_config_names(
     try:
         section_obj = get_config_section(config, section)
     except KeyError:
-        _LOGGER.warning(f"Section path {section} does not exist, returning empty list of names.")
+        _LOGGER.warning(
+            f"Section path {section} does not exist, returning empty list of names."
+        )
         return []
 
     if not isinstance(section_obj, dict):
-        _LOGGER.warning(f"Section at path {section} is not a dictionary, returning empty list of names.")
+        _LOGGER.warning(
+            f"Section at path {section} is not a dictionary, returning empty list of names."
+        )
         return []
 
     names = list(section_obj.keys())
@@ -537,32 +549,32 @@ async def load_and_validate_config(config_path: str) -> dict[str, Any]:
 def _apply_redaction_to_config(config: dict[str, Any]) -> dict[str, Any]:
     """
     Apply all configured redaction functions to a deep copy of the config.
-    
+
     Args:
         config (dict[str, Any]): The configuration dictionary to redact.
-        
+
     Returns:
         dict[str, Any]: A deep copy of the config with sensitive data redacted.
     """
     config_copy = copy.deepcopy(config)
-    
+
     # Apply redaction functions for each configured path
     for path_tuple, spec in _SCHEMA_PATHS.items():
         if spec.redactor is not None:
             try:
                 section = get_config_section(config_copy, list(path_tuple))
                 redacted_section = spec.redactor(section)
-                
+
                 # Navigate to the parent and set the redacted section
                 current = config_copy
                 for key in path_tuple[:-1]:
                     current = current[key]
                 current[path_tuple[-1]] = redacted_section
-                
+
             except KeyError:
                 # Section doesn't exist, skip redaction
                 continue
-    
+
     return config_copy
 
 
@@ -580,10 +592,10 @@ def _log_config_summary(config: dict[str, Any]) -> None:
         >>> _log_config_summary(config)
     """
     _LOGGER.info("Configuration summary:")
-    
+
     # Create a redacted copy of the config for logging
     redacted_config = _apply_redaction_to_config(config)
-    
+
     # Log the redacted config as formatted JSON
     try:
         formatted_config = json.dumps(redacted_config, indent=2, sort_keys=True)
@@ -595,137 +607,151 @@ def _log_config_summary(config: dict[str, Any]) -> None:
 
 def validate_config(config: dict[str, Any]) -> dict[str, Any]:
     """
-    Validate the Deephaven MCP application configuration dictionary.
+        Validate the Deephaven MCP application configuration dictionary.
 
-    This function ensures that the configuration dictionary conforms to the expected schema for Deephaven MCP.
-    The configuration may contain the following top-level keys:
-      - 'community' (dict, optional):
-            A dictionary mapping community configuration.
-            If this key is present, its value must be a dictionary (which can be empty, e.g., {}).
-            If this key is absent, it implies no community configuration is present.
-            Each community configuration dict may contain any of the following fields (all are optional):
+        This function ensures that the configuration dictionary conforms to the expected schema for Deephaven MCP.
+        The configuration may contain the following top-level keys:
+          - 'community' (dict, optional):
+                A dictionary mapping community configuration.
+                If this key is present, its value must be a dictionary (which can be empty, e.g., {}).
+                If this key is absent, it implies no community configuration is present.
+                Each community configuration dict may contain any of the following fields (all are optional):
 
-              - 'sessions' (dict, optional):
-                  A dictionary mapping community session names (str) to client session configuration dicts.
-                  If this key is present, its value must be a dictionary (which can be empty, e.g., {}).
-                  If this key is absent, it implies no community sessions are configured.
-                  Each community session configuration dict may contain any of the following fields (all are optional):
+                  - 'sessions' (dict, optional):
+                      A dictionary mapping community session names (str) to client session configuration dicts.
+                      If this key is present, its value must be a dictionary (which can be empty, e.g., {}).
+                      If this key is absent, it implies no community sessions are configured.
+                      Each community session configuration dict may contain any of the following fields (all are optional):
 
-                    - 'host' (str): Hostname or IP address of the community worker.
-                    - 'port' (int): Port number for the community worker connection.
-                    - 'auth_type' (str): Authentication type. Allowed values include:
-                        * "token": Use a bearer token for authentication.
-                        * "basic": Use HTTP Basic authentication.
-                        * "anonymous": No authentication required.
-                    - 'auth_token' (str, optional): The direct authentication token or password. May be empty if `auth_type` is "anonymous". Use this OR `auth_token_env_var`, but not both.
-                    - 'auth_token_env_var' (str, optional): The name of an environment variable from which to read the authentication token. Use this OR `auth_token`, but not both.
-                    - 'never_timeout' (bool): If True, sessions to this community worker never time out.
-                    - 'session_type' (str): Programming language for the session. Common values include:
-                        * "python": For Python-based Deephaven instances.
-                        * "groovy": For Groovy-based Deephaven instances.
-                    - 'use_tls' (bool): Whether to use TLS/SSL for the connection.
-                    - 'tls_root_certs' (str, optional): Path to a PEM file containing root certificates to trust for TLS.
-                    - 'client_cert_chain' (str, optional): Path to a PEM file containing the client certificate chain for mutual TLS.
-                    - 'client_private_key' (str, optional): Path to a PEM file containing the client private key for mutual TLS.
+                        - 'host' (str): Hostname or IP address of the community worker.
+                        - 'port' (int): Port number for the community worker connection.
+                        - 'auth_type' (str): Authentication type. Allowed values include:
+                            * "token": Use a bearer token for authentication.
+                            * "basic": Use HTTP Basic authentication.
+                            * "anonymous": No authentication required.
+                        - 'auth_token' (str, optional): The direct authentication token or password. May be empty if `auth_type` is "anonymous". Use this OR `auth_token_env_var`, but not both.
+                        - 'auth_token_env_var' (str, optional): The name of an environment variable from which to read the authentication token. Use this OR `auth_token`, but not both.
+                        - 'never_timeout' (bool): If True, sessions to this community worker never time out.
+                        - 'session_type' (str): Programming language for the session. Common values include:
+                            * "python": For Python-based Deephaven instances.
+                            * "groovy": For Groovy-based Deephaven instances.
+                        - 'use_tls' (bool): Whether to use TLS/SSL for the connection.
+                        - 'tls_root_certs' (str, optional): Path to a PEM file containing root certificates to trust for TLS.
+                        - 'client_cert_chain' (str, optional): Path to a PEM file containing the client certificate chain for mutual TLS.
+                        - 'client_private_key' (str, optional): Path to a PEM file containing the client private key for mutual TLS.
 
-      - 'enterprise' (dict, optional):
-            A dictionary mapping enterprise configuration.
-            If this key is present, its value must be a dictionary (which can be empty).
-            Each enterprise configuration dict is validated according to the schema defined in
-            `src/deephaven_mcp/config/enterprise_system.py`. Key fields typically include:
+          - 'enterprise' (dict, optional):
+                A dictionary mapping enterprise configuration.
+                If this key is present, its value must be a dictionary (which can be empty).
+                Each enterprise configuration dict is validated according to the schema defined in
+                `src/deephaven_mcp/config/enterprise_system.py`. Key fields typically include:
 
-              - 'systems' (dict, optional):
-                  A dictionary mapping enterprise system names (str) to system configuration dicts.
-                  If this key is present, its value must be a dictionary (which can be empty).
-                  Each enterprise system configuration dict must include:
-                      - 'connection_json_url' (str, required): URL to the server's connection.json file.
-                      - 'auth_type' (str, required): One of:
-                          * "password":
-                              - 'username' (str, required): The username.
-                              - 'password' (str, optional): The password.
-                              - 'password_env_var' (str, optional): Environment variable for the password.
-                                (Note: `password` and `password_env_var` are mutually exclusive.)
-                          * "private_key":
-                              - 'private_key' (str, required): The private key.
+                  - 'systems' (dict, optional):
+                      A dictionary mapping enterprise system names (str) to system configuration dicts.
+                      If this key is present, its value must be a dictionary (which can be empty).
+                      Each enterprise system configuration dict must include:
+                          - 'connection_json_url' (str, required): URL to the server's connection.json file.
+                          - 'auth_type' (str, required): One of:
+                              * "password":
+                                  - 'username' (str, required): The username.
+                                  - 'password' (str, optional): The password.
+                                  - 'password_env_var' (str, optional): Environment variable for the password.
+                                    (Note: `password` and `password_env_var` are mutually exclusive.)
+                              * "private_key":
+                                  - 'private_key' (str, required): The private key.
 
-Validation Rules:
-  - Only known keys are allowed at each level of nesting.
-  - All present sections are validated according to their schema.
-  - Unknown or misspelled keys at any level will cause validation to fail.
-  - All field types must be correct if present.
-  - Sensitive fields are redacted from logs.
+    Validation Rules:
+      - Only known keys are allowed at each level of nesting.
+      - All present sections are validated according to their schema.
+      - Unknown or misspelled keys at any level will cause validation to fail.
+      - All field types must be correct if present.
+      - Sensitive fields are redacted from logs.
 
-Args:
-    config (dict[str, Any]): The configuration dictionary to validate.
+    Args:
+        config (dict[str, Any]): The configuration dictionary to validate.
 
-Returns:
-    dict[str, Any]: The validated configuration dictionary.
+    Returns:
+        dict[str, Any]: The validated configuration dictionary.
 
-Raises:
-    McpConfigurationError: If validation fails due to unknown keys, wrong types, or invalid nested configurations.
-        This includes cases where community session or enterprise system configurations are invalid.
+    Raises:
+        McpConfigurationError: If validation fails due to unknown keys, wrong types, or invalid nested configurations.
+            This includes cases where community session or enterprise system configurations are invalid.
 
-Example:
-    >>> validated_config = validate_config({'community': {'sessions': {'local_session': {}}}, 'enterprise': {'systems': {'prod_cluster': {}}}})
-    >>> validated_config_empty = validate_config({})  # Also valid
+    Example:
+        >>> validated_config = validate_config({'community': {'sessions': {'local_session': {}}}, 'enterprise': {'systems': {'prod_cluster': {}}}})
+        >>> validated_config_empty = validate_config({})  # Also valid
     """
     if not isinstance(config, dict):
         raise McpConfigurationError("Configuration must be a dictionary")
-    
+
     def _validate_section(data: dict[str, Any], path: tuple[str, ...]) -> None:
         """Validate a configuration section in a single pass."""
         # Get specs for the current path level
         current_specs = {
-            nested_path[len(path)]: spec 
-            for nested_path, spec in _SCHEMA_PATHS.items() 
-            if len(nested_path) == len(path) + 1 and nested_path[:len(path)] == path
+            nested_path[len(path)]: spec
+            for nested_path, spec in _SCHEMA_PATHS.items()
+            if len(nested_path) == len(path) + 1 and nested_path[: len(path)] == path
         }
-        
+
         # Check for unknown keys
         valid_keys = set(current_specs.keys())
         unknown_keys = set(data.keys()) - valid_keys
         if unknown_keys:
             _LOGGER.error(f"Unknown keys at config path {path}: {unknown_keys}")
-            raise McpConfigurationError(f"Unknown keys at config path {path}: {unknown_keys}")
-        
+            raise McpConfigurationError(
+                f"Unknown keys at config path {path}: {unknown_keys}"
+            )
+
         # Check for missing required keys
         required_keys = {key for key, spec in current_specs.items() if spec.required}
         missing_keys = required_keys - set(data.keys())
         if missing_keys:
-            _LOGGER.error(f"Missing required keys at config path {path}: {missing_keys}")
-            raise McpConfigurationError(f"Missing required keys at config path {path}: {missing_keys}")
-        
+            _LOGGER.error(
+                f"Missing required keys at config path {path}: {missing_keys}"
+            )
+            raise McpConfigurationError(
+                f"Missing required keys at config path {path}: {missing_keys}"
+            )
+
         # Validate each present key
         for key, value in data.items():
             if key in current_specs:
                 spec = current_specs[key]
                 current_path = path + (key,)
-                
+
                 # Type validation
                 if not isinstance(value, spec.expected_type):
-                    _LOGGER.error(f"Config path {current_path} must be of type {spec.expected_type.__name__}, got {type(value).__name__}")
+                    _LOGGER.error(
+                        f"Config path {current_path} must be of type {spec.expected_type.__name__}, got {type(value).__name__}"
+                    )
                     raise McpConfigurationError(
                         f"Config path {current_path} must be of type {spec.expected_type.__name__}, got {type(value).__name__}"
                     )
-                
+
                 # Specialized validation
                 if spec.validator:
                     try:
                         spec.validator(value)
-                    except (CommunitySessionConfigurationError, EnterpriseSystemConfigurationError) as e:
-                        raise McpConfigurationError(f"Invalid configuration for {'.'.join(current_path)}: {e}") from e
-                
+                    except (
+                        CommunitySessionConfigurationError,
+                        EnterpriseSystemConfigurationError,
+                    ) as e:
+                        raise McpConfigurationError(
+                            f"Invalid configuration for {'.'.join(current_path)}: {e}"
+                        ) from e
+
                 # Recurse into nested dictionaries
                 if isinstance(value, dict):
                     has_nested_paths = any(
-                        nested_path[:len(current_path)] == current_path and len(nested_path) > len(current_path)
+                        nested_path[: len(current_path)] == current_path
+                        and len(nested_path) > len(current_path)
                         for nested_path in _SCHEMA_PATHS.keys()
                     )
                     if has_nested_paths:
                         _validate_section(value, current_path)
-    
+
     # Validate the entire configuration
     _validate_section(config, ())
-    
+
     _LOGGER.info("Configuration validation passed.")
     return config

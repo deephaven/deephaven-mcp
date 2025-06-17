@@ -76,7 +76,7 @@ def valid_full_config(valid_community_config, valid_enterprise_config):
     # Merge nested 'community' and 'enterprise' dicts
     return {
         "community": valid_community_config["community"],
-        "enterprise": valid_enterprise_config["enterprise"]
+        "enterprise": valid_enterprise_config["enterprise"],
     }
 
 
@@ -140,7 +140,9 @@ def test_validate_community_sessions_config_invalid_session_item(caplog):
 def test_validate_community_sessions_config_unknown_field(caplog):
     """Tests that validate_community_sessions_config fails for an unknown field."""
     with pytest.raises(CommunitySessionConfigurationError):
-        validate_community_sessions_config({"sessions": {"foo": {"host": "localhost", "bad": 1}}})
+        validate_community_sessions_config(
+            {"sessions": {"foo": {"host": "localhost", "bad": 1}}}
+        )
 
 
 def test_community_sessions_wrong_type():
@@ -342,10 +344,10 @@ def test_validate_and_get_auth_type_invalid():
 
 @pytest.mark.asyncio
 async def test_get_config_other_os_error_on_read(monkeypatch, caplog):
+    import os
     from unittest import mock
 
     import aiofiles
-    import os
 
     from deephaven_mcp import config
 
@@ -389,21 +391,23 @@ async def test_validate_config_missing_required_key_runtime(caplog, monkeypatch)
     original_schema = config._SCHEMA_PATHS.copy()
     test_schema = original_schema.copy()
     test_schema[("must_have_this",)] = config._ConfigPathSpec(
-        required=True,
-        expected_type=dict,
-        validator=None
+        required=True, expected_type=dict, validator=None
     )
-    
-    with patch.object(config, '_SCHEMA_PATHS', {
-        **config._SCHEMA_PATHS,
-        ("must_have_this",): config._ConfigPathSpec(
-            required=True,
-            expected_type=dict,
-            validator=None
-        )
-    }):
+
+    with patch.object(
+        config,
+        "_SCHEMA_PATHS",
+        {
+            **config._SCHEMA_PATHS,
+            ("must_have_this",): config._ConfigPathSpec(
+                required=True, expected_type=dict, validator=None
+            ),
+        },
+    ):
         cm = config.ConfigManager()
-        invalid_config_data = {"community": {"sessions": {}}}  # Missing 'must_have_this'
+        invalid_config_data = {
+            "community": {"sessions": {}}
+        }  # Missing 'must_have_this'
 
         config_file_path = "/fake/path/config_missing_req.json"
         monkeypatch.setenv(config.CONFIG_ENV_VAR, config_file_path)
@@ -421,13 +425,14 @@ async def test_validate_config_missing_required_key_runtime(caplog, monkeypatch)
 
         with pytest.raises(
             config.McpConfigurationError,
-            match=re.escape("Error loading configuration file: Missing required keys at config path (): {'must_have_this'}"),
+            match=re.escape(
+                "Error loading configuration file: Missing required keys at config path (): {'must_have_this'}"
+            ),
         ):
             await cm.get_config()  # This will load, then validate
 
         assert (
-            "Missing required keys at config path (): {'must_have_this'}"
-            in caplog.text
+            "Missing required keys at config path (): {'must_have_this'}" in caplog.text
         )
 
         aiofiles.open = original_aio_open_req
@@ -444,7 +449,9 @@ async def test_get_config_uses_cache_and_logs(monkeypatch, caplog):
 
     config_file_path = "/fake/path/config_for_cache_test.json"
     monkeypatch.setenv(config.CONFIG_ENV_VAR, config_file_path)
-    valid_config_data = {"community": {"sessions": {"test_session": {"host": "localhost"}}}}
+    valid_config_data = {
+        "community": {"sessions": {"test_session": {"host": "localhost"}}}
+    }
 
     # Mock aiofiles.open to be called only once for the read
     mock_file_read_content = mock.AsyncMock(
@@ -507,14 +514,13 @@ async def test_get_config_unknown_top_level_key(monkeypatch, caplog):
     cm = config.ConfigManager()
     with pytest.raises(
         config.McpConfigurationError,
-        match=re.escape(r"Error loading configuration file: Unknown keys at config path (): {'some_unknown_key'}"),
+        match=re.escape(
+            r"Error loading configuration file: Unknown keys at config path (): {'some_unknown_key'}"
+        ),
     ):
         await cm.get_config()
 
-    assert (
-        r"Unknown keys at config path (): {'some_unknown_key'}"
-        in caplog.text
-    )
+    assert r"Unknown keys at config path (): {'some_unknown_key'}" in caplog.text
 
     aiofiles.open = original_aio_open
 
@@ -555,7 +561,9 @@ async def test_get_config_invalid_community_session_schema_from_file(
 
     cm = config.ConfigManager()
     # The error will now come from validate_community_sessions_config via validate_config
-    expected_error_pattern = re.escape("Error loading configuration file: Invalid configuration for community.sessions: Field 'host' in community session config for bad_session must be of type str, got int")
+    expected_error_pattern = re.escape(
+        "Error loading configuration file: Invalid configuration for community.sessions: Field 'host' in community session config for bad_session must be of type str, got int"
+    )
 
     with pytest.raises(
         config.McpConfigurationError,
@@ -615,7 +623,9 @@ async def test_validate_enterprise_systems_config_logs_non_dict_map(
     )  # For validate_enterprise_systems_config debug log
 
     # The error will now come from validate_config checking _SCHEMA_PATHS
-    expected_error_pattern = re.escape("Error loading configuration file: Config path ('enterprise', 'systems') must be of type dict, got list")
+    expected_error_pattern = re.escape(
+        "Error loading configuration file: Config path ('enterprise', 'systems') must be of type dict, got list"
+    )
 
     with pytest.raises(
         config.McpConfigurationError,
@@ -677,7 +687,9 @@ async def test_validate_enterprise_systems_config_logs_non_dict_item_in_map(
 
     with pytest.raises(
         config.McpConfigurationError,
-        match=re.escape("Error loading configuration file: Invalid configuration for enterprise.systems: Enterprise system 'bad_system_item' configuration must be a dictionary, but got str."),
+        match=re.escape(
+            "Error loading configuration file: Invalid configuration for enterprise.systems: Enterprise system 'bad_system_item' configuration must be a dictionary, but got str."
+        ),
     ):
         await cm.get_config()
 
@@ -1592,7 +1604,9 @@ async def test_get_config_no_community_sessions_key_from_file(monkeypatch, caplo
 
     with pytest.raises(
         KeyError,
-        match=re.escape("Section path ['community', 'sessions', 'any_session_name'] does not exist in configuration"),
+        match=re.escape(
+            "Section path ['community', 'sessions', 'any_session_name'] does not exist in configuration"
+        ),
     ):
         get_config_section(cfg, ["community", "sessions", "any_session_name"])
 
@@ -1606,7 +1620,12 @@ import pytest
 async def test_get_config_section_invalid_section():
     cm = ConfigManager()
     cm._cache = {"community_sessions": {}}
-    with pytest.raises(KeyError, match=re.escape("Section path ['not_a_section', 'foo'] does not exist in configuration")):
+    with pytest.raises(
+        KeyError,
+        match=re.escape(
+            "Section path ['not_a_section', 'foo'] does not exist in configuration"
+        ),
+    ):
         get_config_section(cm._cache, ["not_a_section", "foo"])
 
 
@@ -1622,7 +1641,12 @@ async def test_get_config_section_invalid_name_enterprise_systems():
             }
         }
     }
-    with pytest.raises(KeyError, match=re.escape("Section path ['enterprise', 'systems', 'bar'] does not exist in configuration")):
+    with pytest.raises(
+        KeyError,
+        match=re.escape(
+            "Section path ['enterprise', 'systems', 'bar'] does not exist in configuration"
+        ),
+    ):
         get_config_section(cm._cache, ["enterprise", "systems", "bar"])
 
 
@@ -1663,26 +1687,32 @@ async def test_validate_config_missing_required_key_runtime(monkeypatch, caplog)
 
     config_file_path = "/fake/path/missing_required_key.json"
     monkeypatch.setenv("DH_MCP_CONFIG_FILE", config_file_path)
-    config_data = {"community": {"sessions": {}}}  # Use nested format, missing 'must_have_this'
+    config_data = {
+        "community": {"sessions": {}}
+    }  # Use nested format, missing 'must_have_this'
     aiofiles_open_ctx = mock.AsyncMock()
     aiofiles_open_ctx.__aenter__.return_value.read = mock.AsyncMock(
         return_value=json.dumps(config_data)
     )
 
     with (
-        patch.object(config, "_SCHEMA_PATHS", {
-            **config._SCHEMA_PATHS,
-            ("must_have_this",): config._ConfigPathSpec(
-                required=True,
-                expected_type=dict,
-                validator=None
-            )
-        }),
+        patch.object(
+            config,
+            "_SCHEMA_PATHS",
+            {
+                **config._SCHEMA_PATHS,
+                ("must_have_this",): config._ConfigPathSpec(
+                    required=True, expected_type=dict, validator=None
+                ),
+            },
+        ),
         patch("aiofiles.open", mock.Mock(return_value=aiofiles_open_ctx)),
     ):
         cm = config.ConfigManager()
         await cm.clear_config_cache()
-        expected_error = re.escape("Error loading configuration file: Missing required keys at config path (): {'must_have_this'}")
+        expected_error = re.escape(
+            "Error loading configuration file: Missing required keys at config path (): {'must_have_this'}"
+        )
         with pytest.raises(
             config.McpConfigurationError,
             match=expected_error,
@@ -1690,19 +1720,20 @@ async def test_validate_config_missing_required_key_runtime(monkeypatch, caplog)
             await cm.get_config()
 
 
-
 @pytest.mark.asyncio
 async def test_get_all_config_names_returns_keys():
     config = {
-        "community": {"sessions": {"a": {"host": "localhost"}, "b": {"host": "localhost"}}}
+        "community": {
+            "sessions": {"a": {"host": "localhost"}, "b": {"host": "localhost"}}
+        }
     }
     names = get_all_config_names(config, ["community", "sessions"])
     assert set(names) == {"a", "b"}
-    
+
     config2 = {"community": {"sessions": {}}}
     names2 = get_all_config_names(config2, ["community", "sessions"])
     assert names2 == []
-    
+
     config3 = {"community": {"sessions": {}}}
     names3 = get_all_config_names(config3, ["enterprise", "systems"])
     assert names3 == []
@@ -1720,10 +1751,11 @@ async def test_named_config_missing():
     config = {"community": {"sessions": {"foo": {"host": "localhost"}}}}
     with pytest.raises(
         KeyError,
-        match=re.escape("Section path ['community', 'sessions', 'bar'] does not exist in configuration"),
+        match=re.escape(
+            "Section path ['community', 'sessions', 'bar'] does not exist in configuration"
+        ),
     ):
         get_config_section(config, ["community", "sessions", "bar"])
-
 
 
 @pytest.mark.asyncio
@@ -1748,6 +1780,7 @@ async def test_get_all_config_names_returns_empty_for_non_dict_section(caplog):
         "Section at path ['not_a_section'] is not a dictionary, returning empty list of names."
         in caplog.text
     )
+
 
 @pytest.mark.asyncio
 async def test_get_config_no_community_sessions_key_from_file(monkeypatch, caplog):
@@ -1791,172 +1824,196 @@ async def test_get_config_no_community_sessions_key_from_file(monkeypatch, caplo
 
     with pytest.raises(
         KeyError,
-        match=re.escape("Section path ['community', 'sessions', 'any_session_name'] does not exist in configuration"),
+        match=re.escape(
+            "Section path ['community', 'sessions', 'any_session_name'] does not exist in configuration"
+        ),
     ):
         get_config_section(cfg, ["community", "sessions", "any_session_name"])
 
 
 # --- New tests for uncovered exception handling paths ---
 
+
 @pytest.mark.asyncio
 async def test_config_file_not_found_error(monkeypatch):
     """Test FileNotFoundError handling in _load_config_from_file."""
     from deephaven_mcp.config import ConfigManager, McpConfigurationError
-    
+
     monkeypatch.setenv("DH_MCP_CONFIG_FILE", "/nonexistent/path/config.json")
-    
+
     cm = ConfigManager()
     await cm.clear_config_cache()
-    
+
     with pytest.raises(McpConfigurationError, match="Configuration file not found"):
         await cm.get_config()
 
 
-@pytest.mark.asyncio 
+@pytest.mark.asyncio
 async def test_config_permission_error(monkeypatch):
     """Test PermissionError handling in _load_config_from_file."""
     import os
     from unittest.mock import patch
+
     from deephaven_mcp.config import ConfigManager, McpConfigurationError
-    
+
     monkeypatch.setenv("DH_MCP_CONFIG_FILE", "/fake/path/config.json")
-    
+
     with patch("aiofiles.open", side_effect=PermissionError("Permission denied")):
         cm = ConfigManager()
         await cm.clear_config_cache()
-        
-        with pytest.raises(McpConfigurationError, match="Permission denied when trying to read configuration file"):
+
+        with pytest.raises(
+            McpConfigurationError,
+            match="Permission denied when trying to read configuration file",
+        ):
             await cm.get_config()
 
 
 @pytest.mark.asyncio
 async def test_config_invalid_json_error(monkeypatch):
     """Test JSONDecodeError handling in _load_config_from_file."""
-    from unittest.mock import patch, AsyncMock, MagicMock
+    from unittest.mock import AsyncMock, MagicMock, patch
+
     from deephaven_mcp.config import ConfigManager, McpConfigurationError
-    
+
     # Invalid JSON content
     invalid_json = "{ invalid json content"
-    
+
     monkeypatch.setenv("DH_MCP_CONFIG_FILE", "/fake/path/config.json")
-    
+
     # Mock aiofiles.open
     mock_aiofiles_open = MagicMock()
     mock_async_context_manager = AsyncMock()
     mock_file_object = AsyncMock()
-    
+
     mock_aiofiles_open.return_value = mock_async_context_manager
     mock_async_context_manager.__aenter__.return_value = mock_file_object
     mock_file_object.read.return_value = invalid_json
-    
+
     with patch("aiofiles.open", mock_aiofiles_open):
         cm = ConfigManager()
         await cm.clear_config_cache()
-        
-        with pytest.raises(McpConfigurationError, match="Invalid JSON in configuration file"):
+
+        with pytest.raises(
+            McpConfigurationError, match="Invalid JSON in configuration file"
+        ):
             await cm.get_config()
 
 
 def test_validate_config_non_dict():
     """Test validation error when config is not a dictionary."""
-    from deephaven_mcp.config import validate_config, McpConfigurationError
-    
-    with pytest.raises(McpConfigurationError, match="Configuration must be a dictionary"):
+    from deephaven_mcp.config import McpConfigurationError, validate_config
+
+    with pytest.raises(
+        McpConfigurationError, match="Configuration must be a dictionary"
+    ):
         validate_config("not a dict")
-    
-    with pytest.raises(McpConfigurationError, match="Configuration must be a dictionary"):
+
+    with pytest.raises(
+        McpConfigurationError, match="Configuration must be a dictionary"
+    ):
         validate_config(123)
-    
-    with pytest.raises(McpConfigurationError, match="Configuration must be a dictionary"):
+
+    with pytest.raises(
+        McpConfigurationError, match="Configuration must be a dictionary"
+    ):
         validate_config(["list", "not", "dict"])
 
 
 @pytest.mark.asyncio
 async def test_config_validation_error_in_load_and_validate(monkeypatch):
     """Test configuration validation error handling in load_and_validate_config."""
-    from unittest.mock import patch, AsyncMock, MagicMock
+    from unittest.mock import AsyncMock, MagicMock, patch
+
     from deephaven_mcp.config import ConfigManager, McpConfigurationError
-    
+
     # Create invalid config that will fail validation
     invalid_config_json = '{"unknown_top_level_key": "invalid"}'
-    
+
     monkeypatch.setenv("DH_MCP_CONFIG_FILE", "/fake/path/config.json")
-    
+
     # Mock aiofiles.open
     mock_aiofiles_open = MagicMock()
     mock_async_context_manager = AsyncMock()
     mock_file_object = AsyncMock()
-    
+
     mock_aiofiles_open.return_value = mock_async_context_manager
     mock_async_context_manager.__aenter__.return_value = mock_file_object
     mock_file_object.read.return_value = invalid_config_json
-    
+
     with patch("aiofiles.open", mock_aiofiles_open):
         cm = ConfigManager()
         await cm.clear_config_cache()
-        
-        with pytest.raises(McpConfigurationError, match="Configuration validation failed"):
+
+        with pytest.raises(
+            McpConfigurationError, match="Configuration validation failed"
+        ):
             await cm.get_config()
 
 
 @pytest.mark.asyncio
 async def test_json_formatting_error_in_log_config_summary(monkeypatch, caplog):
     """Test JSON formatting error handling in _log_config_summary."""
-    from unittest.mock import patch, AsyncMock, MagicMock
-    from deephaven_mcp.config import ConfigManager
     import json
-    
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from deephaven_mcp.config import ConfigManager
+
     # Valid config JSON
     valid_config_json = '{"community": {"sessions": {}}}'
-    
+
     monkeypatch.setenv("DH_MCP_CONFIG_FILE", "/fake/path/config.json")
-    
+
     # Mock aiofiles.open
     mock_aiofiles_open = MagicMock()
     mock_async_context_manager = AsyncMock()
     mock_file_object = AsyncMock()
-    
+
     mock_aiofiles_open.return_value = mock_async_context_manager
     mock_async_context_manager.__aenter__.return_value = mock_file_object
     mock_file_object.read.return_value = valid_config_json
-    
+
     # Mock json.dumps to raise an error (simulating non-serializable config)
     def mock_json_dumps(*args, **kwargs):
         raise TypeError("Object is not JSON serializable")
-    
+
     with patch("aiofiles.open", mock_aiofiles_open):
         with patch("json.dumps", side_effect=mock_json_dumps):
             cm = ConfigManager()
             await cm.clear_config_cache()
             with caplog.at_level("WARNING"):
                 await cm.get_config()
-    
+
     # Verify the warning was logged
     assert "Failed to format config as JSON" in caplog.text
+
 
 @pytest.mark.asyncio
 async def test_config_validation_error_in_load_and_validate(monkeypatch):
     """Test configuration validation error handling in load_and_validate_config."""
-    from unittest.mock import patch, AsyncMock, MagicMock
+    from unittest.mock import AsyncMock, MagicMock, patch
+
     from deephaven_mcp.config import ConfigManager, McpConfigurationError
-    
+
     # Create invalid config that will fail validation
     invalid_config_json = '{"unknown_top_level_key": "invalid"}'
-    
+
     monkeypatch.setenv("DH_MCP_CONFIG_FILE", "/fake/path/config.json")
-    
+
     # Mock aiofiles.open
     mock_aiofiles_open = MagicMock()
     mock_async_context_manager = AsyncMock()
     mock_file_object = AsyncMock()
-    
+
     mock_aiofiles_open.return_value = mock_async_context_manager
     mock_async_context_manager.__aenter__.return_value = mock_file_object
     mock_file_object.read.return_value = invalid_config_json
-    
+
     with patch("aiofiles.open", mock_aiofiles_open):
         cm = ConfigManager()
         await cm.clear_config_cache()
-        
-        with pytest.raises(McpConfigurationError, match="Error loading configuration file"):
+
+        with pytest.raises(
+            McpConfigurationError, match="Error loading configuration file"
+        ):
             await cm.get_config()

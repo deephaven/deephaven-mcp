@@ -1,9 +1,9 @@
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from deephaven_mcp.sessions._lifecycle import community as _lifecycle_community
 from deephaven_mcp.sessions._errors import SessionCreationError
+from deephaven_mcp.sessions._lifecycle import community as _lifecycle_community
 
 
 @pytest.mark.asyncio
@@ -133,8 +133,10 @@ async def test_create_session_for_worker(monkeypatch):
         return "SESSION"
 
     cfg_mgr = MagicMock()
-    cfg_mgr.get_config = AsyncMock(return_value={"community": {"sessions": {"workerZ": {"host": "localhost"}}}})
-    
+    cfg_mgr.get_config = AsyncMock(
+        return_value={"community": {"sessions": {"workerZ": {"host": "localhost"}}}}
+    )
+
     monkeypatch.setattr(
         _lifecycle_community.config, "get_config_section", fake_get_config_section
     )
@@ -156,7 +158,9 @@ async def test_create_session_for_worker_config_fail(monkeypatch):
         return {"community": {"sessions": {"workerZ": {"host": "localhost"}}}}
 
     cfg_mgr = MagicMock()
-    cfg_mgr.get_config = AsyncMock(return_value={"community": {"sessions": {"workerZ": {"host": "localhost"}}}})
+    cfg_mgr.get_config = AsyncMock(
+        return_value={"community": {"sessions": {"workerZ": {"host": "localhost"}}}}
+    )
     monkeypatch.setattr(
         _lifecycle_community.config, "get_config_section", fake_get_config_section
     )
@@ -181,8 +185,10 @@ async def test_create_session_for_worker_session_fail(monkeypatch):
         raise RuntimeError("fail-create")
 
     cfg_mgr = MagicMock()
-    cfg_mgr.get_config = AsyncMock(return_value={"community": {"sessions": {"workerZ": {"host": "localhost"}}}})
-    
+    cfg_mgr.get_config = AsyncMock(
+        return_value={"community": {"sessions": {"workerZ": {"host": "localhost"}}}}
+    )
+
     monkeypatch.setattr(
         _lifecycle_community.config, "get_config_section", fake_get_config_section
     )
