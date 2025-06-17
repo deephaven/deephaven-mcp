@@ -412,3 +412,4 @@ We warmly welcome contributions to Deephaven MCP! Whether it's bug reports, feat
 ## License
 
 This project is licensed under the [Apache 2.0 License](./LICENSE). See the [LICENSE](./LICENSE) file for details.
+
