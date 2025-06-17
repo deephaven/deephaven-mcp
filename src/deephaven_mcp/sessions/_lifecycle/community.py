@@ -172,8 +172,9 @@ async def create_session_for_worker(
     _LOGGER.info(
         f"[Community] Creating new Deephaven Community (Core) session: {session_name}"
     )
-    worker_cfg = await config.get_named_config(
-        config_manager, "community_sessions", session_name
+    full_config = await config_manager.get_config()
+    worker_cfg = config.get_config_section(
+        full_config, ["community", "sessions", session_name]
     )
     session_params = await _get_session_parameters(worker_cfg)
     log_cfg = redact_community_session_config(session_params)

@@ -134,11 +134,11 @@ This section explains how to configure the [Deephaven MCP Systems Server](#commu
 The [Deephaven MCP Systems Server](#community-server) requires a JSON configuration file that describes the [Deephaven Community Core](https://deephaven.io/) worker instances it can connect to. 
 
 *   The file must be a JSON object. It can be an empty object `{}` if no community sessions are to be configured.
-*   Optionally, it can contain a top-level key named `"community_sessions"`.
+*   Optionally, it can contain a top-level key named `"community"` with a nested `"sessions"` key.
     *   If this key is present, its value must be an object (which can be empty, e.g., `{}`) where each key is a unique session name (e.g., `"local_session"`, `"prod_cluster_1_session"`) and the value is a configuration object for that session. An empty object signifies no sessions are configured under this key.
     *   If this key is absent from the JSON file, it is treated as a valid configuration with no community sessions defined.
 
-In addition to `"community_sessions"`, the `deephaven_mcp.json` file can optionally include an `"enterprise_systems"` key for configuring connections to Deephaven Enterprise instances. The configuration details for both `community_sessions` and `enterprise_systems` are provided below.
+In addition to `"community"`, the `deephaven_mcp.json` file can optionally include an `"enterprise"` key with a nested `"systems"` key for configuring connections to Deephaven Enterprise instances. The configuration details for both `community.sessions` and `enterprise.systems` are provided below.
 
 #### Community Session Configuration Fields
 
@@ -160,7 +160,7 @@ In addition to `"community_sessions"`, the `deephaven_mcp.json` file can optiona
 
 #### Enterprise System Configuration Fields
 
-The `enterprise_systems` key in `deephaven_mcp.json` is a dictionary mapping custom system names (e.g., `"prod_cluster"`, `"data_science_env"`) to their specific configuration objects. Each configuration object supports the following fields:
+The `enterprise` key with nested `"systems"` in `deephaven_mcp.json` is a dictionary mapping custom system names (e.g., `"prod_cluster"`, `"data_science_env"`) to their specific configuration objects. Each configuration object supports the following fields:
 
 **Required Fields:**
 
@@ -185,32 +185,36 @@ The `enterprise_systems` key in `deephaven_mcp.json` is a dictionary mapping cus
 
 ```json
 {
-  "community_sessions": {
-    "my_local_deephaven": {
-      "host": "localhost",
-      "port": 10000,
-      "session_type": "python"
-    },
-    "secure_community_worker": {
-      "host": "secure.deephaven.example.com",
-      "port": 10001,
-      "auth_type": "token",
-      "auth_token": "your-community-secret-api-token-here",
-      "use_tls": true,
-      "tls_root_certs": "/path/to/community_root.crt"
+  "community": {
+    "sessions": {
+      "my_local_deephaven": {
+        "host": "localhost",
+        "port": 10000,
+        "session_type": "python"
+      },
+      "secure_community_worker": {
+        "host": "secure.deephaven.example.com",
+        "port": 10001,
+        "auth_type": "token",
+        "auth_token": "your-community-secret-api-token-here",
+        "use_tls": true,
+        "tls_root_certs": "/path/to/community_root.crt"
+      }
     }
   },
-  "enterprise_sessions": {
-    "prod_enterprise_cluster": {
-      "connection_json_url": "https://enterprise.example.com/iris/connection.json",
-      "auth_type": "api_key",
-      "api_key_env_var": "PROD_ENTERPRISE_API_KEY"
-    },
-    "staging_enterprise_env": {
-      "connection_json_url": "https://staging.enterprise.example.com/iris/connection.json",
-      "auth_type": "password",
-      "username": "testuser",
-      "password_env_var": "STAGING_USER_PASSWORD"
+  "enterprise": {
+    "systems": {
+      "prod_cluster": {
+        "connection_json_url": "https://prod.enterprise.example.com/iris/connection.json",
+        "auth_type": "password",
+        "username": "your_username",
+        "password_env_var": "ENTERPRISE_PASSWORD"
+      },
+      "data_science_env": {
+        "connection_json_url": "https://data-science.enterprise.example.com/iris/connection.json",
+        "auth_type": "private_key",
+        "private_key_path": "/path/to/your/private_key.pem"
+      }
     }
   }
 }

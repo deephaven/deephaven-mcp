@@ -28,7 +28,7 @@ def mock_config_manager():
     mock = MagicMock()
     mock.get_system_session_config = AsyncMock(return_value={"host": "localhost"})
     mock.get_config = AsyncMock(
-        return_value={"community_sessions": {"local": {"host": "localhost"}}}
+        return_value={"community": {"sessions": {"local": {"host": "localhost"}}}}
     )
     return mock
 
@@ -65,7 +65,7 @@ async def test_session_manager_concurrent_get_or_create_session():
     mock_cfg_mgr = AsyncMock()
     mock_cfg_mgr.get_worker_config = AsyncMock(return_value={"host": "localhost"})
     mock_cfg_mgr.get_config = AsyncMock(
-        return_value={"community_sessions": {"workerX": {"host": "localhost"}}}
+        return_value={"community": {"sessions": {"workerX": {"host": "localhost"}}}}
     )
     mgr = SessionManager(mock_cfg_mgr)
     # Patch helpers to simulate slow creation and track calls
@@ -103,7 +103,7 @@ async def test_session_manager_concurrent_get_or_create_session_failure():
     mock_cfg_mgr = AsyncMock()
     mock_cfg_mgr.get_worker_config = AsyncMock(return_value={"host": "localhost"})
     mock_cfg_mgr.get_config = AsyncMock(
-        return_value={"community_sessions": {"workerX": {"host": "localhost"}}}
+        return_value={"community": {"sessions": {"workerX": {"host": "localhost"}}}}
     )
     mgr = SessionManager(mock_cfg_mgr)
     with patch(
@@ -125,7 +125,7 @@ async def test_session_manager_delegates_to_helpers():
     mock_cfg_mgr = AsyncMock()
     mock_cfg_mgr.get_worker_config = AsyncMock(return_value={"host": "localhost"})
     mock_cfg_mgr.get_config = AsyncMock(
-        return_value={"community_sessions": {"workerY": {"host": "localhost"}}}
+        return_value={"community": {"sessions": {"workerY": {"host": "localhost"}}}}
     )
     mgr = SessionManager(mock_cfg_mgr)
     with patch(
@@ -189,7 +189,7 @@ async def test_get_or_create_session_liveness_exception(session_manager, caplog)
         return_value={"host": "localhost"}
     )
     session_manager._config_manager.get_config = AsyncMock(
-        return_value={"community_sessions": {"foo": {"host": "localhost"}}}
+        return_value={"community": {"sessions": {"foo": {"host": "localhost"}}}}
     )
     with patch("deephaven_mcp.sessions._lifecycle.community.Session", new=MagicMock()):
         await session_manager.get_or_create_session("foo")
@@ -211,7 +211,7 @@ async def test_get_or_create_session_reuses_alive(session_manager):
         return_value={"host": "localhost"}
     )
     session_manager._config_manager.get_config = AsyncMock(
-        return_value={"community_sessions": {"foo": {"host": "localhost"}}}
+        return_value={"community": {"sessions": {"foo": {"host": "localhost"}}}}
     )
     with patch("deephaven_mcp.sessions._sessions.Session", new=MagicMock()):
         result = await session_manager.get_or_create_session("foo")
@@ -226,7 +226,7 @@ async def test_get_or_create_session_creates_new(session_manager):
         return_value=fake_config
     )
     session_manager._config_manager.get_config = AsyncMock(
-        return_value={"community_sessions": {"foo": {"host": "localhost"}}}
+        return_value={"community": {"sessions": {"foo": {"host": "localhost"}}}}
     )
     mock_session = MagicMock()
     with (
@@ -254,7 +254,7 @@ async def test_get_or_create_session_handles_dead(session_manager):
         return_value=fake_config
     )
     session_manager._config_manager.get_config = AsyncMock(
-        return_value={"community_sessions": {"foo": {"host": "localhost"}}}
+        return_value={"community": {"sessions": {"foo": {"host": "localhost"}}}}
     )
     mock_session = MagicMock()
     with (

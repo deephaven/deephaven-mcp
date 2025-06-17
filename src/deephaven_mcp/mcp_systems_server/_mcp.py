@@ -218,7 +218,8 @@ async def describe_workers(context: Context) -> dict:
     try:
         config_manager = context.request_context.lifespan_context["config_manager"]
         session_manager = context.request_context.lifespan_context["session_manager"]
-        names = await config.get_all_config_names(config_manager, "community_sessions")
+        full_config = await config_manager.get_config()
+        names = config.get_all_config_names(full_config, ["community", "sessions"])
         results = []
         for name in names:
             try:
