@@ -14,11 +14,11 @@ from pydeephaven import Session
 
 from deephaven_mcp import config
 from deephaven_mcp.config._community_session import redact_community_session_config
-from deephaven_mcp.sessions import _sessions
+from deephaven_mcp.sessions import _session_manager
+from deephaven_mcp.sessions._session_manager import SessionManager
 from deephaven_mcp.sessions._errors import SessionCreationError
 from deephaven_mcp.sessions._lifecycle.community import create_session
 from deephaven_mcp.sessions._queries import get_dh_versions
-from deephaven_mcp.sessions._sessions import SessionManager
 
 
 # --- Fixtures and helpers ---
@@ -48,7 +48,7 @@ def session_manager(mock_config_manager):
 async def test_create_session_error_handling():
     # Should raise SessionCreationError on failure
     with patch(
-        "deephaven_mcp.sessions._sessions.Session",
+        "deephaven_mcp.sessions._session_manager.Session",
         new=MagicMock(side_effect=RuntimeError("fail-create")),
     ):
         with pytest.raises(SessionCreationError) as exc_info:
@@ -163,7 +163,7 @@ async def test_clear_all_sessions_calls_close(session_manager):
 async def test_create_session_error():
     # Patch Session to raise
     with patch(
-        "deephaven_mcp.sessions._sessions.Session",
+        "deephaven_mcp.sessions._session_manager.Session",
         new=MagicMock(side_effect=RuntimeError("fail")),
     ):
         with pytest.raises(SessionCreationError) as exc_info:

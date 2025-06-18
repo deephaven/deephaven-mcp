@@ -30,7 +30,7 @@ from ._queries import (
     get_pip_packages_table,
     get_table,
 )
-from ._sessions import (
+from ._session_manager import (
     Session,
     SessionManager,
 )
