@@ -29,6 +29,9 @@ __all__ = ["mcp_server", "run_server"]
 
 _LOGGER = logging.getLogger(__name__)
 
+# Idempotency guard for global exception logging setup
+_EXC_LOGGING_INSTALLED = False
+
 
 # TODO: make this generic for all MCP servers
 def setup_global_exception_logging() -> None:
@@ -48,6 +51,10 @@ def setup_global_exception_logging() -> None:
     Usage:
         Call this function once at process startup (e.g., at the top of your main() entrypoint) before any event loops are created or server code is run.
     """
+    global _EXC_LOGGING_INSTALLED
+    if _EXC_LOGGING_INSTALLED:
+        return
+    _EXC_LOGGING_INSTALLED = True
 
     def _log_unhandled_exception(
         exc_type: type[BaseException],
