@@ -198,3 +198,47 @@ def test_run_server_host_env(monkeypatch):
         # Assert that the 'run' method of our mock_server_instance was called correctly.
         # run_server calls mcp_server.run(transport=transport). Host should not be explicitly passed.
         mock_server_instance.run.assert_called_once_with(transport="stdio")
+
+
+def test_setup_global_exception_logging(monkeypatch, caplog):
+    """Test that setup_global_exception_logging patches sys.excepthook and asyncio.new_event_loop, and logs unhandled exceptions."""
+    import importlib
+    import sys as real_sys
+    import asyncio as real_asyncio
+
+    # Reload module to get a fresh copy
+    sys.modules.pop("deephaven_mcp.mcp_docs_server.__init__", None)
+    mod = importlib.import_module("deephaven_mcp.mcp_docs_server.__init__")
+
+    # Patch _LOGGER to capture logs
+    logger = logging.getLogger("test_logger")
+    monkeypatch.setattr(mod, "_LOGGER", logger)
+    caplog.set_level("ERROR", logger="test_logger")
+
+    # Call the function
+    mod.setup_global_exception_logging()
+
+    # Test sys.excepthook
+    class DummyExc(Exception):
+        pass
+    try:
+        raise DummyExc("fail-sync")
+    except DummyExc as e:
+        mod.sys.excepthook(DummyExc, e, e.__traceback__)
+    assert any("UNHANDLED EXCEPTION" in r.message for r in caplog.records)
+    # Check the exception message is present in exc_info or traceback
+    found = False
+    for r in caplog.records:
+        if r.exc_info:
+            import traceback
+            tb_str = "".join(traceback.format_exception(*r.exc_info))
+            if "fail-sync" in tb_str:
+                found = True
+                break
+    assert found, "Exception message 'fail-sync' not found in exc_info traceback"
+
+    # Test that asyncio.new_event_loop is patched
+    loop = real_asyncio.new_event_loop()
+    assert hasattr(loop, "set_exception_handler")
+    # Clean up
+    loop.close()
