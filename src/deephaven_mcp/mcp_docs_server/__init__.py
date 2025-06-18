@@ -77,7 +77,11 @@ def setup_global_exception_logging() -> None:
         exception = context.get("exception")
         _LOGGER.error(
             f"UNHANDLED ASYNC EXCEPTION: {context.get('message')}",
-            exc_info=(type(exception), exception, exception.__traceback__) if exception else None,
+            exc_info=(
+                (type(exception), exception, exception.__traceback__)
+                if exception
+                else None
+            ),
         )
 
     # Patch new_event_loop to always set the handler

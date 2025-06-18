@@ -202,9 +202,9 @@ def test_run_server_host_env(monkeypatch):
 
 def test_setup_global_exception_logging(monkeypatch, caplog):
     """Test that setup_global_exception_logging patches sys.excepthook and asyncio.new_event_loop, and logs unhandled exceptions."""
+    import asyncio as real_asyncio
     import importlib
     import sys as real_sys
-    import asyncio as real_asyncio
 
     # Reload module to get a fresh copy
     sys.modules.pop("deephaven_mcp.mcp_docs_server.__init__", None)
@@ -221,6 +221,7 @@ def test_setup_global_exception_logging(monkeypatch, caplog):
     # Test sys.excepthook
     class DummyExc(Exception):
         pass
+
     try:
         raise DummyExc("fail-sync")
     except DummyExc as e:
@@ -231,6 +232,7 @@ def test_setup_global_exception_logging(monkeypatch, caplog):
     for r in caplog.records:
         if r.exc_info:
             import traceback
+
             tb_str = "".join(traceback.format_exception(*r.exc_info))
             if "fail-sync" in tb_str:
                 found = True
@@ -245,9 +247,9 @@ def test_setup_global_exception_logging(monkeypatch, caplog):
 
 
 def test_setup_global_exception_logging_branches(monkeypatch, caplog):
+    import asyncio as real_asyncio
     import importlib
     import sys as real_sys
-    import asyncio as real_asyncio
     import types
 
     sys.modules.pop("deephaven_mcp.mcp_docs_server.__init__", None)
@@ -267,20 +269,24 @@ def test_setup_global_exception_logging_branches(monkeypatch, caplog):
 
     # --- KeyboardInterrupt branch ---
     caplog.clear()
+
     class DummyKI(KeyboardInterrupt):
         pass
+
     mod.sys.excepthook(DummyKI, DummyKI(), None)
     assert not caplog.records, "KeyboardInterrupt should not be logged"
 
     # --- RuntimeError branch for get_event_loop ---
     def raise_runtime_error():
         raise RuntimeError("no event loop")
+
     monkeypatch.setattr(mod.asyncio, "get_event_loop", raise_runtime_error)
     mod._EXC_LOGGING_INSTALLED = False
     mod.setup_global_exception_logging()  # Should not raise
 
     # --- CLI arg logging ---
     import argparse
+
     monkeypatch.setattr(mod, "run_server", lambda transport: None)
     monkeypatch.setattr(mod, "setup_global_exception_logging", lambda: None)
     caplog.set_level("INFO", logger=logger.name)
