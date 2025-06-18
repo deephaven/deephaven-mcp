@@ -28,16 +28,12 @@ Dependencies:
 import asyncio
 import logging
 import time
-from types import TracebackType
 
 from pydeephaven import Session
 
 from deephaven_mcp import config
 
-from ._lifecycle.community import (
-    create_session_for_worker,
-)
-from ._lifecycle.shared import close_session_safely
+from ._community_session import SessionCommunity, SessionBase
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -64,16 +60,37 @@ class SessionManager:
         Args:
             config_manager (ConfigManager): The configuration manager to use for worker config lookup.
 
-        This constructor sets up the internal session cache (mapping worker names to Session objects)
+        This constructor sets up the internal session cache (mapping worker names to SessionBase objects)
         and an asyncio.Lock to ensure coroutine safety for all session management operations.
+        It also creates CommunitySession objects for all configured community sessions.
 
         Example:
             cfg_mgr = ...  # Your ConfigManager instance
             mgr = SessionManager(cfg_mgr)
         """
-        self._cache: dict[str, Session] = {}
+        self._sessions: dict[str, SessionBase] = {}
         self._lock = asyncio.Lock()
         self._config_manager = config_manager
+        
+        _LOGGER.info("SessionManager initialized (sessions will be created on first access)")
+
+    async def _ensure_sessions_initialized(self) -> None:
+        """
+        Ensure that session objects have been created from the configuration.
+        
+        This is called lazily on first access to avoid requiring the constructor to be async.
+        """
+        if self._sessions:
+            return  # Already initialized
+            
+        # Load configuration and create CommunitySession objects
+        config_data = await self._config_manager.get_config()
+        community_sessions_config = config_data.get("community", {}).get("sessions", {})
+        
+        for session_name, session_config in community_sessions_config.items():
+            self._sessions[session_name] = SessionCommunity(session_name, session_config)
+        
+        _LOGGER.info(f"SessionManager initialized with {len(self._sessions)} sessions")
 
     async def clear_all_sessions(self) -> None:
         """
@@ -81,9 +98,9 @@ class SessionManager:
 
         This method:
         1. Acquires the async session cache lock for coroutine safety.
-        2. Iterates through all cached sessions.
-        3. Attempts to close each alive session (using await asyncio.to_thread).
-        4. Clears the session cache after all sessions are processed.
+        2. Iterates through all session objects.
+        3. Attempts to close each session's cached Session (if any).
+        4. Clears the session objects after all sessions are processed.
 
         Args:
             None
@@ -103,14 +120,16 @@ class SessionManager:
         """
         start_time = time.time()
         _LOGGER.info("Clearing Deephaven session cache...")
-        _LOGGER.info(f"Current session cache size: {len(self._cache)}")
+        
+        await self._ensure_sessions_initialized()
+        _LOGGER.info(f"Current session cache size: {len(self._sessions)}")
 
         async with self._lock:
-            num_sessions = len(self._cache)
+            num_sessions = len(self._sessions)
             _LOGGER.info(f"Processing {num_sessions} cached sessions...")
-            for session_name, session in list(self._cache.items()):
-                await close_session_safely(session, session_name)
-            self._cache.clear()
+            for _session_name, session_obj in list(self._sessions.items()):
+                await session_obj.close_session()
+            self._sessions.clear()
             _LOGGER.info(
                 f"Session cache cleared. Processed {num_sessions} sessions in {time.time() - start_time:.2f}s"
             )
@@ -136,7 +155,7 @@ class SessionManager:
         Raises:
             SessionCreationError: If the session could not be created for any reason.
             FileNotFoundError: If configuration or certificate files are missing.
-            ValueError: If configuration is invalid.
+            ValueError: If configuration is invalid or session not found.
             OSError: If there are file I/O errors when loading certificates/keys.
             RuntimeError: If configuration loading fails for other reasons.
 
@@ -147,32 +166,14 @@ class SessionManager:
             session = await mgr.get_or_create_session('worker1')
         """
         _LOGGER.info(f"Getting or creating session for worker: {session_name}")
-        _LOGGER.info(f"Session cache size: {len(self._cache)}")
+        _LOGGER.info(f"Session cache size: {len(self._sessions)}")
+
+        await self._ensure_sessions_initialized()
 
         async with self._lock:
-            session = self._cache.get(session_name)
-            if session is not None:
-                try:
-                    if session.is_alive:
-                        _LOGGER.info(
-                            f"Found and returning cached session for worker: {session_name}"
-                        )
-                        return session
-                    else:
-                        _LOGGER.info(
-                            f"Cached session for worker '{session_name}' is not alive. Recreating."
-                        )
-                except Exception as e:
-                    _LOGGER.warning(
-                        f"Error checking session liveness for worker '{session_name}': {e}. Recreating session."
-                    )
-
-            # At this point, we need to create a new session
-            session = await create_session_for_worker(
-                self._config_manager, session_name
-            )
-            self._cache[session_name] = session
-            _LOGGER.info(
-                f"Session cached for worker: {session_name}. Returning session."
-            )
-            return session
+            session_obj = self._sessions.get(session_name)
+            if session_obj is None:
+                raise ValueError(f"No session configuration found for worker: {session_name}")
+            
+            # Delegate to the session object to get or create the actual Session
+            return await session_obj.get_session()
