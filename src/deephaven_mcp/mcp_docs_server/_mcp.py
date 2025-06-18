@@ -78,6 +78,12 @@ FastMCP: The server instance for the Deephaven documentation tools.
 
 @mcp_server.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
+    from starlette.exceptions import HTTPException
+    
+    if isinstance(exc, HTTPException):
+        # Re-raise HTTPException to preserve its status code and message
+        raise exc
+    
     _LOGGER.exception(f"Unhandled exception for request {request.method} {request.url}: {exc}")
     return JSONResponse(
         status_code=500,
