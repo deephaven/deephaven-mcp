@@ -29,7 +29,6 @@ Example (agentic usage):
     To install Deephaven, ...
 """
 
-import logging
 import os
 
 from mcp.server.fastmcp import FastMCP
@@ -37,8 +36,6 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from ..openai import OpenAIClient
-
-_LOGGER = logging.getLogger(__name__)
 
 #: The API key for authenticating with the Inkeep-powered LLM API. Must be set in the environment. Private to this module.
 _INKEEP_API_KEY = os.environ.get("INKEEP_API_KEY")
@@ -76,20 +73,7 @@ FastMCP: The server instance for the Deephaven documentation tools.
 - Host binding is controlled by the MCP_DOCS_HOST environment variable (default: 127.0.0.1).
 """
 
-@mcp_server.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
-    from starlette.exceptions import HTTPException
-    
-    if isinstance(exc, HTTPException):
-        # Re-raise HTTPException to preserve its status code and message
-        raise exc
-    
-    _LOGGER.exception(f"Unhandled exception for request {request.method} {request.url}: {exc}")
-    return JSONResponse(
-        status_code=500,
-        content={"detail": "Internal Server Error"},
-    )
-    
+
 @mcp_server.custom_route("/health", methods=["GET"])  # type: ignore[misc]
 async def health_check(request: Request) -> JSONResponse:
     """
