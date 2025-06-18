@@ -8,6 +8,7 @@ and lifecycle management for individual community sessions.
 import asyncio
 import logging
 from abc import ABC, abstractmethod
+from enum import Enum
 from typing import Any
 
 from pydeephaven import Session
@@ -21,6 +22,12 @@ from deephaven_mcp.sessions._lifecycle.shared import close_session_safely
 _LOGGER = logging.getLogger(__name__)
 
 
+class SessionType(Enum):
+    """Enum for different types of Deephaven sessions."""
+    COMMUNITY = "community"
+    ENTERPRISE = "enterprise"
+
+
 class SessionBase(ABC):
     """
     Abstract base class for all Deephaven session types.
@@ -28,9 +35,10 @@ class SessionBase(ABC):
     This defines the interface that all session implementations must follow.
     """
     
-    def __init__(self, name: str):
-        """Initialize the session with a name."""
+    def __init__(self, name: str, session_type: SessionType):
+        """Initialize the session with a name and type."""
         self._name = name
+        self._type = session_type
         self._session_cache: Session | None = None
         self._lock = asyncio.Lock()
     
@@ -38,6 +46,10 @@ class SessionBase(ABC):
     def name(self) -> str:
         """Get the session name."""
         return self._name
+    
+    def get_type(self) -> SessionType:
+        """Return the type of this session."""
+        return self._type
     
     @abstractmethod
     async def get_session(self) -> Session:
@@ -78,9 +90,9 @@ class SessionCommunity(SessionBase):
             name: The session name/identifier
             config: The validated community session configuration dictionary
         """
-        super().__init__(name)
+        super().__init__(name, SessionType.COMMUNITY)
         self._config = config
-    
+
     async def get_session(self) -> Session:
         """
         Get or create a session for this community configuration.

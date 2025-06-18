@@ -30,6 +30,7 @@ from ._queries import (
     get_pip_packages_table,
     get_table,
 )
+from ._community_session import SessionType
 from ._session_manager import (
     Session,
     SessionManager,
@@ -37,6 +38,7 @@ from ._session_manager import (
 
 __all__ = [
     "SessionManager",
+    "SessionType",
     "get_dh_versions",
     "get_table",
     "get_pip_packages_table",

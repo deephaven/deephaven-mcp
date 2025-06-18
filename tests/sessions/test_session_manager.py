@@ -339,3 +339,28 @@ async def test_get_dh_versions_raises():
     ):
         with pytest.raises(RuntimeError, match="fail!"):
             await get_dh_versions(session)
+
+
+@pytest.mark.asyncio
+async def test_session_community_type():
+    """Test that SessionCommunity returns correct session type."""
+    from deephaven_mcp.sessions import SessionType
+    from deephaven_mcp.sessions._community_session import SessionCommunity
+    
+    # Create a minimal config for testing
+    config = {
+        "host": "localhost",
+        "port": 10000,
+    }
+    
+    session = SessionCommunity("test", config)
+    assert session.get_type() == SessionType.COMMUNITY
+
+
+def test_session_type_enum():
+    """Test SessionType enum values."""
+    from deephaven_mcp.sessions import SessionType
+    
+    assert SessionType.COMMUNITY.value == "community"
+    assert SessionType.ENTERPRISE.value == "enterprise"
+    assert len(list(SessionType)) == 2
