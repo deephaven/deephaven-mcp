@@ -33,7 +33,7 @@ from pydeephaven import Session
 
 from deephaven_mcp import config
 
-from ._community_session import SessionCommunity, SessionBase
+from deephaven_mcp.sessions._session._community_session import SessionCommunity, SessionBase
 
 _LOGGER = logging.getLogger(__name__)
 

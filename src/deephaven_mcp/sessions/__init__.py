@@ -24,13 +24,13 @@ Dependencies:
 """
 
 from ._errors import SessionCreationError
-from ._queries import (
+from ._session._community_session import SessionType
+from ._session._queries import (
     get_dh_versions,
     get_meta_table,
     get_pip_packages_table,
     get_table,
 )
-from ._community_session import SessionType
 from ._session_manager import (
     Session,
     SessionManager,
