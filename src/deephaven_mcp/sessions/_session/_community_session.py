@@ -70,7 +70,7 @@ class SessionBase(ABC):
         Return True if the session is currently alive/usable, False otherwise.
         Implementations should check the underlying session state as appropriate.
         """
-        pass
+        pass  # pragma: no cover
     
     @abstractmethod
     async def get_session(self) -> Session:
@@ -80,7 +80,7 @@ class SessionBase(ABC):
         Returns:
             Session: An alive Deephaven Session instance.
         """
-        pass
+        pass  # pragma: no cover
     
     async def close_session(self) -> None:
         """
