@@ -242,3 +242,50 @@ def test_setup_global_exception_logging(monkeypatch, caplog):
     assert hasattr(loop, "set_exception_handler")
     # Clean up
     loop.close()
+
+
+def test_setup_global_exception_logging_branches(monkeypatch, caplog):
+    import importlib
+    import sys as real_sys
+    import asyncio as real_asyncio
+    import types
+
+    sys.modules.pop("deephaven_mcp.mcp_docs_server.__init__", None)
+    mod = importlib.import_module("deephaven_mcp.mcp_docs_server.__init__")
+
+    # Patch _LOGGER to capture logs
+    logger = logging.getLogger("test_logger2")
+    monkeypatch.setattr(mod, "_LOGGER", logger)
+    caplog.set_level("ERROR", logger="test_logger2")
+
+    # --- Idempotency guard ---
+    mod._EXC_LOGGING_INSTALLED = False
+    mod.setup_global_exception_logging()
+    # Call again: should be a no-op (idempotent)
+    mod.setup_global_exception_logging()
+    assert mod._EXC_LOGGING_INSTALLED is True
+
+    # --- KeyboardInterrupt branch ---
+    caplog.clear()
+    class DummyKI(KeyboardInterrupt):
+        pass
+    mod.sys.excepthook(DummyKI, DummyKI(), None)
+    assert not caplog.records, "KeyboardInterrupt should not be logged"
+
+    # --- RuntimeError branch for get_event_loop ---
+    def raise_runtime_error():
+        raise RuntimeError("no event loop")
+    monkeypatch.setattr(mod.asyncio, "get_event_loop", raise_runtime_error)
+    mod._EXC_LOGGING_INSTALLED = False
+    mod.setup_global_exception_logging()  # Should not raise
+
+    # --- CLI arg logging ---
+    import argparse
+    monkeypatch.setattr(mod, "run_server", lambda transport: None)
+    monkeypatch.setattr(mod, "setup_global_exception_logging", lambda: None)
+    caplog.set_level("INFO", logger=logger.name)
+    with monkeypatch.context() as m:
+        m.setattr("sys.argv", ["prog", "-t", "stdio"])
+        mod._LOGGER = logger
+        mod.main()
+        assert any("CLI args" in r.getMessage() for r in caplog.records)
