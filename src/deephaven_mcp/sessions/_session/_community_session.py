@@ -35,21 +35,33 @@ class SessionBase(ABC):
     This defines the interface that all session implementations must follow.
     """
     
-    def __init__(self, name: str, session_type: SessionType):
-        """Initialize the session with a name and type."""
-        self._name = name
+    def __init__(self, session_type: SessionType, source: str, name: str):
+        """Initialize the session with a type, source, and name."""
         self._type = session_type
+        self._source = source
+        self._name = name
         self._session_cache: Session | None = None
         self._lock = asyncio.Lock()
     
     @property
+    def session_type(self) -> SessionType:
+        """Return the type of this session."""
+        return self._type
+
+    @property
+    def source(self) -> str:
+        """Get the session source."""
+        return self._source
+
+    @property
     def name(self) -> str:
         """Get the session name."""
         return self._name
-    
-    def get_type(self) -> SessionType:
-        """Return the type of this session."""
-        return self._type
+        
+    @property
+    def full_name(self) -> str:
+        """Get the full name of this session, including type, source, and name."""
+        return f"{self._type.value}:{self._source}:{self._name}"
     
     @property
     @abstractmethod
@@ -99,7 +111,7 @@ class SessionCommunity(SessionBase):
             name: The session name/identifier
             config: The validated community session configuration dictionary
         """
-        super().__init__(name, SessionType.COMMUNITY)
+        super().__init__(SessionType.COMMUNITY, "community", name)
         self._config = config
 
     async def is_alive(self) -> bool:

@@ -354,7 +354,9 @@ async def test_session_community_type():
     }
     
     session = SessionCommunity("test", config)
-    assert session.get_type() == SessionType.COMMUNITY
+    assert session.session_type == SessionType.COMMUNITY
+    assert session.source == "community"
+    assert session.full_name == "community:community:test"
 
 
 def test_session_type_enum():
@@ -376,6 +378,7 @@ async def test_session_community_is_alive_property():
     
     config = {"host": "localhost", "port": 10000}
     session = SessionCommunity("test", config)
+    assert session.source == "community"
     # No cached session: should be False
     assert await session.is_alive() is False
     # Cached session, is_alive True
