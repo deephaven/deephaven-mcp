@@ -364,3 +364,29 @@ def test_session_type_enum():
     assert SessionType.COMMUNITY.value == "community"
     assert SessionType.ENTERPRISE.value == "enterprise"
     assert len(list(SessionType)) == 2
+
+
+import pytest
+
+@pytest.mark.asyncio
+async def test_session_community_is_alive_property():
+    """Test the is_alive property of SessionCommunity."""
+    from deephaven_mcp.sessions._community_session import SessionCommunity
+    from unittest.mock import MagicMock, PropertyMock
+    
+    config = {"host": "localhost", "port": 10000}
+    session = SessionCommunity("test", config)
+    # No cached session: should be False
+    assert await session.is_alive() is False
+    # Cached session, is_alive True
+    mock_sess = MagicMock()
+    mock_sess.is_alive = True
+    session._session_cache = mock_sess
+    assert await session.is_alive() is True
+    # Cached session, is_alive False
+    mock_sess.is_alive = False
+    assert await session.is_alive() is False
+    # Cached session, is_alive raises
+    type(mock_sess).is_alive = PropertyMock(side_effect=Exception("fail"))
+    session._session_cache = mock_sess
+    assert await session.is_alive() is False

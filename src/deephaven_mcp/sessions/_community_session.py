@@ -51,6 +51,15 @@ class SessionBase(ABC):
         """Return the type of this session."""
         return self._type
     
+    @property
+    @abstractmethod
+    def is_alive(self) -> bool:
+        """
+        Return True if the session is currently alive/usable, False otherwise.
+        Implementations should check the underlying session state as appropriate.
+        """
+        pass
+    
     @abstractmethod
     async def get_session(self) -> Session:
         """
@@ -92,6 +101,19 @@ class SessionCommunity(SessionBase):
         """
         super().__init__(name, SessionType.COMMUNITY)
         self._config = config
+
+    async def is_alive(self) -> bool:
+        """
+        Return True if the cached session exists and is alive, False otherwise.
+        This method acquires the lock to ensure thread/coroutine safety.
+        """
+        async with self._lock:
+            if self._session_cache is not None:
+                try:
+                    return bool(self._session_cache.is_alive)
+                except Exception:
+                    return False
+            return False
 
     async def get_session(self) -> Session:
         """
