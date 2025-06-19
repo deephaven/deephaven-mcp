@@ -19,8 +19,6 @@ Usage:
 See the project README for setup, configuration, and usage details for each server.
 """
 
-# Import version from _version.py
-# Initialize logging
 import logging
 
 from ._version import version as __version__

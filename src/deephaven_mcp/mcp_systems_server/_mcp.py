@@ -422,7 +422,7 @@ async def run_script(
         if script is None:
             _LOGGER.info(f"[run_script] Loading script from file: {script_path!r}")
             if script_path is None:
-                raise ValueError("script_path must not be None")
+                raise RuntimeError("Internal error: script_path is None after prior guard")  # pragma: no cover
             async with aiofiles.open(script_path) as f:
                 script = await f.read()
 

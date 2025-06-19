@@ -747,6 +747,7 @@ async def test_run_script_success():
     session_manager = AsyncMock()
 
     class DummySession:
+        called = None
         def run_script(self, script):
             DummySession.called = script
 
@@ -831,6 +832,17 @@ async def test_run_script_script_path_error():
         assert res["success"] is False
         assert res["isError"] is True
         assert "fail-open" in res["error"]
+
+@pytest.mark.asyncio
+async def test_run_script_script_path_none_error():
+    session_manager = AsyncMock()
+    session_manager.get_or_create_session = AsyncMock()
+    context = MockContext({"session_manager": session_manager})
+    # This should trigger the ValueError branch (line 425)
+    res = await mcp_mod.run_script(context, worker_name="worker", script=None, script_path=None)
+    assert res["success"] is False
+    assert res["isError"] is True
+    assert "Must provide either script or script_path." in res["error"]
 
 
 # === pip_packages ===

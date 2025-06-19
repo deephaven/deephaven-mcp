@@ -20,6 +20,11 @@ from deephaven_mcp.sessions._errors import SessionCreationError
 from deephaven_mcp.sessions._lifecycle.community import create_session
 from deephaven_mcp.sessions._session._queries import get_dh_versions
 
+# --- Coverage sanity check ---
+def test_module_import_and_init():
+    # This test guarantees the module is imported and SessionManager can be constructed
+    mgr = SessionManager(MagicMock())
+    assert isinstance(mgr, SessionManager)
 
 # --- Fixtures and helpers ---
 @pytest.fixture
@@ -223,6 +228,16 @@ async def test_get_or_create_session_checks_liveness_error(session_manager, capl
 
 
 # --- Tests for get_or_create_session ---
+
+@pytest.mark.asyncio
+async def test_get_or_create_session_unknown_worker_raises(session_manager):
+    # Ensure the session cache is initialized (simulate at least one session)
+    await session_manager._ensure_sessions_initialized()
+    # Remove all sessions to simulate a missing worker
+    session_manager._sessions.clear()
+    with pytest.raises(ValueError, match="No session configuration found for worker: unknown_worker"):
+        await session_manager.get_or_create_session("unknown_worker")
+
 @pytest.mark.asyncio
 async def test_get_or_create_session_reuses_existing(session_manager):
     """Test get_or_create_session returns existing alive session."""
