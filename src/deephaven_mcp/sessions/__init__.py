@@ -24,7 +24,7 @@ Dependencies:
 """
 
 from ._errors import SessionCreationError
-from ._session._community_session import SessionType
+from ._session._session_base import SessionType
 from ._session._queries import (
     get_dh_versions,
     get_meta_table,

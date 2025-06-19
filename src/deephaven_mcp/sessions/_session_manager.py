@@ -2,8 +2,7 @@
 Async session management for Deephaven workers.
 
 This module provides asyncio-compatible, coroutine-safe creation, caching, and lifecycle management of Deephaven Session objects.
-Sessions are configured using validated worker configuration from _config.py. Session reuse is automatic:
-if a cached session is alive, it is returned; otherwise, a new session is created and cached.
+A "Session" is a connection to a Deephaven server, used to execute queries and manage resources. Sessions are configured using validated worker configuration from _config.py. Session reuse is automatic: if a cached session is alive, it is returned; otherwise, a new session is created and cached.
 
 Features:
     - Coroutine-safe session cache keyed by worker name, protected by an asyncio.Lock.
@@ -21,6 +20,11 @@ Error Handling:
     - Session creation failures are logged and raised to the caller.
     - Session closure failures are logged but do not prevent other operations.
 
+Public API:
+    - SessionManager: Main entry point for session creation, caching, and lifecycle management.
+    - get_or_create_session(session_name): Obtain or create an alive Deephaven Session for a worker.
+    - clear_all_sessions(): Atomically clear all sessions and release resources.
+
 Dependencies:
     - Requires aiofiles for async file I/O.
 """
@@ -33,24 +37,24 @@ from pydeephaven import Session
 
 from deephaven_mcp import config
 
-from deephaven_mcp.sessions._session._community_session import SessionCommunity, SessionBase
+from deephaven_mcp.sessions._session._session_base import SessionBase
+from deephaven_mcp.sessions._session._session_community import SessionCommunity
 
 _LOGGER = logging.getLogger(__name__)
 
 
 class SessionManager:
     """
-    Manages Deephaven Session objects, including creation, caching, and lifecycle.
+    Async/thread-safe manager for Deephaven Session objects, including creation, caching, and lifecycle.
+
+    Each SessionManager instance is fully isolated and must be provided a ConfigManager. All operations are coroutine-safe.
+    Use this class to obtain, reuse, and clean up Deephaven Session objects for workers.
 
     Usage:
-        - Instantiate with a ConfigManager instance:
-            cfg_mgr = ...  # Your ConfigManager
-            mgr = SessionManager(cfg_mgr)
-        - Use clear_all_sessions() for explicit cleanup when needed:
-            await mgr.clear_all_sessions()
-
-    Notes:
-        - Each SessionManager instance is fully isolated and must be provided a ConfigManager.
+        cfg_mgr = ...  # Your ConfigManager
+        mgr = SessionManager(cfg_mgr)
+        session = await mgr.get_or_create_session('worker1')
+        await mgr.clear_all_sessions()
     """
 
     def __init__(self, config_manager: config.ConfigManager):
@@ -60,9 +64,8 @@ class SessionManager:
         Args:
             config_manager (ConfigManager): The configuration manager to use for worker config lookup.
 
-        This constructor sets up the internal session cache (mapping worker names to SessionBase objects)
-        and an asyncio.Lock to ensure coroutine safety for all session management operations.
-        It also creates CommunitySession objects for all configured community sessions.
+        Sets up the internal session cache (mapping worker names to SessionBase objects)
+        and an asyncio.Lock for coroutine safety. Session objects are created lazily on first use.
 
         Example:
             cfg_mgr = ...  # Your ConfigManager instance
@@ -76,9 +79,10 @@ class SessionManager:
 
     async def _ensure_sessions_initialized(self) -> None:
         """
-        Ensure that session objects have been created from the configuration.
-        
-        This is called lazily on first access to avoid requiring the constructor to be async.
+        Lazily initialize session objects from configuration if not already present.
+
+        Called on first access to avoid requiring an async constructor. Populates the session cache
+        with SessionCommunity objects for all configured community sessions.
         """
         if self._sessions:
             return  # Already initialized
@@ -96,27 +100,9 @@ class SessionManager:
         """
         Atomically clear all Deephaven sessions and their cache (async).
 
-        This method:
-        1. Acquires the async session cache lock for coroutine safety.
-        2. Iterates through all session objects.
-        3. Attempts to close each session's cached Session (if any).
-        4. Clears the session objects after all sessions are processed.
-
-        Args:
-            None
-
-        Returns:
-            None
-
-        Error Handling:
-            - Any exceptions during session closure are logged but do not prevent other sessions from being closed.
-            - The cache is always cleared regardless of errors.
-
-        Async Safety:
-            This method is coroutine-safe and uses an asyncio.Lock to prevent race conditions.
-
-        Notes:
-            Intended for both production and test cleanup. Should be preferred over forcibly clearing the cache to ensure all resources are released.
+        Acquires the session cache lock for coroutine safety, closes all cached sessions, and clears the cache.
+        Any exceptions during session closure are logged but do not prevent other sessions from being closed.
+        The cache is always cleared regardless of errors. Intended for both production and test cleanup.
         """
         start_time = time.time()
         _LOGGER.info("Clearing Deephaven session cache...")
@@ -138,19 +124,14 @@ class SessionManager:
         """
         Retrieve a cached Deephaven session for the specified worker, or create and cache a new one if needed.
 
-        This is the main entry point for obtaining a Deephaven Session for a given worker. Sessions are reused if possible;
+        Main entry point for obtaining an alive Deephaven Session for a given worker. Sessions are reused if alive;
         if the cached session is not alive, a new one is created and cached. All session creation and configuration is coroutine-safe.
 
         Args:
-            session_name (str): The name of the worker to retrieve a session for. This argument is required.
+            session_name (str): The name of the worker to retrieve a session for.
 
         Returns:
             Session: An alive Deephaven Session instance for the worker.
-
-        Error Handling:
-            - Any exceptions during session creation will raise SessionCreationError with details.
-            - Any exceptions during config loading are logged and propagated to the caller.
-            - If the cached session is not alive or liveness check fails, a new session is created.
 
         Raises:
             SessionCreationError: If the session could not be created for any reason.
@@ -159,8 +140,11 @@ class SessionManager:
             OSError: If there are file I/O errors when loading certificates/keys.
             RuntimeError: If configuration loading fails for other reasons.
 
-        Usage:
-            This method is coroutine-safe and can be used concurrently in async workflows.
+        Notes:
+            - Any exceptions during session creation will raise SessionCreationError with details.
+            - Any exceptions during config loading are logged and propagated to the caller.
+            - If the cached session is not alive or liveness check fails, a new session is created.
+            - This method is coroutine-safe and can be used concurrently in async workflows.
 
         Example:
             session = await mgr.get_or_create_session('worker1')

@@ -57,7 +57,7 @@ dev = [
     "black>=24.0.0",       # Code formatter
     "ruff>=0.1.0",         # Linter and code quality tool
     "isort>=5.12.0",       # Import sorter
-
+    "pydocstyle>=6.3.0",   # Docstring style checker
     # Type checking and static analysis
     "mypy>=1.6.0",         # Static type checker
     "types-aiofiles",      # Type stubs for aiofiles
@@ -118,6 +118,11 @@ ignore = ["E501"]  # Ignore line length warnings since we use black
 # Isort configuration for import sorting
 [tool.isort]
 profile = "black"  # Use black's style for import sorting
+
+# pydocstyle configuration for docstring linting
+[tool.pydocstyle]
+convention = "pep257"
+match = '(?!test_).*\.py'  # Ignore test files by default
 
 # Pytest configuration for testing
 [tool.pytest.ini_options]
