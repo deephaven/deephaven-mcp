@@ -1,6 +1,5 @@
 """
-Deephaven MCP I/O Utilities
---------------------------
+io.py - Async file I/O utilities for deephaven_mcp.
 
 This module provides asynchronous I/O helpers for the Deephaven MCP project, including
 coroutine-safe file reading for sensitive binary files such as TLS certificates and private keys.

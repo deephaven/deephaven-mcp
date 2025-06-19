@@ -24,19 +24,21 @@ Dependencies:
 """
 
 from ._errors import SessionCreationError
-from ._queries import (
+from ._session._queries import (
     get_dh_versions,
     get_meta_table,
     get_pip_packages_table,
     get_table,
 )
-from ._sessions import (
+from ._session._session_base import SessionType
+from ._session_manager import (
     Session,
     SessionManager,
 )
 
 __all__ = [
     "SessionManager",
+    "SessionType",
     "get_dh_versions",
     "get_table",
     "get_pip_packages_table",

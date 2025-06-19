@@ -1161,30 +1161,39 @@ After these steps, your virtual environment will be configured for Core Plus cli
 
 To help maintain a consistent and high-quality codebase, the [`bin/precommit.sh`](../bin/precommit.sh) script is provided. This script will:
 
-- Sort Python imports using [**isort**](https://pycqa.github.io/isort/)
-- Format code using [**black**](https://black.readthedocs.io/)
-- Lint code using [**ruff**](https://docs.astral.sh/ruff/) (with autofix)
-- Perform static type checking using [**mypy**](https://mypy-lang.org/)
+| Tool         | Purpose                                        | How to Run (manual)                | What is Enforced |
+|--------------|------------------------------------------------|-------------------------------------|------------------|
+| isort        | Sort Python imports                            | `uv run isort . --skip _version.py --skip .venv` | Import order, grouping |
+| black        | Format Python code                             | `uv run black . --exclude '(_version.py|.venv)'` | PEP 8 formatting |
+| ruff         | Lint code, autofix common issues               | `uv run ruff check src --fix --exclude _version.py --exclude .venv` | Linting, best practices |
+| mypy         | Static type checking                           | `uv run mypy src/`                  | Type correctness |
+| pydocstyle   | Docstring style/linting                        | `uv run pydocstyle src`             | PEP 257 docstrings |
 
-**How to run:**
+The script will run all of these tools (plus tests) in order. If any step fails, the script will stop and print an error. Fix the reported issues and rerun the script until it completes successfully. Only commit code that passes all pre-commit checks.
 
-```sh
-bin/precommit.sh
-```
-
-You should run this script before every commit or pull request. If any step fails, the script will stop and print an error. Fix the reported issues and rerun the script until it completes successfully. Only commit code that passes all pre-commit checks.
+**Docstring policy:**
+- All public modules, classes, and functions must have clear, PEP 257-compliant docstrings (unless explicitly ignored in config)
+- Docstrings should start with a summary line, use proper formatting, and describe parameters, return values, and exceptions where relevant
+- `pydocstyle` is configured in `pyproject.toml` (see `[tool.pydocstyle]`)
+- Test files are excluded from docstring checks by default (see `match` pattern)
 
 You may also configure this script as a git pre-commit hook or run it in your CI pipeline to enforce code quality for all contributors.
 
 ```sh
+# Run all code style, lint, and docstring checks
+bin/precommit.sh
+
 # Run tests with pytest
 uv run pytest  # Runs all unit and integration tests
 
-# Run code style and lint checks
-
-# Sort imports (fixes in place)
+# Run code style and lint checks individually
 uv run isort . --skip _version.py --skip .venv
-# Check import sorting only (no changes)
+uv run black . --exclude '(_version.py|.venv)'
+uv run ruff check src --fix --exclude _version.py --exclude .venv
+uv run mypy src/
+uv run pydocstyle src
+```
+
 uv run isort . --check-only --diff --skip _version.py --skip .venv
 
 # Format code (fixes in place)

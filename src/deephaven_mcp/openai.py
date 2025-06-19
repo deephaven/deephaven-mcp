@@ -1,5 +1,5 @@
 """
-openai.py - Generic OpenAI/LLM client utilities for deephaven_mcp
+openai.py - Generic OpenAI/LLM client utilities for deephaven_mcp.
 
 This module provides a generic OpenAIClient class for interacting with OpenAI-compatible LLM APIs.
 """
@@ -183,13 +183,13 @@ class OpenAIClient:
         system_prompts: Sequence[str] | None = None,
         **kwargs: Any,
     ) -> str:
-        """
+        r"""
         Asynchronously send a chat completion request to the OpenAI API and return the assistant's response.
 
-        This method validates the chat history, constructs the message list (including system prompt(s) and user prompt), and sends a chat completion request using the injected or default OpenAI async client. It logs request and response details, and raises a custom error on failure.
+        Run a chat completion using the OpenAI API.
 
         Args:
-            prompt (str): The user's question or message to send to the assistant.
+            prompt (str): The prompt to send to the model.
             history (Sequence[dict[str, str]] | None, optional): Previous chat messages for context. Each must be a dict with 'role' and 'content'.
             system_prompts (Sequence[str] | None, optional): Optional sequence of system prompt strings to prepend as system messages.
             **kwargs: Additional keyword arguments to pass to the OpenAI API (e.g., max_tokens, temperature, stop, presence_penalty, frequency_penalty, etc.).
@@ -251,8 +251,7 @@ class OpenAIClient:
         system_prompts: Sequence[str] | None = None,
         **kwargs: Any,
     ) -> AsyncGenerator[str, None]:
-        """
-        Asynchronously send a streaming chat completion request to the OpenAI API, yielding tokens as they arrive.
+        r"""Asynchronously send a streaming chat completion request to the OpenAI API, yielding tokens as they arrive.
 
         This method validates the chat history, constructs the message list (including system prompt(s) and user prompt), and sends a streaming chat completion request using the injected or default OpenAI async client. It logs request and response details, and raises a custom error on failure. Each yielded string is a new token or chunk from the assistant's response.
 

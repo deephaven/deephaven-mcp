@@ -1,5 +1,5 @@
 """
-deephaven_mcp.mcp_docs_server package
+deephaven_mcp.mcp_docs_server package.
 
 This module serves as the entrypoint for the Deephaven MCP Docs server package. It provides access to the MCP server instance (`mcp_server`) and the `run_server` entrypoint for starting the server.
 

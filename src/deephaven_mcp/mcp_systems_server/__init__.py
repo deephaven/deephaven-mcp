@@ -1,5 +1,5 @@
 """
-deephaven_mcp.mcp_systems_server package
+deephaven_mcp.mcp_systems_server package.
 
 This module serves as the entrypoint for the Deephaven MCP Systems server package. It provides access to the MCP server instance (`mcp_server`) and the `run_server` entrypoint for starting the server.
 
@@ -84,5 +84,5 @@ def main() -> None:
     run_server(args.transport)
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     main()

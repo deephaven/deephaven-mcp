@@ -1,5 +1,5 @@
 """
-Deephaven MCP Systems Tools Module
+Deephaven MCP Systems Tools Module.
 
 This module defines the set of MCP (Multi-Cluster Platform) tool functions for managing and interacting with Deephaven workers in a multi-server environment. All functions are designed for use as MCP tools and are decorated with @mcp_server.tool().
 
@@ -422,7 +422,9 @@ async def run_script(
         if script is None:
             _LOGGER.info(f"[run_script] Loading script from file: {script_path!r}")
             if script_path is None:
-                raise ValueError("script_path must not be None")
+                raise RuntimeError(
+                    "Internal error: script_path is None after prior guard"
+                )  # pragma: no cover
             async with aiofiles.open(script_path) as f:
                 script = await f.read()
 
