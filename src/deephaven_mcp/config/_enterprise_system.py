@@ -1,6 +1,4 @@
-"""
-Validation logic for the 'enterprise_systems' section of the Deephaven MCP configuration.
-"""
+"""Validation logic for the 'enterprise_systems' section of the Deephaven MCP configuration."""
 
 __all__ = [
     "validate_enterprise_systems_config",
@@ -81,7 +79,7 @@ def redact_enterprise_systems_map(
 
 def validate_enterprise_systems_config(enterprise_systems_map: Any | None) -> None:
     """
-    Validates the 'enterprise_systems' part of the MCP configuration.
+    Validate the 'enterprise_systems' part of the MCP configuration.
 
     The 'enterprise_systems' key in the config should map to a dictionary.
     Each key in this dictionary is a system name, and its value is the

@@ -15,10 +15,11 @@ from pydeephaven import Session
 from deephaven_mcp import config
 from deephaven_mcp.config._community_session import redact_community_session_config
 from deephaven_mcp.sessions import _session_manager
-from deephaven_mcp.sessions._session_manager import SessionManager
 from deephaven_mcp.sessions._errors import SessionCreationError
 from deephaven_mcp.sessions._lifecycle.community import create_session
 from deephaven_mcp.sessions._session._queries import get_dh_versions
+from deephaven_mcp.sessions._session_manager import SessionManager
+
 
 # --- Coverage sanity check ---
 def test_module_import_and_init():
@@ -26,16 +27,21 @@ def test_module_import_and_init():
     mgr = SessionManager(MagicMock())
     assert isinstance(mgr, SessionManager)
 
+
 # --- Fixtures and helpers ---
 @pytest.fixture
 def mock_config_manager():
     # Create a MagicMock for ConfigManager, with async methods
     mock = MagicMock()
     mock.get_config = AsyncMock(
-        return_value={"community": {"sessions": {
-            "local": {"host": "localhost"}, 
-            "foo": {"host": "localhost"}
-        }}}
+        return_value={
+            "community": {
+                "sessions": {
+                    "local": {"host": "localhost"},
+                    "foo": {"host": "localhost"},
+                }
+            }
+        }
     )
     return mock
 
@@ -72,10 +78,10 @@ async def test_session_manager_concurrent_get_or_create_session(session_manager)
     """Test concurrent calls to get_or_create_session don't create duplicate sessions."""
     # Initialize sessions
     await session_manager._ensure_sessions_initialized()
-    
+
     # Mock the session creation to track calls
     create_call_count = 0
-    
+
     async def mock_create_session(cfg):
         nonlocal create_call_count
         create_call_count += 1
@@ -83,12 +89,15 @@ async def test_session_manager_concurrent_get_or_create_session(session_manager)
         mock_session = MagicMock(spec=Session)
         mock_session.is_alive = True
         return mock_session
-    
-    with patch("deephaven_mcp.sessions._session._session_community.create_session", side_effect=mock_create_session):
+
+    with patch(
+        "deephaven_mcp.sessions._session._session_community.create_session",
+        side_effect=mock_create_session,
+    ):
         # Run multiple concurrent get_or_create_session calls
         tasks = [session_manager.get_or_create_session("foo") for _ in range(5)]
         sessions = await asyncio.gather(*tasks)
-        
+
         # All should return the same session object
         assert all(session is sessions[0] for session in sessions)
         # Should only create one session despite concurrent calls
@@ -96,12 +105,17 @@ async def test_session_manager_concurrent_get_or_create_session(session_manager)
 
 
 @pytest.mark.asyncio
-async def test_session_manager_concurrent_get_or_create_session_failure(session_manager):
+async def test_session_manager_concurrent_get_or_create_session_failure(
+    session_manager,
+):
     """Test concurrent calls handle session creation failures properly."""
     # Initialize sessions
     await session_manager._ensure_sessions_initialized()
-    
-    with patch("deephaven_mcp.sessions._session._session_community.create_session", side_effect=SessionCreationError("fail")):
+
+    with patch(
+        "deephaven_mcp.sessions._session._session_community.create_session",
+        side_effect=SessionCreationError("fail"),
+    ):
         with pytest.raises(SessionCreationError):
             await session_manager.get_or_create_session("foo")
 
@@ -111,11 +125,14 @@ async def test_session_manager_delegates_to_helpers(session_manager):
     """Test SessionManager delegates to session objects properly."""
     # Initialize sessions
     await session_manager._ensure_sessions_initialized()
-    
+
     mock_session = MagicMock(spec=Session)
     mock_session.is_alive = True
-    
-    with patch("deephaven_mcp.sessions._session._session_community.create_session", return_value=mock_session):
+
+    with patch(
+        "deephaven_mcp.sessions._session._session_community.create_session",
+        return_value=mock_session,
+    ):
         session = await session_manager.get_or_create_session("foo")
         assert session is mock_session
 
@@ -126,12 +143,15 @@ async def test_clear_all_sessions_clears_cache(session_manager):
     """Test clear_all_sessions properly clears the session cache."""
     # Initialize sessions
     await session_manager._ensure_sessions_initialized()
-    
+
     # Create a session first
     mock_session = MagicMock(spec=Session)
     mock_session.is_alive = True
-    
-    with patch("deephaven_mcp.sessions._session._session_community.create_session", return_value=mock_session):
+
+    with patch(
+        "deephaven_mcp.sessions._session._session_community.create_session",
+        return_value=mock_session,
+    ):
         await session_manager.get_or_create_session("foo")
         # Verify session exists
         assert len(session_manager._sessions) == 2  # Both local and foo
@@ -146,17 +166,17 @@ async def test_clear_all_sessions_clears_cache(session_manager):
 async def test_clear_all_sessions_calls_close(session_manager):
     # Initialize sessions first
     await session_manager._ensure_sessions_initialized()
-    
+
     session = MagicMock(spec=Session)
     session.is_alive = True
     session.close = MagicMock()
-    
+
     # Manually set a session in a CommunitySession object
     community_session = session_manager._sessions["local"]
     community_session._session_cache = session
-    
+
     await session_manager.clear_all_sessions()
-    
+
     # Verify the session was closed (this is done via close_session_safely in CommunitySession.close_session)
     assert len(session_manager._sessions) == 0
 
@@ -184,18 +204,21 @@ async def test_get_or_create_session_liveness_exception(session_manager, caplog)
     """Test get_or_create_session when session liveness check fails."""
     # Initialize sessions first
     await session_manager._ensure_sessions_initialized()
-    
+
     bad_session = MagicMock(spec=Session)
     # Make is_alive property raise an exception
     type(bad_session).is_alive = property(
         lambda self: (_ for _ in ()).throw(Exception("fail"))
     )
-    
+
     # Manually inject a bad session into a CommunitySession object
     community_session = session_manager._sessions["local"]
     community_session._session_cache = bad_session
-    
-    with patch("deephaven_mcp.sessions._session._session_community.create_session", new=AsyncMock()):
+
+    with patch(
+        "deephaven_mcp.sessions._session._session_community.create_session",
+        new=AsyncMock(),
+    ):
         await session_manager.get_or_create_session("local")
         assert any(
             "Error checking session liveness" in r for r in caplog.text.splitlines()
@@ -208,18 +231,21 @@ async def test_get_or_create_session_checks_liveness_error(session_manager, capl
     """Test get_or_create_session when session liveness check fails."""
     # Initialize sessions first
     await session_manager._ensure_sessions_initialized()
-    
+
     bad_session = MagicMock(spec=Session)
     # Make is_alive property raise an exception
     type(bad_session).is_alive = property(
         lambda self: (_ for _ in ()).throw(Exception("fail"))
     )
-    
+
     # Manually inject a bad session into a CommunitySession object
     community_session = session_manager._sessions["local"]
     community_session._session_cache = bad_session
-    
-    with patch("deephaven_mcp.sessions._session._session_community.create_session", new=AsyncMock()):
+
+    with patch(
+        "deephaven_mcp.sessions._session._session_community.create_session",
+        new=AsyncMock(),
+    ):
         await session_manager.get_or_create_session("local")
         assert any(
             "Error checking session liveness" in r for r in caplog.text.splitlines()
@@ -229,47 +255,54 @@ async def test_get_or_create_session_checks_liveness_error(session_manager, capl
 
 # --- Tests for get_or_create_session ---
 
+
 @pytest.mark.asyncio
 async def test_get_or_create_session_unknown_worker_raises(session_manager):
     # Ensure the session cache is initialized (simulate at least one session)
     await session_manager._ensure_sessions_initialized()
     # Remove all sessions to simulate a missing worker
     session_manager._sessions.clear()
-    with pytest.raises(ValueError, match="No session configuration found for worker: unknown_worker"):
+    with pytest.raises(
+        ValueError, match="No session configuration found for worker: unknown_worker"
+    ):
         await session_manager.get_or_create_session("unknown_worker")
+
 
 @pytest.mark.asyncio
 async def test_get_or_create_session_reuses_existing(session_manager):
     """Test get_or_create_session returns existing alive session."""
     # Initialize sessions first
     await session_manager._ensure_sessions_initialized()
-    
+
     session = MagicMock(spec=Session)
     session.is_alive = True
     session.host = "localhost"
     session.port = 10000
-    
+
     # Manually set session in CommunitySession object
     community_session = session_manager._sessions["local"]
     community_session._session_cache = session
-    
+
     result = await session_manager.get_or_create_session("local")
     assert result == session
 
 
 @pytest.mark.asyncio
 async def test_get_or_create_session_creates_new(session_manager):
-    # Initialize sessions first 
+    # Initialize sessions first
     await session_manager._ensure_sessions_initialized()
-    
+
     # Clear the session cache for local to ensure a new one is created
     community_session = session_manager._sessions["local"]
     community_session._session_cache = None
-    
+
     mock_session = MagicMock(spec=Session)
     mock_session.is_alive = True
-    
-    with patch("deephaven_mcp.sessions._session._session_community.create_session", return_value=mock_session):
+
+    with patch(
+        "deephaven_mcp.sessions._session._session_community.create_session",
+        return_value=mock_session,
+    ):
         result = await session_manager.get_or_create_session("local")
         assert result == mock_session
 
@@ -279,18 +312,21 @@ async def test_get_or_create_session_replaces_dead(session_manager):
     """Test get_or_create_session replaces dead session with new one."""
     # Initialize sessions first
     await session_manager._ensure_sessions_initialized()
-    
+
     session = MagicMock(spec=Session)
     session.is_alive = False
-    
+
     # Set dead session in CommunitySession object
     community_session = session_manager._sessions["local"]
     community_session._session_cache = session
-    
+
     mock_session = MagicMock(spec=Session)
     mock_session.is_alive = True
-    
-    with patch("deephaven_mcp.sessions._session._session_community.create_session", return_value=mock_session):
+
+    with patch(
+        "deephaven_mcp.sessions._session._session_community.create_session",
+        return_value=mock_session,
+    ):
         result = await session_manager.get_or_create_session("local")
         assert result == mock_session
 
@@ -358,13 +394,13 @@ async def test_session_community_type():
     """Test that SessionCommunity returns correct session type."""
     from deephaven_mcp.sessions import SessionType
     from deephaven_mcp.sessions._session._session_community import SessionCommunity
-    
+
     # Create a minimal config for testing
     config = {
         "host": "localhost",
         "port": 10000,
     }
-    
+
     session = SessionCommunity("test", config)
     assert session.session_type == SessionType.COMMUNITY
     assert session.source == "community"
@@ -374,7 +410,7 @@ async def test_session_community_type():
 def test_session_type_enum():
     """Test SessionType enum values."""
     from deephaven_mcp.sessions import SessionType
-    
+
     assert SessionType.COMMUNITY.value == "community"
     assert SessionType.ENTERPRISE.value == "enterprise"
     assert len(list(SessionType)) == 2
@@ -382,12 +418,14 @@ def test_session_type_enum():
 
 import pytest
 
+
 @pytest.mark.asyncio
 async def test_session_community_is_alive_property():
     """Test the is_alive property of SessionCommunity."""
-    from deephaven_mcp.sessions._session._session_community import SessionCommunity
     from unittest.mock import MagicMock, PropertyMock
-    
+
+    from deephaven_mcp.sessions._session._session_community import SessionCommunity
+
     config = {"host": "localhost", "port": 10000}
     session = SessionCommunity("test", config)
     assert session.source == "community"

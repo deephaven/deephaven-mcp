@@ -2,8 +2,10 @@
 Tests for deephaven_mcp.sessions.__init__ (import/export surface).
 """
 
+
 def test_imports_and_all():
     import deephaven_mcp.sessions as mod
+
     # __all__ should include key public symbols
     assert hasattr(mod, "SessionManager")
     assert hasattr(mod, "Session")

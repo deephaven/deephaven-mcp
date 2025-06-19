@@ -173,6 +173,7 @@ async def create_session(worker_cfg: dict[str, Any]) -> Session:
     )
     return session
 
+
 # TODO: is this used?  can it be deleted?
 async def create_session_for_worker(
     config_manager: config.ConfigManager, session_name: str

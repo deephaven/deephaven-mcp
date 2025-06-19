@@ -9,7 +9,6 @@ import asyncio
 import enum
 import logging
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional
 
 from pydeephaven import Session
 
@@ -20,6 +19,7 @@ _LOGGER = logging.getLogger(__name__)
 
 class SessionType(enum.Enum):
     """Enum for different types of Deephaven sessions."""
+
     COMMUNITY = "community"
     ENTERPRISE = "enterprise"
 
@@ -32,7 +32,7 @@ class SessionBase(ABC):
     liveness checking, creation, and cleanup. Subclasses must implement all abstract methods and
     ensure correct resource management and cache semantics.
     """
-    
+
     def __init__(self, session_type: SessionType, source: str, name: str):
         """Initialize the session with a type, source, and name."""
         self._type = session_type
@@ -40,7 +40,7 @@ class SessionBase(ABC):
         self._name = name
         self._session_cache: Session | None = None
         self._lock = asyncio.Lock()
-    
+
     @property
     def session_type(self) -> SessionType:
         """Return the type of this session."""
@@ -55,17 +55,17 @@ class SessionBase(ABC):
     def name(self) -> str:
         """Get the session name."""
         return self._name
-        
+
     @property
     def full_name(self) -> str:
         """Get the full name of this session, including type, source, and name."""
         return f"{self._type.value}:{self._source}:{self._name}"
-    
+
     @property
     @abstractmethod
-    def is_alive(self) -> bool:
+    async def is_alive(self) -> bool:
         """
-        Return True if the session is currently alive and usable, False otherwise.
+        Asynchronously check if the session is currently alive and usable.
 
         Implementations must check the underlying session state (e.g., connection open, authenticated, not expired).
         This property should never block for long periods and should be safe to call frequently. Any exceptions
@@ -75,7 +75,7 @@ class SessionBase(ABC):
             bool: True if the session is alive/usable, False otherwise.
         """
         pass  # pragma: no cover
-    
+
     @abstractmethod
     async def get_session(self) -> Session:
         """
@@ -93,7 +93,7 @@ class SessionBase(ABC):
             Exception: If session creation fails or the session cannot be made alive.
         """
         pass  # pragma: no cover
-    
+
     async def close_session(self) -> None:
         """
         Asynchronously close and clean up the cached session if it exists.

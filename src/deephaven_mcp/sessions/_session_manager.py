@@ -36,7 +36,6 @@ import time
 from pydeephaven import Session
 
 from deephaven_mcp import config
-
 from deephaven_mcp.sessions._session._session_base import SessionBase
 from deephaven_mcp.sessions._session._session_community import SessionCommunity
 
@@ -74,8 +73,10 @@ class SessionManager:
         self._sessions: dict[str, SessionBase] = {}
         self._lock = asyncio.Lock()
         self._config_manager = config_manager
-        
-        _LOGGER.info("SessionManager initialized (sessions will be created on first access)")
+
+        _LOGGER.info(
+            "SessionManager initialized (sessions will be created on first access)"
+        )
 
     async def _ensure_sessions_initialized(self) -> None:
         """
@@ -86,14 +87,16 @@ class SessionManager:
         """
         if self._sessions:
             return  # Already initialized
-            
+
         # Load configuration and create CommunitySession objects
         config_data = await self._config_manager.get_config()
         community_sessions_config = config_data.get("community", {}).get("sessions", {})
-        
+
         for session_name, session_config in community_sessions_config.items():
-            self._sessions[session_name] = SessionCommunity(session_name, session_config)
-        
+            self._sessions[session_name] = SessionCommunity(
+                session_name, session_config
+            )
+
         _LOGGER.info(f"SessionManager initialized with {len(self._sessions)} sessions")
 
     async def clear_all_sessions(self) -> None:
@@ -106,7 +109,7 @@ class SessionManager:
         """
         start_time = time.time()
         _LOGGER.info("Clearing Deephaven session cache...")
-        
+
         await self._ensure_sessions_initialized()
         _LOGGER.info(f"Current session cache size: {len(self._sessions)}")
 
@@ -157,7 +160,9 @@ class SessionManager:
         async with self._lock:
             session_obj = self._sessions.get(session_name)
             if session_obj is None:
-                raise ValueError(f"No session configuration found for worker: {session_name}")
-            
+                raise ValueError(
+                    f"No session configuration found for worker: {session_name}"
+                )
+
             # Delegate to the session object to get or create the actual Session
             return await session_obj.get_session()

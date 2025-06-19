@@ -1,5 +1,5 @@
 """
-Deephaven Model Context Protocol (MCP)
+Deephaven Model Context Protocol (MCP).
 
 This package provides unified Python implementations of the Deephaven Model Context Protocol (MCP) servers, supporting both:
 

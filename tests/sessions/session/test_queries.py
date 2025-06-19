@@ -60,7 +60,9 @@ async def test_get_meta_table_success():
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
 
-    with patch("deephaven_mcp.sessions._session._queries.asyncio.to_thread", new=fake_to_thread):
+    with patch(
+        "deephaven_mcp.sessions._session._queries.asyncio.to_thread", new=fake_to_thread
+    ):
         result = await get_meta_table(session_mock, "foo")
         assert result is arrow_mock
         session_mock.open_table.assert_called_once_with("foo")
@@ -92,7 +94,9 @@ async def test_get_meta_table_to_arrow_error():
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
 
-    with patch("deephaven_mcp.sessions._session._queries.asyncio.to_thread", new=fake_to_thread):
+    with patch(
+        "deephaven_mcp.sessions._session._queries.asyncio.to_thread", new=fake_to_thread
+    ):
         with pytest.raises(RuntimeError) as excinfo:
             await get_meta_table(session_mock, "foo")
         assert "fail-arrow" in str(excinfo.value)
@@ -106,7 +110,9 @@ async def test_get_pip_packages_table_success(caplog):
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
 
-    with patch("deephaven_mcp.sessions._session._queries.asyncio.to_thread", new=fake_to_thread):
+    with patch(
+        "deephaven_mcp.sessions._session._queries.asyncio.to_thread", new=fake_to_thread
+    ):
         arrow_mock = MagicMock()
         with patch(
             "deephaven_mcp.sessions._session._queries.get_table",
@@ -131,7 +137,9 @@ async def test_get_pip_packages_table_script_failure():
             raise RuntimeError("fail-script")
         return fn(*args, **kwargs)
 
-    with patch("deephaven_mcp.sessions._session._queries.asyncio.to_thread", new=fake_to_thread):
+    with patch(
+        "deephaven_mcp.sessions._session._queries.asyncio.to_thread", new=fake_to_thread
+    ):
         with pytest.raises(RuntimeError, match="fail-script"):
             await get_pip_packages_table(session_mock)
 
@@ -144,7 +152,10 @@ async def test_get_pip_packages_table_table_failure():
         return fn(*args, **kwargs)
 
     with (
-        patch("deephaven_mcp.sessions._session._queries.asyncio.to_thread", new=fake_to_thread),
+        patch(
+            "deephaven_mcp.sessions._session._queries.asyncio.to_thread",
+            new=fake_to_thread,
+        ),
         patch(
             "deephaven_mcp.sessions._session._queries.get_table",
             AsyncMock(side_effect=RuntimeError("fail-table")),

@@ -17,4 +17,5 @@ class SessionCreationError(Exception):
     problems. This error is intended to be caught by callers that can handle or report
     session creation failures gracefully.
     """
+
     pass
