@@ -267,10 +267,10 @@ async def docs_chat(
         # This could be logged at a lower level since it is potentially not a problem with the MCP server itself,
         # but rather an issue with the OpenAI client or API.
         # However, we log it at the exception level to ensure visibility in case of issues.
-        _LOGGER.exception(f"OpenAIClientError in docs_chat: {exc}")
+        _LOGGER.exception(f"[ERROR] OpenAIClientError: {exc}")
         return f"[ERROR] OpenAIClientError: {exc}"
     except Exception as exc:
-        _LOGGER.exception(f"Exception in docs_chat: {exc}")
+        _LOGGER.exception(f"[ERROR] {type(exc).__name__}: {exc}")
         return f"[ERROR] {type(exc).__name__}: {exc}"
 
 
