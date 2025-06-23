@@ -211,6 +211,8 @@ async def docs_chat(
 
     Returns:
         str: The assistant's response message answering the user's documentation question. The response is a natural language string, suitable for direct display or further agentic processing.
+        
+        If an error occurs, the response will be a string starting with '[ERROR] ', followed by the error type and message. Agents should check for this prefix to detect errors.
 
     Raises:
         OpenAIClientError: If the underlying LLM API call fails or parameters are invalid. The error message will describe the failure reason for agentic error handling.
@@ -259,9 +261,7 @@ async def docs_chat(
                     f"Worker environment: Programming language: {programming_language}"
                 )
             else:
-                raise ValueError(
-                    f"Unsupported programming language: {programming_language}. Supported languages are: {', '.join(supported_languages)}."
-                )
+                return f"[ERROR] Unsupported programming language: {programming_language}. Supported languages are: {', '.join(supported_languages)}."
 
         return await inkeep_client.chat(
             prompt=prompt, history=history, system_prompts=system_prompts
