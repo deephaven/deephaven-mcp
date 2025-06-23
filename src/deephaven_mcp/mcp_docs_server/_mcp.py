@@ -211,7 +211,7 @@ async def docs_chat(
 
     Returns:
         str: The assistant's response message answering the user's documentation question. The response is a natural language string, suitable for direct display or further agentic processing.
-        
+
         If an error occurs, the response will be a string starting with '[ERROR] ', followed by the error type and message. Agents should check for this prefix to detect errors.
 
     Raises:
