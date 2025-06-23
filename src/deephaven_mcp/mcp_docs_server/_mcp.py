@@ -29,8 +29,8 @@ Example (agentic usage):
     To install Deephaven, ...
 """
 
-import os
 import logging
+import os
 
 from mcp.server.fastmcp import FastMCP
 from starlette.requests import Request
@@ -79,18 +79,6 @@ FastMCP: The server instance for the Deephaven documentation tools.
 - Host binding is controlled by the MCP_DOCS_HOST environment variable (default: 127.0.0.1).
 """
 
-# Add a global exception handler to log and return structured errors
-def mcp_exception_handler(request, exc):
-    _LOGGER.exception(f"Unhandled exception: {exc}")
-    return JSONResponse(
-        status_code=500,
-        content={
-            "error": str(exc),
-            "detail": "An internal server error occurred. Please contact support if this persists."
-        },
-    )
-
-mcp_server.add_exception_handler(Exception, mcp_exception_handler)
 
 @mcp_server.custom_route("/health", methods=["GET"])  # type: ignore[misc]
 async def health_check(request: Request) -> JSONResponse:
