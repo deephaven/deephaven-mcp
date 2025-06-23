@@ -76,10 +76,10 @@ def test_docs_chat_programming_language_invalid(monkeypatch):
 
     dummy_client = DummyOpenAIClient(response="should not matter")
     mcp_mod.inkeep_client = dummy_client
-    with pytest.raises(ValueError) as excinfo:
-        coro = mcp_mod.docs_chat("language?", None, programming_language="java")
-        asyncio.run(coro)
-    assert "Unsupported programming language: java" in str(excinfo.value)
+    coro = mcp_mod.docs_chat("language?", None, programming_language="java")
+    result = asyncio.run(coro)
+    assert result.startswith("[ERROR]")
+    assert "Unsupported programming language: java" in result
 
 
 def test_docs_chat_success(monkeypatch):
@@ -199,9 +199,6 @@ def test_docs_chat_error(monkeypatch):
     # Patch inkeep_client with dummy that raises
     mcp_mod.inkeep_client = DummyOpenAIClient(exc=OpenAIClientError("fail!"))
     coro = mcp_mod.docs_chat("fail", None, programming_language=None)
-    try:
-        asyncio.run(coro)
-    except OpenAIClientError as e:
-        assert "fail!" in str(e)
-    else:
-        assert False, "OpenAIClientError not raised"
+    result = asyncio.run(coro)
+    assert result.startswith("[ERROR]")
+    assert "fail!" in result
