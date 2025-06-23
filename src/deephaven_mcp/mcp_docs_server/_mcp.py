@@ -30,6 +30,7 @@ Example (agentic usage):
 """
 
 import os
+import logging
 
 from mcp.server.fastmcp import FastMCP
 from starlette.requests import Request
@@ -37,10 +38,15 @@ from starlette.responses import JSONResponse
 
 from ..openai import OpenAIClient
 
+_LOGGER = logging.getLogger(__name__)
+
 #: The API key for authenticating with the Inkeep-powered LLM API. Must be set in the environment. Private to this module.
 _INKEEP_API_KEY = os.environ.get("INKEEP_API_KEY")
 """str: The API key for authenticating with the Inkeep-powered LLM API. Must be set in the environment. Private to this module."""
 if not _INKEEP_API_KEY:
+    _LOGGER.error(
+        "INKEEP_API_KEY environment variable is not set. Please set it to use the Inkeep-powered documentation tools."
+    )
     raise RuntimeError(
         "INKEEP_API_KEY environment variable must be set to use the Inkeep-powered documentation tools."
     )
@@ -73,6 +79,18 @@ FastMCP: The server instance for the Deephaven documentation tools.
 - Host binding is controlled by the MCP_DOCS_HOST environment variable (default: 127.0.0.1).
 """
 
+# Add a global exception handler to log and return structured errors
+def mcp_exception_handler(request, exc):
+    _LOGGER.exception(f"Unhandled exception: {exc}")
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": str(exc),
+            "detail": "An internal server error occurred. Please contact support if this persists."
+        },
+    )
+
+mcp_server.add_exception_handler(Exception, mcp_exception_handler)
 
 @mcp_server.custom_route("/health", methods=["GET"])  # type: ignore[misc]
 async def health_check(request: Request) -> JSONResponse:
@@ -226,38 +244,41 @@ async def docs_chat(
         >>> print(response)
         To install Deephaven, ...
     """
+    try:
+        system_prompts = [
+            _prompt_basic,
+            _prompt_good_query_strings,
+        ]
 
-    system_prompts = [
-        _prompt_basic,
-        _prompt_good_query_strings,
-    ]
-
-    # Optionally add version info to prompt context if provided
-    if deephaven_core_version:
-        system_prompts.append(
-            f"Worker environment: Deephaven Community Core version: {deephaven_core_version}"
-        )
-    if deephaven_enterprise_version:
-        system_prompts.append(
-            f"Worker environment: Deephaven Core+ (Enterprise) version: {deephaven_enterprise_version}"
-        )
-
-    if programming_language:
-        # Trim whitespace and validate against supported languages
-        programming_language = programming_language.strip().lower()
-        supported_languages = {"python", "groovy"}
-        if programming_language in supported_languages:
+        # Optionally add version info to prompt context if provided
+        if deephaven_core_version:
             system_prompts.append(
-                f"Worker environment: Programming language: {programming_language}"
+                f"Worker environment: Deephaven Community Core version: {deephaven_core_version}"
             )
-        else:
-            raise ValueError(
-                f"Unsupported programming language: {programming_language}. Supported languages are: {', '.join(supported_languages)}."
+        if deephaven_enterprise_version:
+            system_prompts.append(
+                f"Worker environment: Deephaven Core+ (Enterprise) version: {deephaven_enterprise_version}"
             )
 
-    return await inkeep_client.chat(
-        prompt=prompt, history=history, system_prompts=system_prompts
-    )
+        if programming_language:
+            # Trim whitespace and validate against supported languages
+            programming_language = programming_language.strip().lower()
+            supported_languages = {"python", "groovy"}
+            if programming_language in supported_languages:
+                system_prompts.append(
+                    f"Worker environment: Programming language: {programming_language}"
+                )
+            else:
+                raise ValueError(
+                    f"Unsupported programming language: {programming_language}. Supported languages are: {', '.join(supported_languages)}."
+                )
+
+        return await inkeep_client.chat(
+            prompt=prompt, history=history, system_prompts=system_prompts
+        )
+    except Exception as exc:
+        _LOGGER.exception(f"Exception in docs_chat: {exc}")
+        return f"[ERROR] {type(exc).__name__}: {exc}"
 
 
 __all__ = ["mcp_server"]
