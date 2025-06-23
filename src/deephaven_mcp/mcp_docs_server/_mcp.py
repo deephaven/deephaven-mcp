@@ -36,7 +36,7 @@ from mcp.server.fastmcp import FastMCP
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from ..openai import OpenAIClient
+from ..openai import OpenAIClient, OpenAIClientError
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -214,9 +214,6 @@ async def docs_chat(
 
         If an error occurs, the response will be a string starting with '[ERROR] ', followed by the error type and message. Agents should check for this prefix to detect errors.
 
-    Raises:
-        OpenAIClientError: If the underlying LLM API call fails or parameters are invalid. The error message will describe the failure reason for agentic error handling.
-
     Usage Notes:
         - This tool is asynchronous and should be awaited in agentic or orchestration frameworks.
         - The tool is discoverable via MCP server tool registries and can be invoked by name ('docs_chat').
@@ -266,6 +263,12 @@ async def docs_chat(
         return await inkeep_client.chat(
             prompt=prompt, history=history, system_prompts=system_prompts
         )
+    except OpenAIClientError as exc:
+        # This could be logged at a lower level since it is potentially not a problem with the MCP server itself,
+        # but rather an issue with the OpenAI client or API.
+        # However, we log it at the exception level to ensure visibility in case of issues.
+        _LOGGER.exception(f"OpenAIClientError in docs_chat: {exc}")
+        return f"[ERROR] OpenAIClientError: {exc}"
     except Exception as exc:
         _LOGGER.exception(f"Exception in docs_chat: {exc}")
         return f"[ERROR] {type(exc).__name__}: {exc}"
