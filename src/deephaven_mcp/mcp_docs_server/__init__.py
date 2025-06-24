@@ -37,7 +37,7 @@ _EXC_LOGGING_INSTALLED = False
 
 
 # TODO: remove monkey patching
-def monkeypatch_uvicorn_exception_handling() -> None:
+def monkeypatch_uvicorn_exception_handling() -> None:  # pragma: no cover
     """
     Monkey-patch Uvicorn's RequestResponseCycle to ensure exceptions in ASGI applications are logged.
     This is necessary because some versions of Uvicorn do not log exceptions in ASGI applications properly in some cases.
