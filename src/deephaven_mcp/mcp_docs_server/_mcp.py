@@ -71,7 +71,15 @@ str: The host to bind the FastMCP server to. Defaults to 127.0.0.1 (localhost).
 Set MCP_DOCS_HOST to '0.0.0.0' for external access, or another interface as needed.
 """
 
-mcp_server = FastMCP("deephaven-mcp-docs", host=mcp_docs_host)
+mcp_docs_port = int(os.environ.get("PORT", 8000))  # Use Cloud Run's PORT if set
+"""
+int: The port to bind the FastMCP server to. Defaults to 8000.
+If running in a Cloud Run environment, this will automatically use the PORT environment variable.
+"""
+
+_LOGGER.warning("MCP DOCS ENDPOINT: host=%s port=%s", mcp_docs_host, mcp_docs_port)
+
+mcp_server = FastMCP("deephaven-mcp-docs", host=mcp_docs_host, port=mcp_docs_port)
 """
 FastMCP: The server instance for the Deephaven documentation tools.
 - All tools decorated with @mcp_server.tool are registered here and discoverable by agentic frameworks.

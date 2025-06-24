@@ -48,9 +48,6 @@ COPY . .
 # Install Python dependencies using uv for fast and reliable installs
 RUN uv venv && uv pip install ".[dev]"
 
-# Expose the default port used by the docs MCP server (8000)
-EXPOSE 8000
-
 # Always bind the docs server to all interfaces by default
 ENV MCP_DOCS_HOST=0.0.0.0
 
