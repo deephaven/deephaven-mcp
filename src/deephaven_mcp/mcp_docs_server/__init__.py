@@ -24,9 +24,19 @@ import traceback
 from types import TracebackType
 from typing import Any, Literal
 
-from uvicorn.protocols.http.httptools_impl import RequestResponseCycle
+# TODO: How should these main functions be structured?  Where should logging setup live?
+# Configure logging with the PYTHONLOGLEVEL environment variable
+logging.basicConfig(
+    level=os.getenv("PYTHONLOGLEVEL", "INFO"),
+    format="[%(asctime)s] %(levelname)s: %(message)s",
+    # stream=stream,
+    stream=sys.stderr,
+    force=True,  # Ensure we override any existing logging configuration
+)
 
-from ._mcp import mcp_docs_host, mcp_docs_port, mcp_server
+from uvicorn.protocols.http.httptools_impl import RequestResponseCycle  # noqa: E402
+
+from ._mcp import mcp_docs_host, mcp_docs_port, mcp_server  # noqa: E402
 
 __all__ = ["mcp_server", "run_server"]
 
@@ -59,13 +69,20 @@ def monkeypatch_uvicorn_exception_handling() -> None:  # pragma: no cover
                 return await app(*args)
             except Exception as e:
                 print(
-                    f"Unhandled exception in ASGI application: {type(e)} {e}",
+                    f"Unhandled exception in ASGI application (0): {type(e)} {e}",
                     file=sys.stderr,
                 )
                 traceback.print_exc()
                 traceback.print_exception(type(e), e, e.__traceback__)
+                _LOGGER.exception(
+                    f"Unhandled exception in ASGI application (1): {type(e)} {e}",
+                    exc_info=(type(e), e, e.__traceback__),
+                )
+                _LOGGER.exception(
+                    f"Unhandled exception in ASGI application (2): {type(e)} {e}"
+                )
                 _LOGGER.error(
-                    "Unhandled exception in ASGI application",
+                    "Unhandled exception in ASGI application (3)",
                     exc_info=(type(e), e, e.__traceback__),
                 )
                 raise
@@ -156,15 +173,9 @@ def run_server(
     """
     # Set stream based on transport
     # stdio MCP servers log to stderr so that they don't pollute the communication channel
-    stream = sys.stderr if transport == "stdio" else sys.stdout
+    # TODO: stream = sys.stderr if transport == "stdio" else sys.stdout
 
-    # Configure logging with the PYTHONLOGLEVEL environment variable
-    logging.basicConfig(
-        level=os.getenv("PYTHONLOGLEVEL", "INFO"),
-        format="[%(asctime)s] %(levelname)s: %(message)s",
-        stream=stream,
-        force=True,  # Ensure we override any existing logging configuration
-    )
+    monkeypatch_uvicorn_exception_handling()
 
     try:
         # Start the server
@@ -197,8 +208,7 @@ def main() -> None:
         help="Transport type for the MCP server (stdio, sse, or streamable-http). Default: stdio",
     )
     args = parser.parse_args()
-    _LOGGER.info(f"CLI args: {args}")
-    monkeypatch_uvicorn_exception_handling()
+    _LOGGER.info(f"CLI args: {vars(args)}")
     run_server(args.transport)
 
 
