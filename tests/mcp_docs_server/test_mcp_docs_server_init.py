@@ -184,7 +184,9 @@ def test_run_server_host_env(monkeypatch):
         mod_init = importlib.import_module("deephaven_mcp.mcp_docs_server.__init__")
 
         # 1. Verify FastMCP class was instantiated with the host from the environment variable
-        MockFastMCPClass.assert_called_once_with("deephaven-mcp-docs", host="1.2.3.4")
+        MockFastMCPClass.assert_called_once_with(
+            "deephaven-mcp-docs", host="1.2.3.4", port=8000
+        )
 
         # mod_init.mcp_server is now mock_server_instance (the return_value of MockFastMCPClass)
         # 2. Call run_server and verify arguments to the instance's run method.
