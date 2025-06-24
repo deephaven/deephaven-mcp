@@ -13,7 +13,6 @@ from typing import Any
 
 from pydeephaven import Session
 
-from deephaven_mcp import config
 from deephaven_mcp.config._community_session import redact_community_session_config
 from deephaven_mcp.io import load_bytes
 from deephaven_mcp.sessions._errors import SessionCreationError
@@ -172,37 +171,3 @@ async def create_session(worker_cfg: dict[str, Any]) -> Session:
         f"[Community] Successfully created Deephaven Community (Core) session for config: {log_cfg}"
     )
     return session
-
-
-# TODO: is this used?  can it be deleted?
-async def create_session_for_worker(
-    config_manager: config.ConfigManager, session_name: str
-) -> Session:
-    """
-    Asynchronously create and return a new Deephaven Community (Core) Session for the given worker/session name.
-
-    This helper:
-      - Looks up the worker configuration from the config manager (for Community sessions).
-      - Gathers and logs (with redaction) the community session parameters.
-      - Creates and returns a new Deephaven Community (Core) Session instance.
-
-    Does not handle session caching; intended to be called by session managers for Community clusters.
-
-    Args:
-        config_manager (ConfigManager): The config manager to use for community config lookup.
-        session_name (str): The name of the worker/session.
-
-    Returns:
-        Session: A new Deephaven Community (Core) Session instance.
-
-    Raises:
-        SessionCreationError: If session creation fails.
-    """
-    _LOGGER.info(
-        f"[Community] Creating new Deephaven Community (Core) session: {session_name}"
-    )
-    full_config = await config_manager.get_config()
-    worker_cfg = config.get_config_section(
-        full_config, ["community", "sessions", session_name]
-    )
-    return await create_session(worker_cfg)
