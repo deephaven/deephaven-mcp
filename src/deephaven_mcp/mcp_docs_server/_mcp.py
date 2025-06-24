@@ -71,7 +71,7 @@ str: The host to bind the FastMCP server to. Defaults to 127.0.0.1 (localhost).
 Set MCP_DOCS_HOST to '0.0.0.0' for external access, or another interface as needed.
 """
 
-mcp_docs_port = int(os.environ.get("PORT", 8000))  # Use Cloud Run's PORT if set
+mcp_docs_port = int(os.environ.get("PORT", 8000))
 """
 int: The port to bind the FastMCP server to. Defaults to 8000.
 If running in a Cloud Run environment, this will automatically use the PORT environment variable.
