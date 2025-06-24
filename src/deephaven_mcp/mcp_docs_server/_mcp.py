@@ -29,18 +29,24 @@ Example (agentic usage):
     To install Deephaven, ...
 """
 
+import logging
 import os
 
 from mcp.server.fastmcp import FastMCP
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from ..openai import OpenAIClient
+from ..openai import OpenAIClient, OpenAIClientError
+
+_LOGGER = logging.getLogger(__name__)
 
 #: The API key for authenticating with the Inkeep-powered LLM API. Must be set in the environment. Private to this module.
 _INKEEP_API_KEY = os.environ.get("INKEEP_API_KEY")
 """str: The API key for authenticating with the Inkeep-powered LLM API. Must be set in the environment. Private to this module."""
 if not _INKEEP_API_KEY:
+    _LOGGER.error(
+        "INKEEP_API_KEY environment variable is not set. Please set it to use the Inkeep-powered documentation tools."
+    )
     raise RuntimeError(
         "INKEEP_API_KEY environment variable must be set to use the Inkeep-powered documentation tools."
     )
@@ -65,7 +71,13 @@ str: The host to bind the FastMCP server to. Defaults to 127.0.0.1 (localhost).
 Set MCP_DOCS_HOST to '0.0.0.0' for external access, or another interface as needed.
 """
 
-mcp_server = FastMCP("deephaven-mcp-docs", host=mcp_docs_host)
+mcp_docs_port = int(os.environ.get("PORT", 8000))
+"""
+int: The port to bind the FastMCP server to. Defaults to 8000.
+If running in a Cloud Run environment, this will automatically use the PORT environment variable.
+"""
+
+mcp_server = FastMCP("deephaven-mcp-docs", host=mcp_docs_host, port=mcp_docs_port)
 """
 FastMCP: The server instance for the Deephaven documentation tools.
 - All tools decorated with @mcp_server.tool are registered here and discoverable by agentic frameworks.
@@ -99,7 +111,9 @@ async def health_check(request: Request) -> JSONResponse:
 
 _prompt_basic = """
 You are a helpful assistant that answers questions about Deephaven Data Labs documentation. 
-Never return answers about Legacy Deephaven.
+Only return answers about Legacy Deephaven if explicitly asked.
+If you return an answer about Legacy Deephaven, make certain that Legacy and current Deephaven documentation is clearly distinguished in your responses.
+Your responses should be concise, accurate, and relevant to the user's query.
 """
 
 _prompt_good_query_strings = r"""
@@ -204,8 +218,7 @@ async def docs_chat(
     Returns:
         str: The assistant's response message answering the user's documentation question. The response is a natural language string, suitable for direct display or further agentic processing.
 
-    Raises:
-        OpenAIClientError: If the underlying LLM API call fails or parameters are invalid. The error message will describe the failure reason for agentic error handling.
+        If an error occurs, the response will be a string starting with '[ERROR] ', followed by the error type and message. Agents should check for this prefix to detect errors.
 
     Usage Notes:
         - This tool is asynchronous and should be awaited in agentic or orchestration frameworks.
@@ -226,37 +239,45 @@ async def docs_chat(
         >>> print(response)
         To install Deephaven, ...
     """
-    system_prompts = [
-        _prompt_basic,
-        _prompt_good_query_strings,
-    ]
+    try:
+        system_prompts = [
+            _prompt_basic,
+            _prompt_good_query_strings,
+        ]
 
-    # Optionally add version info to prompt context if provided
-    if deephaven_core_version:
-        system_prompts.append(
-            f"Worker environment: Deephaven Community Core version: {deephaven_core_version}"
-        )
-    if deephaven_enterprise_version:
-        system_prompts.append(
-            f"Worker environment: Deephaven Core+ (Enterprise) version: {deephaven_enterprise_version}"
-        )
-
-    if programming_language:
-        # Trim whitespace and validate against supported languages
-        programming_language = programming_language.strip().lower()
-        supported_languages = {"python", "groovy"}
-        if programming_language in supported_languages:
+        # Optionally add version info to prompt context if provided
+        if deephaven_core_version:
             system_prompts.append(
-                f"Worker environment: Programming language: {programming_language}"
+                f"Worker environment: Deephaven Community Core version: {deephaven_core_version}"
             )
-        else:
-            raise ValueError(
-                f"Unsupported programming language: {programming_language}. Supported languages are: {', '.join(supported_languages)}."
+        if deephaven_enterprise_version:
+            system_prompts.append(
+                f"Worker environment: Deephaven Core+ (Enterprise) version: {deephaven_enterprise_version}"
             )
 
-    return await inkeep_client.chat(
-        prompt=prompt, history=history, system_prompts=system_prompts
-    )
+        if programming_language:
+            # Trim whitespace and validate against supported languages
+            programming_language = programming_language.strip().lower()
+            supported_languages = {"python", "groovy"}
+            if programming_language in supported_languages:
+                system_prompts.append(
+                    f"Worker environment: Programming language: {programming_language}"
+                )
+            else:
+                return f"[ERROR] Unsupported programming language: {programming_language}. Supported languages are: {', '.join(supported_languages)}."
+
+        return await inkeep_client.chat(
+            prompt=prompt, history=history, system_prompts=system_prompts
+        )
+    except OpenAIClientError as exc:
+        # This could be logged at a lower level since it is potentially not a problem with the MCP server itself,
+        # but rather an issue with the OpenAI client or API.
+        # However, we log it at the exception level to ensure visibility in case of issues.
+        _LOGGER.exception(f"[ERROR] OpenAIClientError: {exc}")
+        return f"[ERROR] OpenAIClientError: {exc}"
+    except Exception as exc:
+        _LOGGER.exception(f"[ERROR] {type(exc).__name__}: {exc}")
+        return f"[ERROR] {type(exc).__name__}: {exc}"
 
 
 __all__ = ["mcp_server"]

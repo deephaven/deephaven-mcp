@@ -28,8 +28,8 @@
 #     (see pyproject.toml) with SSE transport.
 # ------------------------------------------------------------------------------
 
-# Use the official Python 3.13 slim image for compatibility and minimal size
-FROM python:3.13-slim
+# Use the official Python slim image for compatibility and minimal size
+FROM python:3.12-slim
 
 # Set the working directory for the application code
 WORKDIR /app
@@ -47,9 +47,6 @@ COPY . .
 
 # Install Python dependencies using uv for fast and reliable installs
 RUN uv venv && uv pip install ".[dev]"
-
-# Expose the default port used by the docs MCP server (8000)
-EXPOSE 8000
 
 # Always bind the docs server to all interfaces by default
 ENV MCP_DOCS_HOST=0.0.0.0

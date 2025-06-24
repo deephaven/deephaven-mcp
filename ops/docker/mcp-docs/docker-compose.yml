@@ -1,11 +1,11 @@
 services:
   mcp-docs:
     build:
-      context: ../..
-      dockerfile: docker/mcp-docs/Dockerfile
+      context: ../../..
+      dockerfile: ops/docker/mcp-docs/Dockerfile
     image: mcp-docs:latest
     ports:
       - "8000:8000"
     env_file:
-      - ../../.env
+      - ../../../.env
     restart: unless-stopped
