@@ -1,5 +1,5 @@
 ---
-description: Improve the documentation
+description: Improve a documentation file
 ---
 
 Create a plan for improving this markdown file.
