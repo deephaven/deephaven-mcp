@@ -23,7 +23,7 @@ import sys
 from types import TracebackType
 from typing import Any, Literal
 
-from ._mcp import mcp_server
+from ._mcp import mcp_server, mcp_docs_host, mcp_docs_port
 
 __all__ = ["mcp_server", "run_server"]
 
@@ -126,8 +126,8 @@ def run_server(
 
     try:
         # Start the server
-        _LOGGER.info(
-            f"Starting MCP server '{mcp_server.name}' with transport={transport}"
+        _LOGGER.warning(
+            f"Starting MCP server '{mcp_server.name}' with transport={transport} (host={mcp_docs_host}, port={mcp_docs_port})"
         )
         mcp_server.run(transport=transport)
     finally:
