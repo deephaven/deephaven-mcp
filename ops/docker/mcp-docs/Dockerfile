@@ -28,8 +28,8 @@
 #     (see pyproject.toml) with SSE transport.
 # ------------------------------------------------------------------------------
 
-# Use the official Python 3.13 slim image for compatibility and minimal size
-FROM python:3.13-slim
+# Use the official Python slim image for compatibility and minimal size
+FROM python:3.12-slim
 
 # Set the working directory for the application code
 WORKDIR /app
