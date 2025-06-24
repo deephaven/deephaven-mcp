@@ -1,6 +1,4 @@
-"""
-Custom exceptions for Deephaven MCP configuration.
-"""
+"""Custom types for Deephaven MCP configuration errors."""
 
 
 class McpConfigurationError(Exception):

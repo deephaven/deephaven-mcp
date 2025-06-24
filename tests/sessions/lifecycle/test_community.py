@@ -1,9 +1,41 @@
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from deephaven_mcp.sessions._errors import SessionCreationError
 from deephaven_mcp.sessions._lifecycle import community as _lifecycle_community
+
+
+class DummySession:
+    pass
+
+
+@pytest.mark.asyncio
+async def test__create_session_impl_success():
+    # Patch Session to a dummy class so we don't need a real server
+    with patch(
+        "deephaven_mcp.sessions._lifecycle.community.Session",
+        return_value=DummySession(),
+    ) as mock_sess:
+        result = await _lifecycle_community._create_session_impl(
+            host="localhost", port=10000
+        )
+        assert isinstance(result, DummySession)
+        mock_sess.assert_called_once_with(host="localhost", port=10000)
+
+
+@pytest.mark.asyncio
+async def test__create_session_impl_failure():
+    # Patch Session to raise an error
+    with patch(
+        "deephaven_mcp.sessions._lifecycle.community.Session",
+        side_effect=RuntimeError("fail!"),
+    ):
+        with pytest.raises(SessionCreationError) as excinfo:
+            await _lifecycle_community._create_session_impl(
+                host="localhost", port=10000
+            )
+        assert "fail!" in str(excinfo.value)
 
 
 @pytest.mark.asyncio
@@ -115,86 +147,24 @@ async def test_get_session_parameters_no_auth_token_provided():
 
 
 @pytest.mark.asyncio
-async def test_create_session_for_worker(monkeypatch):
-    def fake_get_config_section(config, path):
-        # Expect new signature: get_config_section(config, ["community", "sessions", "workerZ"])
-        assert path == ["community", "sessions", "workerZ"]
-        return {"host": "localhost"}
-
-    async def fake_get_config():
-        return {"community": {"sessions": {"workerZ": {"host": "localhost"}}}}
+async def test_create_session(monkeypatch):
+    """Test the new create_session function that wraps parameter retrieval and session creation."""
+    worker_cfg = {"host": "localhost"}
 
     async def fake__get_session_parameters(cfg):
         assert cfg["host"] == "localhost"
-        return {"host": "localhost"}
+        return {"host": "localhost", "port": 10000}
 
-    async def fake_create_session(**kwargs):
-        assert kwargs["host"] == "localhost"
-        return "SESSION"
+    mock_session = MagicMock()
+    mock_create = AsyncMock(return_value=mock_session)
 
-    cfg_mgr = MagicMock()
-    cfg_mgr.get_config = AsyncMock(
-        return_value={"community": {"sessions": {"workerZ": {"host": "localhost"}}}}
-    )
-
-    monkeypatch.setattr(
-        _lifecycle_community.config, "get_config_section", fake_get_config_section
-    )
     monkeypatch.setattr(
         _lifecycle_community, "_get_session_parameters", fake__get_session_parameters
     )
-    monkeypatch.setattr(_lifecycle_community, "create_session", fake_create_session)
+    # Patch the underlying _create_session_impl implementation
+    monkeypatch.setattr(_lifecycle_community, "_create_session_impl", mock_create)
 
-    session = await _lifecycle_community.create_session_for_worker(cfg_mgr, "workerZ")
-    assert session == "SESSION"
+    session = await _lifecycle_community.create_session(worker_cfg)
 
-
-@pytest.mark.asyncio
-async def test_create_session_for_worker_config_fail(monkeypatch):
-    def fake_get_config_section(config, path):
-        raise RuntimeError("fail-config")
-
-    async def fake_get_config():
-        return {"community": {"sessions": {"workerZ": {"host": "localhost"}}}}
-
-    cfg_mgr = MagicMock()
-    cfg_mgr.get_config = AsyncMock(
-        return_value={"community": {"sessions": {"workerZ": {"host": "localhost"}}}}
-    )
-    monkeypatch.setattr(
-        _lifecycle_community.config, "get_config_section", fake_get_config_section
-    )
-    with pytest.raises(RuntimeError):
-        await _lifecycle_community.create_session_for_worker(cfg_mgr, "workerZ")
-
-
-@pytest.mark.asyncio
-async def test_create_session_for_worker_session_fail(monkeypatch):
-    def fake_get_config_section(config, path):
-        # Expect new signature: get_config_section(config, ["community", "sessions", "workerZ"])
-        assert path == ["community", "sessions", "workerZ"]
-        return {"host": "localhost"}
-
-    async def fake_get_config():
-        return {"community": {"sessions": {"workerZ": {"host": "localhost"}}}}
-
-    async def fake__get_session_parameters(cfg):
-        return {"host": "localhost"}
-
-    async def fake_create_session(**kwargs):
-        raise RuntimeError("fail-create")
-
-    cfg_mgr = MagicMock()
-    cfg_mgr.get_config = AsyncMock(
-        return_value={"community": {"sessions": {"workerZ": {"host": "localhost"}}}}
-    )
-
-    monkeypatch.setattr(
-        _lifecycle_community.config, "get_config_section", fake_get_config_section
-    )
-    monkeypatch.setattr(
-        _lifecycle_community, "_get_session_parameters", fake__get_session_parameters
-    )
-    monkeypatch.setattr(_lifecycle_community, "create_session", fake_create_session)
-    with pytest.raises(RuntimeError):
-        await _lifecycle_community.create_session_for_worker(cfg_mgr, "workerZ")
+    assert session is mock_session
+    mock_create.assert_called_once_with(host="localhost", port=10000)

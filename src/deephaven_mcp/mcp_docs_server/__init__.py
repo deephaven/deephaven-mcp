@@ -1,5 +1,5 @@
 """
-deephaven_mcp.mcp_docs_server package
+deephaven_mcp.mcp_docs_server package.
 
 This module serves as the entrypoint for the Deephaven MCP Docs server package. It provides access to the MCP server instance (`mcp_server`) and the `run_server` entrypoint for starting the server.
 
@@ -40,6 +40,7 @@ _EXC_LOGGING_INSTALLED = False
 def monkeypatch_uvicorn_exception_handling() -> None:  # pragma: no cover
     """
     Monkey-patch Uvicorn's RequestResponseCycle to ensure exceptions in ASGI applications are logged.
+
     This is necessary because some versions of Uvicorn do not log exceptions in ASGI applications properly in some cases.
     This patch wraps the ASGI app execution in a try-except block to catch and log exceptions,
     ensuring that unhandled exceptions in the ASGI application are logged properly.

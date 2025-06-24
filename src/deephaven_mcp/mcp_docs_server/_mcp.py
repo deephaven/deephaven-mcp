@@ -1,5 +1,5 @@
 """
-Deephaven MCP Docs Server - Internal Tool and API Definitions
+Deephaven MCP Docs Tools Module.
 
 This module defines the MCP (Multi-Cluster Platform) server and tools for the Deephaven documentation assistant, powered by Inkeep LLM APIs. It exposes agentic, LLM-friendly tool endpoints for documentation Q&A and future extensibility.
 
@@ -89,8 +89,8 @@ FastMCP: The server instance for the Deephaven documentation tools.
 @mcp_server.custom_route("/health", methods=["GET"])  # type: ignore[misc]
 async def health_check(request: Request) -> JSONResponse:
     """
-    Health Check Endpoint
-    ---------------------
+    Health check endpoint for the docs server.
+
     Exposes a simple HTTP GET endpoint at /health for liveness and readiness checks.
 
     Purpose:
@@ -194,7 +194,7 @@ async def docs_chat(
     programming_language: str | None = None,
 ) -> str:
     """
-    docs_chat - Asynchronous Documentation Q&A Tool (MCP Tool)
+    docs_chat - Asynchronous Documentation Q&A Tool (MCP Tool).
 
     This tool provides conversational access to the Deephaven documentation assistant, powered by LLM APIs. It is designed for LLM agents, orchestration frameworks, and backend automation to answer Deephaven documentation questions in natural language.
 

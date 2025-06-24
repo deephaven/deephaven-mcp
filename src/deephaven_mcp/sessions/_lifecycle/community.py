@@ -13,7 +13,6 @@ from typing import Any
 
 from pydeephaven import Session
 
-from deephaven_mcp import config
 from deephaven_mcp.config._community_session import redact_community_session_config
 from deephaven_mcp.io import load_bytes
 from deephaven_mcp.sessions._errors import SessionCreationError
@@ -21,7 +20,7 @@ from deephaven_mcp.sessions._errors import SessionCreationError
 _LOGGER = logging.getLogger(__name__)
 
 
-async def create_session(**kwargs: Any) -> Session:
+async def _create_session_impl(**kwargs: Any) -> Session:
     """
     Asynchronously create and return a new Deephaven Community (Core) Session instance in a background thread.
 
@@ -62,6 +61,9 @@ async def _get_session_parameters(worker_cfg: dict[str, Any]) -> dict[str, Any]:
 
     Loads TLS certificate and key files asynchronously if specified in the community session config,
     redacts sensitive fields for logging, and returns a dictionary of parameters ready to be passed to pydeephaven.Session.
+
+    If 'auth_token_env_var' is specified in the configuration, attempts to source the authentication token from the given environment variable.
+    If the environment variable is not set, falls back to an empty authentication token and logs a warning. Otherwise, uses the direct 'auth_token' value or defaults to empty.
 
     Args:
         worker_cfg (dict): The worker's community session configuration.
@@ -146,22 +148,12 @@ async def _get_session_parameters(worker_cfg: dict[str, Any]) -> dict[str, Any]:
     return session_config
 
 
-async def create_session_for_worker(
-    config_manager: config.ConfigManager, session_name: str
-) -> Session:
+async def create_session(worker_cfg: dict[str, Any]) -> Session:
     """
-    Asynchronously create and return a new Deephaven Community (Core) Session for the given worker/session name.
-
-    This helper:
-      - Looks up the worker configuration from the config manager (for Community sessions).
-      - Gathers and logs (with redaction) the community session parameters.
-      - Creates and returns a new Deephaven Community (Core) Session instance.
-
-    Does not handle session caching; intended to be called by session managers for Community clusters.
+    Asynchronously create and return a new Deephaven Community (Core) Session instance.
 
     Args:
-        config_manager (ConfigManager): The config manager to use for community config lookup.
-        session_name (str): The name of the worker/session.
+        worker_cfg (dict): The worker's community session configuration.
 
     Returns:
         Session: A new Deephaven Community (Core) Session instance.
@@ -169,21 +161,13 @@ async def create_session_for_worker(
     Raises:
         SessionCreationError: If session creation fails.
     """
-    _LOGGER.info(
-        f"[Community] Creating new Deephaven Community (Core) session: {session_name}"
-    )
-    full_config = await config_manager.get_config()
-    worker_cfg = config.get_config_section(
-        full_config, ["community", "sessions", session_name]
-    )
     session_params = await _get_session_parameters(worker_cfg)
     log_cfg = redact_community_session_config(session_params)
-    log_cfg["session_name"] = session_name
     _LOGGER.info(
-        f"[Community] Creating new Deephaven Community (Core) Session with config: (worker cache key: {session_name}) {log_cfg}"
+        f"[Community] Creating new Deephaven Community (Core) Session with config: {log_cfg}"
     )
-    session = await create_session(**session_params)
+    session = await _create_session_impl(**session_params)
     _LOGGER.info(
-        f"[Community] Successfully created Deephaven Community (Core) session: {session_name}"
+        f"[Community] Successfully created Deephaven Community (Core) session for config: {log_cfg}"
     )
     return session
