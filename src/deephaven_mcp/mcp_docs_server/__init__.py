@@ -53,9 +53,9 @@ def monkeypatch_uvicorn_exception_handling() -> None:  # pragma: no cover
     orig_run_asgi = RequestResponseCycle.run_asgi
 
     async def my_run_asgi(self: RequestResponseCycle, app: Any) -> None:
-        def wrapped_app(*args: Any) -> Any:
+        async def wrapped_app(*args: Any) -> Any:
             try:
-                return app(*args)
+                return await app(*args)
             except Exception as e:
                 print(
                     f"Unhandled exception in ASGI application: {type(e)} {e}",
