@@ -20,8 +20,11 @@ import asyncio
 import logging
 import os
 import sys
+import traceback
 from types import TracebackType
 from typing import Any, Literal
+
+from uvicorn.protocols.http.httptools_impl import RequestResponseCycle
 
 from ._mcp import mcp_docs_host, mcp_docs_port, mcp_server
 
@@ -31,6 +34,44 @@ _LOGGER = logging.getLogger(__name__)
 
 # Idempotency guard for global exception logging setup
 _EXC_LOGGING_INSTALLED = False
+
+
+# TODO: remove monkey patching
+def monkeypatch_uvicorn_exception_handling() -> None:
+    """
+    Monkey-patch Uvicorn's RequestResponseCycle to ensure exceptions in ASGI applications are logged.
+    This is necessary because some versions of Uvicorn do not log exceptions in ASGI applications properly in some cases.
+    This patch wraps the ASGI app execution in a try-except block to catch and log exceptions,
+    ensuring that unhandled exceptions in the ASGI application are logged properly.
+    This is useful for debugging and monitoring, especially in production environments where silent failures
+    can lead to difficult-to-diagnose issues.
+    This function should be called once at process startup to ensure that the patch is applied globally.
+    """
+    _LOGGER.warning(
+        "Monkey-patching Uvicorn's RequestResponseCycle to log unhandled ASGI exceptions."
+    )
+    orig_run_asgi = RequestResponseCycle.run_asgi
+
+    async def my_run_asgi(self: RequestResponseCycle, app: Any) -> None:
+        def wrapped_app(*args: Any) -> Any:
+            try:
+                return app(*args)
+            except Exception as e:
+                print(
+                    f"Unhandled exception in ASGI application: {type(e)} {e}",
+                    file=sys.stderr,
+                )
+                traceback.print_exc()
+                traceback.print_exception(type(e), e, e.__traceback__)
+                _LOGGER.error(
+                    "Unhandled exception in ASGI application",
+                    exc_info=(type(e), e, e.__traceback__),
+                )
+                raise
+
+        await orig_run_asgi(self, wrapped_app)
+
+    RequestResponseCycle.run_asgi = my_run_asgi  # type: ignore[method-assign]
 
 
 # TODO: make this generic for all MCP servers
@@ -156,6 +197,7 @@ def main() -> None:
     )
     args = parser.parse_args()
     _LOGGER.info(f"CLI args: {args}")
+    monkeypatch_uvicorn_exception_handling()
     run_server(args.transport)
 
 
