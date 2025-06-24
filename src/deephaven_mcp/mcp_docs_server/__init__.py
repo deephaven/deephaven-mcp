@@ -23,7 +23,7 @@ import sys
 from types import TracebackType
 from typing import Any, Literal
 
-from ._mcp import mcp_server, mcp_docs_host, mcp_docs_port
+from ._mcp import mcp_docs_host, mcp_docs_port, mcp_server
 
 __all__ = ["mcp_server", "run_server"]
 
