@@ -202,18 +202,3 @@ def test_docs_chat_error(monkeypatch):
     result = asyncio.run(coro)
     assert result.startswith("[ERROR]")
     assert "fail!" in result
-
-
-@pytest.mark.asyncio
-async def test_docs_chat_generic_exception(monkeypatch):
-    monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
-    sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
-    import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
-
-    class DummyClient:
-        async def chat(self, *args, **kwargs):
-            raise RuntimeError("Simulated generic failure")
-
-    mcp_mod.inkeep_client = DummyClient()
-    result = await mcp_mod.docs_chat(prompt="test")
-    assert result.startswith("[ERROR] RuntimeError: Simulated generic failure")

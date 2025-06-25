@@ -84,8 +84,8 @@ Repository = "https://github.com/deephaven/deephaven-mcp"
 Issues = "https://github.com/deephaven/deephaven-mcp/issues"
 
 [project.scripts]
-dh-mcp-systems-server = "deephaven_mcp.mcp_systems_server:main"
-dh-mcp-docs-server = "deephaven_mcp.mcp_docs_server:main"
+dh-mcp-systems-server = "deephaven_mcp.mcp_systems_server.main:main"
+dh-mcp-docs-server = "deephaven_mcp.mcp_docs_server.main:main"
 
 [tool.uv]
 package = true
