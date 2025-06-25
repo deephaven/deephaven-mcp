@@ -30,19 +30,20 @@ from ._session._queries import (
     get_pip_packages_table,
     get_table,
 )
-from ._session._session_base import SessionType
+from ._session._session_base import SessionBase, SessionType
+from ._session._session_community import SessionCommunity
 from ._session_manager import (
-    Session,
     SessionManager,
 )
 
 __all__ = [
     "SessionManager",
     "SessionType",
+    "SessionBase",
+    "SessionCommunity",
+    "SessionCreationError",
     "get_dh_versions",
     "get_table",
     "get_pip_packages_table",
     "get_meta_table",
-    "SessionCreationError",
-    "Session",
 ]
