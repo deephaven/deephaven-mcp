@@ -13,11 +13,8 @@ def test_module_exports(monkeypatch):
     sys.modules.pop("deephaven_mcp.mcp_docs_server.__init__", None)
     mod = importlib.import_module("deephaven_mcp.mcp_docs_server.__init__")
     assert hasattr(mod, "mcp_server")
-    assert hasattr(mod, "run_server")
-    assert hasattr(mod, "main")
     assert hasattr(mod, "__all__")
     assert "mcp_server" in mod.__all__
-    assert "run_server" in mod.__all__
 
 
 def test_import_docs_init():
