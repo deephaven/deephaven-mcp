@@ -1047,7 +1047,7 @@ def testvalidate_single_enterprise_system_base_field_invalid_tuple_type(caplog):
     import logging
     import re
 
-    from deephaven_mcp.config import enterprise_system  # Import the module itself
+    from deephaven_mcp.config import _enterprise_system  # Import the module itself
     from deephaven_mcp.config._enterprise_system import (
         EnterpriseSystemConfigurationError,
         validate_single_enterprise_system,
@@ -1057,34 +1057,36 @@ def testvalidate_single_enterprise_system_base_field_invalid_tuple_type(caplog):
     system_name = "test_system_base_tuple_type_fail"
 
     # Modify _BASE_ENTERPRISE_SYSTEM_FIELDS for this test
-    original_base_fields = enterprise_system._BASE_ENTERPRISE_SYSTEM_FIELDS
-    patched_base_fields = original_base_fields.copy()
-    patched_base_fields["test_base_tuple_field"] = (str, int)  # Expects str OR int
+    original_schema_fields = _enterprise_system._BASE_ENTERPRISE_SYSTEM_FIELDS
+    patched_schema_fields = original_schema_fields.copy()
+    patched_schema_fields["connection_json_url"] = (
+        str,
+        int,
+    )  # Modify an existing field to expect str OR int
     with patch.object(
-        enterprise_system, "_BASE_ENTERPRISE_SYSTEM_FIELDS", patched_base_fields
+        _enterprise_system, "_BASE_ENTERPRISE_SYSTEM_FIELDS", patched_schema_fields
     ):
         invalid_config = {
-            "connection_json_url": "http://example.com/connection.json",
-            "auth_type": "password",  # Use a valid auth_type
-            "username": "dummy_user",
-            "password": "dummy_key_for_test",  # Satisfy 'password' auth type requirements
-            "test_base_tuple_field": [
+            "connection_json_url": [
                 1.0,
                 2.0,
             ],  # Use a type not str or int (e.g., list)
+            "auth_type": "password",  # Use a valid auth_type
+            "username": "test_user",  # Required for password auth type
+            "password": "dummy_key_for_test",  # Satisfy 'password' auth type requirements
         }
 
-    field_value = invalid_config["test_base_tuple_field"]
-    expected_types_str = ", ".join(
-        t.__name__ for t in patched_base_fields["test_base_tuple_field"]
-    )
-    expected_error_message = f"Field 'test_base_tuple_field' for enterprise system '{system_name}' must be one of types ({expected_types_str}), but got {type(field_value).__name__}."
+        field_value = invalid_config["connection_json_url"]
+        expected_types_str = ", ".join(
+            t.__name__ for t in patched_schema_fields["connection_json_url"]
+        )
+        expected_error_message = f"Field 'connection_json_url' for enterprise system '{system_name}' must be one of types ({expected_types_str}), but got {type(field_value).__name__}."
 
-    with pytest.raises(
-        EnterpriseSystemConfigurationError,
-        match=re.escape(expected_error_message),
-    ):
-        validate_single_enterprise_system(system_name, invalid_config)
+        with pytest.raises(
+            EnterpriseSystemConfigurationError,
+            match=re.escape(expected_error_message),
+        ):
+            validate_single_enterprise_system(system_name, invalid_config)
 
     found_log = False
     for record in caplog.records:
@@ -1110,7 +1112,7 @@ def testvalidate_single_enterprise_system_auth_specific_field_invalid_tuple_type
     import logging
     import re
 
-    from deephaven_mcp.config import enterprise_system  # Import the module itself
+    from deephaven_mcp.config import _enterprise_system  # Import the module itself
     from deephaven_mcp.config._enterprise_system import (
         _AUTH_SPECIFIC_FIELDS,
         EnterpriseSystemConfigurationError,
@@ -1122,7 +1124,7 @@ def testvalidate_single_enterprise_system_auth_specific_field_invalid_tuple_type
     auth_type_to_test = "password"
 
     # Modify _AUTH_SPECIFIC_FIELDS for this test
-    original_auth_fields = enterprise_system._AUTH_SPECIFIC_FIELDS
+    original_auth_fields = _enterprise_system._AUTH_SPECIFIC_FIELDS
     patched_auth_fields = {
         k: v.copy() for k, v in original_auth_fields.items()
     }  # Deep copy for safety
@@ -1132,26 +1134,25 @@ def testvalidate_single_enterprise_system_auth_specific_field_invalid_tuple_type
         str,
         int,
     )  # Expects str OR int
-    with patch.object(enterprise_system, "_AUTH_SPECIFIC_FIELDS", patched_auth_fields):
+    with patch.object(_enterprise_system, "_AUTH_SPECIFIC_FIELDS", patched_auth_fields):
         invalid_config = {
             "connection_json_url": "http://example.com/connection.json",
-            "auth_type": auth_type_to_test,
-            "password": "dummy_pass_value",  # Satisfy password auth presence
+            "auth_type": "password",  # Use a valid auth_type
+            "username": "test_user",  # Required for password auth type
             "test_auth_tuple_field": [1.0, 2.0],  # Invalid type (list)
         }
 
-    field_value = invalid_config["test_auth_tuple_field"]
-    expected_types_str = ", ".join(
-        t.__name__
-        for t in patched_auth_fields[auth_type_to_test]["test_auth_tuple_field"]
-    )
-    expected_error_message = f"Field 'test_auth_tuple_field' for enterprise system '{system_name}' (auth_type: {auth_type_to_test}) must be one of types ({expected_types_str}), but got {type(field_value).__name__}."
+        field_value = invalid_config["test_auth_tuple_field"]
+        expected_types_str = ", ".join(
+            t.__name__ for t in patched_auth_fields["password"]["test_auth_tuple_field"]
+        )
+        expected_error_message = f"Field 'test_auth_tuple_field' for enterprise system '{system_name}' (auth_type: password) must be one of types ({expected_types_str}), but got {type(field_value).__name__}."
 
-    with pytest.raises(
-        EnterpriseSystemConfigurationError,
-        match=re.escape(expected_error_message),
-    ):
-        validate_single_enterprise_system(system_name, invalid_config)
+        with pytest.raises(
+            EnterpriseSystemConfigurationError,
+            match=re.escape(expected_error_message),
+        ):
+            validate_single_enterprise_system(system_name, invalid_config)
 
     found_log = False
     for record in caplog.records:

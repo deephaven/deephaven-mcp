@@ -13,6 +13,19 @@ import deephaven_mcp.mcp_systems_server._mcp as mcp_mod
 from deephaven_mcp import config
 
 
+# Helper class for mocking sessions with awaitable is_alive property
+class AsyncSessionMock:
+    def __init__(self, is_alive_value=True):
+        self._is_alive = is_alive_value
+
+    @property
+    async def is_alive(self):
+        return self._is_alive
+
+    async def get_session(self):
+        return self
+
+
 class MockRequestContext:
     def __init__(self, lifespan_context):
         self.lifespan_context = lifespan_context
@@ -27,10 +40,10 @@ class MockContext:
 
 
 def test_run_script_reads_script_from_file():
-    mock_session = MagicMock()
+    mock_session = AsyncSessionMock()
     mock_session.run_script = MagicMock()
     mock_manager = AsyncMock()
-    mock_manager.get_or_create_session = AsyncMock(return_value=mock_session)
+    mock_manager.get_by_name = AsyncMock(return_value=mock_session)
     context = MockContext(
         {
             "session_manager": mock_manager,
@@ -85,7 +98,7 @@ async def test_refresh_lock_error():
     refresh_lock.__aenter__ = AsyncMock(side_effect=Exception("lock error"))
     refresh_lock.__aexit__ = AsyncMock(return_value=None)
     config_manager.clear_config_cache = AsyncMock()
-    session_manager.clear_all_sessions = AsyncMock()
+    session_manager.close_all_sessions = AsyncMock()
     context = MockContext(
         {
             "config_manager": config_manager,
@@ -110,7 +123,7 @@ async def test_refresh_success():
     refresh_lock.__aenter__ = AsyncMock(return_value=None)
     refresh_lock.__aexit__ = AsyncMock(return_value=None)
     config_manager.clear_config_cache = AsyncMock()
-    session_manager.clear_all_sessions = AsyncMock()
+    session_manager.close_all_sessions = AsyncMock()
     context = MockContext(
         {
             "config_manager": config_manager,
@@ -121,7 +134,7 @@ async def test_refresh_success():
     result = await mcp_mod.refresh(context)
     assert result == {"success": True}
     config_manager.clear_config_cache.assert_awaited_once()
-    session_manager.clear_all_sessions.assert_awaited_once()
+    session_manager.close_all_sessions.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -132,7 +145,7 @@ async def test_refresh_failure():
     refresh_lock.__aenter__ = AsyncMock(return_value=None)
     refresh_lock.__aexit__ = AsyncMock(return_value=None)
     config_manager.clear_config_cache = AsyncMock(side_effect=RuntimeError("fail"))
-    session_manager.clear_all_sessions = AsyncMock()
+    session_manager.close_all_sessions = AsyncMock()
     context = MockContext(
         {
             "config_manager": config_manager,
@@ -162,8 +175,8 @@ async def test_describe_workers_all_available_with_versions():
             }
         }
     )
-    alive_session = MagicMock(is_alive=True)
-    session_manager.get_or_create_session = AsyncMock(return_value=alive_session)
+    alive_session = AsyncSessionMock(is_alive_value=True)
+    session_manager.get_by_name = AsyncMock(return_value=alive_session)
     config_manager.get_community_session_config = AsyncMock(
         return_value={"session_type": "python"}
     )
@@ -213,8 +226,8 @@ async def test_describe_workers_all_available_no_versions():
             }
         }
     )
-    alive_session = MagicMock(is_alive=True)
-    session_manager.get_or_create_session = AsyncMock(return_value=alive_session)
+    alive_session = AsyncSessionMock(is_alive_value=True)
+    session_manager.get_by_name = AsyncMock(return_value=alive_session)
     config_manager.get_community_session_config = AsyncMock(
         return_value={"session_type": "python"}
     )
@@ -256,10 +269,10 @@ async def test_describe_workers_some_unavailable():
             }
         }
     )
-    alive_session = MagicMock(is_alive=True)
-    dead_session = MagicMock(is_alive=False)
+    alive_session = AsyncSessionMock(is_alive_value=True)
+    dead_session = AsyncSessionMock(is_alive_value=False)
 
-    async def get_or_create_session(name):
+    async def get_by_name(name):
         if name == "w1":
             return alive_session
         elif name == "w2":
@@ -267,7 +280,7 @@ async def test_describe_workers_some_unavailable():
         else:
             return dead_session
 
-    session_manager.get_or_create_session = AsyncMock(side_effect=get_or_create_session)
+    session_manager.get_by_name = AsyncMock(side_effect=get_by_name)
     config_manager.get_community_session_config = AsyncMock(
         return_value={"session_type": "python"}
     )
@@ -312,8 +325,8 @@ async def test_describe_workers_non_python():
             }
         }
     )
-    alive_session = MagicMock(is_alive=True)
-    session_manager.get_or_create_session = AsyncMock(return_value=alive_session)
+    alive_session = AsyncSessionMock(is_alive_value=True)
+    session_manager.get_by_name = AsyncMock(return_value=alive_session)
     config_manager.get_community_session_config = AsyncMock(
         return_value={"session_type": "groovy"}
     )
@@ -352,8 +365,8 @@ async def test_describe_workers_versions_error():
             }
         }
     )
-    alive_session = MagicMock(is_alive=True)
-    session_manager.get_or_create_session = AsyncMock(return_value=alive_session)
+    alive_session = AsyncSessionMock(is_alive_value=True)
+    session_manager.get_by_name = AsyncMock(return_value=alive_session)
     config_manager.get_community_session_config = AsyncMock(
         return_value={"session_type": "python"}
     )
@@ -397,10 +410,10 @@ async def test_describe_workers_some_unavailable_with_versions():
             }
         }
     )
-    alive_session = MagicMock(is_alive=True)
-    dead_session = MagicMock(is_alive=False)
+    alive_session = AsyncSessionMock(is_alive_value=True)
+    dead_session = AsyncSessionMock(is_alive_value=False)
 
-    async def get_or_create_session(name):
+    async def get_by_name(name):
         if name == "w1":
             return alive_session
         elif name == "w2":
@@ -408,7 +421,7 @@ async def test_describe_workers_some_unavailable_with_versions():
         else:
             return dead_session
 
-    session_manager.get_or_create_session = AsyncMock(side_effect=get_or_create_session)
+    session_manager.get_by_name = AsyncMock(side_effect=get_by_name)
     config_manager.get_community_session_config = AsyncMock(
         return_value={"session_type": "python"}
     )
@@ -457,8 +470,8 @@ async def test_describe_workers_worker_config_error():
     config_manager.get_community_session_config = AsyncMock(
         side_effect=config.CommunitySessionConfigurationError("config-fail")
     )
-    session_manager.get_or_create_session = AsyncMock(
-        return_value=MagicMock(is_alive=True)
+    session_manager.get_by_name = AsyncMock(
+        return_value=AsyncSessionMock(is_alive_value=True)
     )
     context = MockContext(
         {
@@ -497,7 +510,13 @@ async def test_table_schemas_empty_table_names():
     session_manager = AsyncMock()
 
     class DummySession:
+        async def get_session(self):
+            return self
+
         tables = ["t1"]
+
+        async def get_session(self):
+            return self
 
         def open_table(self, name):
             class MetaTable:
@@ -513,7 +532,7 @@ async def test_table_schemas_empty_table_names():
 
             return Table()
 
-    session_manager.get_or_create_session = AsyncMock(return_value=DummySession())
+    session_manager.get_by_name = AsyncMock(return_value=DummySession())
     context = MockContext({"session_manager": session_manager})
     res = await mcp_mod.table_schemas(context, worker_name="worker", table_names=[])
     assert isinstance(res, list)
@@ -525,12 +544,18 @@ async def test_table_schemas_no_tables():
     session_manager = AsyncMock()
 
     class DummySession:
+        async def get_session(self):
+            return self
+
         tables = []
+
+        async def get_session(self):
+            return self
 
         def open_table(self, name):
             raise Exception("Should not be called")
 
-    session_manager.get_or_create_session = AsyncMock(return_value=DummySession())
+    session_manager.get_by_name = AsyncMock(return_value=DummySession())
     context = MockContext({"session_manager": session_manager})
     res = await mcp_mod.table_schemas(context, worker_name="worker", table_names=None)
     assert isinstance(res, list)
@@ -542,6 +567,9 @@ async def test_table_schemas_success():
     session_manager = AsyncMock()
 
     class DummySession:
+        async def get_session(self):
+            return self
+
         def open_table(self, name):
             class Arrow:
                 def to_pylist(self):
@@ -558,7 +586,7 @@ async def test_table_schemas_success():
 
             return Table()
 
-    session_manager.get_or_create_session = AsyncMock(return_value=DummySession())
+    session_manager.get_by_name = AsyncMock(return_value=DummySession())
     context = MockContext(
         {
             "session_manager": session_manager,
@@ -576,6 +604,9 @@ async def test_table_schemas_all_tables():
     session_manager = AsyncMock()
 
     class DummySession:
+        async def get_session(self):
+            return self
+
         tables = ["t1", "t2"]
 
         def open_table(self, name):
@@ -594,7 +625,7 @@ async def test_table_schemas_all_tables():
 
             return Table()
 
-    session_manager.get_or_create_session = AsyncMock(return_value=DummySession())
+    session_manager.get_by_name = AsyncMock(return_value=DummySession())
     context = MockContext(
         {
             "session_manager": session_manager,
@@ -614,6 +645,9 @@ async def test_table_schemas_schema_key_error():
     session_manager = AsyncMock()
 
     class DummySession:
+        async def get_session(self):
+            return self
+
         def open_table(self, name):
             class Arrow:
                 def to_pylist(self):
@@ -631,7 +665,7 @@ async def test_table_schemas_schema_key_error():
 
             return Table()
 
-    session_manager.get_or_create_session = AsyncMock(return_value=DummySession())
+    session_manager.get_by_name = AsyncMock(return_value=DummySession())
     context = MockContext(
         {
             "session_manager": session_manager,
@@ -647,7 +681,7 @@ async def test_table_schemas_schema_key_error():
 @pytest.mark.asyncio
 async def test_table_schemas_session_error():
     session_manager = AsyncMock()
-    session_manager.get_or_create_session = AsyncMock(side_effect=Exception("fail"))
+    session_manager.get_by_name = AsyncMock(side_effect=Exception("fail"))
     context = MockContext(
         {
             "session_manager": session_manager,
@@ -666,10 +700,10 @@ async def test_table_schemas_session_error():
 @pytest.mark.asyncio
 async def test_run_script_both_script_and_path():
     # Both script and script_path provided, should prefer script
-    session = MagicMock()
+    session = AsyncSessionMock()
     session.run_script = MagicMock(return_value=None)
     session_manager = AsyncMock()
-    session_manager.get_or_create_session = AsyncMock(return_value=session)
+    session_manager.get_by_name = AsyncMock(return_value=session)
     context = MockContext({"session_manager": session_manager})
     result = await mcp_mod.run_script(
         context, worker_name="foo", script="print('hi')", script_path="/tmp/fake.py"
@@ -682,9 +716,7 @@ async def test_run_script_both_script_and_path():
 @pytest.mark.asyncio
 async def test_run_script_missing_worker():
     session_manager = AsyncMock()
-    session_manager.get_or_create_session = AsyncMock(
-        side_effect=Exception("no worker")
-    )
+    session_manager.get_by_name = AsyncMock(side_effect=Exception("no worker"))
     context = MockContext({"session_manager": session_manager})
     result = await mcp_mod.run_script(context, worker_name=None, script="print('hi')")
     assert result["success"] is False
@@ -695,7 +727,7 @@ async def test_run_script_missing_worker():
 @pytest.mark.asyncio
 async def test_run_script_both_none():
     session_manager = AsyncMock()
-    session_manager.get_or_create_session = AsyncMock(return_value=AsyncMock())
+    session_manager.get_by_name = AsyncMock(return_value=AsyncMock())
     context = MockContext({"session_manager": session_manager})
     result = await mcp_mod.run_script(context, worker_name="foo")
     assert result["success"] is False
@@ -712,7 +744,7 @@ async def test_app_lifespan_yields_context_and_cleans_up():
     session_manager = AsyncMock()
     refresh_lock = AsyncMock()
     config_manager.get_config = AsyncMock()
-    session_manager.clear_all_sessions = AsyncMock()
+    session_manager.close_all_sessions = AsyncMock()
 
     with (
         patch(
@@ -735,7 +767,7 @@ async def test_app_lifespan_yields_context_and_cleans_up():
             assert context["config_manager"] is config_manager
             assert context["session_manager"] is session_manager
             assert context["refresh_lock"] is refresh_lock
-        session_manager.clear_all_sessions.assert_awaited_once()
+        session_manager.close_all_sessions.assert_awaited_once()
 
 
 # Use filterwarnings to suppress ResourceWarning about unclosed sockets, which can be triggered by mocks or library internals in CI
@@ -747,12 +779,18 @@ async def test_run_script_success():
     session_manager = AsyncMock()
 
     class DummySession:
+        async def get_session(self):
+            return self
+
         called = None
+
+        async def get_session(self):
+            return self
 
         def run_script(self, script):
             DummySession.called = script
 
-    session_manager.get_or_create_session = AsyncMock(return_value=DummySession())
+    session_manager.get_by_name = AsyncMock(return_value=DummySession())
     context = MockContext(
         {
             "session_manager": session_manager,
@@ -779,7 +817,7 @@ async def test_run_script_no_script():
 @pytest.mark.filterwarnings("ignore:unclosed event loop:ResourceWarning")
 async def test_run_script_session_error():
     session_manager = AsyncMock()
-    session_manager.get_or_create_session = AsyncMock(side_effect=Exception("fail"))
+    session_manager.get_by_name = AsyncMock(side_effect=Exception("fail"))
     context = MockContext({"session_manager": session_manager})
     res = await mcp_mod.run_script(context, worker_name="worker", script="print(1)")
     assert res["success"] is False
@@ -796,10 +834,13 @@ async def test_run_script_script_path():
     session_manager = AsyncMock()
 
     class DummySession:
+        async def get_session(self):
+            return self
+
         def run_script(self, script):
             DummySession.called = script
 
-    session_manager.get_or_create_session = AsyncMock(return_value=DummySession())
+    session_manager.get_by_name = AsyncMock(return_value=DummySession())
     context = MockContext({"session_manager": session_manager})
     with patch("aiofiles.open", new_callable=MagicMock) as aio_open:
         mock_file = aio_open.return_value.__aenter__.return_value
@@ -820,10 +861,13 @@ async def test_run_script_script_path_error():
     session_manager = AsyncMock()
 
     class DummySession:
+        async def get_session(self):
+            return self
+
         def run_script(self, script):
             DummySession.called = script
 
-    session_manager.get_or_create_session = AsyncMock(return_value=DummySession())
+    session_manager.get_by_name = AsyncMock(return_value=DummySession())
     context = MockContext({"session_manager": session_manager})
     with patch("aiofiles.open", new_callable=MagicMock) as aio_open:
         aio_open.side_effect = FileNotFoundError("fail-open")
@@ -838,7 +882,7 @@ async def test_run_script_script_path_error():
 @pytest.mark.asyncio
 async def test_run_script_script_path_none_error():
     session_manager = AsyncMock()
-    session_manager.get_or_create_session = AsyncMock()
+    session_manager.get_by_name = AsyncMock()
     context = MockContext({"session_manager": session_manager})
     # This should trigger the ValueError branch (line 425)
     res = await mcp_mod.run_script(
@@ -854,27 +898,26 @@ async def test_run_script_script_path_none_error():
 
 @pytest.mark.asyncio
 async def test_pip_packages_success():
-    """Test successful retrieval of pip packages."""
+    """Test pip_packages with a successful response."""
     mock_arrow_table = MagicMock()
     mock_df = MagicMock()
-    mock_df.to_dict.side_effect = lambda *args, **kwargs: (
-        [
-            {"Package": "numpy", "Version": "1.25.0"},
-            {"Package": "pandas", "Version": "2.0.1"},
-        ]
-        if kwargs.get("orient") == "records"
-        else []
-    )
+    mock_df.to_dict.side_effect = lambda *args, **kwargs: [
+        {"Package": "numpy", "Version": "1.21.0"}
+    ]
     mock_arrow_table.to_pandas.return_value = mock_df
     mock_get_pip_packages_table = AsyncMock(return_value=mock_arrow_table)
-    mock_get_or_create_session = AsyncMock(return_value=MagicMock())
+
+    # Create a proper mock session object with async get_session method
+    mock_session = AsyncMock()
+    mock_session_obj = AsyncMock()
+    mock_session_obj.get_session = AsyncMock(return_value=mock_session)
 
     with patch(
         "deephaven_mcp.sessions.get_pip_packages_table",
         mock_get_pip_packages_table,
     ):
         mock_manager = AsyncMock()
-        mock_manager.get_or_create_session = AsyncMock(return_value=MagicMock())
+        mock_manager.get_by_name = AsyncMock(return_value=mock_session_obj)
         context = MockContext(
             {
                 "session_manager": mock_manager,
@@ -882,10 +925,11 @@ async def test_pip_packages_success():
             }
         )
         result = await mcp_mod.pip_packages(context, worker_name="test_worker")
-        assert result["success"] is True
-        assert len(result["result"]) == 2
-        assert result["result"][0]["package"] == "numpy"
-        assert result["result"][0]["version"] == "1.25.0"
+    assert result["success"] is True
+    assert isinstance(result["result"], list)
+    assert len(result["result"]) == 1
+    assert result["result"][0]["package"] == "numpy"
+    assert result["result"][0]["version"] == "1.21.0"
 
 
 @pytest.mark.asyncio
@@ -896,8 +940,14 @@ async def test_pip_packages_empty():
     mock_df.to_dict.side_effect = lambda *args, **kwargs: []
     mock_arrow_table.to_pandas.return_value = mock_df
     mock_get_pip_packages_table = AsyncMock(return_value=mock_arrow_table)
+
+    # Create a proper mock session object with async get_session method
+    mock_session = AsyncMock()
+    mock_session_obj = AsyncMock()
+    mock_session_obj.get_session = AsyncMock(return_value=mock_session)
+
     mock_manager = AsyncMock()
-    mock_manager.get_or_create_session = AsyncMock(return_value=MagicMock())
+    mock_manager.get_by_name = AsyncMock(return_value=mock_session_obj)
     context = MockContext(
         {"session_manager": mock_manager, "config_manager": AsyncMock()}
     )
@@ -908,7 +958,7 @@ async def test_pip_packages_empty():
         result = await mcp_mod.pip_packages(context, worker_name="test_worker")
     assert result["success"] is True
     assert result["result"] == []
-    mock_manager.get_or_create_session.assert_awaited_once_with("test_worker")
+    mock_manager.get_by_name.assert_awaited_once_with("test_worker")
     mock_get_pip_packages_table.assert_awaited_once()
 
 
@@ -922,8 +972,14 @@ async def test_pip_packages_malformed_data():
     )  # missing 'Package' and 'Version'
     mock_arrow_table.to_pandas.return_value = mock_df
     mock_get_pip_packages_table = AsyncMock(return_value=mock_arrow_table)
+
+    # Create a proper mock session object with async get_session method
+    mock_session = AsyncMock()
+    mock_session_obj = AsyncMock()
+    mock_session_obj.get_session = AsyncMock(return_value=mock_session)
+
     mock_manager = AsyncMock()
-    mock_manager.get_or_create_session = AsyncMock(return_value=MagicMock())
+    mock_manager.get_by_name = AsyncMock(return_value=mock_session_obj)
     context = MockContext(
         {"session_manager": mock_manager, "config_manager": AsyncMock()}
     )
@@ -935,7 +991,7 @@ async def test_pip_packages_malformed_data():
     assert result["success"] is False
     assert result["isError"] is True
     assert "Malformed package data" in result["error"]
-    mock_manager.get_or_create_session.assert_awaited_once_with("test_worker")
+    mock_manager.get_by_name.assert_awaited_once_with("test_worker")
     mock_get_pip_packages_table.assert_awaited_once()
 
 
@@ -943,14 +999,18 @@ async def test_pip_packages_malformed_data():
 async def test_pip_packages_error():
     """Test pip_packages with an error."""
     mock_get_pip_packages_table = AsyncMock(side_effect=Exception("Table error"))
-    mock_get_or_create_session = AsyncMock(return_value=MagicMock())
+
+    # Create a proper mock session object with async get_session method
+    mock_session = AsyncMock()
+    mock_session_obj = AsyncMock()
+    mock_session_obj.get_session = AsyncMock(return_value=mock_session)
 
     with patch(
         "deephaven_mcp.sessions.get_pip_packages_table",
         mock_get_pip_packages_table,
     ):
         mock_manager = AsyncMock()
-        mock_manager.get_or_create_session = AsyncMock(return_value=MagicMock())
+        mock_manager.get_by_name = AsyncMock(return_value=mock_session_obj)
         context = MockContext(
             {
                 "session_manager": mock_manager,
@@ -967,16 +1027,13 @@ async def test_pip_packages_error():
 async def test_pip_packages_worker_not_found():
     """Test pip_packages when the worker is not found."""
     mock_get_pip_packages_table = AsyncMock(return_value=MagicMock())
-    mock_get_or_create_session = AsyncMock(side_effect=ValueError("Worker not found"))
 
     with patch(
         "deephaven_mcp.sessions.get_pip_packages_table",
         mock_get_pip_packages_table,
     ):
         mock_manager = AsyncMock()
-        mock_manager.get_or_create_session = AsyncMock(
-            side_effect=ValueError("Worker not found")
-        )
+        mock_manager.get_by_name = AsyncMock(side_effect=ValueError("Worker not found"))
         context = MockContext(
             {
                 "session_manager": mock_manager,
@@ -985,5 +1042,5 @@ async def test_pip_packages_worker_not_found():
         )
         result = await mcp_mod.pip_packages(context, worker_name="nonexistent_worker")
         assert result["success"] is False
-        assert "Worker not found" in result["error"]
         assert result["isError"] is True
+        assert "Worker not found" in result["error"]
