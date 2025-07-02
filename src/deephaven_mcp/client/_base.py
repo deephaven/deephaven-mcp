@@ -1,0 +1,132 @@
+"""Base classes and utilities for the Deephaven client interface.
+
+This module provides common base classes and utility functions used throughout the
+Deephaven client package. It contains functionality that is shared between both
+standard and enterprise client components.
+
+Classes:
+    ClientObjectWrapper: Generic base class for wrapping client objects with enhanced interfaces
+
+Attributes:
+    is_enterprise_available (bool): Flag indicating if enterprise features are available
+"""
+
+import logging
+from typing import Generic, TypeVar
+
+from deephaven_mcp._exceptions import InternalError
+
+_LOGGER = logging.getLogger(__name__)
+
+# Check for enterprise features
+is_enterprise_available = False
+try:
+    # The following imports are required for enterprise features
+    import deephaven_enterprise  # noqa: F401
+
+    # TODO: Workaround: Explicitly import all enterprise proto modules to ensure correct namespace setup -- see https://deephaven.atlassian.net/browse/DH-19813
+    # The following imports are required to ensure that the proto modules are loaded
+    import deephaven_enterprise.proto.acl_pb2  # noqa: F401
+    import deephaven_enterprise.proto.acl_pb2_grpc  # noqa: F401
+    import deephaven_enterprise.proto.auth_pb2  # noqa: F401
+    import deephaven_enterprise.proto.auth_pb2_grpc  # noqa: F401
+    import deephaven_enterprise.proto.auth_service_pb2  # noqa: F401
+    import deephaven_enterprise.proto.auth_service_pb2_grpc  # noqa: F401
+    import deephaven_enterprise.proto.common_pb2  # noqa: F401
+    import deephaven_enterprise.proto.common_pb2_grpc  # noqa: F401
+    import deephaven_enterprise.proto.controller_common_pb2  # noqa: F401
+    import deephaven_enterprise.proto.controller_common_pb2_grpc  # noqa: F401
+    import deephaven_enterprise.proto.controller_pb2  # noqa: F401
+    import deephaven_enterprise.proto.controller_pb2_grpc  # noqa: F401
+    import deephaven_enterprise.proto.controller_service_pb2  # noqa: F401
+    import deephaven_enterprise.proto.controller_service_pb2_grpc  # noqa: F401
+    import deephaven_enterprise.proto.persistent_query_pb2  # noqa: F401
+    import deephaven_enterprise.proto.persistent_query_pb2_grpc  # noqa: F401
+    import deephaven_enterprise.proto.table_definition_pb2  # noqa: F401
+    import deephaven_enterprise.proto.table_definition_pb2_grpc  # noqa: F401
+
+    is_enterprise_available = True
+    _LOGGER.debug("Enterprise features available")
+except ImportError:
+    _LOGGER.debug("Enterprise features not available")
+
+# Type variable for the wrapped object
+T = TypeVar("T")
+
+
+class ClientObjectWrapper(Generic[T]):
+    """Base class for client wrappers with generic type support.
+
+    This class serves as a foundation for wrappers around Deephaven client objects.
+    It provides common functionality for all client wrappers, such as access to the
+    underlying wrapped client object. The generic type parameter T represents the
+    type of the wrapped object, ensuring type safety throughout inheritance.
+
+    When extending this class, implementers should create async wrapper methods that
+    delegate to the underlying wrapped client object, typically using asyncio.to_thread
+    to prevent blocking the event loop with potentially long-running operations.
+
+    Specific wrapper classes should inherit from this base class and implement
+    their own specialized methods to provide asynchronous interfaces and enhanced
+    Pythonic access to client features.
+
+    Examples:
+        >>> class TableWrapper(ClientObjectWrapper[DeephavenTable]):
+        ...     def __init__(self, table: DeephavenTable):
+        ...         super().__init__(table, is_enterprise=False)
+        ...
+        ...     async def get_column_names(self) -> List[str]:
+        ...         # Wrap potentially blocking operation in a background thread
+        ...         return await asyncio.to_thread(lambda: self.wrapped.column_names)
+    """
+
+    def __init__(self, wrapped: T, is_enterprise: bool) -> None:
+        """Initialize a wrapper for a client object.
+
+        This constructor creates a wrapper around a client object and verifies that the
+        required features (enterprise or non-enterprise) are available.
+
+        Args:
+            wrapped: The client object to wrap. Must not be None.
+            is_enterprise: Specifies whether the wrapped object requires enterprise features.
+                          Must be True for enterprise objects and False for non-enterprise objects.
+                          When True, availability of enterprise features will be verified using
+                          the module-level is_enterprise_available flag.
+
+        Raises:
+            ValueError: If the wrapped object is None.
+            InternalError: If is_enterprise=True but enterprise features are not available.
+                          This typically indicates a programming error in the library.
+        """
+        if wrapped is None:
+            _LOGGER.error("ClientObjectWrapper constructor called with None")
+            raise ValueError("Cannot wrap None")
+
+        self._wrapped = wrapped
+
+        if is_enterprise and not is_enterprise_available:
+            raise InternalError(
+                "ClientObjectWrapper constructor called with enterprise=True when enterprise features are not available. Please report this issue."
+            )
+
+    @property
+    def wrapped(self) -> T:
+        """Access the underlying wrapped client object.
+
+        This property provides direct access to the wrapped client object when
+        needed. In most cases, consumers should use the wrapper's methods instead
+        of directly accessing the wrapped client.
+
+        The wrapped object is considered an implementation detail, and direct access
+        should be avoided in client code when possible. Wrapper methods provide a more
+        stable API that can evolve independently of the underlying implementation.
+
+        Returns:
+            The wrapped client object of type T.
+
+        Note:
+            This property is primarily intended for use within subclasses that need to
+            delegate to the wrapped object's methods. External code should prefer to use
+            the wrapper's own methods which provide a stable, asynchronous interface.
+        """
+        return self._wrapped

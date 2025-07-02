@@ -132,7 +132,7 @@ python_files = ["test_*.py"]  # Test file naming pattern
 python_classes = ["Test"]  # Test class naming pattern
 python_functions = ["test_"]  # Test function naming pattern
 filterwarnings = [
-    "ignore:The NumPy module was reloaded (imported a second time):UserWarning"
+    "ignore:The NumPy module was reloaded (imported a second time).*:UserWarning"
 ]
 asyncio_default_fixture_loop_scope = "function"
 

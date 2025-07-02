@@ -13,9 +13,9 @@ import pytest
 from pydeephaven import Session
 
 from deephaven_mcp import config
+from deephaven_mcp._exceptions import SessionCreationError
 from deephaven_mcp.config._community_session import redact_community_session_config
 from deephaven_mcp.sessions import _session_manager
-from deephaven_mcp.sessions._errors import SessionCreationError
 from deephaven_mcp.sessions._lifecycle.community import create_session
 from deephaven_mcp.sessions._session._queries import get_dh_versions
 from deephaven_mcp.sessions._session_manager import SessionManager
