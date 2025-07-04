@@ -371,10 +371,10 @@ class ConfigManager:
             >>> config_dict = await config_manager.get_config()
             >>> print(config_dict['community'])
         """
-        _LOGGER.debug("Loading Deephaven MCP application configuration...")
+        _LOGGER.debug("[ConfigManager] Loading Deephaven MCP application configuration...")
         async with self._lock:
             if self._cache is not None:
-                _LOGGER.debug("Using cached Deephaven MCP application configuration.")
+                _LOGGER.debug("[ConfigManager] Using cached Deephaven MCP application configuration.")
                 return self._cache
 
             config_path = get_config_path()
@@ -591,7 +591,7 @@ def _log_config_summary(config: dict[str, Any]) -> None:
         >>> config = {'community': {'sessions': {'local': {...}}}}
         >>> _log_config_summary(config)
     """
-    _LOGGER.info("Configuration summary:")
+    _LOGGER.info("[ConfigManager] Configuration summary:")
 
     # Create a redacted copy of the config for logging
     redacted_config = _apply_redaction_to_config(config)
@@ -599,10 +599,10 @@ def _log_config_summary(config: dict[str, Any]) -> None:
     # Log the redacted config as formatted JSON
     try:
         formatted_config = json.dumps(redacted_config, indent=2, sort_keys=True)
-        _LOGGER.info(f"Loaded configuration:\n{formatted_config}")
+        _LOGGER.info(f"[ConfigManager] Loaded configuration:\n{formatted_config}")
     except (TypeError, ValueError) as e:
-        _LOGGER.warning(f"Failed to format config as JSON: {e}")
-        _LOGGER.info(f"Loaded configuration: {redacted_config}")
+        _LOGGER.warning(f"[ConfigManager] Failed to format config as JSON: {e}")
+        _LOGGER.info(f"[ConfigManager] Loaded configuration: {redacted_config}")
 
 
 def _validate_unknown_keys(
