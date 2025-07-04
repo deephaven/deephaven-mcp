@@ -31,7 +31,8 @@ from contextlib import asynccontextmanager
 import aiofiles
 from mcp.server.fastmcp import Context, FastMCP
 
-import deephaven_mcp.sessions as sessions
+from deephaven_mcp.session_manager import SessionManager
+from  deephaven_mcp import queries
 from deephaven_mcp import config
 
 _LOGGER = logging.getLogger(__name__)
@@ -78,7 +79,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
         await config_manager.get_config()
         _LOGGER.info("Configuration loaded.")
 
-        session_manager = sessions.SessionManager(config_manager)
+        session_manager = SessionManager(config_manager)
 
         # lock for refresh to prevent concurrent refresh operations.
         refresh_lock = asyncio.Lock()
@@ -253,7 +254,7 @@ async def describe_workers(context: Context) -> dict:
             # Only add versions if Python
             if programming_language == "python" and available:
                 try:
-                    core_version, enterprise_version = await sessions.get_dh_versions(
+                    core_version, enterprise_version = await queries.get_dh_versions(
                         session
                     )
                     _LOGGER.debug(
@@ -339,7 +340,7 @@ async def table_schemas(
 
         for table_name in selected_table_names:
             try:
-                meta_table = await sessions.get_meta_table(session, table_name)
+                meta_table = await queries.get_meta_table(session, table_name)
                 # meta_table is a pyarrow.Table with columns: 'Name', 'DataType', etc.
                 schema = [
                     {"name": row["Name"], "type": row["DataType"]}
@@ -486,7 +487,7 @@ async def pip_packages(context: Context, worker_name: str) -> dict:
         _LOGGER.info(
             f"[pip_packages] Getting pip packages table for worker: '{worker_name}'"
         )
-        arrow_table = await sessions.get_pip_packages_table(session)
+        arrow_table = await queries.get_pip_packages_table(session)
         _LOGGER.info(
             f"[pip_packages] Pip packages table retrieved successfully for worker: '{worker_name}'"
         )

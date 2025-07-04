@@ -13,7 +13,7 @@ Features:
 
 Async Safety:
     All public functions are async and use an instance-level asyncio.Lock (self._lock) for coroutine safety.
-    Each SessionManager instance encapsulates its own session cache and lock.
+    Each SessionRegistry instance encapsulates its own session cache and lock.
 
 Error Handling:
     - All certificate loading operations are wrapped in try-except blocks and use aiofiles for async file I/O.
@@ -21,7 +21,7 @@ Error Handling:
     - Session closure failures are logged but do not prevent other operations.
 
 Public API:
-    - SessionManager: Main entry point for session creation, caching, and lifecycle management.
+    - SessionRegistry: Main entry point for session creation, caching, and lifecycle management.
     - get_or_create_session(session_name): Obtain or create an alive Deephaven Session for a worker.
     - clear_all_sessions(): Atomically clear all sessions and release resources.
 
@@ -36,24 +36,23 @@ import time
 from pydeephaven import Session
 
 from deephaven_mcp import config
-from deephaven_mcp.sessions._session._session_base import SessionBase
-from deephaven_mcp.sessions._session._session_community import SessionCommunity
+from ._session_manager import BaseSessionManager, CommunitySessionManager
 
 _LOGGER = logging.getLogger(__name__)
 
 
-class SessionManager:
+class SessionRegistry:
     """
     Async/thread-safe manager for Deephaven Session objects, including creation, caching, and lifecycle.
 
-    Each SessionManager instance is fully isolated and must be provided a ConfigManager. All operations are coroutine-safe.
+    Each SessionRegistry instance is fully isolated and must be provided a ConfigManager. All operations are coroutine-safe.
     Use this class to obtain, reuse, and clean up Deephaven Session objects for workers.
 
-    Usage:
-        cfg_mgr = ...  # Your ConfigManager
-        mgr = SessionManager(cfg_mgr)
-        session = await mgr.get_or_create_session('worker1')
-        await mgr.clear_all_sessions()
+    Example:
+        cfg_mgr = ...  # Your ConfigManager instance
+        registry = SessionRegistry(cfg_mgr)
+        session = await registry.get_or_create_session('worker1')
+        await registry.clear_all_sessions()
     """
 
     def __init__(self, config_manager: config.ConfigManager):
@@ -70,20 +69,23 @@ class SessionManager:
             cfg_mgr = ...  # Your ConfigManager instance
             mgr = SessionManager(cfg_mgr)
         """
-        self._sessions: dict[str, SessionBase] = {}
+        self._sessions: dict[str, BaseSessionManager] = {}
         self._lock = asyncio.Lock()
         self._config_manager = config_manager
 
         _LOGGER.info(
-            "SessionManager initialized (sessions will be created on first access)"
+            "[SessionRegistry] initialized (sessions will be created on first access)"
         )
 
     async def _ensure_sessions_initialized(self) -> None:
         """
-        Lazily initialize session objects from configuration if not already present.
+        Lazily initialize session manager objects from configuration if not already present.
 
         Called on first access to avoid requiring an async constructor. Populates the session cache
-        with SessionCommunity objects for all configured community sessions.
+        with CommunitySessionManager objects for all configured community sessions.
+
+        This ensures that each community session is managed by a CommunitySessionManager, providing
+        async/thread-safe session creation, caching, and liveness checking for each worker.
         """
         if self._sessions:
             return  # Already initialized
@@ -93,7 +95,7 @@ class SessionManager:
         community_sessions_config = config_data.get("community", {}).get("sessions", {})
 
         for session_name, session_config in community_sessions_config.items():
-            self._sessions[session_name] = SessionCommunity(
+            self._sessions[session_name] = CommunitySessionManager(
                 session_name, session_config
             )
 
@@ -123,6 +125,7 @@ class SessionManager:
                 f"Session cache cleared. Processed {num_sessions} sessions in {time.time() - start_time:.2f}s"
             )
 
+    #TODO: do we need this?  Should it return a different type?? etc.
     async def get_or_create_session(self, session_name: str) -> Session:
         """
         Retrieve a cached Deephaven session for the specified worker, or create and cache a new one if needed.

@@ -81,6 +81,7 @@ from deephaven_mcp._exceptions import (
 )
 
 from ._base import ClientObjectWrapper
+from typing import override
 from ._protobuf import CorePlusQueryInfo
 import os
 import logging
@@ -683,6 +684,7 @@ class CoreSession(BaseSession):
         - CorePlusSession: For enterprise-specific session features
     """
 
+    @override
     def __init__(self, session: Session):
         """
         Initialize with an underlying Session instance.
@@ -826,6 +828,7 @@ class CorePlusSession(BaseSession):
         - CorePlusSessionManager: For creating and managing enterprise sessions
     """
 
+    @override
     def __init__(self, session: Session):
         """
         Initialize with an underlying DndSession instance.
