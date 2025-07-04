@@ -550,6 +550,68 @@ install_coreplus_client() {
   echo "Install complete." >&2
 }
 
+# --- install_coreplus_client (existing function should be above this) ---
+
+# TODO: Remove this function after the proto package is fixed in the wheel (see https://deephaven.atlassian.net/browse/DH-19813)
+patch_deephaven_enterprise_proto_package() {
+  # Dynamically find the site-packages dir for the active Python interpreter
+  local python_bin="${VIRTUAL_ENV:+$VIRTUAL_ENV/bin/python3}"
+  python_bin="${python_bin:-python3}"
+
+  local proto_dir base_dir
+  proto_dir=$("$python_bin" -c 'import site, os; d=[p for p in site.getsitepackages() if os.path.exists(os.path.join(p, "deephaven_enterprise", "proto"))]; print(os.path.join(d[0], "deephaven_enterprise", "proto") if d else "")')
+  base_dir=$("$python_bin" -c 'import site, os; d=[p for p in site.getsitepackages() if os.path.exists(os.path.join(p, "deephaven_enterprise"))]; print(os.path.join(d[0], "deephaven_enterprise") if d else "")')
+
+  if [[ -z "$proto_dir" || -z "$base_dir" ]]; then
+    echo "[ERROR] Could not find deephaven_enterprise/proto or base dir in site-packages. Skipping patch."
+    exit 1
+  fi
+
+  echo "[INFO] proto_dir: $proto_dir"
+  echo "[INFO] base_dir: $base_dir"
+  echo "Patching Deephaven Enterprise proto package at $proto_dir ..."
+  mkdir -p "$proto_dir"
+
+  # Only create proto __init__.py if missing
+  if [ ! -f "$proto_dir/__init__.py" ]; then
+    echo "Creating missing $proto_dir/__init__.py ..."
+    cat > "$proto_dir/__init__.py" <<'EOF'
+from . import acl_pb2
+from . import acl_pb2_grpc
+from . import auth_pb2
+from . import auth_pb2_grpc
+from . import auth_service_pb2
+from . import auth_service_pb2_grpc
+from . import common_pb2
+from . import common_pb2_grpc
+from . import controller_common_pb2
+from . import controller_common_pb2_grpc
+from . import controller_pb2
+from . import controller_pb2_grpc
+from . import controller_service_pb2
+from . import controller_service_pb2_grpc
+from . import persistent_query_pb2
+from . import persistent_query_pb2_grpc
+from . import table_definition_pb2
+from . import table_definition_pb2_grpc
+EOF
+    echo "Created $proto_dir/__init__.py."
+  else
+    echo "$proto_dir/__init__.py already exists, skipping creation."
+  fi
+
+  # Only create base __init__.py if missing
+  if [ ! -f "$base_dir/__init__.py" ]; then
+    echo "Creating missing $base_dir/__init__.py ..."
+    echo "# Regular package marker" > "$base_dir/__init__.py"
+    echo "Created $base_dir/__init__.py."
+  else
+    echo "$base_dir/__init__.py already exists, skipping creation."
+  fi
+
+  echo "Deephaven Enterprise proto package patch complete."
+}
+
 # --- Main Script Logic ---
 
 if [ $# -lt 1 ]; then usage; fi
@@ -580,6 +642,7 @@ case "$COMMAND" in
     set -- $(resolve_install_versions "$channel" "$ev" "$pr" "$cv")
     channel="$1"; ev="$2"; pr="$3"; cv="$4"
     install_coreplus_client "$channel" "$ev" "$pr" "$cv"
+    patch_deephaven_enterprise_proto_package
     ;;
   uninstall)
     echo "Uninstalling deephaven-coreplus-client from the current environment..." >&2
