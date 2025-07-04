@@ -7,6 +7,15 @@ Should pass in both community-only and enterprise environments by patching sys.m
 import sys
 import types
 
+# Patch sys.modules for enterprise imports BEFORE any tested imports
+mock_enterprise = types.ModuleType("deephaven_enterprise")
+mock_client = types.ModuleType("deephaven_enterprise.client")
+mock_controller = types.ModuleType("deephaven_enterprise.client.controller")
+mock_controller.ControllerClient = type("ControllerClient", (), {})
+sys.modules["deephaven_enterprise"] = mock_enterprise
+sys.modules["deephaven_enterprise.client"] = mock_client
+sys.modules["deephaven_enterprise.client.controller"] = mock_controller
+
 import pytest
 
 
@@ -25,6 +34,7 @@ def test_expected_symbols_in_all():
 
     expected = {
         "ClientObjectWrapper",
+        "BaseSession",
         "CoreSession",
         "CorePlusSession",
         "CorePlusAuthClient",
@@ -46,6 +56,7 @@ def test_expected_symbols_in_all():
     "symbol",
     [
         "ClientObjectWrapper",
+        "BaseSession",
         "CoreSession",
         "CorePlusSession",
         "CorePlusAuthClient",
@@ -77,9 +88,9 @@ def test_import_client_init():
 
 def test___all__():
     client = pytest.importorskip("deephaven_mcp.client")
-    exported = set(client.__all__)
     expected = {
         "ClientObjectWrapper",
+        "BaseSession",
         "CoreSession",
         "CorePlusSession",
         "CorePlusAuthClient",
@@ -94,7 +105,34 @@ def test___all__():
         "CorePlusQueryInfo",
         "CorePlusToken",
     }
-    assert expected <= exported
+    assert set(client.__all__) == expected
+
+def test_import_star_behavior():
+    expected = {
+        "ClientObjectWrapper",
+        "BaseSession",
+        "CoreSession",
+        "CorePlusSession",
+        "CorePlusAuthClient",
+        "CorePlusSessionManager",
+        "CorePlusControllerClient",
+        "is_enterprise_available",
+        "ProtobufWrapper",
+        "CorePlusQueryStatus",
+        "CorePlusQuerySerial",
+        "CorePlusQueryConfig",
+        "CorePlusQueryState",
+        "CorePlusQueryInfo",
+        "CorePlusToken",
+    }
+    ns = {}
+    exec("from deephaven_mcp.client import *", ns)
+    for symbol in expected:
+        assert symbol in ns
+    # Optionally, check that no unexpected symbols are present (no leading underscores)
+    for k in ns:
+        if not k.startswith("__"):
+            assert k in expected
 
 
 def test_is_enterprise_available_type():
@@ -106,10 +144,12 @@ import importlib
 
 COMMUNITY_SYMBOLS = [
     "ClientObjectWrapper",
+    "BaseSession",
     "CoreSession",
     "is_enterprise_available",
 ]
 ENTERPRISE_SYMBOLS = [
+    "BaseSession",
     "CorePlusSession",
     "CorePlusAuthClient",
     "CorePlusSessionManager",

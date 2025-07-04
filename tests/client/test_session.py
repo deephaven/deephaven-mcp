@@ -1,10 +1,26 @@
-import asyncio
 import sys
 import types
-from unittest.mock import MagicMock, patch
+import os
+import asyncio
+from unittest.mock import MagicMock, patch, AsyncMock
+
+import pytest
+
+@pytest.fixture(autouse=True)
+def patch_load_bytes():
+    with patch("deephaven_mcp.client._session.load_bytes", new=AsyncMock(return_value=b"binary")):
+        yield
 
 import pyarrow as pa
 import pytest
+
+from deephaven_mcp._exceptions import (
+    DeephavenConnectionError,
+    QueryError,
+    ResourceError,
+    SessionError,
+    SessionCreationError,
+)
 
 # Patch sys.modules for enterprise imports BEFORE any tested imports
 mock_enterprise = types.ModuleType("deephaven_enterprise")
@@ -37,6 +53,11 @@ class DummyInputTable:
 
 class DummyQuery:
     pass
+
+
+class DummyPDHSession:
+    def __init__(self, *args, **kwargs):
+        pass
 
 
 mock_table_mod.Table = DummyTable
@@ -319,7 +340,118 @@ def test_repr_minimal():
     assert cs.__repr__() == "dummy-repr"
 
 
-# ========== NEW TESTS FOR UNCOVERED LINES BELOW ========== #
+# ========== CoreSession.from_config tests (migrated from test_core_session.py) ========== #
+
+@pytest.mark.asyncio
+async def test_core_from_config_session_creation_error(monkeypatch):
+    class FailingPDHSession:
+        def __init__(self, *args, **kwargs):
+            raise RuntimeError("session creation failed")
+    monkeypatch.setattr("pydeephaven.Session", FailingPDHSession)
+    with pytest.raises(SessionCreationError) as exc_info:
+        await CoreSession.from_config({"host": "localhost"})
+    assert "Failed to create Deephaven Community (Core) Session" in str(exc_info.value)
+
+
+
+@pytest.mark.asyncio
+async def test_core_from_config_success(monkeypatch):
+    """Test CoreSession.from_config creates a session with all parameters."""
+    config = {
+        "host": "localhost",
+        "port": 10000,
+        "auth_type": "token",
+        "auth_token": "tok",
+        "never_timeout": True,
+        "session_type": "python",
+        "use_tls": True,
+        "tls_root_certs": "/no/such/file/root.pem",
+        "client_cert_chain": "/no/such/file/chain.pem",
+        "client_private_key": "/no/such/file/key.pem",
+    }
+    monkeypatch.setattr("pydeephaven.Session", DummyPDHSession)
+    session = await CoreSession.from_config(config)
+    assert isinstance(session, CoreSession)
+    assert isinstance(session.wrapped, DummyPDHSession)
+@pytest.mark.asyncio
+async def test_core_from_config_tls_file_error(monkeypatch):
+    from unittest.mock import AsyncMock
+    monkeypatch.setattr("deephaven_mcp.client._session.load_bytes", AsyncMock(side_effect=IOError("fail")))
+    config = {"tls_root_certs": "/bad/path"}
+    with pytest.raises(IOError):
+        await CoreSession.from_config(config)
+
+@pytest.mark.asyncio
+async def test_core_from_config_auth_token_from_env_var(monkeypatch):
+    env_var = "MY_TEST_TOKEN_VAR"
+    expected = "token_from_env"
+    monkeypatch.setenv(env_var, expected)
+    config = {"auth_token_env_var": env_var}
+    monkeypatch.setattr("pydeephaven.Session", DummyPDHSession)
+    session = await CoreSession.from_config(config)
+    assert isinstance(session, CoreSession)
+    monkeypatch.delenv(env_var)
+
+@pytest.mark.asyncio
+async def test_core_from_config_auth_token_env_var_not_set(monkeypatch, caplog):
+    env_var = "MY_MISSING_TOKEN_VAR"
+    monkeypatch.delenv(env_var, raising=False)
+    config = {"auth_token_env_var": env_var}
+    monkeypatch.setattr("pydeephaven.Session", DummyPDHSession)
+    session = await CoreSession.from_config(config)
+    assert isinstance(session, CoreSession)
+    assert f"Environment variable {env_var} specified for auth_token but not found. Using empty token." in caplog.text
+
+@pytest.mark.asyncio
+async def test_core_from_config_auth_token_from_config(monkeypatch):
+    expected = "token_from_config_direct"
+    config = {"auth_token": expected}
+    monkeypatch.setattr("pydeephaven.Session", DummyPDHSession)
+    session = await CoreSession.from_config(config)
+    assert isinstance(session, CoreSession)
+
+@pytest.mark.asyncio
+async def test_core_from_config_no_auth_token(monkeypatch):
+    config = {"host": "localhost"}
+    monkeypatch.setattr("pydeephaven.Session", DummyPDHSession)
+    session = await CoreSession.from_config(config)
+    assert isinstance(session, CoreSession)
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cfg,expected", [
+    ({"host": "localhost"}, {
+        "host": "localhost", "port": None, "auth_type": "Anonymous", "auth_token": "", "never_timeout": False,
+        "session_type": "python", "use_tls": False, "tls_root_certs": None, "client_cert_chain": None, "client_private_key": None
+    }),
+    ({"host": "localhost", "port": 123}, {
+        "host": "localhost", "port": 123, "auth_type": "Anonymous", "auth_token": "", "never_timeout": False,
+        "session_type": "python", "use_tls": False, "tls_root_certs": None, "client_cert_chain": None, "client_private_key": None
+    }),
+    ({"host": "localhost", "auth_type": "token", "auth_token": "tok"}, {
+        "host": "localhost", "port": None, "auth_type": "token", "auth_token": "tok", "never_timeout": False,
+        "session_type": "python", "use_tls": False, "tls_root_certs": None, "client_cert_chain": None, "client_private_key": None
+    }),
+    ({"host": "localhost", "never_timeout": True, "session_type": "custom"}, {
+        "host": "localhost", "port": None, "auth_type": "Anonymous", "auth_token": "", "never_timeout": True,
+        "session_type": "custom", "use_tls": False, "tls_root_certs": None, "client_cert_chain": None, "client_private_key": None
+    }),
+])
+async def test_core_from_config_defaults(monkeypatch, cfg, expected):
+    monkeypatch.setattr("pydeephaven.Session", DummyPDHSession)
+    session = await CoreSession.from_config(cfg)
+    actual = session.wrapped.__dict__ if hasattr(session.wrapped, "__dict__") else {k: getattr(session.wrapped, k, None) for k in expected}
+    assert isinstance(session, CoreSession)
+
+@pytest.mark.asyncio
+@pytest.mark.asyncio
+async def test_core_from_config_tls_and_client_keys(monkeypatch):
+    # All present
+    config = {
+        "host": "localhost", "tls_root_certs": "/no/such/file/a", "client_cert_chain": "/no/such/file/b", "client_private_key": "/no/such/file/c"
+    }
+    monkeypatch.setattr("pydeephaven.Session", DummyPDHSession)
+    session = await CoreSession.from_config(config)
+    assert isinstance(session, CoreSession)
 
 
 @pytest.mark.asyncio

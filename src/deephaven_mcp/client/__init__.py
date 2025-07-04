@@ -33,31 +33,23 @@ from ._protobuf import (
     CorePlusToken,
     ProtobufWrapper,
 )
-from ._session import CorePlusSession, CoreSession
+from ._session import BaseSession, CoreSession, CorePlusSession
 from ._session_manager import CorePlusSessionManager
 
-_LOGGER = logging.getLogger(__name__)
-
 __all__ = [
-    # Base wrapper class
+    "CorePlusAuthClient",
     "ClientObjectWrapper",
-    # Session classes
+    "is_enterprise_available",
+    "CorePlusControllerClient",
+    "CorePlusQueryConfig",
+    "CorePlusQueryInfo",
+    "CorePlusQuerySerial",
+    "CorePlusQueryState",
+    "CorePlusQueryStatus",
+    "CorePlusToken",
+    "ProtobufWrapper",
+    "BaseSession",
     "CoreSession",
     "CorePlusSession",
-    # Session management
     "CorePlusSessionManager",
-    # Authentication
-    "CorePlusAuthClient",
-    # Controller
-    "CorePlusControllerClient",
-    # Query and protobuf wrappers
-    "ProtobufWrapper",
-    "CorePlusQueryStatus",
-    "CorePlusQuerySerial",
-    "CorePlusQueryConfig",
-    "CorePlusQueryState",
-    "CorePlusQueryInfo",
-    "CorePlusToken",
-    # Feature detection
-    "is_enterprise_available",
 ]

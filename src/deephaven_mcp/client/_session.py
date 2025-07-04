@@ -1,88 +1,49 @@
-"""Asynchronous session wrappers for Deephaven standard and enterprise functionality.
+"""Async wrappers for Deephaven standard and enterprise sessions.
 
-This module provides asynchronous wrappers for Deephaven session classes, making all blocking
-operations non-blocking through asyncio.to_thread. It supports both standard Deephaven sessions
-and enterprise-specific functionality through two main classes:
+This module provides asynchronous wrappers for Deephaven session classes, ensuring all blocking operations are executed in background threads via `asyncio.to_thread`. It supports both standard and enterprise (Core+) sessions, exposing a unified async API for table creation, data import, querying, and advanced enterprise features.
 
-Two main classes are provided:
-- CoreSession: An asynchronous wrapper around the standard pydeephaven Session class for basic table
-  operations like creating empty tables, importing data, and executing queries
-- CorePlusSession: An asynchronous wrapper around the enterprise DndSession class that extends
-  CoreSession with additional enterprise-specific features like persistent query information, 
-  historical data, and catalog operations
+Classes:
+    - CoreSession: Async wrapper for basic pydeephaven Session, supporting standard table operations.
+    - CorePlusSession: Async wrapper for enterprise DndSession, extending CoreSession with persistent query, historical data, and catalog features.
 
-All session operations that would normally block the event loop are executed in background threads
-using asyncio.to_thread to ensure application responsiveness when using asyncio.
+All operations that interact with the server are asynchronous and do not block the event loop.
 
-Example usage of CoreSession (standard functionality):
+Example (standard):
     ```python
     import asyncio
     import pyarrow as pa
-    from deephaven_mcp.client import CoreSessionManager
-    
+    from deephaven_mcp.session_manager import CoreSessionManager
+
     async def main():
-        # Create a session manager and connect to the server
         manager = CoreSessionManager("localhost", 10000)
-        
-        # Get a session
         session = await manager.get_session()
-        
-        # Create a time table that ticks every second
-        time_table = await session.time_table("PT1S")
-        
-        # Create a derived table using query operations
-        result = await (await session.query(time_table))\
-            .update_view(["Timestamp = now()", "Value = i % 10"])\
-            .to_table()
-            
-        # Create an input table with a schema
+        table = await session.time_table("PT1S")
+        result = await (await session.query(table)).update_view(["Value = i % 10"]).to_table()
         schema = pa.schema([
             pa.field('name', pa.string()),
             pa.field('value', pa.int64())
         ])
         input_table = await session.input_table(schema=schema)
-        
-        # Save a table to be accessible by name
         await session.bind_table("my_result_table", result)
-        
+
     asyncio.run(main())
     ```
 
-Example usage of CorePlusSession (enterprise features):
+Example (enterprise):
     ```python
     import asyncio
-    from deephaven_mcp.client import CorePlusSessionManager
-    
+    from deephaven_mcp.session_manager import CorePlusSessionManager
+
     async def main():
-        # Create an enterprise session manager and authenticate
         manager = CorePlusSessionManager.from_url("https://myserver.example.com/iris/connection.json")
         await manager.password("username", "password")
-        
-        # Connect to a new worker (creates a new persistent query)
         session = await manager.connect_to_new_worker()
-        
-        # Get information about this persistent query
-        query_info = await session.pqinfo()
-        print(f"Connected to query {query_info.id} with status {query_info.status}")
-        
-        # Access historical data
-        historical_data = await session.historical_table("market_data", "daily_prices")
-        
-        # Access live data that updates in real-time
-        live_data = await session.live_table("market_data", "live_trades")
-        
-        # Query the catalog to see all available tables
+        info = await session.pqinfo()
+        print(f"Connected to query {info.id} with status {info.status}")
+        hist = await session.historical_table("market_data", "daily_prices")
+        live = await session.live_table("market_data", "live_trades")
         catalog = await session.catalog_table()
-        
-        # Filter the catalog to find tables containing price data
-        price_tables = await (await session.query(catalog))\
-            .where("TableName.contains('price')")\
-            .to_table()
-            
-    asyncio.run(main())
-    ```
-    
-    async def main():
+        price_tables = await (await session.query(catalog)).where("TableName.contains('price')").to_table()
         # Create a session manager
         manager = CorePlusSessionManager.from_url("https://myserver.example.com/iris/connection.json")
         await manager.password("username", "password")
@@ -121,73 +82,58 @@ from deephaven_mcp._exceptions import (
 
 from ._base import ClientObjectWrapper
 from ._protobuf import CorePlusQueryInfo
+import os
+import logging
+from deephaven_mcp.io import load_bytes
+from deephaven_mcp.config import redact_community_session_config
+from deephaven_mcp._exceptions import SessionCreationError
+from typing import Any
+
+
 
 _LOGGER = logging.getLogger(__name__)
 
 
-class CoreSession(ClientObjectWrapper[Session]):
+class BaseSession(ClientObjectWrapper[Session]):
     """
-    An asynchronous wrapper around the Deephaven Session class.
-    
-    This class delegates to the underlying Session object while making all blocking operations
-    asynchronous using asyncio.to_thread. This ensures that the caller's event loop is not blocked
-    by potentially long-running operations.
-    
-    CoreSession provides methods for creating, querying, and manipulating Deephaven tables
-    with a fully asynchronous API. This enables efficient integration with other asyncio-based
-    applications and prevents blocking operations from affecting application responsiveness.
-    
-    Thread Safety:
-      - CoreSession methods are not thread-safe and should only be called from a single thread
-      - However, multiple CoreSession instances can be used concurrently from different threads
-      - Each method should be awaited before calling another method on the same session
-    
+    Base class for asynchronous Deephaven session wrappers.
+
+    Provides a unified async interface for all Deephaven session types (standard and enterprise).
+    All blocking operations are executed using `asyncio.to_thread` to prevent blocking the event loop.
+    Intended for subclassing by `CoreSession` (standard) and `CorePlusSession` (enterprise).
+
+    Usage:
+        - Do not instantiate directly; use a SessionManager to obtain a session instance.
+        - All methods are async and must be awaited.
+        - Do not call methods of the same session object concurrently from multiple threads.
+        - Multiple session objects may be used in parallel.
+
     Example:
         ```python
         import asyncio
-        from deephaven_mcp.client import CoreSessionManager
-        
+        from deephaven_mcp.session_manager import CoreSessionManager
+
         async def main():
-            # Create a session manager and connect to a server
             manager = CoreSessionManager("localhost", 10000)
-            
-            # Get a session
             session = await manager.get_session()
-            
-            # Create a time table
             table = await session.time_table("PT1S")
-            
-            # Perform operations
-            result = await (await session.query(table))\
-                .update_view(["Value = i % 10"])\
-                .to_table()
-                
-            # Work with the result
+            result = await (await session.query(table)).update_view(["Value = i % 10"]).to_table()
             print(await result.to_string())
-        
+
         asyncio.run(main())
         ```
     """
 
     def __init__(self, session: Session, is_enterprise: bool = False):
         """
-        Initialize with an underlying Session instance.
-
-        This constructor wraps an existing pydeephaven Session object and exposes its methods
-        as asynchronous coroutines. The wrapped session object is stored as self.wrapped and
-        all method calls are delegated to it after ensuring they're executed in a non-blocking
-        manner using asyncio.to_thread.
+        Initialize the async session wrapper with a pydeephaven Session instance.
 
         Args:
-            session: A pydeephaven Session instance that will be wrapped by this class. This
-                   object must be a valid, already initialized Session object.
-            is_enterprise: Whether the wrapped object is an enterprise session type. This affects
-                         how the object is handled internally. Set to True for enterprise sessions
-                         and False for standard sessions.
+            session: An initialized pydeephaven Session object to wrap.
+            is_enterprise: Set True for enterprise (Core+) sessions, False for standard sessions.
 
         Note:
-            This class is typically not instantiated directly by users but rather obtained
-            through a SessionManager's connect or get_session methods.
+            Do not instantiate this class directly; use a SessionManager to obtain session instances.
         """
         super().__init__(session, is_enterprise=is_enterprise)
 
@@ -463,56 +409,40 @@ class CoreSession(ClientObjectWrapper[Session]):
         blink_table: bool = False,
     ) -> InputTable:
         """
-        Asynchronously creates an InputTable from either Arrow schema or initial table.
+        Asynchronously create an InputTable on the server using a PyArrow schema or an existing Table.
 
-        An InputTable is a special type of table that allows direct data insertion from the client.
-        Three different types of InputTable can be created:
+        InputTables allow direct, client-driven data insertion and updates. Three modes are supported:
 
-        1. **Append-only table**: Created when blink_table=False and key_cols=None.
-           Rows are only ever added, never updated or removed.
-
-        2. **Keyed table**: Created when blink_table=False and key_cols is specified.
-           Rows with the same key values will update existing rows rather than append.
-
-        3. **Blink table**: Created when blink_table=True.
-           Only the most recent row(s) are retained, all previous rows are discarded.
+        1. **Append-only**: (blink_table=False, key_cols=None) Rows are only appended.
+        2. **Keyed**: (blink_table=False, key_cols specified) Rows with duplicate keys update existing rows.
+        3. **Blink**: (blink_table=True) Only the most recent row(s) are retained; previous rows are discarded.
 
         Args:
-            schema: The PyArrow schema defining the structure of the input table. Required if
-                   init_table is not provided.
-            init_table: An existing table to use as the initial state for the input table.
-                       Required if schema is not provided.
-            key_cols: The column name or list of column names to use as the unique key for the table.
-                     When specified and blink_table is False, creates a keyed table where rows with
-                     matching key values update existing rows instead of appending.
-            blink_table: If True, creates a blink table that only retains the most recent rows.
-                        If False (default), creates either an append-only table (if key_cols is None)
-                        or a keyed table (if key_cols is specified).
+            schema (pa.Schema, optional): PyArrow schema for the input table. Required if init_table is not provided.
+            init_table (Table, optional): Existing Table to use as the initial state. Required if schema is not provided.
+            key_cols (str or list[str], optional): Column(s) to use as unique key. If set and blink_table is False, creates a keyed table.
+            blink_table (bool, optional): If True, creates a blink table; if False (default), creates append-only or keyed table.
 
         Returns:
-            An InputTable object that can be used to add or update data
+            InputTable: An object supporting direct data insertion and updates.
 
         Raises:
-            ValueError: If neither schema nor init_table is provided, or if other invalid
-                      parameter combinations are used
-            DeephavenConnectionError: If there is a network or connection error
-            QueryError: If the operation fails due to a query-related error
+            ValueError: If neither schema nor init_table is provided, or if parameters are invalid.
+            DeephavenConnectionError: If a network or connection error occurs.
+            QueryError: If the operation fails due to query or server error.
 
         Example:
             ```python
             import pyarrow as pa
-
-            # Create an append-only table
             schema = pa.schema([
                 pa.field('name', pa.string()),
                 pa.field('value', pa.int64())
             ])
+            # Append-only
             append_table = await session.input_table(schema=schema)
-
-            # Create a keyed table that updates rows with matching keys
+            # Keyed
             keyed_table = await session.input_table(schema=schema, key_cols='name')
-
-            # Create a blink table that only keeps the latest row
+            # Blink
             blink_table = await session.input_table(schema=schema, blink_table=True)
             ```
         """
@@ -537,18 +467,23 @@ class CoreSession(ClientObjectWrapper[Session]):
 
     async def open_table(self, name: str) -> Table:
         """
-        Asynchronously opens a table in the global scope with the given name on the server.
+        Asynchronously open a global table by name from the server.
 
         Args:
-            name: The name of the table
+            name (str): Name of the table to open. Must exist in the global namespace.
 
         Returns:
-            A Table object
+            Table: The opened Table object.
 
         Raises:
-            ResourceError: If no table exists with the given name
-            DeephavenConnectionError: If there is a network or connection error
-            QueryError: If the operation fails due to a query-related error
+            ResourceError: If no table exists with the given name.
+            DeephavenConnectionError: If a network or connection error occurs.
+            QueryError: If the operation fails due to a query-related error (e.g., permissions, server error).
+
+        Example:
+            ```python
+            table = await session.open_table("my_table")
+            ```
         """
         _LOGGER.debug("CoreSession.open_table called with name=%s", name)
         try:
@@ -567,15 +502,22 @@ class CoreSession(ClientObjectWrapper[Session]):
 
     async def bind_table(self, name: str, table: Table) -> None:
         """
-        Asynchronously binds a table to the given name on the server so that it can be referenced by that name.
+        Asynchronously bind a Table object to a global name on the server.
+
+        This allows the table to be referenced by name in subsequent operations or by other users.
 
         Args:
-            name: Name for the table
-            table: A Table object
+            name (str): Name to assign to the table in the global namespace.
+            table (Table): The Table object to bind.
 
         Raises:
-            DeephavenConnectionError: If there is a network or connection error
-            QueryError: If the operation fails due to a query-related error
+            DeephavenConnectionError: If a network or connection error occurs.
+            QueryError: If the operation fails due to a query-related error.
+
+        Example:
+            ```python
+            await session.bind_table("result_table", table)
+            ```
         """
         _LOGGER.debug("CoreSession.bind_table called with name=%s", name)
         try:
@@ -593,14 +535,19 @@ class CoreSession(ClientObjectWrapper[Session]):
 
     async def close(self) -> None:
         """
-        Asynchronously closes the Session object if it hasn't timed out already.
+        Asynchronously close the session and release all associated server resources.
 
-        This method should be called when the session is no longer needed to properly
-        clean up resources on the server.
+        This method should be called when the session is no longer needed to prevent resource leaks.
+        After closing, the session object should not be used for further operations.
 
         Raises:
-            DeephavenConnectionError: If there is a network or connection error closing the session
-            SessionError: If the session cannot be closed for non-connection reasons
+            DeephavenConnectionError: If a network or connection error occurs during close.
+            SessionError: If the session cannot be closed for non-connection reasons (e.g., server error).
+
+        Example:
+            ```python
+            await session.close()
+            ```
         """
         _LOGGER.debug("CoreSession.close called")
         try:
@@ -617,16 +564,20 @@ class CoreSession(ClientObjectWrapper[Session]):
 
     async def run_script(self, script: str, systemic: bool | None = None) -> None:
         """
-        Asynchronously runs the supplied Python script on the server.
+        Asynchronously execute a Python script on the server in the context of this session.
 
         Args:
-            script: The Python script code
-            systemic: Whether to treat the code as systemically important.
-                    Defaults to None which uses the default system behavior
+            script (str): The Python script code to execute.
+            systemic (bool, optional): If True, treat the script as systemically important. If None, uses default behavior.
 
         Raises:
-            DeephavenConnectionError: If there is a network or connection error
-            QueryError: If the script cannot be run or encounters an error
+            DeephavenConnectionError: If a network or connection error occurs.
+            QueryError: If the script cannot be run or encounters an error (e.g., syntax, runtime, or server error).
+
+        Example:
+            ```python
+            await session.run_script("print('Hello from server!')")
+            ```
         """
         _LOGGER.debug("CoreSession.run_script called")
         try:
@@ -644,19 +595,21 @@ class CoreSession(ClientObjectWrapper[Session]):
 
     async def tables(self) -> list[str]:
         """
-        Asynchronously get the names of global tables available in the server.
-
-        This method wraps the potentially blocking operation in a background thread
-        to prevent blocking the event loop.
+        Asynchronously retrieve the names of all global tables available on the server.
 
         Returns:
-            A list of table names
+            list[str]: List of table names currently registered in the global namespace.
 
         Raises:
-            DeephavenConnectionError: If there is a network or connection error
-            QueryError: If the operation fails due to a query-related error
+            DeephavenConnectionError: If a network or connection error occurs.
+            QueryError: If the operation fails due to a query-related error.
+
+        Example:
+            ```python
+            table_names = await session.tables()
+            ```
         """
-        _LOGGER.debug("CoreSession.tables called")
+        _LOGGER.debug("[CoreSession] tables called")
         try:
             return await asyncio.to_thread(self.wrapped.tables)
         except ConnectionError as e:
@@ -695,7 +648,140 @@ class CoreSession(ClientObjectWrapper[Session]):
             raise SessionError(f"Failed to check session status: {e}") from e
 
 
-class CorePlusSession(CoreSession):
+
+class CoreSession(BaseSession):
+    """
+    An asynchronous wrapper around the standard Deephaven Session class.
+
+    CoreSession provides a fully asynchronous interface for interacting with standard Deephaven servers.
+    It delegates all blocking operations to background threads using asyncio.to_thread, ensuring that
+    the event loop is never blocked. This class is suitable for use in asyncio-based applications
+    and provides methods for table creation, querying, and manipulation.
+
+    This class is intended for standard (non-enterprise) Deephaven sessions. For enterprise-specific
+    features, use CorePlusSession.
+
+    Example:
+        ```python
+        import asyncio
+        from deephaven_mcp.session_manager import CoreSessionManager
+
+        async def main():
+            manager = CoreSessionManager("localhost", 10000)
+            session = await manager.get_session()
+            table = await session.time_table("PT1S")
+            result = await (await session.query(table))\
+                .update_view(["Value = i % 10"]).to_table()
+            print(await result.to_string())
+
+        asyncio.run(main())
+        ```
+
+    See Also:
+        - BaseSession: Parent class for all Deephaven session types
+        - CoreSessionManager: For creating and managing standard sessions
+        - CorePlusSession: For enterprise-specific session features
+    """
+
+    def __init__(self, session: Session):
+        """
+        Initialize with an underlying Session instance.
+
+        Args:
+            session: A pydeephaven Session instance that will be wrapped by this class.
+        """
+        super().__init__(session, is_enterprise=False)
+
+    @classmethod
+    async def from_config(cls, worker_cfg: dict[str, Any]) -> "CoreSession":
+        """
+        Asynchronously create a CoreSession from a community (core) session configuration dictionary.
+
+        This method prepares all session parameters (including TLS and auth logic),
+        creates the underlying pydeephaven.Session, and returns a CoreSession instance.
+        Sensitive fields in the config are redacted before logging. If session creation fails,
+        a SessionCreationError is raised with details.
+
+        Args:
+            worker_cfg (dict): The worker's community session configuration.
+
+        Returns:
+            CoreSession: A new CoreSession instance wrapping a pydeephaven Session.
+
+        Raises:
+            SessionCreationError: If session creation fails for any reason.
+        """
+        def redact(cfg):
+            return redact_community_session_config(cfg) if 'auth_token' in cfg or 'client_private_key' in cfg else cfg
+
+        # Prepare session parameters
+        log_cfg = redact(worker_cfg)
+        _LOGGER.info(f"[Community] Community session configuration: {log_cfg}")
+        host = worker_cfg.get("host", None)
+        port = worker_cfg.get("port", None)
+        auth_type = worker_cfg.get("auth_type", "Anonymous")
+        auth_token = worker_cfg.get("auth_token")
+        auth_token_env_var = worker_cfg.get("auth_token_env_var")
+        if auth_token_env_var:
+            _LOGGER.info(f"[Community] Attempting to read auth token from environment variable: {auth_token_env_var}")
+            token_from_env = os.getenv(auth_token_env_var)
+            if token_from_env is not None:
+                auth_token = token_from_env
+                _LOGGER.info(f"[Community] Successfully read auth token from environment variable {auth_token_env_var}.")
+            else:
+                auth_token = ""
+                _LOGGER.warning(f"[Community] Environment variable {auth_token_env_var} specified for auth_token but not found. Using empty token.")
+        elif auth_token is None:
+            auth_token = ""
+        never_timeout = worker_cfg.get("never_timeout", False)
+        session_type = worker_cfg.get("session_type", "python")
+        use_tls = worker_cfg.get("use_tls", False)
+        tls_root_certs = worker_cfg.get("tls_root_certs", None)
+        client_cert_chain = worker_cfg.get("client_cert_chain", None)
+        client_private_key = worker_cfg.get("client_private_key", None)
+        if tls_root_certs:
+            _LOGGER.info(f"[Community] Loading TLS root certs from: {worker_cfg.get('tls_root_certs')}")
+            tls_root_certs = await load_bytes(tls_root_certs)
+            _LOGGER.info("[Community] Loaded TLS root certs successfully.")
+        else:
+            _LOGGER.debug("[Community] No TLS root certs provided for community session.")
+        if client_cert_chain:
+            _LOGGER.info(f"[Community] Loading client cert chain from: {worker_cfg.get('client_cert_chain')}")
+            client_cert_chain = await load_bytes(client_cert_chain)
+            _LOGGER.info("[Community] Loaded client cert chain successfully.")
+        else:
+            _LOGGER.debug("[Community] No client cert chain provided for community session.")
+        if client_private_key:
+            _LOGGER.info(f"[Community] Loading client private key from: {worker_cfg.get('client_private_key')}")
+            client_private_key = await load_bytes(client_private_key)
+            _LOGGER.info("[Community] Loaded client private key successfully.")
+        else:
+            _LOGGER.debug("[Community] No client private key provided for community session.")
+        session_config = {
+            "host": host,
+            "port": port,
+            "auth_type": auth_type,
+            "auth_token": auth_token,
+            "never_timeout": never_timeout,
+            "session_type": session_type,
+            "use_tls": use_tls,
+            "tls_root_certs": tls_root_certs,
+            "client_cert_chain": client_cert_chain,
+            "client_private_key": client_private_key,
+        }
+        log_cfg = redact(session_config)
+        _LOGGER.info(f"[Community] Prepared Deephaven Community (Core) Session config: {log_cfg}")
+        try:
+            from pydeephaven import Session as PDHSession
+            _LOGGER.info(f"[Community] Creating new Deephaven Community (Core) Session with config: {log_cfg}")
+            session = await asyncio.to_thread(PDHSession, **session_config)
+        except Exception as e:
+            _LOGGER.warning(f"[Community] Failed to create Deephaven Community (Core) Session with config: {log_cfg}: {e}")
+            raise SessionCreationError(f"Failed to create Deephaven Community (Core) Session with config: {log_cfg}: {e}") from e
+        _LOGGER.info(f"[Community] Successfully created Deephaven Community (Core) Session: {session}")
+        return cls(session)
+
+class CorePlusSession(BaseSession):
     """
     A wrapper around the enterprise DndSession class, providing a standardized interface
     while delegating to the underlying enterprise session implementation.
@@ -713,7 +799,7 @@ class CorePlusSession(CoreSession):
     Example:
         ```python
         import asyncio
-        from deephaven_mcp.client import CorePlusSessionManager
+        from deephaven_mcp.session_manager import CorePlusSessionManager
 
         async def work_with_enterprise_session():
             # Create a session manager and authenticate
@@ -736,7 +822,7 @@ class CorePlusSession(CoreSession):
         ```
 
     See Also:
-        - CoreSession: Base class for standard session operations
+        - BaseSession: Parent class for all Deephaven session types
         - CorePlusSessionManager: For creating and managing enterprise sessions
     """
 

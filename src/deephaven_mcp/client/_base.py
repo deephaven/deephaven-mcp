@@ -24,26 +24,26 @@ try:
     # The following imports are required for enterprise features
     import deephaven_enterprise  # noqa: F401
 
-    # TODO: Workaround: Explicitly import all enterprise proto modules to ensure correct namespace setup -- see https://deephaven.atlassian.net/browse/DH-19813
-    # The following imports are required to ensure that the proto modules are loaded
-    import deephaven_enterprise.proto.acl_pb2  # noqa: F401
-    import deephaven_enterprise.proto.acl_pb2_grpc  # noqa: F401
-    import deephaven_enterprise.proto.auth_pb2  # noqa: F401
-    import deephaven_enterprise.proto.auth_pb2_grpc  # noqa: F401
-    import deephaven_enterprise.proto.auth_service_pb2  # noqa: F401
-    import deephaven_enterprise.proto.auth_service_pb2_grpc  # noqa: F401
-    import deephaven_enterprise.proto.common_pb2  # noqa: F401
-    import deephaven_enterprise.proto.common_pb2_grpc  # noqa: F401
-    import deephaven_enterprise.proto.controller_common_pb2  # noqa: F401
-    import deephaven_enterprise.proto.controller_common_pb2_grpc  # noqa: F401
-    import deephaven_enterprise.proto.controller_pb2  # noqa: F401
-    import deephaven_enterprise.proto.controller_pb2_grpc  # noqa: F401
-    import deephaven_enterprise.proto.controller_service_pb2  # noqa: F401
-    import deephaven_enterprise.proto.controller_service_pb2_grpc  # noqa: F401
-    import deephaven_enterprise.proto.persistent_query_pb2  # noqa: F401
-    import deephaven_enterprise.proto.persistent_query_pb2_grpc  # noqa: F401
-    import deephaven_enterprise.proto.table_definition_pb2  # noqa: F401
-    import deephaven_enterprise.proto.table_definition_pb2_grpc  # noqa: F401
+    # # TODO: Workaround: Explicitly import all enterprise proto modules to ensure correct namespace setup -- see https://deephaven.atlassian.net/browse/DH-19813
+    # # The following imports are required to ensure that the proto modules are loaded
+    # import deephaven_enterprise.proto.acl_pb2  # noqa: F401
+    # import deephaven_enterprise.proto.acl_pb2_grpc  # noqa: F401
+    # import deephaven_enterprise.proto.auth_pb2  # noqa: F401
+    # import deephaven_enterprise.proto.auth_pb2_grpc  # noqa: F401
+    # import deephaven_enterprise.proto.auth_service_pb2  # noqa: F401
+    # import deephaven_enterprise.proto.auth_service_pb2_grpc  # noqa: F401
+    # import deephaven_enterprise.proto.common_pb2  # noqa: F401
+    # import deephaven_enterprise.proto.common_pb2_grpc  # noqa: F401
+    # import deephaven_enterprise.proto.controller_common_pb2  # noqa: F401
+    # import deephaven_enterprise.proto.controller_common_pb2_grpc  # noqa: F401
+    # import deephaven_enterprise.proto.controller_pb2  # noqa: F401
+    # import deephaven_enterprise.proto.controller_pb2_grpc  # noqa: F401
+    # import deephaven_enterprise.proto.controller_service_pb2  # noqa: F401
+    # import deephaven_enterprise.proto.controller_service_pb2_grpc  # noqa: F401
+    # import deephaven_enterprise.proto.persistent_query_pb2  # noqa: F401
+    # import deephaven_enterprise.proto.persistent_query_pb2_grpc  # noqa: F401
+    # import deephaven_enterprise.proto.table_definition_pb2  # noqa: F401
+    # import deephaven_enterprise.proto.table_definition_pb2_grpc  # noqa: F401
 
     is_enterprise_available = True
     _LOGGER.debug("Enterprise features available")
@@ -71,13 +71,19 @@ class ClientObjectWrapper(Generic[T]):
     Pythonic access to client features.
 
     Examples:
-        >>> class TableWrapper(ClientObjectWrapper[DeephavenTable]):
-        ...     def __init__(self, table: DeephavenTable):
-        ...         super().__init__(table, is_enterprise=False)
-        ...
-        ...     async def get_column_names(self) -> List[str]:
-        ...         # Wrap potentially blocking operation in a background thread
-        ...         return await asyncio.to_thread(lambda: self.wrapped.column_names)
+        from typing import List
+        import asyncio
+        # Example assumes a user-defined class DeephavenTable
+        class DeephavenTable:
+            ...
+
+        class TableWrapper(ClientObjectWrapper[DeephavenTable]):
+            def __init__(self, table: DeephavenTable):
+                super().__init__(table, is_enterprise=False)
+
+            async def get_column_names(self) -> List[str]:
+                # Wrap potentially blocking operation in a background thread
+                return await asyncio.to_thread(lambda: self.wrapped.column_names)
     """
 
     def __init__(self, wrapped: T, is_enterprise: bool) -> None:

@@ -154,10 +154,12 @@ class CorePlusQueryStatus(ProtobufWrapper):
 
 
 class CorePlusToken(ProtobufWrapper):
-    """Wrapper for authentication Token message.
+    """
+    Wrapper for authentication Token message.
 
-    This class wraps the protobuf Token message to provide a more convenient interface
-    for accessing token information such as service name, issuer, and expiration time.
+    This class wraps a protobuf Token message (type: deephaven_enterprise.proto.auth_pb2.Token)
+    to provide a more convenient interface for accessing token information such as service name,
+    issuer, and expiration time.
 
     It simplifies the interaction with authentication tokens in the Deephaven environment,
     allowing for easier token management and validation. The wrapped token contains
@@ -168,12 +170,14 @@ class CorePlusToken(ProtobufWrapper):
     - Issuer information (who created/issued the token)
     - User identity information (who the token represents)
 
+    Args:
+        token: The protobuf Token message to wrap (type: deephaven_enterprise.proto.auth_pb2.Token)
+
     Example:
         >>> token = CorePlusToken(pb_token)
         >>> token_dict = token.to_dict()
         >>> print(f"Token expires: {token_dict.get('expires_at')}")
         >>> print(f"Token issuer: {token_dict.get('issuer')}")
-        >>> json_token = token.to_json()
 
     This corresponds to Token in the protobuf definition:
     https://docs.deephaven.io/protodoc/20240517/#io.deephaven.proto.auth.Token

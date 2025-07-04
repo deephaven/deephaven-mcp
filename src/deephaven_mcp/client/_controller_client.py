@@ -1,13 +1,13 @@
-"""Asynchronous wrapper for the Deephaven controller client.
+"""
+Asynchronous wrapper for the Deephaven ControllerClient.
 
-This module provides a wrapper around the Deephaven ControllerClient to enable non-blocking
-asynchronous operations with the Persistent Query Controller in the Deephaven MCP environment.
-It manages persistent queries, their state changes, and authentication while maintaining the
-same interface as the original ControllerClient.
+This module provides an asynchronous wrapper around the Deephaven ControllerClient, enabling non-blocking
+operations with the Persistent Query Controller in the Deephaven MCP environment. It manages persistent queries,
+their state changes, and authentication, while maintaining the same interface as the original ControllerClient.
 
-The wrapper converts all blocking operations to asynchronous methods using asyncio.to_thread,
-allowing client code to use async/await syntax without blocking the event loop. It also enhances
-error handling by wrapping exceptions in more specific and informative custom exception types.
+All blocking operations are performed using asyncio.to_thread, allowing client code to use async/await syntax
+without blocking the event loop. The wrapper also enhances error handling by wrapping exceptions in more specific
+and informative custom exception types (e.g., AuthenticationError, QueryError, DeephavenConnectionError).
 
 Classes:
     CorePlusControllerClient: Async wrapper around deephaven_enterprise.client.controller.ControllerClient
@@ -43,15 +43,14 @@ class CorePlusControllerClient(
     """Asynchronous wrapper around the ControllerClient.
 
     This class provides an asynchronous interface to the ControllerClient, which connects to the
-    Deephaven PersistentQueryController process. It enables subscription to the state of Persistent
-    Queries as well as creation and modification of those queries.
+    Deephaven PersistentQueryController process. It enables subscription to the state of persistent
+    queries, as well as creation, modification, and deletion of those queries.
 
     All blocking calls are performed in separate threads using asyncio.to_thread to avoid blocking
     the event loop. The wrapper maintains the same interface as the underlying ControllerClient
     while making it compatible with asynchronous code.
 
     Example:
-        ```python
         # Create a controller client from an authenticated session manager
         session_manager = await CorePlusSessionManager.from_url("https://deephaven-server:10000")
         await session_manager.authenticate(username, password)
@@ -70,9 +69,13 @@ class CorePlusControllerClient(
         # When finished, clean up
         await controller_client.delete_query(serial)
         await controller_client.close()
-        ```
-    """
 
+    Notes:
+        - All methods are asynchronous and use asyncio.to_thread to run blocking operations in a background thread.
+        - Exceptions are wrapped in custom types for clarity (e.g., AuthenticationError, QueryError, DeephavenConnectionError).
+        - Logging is performed for entry, success, and error events at appropriate levels.
+
+    """
     def __init__(
         self,
         controller_client: "deephaven_enterprise.client.controller.ControllerClient",  # noqa: F821
@@ -83,7 +86,7 @@ class CorePlusControllerClient(
             controller_client: The ControllerClient instance to wrap.
         """
         super().__init__(controller_client, is_enterprise=True)
-        _LOGGER.info("CorePlusControllerClient initialized")
+        _LOGGER.info("[CorePlusControllerClient] initialized")
 
     # ===========================================================================
     # Initialization & Connection Management
@@ -128,7 +131,7 @@ class CorePlusControllerClient(
         _LOGGER.debug("CorePlusControllerClient.authenticate called")
         try:
             await asyncio.to_thread(self.wrapped.authenticate, token, timeout)
-            _LOGGER.debug("Authentication completed successfully")
+            _LOGGER.debug("[CorePlusControllerClient] Authentication completed successfully")
         except ConnectionError as e:
             _LOGGER.error(f"Failed to connect to controller service: {e}")
             raise DeephavenConnectionError(
@@ -202,10 +205,10 @@ class CorePlusControllerClient(
                                if the auth_client is not properly initialized or if there are
                                permission issues with the provided authentication client.
         """
-        _LOGGER.debug("CorePlusControllerClient.set_auth_client called")
+        _LOGGER.debug("[CorePlusControllerClient] set_auth_client called")
         try:
             await asyncio.to_thread(self.wrapped.set_auth_client, auth_client.wrapped)
-            _LOGGER.debug("Authentication client set successfully")
+            _LOGGER.debug("[CorePlusControllerClient] Authentication client set successfully")
         except Exception as e:
             _LOGGER.error(f"Failed to set authentication client: {e}")
             raise AuthenticationError(
@@ -234,7 +237,7 @@ class CorePlusControllerClient(
                                     issues, if the controller service is unavailable, or
                                     if there are communication errors with the server.
         """
-        _LOGGER.debug("CorePlusControllerClient.ping called")
+        _LOGGER.debug("[CorePlusControllerClient] ping called")
         try:
             return await asyncio.to_thread(self.wrapped.ping)
         except ConnectionError as e:
