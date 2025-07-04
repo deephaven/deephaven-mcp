@@ -89,7 +89,7 @@ from deephaven_mcp.io import load_bytes
 from deephaven_mcp.config import redact_community_session_config
 from deephaven_mcp._exceptions import SessionCreationError
 from typing import Any
-
+from deephaven_mcp.config import validate_single_community_session_config, CommunitySessionConfigurationError
 
 
 _LOGGER = logging.getLogger(__name__)
@@ -699,7 +699,8 @@ class CoreSession(BaseSession):
         """
         Asynchronously create a CoreSession from a community (core) session configuration dictionary.
 
-        This method prepares all session parameters (including TLS and auth logic),
+        This method first validates the configuration using validate_single_community_session_config.
+        It then prepares all session parameters (including TLS and auth logic),
         creates the underlying pydeephaven.Session, and returns a CoreSession instance.
         Sensitive fields in the config are redacted before logging. If session creation fails,
         a SessionCreationError is raised with details.
@@ -711,8 +712,15 @@ class CoreSession(BaseSession):
             CoreSession: A new CoreSession instance wrapping a pydeephaven Session.
 
         Raises:
+            CommunitySessionConfigurationError: If the configuration is invalid.
             SessionCreationError: If session creation fails for any reason.
         """
+        try:
+            validate_single_community_session_config("from_config", worker_cfg)
+        except CommunitySessionConfigurationError as e:
+            _LOGGER.error(f"[CoreSession] Invalid community session config: {e}")
+            raise
+
         def redact(cfg):
             return redact_community_session_config(cfg) if 'auth_token' in cfg or 'client_private_key' in cfg else cfg
 

@@ -59,6 +59,9 @@ from deephaven_mcp._exceptions import (
     SessionError,
 )
 
+from deephaven_mcp.config import validate_single_enterprise_system
+from deephaven_mcp.config import EnterpriseSystemConfigurationError
+
 from ._auth_client import CorePlusAuthClient
 
 # Local application imports
@@ -175,6 +178,88 @@ class CorePlusSessionManager(
                 raise DeephavenConnectionError(
                     f"Failed to establish connection to Deephaven at {url}: {e}"
                 ) from e
+
+    @classmethod
+    async def from_config(cls, worker_cfg: dict[str, Any]) -> "CorePlusSessionManager":
+        """
+        Create a CorePlusSessionManager from an enterprise system configuration dictionary.
+
+        This method validates the provided configuration dict (as used in the 'enterprise.systems' section)
+        and constructs a CorePlusSessionManager using the appropriate authentication method.
+
+        Args:
+            worker_cfg (dict[str, Any]): The configuration dictionary for the enterprise system.
+                Must contain at least 'connection_json_url' and 'auth_type', plus required auth fields.
+
+        Returns:
+            CorePlusSessionManager: An initialized session manager ready for authentication.
+
+        Raises:
+            InternalError: If Core+ features are not available (deephaven-coreplus-client not installed)
+            DeephavenConnectionError: If unable to connect to the specified URL
+            AuthenticationError: If authentication fails due to missing credentials
+            EnterpriseSystemConfigurationError: If the config is invalid
+        """
+
+        if not is_enterprise_available:
+            raise InternalError(
+                "Core+ features are not available (deephaven-coreplus-client not installed)"
+            )
+
+        # Validate config
+        try:
+            validate_single_enterprise_system("from_config", worker_cfg)
+        except EnterpriseSystemConfigurationError as e:
+            _LOGGER.error(f"[CorePlusSessionManager] Invalid enterprise system config: {e}")
+            raise
+
+        url = worker_cfg["connection_json_url"]
+        auth_type = worker_cfg["auth_type"]
+        _LOGGER.debug(f"[CorePlusSessionManager] Creating SessionManager from config: url={url}, auth_type={auth_type}")
+        from deephaven_enterprise.client.session_manager import SessionManager
+        try:
+            manager = SessionManager(url)
+        except Exception as e:
+            _LOGGER.error(f"[CorePlusSessionManager] Failed to create SessionManager with URL {url}: {e}")
+            raise DeephavenConnectionError(
+                f"Failed to establish connection to Deephaven at {url}: {e}"
+            ) from e
+
+        instance = cls(manager)
+
+        # Perform authentication if credentials are provided
+        if auth_type == "password":
+            username = worker_cfg.get("username")
+            password = worker_cfg.get("password")
+            password_env_var = worker_cfg.get("password_env_var")
+            effective_user = worker_cfg.get("effective_user")
+
+            # Prefer password_env_var if present
+            if password is None and password_env_var is not None:
+                import os
+                password = os.environ.get(password_env_var)
+                if password is None:
+                    _LOGGER.error(f"[CorePlusSessionManager] Environment variable '{password_env_var}' not set for password authentication.")
+                    raise AuthenticationError(
+                        f"Environment variable '{password_env_var}' not set for password authentication."
+                    )
+            if password is None:
+                _LOGGER.error("[CorePlusSessionManager] No password provided for password authentication.")
+                raise AuthenticationError("No password provided for password authentication.")
+            await instance.password(username, password, effective_user)
+        elif auth_type == "private_key":
+            private_key = worker_cfg.get("private_key")
+            if private_key is None:
+                _LOGGER.error("[CorePlusSessionManager] No private_key provided for private_key authentication.")
+                raise AuthenticationError("No private_key provided for private_key authentication.")
+            import io
+            await instance.private_key(io.StringIO(private_key))
+        else:
+            _LOGGER.warning(f"[CorePlusSessionManager] Auth type '{auth_type}' is not supported for automatic authentication. Returning unauthenticated manager.")
+
+        _LOGGER.info(f"[CorePlusSessionManager] Successfully created and authenticated SessionManager from config (auth_type={auth_type})")
+        return instance
+
 
     async def close(self) -> None:
         """Terminate this session manager's connection to the authentication server and controller.

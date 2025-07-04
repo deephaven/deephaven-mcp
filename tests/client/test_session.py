@@ -352,6 +352,44 @@ async def test_core_from_config_session_creation_error(monkeypatch):
         await CoreSession.from_config({"host": "localhost"})
     assert "Failed to create Deephaven Community (Core) Session" in str(exc_info.value)
 
+@pytest.mark.asyncio
+async def test_core_from_config_invalid_not_dict(monkeypatch):
+    # Config is not a dict
+    with pytest.raises(Exception) as exc_info:
+        await CoreSession.from_config("not a dict")
+    assert "dictionary" in str(exc_info.value) or "dict" in str(exc_info.value)
+
+@pytest.mark.asyncio
+async def test_core_from_config_invalid_unknown_field(monkeypatch):
+    # Config with unknown field
+    config = {"host": "localhost", "bad_field": 123}
+    with pytest.raises(Exception) as exc_info:
+        await CoreSession.from_config(config)
+    assert "Unknown field 'bad_field'" in str(exc_info.value)
+
+@pytest.mark.asyncio
+async def test_core_from_config_invalid_mutually_exclusive(monkeypatch):
+    # Both auth_token and auth_token_env_var set
+    config = {"host": "localhost", "auth_token": "tok", "auth_token_env_var": "ENV"}
+    with pytest.raises(Exception) as exc_info:
+        await CoreSession.from_config(config)
+    assert "both 'auth_token' and 'auth_token_env_var' are set" in str(exc_info.value)
+
+@pytest.mark.asyncio
+async def test_core_from_config_invalid_type(monkeypatch):
+    # Wrong type for port
+    config = {"host": "localhost", "port": "not an int"}
+    with pytest.raises(Exception) as exc_info:
+        await CoreSession.from_config(config)
+    assert "type" in str(exc_info.value) or "int" in str(exc_info.value)
+
+@pytest.mark.asyncio
+async def test_core_from_config_valid_minimal(monkeypatch):
+    config = {"host": "localhost"}
+    monkeypatch.setattr("pydeephaven.Session", DummyPDHSession)
+    session = await CoreSession.from_config(config)
+    assert isinstance(session, CoreSession)
+
 
 
 @pytest.mark.asyncio
