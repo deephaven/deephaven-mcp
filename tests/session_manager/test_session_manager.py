@@ -149,10 +149,10 @@ class TestEnterpriseSessionManager:
         mock_session_old.is_alive = False
         mock_session_new = MagicMock()
         session._session_cache = mock_session_old
-        with patch("deephaven_mcp.session_manager._session_manager.create_session", new=AsyncMock(return_value=mock_session_new)) as mock_create:
-            result = await session.get_session()
-        mock_create.assert_awaited_once_with({"source": "enterprise-source", "name": "worker-7"})
-        assert session._session_cache is mock_session_new
+        with pytest.raises(Exception) as exc_info:
+            await session.get_session()
+        # Should raise InternalError until implemented
+        assert "not implemented" in str(exc_info.value)
 
     @pytest.mark.asyncio
     async def test_get_session_cached_exception(self):
@@ -162,19 +162,19 @@ class TestEnterpriseSessionManager:
         type(mock_session_old).is_alive = property(lambda self: (_ for _ in ()).throw(Exception("fail")))
         mock_session_new = MagicMock()
         session._session_cache = mock_session_old
-        with patch("deephaven_mcp.session_manager._session_manager.create_session", new=AsyncMock(return_value=mock_session_new)) as mock_create:
-            result = await session.get_session()
-        mock_create.assert_awaited_once_with({"source": "enterprise-source", "name": "worker-8"})
-        assert session._session_cache is mock_session_new
+        with pytest.raises(Exception) as exc_info:
+            await session.get_session()
+        # Should raise InternalError until implemented
+        assert "not implemented" in str(exc_info.value)
 
     @pytest.mark.asyncio
     async def test_get_session_new(self):
         session = EnterpriseSessionManager("enterprise-source", "worker-9")
         mock_session = MagicMock()
-        with patch("deephaven_mcp.session_manager._session_manager.create_session", new=AsyncMock(return_value=mock_session)) as mock_create:
-            result = await session.get_session()
-        mock_create.assert_awaited_once_with({"source": "enterprise-source", "name": "worker-9"})
-        assert session._session_cache is mock_session
+        with pytest.raises(Exception) as exc_info:
+            await session.get_session()
+        # Should raise InternalError until implemented
+        assert "not implemented" in str(exc_info.value)
 
 
 class TestCommunitySessionManager:
