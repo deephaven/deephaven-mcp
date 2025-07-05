@@ -120,7 +120,7 @@ class BaseSessionManager(ABC):
         pass  # pragma: no cover
 
     @abstractmethod
-    async def get_session(self) -> BaseSession:
+    async def get(self) -> BaseSession:
         """
         Asynchronously get or create an alive Deephaven session for this configuration.
 
@@ -137,7 +137,7 @@ class BaseSessionManager(ABC):
         """
         pass  # pragma: no cover
 
-    async def close_session(self) -> None:
+    async def close(self) -> None:
         """
         Asynchronously close and clean up the cached session if it exists.
 
@@ -195,7 +195,7 @@ class CommunitySessionManager(BaseSessionManager):
                 return False
 
     @override
-    async def get_session(self) -> CoreSession:
+    async def get(self) -> CoreSession:
         """
         Retrieve an alive Deephaven Session for this community worker.
 
@@ -282,7 +282,7 @@ class EnterpriseSessionManager(BaseSessionManager):
                 return False
 
     @override
-    async def get_session(self) -> CorePlusSession:
+    async def get(self) -> CorePlusSession:
         """
         Retrieve an alive Deephaven CorePlusSession for this enterprise worker.
 

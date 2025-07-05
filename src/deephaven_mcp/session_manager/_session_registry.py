@@ -118,7 +118,7 @@ class SessionRegistry:
             num_sessions = len(self._sessions)
             _LOGGER.info(f"Processing {num_sessions} cached sessions...")
             for _session_name, session_obj in list(self._sessions.items()):
-                await session_obj.close_session()
+                await session_obj.close()
             self._sessions.clear()
             _LOGGER.info(
                 f"Session cache cleared. Processed {num_sessions} sessions in {time.time() - start_time:.2f}s"
@@ -168,4 +168,4 @@ class SessionRegistry:
                 )
 
             # Delegate to the session object to get or create the actual Session
-            return await session_obj.get_session()
+            return await session_obj.get()

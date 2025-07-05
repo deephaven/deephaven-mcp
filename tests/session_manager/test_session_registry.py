@@ -106,7 +106,7 @@ async def test_session_manager_concurrent_get_failure(
     await session_manager._ensure_sessions_initialized()
 
     with patch(
-        "deephaven_mcp.session_manager._session_manager.CommunitySessionManager.get_session",
+        "deephaven_mcp.session_manager._session_manager.CommunitySessionManager.get",
         side_effect=SessionCreationError("fail"),
     ):
         with pytest.raises(SessionCreationError):
@@ -123,7 +123,7 @@ async def test_session_manager_delegates_to_helpers(session_manager):
     mock_session.is_alive = True
 
     with patch(
-        "deephaven_mcp.session_manager._session_manager.CommunitySessionManager.get_session",
+        "deephaven_mcp.session_manager._session_manager.CommunitySessionManager.get",
         return_value=mock_session,
     ):
         session = await session_manager.get("foo")
@@ -142,7 +142,7 @@ async def test_clear_all_sessions_clears_cache(session_manager):
     mock_session.is_alive = True
 
     with patch(
-        "deephaven_mcp.session_manager._session_manager.CommunitySessionManager.get_session",
+        "deephaven_mcp.session_manager._session_manager.CommunitySessionManager.get",
         return_value=mock_session,
     ):
         await session_manager.get("foo")
@@ -170,7 +170,7 @@ async def test_clear_all_sessions_calls_close(session_manager):
 
     await session_manager.clear_all_sessions()
 
-    # Verify the session was closed (this is done via close_session_safely in CommunitySession.close_session)
+    # Verify the session was closed (this is done via close_safely in CommunitySession.close)
     assert len(session_manager._sessions) == 0
 
 
@@ -198,7 +198,7 @@ async def test_get_liveness_exception(session_manager, caplog):
     community_session = session_manager._sessions["local"]
     community_session._session_cache = bad_session
     with patch(
-        "deephaven_mcp.session_manager._session_manager.CommunitySessionManager.get_session",
+        "deephaven_mcp.session_manager._session_manager.CommunitySessionManager.get",
         new=AsyncMock(),
     ):
         await session_manager.get("local")
@@ -215,7 +215,7 @@ async def test_get_checks_liveness_error(session_manager, caplog):
     community_session = session_manager._sessions["local"]
     community_session._session_cache = bad_session
     with patch(
-        "deephaven_mcp.session_manager._session_manager.CommunitySessionManager.get_session",
+        "deephaven_mcp.session_manager._session_manager.CommunitySessionManager.get",
         new=AsyncMock(),
     ):
         await session_manager.get("local")
@@ -270,7 +270,7 @@ async def test_get_creates_new(session_manager):
     mock_session.is_alive = True
 
     with patch(
-        "deephaven_mcp.session_manager._session_manager.CommunitySessionManager.get_session",
+        "deephaven_mcp.session_manager._session_manager.CommunitySessionManager.get",
         return_value=mock_session,
     ):
         result = await session_manager.get("local")
@@ -294,7 +294,7 @@ async def test_get_replaces_dead(session_manager):
     mock_session.is_alive = True
 
     with patch(
-        "deephaven_mcp.session_manager._session_manager.CommunitySessionManager.get_session",
+        "deephaven_mcp.session_manager._session_manager.CommunitySessionManager.get",
         return_value=mock_session,
     ):
         result = await session_manager.get("local")

@@ -29,7 +29,7 @@ class StubBaseSessionManager(BaseSessionManager):
     def is_alive(self) -> bool:
         return True
 
-    async def get_session(self) -> Session:
+    async def get(self) -> Session:
         return MagicMock(spec=Session)
 
 
@@ -61,22 +61,22 @@ class TestBaseSessionRegistry:
         assert session.full_name == "enterprise:test-source:test-name"
 
     @pytest.mark.asyncio
-    async def test_close_session_no_cache(self):
-        """Test close_session with no cached session."""
+    async def test_close_no_cache(self):
+        """Test close with no cached session."""
         session = StubBaseSessionManager(SessionManagerType.ENTERPRISE, "test-source", "test-name")
 
-        await session.close_session()  # Should not raise exceptions
+        await session.close()  # Should not raise exceptions
         assert session._session_cache is None
 
     @pytest.mark.asyncio
-    async def test_close_session_with_cache(self):
-        """Test close_session with a cached session."""
+    async def test_close_with_cache(self):
+        """Test close with a cached session."""
         session = StubBaseSessionManager(SessionManagerType.ENTERPRISE, "test-source", "test-name")
         mock_session = MagicMock(spec=Session)
         session._session_cache = mock_session
 
         mock_session.close = AsyncMock()
-        await session.close_session()
+        await session.close()
         mock_session.close.assert_awaited_once()
         assert session._session_cache is None
 
@@ -132,30 +132,30 @@ class TestEnterpriseSessionManager:
         assert result is False
 
     @pytest.mark.asyncio
-    async def test_get_session_cached_alive(self):
+    async def test_get_cached_alive(self):
         session = EnterpriseSessionManager("enterprise-source", "worker-6")
         mock_session = MagicMock()
         mock_session.is_alive = True
         session._session_cache = mock_session
-        result = await session.get_session()
+        result = await session.get()
         # Should return CorePlusSession(mock_session)
         assert hasattr(result, '__class__')  # Just check it's a wrapper, not the raw mock
         assert session._session_cache is mock_session
 
     @pytest.mark.asyncio
-    async def test_get_session_cached_dead(self):
+    async def test_get_cached_dead(self):
         session = EnterpriseSessionManager("enterprise-source", "worker-7")
         mock_session_old = MagicMock()
         mock_session_old.is_alive = False
         mock_session_new = MagicMock()
         session._session_cache = mock_session_old
         with pytest.raises(Exception) as exc_info:
-            await session.get_session()
+            await session.get()
         # Should raise InternalError until implemented
         assert "not implemented" in str(exc_info.value)
 
     @pytest.mark.asyncio
-    async def test_get_session_cached_exception(self):
+    async def test_get_cached_exception(self):
         session = EnterpriseSessionManager("enterprise-source", "worker-8")
         mock_session_old = MagicMock()
         # Simulate exception on is_alive property
@@ -163,16 +163,16 @@ class TestEnterpriseSessionManager:
         mock_session_new = MagicMock()
         session._session_cache = mock_session_old
         with pytest.raises(Exception) as exc_info:
-            await session.get_session()
+            await session.get()
         # Should raise InternalError until implemented
         assert "not implemented" in str(exc_info.value)
 
     @pytest.mark.asyncio
-    async def test_get_session_new(self):
+    async def test_get_new(self):
         session = EnterpriseSessionManager("enterprise-source", "worker-9")
         mock_session = MagicMock()
         with pytest.raises(Exception) as exc_info:
-            await session.get_session()
+            await session.get()
         # Should raise InternalError until implemented
         assert "not implemented" in str(exc_info.value)
 
@@ -242,8 +242,8 @@ class TestCommunitySessionManager:
         assert result is False
 
     @pytest.mark.asyncio
-    async def test_get_session_new(self):
-        """Test get_session when creating a new session."""
+    async def test_get_new(self):
+        """Test get when creating a new session."""
         config = {"host": "testhost", "port": 12345}
         session = CommunitySessionManager("test-name", config)
         mock_session = MagicMock(spec=Session)
@@ -252,26 +252,26 @@ class TestCommunitySessionManager:
             "deephaven_mcp.client._session.CoreSession.from_config",
             new=AsyncMock(return_value=mock_session),
         ) as mock_from_config:
-            result = await session.get_session()
+            result = await session.get()
         mock_from_config.assert_called_once_with(config)
         assert result is mock_session
         assert session._session_cache is mock_session
 
     @pytest.mark.asyncio
-    async def test_get_session_cached_alive(self):
-        """Test get_session with a cached session that is alive."""
+    async def test_get_cached_alive(self):
+        """Test get with a cached session that is alive."""
         session = CommunitySessionManager("test-name", {})
         mock_session = MagicMock(spec=Session)
         mock_session.is_alive = True
         session._session_cache = mock_session
 
-        result = await session.get_session()
+        result = await session.get()
 
         assert result is mock_session
 
     @pytest.mark.asyncio
-    async def test_get_session_cached_not_alive(self):
-        """Test get_session with a cached session that is not alive."""
+    async def test_get_cached_not_alive(self):
+        """Test get with a cached session that is not alive."""
         config = {"host": "testhost", "port": 12345}
         session = CommunitySessionManager("test-name", config)
         mock_session_old = MagicMock(spec=Session)
@@ -283,14 +283,14 @@ class TestCommunitySessionManager:
             "deephaven_mcp.client._session.CoreSession.from_config",
             new=AsyncMock(return_value=mock_session_new),
         ) as mock_from_config:
-            result = await session.get_session()
+            result = await session.get()
         mock_from_config.assert_called_once_with(config)
         assert result is mock_session_new
         assert session._session_cache is mock_session_new
 
     @pytest.mark.asyncio
-    async def test_get_session_cached_error(self):
-        """Test get_session when checking cached session liveness raises an exception."""
+    async def test_get_cached_error(self):
+        """Test get when checking cached session liveness raises an exception."""
         config = {"host": "testhost", "port": 12345}
         session = CommunitySessionManager("test-name", config)
         mock_session_old = MagicMock(spec=Session)
@@ -305,7 +305,7 @@ class TestCommunitySessionManager:
             "deephaven_mcp.client._session.CoreSession.from_config",
             new=AsyncMock(return_value=mock_session_new),
         ) as mock_from_config:
-            result = await session.get_session()
+            result = await session.get()
         mock_from_config.assert_called_once_with(config)
         assert result is mock_session_new
         assert session._session_cache is mock_session_new
