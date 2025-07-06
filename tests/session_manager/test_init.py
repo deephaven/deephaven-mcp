@@ -9,7 +9,7 @@ def test_imports_and_all():
         BaseSessionManager,
         CommunitySessionManager,
         EnterpriseSessionManager,
-        SessionRegistry,
+        CommunitySessionRegistry,
         SessionManagerType,
     )
 
@@ -18,7 +18,7 @@ def test_imports_and_all():
         "BaseSessionManager",
         "CommunitySessionManager",
         "EnterpriseSessionManager",
-        "SessionRegistry",
+        "CommunitySessionRegistry",
         "SessionManagerType",
     ]
     assert mod.__all__ == expected_all
@@ -27,7 +27,7 @@ def test_imports_and_all():
     assert mod.BaseSessionManager is BaseSessionManager
     assert mod.CommunitySessionManager is CommunitySessionManager
     assert mod.EnterpriseSessionManager is EnterpriseSessionManager
-    assert mod.SessionRegistry is SessionRegistry
+    assert mod.CommunitySessionRegistry is CommunitySessionRegistry
     assert mod.SessionManagerType is SessionManagerType
 
     # star import should bring in only expected symbols

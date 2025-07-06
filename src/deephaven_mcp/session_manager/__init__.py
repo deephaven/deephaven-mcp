@@ -8,7 +8,7 @@ Exports:
     - CommunitySessionManager: Async/thread-safe manager for community sessions.
     - EnterpriseSessionManager: Async/thread-safe manager for enterprise sessions.
     - SessionManagerType: Enum representing available session manager types.
-    - SessionRegistry: Async/thread-safe registry for session lifecycle and caching.
+    - CommunitySessionRegistry: Async/thread-safe registry for community session lifecycle and caching.
 
 Features:
     - Coroutine-safe session cache keyed by worker name, protected by an asyncio.Lock.
@@ -35,12 +35,12 @@ from ._session_manager import (
     EnterpriseSessionManager,
     SessionManagerType,
 )
-from ._session_registry import SessionRegistry
+from ._community_session_registry import CommunitySessionRegistry
 
 __all__ = [
     "BaseSessionManager",
     "CommunitySessionManager",
     "EnterpriseSessionManager",
-    "SessionRegistry",
+    "CommunitySessionRegistry",
     "SessionManagerType",
 ]
