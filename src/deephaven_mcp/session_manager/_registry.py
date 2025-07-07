@@ -17,10 +17,11 @@ import abc
 import asyncio
 import logging
 import time
-from typing import TypeVar, Generic
+from typing import TypeVar, Generic, override
 
 from deephaven_mcp import config
 from deephaven_mcp._exceptions import InternalError
+from ._manager import CommunitySessionManager, CorePlusSessionFactoryManager
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -122,4 +123,70 @@ class BaseRegistry(abc.ABC, Generic[T]):
                 self.__class__.__name__,
                 num_items,
                 time.time() - start_time,
+            )
+
+
+class CommunitySessionRegistry(BaseRegistry[CommunitySessionManager]):
+    """
+    A registry for managing `CommunitySessionManager` instances.
+
+    This class inherits from `BaseRegistry` and implements the `_load_items`
+    method to discover and create `CommunitySessionManager` objects from the
+    application's configuration data.
+    """
+
+    @override
+    async def _load_items(self, config_manager: config.ConfigManager) -> None:
+        """
+        Loads session configurations and creates CommunitySessionManager instances.
+
+        Args:
+            config_manager: The configuration manager to use for loading session configurations.
+        """
+        config_data = await config_manager.get_config()
+        community_sessions_config = config_data.get("community", {}).get("sessions", {})
+
+        _LOGGER.info(
+            "[%s] Found %d community session configurations to load.",
+            self.__class__.__name__,
+            len(community_sessions_config),
+        )
+
+        for session_name, session_config in community_sessions_config.items():
+            _LOGGER.info("[%s] Loading session configuration for '%s'...", self.__class__.__name__, session_name)
+            self._items[session_name] = CommunitySessionManager(
+                session_name, session_config
+            )
+
+
+class CorePlusSessionFactoryRegistry(BaseRegistry[CorePlusSessionFactoryManager]):
+    """
+    A registry for managing CorePlusSessionFactoryManager instances.
+
+    This class inherits from `BaseRegistry` and implements the `_load_items`
+    method to discover and create `CorePlusSessionFactoryManager` objects from the
+    application's configuration data.
+    """
+
+    @override
+    async def _load_items(self, config_manager: config.ConfigManager) -> None:
+        """
+        Loads factory configurations and creates CorePlusSessionFactoryManager instances.
+
+        Args:
+            config_manager: The configuration manager to use for loading factory configurations.
+        """
+        config_data = await config_manager.get_config()
+        factories_config = config_data.get("enterprise", {}).get("factories", {})
+
+        _LOGGER.info(
+            "[%s] Found %d core+ factory configurations to load.",
+            self.__class__.__name__,
+            len(factories_config),
+        )
+
+        for factory_name, factory_config in factories_config.items():
+            _LOGGER.info("[%s] Loading factory configuration for '%s'...", self.__class__.__name__, factory_name)
+            self._items[factory_name] = CorePlusSessionFactoryManager(
+                factory_name, factory_config
             )

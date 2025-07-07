@@ -1,34 +1,41 @@
 """
-Tests for deephaven_mcp.session_manager.__init__ (import/export surface).
+Tests for the session_manager __init__.py file.
 """
-
 
 def test_imports_and_all():
     import deephaven_mcp.session_manager as mod
     from deephaven_mcp.session_manager import (
-        BaseSessionManager,
+        BaseItemManager,
         CommunitySessionManager,
         EnterpriseSessionManager,
+        CorePlusSessionFactoryManager,
         CommunitySessionRegistry,
-        SessionManagerType,
+        CorePlusSessionFactoryRegistry,
+
     )
 
-    # __all__ should include key public symbols exactly
+    # __all__ should be defined and contain all the public symbols
+    assert hasattr(mod, "__all__")
+
     expected_all = [
-        "BaseSessionManager",
+        "BaseItemManager",
         "CommunitySessionManager",
         "EnterpriseSessionManager",
+        "CorePlusSessionFactoryManager",
         "CommunitySessionRegistry",
-        "SessionManagerType",
+        "CorePlusSessionFactoryRegistry",
+        "SystemType"
     ]
-    assert mod.__all__ == expected_all
+    assert sorted(mod.__all__) == sorted(expected_all)
 
     # each symbol should be the correct object from the submodules
-    assert mod.BaseSessionManager is BaseSessionManager
+    assert mod.BaseItemManager is BaseItemManager
     assert mod.CommunitySessionManager is CommunitySessionManager
     assert mod.EnterpriseSessionManager is EnterpriseSessionManager
+    assert mod.CorePlusSessionFactoryManager is CorePlusSessionFactoryManager
     assert mod.CommunitySessionRegistry is CommunitySessionRegistry
-    assert mod.SessionManagerType is SessionManagerType
+    assert mod.CorePlusSessionFactoryRegistry is CorePlusSessionFactoryRegistry
+
 
     # star import should bring in only expected symbols
     imported = {}

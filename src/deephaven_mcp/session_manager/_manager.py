@@ -1,0 +1,265 @@
+"""Base classes and enums for Deephaven MCP session management."""
+
+import asyncio
+import enum
+import logging
+from abc import ABC, abstractmethod
+from typing import Any, Generic, TypeVar, override
+
+from deephaven_mcp._exceptions import InternalError, SessionCreationError
+from deephaven_mcp.client import (
+    CorePlusSession,
+    CorePlusSessionFactory,
+    CoreSession,
+)
+
+_LOGGER = logging.getLogger(__name__)
+
+T = TypeVar("T")
+
+
+class SystemType(str, enum.Enum):
+    """Enum representing the types of backend systems."""
+
+    COMMUNITY = "community"
+    ENTERPRISE = "enterprise"
+
+
+class BaseItemManager(Generic[T], ABC):
+    """
+    A generic, async, coroutine-safe base class for managing a single, lazily-initialized item.
+
+    This class provides the core boilerplate for:
+    - Lazy initialization on the first `get` call.
+    - Caching the item for subsequent calls.
+    - Thread-safe operations using an asyncio.Lock.
+    - A common interface for getting, checking liveness, and closing the item.
+    """
+
+    def __init__(self, system_type: SystemType, source: str, name: str):
+        """
+        Initializes the manager.
+
+        Args:
+            system_type: The system type (e.g., COMMUNITY, ENTERPRISE).
+            source: The configuration source name (e.g., a file path or URL).
+            name: The name of the manager instance.
+        """
+        self._system_type = system_type
+        self._source = source
+        self._name = name
+        self._item_cache: T | None = None
+        self._lock = asyncio.Lock()
+
+    @property
+    def system_type(self) -> SystemType:
+        """The type of system this manager connects to."""
+        return self._system_type
+
+    @property
+    def source(self) -> str:
+        """The source of the item, used for grouping or identification."""
+        return self._source
+
+    @property
+    def name(self) -> str:
+        """The name of the manager, used for identification and logging."""
+        return self._name
+
+    @property
+    def full_name(self) -> str:
+        """A fully qualified name for the manager instance."""
+        return f"{self.system_type.value}:{self.source}:{self.name}"
+
+    @abstractmethod
+    async def _create_item(self) -> T:
+        """Abstract method to create the managed item."""
+        raise NotImplementedError  # pragma: no cover
+
+    @abstractmethod
+    async def _check_liveness(self, item: T) -> bool:
+        """Abstract method to check the liveness of the managed item."""
+        raise NotImplementedError  # pragma: no cover
+
+    async def get(self) -> T:
+        """Gets the managed item, creating it if it doesn't exist."""
+        async with self._lock:
+            # Double-checked locking pattern
+            if self._item_cache:
+                return self._item_cache
+
+            _LOGGER.info("[%s] Creating new item for '%s'...", self.__class__.__name__, self._name)
+            self._item_cache = await self._create_item()
+            return self._item_cache
+
+    async def is_alive(self) -> bool:
+        """Checks if the underlying item is alive."""
+        async with self._lock:
+            if not self._item_cache:
+                return False
+            try:
+                return await self._check_liveness(self._item_cache)
+            except Exception as e:
+                _LOGGER.warning("[%s] Liveness check failed for '%s': %s", self.__class__.__name__, self._name, e)
+                return False
+
+    async def close(self) -> None:
+        """Closes the underlying item and clears the cache."""
+        async with self._lock:
+            if not self._item_cache:
+                return
+
+            is_alive = await self._check_liveness(self._item_cache)
+
+            if not is_alive:
+                self._item_cache = None
+                return
+
+            if asyncio.iscoroutinefunction(self._item_cache.close):
+                await self._item_cache.close()
+            else:
+                raise InternalError(
+                    f"Item '{self._name}' of type {type(self._item_cache).__name__} has a 'close' attribute that is not a coroutine function."
+                )
+
+            self._item_cache = None
+
+
+class CommunitySessionManager(BaseItemManager[CoreSession]):
+    """
+    An async, coroutine-safe manager for a single Deephaven community session.
+
+    This class, built on the `BaseItemManager` foundation, handles the lazy
+    initialization, caching, and lifecycle of a `CoreSession`. It guarantees
+    that only one session instance is created per manager and provides a
+    coroutine-safe `get()` method for access.
+
+    The underlying `CoreSession` is created on-demand from a configuration
+    dictionary passed during the manager's instantiation. Session liveness is
+    determined by the session's own `is_alive()` method.
+
+    While it can be used standalone, this manager is primarily designed to be
+    held and managed by a `CommunitySessionRegistry`, which oversees a
+    collection of these managers for different workers.
+
+    See Also:
+        - `BaseItemManager`: The generic base class providing core lifecycle and concurrency logic.
+        - `CoreSession`: The async session wrapper for standard Deephaven sessions.
+        - `CommunitySessionRegistry`: The registry that manages multiple `CommunitySessionManager` instances.
+    """
+
+    def __init__(self, name: str, config: dict[str, Any]):
+        """Initializes the manager with a name and configuration."""
+        super().__init__(
+            system_type=SystemType.COMMUNITY,
+            source="community",
+            name=name,
+        )
+        self._config = config
+
+    @override
+    async def _create_item(self) -> CoreSession:
+        """Creates the CoreSession from the config."""
+        try:
+            return await CoreSession.from_config(self._config)
+        except Exception as e:
+            #TODO: what exception strategy?
+            raise SessionCreationError(
+                f"Failed to create session for community worker {self._name}: {e}"
+            ) from e
+
+    @override
+    async def _check_liveness(self, item: CoreSession) -> bool:
+        """Checks the liveness of the session."""
+        return await item.is_alive()
+
+
+class EnterpriseSessionManager(BaseItemManager[CorePlusSession]):
+    """
+    An async, coroutine-safe manager for a single Deephaven enterprise session.
+
+    This manager, inheriting from `BaseItemManager`, is responsible for the
+    complete lifecycle of a `CorePlusSession`. Its role is to abstract the
+    process of obtaining a session from a `CorePlusSessionFactory`.
+
+    The manager is given a factory instance during construction and uses it to
+    create session objects on demand. It does not own or manage the lifecycle
+    of the factory itself; that is the responsibility of the caller, typically
+    a registry that manages a pool of factories.
+
+    Liveness of the managed session is checked via the session's `is_alive()` method.
+
+    See Also:
+        - `BaseItemManager`: The generic base class providing core lifecycle and concurrency logic.
+        - `CorePlusSession`: The async session wrapper for enterprise Deephaven sessions.
+        - `CorePlusSessionFactory`: The factory responsible for creating `CorePlusSession` instances.
+    """
+
+    def __init__(
+        self,
+        source: str,
+        name: str,
+        factory: CorePlusSessionFactory,
+    ):
+        """Initializes the manager with a name and a session factory."""
+        super().__init__(system_type=SystemType.ENTERPRISE, source=source, name=name)
+        self._factory = factory
+
+    @override
+    async def _create_item(self) -> CorePlusSession:
+        """Creates the CorePlusSession from the provided factory."""
+        #TODO: implement
+        raise NotImplementedError
+        # try:
+        #     session = self._factory.connect_to_persistent_query()
+        #     return CorePlusSession(session)
+        #     return await self._factory.get_session()
+        # except Exception as e:
+        #     raise SessionCreationError(
+        #         f"Failed to create enterprise session for {self._name}: {e}"
+        #     ) from e
+    @override
+    async def _check_liveness(self, item: CorePlusSession) -> bool:
+        """Checks the liveness of the session."""
+        return await item.is_alive()
+
+
+class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
+    """
+    An async, coroutine-safe manager for a single `CorePlusSessionFactory`.
+
+    This manager is a critical component of the enterprise session architecture.
+    Instead of managing a session directly, it manages the lifecycle of a
+    `CorePlusSessionFactory`. This factory is then used by other components
+    (like an `EnterpriseSessionManager`) to create `CorePlusSession` instances.
+
+    Built on `BaseItemManager`, it handles the lazy, thread-safe creation of the
+    factory from a configuration dictionary. It is typically managed by a
+    `CorePlusSessionFactoryRegistry`.
+
+    Liveness for the factory is not determined by an `is_alive` method, but
+    rather by calling the factory's `ping()` method, which confirms connectivity
+    and readiness.
+
+    See Also:
+        - `BaseItemManager`: The generic base class providing core lifecycle and concurrency logic.
+        - `CorePlusSessionFactory`: The factory this manager creates and manages.
+        - `CorePlusSessionFactoryRegistry`: The registry that manages multiple factory managers.
+    """
+
+    def __init__(self, name: str, config: dict[str, Any]):
+        """Initializes the manager with a name and configuration."""
+        super().__init__(
+            system_type=SystemType.ENTERPRISE,
+            source=name, #TODO: what source?
+            name=name,
+        )
+        self._config = config
+
+    async def _create_item(self) -> CorePlusSessionFactory:
+        """Creates the CorePlusSessionFactory from the config."""
+        return await CorePlusSessionFactory.from_config(self._config)
+
+    async def _check_liveness(self, item: CorePlusSessionFactory) -> bool:
+        """Checks the liveness of the factory by pinging it."""
+        return await item.ping()

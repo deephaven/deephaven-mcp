@@ -4,21 +4,23 @@ Deephaven MCP Session Management Public API.
 This module defines the public API for session management in Deephaven MCP. It re-exports the core session manager types, session registry, and related enums from submodules to provide a unified interface for session creation, caching, and lifecycle management.
 
 Exports:
-    - BaseSessionManager: Abstract base class for all session managers.
+    - BaseItemManager: Abstract base class for managing lazily-initialized items.
     - CommunitySessionManager: Async/thread-safe manager for community sessions.
     - EnterpriseSessionManager: Async/thread-safe manager for enterprise sessions.
-    - SessionManagerType: Enum representing available session manager types.
+    - CorePlusSessionFactoryManager: Async/thread-safe manager for CorePlusSessionFactory objects.
+
     - CommunitySessionRegistry: Async/thread-safe registry for community session lifecycle and caching.
+    - CorePlusSessionFactoryRegistry: Async/thread-safe registry for CorePlusSessionFactory lifecycle and caching.
 
 Features:
-    - Coroutine-safe session cache keyed by worker name, protected by an asyncio.Lock.
-    - Automatic session reuse, liveness checking, and resource cleanup.
+    - Coroutine-safe item cache keyed by name, protected by an asyncio.Lock.
+    - Automatic item reuse, liveness checking, and resource cleanup.
     - Native async file I/O for secure loading of certificate files (TLS, client certs/keys) using aiofiles.
     - Tools for cache clearing and atomic reloads.
 
 Async Safety:
     - All public functions are async and use an instance-level asyncio.Lock for coroutine safety.
-    - Each session manager instance encapsulates its own session cache and lock.
+    - Each manager instance encapsulates its own item cache and lock.
 
 Error Handling:
     - Certificate loading operations are wrapped in try-except blocks and use aiofiles for async file I/O.
@@ -29,18 +31,22 @@ Dependencies:
     - Requires aiofiles for async file I/O.
 """
 
-from ._session_manager import (
-    BaseSessionManager,
+from ._manager import (
+    BaseItemManager,
     CommunitySessionManager,
     EnterpriseSessionManager,
-    SessionManagerType,
+    CorePlusSessionFactoryManager,
+    SystemType
 )
-from ._community_session_registry import CommunitySessionRegistry
+from ._registry import CommunitySessionRegistry, CorePlusSessionFactoryRegistry
 
 __all__ = [
-    "BaseSessionManager",
+    "SystemType",
+    "BaseItemManager",
     "CommunitySessionManager",
     "EnterpriseSessionManager",
+    "CorePlusSessionFactoryManager",
     "CommunitySessionRegistry",
-    "SessionManagerType",
+    "CorePlusSessionFactoryRegistry",
+
 ]
