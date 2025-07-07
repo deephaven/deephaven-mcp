@@ -23,7 +23,7 @@ mock_controller = types.ModuleType("deephaven_enterprise.client.controller")
 mock_controller.ControllerClient = MagicMock()
 sys.modules["deephaven_enterprise.client.controller"] = mock_controller
 
-from deephaven_mcp.client._session_manager import CorePlusSessionManager
+from deephaven_mcp.client._session_factory import CorePlusSessionFactory
 
 
 @pytest.fixture
@@ -45,7 +45,7 @@ def dummy_session_manager():
 
 @pytest.fixture
 def coreplus_session_manager(dummy_session_manager):
-    return CorePlusSessionManager(dummy_session_manager)
+    return CorePlusSessionFactory(dummy_session_manager)
 
 
 @pytest.mark.asyncio
@@ -107,7 +107,7 @@ async def test_private_key_success(coreplus_session_manager, dummy_session_manag
 async def test_private_key_file_not_found(
     coreplus_session_manager, dummy_session_manager
 ):
-    import deephaven_mcp.client._session_manager as sm_mod
+    import deephaven_mcp.client._session_factory as sm_mod
     dummy_session_manager.private_key.side_effect = FileNotFoundError("no file")
     with pytest.raises(sm_mod.AuthenticationError) as excinfo:
         await coreplus_session_manager.private_key("/fake/path")
@@ -217,7 +217,7 @@ async def test_connect_to_new_worker_success(
     dummy_session = MagicMock()
     dummy_session_manager.connect_to_new_worker.return_value = dummy_session
     with patch(
-        "deephaven_mcp.client._session_manager.CorePlusSession", autospec=True
+        "deephaven_mcp.client._session_factory.CorePlusSession", autospec=True
     ) as mock_session:
         mock_session.return_value = "wrapped_session"
         result = await coreplus_session_manager.connect_to_new_worker(name="worker")
@@ -283,7 +283,7 @@ async def test_connect_to_persistent_query_success(
     dummy_session = MagicMock()
     dummy_session_manager.connect_to_persistent_query.return_value = dummy_session
     with patch(
-        "deephaven_mcp.client._session_manager.CorePlusSession", autospec=True
+        "deephaven_mcp.client._session_factory.CorePlusSession", autospec=True
     ) as mock_session:
         mock_session.return_value = "wrapped_session"
         result = await coreplus_session_manager.connect_to_persistent_query(name="pq")
@@ -351,7 +351,7 @@ async def test_create_auth_client_success(
     dummy_auth_client = MagicMock()
     dummy_session_manager.create_auth_client.return_value = dummy_auth_client
     with patch(
-        "deephaven_mcp.client._session_manager.CorePlusAuthClient", autospec=True
+        "deephaven_mcp.client._session_factory.CorePlusAuthClient", autospec=True
     ) as mock_auth:
         mock_auth.return_value = "wrapped_auth"
         result = await coreplus_session_manager.create_auth_client()
@@ -384,7 +384,7 @@ async def test_create_controller_client_success(
     dummy_ctrl_client = MagicMock()
     dummy_session_manager.create_controller_client.return_value = dummy_ctrl_client
     with patch(
-        "deephaven_mcp.client._session_manager.CorePlusControllerClient", autospec=True
+        "deephaven_mcp.client._session_factory.CorePlusControllerClient", autospec=True
     ) as mock_ctrl:
         mock_ctrl.return_value = "wrapped_ctrl"
         result = await coreplus_session_manager.create_controller_client()
@@ -424,14 +424,14 @@ async def test_from_config_password_success(monkeypatch):
     }
     mock_manager = MagicMock()
     with (
-        patch("deephaven_mcp.client._session_manager.is_enterprise_available", True),
+        patch("deephaven_mcp.client._session_factory.is_enterprise_available", True),
         patch("deephaven_mcp.config.validate_single_enterprise_system"),
         patch("deephaven_enterprise.client.session_manager.SessionManager", return_value=mock_manager),
     ):
-        import deephaven_mcp.client._session_manager as sm_mod
+        import deephaven_mcp.client._session_factory as sm_mod
         # Patch password method on the instance after creation
-        with patch.object(sm_mod.CorePlusSessionManager, "password", new_callable=AsyncMock) as mock_password:
-            result = await sm_mod.CorePlusSessionManager.from_config(worker_cfg)
+        with patch.object(sm_mod.CorePlusSessionFactory, "password", new_callable=AsyncMock) as mock_password:
+            result = await sm_mod.CorePlusSessionFactory.from_config(worker_cfg)
             mock_password.assert_awaited_once_with("bob", "pw", None)
 
 @pytest.mark.asyncio
@@ -445,13 +445,13 @@ async def test_from_config_password_env(monkeypatch):
     monkeypatch.setenv("PW_ENV", "env_pw")
     mock_manager = MagicMock()
     with (
-        patch("deephaven_mcp.client._session_manager.is_enterprise_available", True),
+        patch("deephaven_mcp.client._session_factory.is_enterprise_available", True),
         patch("deephaven_mcp.config.validate_single_enterprise_system"),
         patch("deephaven_enterprise.client.session_manager.SessionManager", return_value=mock_manager),
     ):
-        import deephaven_mcp.client._session_manager as sm_mod
-        with patch.object(sm_mod.CorePlusSessionManager, "password", new_callable=AsyncMock) as mock_password:
-            result = await sm_mod.CorePlusSessionManager.from_config(worker_cfg)
+        import deephaven_mcp.client._session_factory as sm_mod
+        with patch.object(sm_mod.CorePlusSessionFactory, "password", new_callable=AsyncMock) as mock_password:
+            result = await sm_mod.CorePlusSessionFactory.from_config(worker_cfg)
             mock_password.assert_awaited_once_with("alice", "env_pw", None)
 
 @pytest.mark.asyncio
@@ -463,13 +463,13 @@ async def test_from_config_private_key_success():
     }
     mock_manager = MagicMock()
     with (
-        patch("deephaven_mcp.client._session_manager.is_enterprise_available", True),
+        patch("deephaven_mcp.client._session_factory.is_enterprise_available", True),
         patch("deephaven_mcp.config.validate_single_enterprise_system"),
         patch("deephaven_enterprise.client.session_manager.SessionManager", return_value=mock_manager),
     ):
-        import deephaven_mcp.client._session_manager as sm_mod
-        with patch.object(sm_mod.CorePlusSessionManager, "private_key", new_callable=AsyncMock) as mock_pk:
-            result = await sm_mod.CorePlusSessionManager.from_config(worker_cfg)
+        import deephaven_mcp.client._session_factory as sm_mod
+        with patch.object(sm_mod.CorePlusSessionFactory, "private_key", new_callable=AsyncMock) as mock_pk:
+            result = await sm_mod.CorePlusSessionFactory.from_config(worker_cfg)
             assert mock_pk.await_count == 1
             arg = mock_pk.await_args.args[0]
             assert hasattr(arg, "read")  # Should be a StringIO
@@ -479,34 +479,34 @@ async def test_from_config_private_key_success():
 async def test_from_config_invalid_config():
     worker_cfg = {"connection_json_url": "url", "auth_type": "password"}
     with (
-        patch("deephaven_mcp.client._session_manager.is_enterprise_available", True),
+        patch("deephaven_mcp.client._session_factory.is_enterprise_available", True),
         patch("deephaven_mcp.config.validate_single_enterprise_system", side_effect=Exception("bad config")),
     ):
-        import deephaven_mcp.client._session_manager as sm_mod
+        import deephaven_mcp.client._session_factory as sm_mod
         with pytest.raises(Exception) as excinfo:
-            await sm_mod.CorePlusSessionManager.from_config(worker_cfg)
+            await sm_mod.CorePlusSessionFactory.from_config(worker_cfg)
         # Accept any error message for this generic invalid config test
         assert excinfo.value is not None
 
 @pytest.mark.asyncio
 async def test_from_config_not_enterprise():
     worker_cfg = {"connection_json_url": "url", "auth_type": "password"}
-    with patch("deephaven_mcp.client._session_manager.is_enterprise_available", False):
-        import deephaven_mcp.client._session_manager as sm_mod
+    with patch("deephaven_mcp.client._session_factory.is_enterprise_available", False):
+        import deephaven_mcp.client._session_factory as sm_mod
         with pytest.raises(exc.InternalError):
-            await sm_mod.CorePlusSessionManager.from_config(worker_cfg)
+            await sm_mod.CorePlusSessionFactory.from_config(worker_cfg)
 
 @pytest.mark.asyncio
 async def test_from_config_connection_error():
     worker_cfg = {"connection_json_url": "url", "auth_type": "password", "username": "bob", "password": "pw"}
     with (
-        patch("deephaven_mcp.client._session_manager.is_enterprise_available", True),
+        patch("deephaven_mcp.client._session_factory.is_enterprise_available", True),
         patch("deephaven_mcp.config.validate_single_enterprise_system"),
         patch("deephaven_enterprise.client.session_manager.SessionManager", side_effect=Exception("fail connect")),
     ):
-        import deephaven_mcp.client._session_manager as sm_mod
+        import deephaven_mcp.client._session_factory as sm_mod
         with pytest.raises(exc.DeephavenConnectionError):
-            await sm_mod.CorePlusSessionManager.from_config(worker_cfg)
+            await sm_mod.CorePlusSessionFactory.from_config(worker_cfg)
 
 @pytest.mark.asyncio
 async def test_from_config_password_env_missing(monkeypatch):
@@ -519,14 +519,14 @@ async def test_from_config_password_env_missing(monkeypatch):
     # Do NOT setenv
     mock_manager = MagicMock()
     with (
-        patch("deephaven_mcp.client._session_manager.is_enterprise_available", True),
+        patch("deephaven_mcp.client._session_factory.is_enterprise_available", True),
         patch("deephaven_mcp.config.validate_single_enterprise_system"),
         patch("deephaven_enterprise.client.session_manager.SessionManager", return_value=mock_manager),
     ):
-        import deephaven_mcp.client._session_manager as sm_mod
-        with patch.object(sm_mod.CorePlusSessionManager, "password", new_callable=AsyncMock):
+        import deephaven_mcp.client._session_factory as sm_mod
+        with patch.object(sm_mod.CorePlusSessionFactory, "password", new_callable=AsyncMock):
             with pytest.raises(sm_mod.AuthenticationError) as excinfo:
-                await sm_mod.CorePlusSessionManager.from_config(worker_cfg)
+                await sm_mod.CorePlusSessionFactory.from_config(worker_cfg)
             assert "not set for password authentication" in str(excinfo.value)
 
 @pytest.mark.asyncio
@@ -538,14 +538,14 @@ async def test_from_config_password_missing(monkeypatch):
     }
     mock_manager = MagicMock()
     with (
-        patch("deephaven_mcp.client._session_manager.is_enterprise_available", True),
+        patch("deephaven_mcp.client._session_factory.is_enterprise_available", True),
         patch("deephaven_mcp.config.validate_single_enterprise_system"),
         patch("deephaven_enterprise.client.session_manager.SessionManager", return_value=mock_manager),
     ):
-        import deephaven_mcp.client._session_manager as sm_mod
-        with patch.object(sm_mod.CorePlusSessionManager, "password", new_callable=AsyncMock):
+        import deephaven_mcp.client._session_factory as sm_mod
+        with patch.object(sm_mod.CorePlusSessionFactory, "password", new_callable=AsyncMock):
             with pytest.raises(sm_mod.EnterpriseSystemConfigurationError) as excinfo:
-                await sm_mod.CorePlusSessionManager.from_config(worker_cfg)
+                await sm_mod.CorePlusSessionFactory.from_config(worker_cfg)
             assert "must define 'password'" in str(excinfo.value) or "must define 'username'" in str(excinfo.value)
 
 @pytest.mark.asyncio
@@ -556,14 +556,14 @@ async def test_from_config_private_key_missing():
     }
     mock_manager = MagicMock()
     with (
-        patch("deephaven_mcp.client._session_manager.is_enterprise_available", True),
+        patch("deephaven_mcp.client._session_factory.is_enterprise_available", True),
         patch("deephaven_mcp.config.validate_single_enterprise_system"),
         patch("deephaven_enterprise.client.session_manager.SessionManager", return_value=mock_manager),
     ):
-        import deephaven_mcp.client._session_manager as sm_mod
-        with patch.object(sm_mod.CorePlusSessionManager, "private_key", new_callable=AsyncMock):
+        import deephaven_mcp.client._session_factory as sm_mod
+        with patch.object(sm_mod.CorePlusSessionFactory, "private_key", new_callable=AsyncMock):
             with pytest.raises(sm_mod.EnterpriseSystemConfigurationError) as excinfo:
-                await sm_mod.CorePlusSessionManager.from_config(worker_cfg)
+                await sm_mod.CorePlusSessionFactory.from_config(worker_cfg)
             assert "must define 'private_key'" in str(excinfo.value)
 
 @pytest.mark.asyncio
@@ -574,13 +574,13 @@ async def test_from_config_unsupported_auth():
     }
     mock_manager = MagicMock()
     with (
-        patch("deephaven_mcp.client._session_manager.is_enterprise_available", True),
+        patch("deephaven_mcp.client._session_factory.is_enterprise_available", True),
         patch("deephaven_mcp.config.validate_single_enterprise_system"),
         patch("deephaven_enterprise.client.session_manager.SessionManager", return_value=mock_manager),
     ):
-        import deephaven_mcp.client._session_manager as sm_mod
+        import deephaven_mcp.client._session_factory as sm_mod
         with pytest.raises(sm_mod.EnterpriseSystemConfigurationError) as excinfo:
-            await sm_mod.CorePlusSessionManager.from_config(worker_cfg)
+            await sm_mod.CorePlusSessionFactory.from_config(worker_cfg)
         assert "must be one of" in str(excinfo.value) and "saml" in str(excinfo.value)
 
 @pytest.mark.asyncio
@@ -591,42 +591,42 @@ async def test_from_config_not_enterprise_available():
         "username": "bob",
         "password": "pw",
     }
-    with patch("deephaven_mcp.client._session_manager.is_enterprise_available", False):
-        import deephaven_mcp.client._session_manager as sm_mod
+    with patch("deephaven_mcp.client._session_factory.is_enterprise_available", False):
+        import deephaven_mcp.client._session_factory as sm_mod
         with pytest.raises(sm_mod.InternalError) as excinfo:
-            await sm_mod.CorePlusSessionManager.from_config(worker_cfg)
+            await sm_mod.CorePlusSessionFactory.from_config(worker_cfg)
         assert "Core+ features are not available" in str(excinfo.value)
 @pytest.mark.asyncio
 async def test_from_url_success():
     with (
-        patch("deephaven_mcp.client._session_manager.is_enterprise_available", True),
+        patch("deephaven_mcp.client._session_factory.is_enterprise_available", True),
         patch("deephaven_enterprise.client.session_manager.SessionManager") as mock_sm,
     ):
         instance = MagicMock()
         mock_sm.return_value = instance
-        result = CorePlusSessionManager.from_url("http://fake")
-        assert isinstance(result, CorePlusSessionManager)
+        result = CorePlusSessionFactory.from_url("http://fake")
+        assert isinstance(result, CorePlusSessionFactory)
         assert result.wrapped == instance
 
 
 @pytest.mark.asyncio
 async def test_from_url_not_enterprise():
-    with patch("deephaven_mcp.client._session_manager.is_enterprise_available", False):
+    with patch("deephaven_mcp.client._session_factory.is_enterprise_available", False):
         with pytest.raises(exc.InternalError):
-            CorePlusSessionManager.from_url("http://fake")
+            CorePlusSessionFactory.from_url("http://fake")
 
 
 @pytest.mark.asyncio
 async def test_from_url_connection_error():
     with (
-        patch("deephaven_mcp.client._session_manager.is_enterprise_available", True),
+        patch("deephaven_mcp.client._session_factory.is_enterprise_available", True),
         patch(
             "deephaven_enterprise.client.session_manager.SessionManager",
             side_effect=Exception("fail"),
         ),
     ):
         with pytest.raises(exc.DeephavenConnectionError):
-            CorePlusSessionManager.from_url("http://fake")
+            CorePlusSessionFactory.from_url("http://fake")
 
 
 # --- Coverage for unreachable error/warning branches in from_config ---
@@ -640,15 +640,15 @@ async def test_from_config_missing_password_branch(monkeypatch, caplog):
     }
     mock_manager = MagicMock()
     with (
-        patch("deephaven_mcp.client._session_manager.is_enterprise_available", True),
-        patch("deephaven_mcp.client._session_manager.validate_single_enterprise_system", return_value=None),
+        patch("deephaven_mcp.client._session_factory.is_enterprise_available", True),
+        patch("deephaven_mcp.client._session_factory.validate_single_enterprise_system", return_value=None),
         patch("deephaven_enterprise.client.session_manager.SessionManager", return_value=mock_manager),
     ):
-        import deephaven_mcp.client._session_manager as sm_mod
+        import deephaven_mcp.client._session_factory as sm_mod
         with caplog.at_level(logging.ERROR):
-            with patch.object(sm_mod.CorePlusSessionManager, "password", new_callable=MagicMock):
+            with patch.object(sm_mod.CorePlusSessionFactory, "password", new_callable=MagicMock):
                 with pytest.raises(sm_mod.AuthenticationError) as excinfo:
-                    await sm_mod.CorePlusSessionManager.from_config(worker_cfg)
+                    await sm_mod.CorePlusSessionFactory.from_config(worker_cfg)
                 assert "No password provided" in str(excinfo.value)
                 assert "No password provided for password authentication" in caplog.text
 
@@ -660,15 +660,15 @@ async def test_from_config_missing_private_key_branch(caplog):
     }
     mock_manager = MagicMock()
     with (
-        patch("deephaven_mcp.client._session_manager.is_enterprise_available", True),
-        patch("deephaven_mcp.client._session_manager.validate_single_enterprise_system", return_value=None),
+        patch("deephaven_mcp.client._session_factory.is_enterprise_available", True),
+        patch("deephaven_mcp.client._session_factory.validate_single_enterprise_system", return_value=None),
         patch("deephaven_enterprise.client.session_manager.SessionManager", return_value=mock_manager),
     ):
-        import deephaven_mcp.client._session_manager as sm_mod
+        import deephaven_mcp.client._session_factory as sm_mod
         with caplog.at_level(logging.ERROR):
-            with patch.object(sm_mod.CorePlusSessionManager, "private_key", new_callable=MagicMock):
+            with patch.object(sm_mod.CorePlusSessionFactory, "private_key", new_callable=MagicMock):
                 with pytest.raises(sm_mod.AuthenticationError) as excinfo:
-                    await sm_mod.CorePlusSessionManager.from_config(worker_cfg)
+                    await sm_mod.CorePlusSessionFactory.from_config(worker_cfg)
                 assert "No private_key provided" in str(excinfo.value)
                 assert "No private_key provided for private_key authentication" in caplog.text
 
@@ -680,15 +680,15 @@ async def test_from_config_unsupported_auth_type_branch(caplog):
     }
     mock_manager = MagicMock()
     with (
-        patch("deephaven_mcp.client._session_manager.is_enterprise_available", True),
-        patch("deephaven_mcp.client._session_manager.validate_single_enterprise_system", return_value=None),
+        patch("deephaven_mcp.client._session_factory.is_enterprise_available", True),
+        patch("deephaven_mcp.client._session_factory.validate_single_enterprise_system", return_value=None),
         patch("deephaven_enterprise.client.session_manager.SessionManager", return_value=mock_manager),
     ):
-        import deephaven_mcp.client._session_manager as sm_mod
+        import deephaven_mcp.client._session_factory as sm_mod
         with caplog.at_level(logging.WARNING):
-            with patch.object(sm_mod.CorePlusSessionManager, "password", new_callable=MagicMock), \
-                 patch.object(sm_mod.CorePlusSessionManager, "private_key", new_callable=MagicMock):
+            with patch.object(sm_mod.CorePlusSessionFactory, "password", new_callable=MagicMock), \
+                 patch.object(sm_mod.CorePlusSessionFactory, "private_key", new_callable=MagicMock):
                 # Should not raise
-                result = await sm_mod.CorePlusSessionManager.from_config(worker_cfg)
-                assert isinstance(result, sm_mod.CorePlusSessionManager)
+                result = await sm_mod.CorePlusSessionFactory.from_config(worker_cfg)
+                assert isinstance(result, sm_mod.CorePlusSessionFactory)
                 assert "Auth type 'saml' is not supported for automatic authentication" in caplog.text

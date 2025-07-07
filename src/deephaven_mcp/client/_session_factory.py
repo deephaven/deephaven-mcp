@@ -6,17 +6,17 @@ while maintaining strict interface compatibility. The wrapper adds comprehensive
 documentation, robust logging, and ensures non-blocking operation by running potentially
 blocking operations in separate threads.
 
-The CorePlusSessionManager delegates all method calls to the underlying session manager
+The CorePlusSessionFactory delegates all method calls to the underlying session manager
 instance and wraps returned sessions in CorePlusSession objects for consistent behavior.
 
 Example:
     import asyncio
-    from deephaven_mcp.session_manager import CorePlusSessionManager
+    from deephaven_mcp.session_manager import CorePlusSessionFactory
 
     # Create a Core+ session manager connected to a server
     async def main():
         # Create a session manager using the from_url classmethod
-        manager = CorePlusSessionManager.from_url("https://myserver.example.com/iris/connection.json")
+        manager = CorePlusSessionFactory.from_url("https://myserver.example.com/iris/connection.json")
 
         # Authenticate
         await manager.password("username", "password")
@@ -35,11 +35,11 @@ Example:
 You can also directly instantiate the class with an existing SessionManager:
 
     from deephaven_enterprise.client.session_manager import SessionManager
-    from deephaven_mcp.session_manager import CorePlusSessionManager
+    from deephaven_mcp.session_manager import CorePlusSessionFactory
 
     # Create and wrap an existing session manager
     session_manager = SessionManager("https://myserver.example.com/iris/connection.json")
-    wrapped_manager = CorePlusSessionManager(session_manager)
+    wrapped_manager = CorePlusSessionFactory(session_manager)
 
 """
 
@@ -73,7 +73,7 @@ from ._session import CorePlusSession
 _LOGGER = logging.getLogger(__name__)
 
 
-class CorePlusSessionManager(
+class CorePlusSessionFactory(
     ClientObjectWrapper["deephaven_enterprise.client.session_manager.SessionManager"]
 ):
     """Asynchronous wrapper for the Deephaven Core+ SessionManager.
@@ -106,7 +106,7 @@ class CorePlusSessionManager(
     """
 
     def __init__(self, session_manager):
-        """Initialize the CorePlusSessionManager wrapper.
+        """Initialize the CorePlusSessionFactory wrapper.
 
         Args:
             session_manager: The SessionManager instance to wrap. Must be an instance
@@ -116,14 +116,14 @@ class CorePlusSessionManager(
 
         """
         super().__init__(session_manager, is_enterprise=True)
-        _LOGGER.info("[CorePlusSessionManager] Successfully initialized CorePlusSessionManager")
+        _LOGGER.info("[CorePlusSessionFactory] Successfully initialized CorePlusSessionFactory")
 
     @classmethod
-    def from_url(cls, url: str) -> "CorePlusSessionManager":
-        """Create a CorePlusSessionManager connected to the specified connection URL.
+    def from_url(cls, url: str) -> "CorePlusSessionFactory":
+        """Create a CorePlusSessionFactory connected to the specified connection URL.
 
         This convenience method creates a new SessionManager connected to the specified
-        connection URL and wraps it in a CorePlusSessionManager for asynchronous use.
+        connection URL and wraps it in a CorePlusSessionFactory for asynchronous use.
 
         Args:
             url: The connection URL for the Deephaven server. This should point to a
@@ -131,7 +131,7 @@ class CorePlusSessionManager(
                  "https://<server>/iris/connection.json".
 
         Returns:
-            CorePlusSessionManager: A new wrapper instance connected to the specified URL
+            CorePlusSessionFactory: A new wrapper instance connected to the specified URL
 
         Raises:
             InternalError: If Core+ features are not available (deephaven-coreplus-client not installed)
@@ -139,10 +139,10 @@ class CorePlusSessionManager(
 
         Example:
             ```python
-            from deephaven_mcp.session_manager import CorePlusSessionManager
+            from deephaven_mcp.session_manager import CorePlusSessionFactory
 
             # Create a session manager connected to the server
-            manager = CorePlusSessionManager.from_url("https://myserver.example.com/iris/connection.json")
+            manager = CorePlusSessionFactory.from_url("https://myserver.example.com/iris/connection.json")
 
             # Authenticate (in an async context)
             await manager.password("username", "password")
@@ -171,7 +171,7 @@ class CorePlusSessionManager(
             from deephaven_enterprise.client.session_manager import SessionManager
 
             try:
-                _LOGGER.debug(f"[CorePlusSessionManager] Creating SessionManager for URL: {url}")
+                _LOGGER.debug(f"[CorePlusSessionFactory] Creating SessionManager for URL: {url}")
                 return cls(SessionManager(url))
             except Exception as e:
                 _LOGGER.error(f"Failed to create SessionManager with URL {url}: {e}")
@@ -180,19 +180,19 @@ class CorePlusSessionManager(
                 ) from e
 
     @classmethod
-    async def from_config(cls, worker_cfg: dict[str, Any]) -> "CorePlusSessionManager":
+    async def from_config(cls, worker_cfg: dict[str, Any]) -> "CorePlusSessionFactory":
         """
-        Create a CorePlusSessionManager from an enterprise system configuration dictionary.
+        Create a CorePlusSessionFactory from an enterprise system configuration dictionary.
 
         This method validates the provided configuration dict (as used in the 'enterprise.systems' section)
-        and constructs a CorePlusSessionManager using the appropriate authentication method.
+        and constructs a CorePlusSessionFactory using the appropriate authentication method.
 
         Args:
             worker_cfg (dict[str, Any]): The configuration dictionary for the enterprise system.
                 Must contain at least 'connection_json_url' and 'auth_type', plus required auth fields.
 
         Returns:
-            CorePlusSessionManager: An initialized session manager ready for authentication.
+            CorePlusSessionFactory: An initialized session manager ready for authentication.
 
         Raises:
             InternalError: If Core+ features are not available (deephaven-coreplus-client not installed)
@@ -210,17 +210,17 @@ class CorePlusSessionManager(
         try:
             validate_single_enterprise_system("from_config", worker_cfg)
         except EnterpriseSystemConfigurationError as e:
-            _LOGGER.error(f"[CorePlusSessionManager] Invalid enterprise system config: {e}")
+            _LOGGER.error(f"[CorePlusSessionFactory] Invalid enterprise system config: {e}")
             raise
 
         url = worker_cfg["connection_json_url"]
         auth_type = worker_cfg["auth_type"]
-        _LOGGER.debug(f"[CorePlusSessionManager] Creating SessionManager from config: url={url}, auth_type={auth_type}")
+        _LOGGER.debug(f"[CorePlusSessionFactory] Creating SessionManager from config: url={url}, auth_type={auth_type}")
         from deephaven_enterprise.client.session_manager import SessionManager
         try:
             manager = SessionManager(url)
         except Exception as e:
-            _LOGGER.error(f"[CorePlusSessionManager] Failed to create SessionManager with URL {url}: {e}")
+            _LOGGER.error(f"[CorePlusSessionFactory] Failed to create SessionManager with URL {url}: {e}")
             raise DeephavenConnectionError(
                 f"Failed to establish connection to Deephaven at {url}: {e}"
             ) from e
@@ -239,25 +239,25 @@ class CorePlusSessionManager(
                 import os
                 password = os.environ.get(password_env_var)
                 if password is None:
-                    _LOGGER.error(f"[CorePlusSessionManager] Environment variable '{password_env_var}' not set for password authentication.")
+                    _LOGGER.error(f"[CorePlusSessionFactory] Environment variable '{password_env_var}' not set for password authentication.")
                     raise AuthenticationError(
                         f"Environment variable '{password_env_var}' not set for password authentication."
                     )
             if password is None:
-                _LOGGER.error("[CorePlusSessionManager] No password provided for password authentication.")
+                _LOGGER.error("[CorePlusSessionFactory] No password provided for password authentication.")
                 raise AuthenticationError("No password provided for password authentication.")
             await instance.password(username, password, effective_user)
         elif auth_type == "private_key":
             private_key = worker_cfg.get("private_key")
             if private_key is None:
-                _LOGGER.error("[CorePlusSessionManager] No private_key provided for private_key authentication.")
+                _LOGGER.error("[CorePlusSessionFactory] No private_key provided for private_key authentication.")
                 raise AuthenticationError("No private_key provided for private_key authentication.")
             import io
             await instance.private_key(io.StringIO(private_key))
         else:
-            _LOGGER.warning(f"[CorePlusSessionManager] Auth type '{auth_type}' is not supported for automatic authentication. Returning unauthenticated manager.")
+            _LOGGER.warning(f"[CorePlusSessionFactory] Auth type '{auth_type}' is not supported for automatic authentication. Returning unauthenticated manager.")
 
-        _LOGGER.info(f"[CorePlusSessionManager] Successfully created and authenticated SessionManager from config (auth_type={auth_type})")
+        _LOGGER.info(f"[CorePlusSessionFactory] Successfully created and authenticated SessionManager from config (auth_type={auth_type})")
         return instance
 
 
@@ -278,9 +278,9 @@ class CorePlusSessionManager(
             must be created if further connections are needed.
         """
         try:
-            _LOGGER.debug("[CorePlusSessionManager] Closing session manager connection")
+            _LOGGER.debug("[CorePlusSessionFactory] Closing session manager connection")
             await asyncio.to_thread(self.wrapped.close)
-            _LOGGER.debug("[CorePlusSessionManager] Successfully closed session manager connection")
+            _LOGGER.debug("[CorePlusSessionFactory] Successfully closed session manager connection")
         except Exception as e:
             _LOGGER.error(f"Failed to close session manager: {e}")
             raise SessionError(
@@ -355,11 +355,11 @@ class CorePlusSessionManager(
         Example:
             ```python
             import asyncio
-            from deephaven_mcp.session_manager import CorePlusSessionManager
+            from deephaven_mcp.session_manager import CorePlusSessionFactory
 
             async def create_custom_worker():
                 # Create and authenticate the session manager
-                manager = CorePlusSessionManager.from_url("https://myserver.example.com/iris/connection.json")
+                manager = CorePlusSessionFactory.from_url("https://myserver.example.com/iris/connection.json")
                 await manager.password("username", "password")
 
                 # Create a high-memory worker with a custom name and 10-minute auto-delete
@@ -388,7 +388,7 @@ class CorePlusSessionManager(
             - create_controller_client: Create a client for managing workers directly
         """
         try:
-            _LOGGER.debug("[CorePlusSessionManager] Creating new worker and connecting to it")
+            _LOGGER.debug("[CorePlusSessionFactory] Creating new worker and connecting to it")
             session = await asyncio.to_thread(
                 self.wrapped.connect_to_new_worker,
                 name=name,
@@ -404,7 +404,7 @@ class CorePlusSessionManager(
                 configuration_transformer=configuration_transformer,
                 session_arguments=session_arguments,
             )
-            _LOGGER.debug("[CorePlusSessionManager] Successfully connected to new worker")
+            _LOGGER.debug("[CorePlusSessionFactory] Successfully connected to new worker")
             return CorePlusSession(session)
         except ConnectionError as e:
             _LOGGER.error(f"Connection error while connecting to new worker: {e}")
@@ -460,7 +460,7 @@ class CorePlusSessionManager(
                 serial=serial,
                 session_arguments=session_arguments,
             )
-            _LOGGER.debug("[CorePlusSessionManager] Successfully connected to persistent query")
+            _LOGGER.debug("[CorePlusSessionFactory] Successfully connected to persistent query")
             return CorePlusSession(session)
         except ValueError:
             # Re-raise input validation exceptions unchanged
@@ -508,7 +508,7 @@ class CorePlusSessionManager(
             auth_client = await asyncio.to_thread(
                 self.wrapped.create_auth_client, auth_host
             )
-            _LOGGER.debug("[CorePlusSessionManager] Successfully created authentication client")
+            _LOGGER.debug("[CorePlusSessionFactory] Successfully created authentication client")
             return CorePlusAuthClient(auth_client)
         except ConnectionError as e:
             _LOGGER.error(f"Failed to connect to authentication service: {e}")
@@ -538,11 +538,11 @@ class CorePlusSessionManager(
             SessionError: If there is an error creating the controller client for reasons other than connectivity.
         """
         try:
-            _LOGGER.debug("[CorePlusSessionManager] Creating controller client")
+            _LOGGER.debug("[CorePlusSessionFactory] Creating controller client")
             controller_client = await asyncio.to_thread(
                 self.wrapped.create_controller_client
             )
-            _LOGGER.debug("[CorePlusSessionManager] Successfully created controller client")
+            _LOGGER.debug("[CorePlusSessionFactory] Successfully created controller client")
             return CorePlusControllerClient(controller_client)
         except ConnectionError as e:
             _LOGGER.error(f"Failed to connect to controller service: {e}")
@@ -573,9 +573,9 @@ class CorePlusSessionManager(
             It removes a previously uploaded public key from the server's authorized keys.
         """
         try:
-            _LOGGER.debug("[CorePlusSessionManager] Deleting public key")
+            _LOGGER.debug("[CorePlusSessionFactory] Deleting public key")
             await asyncio.to_thread(self.wrapped.delete_key, public_key_text)
-            _LOGGER.debug("[CorePlusSessionManager] Successfully deleted public key")
+            _LOGGER.debug("[CorePlusSessionFactory] Successfully deleted public key")
         except ConnectionError as e:
             _LOGGER.error(f"Connection error when deleting key: {e}")
             raise DeephavenConnectionError(
@@ -611,11 +611,11 @@ class CorePlusSessionManager(
 
         Example:
             ```python
-            from deephaven_mcp.session_manager import CorePlusSessionManager
+            from deephaven_mcp.session_manager import CorePlusSessionFactory
 
             async def authenticate_and_work():
                 # Create the session manager
-                manager = CorePlusSessionManager.from_url("https://myserver.example.com/iris/connection.json")
+                manager = CorePlusSessionFactory.from_url("https://myserver.example.com/iris/connection.json")
 
                 # Authenticate with username/password
                 await manager.password("username", "my_secure_password")
@@ -641,7 +641,7 @@ class CorePlusSessionManager(
             await asyncio.to_thread(
                 self.wrapped.password, user, password, effective_user
             )
-            _LOGGER.debug("[CorePlusSessionManager] Successfully authenticated")
+            _LOGGER.debug("[CorePlusSessionFactory] Successfully authenticated")
         except ConnectionError as e:
             _LOGGER.error(f"Failed to connect to authentication server: {e}")
             raise DeephavenConnectionError(
@@ -670,7 +670,7 @@ class CorePlusSessionManager(
             It can be called periodically to ensure the connection is still alive.
         """
         try:
-            _LOGGER.debug("[CorePlusSessionManager] Sending ping to authentication server and controller")
+            _LOGGER.debug("[CorePlusSessionFactory] Sending ping to authentication server and controller")
             result = await asyncio.to_thread(self.wrapped.ping)
             _LOGGER.debug(f"Ping result: {result}")
             return result
@@ -710,12 +710,12 @@ class CorePlusSessionManager(
 
         Example with file path:
             ```python
-            from deephaven_mcp.session_manager import CorePlusSessionManager
+            from deephaven_mcp.session_manager import CorePlusSessionFactory
             import asyncio
 
             async def use_private_key_auth():
                 # Create the session manager
-                manager = CorePlusSessionManager.from_url("https://myserver.example.com/iris/connection.json")
+                manager = CorePlusSessionFactory.from_url("https://myserver.example.com/iris/connection.json")
 
                 # Authenticate using a private key file
                 await manager.private_key("/path/to/private_key.pem")
@@ -746,9 +746,9 @@ class CorePlusSessionManager(
             https://docs.deephaven.io/Core+/latest/how-to/connect/connect-from-java/#instructions-for-setting-up-private-keys
         """
         try:
-            _LOGGER.debug("[CorePlusSessionManager] Authenticating with private key")
+            _LOGGER.debug("[CorePlusSessionFactory] Authenticating with private key")
             await asyncio.to_thread(self.wrapped.private_key, file)
-            _LOGGER.debug("[CorePlusSessionManager] Successfully authenticated with private key")
+            _LOGGER.debug("[CorePlusSessionFactory] Successfully authenticated with private key")
         except FileNotFoundError as e:
             _LOGGER.error(f"Private key file not found: {e}")
             raise AuthenticationError(f"Private key file not found: {e}") from e
@@ -798,11 +798,11 @@ class CorePlusSessionManager(
 
         Example:
             ```python
-            from deephaven_mcp.session_manager import CorePlusSessionManager
+            from deephaven_mcp.session_manager import CorePlusSessionFactory
 
             async def authenticate_with_saml():
                 # Create the session manager
-                manager = CorePlusSessionManager.from_url("https://myserver.example.com/iris/connection.json")
+                manager = CorePlusSessionFactory.from_url("https://myserver.example.com/iris/connection.json")
 
                 # Authenticate using SAML - this may open a browser window for SSO login
                 await manager.saml()
@@ -819,9 +819,9 @@ class CorePlusSessionManager(
             - private_key: Alternative authentication using private key cryptographic authentication
         """
         try:
-            _LOGGER.debug("[CorePlusSessionManager] Starting SAML authentication flow")
+            _LOGGER.debug("[CorePlusSessionFactory] Starting SAML authentication flow")
             await asyncio.to_thread(self.wrapped.saml)
-            _LOGGER.debug("[CorePlusSessionManager] Successfully authenticated using SAML")
+            _LOGGER.debug("[CorePlusSessionFactory] Successfully authenticated using SAML")
         except ConnectionError as e:
             _LOGGER.error(
                 f"Failed to connect to authentication server or SAML provider: {e}"
@@ -857,9 +857,9 @@ class CorePlusSessionManager(
             The key will be associated with your user account on the server.
         """
         try:
-            _LOGGER.debug("[CorePlusSessionManager] Uploading public key")
+            _LOGGER.debug("[CorePlusSessionFactory] Uploading public key")
             await asyncio.to_thread(self.wrapped.upload_key, public_key_text)
-            _LOGGER.debug("[CorePlusSessionManager] Successfully uploaded public key")
+            _LOGGER.debug("[CorePlusSessionFactory] Successfully uploaded public key")
         except ConnectionError as e:
             _LOGGER.error(f"Connection error when uploading key: {e}")
             raise DeephavenConnectionError(

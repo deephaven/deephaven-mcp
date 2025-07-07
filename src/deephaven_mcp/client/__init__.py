@@ -34,7 +34,7 @@ from ._protobuf import (
     ProtobufWrapper,
 )
 from ._session import BaseSession, CoreSession, CorePlusSession
-from ._session_manager import CorePlusSessionManager
+from ._session_factory import CorePlusSessionFactory
 
 __all__ = [
     "CorePlusAuthClient",
@@ -51,5 +51,5 @@ __all__ = [
     "BaseSession",
     "CoreSession",
     "CorePlusSession",
-    "CorePlusSessionManager",
+    "CorePlusSessionFactory",
 ]
