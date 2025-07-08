@@ -56,7 +56,7 @@ from ._base import is_enterprise_available
 if is_enterprise_available:
     from deephaven_enterprise.client.controller import ControllerClient
 else:
-    ControllerClient = None
+    ControllerClient = None # pragma: no cover
 
 
 # Type definitions

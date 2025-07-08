@@ -18,6 +18,7 @@ from deephaven_mcp._exceptions import InternalError, SessionCreationError
 from deephaven_mcp.resource_manager import CommunitySessionRegistry, CorePlusSessionFactoryRegistry
 from deephaven_mcp.resource_manager._registry import BaseRegistry
 from deephaven_mcp.resource_manager._manager import CommunitySessionManager
+from deephaven_mcp.resource_manager import _registry  # noqa: F401
 
 
 # --- Base Registry Tests ---
@@ -307,3 +308,60 @@ async def test_factory_registry_no_factories_key():
     await registry.initialize(manager)
 
     assert len(registry._items) == 0
+
+
+# --- Error Handling Tests ---
+
+
+class InvalidItemNoClose:
+    """A mock item that has no close() method."""
+
+    def __repr__(self):
+        return "InvalidItemNoClose"
+
+
+class InvalidItemSyncClose:
+    """A mock item with a synchronous close() method."""
+
+    def close(self):
+        """A non-coroutine close method."""
+        pass
+
+    def __repr__(self):
+        return "InvalidItemSyncClose"
+
+
+@pytest.mark.parametrize(
+    "invalid_item",
+    [
+        InvalidItemNoClose(),
+        InvalidItemSyncClose(),
+    ],
+    ids=["no_close_method", "sync_close_method"],
+)
+@pytest.mark.asyncio
+async def test_close_raises_error_for_invalid_item(
+    registry, mock_base_config_manager, invalid_item, caplog
+):
+    """
+    Test that close() raises InternalError for items with invalid close methods.
+
+    - Item has no close() method.
+    - Item has a synchronous (non-coroutine) close() method.
+    """
+    await registry.initialize(mock_base_config_manager)
+
+    # Replace a valid item with our invalid one to trigger the error path
+    registry._items["item1"] = invalid_item
+
+    with pytest.raises(
+        InternalError,
+        match=f"Item {invalid_item} does not have a close method or the method is not a coroutine function.",
+    ):
+        await registry.close()
+
+    # Verify that the error was logged
+    assert (
+        f"Item {invalid_item} does not have a close method or the method is not a coroutine function."
+        in caplog.text
+    )
