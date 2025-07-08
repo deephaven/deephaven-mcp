@@ -6,12 +6,12 @@ This module defines the public API for resource management in Deephaven MCP. It 
 Exports:
     - SystemType: Enum for backend system type (COMMUNITY, ENTERPRISE).
     - BaseItemManager: Abstract base class for managing lazily-initialized items.
-    - CommunitySessionManager: Async/thread-safe manager for community sessions.
-    - EnterpriseSessionManager: Async/thread-safe manager for enterprise sessions.
-    - CorePlusSessionFactoryManager: Async/thread-safe manager for CorePlusSessionFactory objects.
+    - CommunitySessionManager: Manages the lifecycle of community sessions.
+    - EnterpriseSessionManager: Manages the lifecycle of enterprise sessions.
+    - CorePlusSessionFactoryManager: Manages the lifecycle of CorePlusSessionFactory objects.
 
-    - CommunitySessionRegistry: Async/thread-safe registry for community session lifecycle and caching.
-    - CorePlusSessionFactoryRegistry: Async/thread-safe registry for CorePlusSessionFactory lifecycle and caching.
+    - CommunitySessionRegistry: A registry for all configured CommunitySessionManager instances.
+    - CorePlusSessionFactoryRegistry: A registry for all configured CorePlusSessionFactoryManager instances.
 
 Features:
     - Coroutine-safe item cache keyed by name, protected by an asyncio.Lock.

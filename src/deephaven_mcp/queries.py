@@ -46,10 +46,10 @@ async def get_table(session: BaseSession, table_name: str) -> pyarrow.Table:
         - Logging is performed at DEBUG level for entry, exit, and error tracing.
         - This function is intended for internal use only.
     """
-    _LOGGER.debug("[queries.py:get_table] Retrieving table '%s' from session...", table_name)
+    _LOGGER.debug("[queries:get_table] Retrieving table '%s' from session...", table_name)
     table = await session.open_table(table_name)
     arrow_table = await asyncio.to_thread(table.to_arrow)
-    _LOGGER.debug("[queries.py:get_table] Table '%s' retrieved successfully.", table_name)
+    _LOGGER.debug("[queries:get_table] Table '%s' retrieved successfully.", table_name)
     return arrow_table
 
 
@@ -73,11 +73,11 @@ async def get_meta_table(session: BaseSession, table_name: str) -> pyarrow.Table
         - Logging is performed at DEBUG level for entry, exit, and error tracing.
         - This function is intended for internal use only.
     """
-    _LOGGER.debug("[queries.py:get_meta_table] Retrieving meta table for '%s' from session...", table_name)
+    _LOGGER.debug("[queries:get_meta_table] Retrieving meta table for '%s' from session...", table_name)
     table = await session.open_table(table_name)
     meta_table = await asyncio.to_thread(lambda: table.meta_table)
     arrow_meta_table = await asyncio.to_thread(meta_table.to_arrow)
-    _LOGGER.debug("[queries.py:get_meta_table] Meta table for '%s' retrieved successfully.", table_name)
+    _LOGGER.debug("[queries:get_meta_table] Meta table for '%s' retrieved successfully.", table_name)
     return arrow_meta_table
 
 
@@ -122,11 +122,11 @@ async def get_pip_packages_table(session: BaseSession) -> pyarrow.Table:
         _pip_packages_table = _make_pip_packages_table()
         """
     )
-    _LOGGER.debug("[queries.py:get_pip_packages_table] Running pip packages script in session...")
+    _LOGGER.debug("[queries:get_pip_packages_table] Running pip packages script in session...")
     await session.run_script(script)
-    _LOGGER.debug("[queries.py:get_pip_packages_table] Script executed successfully.")
+    _LOGGER.debug("[queries:get_pip_packages_table] Script executed successfully.")
     arrow_table = await get_table(session, "_pip_packages_table")
-    _LOGGER.debug("[queries.py:get_pip_packages_table] Table '_pip_packages_table' retrieved successfully.")
+    _LOGGER.debug("[queries:get_pip_packages_table] Table '_pip_packages_table' retrieved successfully.")
     return arrow_table
 
 
@@ -145,32 +145,35 @@ async def get_dh_versions(session: BaseSession) -> tuple[str | None, str | None]
             - Index 1: The version string for Deephaven Core+, or None if not found.
 
     Raises:
-        Exception: If the pip packages table cannot be retrieved, or conversion to pandas fails.
+        Exception: If the pip packages table cannot be retrieved.
 
     Note:
         - Returns (None, None) if neither package is found in the session environment.
         - Logging is performed at DEBUG level for entry, exit, and version reporting.
     """
-    _LOGGER.debug("[queries.py:get_dh_versions] Retrieving Deephaven Core and Core+ versions from session...")
+    _LOGGER.debug("[queries:get_dh_versions] Retrieving Deephaven Core and Core+ versions from session...")
     arrow_table = await get_pip_packages_table(session)
     if arrow_table is None:
-        _LOGGER.debug("[queries.py:get_dh_versions] No pip packages table found. Returning (None, None).")
+        _LOGGER.debug("[queries:get_dh_versions] No pip packages table found. Returning (None, None).")
         return None, None
-    df = arrow_table.to_pandas()
+
+    packages_dict = arrow_table.to_pydict()
+    packages = zip(packages_dict["Package"], packages_dict["Version"])
+
     dh_core_version = None
     dh_coreplus_version = None
-    raw_packages = df.to_dict(orient="records")
-    for pkg in raw_packages:
-        pkg_name = pkg.get("Package", "").lower()
-        version = pkg.get("Version", "")
-        if pkg_name == "deephaven-core" and dh_core_version is None:
+
+    for pkg_name, version in packages:
+        pkg_name_lower = pkg_name.lower()
+        if pkg_name_lower == "deephaven-core" and dh_core_version is None:
             dh_core_version = version
-        elif pkg_name == "deephaven_coreplus_worker" and dh_coreplus_version is None:
+        elif pkg_name_lower == "deephaven_coreplus_worker" and dh_coreplus_version is None:
             dh_coreplus_version = version
         if dh_core_version and dh_coreplus_version:
             break
+
     _LOGGER.debug(
-        "[queries.py:get_dh_versions] Found versions: deephaven-core=%s, deephaven_coreplus_worker=%s",
+        "[queries:get_dh_versions] Found versions: deephaven-core=%s, deephaven_coreplus_worker=%s",
         dh_core_version,
         dh_coreplus_version,
     )

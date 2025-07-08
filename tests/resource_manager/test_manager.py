@@ -125,6 +125,23 @@ async def test_close():
 
 
 @pytest.mark.asyncio
+async def test_close_not_alive():
+    """Test that close handles an item that is not alive."""
+    manager = ConcreteItemManager(SystemType.COMMUNITY, "test-source", "test")
+    item = await manager.get()
+
+    # Mark the item as not alive
+    item.is_alive.return_value = False
+
+    await manager.close()
+
+    # close() should not be called on the item
+    item.close.assert_not_called()
+    # Cache should be cleared
+    assert manager._item_cache is None
+
+
+@pytest.mark.asyncio
 async def test_concurrent_get():
     """Test that get is thread-safe and creates only one item."""
     manager = ConcreteItemManager(SystemType.COMMUNITY, "test-source", "test")
@@ -272,6 +289,18 @@ class TestEnterpriseSessionManager:
 
 
 class TestCorePlusSessionFactoryManager:
+    """Tests for the CorePlusSessionFactoryManager."""
+
+    def test_initialization(self):
+        """Test that the manager initializes with the correct properties."""
+        config = {"host": "localhost"}
+        manager = CorePlusSessionFactoryManager(name="test_factory", config=config)
+
+        assert manager.system_type == SystemType.ENTERPRISE
+        assert manager.source == "factory"
+        assert manager.name == "test_factory"
+        assert manager._config == config
+
     """Tests for the CorePlusSessionFactoryManager class."""
 
     @pytest.mark.asyncio

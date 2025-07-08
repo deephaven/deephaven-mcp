@@ -173,13 +173,11 @@ async def test_get_pip_packages_table_table_failure():
 @pytest.mark.asyncio
 async def test_get_dh_versions_both_versions():
     session = MagicMock()
-    df = MagicMock()
-    df.to_dict.return_value = [
-        {"Package": "deephaven-core", "Version": "1.2.3"},
-        {"Package": "deephaven_coreplus_worker", "Version": "4.5.6"},
-    ]
     arrow_table = MagicMock()
-    arrow_table.to_pandas.return_value = df
+    arrow_table.to_pydict.return_value = {
+        "Package": ["deephaven-core", "deephaven_coreplus_worker"],
+        "Version": ["1.2.3", "4.5.6"],
+    }
     with patch(
         "deephaven_mcp.queries.get_pip_packages_table",
         new=AsyncMock(return_value=arrow_table),
@@ -192,13 +190,11 @@ async def test_get_dh_versions_both_versions():
 @pytest.mark.asyncio
 async def test_get_dh_versions_only_core():
     session = MagicMock()
-    df = MagicMock()
-    df.to_dict.return_value = [
-        {"Package": "deephaven-core", "Version": "1.2.3"},
-        {"Package": "numpy", "Version": "2.0.0"},
-    ]
     arrow_table = MagicMock()
-    arrow_table.to_pandas.return_value = df
+    arrow_table.to_pydict.return_value = {
+        "Package": ["deephaven-core", "numpy"],
+        "Version": ["1.2.3", "2.0.0"],
+    }
     with patch(
         "deephaven_mcp.queries.get_pip_packages_table",
         new=AsyncMock(return_value=arrow_table),
@@ -211,13 +207,11 @@ async def test_get_dh_versions_only_core():
 @pytest.mark.asyncio
 async def test_get_dh_versions_only_coreplus():
     session = MagicMock()
-    df = MagicMock()
-    df.to_dict.return_value = [
-        {"Package": "deephaven_coreplus_worker", "Version": "4.5.6"},
-        {"Package": "pandas", "Version": "2.0.0"},
-    ]
     arrow_table = MagicMock()
-    arrow_table.to_pandas.return_value = df
+    arrow_table.to_pydict.return_value = {
+        "Package": ["deephaven_coreplus_worker", "pandas"],
+        "Version": ["4.5.6", "2.0.0"],
+    }
     with patch(
         "deephaven_mcp.queries.get_pip_packages_table",
         new=AsyncMock(return_value=arrow_table),
@@ -230,13 +224,11 @@ async def test_get_dh_versions_only_coreplus():
 @pytest.mark.asyncio
 async def test_get_dh_versions_neither():
     session = MagicMock()
-    df = MagicMock()
-    df.to_dict.return_value = [
-        {"Package": "numpy", "Version": "2.0.0"},
-        {"Package": "pandas", "Version": "2.0.0"},
-    ]
     arrow_table = MagicMock()
-    arrow_table.to_pandas.return_value = df
+    arrow_table.to_pydict.return_value = {
+        "Package": ["numpy", "pandas"],
+        "Version": ["2.0.0", "2.0.0"],
+    }
     with patch(
         "deephaven_mcp.queries.get_pip_packages_table",
         new=AsyncMock(return_value=arrow_table),

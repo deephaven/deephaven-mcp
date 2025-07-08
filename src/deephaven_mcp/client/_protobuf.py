@@ -46,7 +46,7 @@ Usage Note:
     wrap specific protobuf message types at runtime.
 """
 
-from typing import Any, NewType
+from typing import Any, NewType, override
 
 from google.protobuf.json_format import MessageToDict, MessageToJson
 from google.protobuf.message import Message
@@ -186,6 +186,7 @@ class CorePlusQueryStatus(ProtobufWrapper):
     https://docs.deephaven.io/protodoc/20240517/#io.deephaven.proto.controller.PersistentQueryStatusEnum
     """
 
+    @override
     def __init__(
         self,
         status: "deephaven_enterprise.proto.controller.PersistentQueryStatusEnum",  # noqa: F821
@@ -197,10 +198,12 @@ class CorePlusQueryStatus(ProtobufWrapper):
         """
         super().__init__(status)
 
+    @override
     def __str__(self) -> str:
         """Return the string representation of the status."""
         return self.name
 
+    @override
     def __eq__(self, other: object) -> bool:
         """Compare this status with another status or string."""
         if isinstance(other, CorePlusQueryStatus):
@@ -324,6 +327,7 @@ class CorePlusToken(ProtobufWrapper):
     https://docs.deephaven.io/protodoc/20240517/#io.deephaven.proto.auth.Token
     """
 
+    @override
     def __init__(
         self, token: "deephaven_enterprise.proto.auth_pb2.Token"  # noqa: F821
     ):
@@ -390,6 +394,7 @@ class CorePlusQueryConfig(ProtobufWrapper):
     https://docs.deephaven.io/protodoc/20240517/#io.deephaven.proto.persistent_query.PersistentQueryConfigMessage
     """
 
+    @override
     def __init__(
         self,
         config: "deephaven_enterprise.proto.persistent_query_pb2.PersistentQueryConfigMessage",  # noqa: F821
@@ -435,6 +440,7 @@ class CorePlusQueryState(ProtobufWrapper):
     https://docs.deephaven.io/protodoc/20240517/#io.deephaven.proto.persistent_query.PersistentQueryStateMessage
     """
 
+    @override
     def __init__(
         self,
         state: "deephaven_enterprise.proto.persistent_query_pb2.PersistentQueryStateMessage",  # noqa: F821
@@ -494,6 +500,7 @@ class CorePlusQueryInfo(ProtobufWrapper):
     https://docs.deephaven.io/protodoc/20240517/#io.deephaven.proto.persistent_query.PersistentQueryInfoMessage
     """
 
+    @override
     def __init__(
         self,
         info: "deephaven_enterprise.proto.persistent_query_pb2.PersistentQueryInfoMessage",  # noqa: F821

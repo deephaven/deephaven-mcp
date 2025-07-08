@@ -41,6 +41,10 @@ class BaseRegistry(abc.ABC, Generic[T]):
     Generic, async, coroutine-safe abstract base class for a registry of items.
 
     This class provides a skeletal implementation for managing a dictionary of items, including initialization, retrieval, and closure. It is designed to be subclassed to create specific types of registries.
+
+    See Also:
+        - `CommunitySessionRegistry`: A concrete implementation for managing community sessions.
+        - `CorePlusSessionFactoryRegistry`: A concrete implementation for managing enterprise factories.
     """
 
     def __init__(self):
@@ -110,7 +114,11 @@ class BaseRegistry(abc.ABC, Generic[T]):
         """
         Closes all items in the registry.
 
-        This method iterates through all items and calls their `close` method if it exists.
+        This method iterates through all items and calls their `close` method.
+
+        Raises:
+            InternalError: If any item in the registry does not have a compliant
+                async `close` method.
         """
         async with self._lock:
             if not self._initialized:
@@ -125,6 +133,13 @@ class BaseRegistry(abc.ABC, Generic[T]):
             for item in self._items.values():
                 if hasattr(item, "close") and asyncio.iscoroutinefunction(item.close):
                     await item.close()
+                else:
+                    _LOGGER.error(
+                        f"Item {item} does not have a close method or the method is not a coroutine function."
+                    )
+                    raise InternalError(
+                        f"Item {item} does not have a close method or the method is not a coroutine function."
+                    )
 
             _LOGGER.info(
                 "[%s] close command sent to all items. Processed %d items in %.2fs",
@@ -138,9 +153,8 @@ class CommunitySessionRegistry(BaseRegistry[CommunitySessionManager]):
     """
     A registry for managing `CommunitySessionManager` instances.
 
-    This class inherits from `BaseRegistry` and implements the `_load_items`
-    method to discover and create `CommunitySessionManager` objects from the
-    application's configuration data.
+    This class discovers and loads community session configurations from the
+    `community.sessions` path in the application's configuration data.
     """
 
     @override
@@ -169,11 +183,10 @@ class CommunitySessionRegistry(BaseRegistry[CommunitySessionManager]):
 
 class CorePlusSessionFactoryRegistry(BaseRegistry[CorePlusSessionFactoryManager]):
     """
-    A registry for managing CorePlusSessionFactoryManager instances.
+    A registry for managing `CorePlusSessionFactoryManager` instances.
 
-    This class inherits from `BaseRegistry` and implements the `_load_items`
-    method to discover and create `CorePlusSessionFactoryManager` objects from the
-    application's configuration data.
+    This class discovers and loads enterprise factory configurations from the
+    `enterprise.factories` path in the application's configuration data.
     """
 
     @override

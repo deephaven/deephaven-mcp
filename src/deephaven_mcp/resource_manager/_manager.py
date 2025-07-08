@@ -164,7 +164,12 @@ class CommunitySessionManager(BaseItemManager[CoreSession]):
     """
 
     def __init__(self, name: str, config: dict[str, Any]):
-        """Initializes the manager with a name and configuration."""
+        """Initializes the manager with a name and configuration.
+
+        Args:
+            name: The name of the manager instance, used for identification.
+            config: The configuration dictionary used to create the CoreSession.
+        """
         super().__init__(
             system_type=SystemType.COMMUNITY,
             source="community",
@@ -216,7 +221,18 @@ class EnterpriseSessionManager(BaseItemManager[CorePlusSession]):
         name: str,
         factory: CorePlusSessionFactory,
     ):
-        """Initializes the manager with a name and a session factory."""
+        """Initializes the manager with a name and a session factory.
+
+        Args:
+            source: The configuration source name (e.g., a file path or URL).
+            name: The name of the manager instance, used for identification.
+            factory: The CorePlusSessionFactory used to create sessions.
+
+        Note:
+            The factory instance is expected to be properly configured and
+            ready to create sessions. The manager does not validate the factory
+            instance during initialization.
+        """
         super().__init__(system_type=SystemType.ENTERPRISE, source=source, name=name)
         self._factory = factory
 
@@ -263,18 +279,25 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
     """
 
     def __init__(self, name: str, config: dict[str, Any]):
-        """Initializes the manager with a name and configuration."""
+        """Initializes the manager with a name and configuration.
+
+        Args:
+            name: The name of the manager instance, used for identification.
+            config: The configuration dictionary used to create the CorePlusSessionFactory.
+        """
         super().__init__(
             system_type=SystemType.ENTERPRISE,
-            source=name, #TODO: what source?
+            source="factory",
             name=name,
         )
         self._config = config
 
+    @override
     async def _create_item(self) -> CorePlusSessionFactory:
         """Creates the CorePlusSessionFactory from the config."""
         return await CorePlusSessionFactory.from_config(self._config)
 
+    @override
     async def _check_liveness(self, item: CorePlusSessionFactory) -> bool:
         """Checks the liveness of the factory by pinging it."""
         return await item.ping()
