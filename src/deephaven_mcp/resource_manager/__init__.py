@@ -4,6 +4,7 @@ Deephaven MCP Resource Management Public API.
 This module defines the public API for resource management in Deephaven MCP. It re-exports the core resource manager types, registries, and related enums from submodules to provide a unified interface for resource creation, caching, and lifecycle management.
 
 Exports:
+    - SystemType: Enum for backend system type (COMMUNITY, ENTERPRISE).
     - BaseItemManager: Abstract base class for managing lazily-initialized items.
     - CommunitySessionManager: Async/thread-safe manager for community sessions.
     - EnterpriseSessionManager: Async/thread-safe manager for enterprise sessions.

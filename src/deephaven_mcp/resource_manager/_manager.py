@@ -1,4 +1,19 @@
-"""Base classes and enums for Deephaven MCP session management."""
+"""
+Base classes and enums for Deephaven MCP session and factory management.
+
+This module provides the core async/coroutine-safe building blocks for managing sessions and factories
+in both community and enterprise Deephaven deployments. It defines generic, extensible manager types
+that ensure safe, lazy initialization and lifecycle management for backend resources.
+
+Key Classes:
+    SystemType: Enum for backend system type (COMMUNITY, ENTERPRISE).
+    BaseItemManager: Generic async manager for a single lazily-initialized item, with locking, caching, liveness, and close logic.
+    CommunitySessionManager: Manages a single CoreSession (community) with lazy init, caching, and liveness.
+    EnterpriseSessionManager: Manages a single CorePlusSession (enterprise) via a CorePlusSessionFactory.
+    CorePlusSessionFactoryManager: Manages a single CorePlusSessionFactory (enterprise), with liveness via ping().
+
+All managers are designed to be coroutine-safe and are suitable for use in async applications.
+"""
 
 import asyncio
 import enum

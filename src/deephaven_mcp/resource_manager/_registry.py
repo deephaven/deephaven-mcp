@@ -1,16 +1,24 @@
 """
-Provides a generic, async, and coroutine-safe base registry for managing objects.
+Async, coroutine-safe registries for Deephaven MCP resource management.
 
-This module defines the `BaseRegistry`, an abstract base class (ABC) that offers a standardized, reusable foundation for creating different types of registries. It includes core functionalities such as item caching, asynchronous initialization, and resource management, all designed to be coroutine-safe.
+This module provides a generic, reusable foundation for managing collections of objects (such as session or factory managers)
+in a coroutine-safe, async environment. It defines the abstract `BaseRegistry` and concrete registry implementations for
+community and enterprise session/factory managers.
 
-Key Features:
-    - Abstract Base Class: Defines a clear and consistent interface for all registry implementations.
-    - Coroutine-Safe: All operations are protected by an `asyncio.Lock` to ensure safe concurrent access.
-    - Generic Design: Can be subclassed to manage any type of object, not just session managers.
-    - Lifecycle Management: Includes `initialize` and `close` methods for robust lifecycle control.
+Key Classes:
+    BaseRegistry: Abstract, generic, coroutine-safe registry base class. Handles item caching, async initialization, locking, and closure.
+    CommunitySessionRegistry: Registry for managing CommunitySessionManager instances. Discovers and loads community sessions from config.
+    CorePlusSessionFactoryRegistry: Registry for managing CorePlusSessionFactoryManager instances. Discovers and loads enterprise factories from config.
 
-Subclassing `BaseRegistry`:
-    To create a new registry, you must subclass `BaseRegistry` and implement the `_load_items` abstract method. This method should contain the specific logic for loading and creating the items to be managed by the registry.
+Features:
+    - Abstract interface for all registry implementations (subclass and implement `_load_items`).
+    - Coroutine-safe: All methods use `asyncio.Lock` for safe concurrent access.
+    - Generic: Can be subclassed to manage any object type, not just sessions.
+    - Lifecycle management: Robust `initialize` and `close` methods for resource control.
+
+Usage:
+    Subclass `BaseRegistry` and implement the `_load_items` method to define how items are loaded from configuration.
+    Use the provided concrete registries for most Deephaven MCP session/factory management scenarios.
 """
 
 import abc
