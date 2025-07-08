@@ -11,7 +11,7 @@ instance and wraps returned sessions in CorePlusSession objects for consistent b
 
 Example:
     import asyncio
-    from deephaven_mcp.session_manager import CorePlusSessionFactory
+    from deephaven_mcp.resource_manager import CorePlusSessionFactory
 
     # Create a Core+ session manager connected to a server
     async def main():
@@ -35,7 +35,7 @@ Example:
 You can also directly instantiate the class with an existing SessionManager:
 
     from deephaven_enterprise.client.session_manager import SessionManager
-    from deephaven_mcp.session_manager import CorePlusSessionFactory
+    from deephaven_mcp.resource_manager import CorePlusSessionFactory
 
     # Create and wrap an existing session manager
     session_manager = SessionManager("https://myserver.example.com/iris/connection.json")
@@ -139,7 +139,7 @@ class CorePlusSessionFactory(
 
         Example:
             ```python
-            from deephaven_mcp.session_manager import CorePlusSessionFactory
+            from deephaven_mcp.resource_manager import CorePlusSessionFactory
 
             # Create a session manager connected to the server
             manager = CorePlusSessionFactory.from_url("https://myserver.example.com/iris/connection.json")
@@ -355,7 +355,7 @@ class CorePlusSessionFactory(
         Example:
             ```python
             import asyncio
-            from deephaven_mcp.session_manager import CorePlusSessionFactory
+            from deephaven_mcp.resource_manager import CorePlusSessionFactory
 
             async def create_custom_worker():
                 # Create and authenticate the session manager
@@ -611,7 +611,7 @@ class CorePlusSessionFactory(
 
         Example:
             ```python
-            from deephaven_mcp.session_manager import CorePlusSessionFactory
+            from deephaven_mcp.resource_manager import CorePlusSessionFactory
 
             async def authenticate_and_work():
                 # Create the session manager
@@ -710,7 +710,7 @@ class CorePlusSessionFactory(
 
         Example with file path:
             ```python
-            from deephaven_mcp.session_manager import CorePlusSessionFactory
+            from deephaven_mcp.resource_manager import CorePlusSessionFactory
             import asyncio
 
             async def use_private_key_auth():
@@ -798,7 +798,7 @@ class CorePlusSessionFactory(
 
         Example:
             ```python
-            from deephaven_mcp.session_manager import CorePlusSessionFactory
+            from deephaven_mcp.resource_manager import CorePlusSessionFactory
 
             async def authenticate_with_saml():
                 # Create the session manager

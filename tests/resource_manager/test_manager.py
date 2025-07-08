@@ -7,11 +7,13 @@ from unittest.mock import AsyncMock, Mock, MagicMock, call, patch
 
 import pytest
 
+from deephaven_mcp import client
 from deephaven_mcp.client import CorePlusSession
 from deephaven_mcp._exceptions import InternalError, SessionCreationError
-from deephaven_mcp.session_manager import (
+from deephaven_mcp.resource_manager import (
     BaseItemManager,
     CommunitySessionManager,
+    CorePlusSessionFactoryManager,
     EnterpriseSessionManager,
     SystemType,
 )
@@ -213,69 +215,93 @@ class TestEnterpriseSessionManager:
     @pytest.mark.asyncio
     async def test_create_item_raises_not_implemented(self):
         """Test that _create_item raises NotImplementedError."""
-        manager = EnterpriseSessionManager(
-            source="test_source",
-            name="test_enterprise",
-            factory=AsyncMock(),
-        )
+        manager = EnterpriseSessionManager(SystemType.ENTERPRISE, "test", "test_session")
         with pytest.raises(NotImplementedError):
             await manager._create_item()
 
     @pytest.mark.asyncio
     async def test_get_raises_not_implemented(self):
         """Test that get() raises NotImplementedError because _create_item is not implemented."""
-        manager = EnterpriseSessionManager(
-            source="test_source",
-            name="test_enterprise",
-            factory=AsyncMock(),
-        )
+        manager = EnterpriseSessionManager(SystemType.ENTERPRISE, "test", "test_session")
         with pytest.raises(NotImplementedError):
             await manager.get()
 
     @pytest.mark.asyncio
     async def test_close(self):
         """Test that close correctly closes the cached session."""
-        manager = EnterpriseSessionManager(
-            source="test_source",
-            name="test_enterprise",
-            factory=AsyncMock(),
-        )
-        mock_session = AsyncMock(spec=CorePlusSession)
-
-        # Manually set the cached item to bypass get()
+        # Create a manager with a mock session
+        manager = EnterpriseSessionManager(SystemType.ENTERPRISE, "test", "test_session")
+        mock_session = AsyncMock()
+        
+        # Set up the mock session to pass the liveness check
+        mock_session.is_alive = AsyncMock(return_value=True)
+        
+        # Manually set the cached item
         manager._item_cache = mock_session
 
-        # Mock _check_liveness to return True so close proceeds
-        with patch.object(
-            manager, "_check_liveness", new_callable=AsyncMock, return_value=True
-        ) as mock_check:
-            await manager.close()
-            mock_check.assert_awaited_once_with(mock_session)
-
-        # Verify the session's close method was called
+        # Call close and verify the session is closed
+        await manager.close()
         mock_session.close.assert_awaited_once()
-        # Verify the cache is cleared
         assert manager._item_cache is None
 
     @pytest.mark.asyncio
     async def test_check_liveness(self):
         """Test that _check_liveness correctly calls the session's is_alive method."""
-        mock_factory = AsyncMock()
-        manager = EnterpriseSessionManager(
-            source="test_source",
-            name="test_enterprise",
-            factory=mock_factory,
-        )
-        mock_session = AsyncMock(spec=CorePlusSession)
-        mock_session.is_alive.return_value = True
+        # Create a manager
+        manager = EnterpriseSessionManager(SystemType.ENTERPRISE, "test", "test_session")
 
-        result = await manager._check_liveness(mock_session)
-
+        # Test with a mock session where is_alive returns True
+        mock_session = AsyncMock()
+        mock_session.is_alive = AsyncMock(return_value=True)
+        assert await manager._check_liveness(mock_session) is True
         mock_session.is_alive.assert_awaited_once()
-        assert result is True
 
-        # Test when is_alive returns False
-        mock_session.is_alive.reset_mock()
-        mock_session.is_alive.return_value = False
+        # Test with a mock session where is_alive returns False
+        mock_session = AsyncMock()
+        mock_session.is_alive = AsyncMock(return_value=False)
         assert await manager._check_liveness(mock_session) is False
         mock_session.is_alive.assert_awaited_once()
+
+        # Test with a mock session where is_alive raises an exception
+        mock_session = AsyncMock()
+        mock_session.is_alive = AsyncMock(side_effect=Exception("Connection error"))
+        # The _check_liveness method in EnterpriseSessionManager does not catch exceptions,
+        # so we expect the exception to be raised
+        with pytest.raises(Exception, match="Connection error"):
+            await manager._check_liveness(mock_session)
+
+
+class TestCorePlusSessionFactoryManager:
+    """Tests for the CorePlusSessionFactoryManager class."""
+
+    @pytest.mark.asyncio
+    @patch("deephaven_mcp.client.CorePlusSessionFactory.from_config", new_callable=AsyncMock)
+    async def test_create_item(self, mock_from_config):
+        """Test that _create_item correctly calls the factory's from_config method."""
+        mock_factory = AsyncMock(spec=client.CorePlusSessionFactory)
+        mock_from_config.return_value = mock_factory
+
+        config = {"host": "localhost"}
+        manager = CorePlusSessionFactoryManager(name="test_factory", config=config)
+
+        created_factory = await manager._create_item()
+
+        assert created_factory is mock_factory
+        mock_from_config.assert_awaited_once_with(config)
+
+    @pytest.mark.asyncio
+    async def test_check_liveness(self):
+        """Test that _check_liveness correctly calls the item's ping method."""
+        mock_factory = AsyncMock(spec=client.CorePlusSessionFactory)
+        manager = CorePlusSessionFactoryManager(name="test_factory", config={})
+
+        # Test when ping returns True
+        mock_factory.ping.return_value = True
+        assert await manager._check_liveness(mock_factory) is True
+        mock_factory.ping.assert_awaited_once()
+
+        # Test when ping returns False
+        mock_factory.ping.reset_mock()
+        mock_factory.ping.return_value = False
+        assert await manager._check_liveness(mock_factory) is False
+        mock_factory.ping.assert_awaited_once()

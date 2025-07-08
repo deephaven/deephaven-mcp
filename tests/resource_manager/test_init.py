@@ -1,10 +1,10 @@
 """
-Tests for the session_manager __init__.py file.
+Tests for the resource_manager __init__.py file.
 """
 
 def test_imports_and_all():
-    import deephaven_mcp.session_manager as mod
-    from deephaven_mcp.session_manager import (
+    import deephaven_mcp.resource_manager as mod
+    from deephaven_mcp.resource_manager import (
         BaseItemManager,
         CommunitySessionManager,
         EnterpriseSessionManager,
@@ -39,7 +39,7 @@ def test_imports_and_all():
 
     # star import should bring in only expected symbols
     imported = {}
-    exec("from deephaven_mcp.session_manager import *", {}, imported)
+    exec("from deephaven_mcp.resource_manager import *", {}, imported)
     for symbol in expected_all:
         assert symbol in imported, f"{symbol} missing from star import"
     for symbol in imported:

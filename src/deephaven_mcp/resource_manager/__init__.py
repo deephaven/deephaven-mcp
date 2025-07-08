@@ -1,7 +1,7 @@
 """
-Deephaven MCP Session Management Public API.
+Deephaven MCP Resource Management Public API.
 
-This module defines the public API for session management in Deephaven MCP. It re-exports the core session manager types, session registry, and related enums from submodules to provide a unified interface for session creation, caching, and lifecycle management.
+This module defines the public API for resource management in Deephaven MCP. It re-exports the core resource manager types, registries, and related enums from submodules to provide a unified interface for resource creation, caching, and lifecycle management.
 
 Exports:
     - BaseItemManager: Abstract base class for managing lazily-initialized items.
@@ -24,8 +24,8 @@ Async Safety:
 
 Error Handling:
     - Certificate loading operations are wrapped in try-except blocks and use aiofiles for async file I/O.
-    - Session creation failures are logged and raised to the caller.
-    - Session closure failures are logged but do not prevent other operations.
+    - Resource creation failures are logged and raised to the caller.
+    - Resource closure failures are logged but do not prevent other operations.
 
 Dependencies:
     - Requires aiofiles for async file I/O.
@@ -47,6 +47,5 @@ __all__ = [
     "EnterpriseSessionManager",
     "CorePlusSessionFactoryManager",
     "CommunitySessionRegistry",
-    "CorePlusSessionFactoryRegistry",
-
+    "CorePlusSessionFactoryRegistry"
 ]

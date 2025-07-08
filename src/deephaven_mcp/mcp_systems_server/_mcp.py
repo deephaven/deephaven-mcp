@@ -31,7 +31,7 @@ from contextlib import asynccontextmanager
 import aiofiles
 from mcp.server.fastmcp import Context, FastMCP
 
-from deephaven_mcp.session_manager import SessionManager
+from deephaven_mcp.resource_manager import CommunitySessionRegistry
 from  deephaven_mcp import queries
 from deephaven_mcp import config
 
@@ -79,20 +79,21 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
         await config_manager.get_config()
         _LOGGER.info("Configuration loaded.")
 
-        session_manager = SessionManager(config_manager)
+        session_registry = CommunitySessionRegistry()
+        await session_registry.initialize(config_manager)
 
         # lock for refresh to prevent concurrent refresh operations.
         refresh_lock = asyncio.Lock()
 
         yield {
             "config_manager": config_manager,
-            "session_manager": session_manager,
+            "session_registry": session_registry,
             "refresh_lock": refresh_lock,
         }
     finally:
         _LOGGER.info("Shutting down MCP server '%s'", server.name)
-        if session_manager is not None:
-            await session_manager.clear_all_sessions()
+        if session_registry is not None:
+            await session_registry.close()
         _LOGGER.info("MCP server '%s' shut down.", server.name)
 
 
@@ -152,11 +153,11 @@ async def refresh(context: Context) -> dict:
     try:
         refresh_lock = context.request_context.lifespan_context["refresh_lock"]
         config_manager = context.request_context.lifespan_context["config_manager"]
-        session_manager = context.request_context.lifespan_context["session_manager"]
+        session_registry = context.request_context.lifespan_context["session_registry"]
 
         async with refresh_lock:
             await config_manager.clear_config_cache()
-            await session_manager.clear_all_sessions()
+            await session_registry.close()
         _LOGGER.info(
             "[refresh] Success: Worker configuration and session cache have been reloaded."
         )
@@ -218,14 +219,15 @@ async def describe_workers(context: Context) -> dict:
     )
     try:
         config_manager = context.request_context.lifespan_context["config_manager"]
-        session_manager = context.request_context.lifespan_context["session_manager"]
+        session_registry = context.request_context.lifespan_context["session_registry"]
         full_config = await config_manager.get_config()
         names = config.get_all_config_names(full_config, ["community", "sessions"])
         results = []
         for name in names:
             try:
                 # Try to get or create a session for the worker. If this fails, mark as unavailable.
-                session = await session_manager.get_or_create_session(name)
+                session_manager = await session_registry.get(name)
+                session = await session_manager.get()
                 available = session is not None and session.is_alive
             except Exception as e:
                 _LOGGER.warning(
@@ -323,8 +325,10 @@ async def table_schemas(
     )
     results = []
     try:
-        session_manager = context.request_context.lifespan_context["session_manager"]
-        session = await session_manager.get_or_create_session(worker_name)
+        #TODO: Package up these next 3 lines into a function
+        session_registry = context.request_context.lifespan_context["session_registry"]
+        session_manager = await session_registry.get(worker_name)
+        session = await session_manager.get()
         _LOGGER.info(f"[table_schemas] Session established for worker: '{worker_name}'")
 
         if table_names is not None:
@@ -429,8 +433,9 @@ async def run_script(
             async with aiofiles.open(script_path) as f:
                 script = await f.read()
 
-        session_manager = context.request_context.lifespan_context["session_manager"]
-        session = await session_manager.get_or_create_session(worker_name)
+        session_registry = context.request_context.lifespan_context["session_registry"]
+        session_manager = await session_registry.get(worker_name)
+        session = await session_manager.get()
         _LOGGER.info(f"[run_script] Session established for worker: '{worker_name}'")
 
         _LOGGER.info(f"[run_script] Executing script on worker: '{worker_name}'")
@@ -479,8 +484,9 @@ async def pip_packages(context: Context, worker_name: str) -> dict:
     _LOGGER.info(f"[pip_packages] Invoked for worker: {worker_name!r}")
     result: dict = {"success": False}
     try:
-        session_manager = context.request_context.lifespan_context["session_manager"]
-        session = await session_manager.get_or_create_session(worker_name)
+        session_registry = context.request_context.lifespan_context["session_registry"]
+        session_manager = await session_registry.get(worker_name)
+        session = await session_manager.get()
         _LOGGER.info(f"[pip_packages] Session established for worker: '{worker_name}'")
 
         # Run the pip packages script and get the table in one step

@@ -12,7 +12,7 @@ Example (standard):
     ```python
     import asyncio
     import pyarrow as pa
-    from deephaven_mcp.session_manager import CoreSessionManager
+    from deephaven_mcp.resource_manager import CoreSessionManager
 
     async def main():
         manager = CoreSessionManager("localhost", 10000)
@@ -32,7 +32,7 @@ Example (standard):
 Example (enterprise):
     ```python
     import asyncio
-    from deephaven_mcp.session_manager import CorePlusSessionManager
+    from deephaven_mcp.resource_manager import CorePlusSessionManager
 
     async def main():
         manager = CorePlusSessionManager.from_url("https://myserver.example.com/iris/connection.json")
@@ -112,7 +112,7 @@ class BaseSession(ClientObjectWrapper[Session]):
     Example:
         ```python
         import asyncio
-        from deephaven_mcp.session_manager import CoreSessionManager
+        from deephaven_mcp.resource_manager import CoreSessionManager
 
         async def main():
             manager = CoreSessionManager("localhost", 10000)
@@ -665,7 +665,7 @@ class CoreSession(BaseSession):
     Example:
         ```python
         import asyncio
-        from deephaven_mcp.session_manager import CoreSessionManager
+        from deephaven_mcp.resource_manager import CoreSessionManager
 
         async def main():
             manager = CoreSessionManager("localhost", 10000)
@@ -809,7 +809,7 @@ class CorePlusSession(BaseSession):
     Example:
         ```python
         import asyncio
-        from deephaven_mcp.session_manager import CorePlusSessionManager
+        from deephaven_mcp.resource_manager import CorePlusSessionManager
 
         async def work_with_enterprise_session():
             # Create a session manager and authenticate

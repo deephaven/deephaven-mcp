@@ -15,9 +15,9 @@ from pydeephaven import Session
 
 from deephaven_mcp import config
 from deephaven_mcp._exceptions import InternalError, SessionCreationError
-from deephaven_mcp.session_manager import CommunitySessionRegistry, CorePlusSessionFactoryRegistry
-from deephaven_mcp.session_manager._registry import BaseRegistry
-from deephaven_mcp.session_manager._manager import CommunitySessionManager
+from deephaven_mcp.resource_manager import CommunitySessionRegistry, CorePlusSessionFactoryRegistry
+from deephaven_mcp.resource_manager._registry import BaseRegistry
+from deephaven_mcp.resource_manager._manager import CommunitySessionManager
 
 
 # --- Base Registry Tests ---
@@ -234,7 +234,7 @@ async def test_community_registry_get_session_from_manager(community_session_reg
 
     # Patch the manager's get method to return our mock session
     with patch(
-        "deephaven_mcp.session_manager._manager.CommunitySessionManager.get",
+        "deephaven_mcp.resource_manager._manager.CommunitySessionManager.get",
         new=AsyncMock(return_value=mock_session),
     ) as mock_manager_get:
         manager = await community_session_registry.get("worker1")
@@ -251,7 +251,7 @@ async def test_community_registry_get_session_creation_error(community_session_r
 
     # Patch the manager's get method to raise an error
     with patch(
-        "deephaven_mcp.session_manager._manager.CommunitySessionManager.get",
+        "deephaven_mcp.resource_manager._manager.CommunitySessionManager.get",
         side_effect=SessionCreationError("Failed to connect"),
     ):
         manager = await community_session_registry.get("worker1")
@@ -279,7 +279,7 @@ def mock_factory_config_manager():
 @pytest.mark.asyncio
 async def test_factory_registry_creation(mock_factory_config_manager):
     """Test that the registry creates managers for each config entry."""
-    with patch("deephaven_mcp.session_manager._registry.CorePlusSessionFactoryManager") as mock_manager:
+    with patch("deephaven_mcp.resource_manager._registry.CorePlusSessionFactoryManager") as mock_manager:
         registry = CorePlusSessionFactoryRegistry()
         await registry.initialize(mock_factory_config_manager)
 
