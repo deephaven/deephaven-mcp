@@ -35,9 +35,9 @@ Dependencies:
 from ._manager import (
     BaseItemManager,
     CommunitySessionManager,
-    EnterpriseSessionManager,
     CorePlusSessionFactoryManager,
-    SystemType
+    EnterpriseSessionManager,
+    SystemType,
 )
 from ._registry import CommunitySessionRegistry, CorePlusSessionFactoryRegistry
 
@@ -48,5 +48,5 @@ __all__ = [
     "EnterpriseSessionManager",
     "CorePlusSessionFactoryManager",
     "CommunitySessionRegistry",
-    "CorePlusSessionFactoryRegistry"
+    "CorePlusSessionFactoryRegistry",
 ]

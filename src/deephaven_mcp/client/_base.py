@@ -109,7 +109,7 @@ class ClientObjectWrapper(Generic[T]):
             async def get_column_names(self) -> List[str]:
                 # Wrap potentially blocking operation in a background thread
                 return await asyncio.to_thread(lambda: self.wrapped.column_names)
-                
+
             async def filter(self, condition: str):
                 try:
                     # Handle potential errors with appropriate exception translation
@@ -173,7 +173,7 @@ class ClientObjectWrapper(Generic[T]):
         The wrapped object is considered an implementation detail, and direct access
         should be avoided in client code when possible. Wrapper methods provide a more
         stable API that can evolve independently of the underlying implementation.
-        
+
         This property is particularly useful in these scenarios:
         1. When implementing new wrapper methods that need to delegate to the wrapped object
         2. When accessing functionality of the wrapped object that has not yet been

@@ -30,8 +30,13 @@ Example:
 
 import asyncio
 import logging
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import deephaven_enterprise.client.auth  # pragma: no cover
 
 from deephaven_mcp._exceptions import AuthenticationError, DeephavenConnectionError
+
 from ._base import ClientObjectWrapper
 from ._protobuf import CorePlusToken
 
@@ -118,7 +123,9 @@ class CorePlusAuthClient(
             result = await asyncio.to_thread(
                 self.wrapped.authenticate, username, password, timeout
             )
-            _LOGGER.debug("[CorePlusAuthClient] User '%s' authenticated successfully.", username)
+            _LOGGER.debug(
+                "[CorePlusAuthClient] User '%s' authenticated successfully.", username
+            )
             return CorePlusToken(result)
         except ConnectionError as e:
             _LOGGER.error(f"Failed to connect to authentication service: {e}")
@@ -126,7 +133,11 @@ class CorePlusAuthClient(
                 f"Unable to connect to authentication service: {e}"
             ) from e
         except Exception as e:
-            _LOGGER.error("[CorePlusAuthClient] Authentication failed for user '%s': %s", username, e)
+            _LOGGER.error(
+                "[CorePlusAuthClient] Authentication failed for user '%s': %s",
+                username,
+                e,
+            )
             raise AuthenticationError(f"Authentication failed: {e}") from e
 
     async def authenticate_with_token(
@@ -203,12 +214,20 @@ class CorePlusAuthClient(
         Note:
             Uses asyncio.to_thread for non-blocking operation.
         """
-        _LOGGER.debug("[CorePlusAuthClient] Creating service token for service '%s' (username='%s', duration=%ds)...", service, username or '[current user]', duration_seconds)
+        _LOGGER.debug(
+            "[CorePlusAuthClient] Creating service token for service '%s' (username='%s', duration=%ds)...",
+            service,
+            username or "[current user]",
+            duration_seconds,
+        )
         try:
             result = await asyncio.to_thread(
                 self.wrapped.create_token, service, username, duration_seconds, timeout
             )
-            _LOGGER.debug("[CorePlusAuthClient] Service token for '%s' created successfully.", service)
+            _LOGGER.debug(
+                "[CorePlusAuthClient] Service token for '%s' created successfully.",
+                service,
+            )
             return CorePlusToken(result)
         except ConnectionError as e:
             _LOGGER.error(f"Failed to connect to authentication service: {e}")
@@ -216,7 +235,11 @@ class CorePlusAuthClient(
                 f"Unable to connect to authentication service: {e}"
             ) from e
         except Exception as e:
-            _LOGGER.error("[CorePlusAuthClient] Service token creation failed for '%s': %s", service, e)
+            _LOGGER.error(
+                "[CorePlusAuthClient] Service token creation failed for '%s': %s",
+                service,
+                e,
+            )
             raise AuthenticationError(f"Token creation failed: {e}") from e
 
     async def close(self) -> None:
@@ -238,10 +261,14 @@ class CorePlusAuthClient(
             Even if an exception is raised, the client is considered closed and should not be reused.
             Uses asyncio.to_thread for non-blocking operation.
         """
-        _LOGGER.debug("[CorePlusAuthClient] Closing authentication client connection...")
+        _LOGGER.debug(
+            "[CorePlusAuthClient] Closing authentication client connection..."
+        )
         try:
             await asyncio.to_thread(self.wrapped.close)
-            _LOGGER.debug("[CorePlusAuthClient] Authentication client connection closed.")
+            _LOGGER.debug(
+                "[CorePlusAuthClient] Authentication client connection closed."
+            )
         except ConnectionError as e:
             _LOGGER.error(f"Connection error while closing auth client: {e}")
             raise DeephavenConnectionError(

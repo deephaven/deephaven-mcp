@@ -1,5 +1,5 @@
 """
-Deephaven Python Client Interface
+Deephaven Python Client Interface.
 
 This module provides the main entry point for interacting with Deephaven servers via Python. It exposes
 all major client wrappers and utilities for both standard and enterprise (Core+) features. All classes
@@ -44,7 +44,7 @@ from ._protobuf import (
     CorePlusToken,
     ProtobufWrapper,
 )
-from ._session import BaseSession, CoreSession, CorePlusSession
+from ._session import BaseSession, CorePlusSession, CoreSession
 from ._session_factory import CorePlusSessionFactory
 
 __all__ = [

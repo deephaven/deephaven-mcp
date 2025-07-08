@@ -15,13 +15,16 @@ from pydeephaven import Session
 
 from deephaven_mcp import config
 from deephaven_mcp._exceptions import InternalError, SessionCreationError
-from deephaven_mcp.resource_manager import CommunitySessionRegistry, CorePlusSessionFactoryRegistry
-from deephaven_mcp.resource_manager._registry import BaseRegistry
-from deephaven_mcp.resource_manager._manager import CommunitySessionManager
 from deephaven_mcp.resource_manager import _registry  # noqa: F401
-
+from deephaven_mcp.resource_manager import (
+    CommunitySessionRegistry,
+    CorePlusSessionFactoryRegistry,
+)
+from deephaven_mcp.resource_manager._manager import CommunitySessionManager
+from deephaven_mcp.resource_manager._registry import BaseRegistry
 
 # --- Base Registry Tests ---
+
 
 class MockItem:
     """A mock item with a close method for testing."""
@@ -128,6 +131,7 @@ async def test_close_calls_close_on_items(registry, mock_base_config_manager):
 
 # --- Community Session Registry Tests ---
 
+
 @pytest.fixture
 def mock_community_config_manager():
     """Fixture for a mock ConfigManager."""
@@ -158,14 +162,18 @@ def test_community_registry_construction(community_session_registry):
 
 
 @pytest.mark.asyncio
-async def test_community_registry_initialize(community_session_registry, mock_community_config_manager):
+async def test_community_registry_initialize(
+    community_session_registry, mock_community_config_manager
+):
     """Test that initialize() populates session managers correctly."""
     await community_session_registry.initialize(mock_community_config_manager)
     assert community_session_registry._initialized
     assert len(community_session_registry._items) == 2
     assert "worker1" in community_session_registry._items
     assert "worker2" in community_session_registry._items
-    assert isinstance(community_session_registry._items["worker1"], CommunitySessionManager)
+    assert isinstance(
+        community_session_registry._items["worker1"], CommunitySessionManager
+    )
 
     # Test idempotency
     await community_session_registry.initialize(mock_community_config_manager)
@@ -173,7 +181,9 @@ async def test_community_registry_initialize(community_session_registry, mock_co
 
 
 @pytest.mark.asyncio
-async def test_community_registry_methods_raise_before_initialize(community_session_registry):
+async def test_community_registry_methods_raise_before_initialize(
+    community_session_registry,
+):
     """Test that methods raise InternalError if called before initialization."""
     with pytest.raises(InternalError, match="CommunitySessionRegistry not initialized"):
         await community_session_registry.get("worker1")
@@ -183,7 +193,9 @@ async def test_community_registry_methods_raise_before_initialize(community_sess
 
 
 @pytest.mark.asyncio
-async def test_community_registry_get_returns_manager(community_session_registry, mock_community_config_manager):
+async def test_community_registry_get_returns_manager(
+    community_session_registry, mock_community_config_manager
+):
     """Test that get() returns the correct session manager instance."""
     await community_session_registry.initialize(mock_community_config_manager)
     manager = await community_session_registry.get("worker1")
@@ -192,7 +204,9 @@ async def test_community_registry_get_returns_manager(community_session_registry
 
 
 @pytest.mark.asyncio
-async def test_community_registry_get_unknown_raises_key_error(community_session_registry, mock_community_config_manager):
+async def test_community_registry_get_unknown_raises_key_error(
+    community_session_registry, mock_community_config_manager
+):
     """Test that get() for an unknown worker raises KeyError."""
     await community_session_registry.initialize(mock_community_config_manager)
     with pytest.raises(KeyError, match="No item found for: unknown_worker"):
@@ -200,7 +214,9 @@ async def test_community_registry_get_unknown_raises_key_error(community_session
 
 
 @pytest.mark.asyncio
-async def test_community_registry_close_calls_close_on_managers(community_session_registry, mock_community_config_manager):
+async def test_community_registry_close_calls_close_on_managers(
+    community_session_registry, mock_community_config_manager
+):
     """Test that close() calls close() on each manager but does not clear the registry."""
     await community_session_registry.initialize(mock_community_config_manager)
 
@@ -226,7 +242,9 @@ async def test_community_registry_close_calls_close_on_managers(community_sessio
 
 
 @pytest.mark.asyncio
-async def test_community_registry_get_session_from_manager(community_session_registry, mock_community_config_manager):
+async def test_community_registry_get_session_from_manager(
+    community_session_registry, mock_community_config_manager
+):
     """Test the full flow of getting a session via the registry and manager."""
     await community_session_registry.initialize(mock_community_config_manager)
 
@@ -246,7 +264,9 @@ async def test_community_registry_get_session_from_manager(community_session_reg
 
 
 @pytest.mark.asyncio
-async def test_community_registry_get_session_creation_error(community_session_registry, mock_community_config_manager):
+async def test_community_registry_get_session_creation_error(
+    community_session_registry, mock_community_config_manager
+):
     """Test that SessionCreationError from the manager propagates."""
     await community_session_registry.initialize(mock_community_config_manager)
 
@@ -261,6 +281,7 @@ async def test_community_registry_get_session_creation_error(community_session_r
 
 
 # --- CorePlus Session Factory Registry Tests ---
+
 
 @pytest.fixture
 def mock_factory_config_manager():
@@ -280,7 +301,9 @@ def mock_factory_config_manager():
 @pytest.mark.asyncio
 async def test_factory_registry_creation(mock_factory_config_manager):
     """Test that the registry creates managers for each config entry."""
-    with patch("deephaven_mcp.resource_manager._registry.CorePlusSessionFactoryManager") as mock_manager:
+    with patch(
+        "deephaven_mcp.resource_manager._registry.CorePlusSessionFactoryManager"
+    ) as mock_manager:
         registry = CorePlusSessionFactoryRegistry()
         await registry.initialize(mock_factory_config_manager)
 

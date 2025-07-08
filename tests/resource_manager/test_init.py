@@ -2,16 +2,16 @@
 Tests for the resource_manager __init__.py file.
 """
 
+
 def test_imports_and_all():
     import deephaven_mcp.resource_manager as mod
     from deephaven_mcp.resource_manager import (
         BaseItemManager,
         CommunitySessionManager,
-        EnterpriseSessionManager,
-        CorePlusSessionFactoryManager,
         CommunitySessionRegistry,
+        CorePlusSessionFactoryManager,
         CorePlusSessionFactoryRegistry,
-
+        EnterpriseSessionManager,
     )
 
     # __all__ should be defined and contain all the public symbols
@@ -24,7 +24,7 @@ def test_imports_and_all():
         "CorePlusSessionFactoryManager",
         "CommunitySessionRegistry",
         "CorePlusSessionFactoryRegistry",
-        "SystemType"
+        "SystemType",
     ]
     assert sorted(mod.__all__) == sorted(expected_all)
 
@@ -35,7 +35,6 @@ def test_imports_and_all():
     assert mod.CorePlusSessionFactoryManager is CorePlusSessionFactoryManager
     assert mod.CommunitySessionRegistry is CommunitySessionRegistry
     assert mod.CorePlusSessionFactoryRegistry is CorePlusSessionFactoryRegistry
-
 
     # star import should bring in only expected symbols
     imported = {}

@@ -24,11 +24,20 @@ Usage:
 import abc
 import asyncio
 import logging
+import sys
 import time
-from typing import TypeVar, Generic, override
+from typing import TYPE_CHECKING, Generic, TypeVar
+
+if TYPE_CHECKING:
+    from typing_extensions import override  # pragma: no cover
+elif sys.version_info >= (3, 12):
+    from typing import override  # pragma: no cover
+else:
+    from typing_extensions import override  # pragma: no cover
 
 from deephaven_mcp import config
 from deephaven_mcp._exceptions import InternalError
+
 from ._manager import CommunitySessionManager, CorePlusSessionFactoryManager
 
 _LOGGER = logging.getLogger(__name__)
@@ -47,11 +56,24 @@ class BaseRegistry(abc.ABC, Generic[T]):
         - `CorePlusSessionFactoryRegistry`: A concrete implementation for managing enterprise factories.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
+        """Initialize the BaseRegistry.
+
+        This constructor sets up the internal state for the registry, including
+        the item dictionary, an asyncio lock for safe concurrent access, and
+        an initialization flag.
+
+        It's important to note that the registry is not fully operational after
+        the constructor is called. The `initialize()` method must be called and
+        awaited to load the configured items before the registry can be used.
+        """
         self._items: dict[str, T] = {}
         self._lock = asyncio.Lock()
         self._initialized = False
-        _LOGGER.info("[%s] created (must call and await initialize() after construction)", self.__class__.__name__)
+        _LOGGER.info(
+            "[%s] created (must call and await initialize() after construction)",
+            self.__class__.__name__,
+        )
 
     @abc.abstractmethod
     async def _load_items(self, config_manager: config.ConfigManager) -> None:
@@ -67,7 +89,7 @@ class BaseRegistry(abc.ABC, Generic[T]):
 
     async def initialize(self, config_manager: config.ConfigManager) -> None:
         """
-        Initializes the registry by loading all items.
+        Initialize the registry by loading all configured items.
 
         This method is idempotent and ensures that initialization is only performed once.
 
@@ -89,7 +111,7 @@ class BaseRegistry(abc.ABC, Generic[T]):
 
     async def get(self, name: str) -> T:
         """
-        Retrieves an item from the registry by name.
+        Retrieve an item from the registry by its name.
 
         Args:
             name: The name of the item to retrieve.
@@ -112,7 +134,7 @@ class BaseRegistry(abc.ABC, Generic[T]):
 
     async def close(self) -> None:
         """
-        Closes all items in the registry.
+        Close all managed items in the registry.
 
         This method iterates through all items and calls their `close` method.
 
@@ -160,7 +182,7 @@ class CommunitySessionRegistry(BaseRegistry[CommunitySessionManager]):
     @override
     async def _load_items(self, config_manager: config.ConfigManager) -> None:
         """
-        Loads session configurations and creates CommunitySessionManager instances.
+        Load session configurations and create CommunitySessionManager instances.
 
         Args:
             config_manager: The configuration manager to use for loading session configurations.
@@ -175,7 +197,11 @@ class CommunitySessionRegistry(BaseRegistry[CommunitySessionManager]):
         )
 
         for session_name, session_config in community_sessions_config.items():
-            _LOGGER.info("[%s] Loading session configuration for '%s'...", self.__class__.__name__, session_name)
+            _LOGGER.info(
+                "[%s] Loading session configuration for '%s'...",
+                self.__class__.__name__,
+                session_name,
+            )
             self._items[session_name] = CommunitySessionManager(
                 session_name, session_config
             )
@@ -192,7 +218,7 @@ class CorePlusSessionFactoryRegistry(BaseRegistry[CorePlusSessionFactoryManager]
     @override
     async def _load_items(self, config_manager: config.ConfigManager) -> None:
         """
-        Loads factory configurations and creates CorePlusSessionFactoryManager instances.
+        Load factory configurations and create CorePlusSessionFactoryManager instances.
 
         Args:
             config_manager: The configuration manager to use for loading factory configurations.
@@ -207,7 +233,11 @@ class CorePlusSessionFactoryRegistry(BaseRegistry[CorePlusSessionFactoryManager]
         )
 
         for factory_name, factory_config in factories_config.items():
-            _LOGGER.info("[%s] Loading factory configuration for '%s'...", self.__class__.__name__, factory_name)
+            _LOGGER.info(
+                "[%s] Loading factory configuration for '%s'...",
+                self.__class__.__name__,
+                factory_name,
+            )
             self._items[factory_name] = CorePlusSessionFactoryManager(
                 factory_name, factory_config
             )

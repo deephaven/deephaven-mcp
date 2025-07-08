@@ -107,6 +107,7 @@ def test___all__():
     }
     assert set(client.__all__) == expected
 
+
 def test_import_star_behavior():
     expected = {
         "ClientObjectWrapper",

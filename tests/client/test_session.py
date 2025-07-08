@@ -1,15 +1,20 @@
+import asyncio
+import os
 import sys
 import types
-import os
-import asyncio
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+
 @pytest.fixture(autouse=True)
 def patch_load_bytes():
-    with patch("deephaven_mcp.client._session.load_bytes", new=AsyncMock(return_value=b"binary")):
+    with patch(
+        "deephaven_mcp.client._session.load_bytes",
+        new=AsyncMock(return_value=b"binary"),
+    ):
         yield
+
 
 import pyarrow as pa
 import pytest
@@ -18,8 +23,8 @@ from deephaven_mcp._exceptions import (
     DeephavenConnectionError,
     QueryError,
     ResourceError,
-    SessionError,
     SessionCreationError,
+    SessionError,
 )
 
 # Patch sys.modules for enterprise imports BEFORE any tested imports
@@ -159,19 +164,27 @@ async def test_close_other_error(core_session):
 
 @pytest.mark.asyncio
 async def test_is_alive_success(core_session):
-    assert await core_session.is_alive() is True
+    assert await core_session.is_alive()
+
+
+from unittest.mock import PropertyMock
 
 
 @pytest.mark.asyncio
 async def test_is_alive_connection_error(core_session):
-    core_session.wrapped.is_alive = MagicMock(side_effect=ConnectionError("fail"))
+    type(core_session.wrapped).is_alive = PropertyMock(
+        side_effect=ConnectionError("fail")
+    )
     with pytest.raises(DeephavenConnectionError):
         await core_session.is_alive()
 
 
+from unittest.mock import PropertyMock
+
+
 @pytest.mark.asyncio
 async def test_is_alive_other_error(core_session):
-    core_session.wrapped.is_alive = MagicMock(side_effect=Exception("fail"))
+    type(core_session.wrapped).is_alive = PropertyMock(side_effect=Exception("fail"))
     with pytest.raises(SessionError):
         await core_session.is_alive()
 
@@ -342,15 +355,18 @@ def test_repr_minimal():
 
 # ========== CoreSession.from_config tests (migrated from test_core_session.py) ========== #
 
+
 @pytest.mark.asyncio
 async def test_core_from_config_session_creation_error(monkeypatch):
     class FailingPDHSession:
         def __init__(self, *args, **kwargs):
             raise RuntimeError("session creation failed")
+
     monkeypatch.setattr("pydeephaven.Session", FailingPDHSession)
     with pytest.raises(SessionCreationError) as exc_info:
         await CoreSession.from_config({"host": "localhost"})
     assert "Failed to create Deephaven Community (Core) Session" in str(exc_info.value)
+
 
 @pytest.mark.asyncio
 async def test_core_from_config_invalid_not_dict(monkeypatch):
@@ -358,6 +374,7 @@ async def test_core_from_config_invalid_not_dict(monkeypatch):
     with pytest.raises(Exception) as exc_info:
         await CoreSession.from_config("not a dict")
     assert "dictionary" in str(exc_info.value) or "dict" in str(exc_info.value)
+
 
 @pytest.mark.asyncio
 async def test_core_from_config_invalid_unknown_field(monkeypatch):
@@ -367,6 +384,7 @@ async def test_core_from_config_invalid_unknown_field(monkeypatch):
         await CoreSession.from_config(config)
     assert "Unknown field 'bad_field'" in str(exc_info.value)
 
+
 @pytest.mark.asyncio
 async def test_core_from_config_invalid_mutually_exclusive(monkeypatch):
     # Both auth_token and auth_token_env_var set
@@ -374,6 +392,7 @@ async def test_core_from_config_invalid_mutually_exclusive(monkeypatch):
     with pytest.raises(Exception) as exc_info:
         await CoreSession.from_config(config)
     assert "both 'auth_token' and 'auth_token_env_var' are set" in str(exc_info.value)
+
 
 @pytest.mark.asyncio
 async def test_core_from_config_invalid_type(monkeypatch):
@@ -383,13 +402,13 @@ async def test_core_from_config_invalid_type(monkeypatch):
         await CoreSession.from_config(config)
     assert "type" in str(exc_info.value) or "int" in str(exc_info.value)
 
+
 @pytest.mark.asyncio
 async def test_core_from_config_valid_minimal(monkeypatch):
     config = {"host": "localhost"}
     monkeypatch.setattr("pydeephaven.Session", DummyPDHSession)
     session = await CoreSession.from_config(config)
     assert isinstance(session, CoreSession)
-
 
 
 @pytest.mark.asyncio
@@ -411,13 +430,20 @@ async def test_core_from_config_success(monkeypatch):
     session = await CoreSession.from_config(config)
     assert isinstance(session, CoreSession)
     assert isinstance(session.wrapped, DummyPDHSession)
+
+
 @pytest.mark.asyncio
 async def test_core_from_config_tls_file_error(monkeypatch):
     from unittest.mock import AsyncMock
-    monkeypatch.setattr("deephaven_mcp.client._session.load_bytes", AsyncMock(side_effect=IOError("fail")))
+
+    monkeypatch.setattr(
+        "deephaven_mcp.client._session.load_bytes",
+        AsyncMock(side_effect=IOError("fail")),
+    )
     config = {"tls_root_certs": "/bad/path"}
     with pytest.raises(IOError):
         await CoreSession.from_config(config)
+
 
 @pytest.mark.asyncio
 async def test_core_from_config_auth_token_from_env_var(monkeypatch):
@@ -430,6 +456,7 @@ async def test_core_from_config_auth_token_from_env_var(monkeypatch):
     assert isinstance(session, CoreSession)
     monkeypatch.delenv(env_var)
 
+
 @pytest.mark.asyncio
 async def test_core_from_config_auth_token_env_var_not_set(monkeypatch, caplog):
     env_var = "MY_MISSING_TOKEN_VAR"
@@ -438,7 +465,11 @@ async def test_core_from_config_auth_token_env_var_not_set(monkeypatch, caplog):
     monkeypatch.setattr("pydeephaven.Session", DummyPDHSession)
     session = await CoreSession.from_config(config)
     assert isinstance(session, CoreSession)
-    assert f"Environment variable {env_var} specified for auth_token but not found. Using empty token." in caplog.text
+    assert (
+        f"Environment variable {env_var} specified for auth_token but not found. Using empty token."
+        in caplog.text
+    )
+
 
 @pytest.mark.asyncio
 async def test_core_from_config_auth_token_from_config(monkeypatch):
@@ -448,6 +479,7 @@ async def test_core_from_config_auth_token_from_config(monkeypatch):
     session = await CoreSession.from_config(config)
     assert isinstance(session, CoreSession)
 
+
 @pytest.mark.asyncio
 async def test_core_from_config_no_auth_token(monkeypatch):
     config = {"host": "localhost"}
@@ -455,37 +487,93 @@ async def test_core_from_config_no_auth_token(monkeypatch):
     session = await CoreSession.from_config(config)
     assert isinstance(session, CoreSession)
 
+
 @pytest.mark.asyncio
-@pytest.mark.parametrize("cfg,expected", [
-    ({"host": "localhost"}, {
-        "host": "localhost", "port": None, "auth_type": "Anonymous", "auth_token": "", "never_timeout": False,
-        "session_type": "python", "use_tls": False, "tls_root_certs": None, "client_cert_chain": None, "client_private_key": None
-    }),
-    ({"host": "localhost", "port": 123}, {
-        "host": "localhost", "port": 123, "auth_type": "Anonymous", "auth_token": "", "never_timeout": False,
-        "session_type": "python", "use_tls": False, "tls_root_certs": None, "client_cert_chain": None, "client_private_key": None
-    }),
-    ({"host": "localhost", "auth_type": "token", "auth_token": "tok"}, {
-        "host": "localhost", "port": None, "auth_type": "token", "auth_token": "tok", "never_timeout": False,
-        "session_type": "python", "use_tls": False, "tls_root_certs": None, "client_cert_chain": None, "client_private_key": None
-    }),
-    ({"host": "localhost", "never_timeout": True, "session_type": "custom"}, {
-        "host": "localhost", "port": None, "auth_type": "Anonymous", "auth_token": "", "never_timeout": True,
-        "session_type": "custom", "use_tls": False, "tls_root_certs": None, "client_cert_chain": None, "client_private_key": None
-    }),
-])
+@pytest.mark.parametrize(
+    "cfg,expected",
+    [
+        (
+            {"host": "localhost"},
+            {
+                "host": "localhost",
+                "port": None,
+                "auth_type": "Anonymous",
+                "auth_token": "",
+                "never_timeout": False,
+                "session_type": "python",
+                "use_tls": False,
+                "tls_root_certs": None,
+                "client_cert_chain": None,
+                "client_private_key": None,
+            },
+        ),
+        (
+            {"host": "localhost", "port": 123},
+            {
+                "host": "localhost",
+                "port": 123,
+                "auth_type": "Anonymous",
+                "auth_token": "",
+                "never_timeout": False,
+                "session_type": "python",
+                "use_tls": False,
+                "tls_root_certs": None,
+                "client_cert_chain": None,
+                "client_private_key": None,
+            },
+        ),
+        (
+            {"host": "localhost", "auth_type": "token", "auth_token": "tok"},
+            {
+                "host": "localhost",
+                "port": None,
+                "auth_type": "token",
+                "auth_token": "tok",
+                "never_timeout": False,
+                "session_type": "python",
+                "use_tls": False,
+                "tls_root_certs": None,
+                "client_cert_chain": None,
+                "client_private_key": None,
+            },
+        ),
+        (
+            {"host": "localhost", "never_timeout": True, "session_type": "custom"},
+            {
+                "host": "localhost",
+                "port": None,
+                "auth_type": "Anonymous",
+                "auth_token": "",
+                "never_timeout": True,
+                "session_type": "custom",
+                "use_tls": False,
+                "tls_root_certs": None,
+                "client_cert_chain": None,
+                "client_private_key": None,
+            },
+        ),
+    ],
+)
 async def test_core_from_config_defaults(monkeypatch, cfg, expected):
     monkeypatch.setattr("pydeephaven.Session", DummyPDHSession)
     session = await CoreSession.from_config(cfg)
-    actual = session.wrapped.__dict__ if hasattr(session.wrapped, "__dict__") else {k: getattr(session.wrapped, k, None) for k in expected}
+    actual = (
+        session.wrapped.__dict__
+        if hasattr(session.wrapped, "__dict__")
+        else {k: getattr(session.wrapped, k, None) for k in expected}
+    )
     assert isinstance(session, CoreSession)
+
 
 @pytest.mark.asyncio
 @pytest.mark.asyncio
 async def test_core_from_config_tls_and_client_keys(monkeypatch):
     # All present
     config = {
-        "host": "localhost", "tls_root_certs": "/no/such/file/a", "client_cert_chain": "/no/such/file/b", "client_private_key": "/no/such/file/c"
+        "host": "localhost",
+        "tls_root_certs": "/no/such/file/a",
+        "client_cert_chain": "/no/such/file/b",
+        "client_private_key": "/no/such/file/c",
     }
     monkeypatch.setattr("pydeephaven.Session", DummyPDHSession)
     session = await CoreSession.from_config(config)
@@ -614,14 +702,14 @@ async def test_pqinfo_success(core_plus_session):
 
 @pytest.mark.asyncio
 async def test_pqinfo_connection_error(core_plus_session):
-    core_plus_session._session.pqinfo = MagicMock(side_effect=ConnectionError("fail"))
+    core_plus_session.wrapped.pqinfo = MagicMock(side_effect=ConnectionError("fail"))
     with pytest.raises(DeephavenConnectionError):
         await core_plus_session.pqinfo()
 
 
 @pytest.mark.asyncio
 async def test_pqinfo_other_error(core_plus_session):
-    core_plus_session._session.pqinfo = MagicMock(side_effect=Exception("fail"))
+    core_plus_session.wrapped.pqinfo = MagicMock(side_effect=Exception("fail"))
     with pytest.raises(QueryError):
         await core_plus_session.pqinfo()
 
@@ -677,12 +765,12 @@ async def test_live_table_other_error(core_plus_session):
 @pytest.mark.asyncio
 async def test_catalog_table_connection_error(core_plus_session):
     # Patch to raise ConnectionError first
-    core_plus_session._session.catalog_table = MagicMock(
+    core_plus_session.wrapped.catalog_table = MagicMock(
         side_effect=ConnectionError("fail")
     )
     with pytest.raises(DeephavenConnectionError):
         await core_plus_session.catalog_table()
     # Patch to raise generic Exception
-    core_plus_session._session.catalog_table = MagicMock(side_effect=Exception("fail"))
+    core_plus_session.wrapped.catalog_table = MagicMock(side_effect=Exception("fail"))
     with pytest.raises(QueryError):
         await core_plus_session.catalog_table()

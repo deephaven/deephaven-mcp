@@ -1,8 +1,8 @@
 import sys
 import types
 
+# TODO: remove this file and handle the imports on their own...
 
-#TODO: remove this file and handle the imports on their own...
 
 def pytest_sessionstart(session):
     """
@@ -12,6 +12,7 @@ def pytest_sessionstart(session):
     """
     try:
         import deephaven_enterprise.client.controller
+
         # Real package is present, do not patch sys.modules
     except ImportError:
         enterprise_modules = [

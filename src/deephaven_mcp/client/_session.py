@@ -52,14 +52,14 @@ Example (enterprise):
         # Create another session factory
         factory2 = await CorePlusSessionFactory.from_config({"url": "https://myserver.example.com/iris/connection.json"})
         await factory2.password("username", "password")
-        
+
         # Connect to a worker
         session = await factory2.connect_to_new_worker()
-        
+
         # Access enterprise-specific features
         query_info = await session.pqinfo()
         historical_table = await session.historical_table("my_namespace", "my_table")
-        
+
     asyncio.run(main())
     ```
 
@@ -72,41 +72,54 @@ race conditions.
 
 import asyncio
 import logging
+import os
+import sys
+from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 import pyarrow as pa
 from pydeephaven import Session
 from pydeephaven.query import Query
 from pydeephaven.table import InputTable, Table
 
+if TYPE_CHECKING:
+    import deephaven_enterprise.client.session_manager  # pragma: no cover
+    from typing_extensions import override  # pragma: no cover
+elif sys.version_info >= (3, 12):
+    from typing import override  # pragma: no cover
+else:
+    from typing_extensions import override  # pragma: no cover
+
 from deephaven_mcp._exceptions import (
     DeephavenConnectionError,
     QueryError,
     ResourceError,
+    SessionCreationError,
     SessionError,
 )
+from deephaven_mcp.config import (
+    CommunitySessionConfigurationError,
+    redact_community_session_config,
+    validate_single_community_session_config,
+)
+from deephaven_mcp.io import load_bytes
 
 from ._base import ClientObjectWrapper
-from typing import override
 from ._protobuf import CorePlusQueryInfo
-import os
-from deephaven_mcp.io import load_bytes
-from deephaven_mcp.config import redact_community_session_config
-from deephaven_mcp._exceptions import SessionCreationError
-from typing import Any
-from deephaven_mcp.config import validate_single_community_session_config, CommunitySessionConfigurationError
-
 
 _LOGGER = logging.getLogger(__name__)
 
 
-class BaseSession(ClientObjectWrapper[Session]):
+T = TypeVar("T", bound=Session)
+
+
+class BaseSession(ClientObjectWrapper[T], Generic[T]):
     """
     Base class for asynchronous Deephaven session wrappers.
 
     Provides a unified async interface for all Deephaven session types (standard and enterprise).
     All blocking operations are executed using `asyncio.to_thread` to prevent blocking the event loop.
     Intended for subclassing by `CoreSession` (standard) and `CorePlusSession` (enterprise).
-    
+
     Key Features:
         - Asynchronous API: Converts synchronous Deephaven session operations to async coroutines
         - Non-blocking: All potentially blocking operations run in separate threads
@@ -136,16 +149,16 @@ class BaseSession(ClientObjectWrapper[Session]):
         async def main():
             manager = CoreSessionManager("localhost", 10000)
             session = await manager.get_session()
-            
+
             # Create a time table
             table = await session.time_table("PT1S")
-            
+
             # Query and transform the table
             result = await (await session.query(table)).update_view(["Value = i % 10"]).to_table()
-            
+
             # Display the results
             print(await result.to_string())
-            
+
             # Cleanup
             await session.close()
 
@@ -153,7 +166,7 @@ class BaseSession(ClientObjectWrapper[Session]):
         ```
     """
 
-    def __init__(self, session: Session, is_enterprise: bool = False):
+    def __init__(self, session: T, is_enterprise: bool = False):
         """
         Initialize the async session wrapper with a pydeephaven Session instance.
 
@@ -269,8 +282,9 @@ class BaseSession(ClientObjectWrapper[Session]):
         """
         _LOGGER.debug("CoreSession.time_table called")
         try:
+            # TODO: remove type: ignore after pydeephaven is updated.  See https://deephaven.atlassian.net/browse/DH-19874
             return await asyncio.to_thread(
-                self.wrapped.time_table, period, start_time, blink_table
+                self.wrapped.time_table, period, start_time, blink_table  # type: ignore[arg-type]
             )
         except ConnectionError as e:
             _LOGGER.error(f"Connection error creating time table: {e}")
@@ -362,7 +376,8 @@ class BaseSession(ClientObjectWrapper[Session]):
         """
         _LOGGER.debug("CoreSession.merge_tables called with %d tables", len(tables))
         try:
-            return await asyncio.to_thread(self.wrapped.merge_tables, tables, order_by)
+            # TODO: remove type: ignore after pydeephaven is updated.  See https://deephaven.atlassian.net/browse/DH-19874
+            return await asyncio.to_thread(self.wrapped.merge_tables, tables, order_by)  # type: ignore[arg-type]
         except ConnectionError as e:
             _LOGGER.error(f"Connection error merging tables: {e}")
             raise DeephavenConnectionError(
@@ -531,8 +546,9 @@ class BaseSession(ClientObjectWrapper[Session]):
         """
         _LOGGER.debug("CoreSession.input_table called")
         try:
+            # TODO: remove type: ignore after pydeephaven is updated.  See https://deephaven.atlassian.net/browse/DH-19874
             return await asyncio.to_thread(
-                self.wrapped.input_table, schema, init_table, key_cols, blink_table
+                self.wrapped.input_table, schema, init_table, key_cols, blink_table  # type: ignore[arg-type]
             )
         except ValueError:
             # Re-raise ValueError directly for invalid inputs
@@ -590,12 +606,12 @@ class BaseSession(ClientObjectWrapper[Session]):
         This method makes a table accessible by name in the Deephaven global namespace. Once bound,
         the table can be referenced by its name in subsequent operations, queries, and by other
         users or sessions connected to the same server. This is particularly useful for:
-        
+
         - Sharing results with other users or applications
         - Creating persistent references to computed tables
         - Building up complex multi-step data processing workflows
         - Making tables available for external tools that connect to Deephaven
-        
+
         The table remains bound until explicitly removed or until the server session ends,
         depending on server configuration. Binding a table with a name that already exists
         will overwrite the previous binding.
@@ -617,25 +633,25 @@ class BaseSession(ClientObjectWrapper[Session]):
             ```python
             # Create a table
             data_table = await session.table_from_pandas(df)
-            
+
             # Make it available globally
             await session.bind_table("daily_prices", data_table)
             ```
-            
+
         Example - Creating and sharing derived tables:
             ```python
             # Create a base table
             base_table = await session.time_table("PT1S")
-            
+
             # Create derived tables through queries
             filtered = await (await session.query(base_table)).where("i % 2 == 0").to_table()
             aggregated = await (await session.query(base_table)).group_by(["i % 10 as bucket"]).agg(["count=count()"]).to_table()
-            
+
             # Bind both for access by others
             await session.bind_table("even_records", filtered)
             await session.bind_table("record_counts", aggregated)
             ```
-            
+
         Note:
             - Table bindings persist until explicitly removed or the server session ends
             - Binding large tables does not duplicate the data; only a reference is created
@@ -663,18 +679,18 @@ class BaseSession(ClientObjectWrapper[Session]):
         This method should be called when the session is no longer needed to prevent resource leaks.
         After closing, the session object should not be used for further operations. The method
         performs the following cleanup tasks:
-        
+
         - Terminates the connection to the server
         - Releases memory and other resources on the server side
         - Marks the session as closed locally
         - Logs the session closure for audit purposes
-        
+
         Resource Management Best Practices:
         1. Always explicitly close sessions when done with them
         2. Use try/finally blocks or async context managers to ensure sessions are closed
         3. Do not attempt to use a session after closing it
         4. One session instance should be closed only once
-        
+
         While the BaseSession implements __del__ to attempt cleanup during garbage collection,
         explicit closure is strongly recommended as garbage collection timing is unpredictable.
 
@@ -689,7 +705,7 @@ class BaseSession(ClientObjectWrapper[Session]):
             # Close a session when done
             await session.close()
             ```
-            
+
         Example - Using try/finally for reliable cleanup:
             ```python
             session = await manager.get_session()
@@ -701,7 +717,7 @@ class BaseSession(ClientObjectWrapper[Session]):
                 # Ensure session is closed even if an error occurs
                 await session.close()
             ```
-            
+
         Example - Using as an async context manager:
             ```python
             async with (await manager.get_session()) as session:
@@ -727,21 +743,21 @@ class BaseSession(ClientObjectWrapper[Session]):
     async def run_script(self, script: str, systemic: bool | None = None) -> None:
         """
         Asynchronously execute a Python script on the server in the context of this session.
-        
+
         This method sends Python code to be executed on the Deephaven server, allowing for
         complex operations that might not be directly exposed through the API. The script
         runs in the same context as the session, with access to:
-        
+
         - All tables bound in the global namespace
         - Server-side imports and libraries
         - Server-side Deephaven API and functionality
         - Variables and objects previously defined in the session
-        
+
         The script execution is server-side only; local variables from your client application
         are not automatically available to the script unless explicitly passed as part of the
         script string. Any output from print() statements will appear in the server logs, not
         in the client application.
-        
+
         Use cases include:
         - Complex table transformations and calculations
         - Custom data processing logic
@@ -768,7 +784,7 @@ class BaseSession(ClientObjectWrapper[Session]):
             ```python
             await session.run_script("print('Hello from server!')")
             ```
-            
+
         Example - Creating and binding a table:
             ```python
             # Define a multi-line script with proper Deephaven imports and functions
@@ -776,52 +792,52 @@ class BaseSession(ClientObjectWrapper[Session]):
             import numpy as np
             import pandas as pd
             from deephaven import new_table
-            
+
             # Create sample data
             dates = pd.date_range('20230101', periods=100)
             values = np.random.randn(100).cumsum()
-            
+
             # Create and bind a Deephaven table
             df = pd.DataFrame({'Date': dates, 'Value': values})
             table = new_table(df)
             bind_table('random_walk', table)
             '''
-            
+
             # Execute the script on the server
             await session.run_script(script)
             ```
-            
+
         Example - Executing data science calculations:
             ```python
             # Run complex calculations on server-side data
             advanced_script = '''
             from deephaven.plot import Figure
-            
+
             # Get a table that should already exist on the server
             table = get_table('daily_prices')
-            
+
             # Calculate moving averages
-            result = table.update_view([  
+            result = table.update_view([
                 'SMA_5 = rolling_avg(Price, 5)',
                 'SMA_20 = rolling_avg(Price, 20)',
                 'Signal = SMA_5 > SMA_20 ? 1 : -1'
             ])
-            
+
             # Create a plot
             fig = Figure()
             fig.plot_xy(series_name='Price', t=result.get_column('Date'), y=result.get_column('Price'))
             fig.plot_xy(series_name='SMA_5', t=result.get_column('Date'), y=result.get_column('SMA_5'))
             fig.plot_xy(series_name='SMA_20', t=result.get_column('Date'), y=result.get_column('SMA_20'))
-            
+
             # Bind results
             bind_table('moving_avg_result', result)
             bind_figure('price_chart', fig)
             '''
-            
+
             # Execute the script on the server
             await session.run_script(advanced_script)
             ```
-            
+
         Note:
             - Scripts are executed synchronously on the server but the method returns asynchronously
             - Table bindings created in the script persist after the script completes
@@ -934,7 +950,7 @@ class BaseSession(ClientObjectWrapper[Session]):
         """
         _LOGGER.debug("CoreSession.is_alive called")
         try:
-            return await asyncio.to_thread(self.wrapped.is_alive)
+            return await asyncio.to_thread(lambda: self.wrapped.is_alive)
         except ConnectionError as e:
             _LOGGER.error(f"Connection error checking session status: {e}")
             raise DeephavenConnectionError(
@@ -945,8 +961,7 @@ class BaseSession(ClientObjectWrapper[Session]):
             raise SessionError(f"Failed to check session status: {e}") from e
 
 
-
-class CoreSession(BaseSession):
+class CoreSession(BaseSession[Session]):
     """
     An asynchronous wrapper around the standard Deephaven Session class.
 
@@ -1017,8 +1032,12 @@ class CoreSession(BaseSession):
             _LOGGER.error(f"[CoreSession] Invalid community session config: {e}")
             raise
 
-        def redact(cfg):
-            return redact_community_session_config(cfg) if 'auth_token' in cfg or 'client_private_key' in cfg else cfg
+        def redact(cfg: dict[str, Any]) -> dict[str, Any]:
+            return (
+                redact_community_session_config(cfg)
+                if "auth_token" in cfg or "client_private_key" in cfg
+                else cfg
+            )
 
         # Prepare session parameters
         log_cfg = redact(worker_cfg)
@@ -1029,14 +1048,20 @@ class CoreSession(BaseSession):
         auth_token = worker_cfg.get("auth_token")
         auth_token_env_var = worker_cfg.get("auth_token_env_var")
         if auth_token_env_var:
-            _LOGGER.info(f"[Community] Attempting to read auth token from environment variable: {auth_token_env_var}")
+            _LOGGER.info(
+                f"[Community] Attempting to read auth token from environment variable: {auth_token_env_var}"
+            )
             token_from_env = os.getenv(auth_token_env_var)
             if token_from_env is not None:
                 auth_token = token_from_env
-                _LOGGER.info(f"[Community] Successfully read auth token from environment variable {auth_token_env_var}.")
+                _LOGGER.info(
+                    f"[Community] Successfully read auth token from environment variable {auth_token_env_var}."
+                )
             else:
                 auth_token = ""
-                _LOGGER.warning(f"[Community] Environment variable {auth_token_env_var} specified for auth_token but not found. Using empty token.")
+                _LOGGER.warning(
+                    f"[Community] Environment variable {auth_token_env_var} specified for auth_token but not found. Using empty token."
+                )
         elif auth_token is None:
             auth_token = ""
         never_timeout = worker_cfg.get("never_timeout", False)
@@ -1046,23 +1071,35 @@ class CoreSession(BaseSession):
         client_cert_chain = worker_cfg.get("client_cert_chain", None)
         client_private_key = worker_cfg.get("client_private_key", None)
         if tls_root_certs:
-            _LOGGER.info(f"[Community] Loading TLS root certs from: {worker_cfg.get('tls_root_certs')}")
+            _LOGGER.info(
+                f"[Community] Loading TLS root certs from: {worker_cfg.get('tls_root_certs')}"
+            )
             tls_root_certs = await load_bytes(tls_root_certs)
             _LOGGER.info("[Community] Loaded TLS root certs successfully.")
         else:
-            _LOGGER.debug("[Community] No TLS root certs provided for community session.")
+            _LOGGER.debug(
+                "[Community] No TLS root certs provided for community session."
+            )
         if client_cert_chain:
-            _LOGGER.info(f"[Community] Loading client cert chain from: {worker_cfg.get('client_cert_chain')}")
+            _LOGGER.info(
+                f"[Community] Loading client cert chain from: {worker_cfg.get('client_cert_chain')}"
+            )
             client_cert_chain = await load_bytes(client_cert_chain)
             _LOGGER.info("[Community] Loaded client cert chain successfully.")
         else:
-            _LOGGER.debug("[Community] No client cert chain provided for community session.")
+            _LOGGER.debug(
+                "[Community] No client cert chain provided for community session."
+            )
         if client_private_key:
-            _LOGGER.info(f"[Community] Loading client private key from: {worker_cfg.get('client_private_key')}")
+            _LOGGER.info(
+                f"[Community] Loading client private key from: {worker_cfg.get('client_private_key')}"
+            )
             client_private_key = await load_bytes(client_private_key)
             _LOGGER.info("[Community] Loaded client private key successfully.")
         else:
-            _LOGGER.debug("[Community] No client private key provided for community session.")
+            _LOGGER.debug(
+                "[Community] No client private key provided for community session."
+            )
         session_config = {
             "host": host,
             "port": port,
@@ -1076,27 +1113,42 @@ class CoreSession(BaseSession):
             "client_private_key": client_private_key,
         }
         log_cfg = redact(session_config)
-        _LOGGER.info(f"[Community] Prepared Deephaven Community (Core) Session config: {log_cfg}")
+        _LOGGER.info(
+            f"[Community] Prepared Deephaven Community (Core) Session config: {log_cfg}"
+        )
         try:
             from pydeephaven import Session as PDHSession
-            _LOGGER.info(f"[Community] Creating new Deephaven Community (Core) Session with config: {log_cfg}")
+
+            _LOGGER.info(
+                f"[Community] Creating new Deephaven Community (Core) Session with config: {log_cfg}"
+            )
             session = await asyncio.to_thread(PDHSession, **session_config)
         except Exception as e:
-            _LOGGER.warning(f"[Community] Failed to create Deephaven Community (Core) Session with config: {log_cfg}: {e}")
-            raise SessionCreationError(f"Failed to create Deephaven Community (Core) Session with config: {log_cfg}: {e}") from e
-        _LOGGER.info(f"[Community] Successfully created Deephaven Community (Core) Session: {session}")
+            _LOGGER.warning(
+                f"[Community] Failed to create Deephaven Community (Core) Session with config: {log_cfg}: {e}"
+            )
+            raise SessionCreationError(
+                f"Failed to create Deephaven Community (Core) Session with config: {log_cfg}: {e}"
+            ) from e
+        _LOGGER.info(
+            f"[Community] Successfully created Deephaven Community (Core) Session: {session}"
+        )
         return cls(session)
 
-class CorePlusSession(BaseSession):
-    """
-    A wrapper around the enterprise DndSession class, providing a standardized interface
-    while delegating to the underlying enterprise session implementation.
+
+class CorePlusSession(
+    BaseSession["deephaven_enterprise.client.session_manager.DndSession"]
+):
+    """A wrapper around the enterprise DndSession class.
+
+    This class provides a standardized interface while delegating to the
+    underlying enterprise session implementation.
 
     This class provides access to enterprise-specific functionality like persistent queries,
     historical data access, and catalog operations while maintaining compatibility with
     the standard Session interface. CorePlusSession inherits core functionality from BaseSession
     and adds enterprise-specific methods.
-    
+
     Architecture:
     - CorePlusSession wraps an enterprise DndSession instance
     - All operations run in background threads via asyncio.to_thread to prevent blocking
@@ -1141,7 +1193,10 @@ class CorePlusSession(BaseSession):
     """
 
     @override
-    def __init__(self, session: Session):
+    def __init__(
+        self,
+        session: "deephaven_enterprise.client.session_manager.DndSession",  # noqa: F821
+    ):
         """
         Initialize with an underlying DndSession instance.
 
@@ -1149,7 +1204,7 @@ class CorePlusSession(BaseSession):
         the standard Session class with additional enterprise capabilities like persistent queries,
         historical tables, and catalog operations. This class wraps DndSession to provide an
         asynchronous API while maintaining enterprise functionality.
-        
+
         Architecture and Design:
         - This constructor creates an asynchronous wrapper around a synchronous DndSession
         - The wrapped session object is stored as self._session (via BaseSession)
@@ -1250,7 +1305,7 @@ class CorePlusSession(BaseSession):
         """
         _LOGGER.debug("CorePlusSession.pqinfo called")
         try:
-            protobuf_obj = await asyncio.to_thread(self._session.pqinfo)
+            protobuf_obj = await asyncio.to_thread(self.wrapped.pqinfo)
             return CorePlusQueryInfo(protobuf_obj)
         except ConnectionError as e:
             _LOGGER.error(
@@ -1343,7 +1398,7 @@ class CorePlusSession(BaseSession):
         )
         try:
             return await asyncio.to_thread(
-                self._session.historical_table, namespace, table_name
+                self.wrapped.historical_table, namespace, table_name
             )
         except ConnectionError as e:
             _LOGGER.error(f"Connection error fetching historical table: {e}")
@@ -1445,7 +1500,7 @@ class CorePlusSession(BaseSession):
         )
         try:
             return await asyncio.to_thread(
-                self._session.live_table, namespace, table_name
+                self.wrapped.live_table, namespace, table_name
             )
         except ConnectionError as e:
             _LOGGER.error(f"Connection error fetching live table: {e}")
@@ -1464,12 +1519,12 @@ class CorePlusSession(BaseSession):
     async def catalog_table(self) -> Table:
         """
         Asynchronously retrieves the catalog table, which contains metadata about available tables.
-        
+
         The catalog table in Deephaven provides a comprehensive overview of all tables accessible
         to the current session. This includes both historical and live tables across all namespaces
         the user has permission to access. Each row in the catalog table represents a table in the
         system, with columns describing its properties.
-        
+
         Common columns in the catalog table include:
         - TableName: The name of the table
         - Namespace: The namespace the table belongs to
@@ -1480,63 +1535,64 @@ class CorePlusSession(BaseSession):
         - Description: Optional description of the table's contents
         - Owner: User or system that owns the table
         - AccessControl: Information about who can access the table
-        
+
         This method allows users to explore available data without needing to know specific table
         names in advance. It's particularly useful for data discovery and exploration in large or
         unfamiliar Deephaven deployments.
-        
+
         Returns:
             Table: A Table object representing the catalog of available tables in the system.
-                 Each row represents a table, with columns describing the table's properties
-                 such as name, namespace, schema, and type. The catalog itself is a live table
-                 that updates automatically when new tables are created or existing tables are
-                 removed.
-            
+                Each row represents a table, with columns describing the table's properties
+                such as name, namespace, schema, and type. The catalog itself is a live table
+                that updates automatically when new tables are created or existing tables are
+                removed.
+
         Raises:
             DeephavenConnectionError: If there is a network or connection error when
-                                    attempting to communicate with the server
+                attempting to communicate with the server
             QueryError: If the catalog table cannot be retrieved due to a server-side error
             SessionError: If the session has been closed or is otherwise invalid
-                      
+
         Example:
             ```python
             # Get the catalog table
             catalog = await session.catalog_table()
-            
+
             # Find all tables in the 'market_data' namespace
             market_tables = await (await session.query(catalog))\
                 .where("Namespace == 'market_data'")\
                 .to_table()
-                
+
             # Print the names of all available tables
             table_names = await (await session.query(catalog)).select("TableName").to_table()
             for name in await table_names.to_list():
                 print(name)
-                
+
             # Find all tables that contain price data
             price_tables = await (await session.query(catalog))\
                 .where("TableName.contains('price') || Description.contains('price')")\
                 .to_table()
-                
+
             # Get metadata for a specific table
             my_table_info = await (await session.query(catalog))\
                 .where(f"Namespace == 'analytics' && TableName == 'portfolio_metrics'")\
                 .to_table()
-                
+
             # Check if the catalog contains a specific table
             has_table = await (await session.query(catalog))\
                 .where(f"Namespace == 'market_data' && TableName == 'daily_prices'")\
                 .count() > 0
             ```
-            
+
         Note:
             - The catalog table is a live table that updates as tables are created and deleted
             - Column names and availability may vary slightly between Deephaven versions
             - Performance: For large deployments with many tables, consider using more specific
-              filters when querying the catalog table"""
+              filters when querying the catalog table
+        """
         _LOGGER.debug("CorePlusSession.catalog_table called")
         try:
-            return await asyncio.to_thread(self._session.catalog_table)
+            return await asyncio.to_thread(self.wrapped.catalog_table)
         except ConnectionError as e:
             _LOGGER.error(f"Connection error fetching catalog table: {e}")
             raise DeephavenConnectionError(

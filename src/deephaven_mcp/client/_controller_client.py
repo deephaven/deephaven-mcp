@@ -42,7 +42,10 @@ See Also:
 import asyncio
 import logging
 from collections.abc import Iterable
-from typing import cast
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    import deephaven_enterprise.client.controller  # pragma: no cover
 
 from deephaven_mcp._exceptions import (
     AuthenticationError,
@@ -80,18 +83,18 @@ class CorePlusControllerClient(
     - Starting, stopping, restarting, and deleting queries
     - Monitoring query state and health
     - Managing query metadata and configuration
-    
+
     All blocking calls are performed in separate threads using asyncio.to_thread to avoid blocking
     the event loop. The wrapper maintains the same interface as the underlying ControllerClient
     while making it compatible with asynchronous code.
-    
+
     Error handling is enhanced with specific exception types that provide more context and clarity
     than the underlying Java exceptions. Network issues typically result in DeephavenConnectionError,
     authentication problems in AuthenticationError, and query-related issues in QueryError.
-    
+
     Attributes:
         wrapped: The underlying Java ControllerClient instance being wrapped
-    
+
     Example:
         # Create a controller client from an authenticated session factory
         session_factory = await CorePlusSessionFactory.from_url("https://deephaven-server:10000")
@@ -104,14 +107,14 @@ class CorePlusControllerClient(
         # Create a temporary query configuration and add it
         config = await controller_client.make_temporary_config("my-worker", heap_size_gb=2.0)
         serial = await controller_client.add_query(config)
-        
+
         # Start the query and wait for it to initialize
         await controller_client.start_and_wait(serial)
-        
+
         # Monitor the query state
         query_info = await controller_client.get(serial)
         print(f"Query state: {query_info.state}")
-        
+
         # Clean up when done
         await controller_client.stop_query(serial)
         await controller_client.delete_query(serial)
@@ -129,6 +132,7 @@ class CorePlusControllerClient(
         - Logging is performed for entry, success, and error events at appropriate levels.
 
     """
+
     def __init__(
         self,
         controller_client: "deephaven_enterprise.client.controller.ControllerClient",  # noqa: F821
@@ -159,10 +163,10 @@ class CorePlusControllerClient(
         service. You can obtain such a token from the CorePlusAuthClient using create_token with the service
         parameter set to "PersistentQueryController". The token contains claims that determine the user's
         permissions within the controller, such as which queries they can view, create, or manage.
-        
+
         The optional timeout parameter controls how long to wait for authentication to complete before
         raising an exception. If not specified, the underlying client's default timeout is used.
-        
+
         Authentication credentials are verified against the Deephaven authentication service, and if valid,
         the controller establishes a session that will be used for subsequent operations. This session
         remains valid until either the token expires or the client is closed.
@@ -172,7 +176,7 @@ class CorePlusControllerClient(
                   PersistentQueryController service. This token must be valid and not expired.
             timeout: Optional timeout in seconds for the authentication request. If not specified,
                     the default timeout of the underlying client is used.
-                    
+
         Raises:
             AuthenticationError: If authentication fails due to invalid credentials, expired token,
                                insufficient permissions, or authentication service issues.
@@ -207,7 +211,9 @@ class CorePlusControllerClient(
         _LOGGER.debug("CorePlusControllerClient.authenticate called")
         try:
             await asyncio.to_thread(self.wrapped.authenticate, token, timeout)
-            _LOGGER.debug("[CorePlusControllerClient] Authentication completed successfully")
+            _LOGGER.debug(
+                "[CorePlusControllerClient] Authentication completed successfully"
+            )
         except ConnectionError as e:
             _LOGGER.error(f"Failed to connect to controller service: {e}")
             raise DeephavenConnectionError(
@@ -284,7 +290,9 @@ class CorePlusControllerClient(
         _LOGGER.debug("[CorePlusControllerClient] set_auth_client called")
         try:
             await asyncio.to_thread(self.wrapped.set_auth_client, auth_client.wrapped)
-            _LOGGER.debug("[CorePlusControllerClient] Authentication client set successfully")
+            _LOGGER.debug(
+                "[CorePlusControllerClient] Authentication client set successfully"
+            )
         except Exception as e:
             _LOGGER.error(f"Failed to set authentication client: {e}")
             raise AuthenticationError(
@@ -626,12 +634,10 @@ class CorePlusControllerClient(
                        quota limitations, or internal controller errors.
         """
         _LOGGER.debug(
-            f"CorePlusControllerClient.add_query called with config={query_config.config}"
+            f"CorePlusControllerClient.add_query called with config={query_config}"
         )
         try:
-            result = await asyncio.to_thread(
-                self.wrapped.add_query, query_config.config
-            )
+            result = await asyncio.to_thread(self.wrapped.add_query, query_config)
             return cast(CorePlusQuerySerial, result)
         except ConnectionError as e:
             _LOGGER.error(f"Failed to connect to controller when adding query: {e}")

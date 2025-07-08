@@ -3,13 +3,13 @@ Unit tests for Session Manager classes.
 """
 
 import asyncio
-from unittest.mock import AsyncMock, Mock, MagicMock, call, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
 
 import pytest
 
 from deephaven_mcp import client
-from deephaven_mcp.client import CorePlusSession
 from deephaven_mcp._exceptions import InternalError, SessionCreationError
+from deephaven_mcp.client import CorePlusSession
 from deephaven_mcp.resource_manager import (
     BaseItemManager,
     CommunitySessionManager,
@@ -18,8 +18,8 @@ from deephaven_mcp.resource_manager import (
     SystemType,
 )
 
-
 # Base Item Manager Tests
+
 
 class MockItem:
     """A mock item with async methods for testing."""
@@ -184,6 +184,7 @@ async def test_close_raises_on_sync_method():
 
 # Session Manager Tests
 
+
 class TestCommunitySessionManager:
     """Tests for the CommunitySessionManager class."""
 
@@ -232,14 +233,18 @@ class TestEnterpriseSessionManager:
     @pytest.mark.asyncio
     async def test_create_item_raises_not_implemented(self):
         """Test that _create_item raises NotImplementedError."""
-        manager = EnterpriseSessionManager(SystemType.ENTERPRISE, "test", "test_session")
+        manager = EnterpriseSessionManager(
+            SystemType.ENTERPRISE, "test", "test_session"
+        )
         with pytest.raises(NotImplementedError):
             await manager._create_item()
 
     @pytest.mark.asyncio
     async def test_get_raises_not_implemented(self):
         """Test that get() raises NotImplementedError because _create_item is not implemented."""
-        manager = EnterpriseSessionManager(SystemType.ENTERPRISE, "test", "test_session")
+        manager = EnterpriseSessionManager(
+            SystemType.ENTERPRISE, "test", "test_session"
+        )
         with pytest.raises(NotImplementedError):
             await manager.get()
 
@@ -247,12 +252,14 @@ class TestEnterpriseSessionManager:
     async def test_close(self):
         """Test that close correctly closes the cached session."""
         # Create a manager with a mock session
-        manager = EnterpriseSessionManager(SystemType.ENTERPRISE, "test", "test_session")
+        manager = EnterpriseSessionManager(
+            SystemType.ENTERPRISE, "test", "test_session"
+        )
         mock_session = AsyncMock()
-        
+
         # Set up the mock session to pass the liveness check
         mock_session.is_alive = AsyncMock(return_value=True)
-        
+
         # Manually set the cached item
         manager._item_cache = mock_session
 
@@ -265,7 +272,9 @@ class TestEnterpriseSessionManager:
     async def test_check_liveness(self):
         """Test that _check_liveness correctly calls the session's is_alive method."""
         # Create a manager
-        manager = EnterpriseSessionManager(SystemType.ENTERPRISE, "test", "test_session")
+        manager = EnterpriseSessionManager(
+            SystemType.ENTERPRISE, "test", "test_session"
+        )
 
         # Test with a mock session where is_alive returns True
         mock_session = AsyncMock()
@@ -304,7 +313,10 @@ class TestCorePlusSessionFactoryManager:
     """Tests for the CorePlusSessionFactoryManager class."""
 
     @pytest.mark.asyncio
-    @patch("deephaven_mcp.client.CorePlusSessionFactory.from_config", new_callable=AsyncMock)
+    @patch(
+        "deephaven_mcp.client.CorePlusSessionFactory.from_config",
+        new_callable=AsyncMock,
+    )
     async def test_create_item(self, mock_from_config):
         """Test that _create_item correctly calls the factory's from_config method."""
         mock_factory = AsyncMock(spec=client.CorePlusSessionFactory)

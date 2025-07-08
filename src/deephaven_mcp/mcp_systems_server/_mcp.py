@@ -31,9 +31,8 @@ from contextlib import asynccontextmanager
 import aiofiles
 from mcp.server.fastmcp import Context, FastMCP
 
+from deephaven_mcp import config, queries
 from deephaven_mcp.resource_manager import CommunitySessionRegistry
-from  deephaven_mcp import queries
-from deephaven_mcp import config
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -69,7 +68,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
             - 'refresh_lock': An asyncio.Lock for atomic refresh operations.
     """
     _LOGGER.info("Starting MCP server '%s'", server.name)
-    session_manager = None
+    session_registry = None
 
     try:
         config_manager = config.ConfigManager()
@@ -325,7 +324,7 @@ async def table_schemas(
     )
     results = []
     try:
-        #TODO: Package up these next 3 lines into a function
+        # TODO: Package up these next 3 lines into a function
         session_registry = context.request_context.lifespan_context["session_registry"]
         session_manager = await session_registry.get(worker_name)
         session = await session_manager.get()

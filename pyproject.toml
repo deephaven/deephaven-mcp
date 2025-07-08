@@ -3,7 +3,7 @@ name = "deephaven-mcp"
 dynamic = ["version"]
 description = "Unified Python package providing Model Context Protocol (MCP) servers for Deephaven: orchestrate Community Core data workers and power Documentation Q&A with LLMs. Supports AI-driven data workflows and agentic documentation assistance in a single deployable package."
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.10"
 authors = [
     { name = "Deephaven Data Labs", email = "support@deephaven.io" }
 ]
@@ -15,6 +15,8 @@ classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
@@ -23,6 +25,7 @@ classifiers = [
 ]
 dependencies = [
     # Core async file/network dependencies
+    "typing_extensions>=4.3.0", # Backports for typing features (override, etc.)
     "aiofiles>=23.2.1",         # Async file support
     "aiohttp>=3.11.18",         # Async HTTP client (stress testing, SSE)
     # MCP protocol and orchestration
@@ -68,7 +71,9 @@ dev = [
     "pytest>=8.0.0",           # Main test framework
     "pytest-asyncio>=0.23.0",  # Async test support for pytest
     "pytest-cov>=4.1.0",       # Code coverage reporting for pytest
-    "httpx[cli]>=0.24.0"       # HTTP client for integration and stress tests
+    "httpx[cli]>=0.24.0",      # HTTP client for integration and stress tests
+    "typing_extensions>=4.3.0" # Typing backports for dev/type checking
+
 ]
 coreplus = [
     # TODO: get deephaven-coreplus-client on PyPI

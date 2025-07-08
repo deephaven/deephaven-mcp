@@ -18,8 +18,16 @@ All managers are designed to be coroutine-safe and are suitable for use in async
 import asyncio
 import enum
 import logging
+import sys
 from abc import ABC, abstractmethod
-from typing import Any, Generic, TypeVar, override
+from typing import TYPE_CHECKING, Any, Generic, Protocol, TypeVar
+
+if TYPE_CHECKING:
+    from typing_extensions import override  # pragma: no cover
+elif sys.version_info >= (3, 12):
+    from typing import override  # pragma: no cover
+else:
+    from typing_extensions import override  # pragma: no cover
 
 from deephaven_mcp._exceptions import InternalError, SessionCreationError
 from deephaven_mcp.client import (
@@ -30,7 +38,22 @@ from deephaven_mcp.client import (
 
 _LOGGER = logging.getLogger(__name__)
 
-T = TypeVar("T")
+
+class AsyncClosable(Protocol):
+    """Protocol for types that provide an asynchronous close() method.
+
+    Any resource or session type used with BaseItemManager must implement this protocol
+    to ensure proper async cleanup. This allows mypy and other type checkers to verify
+    that the managed item supports async close(), which is required for safe resource
+    management in async contexts.
+    """
+
+    async def close(self) -> None:
+        """Close the underlying resource or session."""
+        ...  # pragma: no cover
+
+
+T = TypeVar("T", bound=AsyncClosable)
 
 
 class SystemType(str, enum.Enum):
@@ -53,7 +76,7 @@ class BaseItemManager(Generic[T], ABC):
 
     def __init__(self, system_type: SystemType, source: str, name: str):
         """
-        Initializes the manager.
+        Initialize the manager.
 
         Args:
             system_type: The system type (e.g., COMMUNITY, ENTERPRISE).
@@ -97,29 +120,46 @@ class BaseItemManager(Generic[T], ABC):
         raise NotImplementedError  # pragma: no cover
 
     async def get(self) -> T:
-        """Gets the managed item, creating it if it doesn't exist."""
+        """Get the managed item, creating it if it doesn't exist."""
         async with self._lock:
             # Double-checked locking pattern
             if self._item_cache:
                 return self._item_cache
 
-            _LOGGER.info("[%s] Creating new item for '%s'...", self.__class__.__name__, self._name)
+            _LOGGER.info(
+                "[%s] Creating new item for '%s'...",
+                self.__class__.__name__,
+                self._name,
+            )
             self._item_cache = await self._create_item()
             return self._item_cache
 
     async def is_alive(self) -> bool:
-        """Checks if the underlying item is alive."""
+        """Check if the underlying item is alive."""
         async with self._lock:
             if not self._item_cache:
                 return False
             try:
                 return await self._check_liveness(self._item_cache)
             except Exception as e:
-                _LOGGER.warning("[%s] Liveness check failed for '%s': %s", self.__class__.__name__, self._name, e)
+                _LOGGER.warning(
+                    "[%s] Liveness check failed for '%s': %s",
+                    self.__class__.__name__,
+                    self._name,
+                    e,
+                )
                 return False
 
     async def close(self) -> None:
-        """Closes the underlying item and clears the cache."""
+        """Close the underlying managed item and clear the cache.
+
+        This method performs an orderly async shutdown of the managed resource (such as a session or connection),
+        if one exists and is alive. It acquires the internal lock to ensure thread/coroutine safety, checks liveness,
+        and then calls the async close() method on the item. After closing, the item is removed from the cache.
+
+        This method is safe to call multiple times and is idempotent: if no item is cached or the item is already dead,
+        it does nothing. Use this to proactively release resources before shutdown or reconfiguration.
+        """
         async with self._lock:
             if not self._item_cache:
                 return
@@ -164,7 +204,7 @@ class CommunitySessionManager(BaseItemManager[CoreSession]):
     """
 
     def __init__(self, name: str, config: dict[str, Any]):
-        """Initializes the manager with a name and configuration.
+        """Initialize the manager with a name and configuration.
 
         Args:
             name: The name of the manager instance, used for identification.
@@ -179,18 +219,18 @@ class CommunitySessionManager(BaseItemManager[CoreSession]):
 
     @override
     async def _create_item(self) -> CoreSession:
-        """Creates the CoreSession from the config."""
+        """Create the CoreSession from the config."""
         try:
             return await CoreSession.from_config(self._config)
         except Exception as e:
-            #TODO: what exception strategy?
+            # TODO: what exception strategy?
             raise SessionCreationError(
                 f"Failed to create session for community worker {self._name}: {e}"
             ) from e
 
     @override
     async def _check_liveness(self, item: CoreSession) -> bool:
-        """Checks the liveness of the session."""
+        """Check the liveness of the session."""
         return await item.is_alive()
 
 
@@ -221,7 +261,7 @@ class EnterpriseSessionManager(BaseItemManager[CorePlusSession]):
         name: str,
         factory: CorePlusSessionFactory,
     ):
-        """Initializes the manager with a name and a session factory.
+        """Initialize the manager with a name and a session factory.
 
         Args:
             source: The configuration source name (e.g., a file path or URL).
@@ -238,8 +278,8 @@ class EnterpriseSessionManager(BaseItemManager[CorePlusSession]):
 
     @override
     async def _create_item(self) -> CorePlusSession:
-        """Creates the CorePlusSession from the provided factory."""
-        #TODO: implement
+        """Create the CorePlusSession from the provided factory."""
+        # TODO: implement
         raise NotImplementedError
         # try:
         #     session = self._factory.connect_to_persistent_query()
@@ -249,9 +289,10 @@ class EnterpriseSessionManager(BaseItemManager[CorePlusSession]):
         #     raise SessionCreationError(
         #         f"Failed to create enterprise session for {self._name}: {e}"
         #     ) from e
+
     @override
     async def _check_liveness(self, item: CorePlusSession) -> bool:
-        """Checks the liveness of the session."""
+        """Check the liveness of the session."""
         return await item.is_alive()
 
 
@@ -279,7 +320,7 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
     """
 
     def __init__(self, name: str, config: dict[str, Any]):
-        """Initializes the manager with a name and configuration.
+        """Initialize the manager with a name and configuration.
 
         Args:
             name: The name of the manager instance, used for identification.
@@ -294,10 +335,10 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
 
     @override
     async def _create_item(self) -> CorePlusSessionFactory:
-        """Creates the CorePlusSessionFactory from the config."""
+        """Create the CorePlusSessionFactory from the config."""
         return await CorePlusSessionFactory.from_config(self._config)
 
     @override
     async def _check_liveness(self, item: CorePlusSessionFactory) -> bool:
-        """Checks the liveness of the factory by pinging it."""
+        """Check the liveness of the factory by pinging it."""
         return await item.ping()

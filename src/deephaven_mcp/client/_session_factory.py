@@ -61,7 +61,11 @@ Note:
 import asyncio
 import io
 import logging
-from typing import Any
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    import deephaven_enterprise.client.session_manager  # pragma: no cover
 
 from deephaven_mcp._exceptions import (
     AuthenticationError,
@@ -72,9 +76,10 @@ from deephaven_mcp._exceptions import (
     SessionCreationError,
     SessionError,
 )
-
-from deephaven_mcp.config import validate_single_enterprise_system
-from deephaven_mcp.config import EnterpriseSystemConfigurationError
+from deephaven_mcp.config import (
+    EnterpriseSystemConfigurationError,
+    validate_single_enterprise_system,
+)
 
 from ._auth_client import CorePlusAuthClient
 
@@ -94,10 +99,10 @@ class CorePlusSessionFactory(
 
     This class wraps an existing Deephaven Core+ session manager instance, delegating all
     method calls to the underlying instance while providing enhanced documentation, robust error
-    handling, and comprehensive logging. The wrapper runs potentially blocking operations in 
+    handling, and comprehensive logging. The wrapper runs potentially blocking operations in
     separate threads using asyncio.to_thread to ensure non-blocking behavior in asynchronous
     contexts.
-    
+
     CorePlusSessionFactory serves as a primary entry point for interacting with Deephaven Core+
     servers in asynchronous applications. It manages the lifecycle of server connections and
     provides methods for authentication, worker creation, and session establishment.
@@ -130,123 +135,128 @@ class CorePlusSessionFactory(
     to prevent blocking the event loop, making this class safe to use in async applications.
     """
 
-    def __init__(self, session_manager: "deephaven_enterprise.client.session_manager.SessionManager"):
+    def __init__(
+        self,
+        session_manager: "deephaven_enterprise.client.session_manager.SessionManager",  # noqa: F821
+    ):
         """Initialize the CorePlusSessionFactory wrapper with an existing SessionManager.
 
-        This constructor creates a new CorePlusSessionFactory that wraps an existing SessionManager 
-        object, providing an asynchronous interface to its methods while preserving all functionality. 
-        This class serves as the primary entry point for interacting with Deephaven Enterprise servers, 
+        This constructor creates a new CorePlusSessionFactory that wraps an existing SessionManager
+        object, providing an asynchronous interface to its methods while preserving all functionality.
+        This class serves as the primary entry point for interacting with Deephaven Enterprise servers,
         handling authentication, worker management, and session establishment.
-        
-        The CorePlusSessionFactory is designed to provide a convenient async/await interface around 
-        the synchronous Enterprise SessionManager, running operations in separate threads to avoid 
-        blocking the event loop. This makes it ideal for integration into async applications, web 
+
+        The CorePlusSessionFactory is designed to provide a convenient async/await interface around
+        the synchronous Enterprise SessionManager, running operations in separate threads to avoid
+        blocking the event loop. This makes it ideal for integration into async applications, web
         servers, or any environment where non-blocking operations are important.
 
         Args:
             session_manager: The SessionManager instance to wrap. Must be an instance
                            of deephaven_enterprise.client.session_manager.SessionManager.
                            This should be a properly initialized session manager with valid
-                           connection information, though it does not need to be authenticated 
+                           connection information, though it does not need to be authenticated
                            yet (authentication can be performed through this wrapper's methods).
-        
+
         Raises:
             TypeError: If the provided session_manager is not an instance of the expected
                        SessionManager class from deephaven_enterprise.client.session_manager.
             ValueError: If the session_manager is not properly initialized or is missing
                        required configuration.
-        
+
         Note:
             In most cases, you should use the class factory methods instead of this constructor:
             - Use from_url() when you have a connection URL to the Deephaven server
             - Use from_config() when you have a configuration dictionary
             - Use from_json() when you have a JSON configuration file
-            
+
             These factory methods handle initialization details, dependency management, and
             error handling for you in a more convenient way than direct instantiation.
-            
+
         Example:
             ```python
             # Direct instantiation (not typically recommended)
             from deephaven_enterprise.client import session_manager
             from deephaven_mcp.client import CorePlusSessionFactory
-            
+
             # Create the underlying session manager
             sm = session_manager.SessionManager.from_url("https://example.com/iris/connection.json")
-            
+
             # Wrap it in the async factory
             factory = CorePlusSessionFactory(sm)
             ```
 
         """
         super().__init__(session_manager, is_enterprise=True)
-        _LOGGER.info("[CorePlusSessionFactory] Successfully initialized CorePlusSessionFactory")
+        _LOGGER.info(
+            "[CorePlusSessionFactory] Successfully initialized CorePlusSessionFactory"
+        )
 
     @classmethod
     def from_url(cls, url: str) -> "CorePlusSessionFactory":
         """Create a CorePlusSessionFactory connected to a Deephaven server specified by URL.
 
-        This is the recommended and most convenient way to create a CorePlusSessionFactory when you 
+        This is the recommended and most convenient way to create a CorePlusSessionFactory when you
         have a URL to a Deephaven server. The method handles all the necessary setup:
-        
+
         1. Validates and parses the provided URL
         2. Establishes initial connection information to the Deephaven server
         3. Creates and configures the underlying SessionManager
         4. Wraps the SessionManager in a CorePlusSessionFactory for asynchronous access
-        
-        The method automatically loads the required enterprise dependencies and handles 
-        initialization details and error conditions, making it much simpler than manually 
+
+        The method automatically loads the required enterprise dependencies and handles
+        initialization details and error conditions, making it much simpler than manually
         creating the session manager.
 
         Args:
             url: The connection URL for the Deephaven server. This should point to a
                 connection.json file that describes how to connect to the server,
                 typically in the format "https://<server>/iris/connection.json".
-                Both HTTP and HTTPS protocols are supported, though HTTPS is strongly 
-                recommended for production environments. The connection.json file contains 
-                server endpoints and configuration details necessary for establishing 
+                Both HTTP and HTTPS protocols are supported, though HTTPS is strongly
+                recommended for production environments. The connection.json file contains
+                server endpoints and configuration details necessary for establishing
                 connections to various services.
 
         Returns:
-            CorePlusSessionFactory: A new, initialized factory instance connected to the specified 
-                server. Note that the returned factory is not yet authenticated; you must call one 
-                of the authentication methods (password(), private_key(), or saml()) before using 
+            CorePlusSessionFactory: A new, initialized factory instance connected to the specified
+                server. Note that the returned factory is not yet authenticated; you must call one
+                of the authentication methods (password(), private_key(), or saml()) before using
                 other methods like connect_to_new_worker().
-                
+
         Raises:
             ModuleNotFoundError: If the required enterprise dependencies are not installed.
             ValueError: If the URL is malformed or cannot be parsed.
             ConnectionError: If the connection.json file cannot be accessed or downloaded.
             JsonDecodeError: If the connection.json file contains invalid JSON.
             ConfigurationError: If the connection configuration is invalid or incomplete.
-            
+
         Example:
             ```python
             import asyncio
             from deephaven_mcp.resource_manager import CorePlusSessionFactory
-            
+
             async def connect_to_server():
                 # Create the factory pointing to a Deephaven server
                 factory = CorePlusSessionFactory.from_url(
                     "https://example.deephaven.io/iris/connection.json"
                 )
-                
+
                 # Authenticate (required before using other methods)
                 await factory.password("username", "password")
-                
+
                 # Now you can create sessions, etc.
                 session = await factory.connect_to_new_worker()
                 return session
             ```
-            
+
         Note:
-            If you need to connect through a proxy, configure your system's proxy settings 
-            before calling this method, as it uses the system's default HTTP client 
+            If you need to connect through a proxy, configure your system's proxy settings
+            before calling this method, as it uses the system's default HTTP client
             configuration for the initial connection.json download.
                                    using it to connect to workers.
 
         Raises:
-            InternalError: If Core+ features are not available (deephaven-coreplus-client 
+            InternalError: If Core+ features are not available (deephaven-coreplus-client
                           package is not installed or cannot be imported).
             DeephavenConnectionError: If unable to connect to the specified URL due to
                                      network issues, invalid URL format, or server-side errors.
@@ -285,7 +295,9 @@ class CorePlusSessionFactory(
             from deephaven_enterprise.client.session_manager import SessionManager
 
             try:
-                _LOGGER.debug(f"[CorePlusSessionFactory] Creating SessionManager for URL: {url}")
+                _LOGGER.debug(
+                    f"[CorePlusSessionFactory] Creating SessionManager for URL: {url}"
+                )
                 return cls(SessionManager(url))
             except Exception as e:
                 _LOGGER.error(f"Failed to create SessionManager with URL {url}: {e}")
@@ -298,36 +310,36 @@ class CorePlusSessionFactory(
         """
         Create and authenticate a CorePlusSessionFactory from a configuration dictionary.
 
-        This factory method provides a complete solution for creating and initializing a 
+        This factory method provides a complete solution for creating and initializing a
         CorePlusSessionFactory from a configuration dictionary. It handles the entire process:
-        
+
         1. Validates the configuration format and required fields
         2. Creates a connection to the specified Deephaven server
         3. Automatically authenticates using the provided credentials
         4. Returns a fully ready-to-use factory instance
-        
-        This is the recommended approach when working with configuration files, environment-based 
-        setups, or any scenario where connection details and authentication information are stored 
+
+        This is the recommended approach when working with configuration files, environment-based
+        setups, or any scenario where connection details and authentication information are stored
         in a structured format rather than hardcoded in the application.
 
         Configuration Format:
-        The configuration dictionary must follow the standard enterprise system format with these 
+        The configuration dictionary must follow the standard enterprise system format with these
         required fields:
-        
+
         - 'connection_json_url': URL to the Deephaven server's connection.json file
         - 'auth_type': Authentication method to use ('password', 'private_key', or 'saml')
-        
+
         Additional fields based on auth_type:
-        
+
         - For 'password' authentication:
             * 'username': The username for authentication
             * Either 'password': The actual password (not recommended for production)
               or 'password_env_var': Name of environment variable containing the password
             * Optional 'effective_user': User to operate as after authentication
-        
+
         - For 'private_key' authentication:
             * 'private_key': The complete private key text (including BEGIN/END markers)
-        
+
         - For 'saml' authentication:
             * No additional fields required, but SAML must be configured on server
 
@@ -336,31 +348,31 @@ class CorePlusSessionFactory(
                 Must contain the required fields as described above.
 
         Returns:
-            CorePlusSessionFactory: A fully initialized and authenticated factory instance 
-                ready for immediate use. You can directly call methods like connect_to_new_worker() 
+            CorePlusSessionFactory: A fully initialized and authenticated factory instance
+                ready for immediate use. You can directly call methods like connect_to_new_worker()
                 without needing to perform separate authentication steps.
 
         Raises:
-            InternalError: If Core+ features are not available due to missing enterprise 
+            InternalError: If Core+ features are not available due to missing enterprise
                 dependencies (deephaven-enterprise-client package not installed).
-            DeephavenConnectionError: If unable to connect to the specified server URL, 
+            DeephavenConnectionError: If unable to connect to the specified server URL,
                 such as network issues or invalid connection.json format.
-            AuthenticationError: If authentication fails due to missing or invalid credentials, 
+            AuthenticationError: If authentication fails due to missing or invalid credentials,
                 incorrect format, or server-side authentication issues.
-            EnterpriseSystemConfigurationError: If the configuration dictionary is invalid, 
+            EnterpriseSystemConfigurationError: If the configuration dictionary is invalid,
                 missing required fields, or contains incompatible settings.
-            EnvironmentError: If a password environment variable is specified but not found 
+            EnvironmentError: If a password environment variable is specified but not found
                 in the environment.
-                
+
         Example - Password authentication with environment variable:
             ```python
             import asyncio
             import os
             from deephaven_mcp.client import CorePlusSessionFactory
-            
+
             # Set password in environment (in practice, this would be set externally)
             os.environ["DH_PASSWORD"] = "my_secure_password"
-            
+
             async def create_from_config():
                 # Define configuration with environment variable for password
                 config = {
@@ -369,41 +381,40 @@ class CorePlusSessionFactory(
                     "username": "admin",
                     "password_env_var": "DH_PASSWORD"
                 }
-                
+
                 # Create and authenticate in one step
                 factory = await CorePlusSessionFactory.from_config(config)
-                
+
                 # Use the factory directly - no authentication needed
                 session = await factory.connect_to_new_worker()
                 return session
             ```
-                
+
         Example - Private key authentication:
             ```python
             async def create_with_key():
                 # Read private key from file
                 with open("private_key.pem", "r") as f:
                     key_content = f.read()
-                    
+
                 # Define configuration with private key
                 config = {
                     "connection_json_url": "https://example.deephaven.io/iris/connection.json",
                     "auth_type": "private_key",
                     "private_key": key_content
                 }
-                
+
                 # Create and authenticate in one step
                 factory = await CorePlusSessionFactory.from_config(config)
                 return factory
             ```
-                
+
         Note:
-            This method performs authentication as part of initialization. If authentication 
-            fails, an exception will be raised and no factory will be returned. For security 
-            best practices, avoid storing credentials directly in the configuration and instead 
+            This method performs authentication as part of initialization. If authentication
+            fails, an exception will be raised and no factory will be returned. For security
+            best practices, avoid storing credentials directly in the configuration and instead
             use environment variables or secure credential storage systems.
         """
-
         if not is_enterprise_available:
             raise InternalError(
                 "Core+ features are not available (deephaven-coreplus-client not installed)"
@@ -413,17 +424,24 @@ class CorePlusSessionFactory(
         try:
             validate_single_enterprise_system("from_config", worker_cfg)
         except EnterpriseSystemConfigurationError as e:
-            _LOGGER.error(f"[CorePlusSessionFactory] Invalid enterprise system config: {e}")
+            _LOGGER.error(
+                f"[CorePlusSessionFactory] Invalid enterprise system config: {e}"
+            )
             raise
 
         url = worker_cfg["connection_json_url"]
         auth_type = worker_cfg["auth_type"]
-        _LOGGER.debug(f"[CorePlusSessionFactory] Creating SessionManager from config: url={url}, auth_type={auth_type}")
+        _LOGGER.debug(
+            f"[CorePlusSessionFactory] Creating SessionManager from config: url={url}, auth_type={auth_type}"
+        )
         from deephaven_enterprise.client.session_manager import SessionManager
+
         try:
             manager = SessionManager(url)
         except Exception as e:
-            _LOGGER.error(f"[CorePlusSessionFactory] Failed to create SessionManager with URL {url}: {e}")
+            _LOGGER.error(
+                f"[CorePlusSessionFactory] Failed to create SessionManager with URL {url}: {e}"
+            )
             raise DeephavenConnectionError(
                 f"Failed to establish connection to Deephaven at {url}: {e}"
             ) from e
@@ -440,29 +458,46 @@ class CorePlusSessionFactory(
             # Prefer password_env_var if present
             if password is None and password_env_var is not None:
                 import os
+
                 password = os.environ.get(password_env_var)
                 if password is None:
-                    _LOGGER.error(f"[CorePlusSessionFactory] Environment variable '{password_env_var}' not set for password authentication.")
+                    _LOGGER.error(
+                        f"[CorePlusSessionFactory] Environment variable '{password_env_var}' not set for password authentication."
+                    )
                     raise AuthenticationError(
                         f"Environment variable '{password_env_var}' not set for password authentication."
                     )
             if password is None:
-                _LOGGER.error("[CorePlusSessionFactory] No password provided for password authentication.")
-                raise AuthenticationError("No password provided for password authentication.")
-            await instance.password(username, password, effective_user)
+                _LOGGER.error(
+                    "[CorePlusSessionFactory] No password provided for password authentication."
+                )
+                raise AuthenticationError(
+                    "No password provided for password authentication."
+                )
+            await instance.password(
+                cast(str, username), cast(str, password), effective_user
+            )
         elif auth_type == "private_key":
             private_key = worker_cfg.get("private_key")
             if private_key is None:
-                _LOGGER.error("[CorePlusSessionFactory] No private_key provided for private_key authentication.")
-                raise AuthenticationError("No private_key provided for private_key authentication.")
+                _LOGGER.error(
+                    "[CorePlusSessionFactory] No private_key provided for private_key authentication."
+                )
+                raise AuthenticationError(
+                    "No private_key provided for private_key authentication."
+                )
             import io
+
             await instance.private_key(io.StringIO(private_key))
         else:
-            _LOGGER.warning(f"[CorePlusSessionFactory] Auth type '{auth_type}' is not supported for automatic authentication. Returning unauthenticated manager.")
+            _LOGGER.warning(
+                f"[CorePlusSessionFactory] Auth type '{auth_type}' is not supported for automatic authentication. Returning unauthenticated manager."
+            )
 
-        _LOGGER.info(f"[CorePlusSessionFactory] Successfully created and authenticated SessionManager from config (auth_type={auth_type})")
+        _LOGGER.info(
+            f"[CorePlusSessionFactory] Successfully created and authenticated SessionManager from config (auth_type={auth_type})"
+        )
         return instance
-
 
     async def close(self) -> None:
         """Terminate this factory's connections to the authentication server and controller.
@@ -471,13 +506,13 @@ class CorePlusSessionFactory(
         instance, releasing server-side resources and cleaning up any outstanding connections. It's
         critical to call this method when you're finished with the factory to avoid resource leaks
         and ensure proper cleanup of server-side resources.
-        
+
         Important behaviors:
         - All authentication tokens and credentials are invalidated
         - Network connections to the server are closed
         - Any in-progress operations may be interrupted
         - The factory becomes unusable after this call (attempting to use it will raise errors)
-        
+
         This method asynchronously delegates to the underlying session manager's close method,
         running it in a separate thread to avoid blocking the event loop. This ensures that
         long-running cleanup operations don't impact the responsiveness of your async application.
@@ -489,25 +524,25 @@ class CorePlusSessionFactory(
         Raises:
             SessionError: If terminating the connections fails for any reason, such as network
                          errors or server-side issues during the cleanup process.
-        
+
         Example:
             ```python
             import asyncio
             from deephaven_mcp.resource_manager import CorePlusSessionFactory
-            
+
             async def main():
                 # Create and authenticate the factory
                 factory = CorePlusSessionFactory.from_url("https://example.com/iris/connection.json")
                 await factory.password("username", "password")
-                
+
                 # Use the factory...
                 session = await factory.connect_to_new_worker()
-                
+
                 # When finished, properly close everything
                 await session.close()
                 await factory.close()
             ```
-            
+
         Note:
             - This method does NOT automatically close any sessions created by this factory
             - Each CorePlusSession must be closed separately before closing the factory
@@ -522,7 +557,9 @@ class CorePlusSessionFactory(
         try:
             _LOGGER.debug("[CorePlusSessionFactory] Closing session manager connection")
             await asyncio.to_thread(self.wrapped.close)
-            _LOGGER.debug("[CorePlusSessionFactory] Successfully closed session manager connection")
+            _LOGGER.debug(
+                "[CorePlusSessionFactory] Successfully closed session manager connection"
+            )
         except Exception as e:
             _LOGGER.error(f"Failed to close session manager: {e}")
             raise SessionError(
@@ -530,25 +567,25 @@ class CorePlusSessionFactory(
             ) from e
 
     async def connect_to_new_worker(
-        self,
+        self: "CorePlusSessionFactory",
         name: str | None = None,
-        heap_size_gb: float = None,
-        server: str = None,
-        extra_jvm_args: list[str] = None,
-        extra_environment_vars: list[str] = None,
+        heap_size_gb: float | None = None,
+        server: str | None = None,
+        extra_jvm_args: list[str] | None = None,
+        extra_environment_vars: list[str] | None = None,
         engine: str = "DeephavenCommunity",
         auto_delete_timeout: int | None = 600,
-        admin_groups: list[str] = None,
-        viewer_groups: list[str] = None,
+        admin_groups: list[str] | None = None,
+        viewer_groups: list[str] | None = None,
         timeout_seconds: float = 60,
-        configuration_transformer=None,
-        session_arguments: dict[str, Any] = None,
+        configuration_transformer: Callable[..., Any] | None = None,
+        session_arguments: dict[str, Any] | None = None,
     ) -> CorePlusSession:
         """Create a new worker process and establish a session connection to it.
-        
-        This method creates a new Deephaven worker process (implemented as a PersistentQuery) 
-        and returns a fully initialized session object that can be used to execute queries, 
-        create tables, and perform other Deephaven operations. The worker operates as an 
+
+        This method creates a new Deephaven worker process (implemented as a PersistentQuery)
+        and returns a fully initialized session object that can be used to execute queries,
+        create tables, and perform other Deephaven operations. The worker operates as an
         isolated execution environment with its own memory space and resources.
 
         This method asynchronously delegates to the underlying session manager's connect_to_new_worker method,
@@ -557,64 +594,64 @@ class CorePlusSessionFactory(
 
         Args:
             # Worker identification
-            name: Optional name for the worker process. If None (default), an auto-generated name based 
-                on the current timestamp will be used. A descriptive name can make it easier to 
+            name: Optional name for the worker process. If None (default), an auto-generated name based
+                on the current timestamp will be used. A descriptive name can make it easier to
                 identify your worker in monitoring tools and logs.
 
             # Resource configuration
-            heap_size_gb: JVM heap size in gigabytes. Determines the maximum amount of memory available 
-                to the worker process. Larger values are necessary for processing larger datasets, but 
+            heap_size_gb: JVM heap size in gigabytes. Determines the maximum amount of memory available
+                to the worker process. Larger values are necessary for processing larger datasets, but
                 require more system resources. If None (default), the server's default heap size is used.
-            server: Specific server to run the worker on. If None (default), the server will be chosen 
+            server: Specific server to run the worker on. If None (default), the server will be chosen
                 automatically from available resources. Useful for targeting specific hardware configurations.
-            extra_jvm_args: Additional JVM arguments to configure the worker's Java Virtual Machine. 
-                Examples include garbage collection settings ("-XX:+UseG1GC"), memory settings, or 
+            extra_jvm_args: Additional JVM arguments to configure the worker's Java Virtual Machine.
+                Examples include garbage collection settings ("-XX:+UseG1GC"), memory settings, or
                 custom Java properties. If None (default), only standard JVM arguments are used.
-            extra_environment_vars: Environment variables to set for the worker process. 
-                Format as ["NAME=value", ...]. Useful for configuring system properties, paths, 
+            extra_environment_vars: Environment variables to set for the worker process.
+                Format as ["NAME=value", ...]. Useful for configuring system properties, paths,
                 or feature flags. If None (default), the standard environment is used.
-            engine: Engine type that determines the worker's capabilities and behavior. 
-                Defaults to "DeephavenCommunity". Other options may include enterprise engines 
+            engine: Engine type that determines the worker's capabilities and behavior.
+                Defaults to "DeephavenCommunity". Other options may include enterprise engines
                 with additional features depending on your Deephaven installation.
 
             # Lifecycle management
-            auto_delete_timeout: Number of seconds of inactivity before the worker is automatically 
-                terminated and cleaned up. Defaults to 600 (10 minutes). Set to None to prevent 
-                auto-deletion (not recommended for production use as it can lead to resource leaks). 
+            auto_delete_timeout: Number of seconds of inactivity before the worker is automatically
+                terminated and cleaned up. Defaults to 600 (10 minutes). Set to None to prevent
+                auto-deletion (not recommended for production use as it can lead to resource leaks).
                 Set to 0 for immediate cleanup when the session disconnects.
-            timeout_seconds: Maximum time in seconds to wait for the worker to start before raising 
-                an exception. Defaults to 60 seconds. Increase for slower environments or when 
+            timeout_seconds: Maximum time in seconds to wait for the worker to start before raising
+                an exception. Defaults to 60 seconds. Increase for slower environments or when
                 creating workers with complex initialization processes.
 
             # Access controls
-            admin_groups: List of user groups that have administrative permissions for this worker. 
-                Admins can modify, restart, or terminate the worker. If None (default), only the 
+            admin_groups: List of user groups that have administrative permissions for this worker.
+                Admins can modify, restart, or terminate the worker. If None (default), only the
                 creator has admin privileges.
-            viewer_groups: List of user groups that have read-only access to this worker. 
-                Viewers can connect to the worker and view its data but cannot modify it. 
+            viewer_groups: List of user groups that have read-only access to this worker.
+                Viewers can connect to the worker and view its data but cannot modify it.
                 If None (default), only the creator has viewing privileges.
 
             # Advanced configuration
-            configuration_transformer: Optional function that takes and returns a configuration dictionary. 
-                This allows for advanced customization of the worker configuration beyond what the 
-                standard parameters provide. The function signature should be: 
+            configuration_transformer: Optional function that takes and returns a configuration dictionary.
+                This allows for advanced customization of the worker configuration beyond what the
+                standard parameters provide. The function signature should be:
                 `(config: dict) -> dict`. Use with caution as it may override other settings.
-            session_arguments: Additional keyword arguments to pass to the pydeephaven.Session constructor. 
-                These parameters control session behavior rather than worker configuration. 
+            session_arguments: Additional keyword arguments to pass to the pydeephaven.Session constructor.
+                These parameters control session behavior rather than worker configuration.
                 Common options include `disable_open_table_listener` or `chunk_size`.
 
         Returns:
-            CorePlusSession: A fully initialized session object connected to the new worker. This session 
-                provides methods for creating and manipulating tables, executing queries, and 
-                performing other Deephaven operations. Always close this session when finished 
+            CorePlusSession: A fully initialized session object connected to the new worker. This session
+                provides methods for creating and manipulating tables, executing queries, and
+                performing other Deephaven operations. Always close this session when finished
                 to properly release resources.
 
         Raises:
-            ResourceError: If there are insufficient server resources (memory, CPU, etc.) to create 
+            ResourceError: If there are insufficient server resources (memory, CPU, etc.) to create
                 the worker, or if resource allocation limits have been reached.
-            SessionCreationError: If an error occurs during worker creation or connection establishment, 
+            SessionCreationError: If an error occurs during worker creation or connection establishment,
                 such as invalid configuration parameters or initialization failures.
-            DeephavenConnectionError: If there is a network or communication problem with the Deephaven 
+            DeephavenConnectionError: If there is a network or communication problem with the Deephaven
                 server during worker creation or connection.
             AuthenticationError: If the current authentication is invalid or has insufficient permissions.
             TimeoutError: If worker creation exceeds the specified timeout_seconds.
@@ -631,14 +668,14 @@ class CorePlusSessionFactory(
 
                 # Create a default worker and get a session
                 session = await factory.connect_to_new_worker()
-                
+
                 # Create and manipulate tables
                 table = session.table([1, 2, 3], columns=["Value"])
                 result = table.update("DoubleValue = Value * 2")
-                
+
                 return result
             ```
-            
+
         Example - Advanced configuration:
             ```python
             async def create_specialized_worker():
@@ -652,7 +689,7 @@ class CorePlusSessionFactory(
                     heap_size_gb=16.0,
                     auto_delete_timeout=1800,  # 30 minutes
                     extra_jvm_args=[
-                        "-XX:+UseG1GC", 
+                        "-XX:+UseG1GC",
                         "-XX:MaxGCPauseMillis=200",
                         "-Ddeephaven.io.bufferSize=65536"
                     ],
@@ -660,18 +697,18 @@ class CorePlusSessionFactory(
                     admin_groups=["data_engineers"],
                     session_arguments={"chunk_size": 100000}
                 )
-                
+
                 return session
             ```
 
         Note:
-            - Creating a new worker is resource-intensive. For better resource utilization, consider 
+            - Creating a new worker is resource-intensive. For better resource utilization, consider
               using `connect_to_persistent_query` to connect to an existing worker if one is available.
             - Multiple sessions can connect to the same worker by sharing its name/ID.
-            - Worker resources are not released until all connected sessions are closed AND the 
+            - Worker resources are not released until all connected sessions are closed AND the
               auto_delete_timeout period has elapsed (if configured).
             - Always close sessions when finished to prevent resource leaks.
-            - The worker will continue to run in the background until explicitly closed or 
+            - The worker will continue to run in the background until explicitly closed or
               terminated by the auto_delete_timeout mechanism.
 
         See Also:
@@ -680,7 +717,9 @@ class CorePlusSessionFactory(
             - CorePlusSession.close: Method to disconnect from a worker and release resources
         """
         try:
-            _LOGGER.debug("[CorePlusSessionFactory] Creating new worker and connecting to it")
+            _LOGGER.debug(
+                "[CorePlusSessionFactory] Creating new worker and connecting to it"
+            )
             session = await asyncio.to_thread(
                 self.wrapped.connect_to_new_worker,
                 name=name,
@@ -696,7 +735,9 @@ class CorePlusSessionFactory(
                 configuration_transformer=configuration_transformer,
                 session_arguments=session_arguments,
             )
-            _LOGGER.debug("[CorePlusSessionFactory] Successfully connected to new worker")
+            _LOGGER.debug(
+                "[CorePlusSessionFactory] Successfully connected to new worker"
+            )
             return CorePlusSession(session)
         except ConnectionError as e:
             _LOGGER.error(f"Connection error while creating new worker: {e}")
@@ -722,8 +763,8 @@ class CorePlusSessionFactory(
         """Connect to an existing persistent query (worker) by name or serial number.
 
         This method establishes a connection to a running worker process that was previously
-        created, allowing you to access its tables and execute queries against it. Connecting 
-        to existing workers is significantly more efficient than creating new ones and enables 
+        created, allowing you to access its tables and execute queries against it. Connecting
+        to existing workers is significantly more efficient than creating new ones and enables
         multiple clients to share and collaborate on the same data and computation environment.
 
         Common use cases include:
@@ -732,62 +773,62 @@ class CorePlusSessionFactory(
         - Creating monitoring or administrative tools that connect to existing workers
         - Implementing load balancing by distributing client connections across workers
 
-        The method asynchronously delegates to the underlying session manager's connect_to_persistent_query 
-        method, running it in a separate thread to avoid blocking the event loop. The returned session 
+        The method asynchronously delegates to the underlying session manager's connect_to_persistent_query
+        method, running it in a separate thread to avoid blocking the event loop. The returned session
         is wrapped in a CorePlusSession for consistent behavior with other MCP client interfaces.
 
         Args:
-            name: The name of the persistent query (worker) to connect to. This is the human-readable 
-                identifier specified when the worker was created. Either name or serial must be provided, 
-                but not both. Names are typically easier to use in interactive scenarios and when the 
+            name: The name of the persistent query (worker) to connect to. This is the human-readable
+                identifier specified when the worker was created. Either name or serial must be provided,
+                but not both. Names are typically easier to use in interactive scenarios and when the
                 worker was created with a custom name.
-            serial: The unique serial number of the persistent query to connect to. Serial numbers are 
-                system-assigned unique identifiers that remain constant throughout a worker's lifetime. 
-                Either name or serial must be provided, but not both. Using serial is more reliable when 
+            serial: The unique serial number of the persistent query to connect to. Serial numbers are
+                system-assigned unique identifiers that remain constant throughout a worker's lifetime.
+                Either name or serial must be provided, but not both. Using serial is more reliable when
                 names might be reused or when precise worker identification is critical.
-            session_arguments: A dictionary of additional arguments to pass to the underlying 
-                pydeephaven.Session constructor. This allows customization of session behavior 
-                such as setting chunk_size for data transfer or configuring query processing options. 
+            session_arguments: A dictionary of additional arguments to pass to the underlying
+                pydeephaven.Session constructor. This allows customization of session behavior
+                such as setting chunk_size for data transfer or configuring query processing options.
                 Common options include `disable_open_table_listener` or `chunk_size`.
 
         Returns:
-            CorePlusSession: A fully initialized session object connected to the existing worker. 
-                This session provides methods for creating and manipulating tables, executing 
-                queries, and performing other Deephaven operations. The session shares the same 
-                computation environment with any other sessions connected to the same worker, 
+            CorePlusSession: A fully initialized session object connected to the existing worker.
+                This session provides methods for creating and manipulating tables, executing
+                queries, and performing other Deephaven operations. The session shares the same
+                computation environment with any other sessions connected to the same worker,
                 including access to the same tables and variables.
 
         Raises:
-            ValueError: If neither name nor serial is provided (exactly one is required), or if both 
+            ValueError: If neither name nor serial is provided (exactly one is required), or if both
                 are provided simultaneously (only one identifier should be used).
-            QueryError: If the persistent query cannot be found (doesn't exist, was terminated), is not 
+            QueryError: If the persistent query cannot be found (doesn't exist, was terminated), is not
                 in a valid state to accept connections, or cannot be accessed due to permission issues.
-            DeephavenConnectionError: If a network-related issue occurs while connecting to the worker, 
+            DeephavenConnectionError: If a network-related issue occurs while connecting to the worker,
                 such as connectivity problems or server unavailability.
-            SessionCreationError: If there's an error establishing the session connection for any other 
+            SessionCreationError: If there's an error establishing the session connection for any other
                 reason, such as version incompatibility or resource constraints.
-            AuthenticationError: If the current authentication is invalid or has insufficient permissions 
+            AuthenticationError: If the current authentication is invalid or has insufficient permissions
                 to connect to the specified worker.
-            
+
         Example - Connecting by name:
             ```python
             import asyncio
             from deephaven_mcp.resource_manager import CorePlusSessionFactory
-            
+
             async def connect_to_existing_worker():
                 # Create and authenticate the session manager
                 factory = CorePlusSessionFactory.from_url("https://myserver.example.com/iris/connection.json")
                 await factory.password("username", "password")
-                
+
                 # Connect to an existing worker by name
                 session = await factory.connect_to_persistent_query(name="analytics_worker_v2")
-                
+
                 # Access existing tables from the worker
                 my_table = session.get_table("my_table")
-                
+
                 # Close when done
                 await factory.close()
-                
+
                 return my_table
             ```
 
@@ -796,24 +837,24 @@ class CorePlusSessionFactory(
             async def connect_with_serial():
                 factory = CorePlusSessionFactory.from_url("https://myserver.example.com/iris/connection.json")
                 await factory.password("username", "password")
-                
+
                 # Get the serial number from somewhere (e.g., stored from previous session)
                 serial_number = CorePlusQuerySerial.from_string("0123456789abcdef0123456789abcdef")
-                
+
                 # Connect to the worker using its serial number
                 session = await factory.connect_to_persistent_query(serial=serial_number)
-                
+
                 return session
             ```
-        
+
         Note:
             - Multiple clients can connect to the same worker simultaneously
             - All connected sessions share the same execution environment and tables
             - Changes made by one session are visible to all other connected sessions
-            - Worker resources are only released when all sessions are closed AND the 
+            - Worker resources are only released when all sessions are closed AND the
               auto_delete_timeout has elapsed (if configured)
             - This method is more efficient than creating a new worker with connect_to_new_worker
-        
+
         See Also:
             - connect_to_new_worker: Create a new worker if one does not already exist
             - CorePlusSession.get_table: Method to access existing tables in the worker
@@ -829,7 +870,9 @@ class CorePlusSessionFactory(
                 serial=serial,
                 session_arguments=session_arguments,
             )
-            _LOGGER.debug("[CorePlusSessionFactory] Successfully connected to persistent query")
+            _LOGGER.debug(
+                "[CorePlusSessionFactory] Successfully connected to persistent query"
+            )
             return CorePlusSession(session)
         except ValueError:
             # Re-raise input validation exceptions unchanged
@@ -853,8 +896,8 @@ class CorePlusSessionFactory(
     ) -> CorePlusAuthClient:
         """Create an authentication client for interacting with the auth service directly.
 
-        This method creates a specialized client that provides low-level access to the 
-        authentication service API. The auth client can be used for advanced authentication 
+        This method creates a specialized client that provides low-level access to the
+        authentication service API. The auth client can be used for advanced authentication
         operations that aren't directly supported by the higher-level methods in this class,
         such as token management, user information retrieval, and custom authentication flows.
 
@@ -873,11 +916,11 @@ class CorePlusSessionFactory(
                 for token management, user information, and other auth-related operations.
 
         Raises:
-            DeephavenConnectionError: If a connection cannot be established with the authentication 
+            DeephavenConnectionError: If a connection cannot be established with the authentication
                 service due to network issues or service unavailability.
             AuthenticationError: If there are authentication-related issues creating the client,
                 such as invalid configuration or authorization problems.
-                
+
         Note:
             For most common authentication scenarios, you should use the higher-level methods
             like password(), private_key(), or saml() instead of creating an auth client directly.
@@ -890,7 +933,9 @@ class CorePlusSessionFactory(
             auth_client = await asyncio.to_thread(
                 self.wrapped.create_auth_client, auth_host
             )
-            _LOGGER.debug("[CorePlusSessionFactory] Successfully created authentication client")
+            _LOGGER.debug(
+                "[CorePlusSessionFactory] Successfully created authentication client"
+            )
             return CorePlusAuthClient(auth_client)
         except ConnectionError as e:
             _LOGGER.error(f"Failed to connect to authentication service: {e}")
@@ -931,68 +976,68 @@ class CorePlusSessionFactory(
                 beyond what the standard factory methods provide.
 
         Raises:
-            DeephavenConnectionError: If a connection cannot be established with the controller 
+            DeephavenConnectionError: If a connection cannot be established with the controller
                 service due to network issues, service unavailability, or connectivity problems.
             AuthenticationError: If the current authentication is invalid, expired, or has
                 insufficient permissions to access the controller service.
-            SessionError: If there is an error creating the controller client for reasons other 
+            SessionError: If there is an error creating the controller client for reasons other
                 than connectivity, such as service misconfiguration or internal server errors.
-                
+
         Example - Listing and filtering workers:
             ```python
             import asyncio
             from deephaven_mcp.resource_manager import CorePlusSessionFactory
-            
+
             async def list_all_workers():
                 # Create and authenticate the factory
                 factory = CorePlusSessionFactory.from_url("https://server.example.com/iris/connection.json")
                 await factory.password("username", "password")
-                
+
                 # Get a controller client
                 controller = await factory.create_controller_client()
-                
+
                 # List all persistent queries (workers)
                 queries = await controller.list_persistent_queries()
                 for query in queries:
                     print(f"Query: {query.name}, Status: {query.status}, Created: {query.create_time}")
-                    
+
                 # Get workers owned by a specific user
                 user_queries = await controller.list_persistent_queries(owner="specific_username")
-                
+
                 # Get high-memory workers (using filter)
                 high_mem_queries = [q for q in queries if q.heap_size_gb > 8.0]
-                
+
                 # Close when done
                 await factory.close()
             ```
-            
+
         Example - Managing worker lifecycle:
             ```python
             async def manage_worker_lifecycle():
                 factory = CorePlusSessionFactory.from_url("https://server.example.com/iris/connection.json")
                 await factory.password("username", "password")
-                
+
                 controller = await factory.create_controller_client()
-                
+
                 # Find a worker by name
                 workers = await controller.list_persistent_queries(name="analytics_worker")
                 if workers:
                     worker = workers[0]
-                    
+
                     # Get detailed information about the worker
                     details = await controller.get_persistent_query(worker.id)
-                    
+
                     # Stop the worker if it's running
                     if details.status == "RUNNING":
                         await controller.stop_persistent_query(worker.id)
                         print(f"Stopped worker: {worker.name}")
-                    
+
                     # Delete the worker if needed
                     # await controller.delete_persistent_query(worker.id)
-                
+
                 await factory.close()
             ```
-            
+
         Note:
             - The controller client provides administrative capabilities that may be restricted
               based on the authenticated user's permissions
@@ -1008,7 +1053,9 @@ class CorePlusSessionFactory(
             controller_client = await asyncio.to_thread(
                 self.wrapped.create_controller_client
             )
-            _LOGGER.debug("[CorePlusSessionFactory] Successfully created controller client")
+            _LOGGER.debug(
+                "[CorePlusSessionFactory] Successfully created controller client"
+            )
             return CorePlusControllerClient(controller_client)
         except ConnectionError as e:
             _LOGGER.error(f"Failed to connect to controller service: {e}")
@@ -1022,64 +1069,64 @@ class CorePlusSessionFactory(
     async def delete_key(self, public_key_text: str) -> None:
         """Delete a previously uploaded public key from the Deephaven server's authentication system.
 
-        This method is used for managing SSH key-based authentication in Deephaven Enterprise. 
-        It removes a public key that was previously registered to your account, preventing future 
-        authentication attempts using the corresponding private key. This is useful for revoking 
+        This method is used for managing SSH key-based authentication in Deephaven Enterprise.
+        It removes a public key that was previously registered to your account, preventing future
+        authentication attempts using the corresponding private key. This is useful for revoking
         access when a key might be compromised or is no longer needed.
-        
+
         Key management best practices include:
         - Regularly rotating authentication keys for security
         - Removing keys that are no longer in use
         - Deleting keys that may have been compromised
         - Limiting the number of authorized keys to those actively needed
-        
+
         This method asynchronously delegates to the underlying session manager's delete_key method,
         running it in a separate thread to avoid blocking the event loop. The method will attempt
         to find and remove the specified key from the server's key store.
 
         Args:
-            public_key_text: The complete text of the public key to delete, exactly as it was 
-                uploaded. This should include the full key string including any key type prefix 
-                (e.g., "ssh-rsa AAAA...") and comment suffix if present. The key text must match 
+            public_key_text: The complete text of the public key to delete, exactly as it was
+                uploaded. This should include the full key string including any key type prefix
+                (e.g., "ssh-rsa AAAA...") and comment suffix if present. The key text must match
                 exactly what was registered in the system for successful deletion.
 
         Raises:
-            ResourceError: If the key cannot be deleted due to issues such as the key not being 
-                found in the system, insufficient permissions to delete the key, or other 
+            ResourceError: If the key cannot be deleted due to issues such as the key not being
+                found in the system, insufficient permissions to delete the key, or other
                 server-side key storage problems.
-            DeephavenConnectionError: If there is a problem connecting to the server during the 
+            DeephavenConnectionError: If there is a problem connecting to the server during the
                 deletion operation, such as network issues or server unavailability.
-            AuthenticationError: If the current authentication is invalid or has expired, 
+            AuthenticationError: If the current authentication is invalid or has expired,
                 requiring re-authentication before key management operations can be performed.
 
         Example:
             ```python
             import asyncio
             from deephaven_mcp.resource_manager import CorePlusSessionFactory
-            
+
             async def revoke_key_access():
                 # Create and authenticate the session manager
                 factory = CorePlusSessionFactory.from_url("https://example.com/iris/connection.json")
                 await factory.password("username", "password")
-                
+
                 # The public key to remove (as previously uploaded)
                 public_key = "ssh-rsa AAAAB3NzaC1yc2EAAA...truncated...user@example.com"
-                
+
                 # Delete the key from the server
                 await factory.delete_key(public_key)
-                
+
                 # Clean up
                 await factory.close()
-                
+
                 print("Key access has been revoked")
             ```
-            
+
         Note:
             - This operation permanently removes the key and cannot be undone
             - You must be authenticated as the key owner or have admin privileges
             - The key text must match exactly what was previously uploaded
             - If you need to rotate keys, upload the new key before deleting the old one
-            - This operation affects only future authentication attempts; existing 
+            - This operation affects only future authentication attempts; existing
               authenticated sessions will not be terminated
         """
         try:
@@ -1100,13 +1147,13 @@ class CorePlusSessionFactory(
     ) -> None:
         """Authenticate to the server using username and password credentials.
 
-        This method performs authentication with the Deephaven server using standard username 
-        and password credentials. It establishes a secure session that can be used for subsequent 
-        operations like connecting to workers or managing server resources. This is the most 
+        This method performs authentication with the Deephaven server using standard username
+        and password credentials. It establishes a secure session that can be used for subsequent
+        operations like connecting to workers or managing server resources. This is the most
         common authentication method and is suitable for most use cases.
-        
-        The authentication process creates and stores session tokens internally, which are 
-        then used for all subsequent API calls. These tokens are automatically refreshed when 
+
+        The authentication process creates and stores session tokens internally, which are
+        then used for all subsequent API calls. These tokens are automatically refreshed when
         needed without requiring re-authentication.
 
         This method asynchronously delegates to the underlying session manager's password method,
@@ -1114,9 +1161,9 @@ class CorePlusSessionFactory(
 
         Args:
             user: The username to authenticate with. This must be a valid user registered
-                with the Deephaven server. Case sensitivity depends on the server's authentication 
+                with the Deephaven server. Case sensitivity depends on the server's authentication
                 configuration.
-            password: The user's password for authentication. Authentication is secure and 
+            password: The user's password for authentication. Authentication is secure and
                 passwords are never stored in memory longer than necessary.
             effective_user: The user to operate as after authentication. Defaults to None, which
                 means the authenticated user will be used. This parameter enables authentication
@@ -1179,9 +1226,9 @@ class CorePlusSessionFactory(
     async def ping(self) -> bool:
         """Send a connectivity check ping to verify the connection to Deephaven services.
 
-        This method tests the connectivity to both the authentication server and the controller 
-        service by sending lightweight ping requests. It's useful for verifying that the connection 
-        is still active and that both essential services are responding correctly without making 
+        This method tests the connectivity to both the authentication server and the controller
+        service by sending lightweight ping requests. It's useful for verifying that the connection
+        is still active and that both essential services are responding correctly without making
         any changes to server state.
 
         Common use cases for this method include:
@@ -1194,8 +1241,8 @@ class CorePlusSessionFactory(
         running it in a separate thread to avoid blocking the event loop.
 
         Returns:
-            bool: True if both the authentication server and controller successfully responded 
-                to the ping request, indicating a healthy connection. False if either service 
+            bool: True if both the authentication server and controller successfully responded
+                to the ping request, indicating a healthy connection. False if either service
                 failed to respond properly, suggesting connection issues or an expired session.
 
         Raises:
@@ -1206,36 +1253,38 @@ class CorePlusSessionFactory(
             ```python
             import asyncio
             from deephaven_mcp.resource_manager import CorePlusSessionFactory
-            
+
             async def check_connection():
                 factory = CorePlusSessionFactory.from_url("https://server.example.com/iris/connection.json")
                 await factory.password("username", "password")
-                
+
                 # Check if connection is still active
                 is_connected = await factory.ping()
                 print(f"Connection status: {'Active' if is_connected else 'Inactive'}")
-                
+
                 # If not connected, re-authenticate
                 if not is_connected:
                     await factory.password("username", "password")
             ```
-        
+
         Note:
-            This method is lightweight and suitable for frequent calls. It can be called 
-            periodically as part of a connection monitoring strategy to detect server 
+            This method is lightweight and suitable for frequent calls. It can be called
+            periodically as part of a connection monitoring strategy to detect server
             disconnections early.
         """
         try:
-            _LOGGER.debug("[CorePlusSessionFactory] Sending ping to authentication server and controller")
+            _LOGGER.debug(
+                "[CorePlusSessionFactory] Sending ping to authentication server and controller"
+            )
             result = await asyncio.to_thread(self.wrapped.ping)
             _LOGGER.debug(f"[CorePlusSessionFactory] Ping result: {result}")
-            return result
+            return cast(bool, result)
         except Exception as e:
             _LOGGER.error(f"Ping failed: {e}")
             raise DeephavenConnectionError(f"Failed to ping server: {e}") from e
 
     async def private_key(self, file: str | io.StringIO) -> None:
-        """Authenticate to the server using a Deephaven format private key file.
+        r"""Authenticate to the server using a Deephaven format private key file.
 
         This method performs certificate-based authentication with the Deephaven server using
         a private key. This authentication method is more secure than password-based authentication
@@ -1247,12 +1296,12 @@ class CorePlusSessionFactory(
 
         Args:
             file: Either a string containing the path to a file with the private key produced by
-                the Deephaven generate-iris-keys tool, or alternatively an io.StringIO instance 
-                containing the key data directly. If an io.StringIO is provided, it may be closed 
+                the Deephaven generate-iris-keys tool, or alternatively an io.StringIO instance
+                containing the key data directly. If an io.StringIO is provided, it may be closed
                 after this method is called as the contents are read fully before returning.
 
         Raises:
-            AuthenticationError: If authentication with the private key fails due to an invalid key, 
+            AuthenticationError: If authentication with the private key fails due to an invalid key,
                 expired key, key not being registered with the server, or insufficient permissions.
             DeephavenConnectionError: If there is a problem connecting to the authentication server
                 such as network issues or server unavailability.
@@ -1261,12 +1310,12 @@ class CorePlusSessionFactory(
         Note:
             Private key authentication is an alternative to username/password or SAML authentication.
             Only one authentication method should be used per session.
-            
+
             Before using this method, you need to:
             1. Generate a key pair using Deephaven's tools
             2. Register the public key with the Deephaven server
             3. Keep the private key secure
-            
+
             The private key should be stored securely and protected from unauthorized access,
             as anyone with access to the private key can authenticate as the associated user.
 
@@ -1310,7 +1359,9 @@ class CorePlusSessionFactory(
         try:
             _LOGGER.debug("[CorePlusSessionFactory] Authenticating with private key")
             await asyncio.to_thread(self.wrapped.private_key, file)
-            _LOGGER.debug("[CorePlusSessionFactory] Successfully authenticated with private key")
+            _LOGGER.debug(
+                "[CorePlusSessionFactory] Successfully authenticated with private key"
+            )
         except FileNotFoundError as e:
             _LOGGER.error(f"Private key file not found: {e}")
             raise AuthenticationError(f"Private key file not found: {e}") from e
@@ -1394,7 +1445,9 @@ class CorePlusSessionFactory(
         try:
             _LOGGER.debug("[CorePlusSessionFactory] Starting SAML authentication flow")
             await asyncio.to_thread(self.wrapped.saml)
-            _LOGGER.debug("[CorePlusSessionFactory] Successfully authenticated using SAML")
+            _LOGGER.debug(
+                "[CorePlusSessionFactory] Successfully authenticated using SAML"
+            )
         except ConnectionError as e:
             _LOGGER.error(
                 f"Failed to connect to authentication server or SAML provider: {e}"
@@ -1412,20 +1465,20 @@ class CorePlusSessionFactory(
     async def upload_key(self, public_key_text: str) -> None:
         """Upload a public key to the Deephaven server for certificate-based authentication.
 
-        This method registers a public key with the Deephaven server, associating it with your 
-        user account. Once uploaded, you can use the corresponding private key to authenticate 
-        in future sessions without needing a username and password. This is particularly useful 
+        This method registers a public key with the Deephaven server, associating it with your
+        user account. Once uploaded, you can use the corresponding private key to authenticate
+        in future sessions without needing a username and password. This is particularly useful
         for automated systems, scripts, and CI/CD pipelines.
 
         The public key should be in the format generated by Deephaven's key generation tools.
         Typically, this is an RSA public key in PEM format.
-        
+
         Key-based authentication workflow:
         1. Generate a key pair (typically using Deephaven's tools)
         2. Authenticate to the server using password or SAML
         3. Upload the public key with this method
         4. For future sessions, use private_key() method with the corresponding private key
-        
+
         This method asynchronously delegates to the underlying session manager's upload_key method,
         running it in a separate thread to avoid blocking the event loop.
 
@@ -1448,21 +1501,21 @@ class CorePlusSessionFactory(
             - Keys are identified by a fingerprint calculated from the key data
             - If a key with the same fingerprint already exists, it will be overwritten
             - There is no automatic expiration for uploaded keys; they remain valid until removed
-            
+
         Example:
             ```python
             from deephaven_mcp.resource_manager import CorePlusSessionFactory
             import asyncio
-            
+
             async def register_public_key():
                 # Create factory and authenticate
                 factory = CorePlusSessionFactory.from_url("https://server.example.com/iris/connection.json")
                 await factory.password("username", "password")
-                
+
                 # Read public key from file
                 with open("my_public_key.pem", "r") as f:
                     public_key = f.read()
-                
+
                 # Upload the public key
                 await factory.upload_key(public_key)
                 print("Public key registered successfully")

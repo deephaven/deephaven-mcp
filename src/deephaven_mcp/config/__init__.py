@@ -371,10 +371,14 @@ class ConfigManager:
             >>> config_dict = await config_manager.get_config()
             >>> print(config_dict['community'])
         """
-        _LOGGER.debug("[ConfigManager] Loading Deephaven MCP application configuration...")
+        _LOGGER.debug(
+            "[ConfigManager] Loading Deephaven MCP application configuration..."
+        )
         async with self._lock:
             if self._cache is not None:
-                _LOGGER.debug("[ConfigManager] Using cached Deephaven MCP application configuration.")
+                _LOGGER.debug(
+                    "[ConfigManager] Using cached Deephaven MCP application configuration."
+                )
                 return self._cache
 
             config_path = get_config_path()
