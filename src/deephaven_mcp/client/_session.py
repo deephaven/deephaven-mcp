@@ -3,10 +3,15 @@
 This module provides asynchronous wrappers for Deephaven session classes, ensuring all blocking operations are executed in background threads via `asyncio.to_thread`. It supports both standard and enterprise (Core+) sessions, exposing a unified async API for table creation, data import, querying, and advanced enterprise features.
 
 Classes:
+    - BaseSession: Abstract base class for all asynchronous session wrappers with common functionality.
     - CoreSession: Async wrapper for basic pydeephaven Session, supporting standard table operations.
-    - CorePlusSession: Async wrapper for enterprise DndSession, extending CoreSession with persistent query, historical data, and catalog features.
+    - CorePlusSession: Async wrapper for enterprise DndSession, extending BaseSession with persistent query, historical data, and catalog features.
 
-All operations that interact with the server are asynchronous and do not block the event loop.
+Key Features:
+    - Non-blocking API: All operations that interact with the server are asynchronous and do not block the event loop
+    - Unified interface: Common API across standard and enterprise sessions
+    - Robust error handling: Consistent exception translation with detailed error messages
+    - Comprehensive logging: Detailed logs for debugging and monitoring
 
 Example (standard):
     ```python
@@ -32,24 +37,24 @@ Example (standard):
 Example (enterprise):
     ```python
     import asyncio
-    from deephaven_mcp.resource_manager import CorePlusSessionManager
+    from deephaven_mcp.client import CorePlusSessionFactory
 
     async def main():
-        manager = CorePlusSessionManager.from_url("https://myserver.example.com/iris/connection.json")
-        await manager.password("username", "password")
-        session = await manager.connect_to_new_worker()
+        factory = await CorePlusSessionFactory.from_config({"url": "https://myserver.example.com/iris/connection.json"})
+        await factory.password("username", "password")
+        session = await factory.connect_to_new_worker()
         info = await session.pqinfo()
         print(f"Connected to query {info.id} with status {info.status}")
         hist = await session.historical_table("market_data", "daily_prices")
         live = await session.live_table("market_data", "live_trades")
         catalog = await session.catalog_table()
         price_tables = await (await session.query(catalog)).where("TableName.contains('price')").to_table()
-        # Create a session manager
-        manager = CorePlusSessionManager.from_url("https://myserver.example.com/iris/connection.json")
-        await manager.password("username", "password")
+        # Create another session factory
+        factory2 = await CorePlusSessionFactory.from_config({"url": "https://myserver.example.com/iris/connection.json"})
+        await factory2.password("username", "password")
         
         # Connect to a worker
-        session = await manager.connect_to_new_worker()
+        session = await factory2.connect_to_new_worker()
         
         # Access enterprise-specific features
         query_info = await session.pqinfo()
@@ -84,7 +89,6 @@ from ._base import ClientObjectWrapper
 from typing import override
 from ._protobuf import CorePlusQueryInfo
 import os
-import logging
 from deephaven_mcp.io import load_bytes
 from deephaven_mcp.config import redact_community_session_config
 from deephaven_mcp._exceptions import SessionCreationError
@@ -102,12 +106,27 @@ class BaseSession(ClientObjectWrapper[Session]):
     Provides a unified async interface for all Deephaven session types (standard and enterprise).
     All blocking operations are executed using `asyncio.to_thread` to prevent blocking the event loop.
     Intended for subclassing by `CoreSession` (standard) and `CorePlusSession` (enterprise).
+    
+    Key Features:
+        - Asynchronous API: Converts synchronous Deephaven session operations to async coroutines
+        - Non-blocking: All potentially blocking operations run in separate threads
+        - Exception translation: Converts native exceptions to async-compatible exception types
+        - Resource management: Proper cleanup of sessions through __del__ or explicit close() calls
+        - Type safety: Preserves proper typing information for editor support and static analysis
 
-    Usage:
-        - Do not instantiate directly; use a SessionManager to obtain a session instance.
-        - All methods are async and must be awaited.
-        - Do not call methods of the same session object concurrently from multiple threads.
-        - Multiple session objects may be used in parallel.
+    Implementation Details:
+        - Uses asyncio.to_thread for executing blocking operations without affecting the event loop
+        - Delegates method calls to the wrapped Session object
+        - Wraps returned objects in appropriate async wrappers when necessary
+        - Handles proper cleanup of resources
+
+    Usage Guidelines:
+        - Do not instantiate directly; use a SessionManager to obtain a session instance
+        - All methods are async and must be awaited
+        - Do not call methods of the same session object concurrently from multiple threads
+        - Multiple session objects may be used in parallel
+        - Always await the close() method when done or use async with
+        - For enterprise features, use CorePlusSession subclass
 
     Example:
         ```python
@@ -117,9 +136,18 @@ class BaseSession(ClientObjectWrapper[Session]):
         async def main():
             manager = CoreSessionManager("localhost", 10000)
             session = await manager.get_session()
+            
+            # Create a time table
             table = await session.time_table("PT1S")
+            
+            # Query and transform the table
             result = await (await session.query(table)).update_view(["Value = i % 10"]).to_table()
+            
+            # Display the results
             print(await result.to_string())
+            
+            # Cleanup
+            await session.close()
 
         asyncio.run(main())
         ```
@@ -353,28 +381,43 @@ class BaseSession(ClientObjectWrapper[Session]):
         each operation returning a new Query object. The operations are not executed until the
         result is materialized by calling methods like `to_table()`, `to_pandas()`, or similar.
         
-        The Query object allows for operations such as:
-        - Filtering rows
-        - Adding or modifying columns
-        - Grouping and aggregating data
-        - Joining tables
-        - Sorting and limiting results
+        Common Query Operations:
+        - Filtering rows: `where("condition")`
+        - Adding/modifying columns: `update_view(["NewCol = expression", ...])`
+        - Grouping: `group_by(["col1", "col2"]).agg(["Sum = sum(Value)"])`
+        - Joining tables: `join(other_table, on=["key"])`
+        - Natural joins: `natural_join(other_table, on=["key"])`
+        - Cross joins: `cross_join(other_table)`
+        - Sorting: `sort(["col1", "col2 DESC"])`
+        - Limiting results: `head(n)`, `tail(n)`, `take_range(start, end)`
+        - Selecting columns: `select(["col1", "col2"])`
+        - Renaming columns: `rename({"OldName": "NewName"})`
+        
+        Materialization Methods:
+        - `to_table()`: Create a new Table with the results
+        - `to_pandas()`: Convert results to a pandas DataFrame
+        - `to_arrow()`: Convert results to a PyArrow Table
+        - `to_list()`: Convert results to a Python list of rows
+        - `count()`: Count the number of rows
+        - `first()`: Get the first row as a Python dict
         
         Args:
             table: A Table object to use as the starting point for the query. This is the table
-                  that operations will be performed on.
+                   that operations will be performed on. This can be any Table object returned by
+                   other session methods or previous query operations.
             
         Returns:
             Query: A Query object that can be used to chain operations and transformations
-                 on the provided table
+                  on the provided table. This object provides a fluent interface where each
+                  operation returns a new Query object.
             
         Raises:
             DeephavenConnectionError: If there is a network or connection error when communicating
-                                    with the server
+                                     with the server
             QueryError: If the operation fails due to a query-related error such as invalid
-                      table references or server-side query processing errors
-                      
-        Example:
+                       table references or server-side query processing errors
+                       
+        Example - Basic filtering and transformation:
             ```python
             # Create a table
             table = await session.time_table("PT1S")
@@ -389,6 +432,45 @@ class BaseSession(ClientObjectWrapper[Session]):
                 .sort("Value")\
                 .to_table()
             ```
+            
+        Example - Joining tables:
+            ```python
+            # Load two tables
+            trades = await session.table_from_pandas(trades_df)
+            symbols = await session.table_from_pandas(symbols_df)
+            
+            # Join the tables and perform calculations
+            enriched_trades = await (await session.query(trades))\
+                .join(
+                    symbols,
+                    on=["Symbol"], 
+                    joins=["SecurityType", "Exchange"])\
+                .update_view(["TradeValue = Price * Size"])\
+                .sort(["Timestamp DESC"])\
+                .to_table()
+            ```
+            
+        Example - Grouping and aggregation:
+            ```python
+            # Calculate statistics by symbol and exchange
+            stats = await (await session.query(trades))\
+                .group_by(["Symbol", "Exchange"])\
+                .agg([
+                    "AvgPrice = avg(Price)",
+                    "TotalVolume = sum(Size)",
+                    "TradeCount = count()",
+                    "MaxPrice = max(Price)",
+                    "MinPrice = min(Price)"
+                ])\
+                .sort(["TotalVolume DESC"])\
+                .to_table()
+            ```
+            
+        Note:
+            - Query objects are immutable; each operation creates a new Query instance
+            - The query is not executed until a materialization method is called
+            - For tables with many rows, use limit operations like head() when appropriate
+            - Live tables produce live results that update automatically
         """
         _LOGGER.debug("CoreSession.query called")
         try:
@@ -505,20 +587,60 @@ class BaseSession(ClientObjectWrapper[Session]):
         """
         Asynchronously bind a Table object to a global name on the server.
 
-        This allows the table to be referenced by name in subsequent operations or by other users.
+        This method makes a table accessible by name in the Deephaven global namespace. Once bound,
+        the table can be referenced by its name in subsequent operations, queries, and by other
+        users or sessions connected to the same server. This is particularly useful for:
+        
+        - Sharing results with other users or applications
+        - Creating persistent references to computed tables
+        - Building up complex multi-step data processing workflows
+        - Making tables available for external tools that connect to Deephaven
+        
+        The table remains bound until explicitly removed or until the server session ends,
+        depending on server configuration. Binding a table with a name that already exists
+        will overwrite the previous binding.
 
         Args:
-            name (str): Name to assign to the table in the global namespace.
-            table (Table): The Table object to bind.
+            name (str): Name to assign to the table in the global namespace. Should be a valid
+                      identifier that follows Deephaven naming conventions. Names are case-sensitive
+                      and should not contain spaces or special characters.
+            table (Table): The Table object to bind. This can be any Table instance, including
+                         tables created from files, databases, or query results.
 
         Raises:
-            DeephavenConnectionError: If a network or connection error occurs.
-            QueryError: If the operation fails due to a query-related error.
+            DeephavenConnectionError: If a network or connection error occurs while attempting
+                                     to communicate with the server.
+            QueryError: If the operation fails due to a query-related error, such as an invalid
+                      table object, name formatting issues, or server permissions problems.
 
-        Example:
+        Example - Binding a simple table:
             ```python
-            await session.bind_table("result_table", table)
+            # Create a table
+            data_table = await session.table_from_pandas(df)
+            
+            # Make it available globally
+            await session.bind_table("daily_prices", data_table)
             ```
+            
+        Example - Creating and sharing derived tables:
+            ```python
+            # Create a base table
+            base_table = await session.time_table("PT1S")
+            
+            # Create derived tables through queries
+            filtered = await (await session.query(base_table)).where("i % 2 == 0").to_table()
+            aggregated = await (await session.query(base_table)).group_by(["i % 10 as bucket"]).agg(["count=count()"]).to_table()
+            
+            # Bind both for access by others
+            await session.bind_table("even_records", filtered)
+            await session.bind_table("record_counts", aggregated)
+            ```
+            
+        Note:
+            - Table bindings persist until explicitly removed or the server session ends
+            - Binding large tables does not duplicate the data; only a reference is created
+            - The same table can be bound to multiple different names
+            - To access bound tables from other sessions, use the catalog_table method to discover them
         """
         _LOGGER.debug("CoreSession.bind_table called with name=%s", name)
         try:
@@ -539,15 +661,54 @@ class BaseSession(ClientObjectWrapper[Session]):
         Asynchronously close the session and release all associated server resources.
 
         This method should be called when the session is no longer needed to prevent resource leaks.
-        After closing, the session object should not be used for further operations.
+        After closing, the session object should not be used for further operations. The method
+        performs the following cleanup tasks:
+        
+        - Terminates the connection to the server
+        - Releases memory and other resources on the server side
+        - Marks the session as closed locally
+        - Logs the session closure for audit purposes
+        
+        Resource Management Best Practices:
+        1. Always explicitly close sessions when done with them
+        2. Use try/finally blocks or async context managers to ensure sessions are closed
+        3. Do not attempt to use a session after closing it
+        4. One session instance should be closed only once
+        
+        While the BaseSession implements __del__ to attempt cleanup during garbage collection,
+        explicit closure is strongly recommended as garbage collection timing is unpredictable.
 
         Raises:
-            DeephavenConnectionError: If a network or connection error occurs during close.
-            SessionError: If the session cannot be closed for non-connection reasons (e.g., server error).
+            DeephavenConnectionError: If a network or connection error occurs during close,
+                                    such as connection timeouts or network disruptions.
+            SessionError: If the session cannot be closed for non-connection reasons,
+                        such as server errors, invalid session state, or permission issues.
 
-        Example:
+        Example - Basic usage:
             ```python
+            # Close a session when done
             await session.close()
+            ```
+            
+        Example - Using try/finally for reliable cleanup:
+            ```python
+            session = await manager.get_session()
+            try:
+                # Use the session for operations
+                table = await session.time_table("PT1S")
+                # ... more operations
+            finally:
+                # Ensure session is closed even if an error occurs
+                await session.close()
+            ```
+            
+        Example - Using as an async context manager:
+            ```python
+            async with (await manager.get_session()) as session:
+                # Session will be automatically closed after this block
+                table = await session.time_table("PT1S")
+                # ... more operations
+            # Session is now closed
             ```
         """
         _LOGGER.debug("CoreSession.close called")
@@ -566,19 +727,107 @@ class BaseSession(ClientObjectWrapper[Session]):
     async def run_script(self, script: str, systemic: bool | None = None) -> None:
         """
         Asynchronously execute a Python script on the server in the context of this session.
+        
+        This method sends Python code to be executed on the Deephaven server, allowing for
+        complex operations that might not be directly exposed through the API. The script
+        runs in the same context as the session, with access to:
+        
+        - All tables bound in the global namespace
+        - Server-side imports and libraries
+        - Server-side Deephaven API and functionality
+        - Variables and objects previously defined in the session
+        
+        The script execution is server-side only; local variables from your client application
+        are not automatically available to the script unless explicitly passed as part of the
+        script string. Any output from print() statements will appear in the server logs, not
+        in the client application.
+        
+        Use cases include:
+        - Complex table transformations and calculations
+        - Custom data processing logic
+        - Administrative tasks on the server
+        - Creating tables programmatically
+        - Loading and processing data from server-accessible locations
 
         Args:
-            script (str): The Python script code to execute.
-            systemic (bool, optional): If True, treat the script as systemically important. If None, uses default behavior.
+            script (str): The Python script code to execute. This can be a single line or a
+                        multi-line string containing complete Python code.
+            systemic (bool, optional): If True, treat the script as systemically important,
+                                      which may affect how the server prioritizes or logs the
+                                      execution. If None, uses the server's default behavior.
+                                      System scripts may have different timeout or resource limits.
 
         Raises:
-            DeephavenConnectionError: If a network or connection error occurs.
-            QueryError: If the script cannot be run or encounters an error (e.g., syntax, runtime, or server error).
+            DeephavenConnectionError: If a network or connection error occurs while sending
+                                     the script to the server or receiving results.
+            QueryError: If the script cannot be run or encounters an error during execution,
+                      such as syntax errors, runtime errors, or permission issues. The error
+                      message typically includes the Python traceback from the server.
 
-        Example:
+        Example - Simple hello world:
             ```python
             await session.run_script("print('Hello from server!')")
             ```
+            
+        Example - Creating and binding a table:
+            ```python
+            # Define a multi-line script with proper Deephaven imports and functions
+            script = '''
+            import numpy as np
+            import pandas as pd
+            from deephaven import new_table
+            
+            # Create sample data
+            dates = pd.date_range('20230101', periods=100)
+            values = np.random.randn(100).cumsum()
+            
+            # Create and bind a Deephaven table
+            df = pd.DataFrame({'Date': dates, 'Value': values})
+            table = new_table(df)
+            bind_table('random_walk', table)
+            '''
+            
+            # Execute the script on the server
+            await session.run_script(script)
+            ```
+            
+        Example - Executing data science calculations:
+            ```python
+            # Run complex calculations on server-side data
+            advanced_script = '''
+            from deephaven.plot import Figure
+            
+            # Get a table that should already exist on the server
+            table = get_table('daily_prices')
+            
+            # Calculate moving averages
+            result = table.update_view([  
+                'SMA_5 = rolling_avg(Price, 5)',
+                'SMA_20 = rolling_avg(Price, 20)',
+                'Signal = SMA_5 > SMA_20 ? 1 : -1'
+            ])
+            
+            # Create a plot
+            fig = Figure()
+            fig.plot_xy(series_name='Price', t=result.get_column('Date'), y=result.get_column('Price'))
+            fig.plot_xy(series_name='SMA_5', t=result.get_column('Date'), y=result.get_column('SMA_5'))
+            fig.plot_xy(series_name='SMA_20', t=result.get_column('Date'), y=result.get_column('SMA_20'))
+            
+            # Bind results
+            bind_table('moving_avg_result', result)
+            bind_figure('price_chart', fig)
+            '''
+            
+            # Execute the script on the server
+            await session.run_script(advanced_script)
+            ```
+            
+        Note:
+            - Scripts are executed synchronously on the server but the method returns asynchronously
+            - Table bindings created in the script persist after the script completes
+            - Server-side variable scope is maintained between script executions
+            - For security reasons, some server configurations may restrict certain imports or operations
+            - Large result sets should be bound to tables rather than returned directly
         """
         _LOGGER.debug("CoreSession.run_script called")
         try:
@@ -597,17 +846,64 @@ class BaseSession(ClientObjectWrapper[Session]):
     async def tables(self) -> list[str]:
         """
         Asynchronously retrieve the names of all global tables available on the server.
+        
+        This method returns a list of table names that are currently bound in the Deephaven
+        global namespace. These tables could have been created by any session connected to 
+        the same server. The method is useful for discovering available data sources and 
+        for programmatically working with tables that may have been created by other users 
+        or processes.
+        
+        Use cases include:
+        - Checking if a specific table exists before attempting to use it
+        - Listing all available tables in a UI or dashboard
+        - Data discovery and exploration
+        - Building dynamic workflows that process all available tables
+        - Cleaning up tables by checking what exists before removing
 
         Returns:
             list[str]: List of table names currently registered in the global namespace.
+                     The list may be empty if no tables are currently bound.
 
         Raises:
-            DeephavenConnectionError: If a network or connection error occurs.
-            QueryError: If the operation fails due to a query-related error.
+            DeephavenConnectionError: If a network or connection error occurs while attempting
+                                    to communicate with the server.
+            QueryError: If the operation fails due to a query-related error, such as
+                      permission issues or server-side errors.
 
-        Example:
+        Example - Basic usage:
             ```python
+            # Get all table names
             table_names = await session.tables()
+            print(f"Available tables: {table_names}")
+            ```
+            
+        Example - Check for specific table:
+            ```python
+            # Check if a specific table exists
+            table_names = await session.tables()
+            if "daily_prices" in table_names:
+                # Table exists, we can use it
+                prices_table = await session.get_table("daily_prices")
+            else:
+                # Table doesn't exist, create it
+                # ... code to create the table ...
+                await session.bind_table("daily_prices", new_table)
+            ```
+            
+        Example - Process all available tables:
+            ```python
+            # Apply an operation to all tables matching a pattern
+            table_names = await session.tables()
+            for name in table_names:
+                if name.startswith("stock_"):
+                    # Get the table
+                    table = await session.get_table(name)
+                    # Process it
+                    processed = await (await session.query(table))\
+                        .update_view(["ProcessedTime = now()"])\
+                        .to_table()
+                    # Save the result
+                    await session.bind_table(f"{name}_processed", processed)
             ```
         """
         _LOGGER.debug("[CoreSession] tables called")
@@ -798,26 +1094,34 @@ class CorePlusSession(BaseSession):
 
     This class provides access to enterprise-specific functionality like persistent queries,
     historical data access, and catalog operations while maintaining compatibility with
-    the standard Session interface. CorePlusSession extends CoreSession with additional
-    methods for enterprise-specific features.
+    the standard Session interface. CorePlusSession inherits core functionality from BaseSession
+    and adds enterprise-specific methods.
+    
+    Architecture:
+    - CorePlusSession wraps an enterprise DndSession instance
+    - All operations run in background threads via asyncio.to_thread to prevent blocking
+    - Method calls are delegated to the wrapped session with proper error translation
+    - All operations return properly typed objects with rich interfaces
 
     Key enterprise-specific features include:
-    - Persistent query information (pqinfo)
-    - Historical and live table access (historical_table, live_table)
-    - Catalog operations (catalog_table)
+    - Persistent query information (pqinfo): Access details about long-running queries
+    - Historical data access (historical_table): Retrieve point-in-time snapshots from the database
+    - Live data access (live_table): Connect to continuously updating data sources
+    - Catalog operations (catalog_table): Discover available tables and their metadata
 
     Example:
         ```python
         import asyncio
-        from deephaven_mcp.resource_manager import CorePlusSessionManager
+        from deephaven_mcp.resource_manager import CorePlusSessionFactoryManager
+        from deephaven_mcp.client import CorePlusSessionFactory
 
         async def work_with_enterprise_session():
-            # Create a session manager and authenticate
-            manager = CorePlusSessionManager.from_url("https://myserver.example.com/iris/connection.json")
-            await manager.password("username", "password")
+            # Create a session factory and authenticate
+            factory = await CorePlusSessionFactory.from_config({"url": "https://myserver.example.com/iris/connection.json"})
+            await factory.password("username", "password")
 
             # Connect to a worker to get a CorePlusSession
-            session = await manager.connect_to_new_worker()
+            session = await factory.connect_to_new_worker()
 
             # Get information about this persistent query
             query_info = await session.pqinfo()
@@ -833,7 +1137,7 @@ class CorePlusSession(BaseSession):
 
     See Also:
         - BaseSession: Parent class for all Deephaven session types
-        - CorePlusSessionManager: For creating and managing enterprise sessions
+        - CorePlusSessionFactory: For creating and managing enterprise sessions
     """
 
     @override
@@ -845,11 +1149,18 @@ class CorePlusSession(BaseSession):
         the standard Session class with additional enterprise capabilities like persistent queries,
         historical tables, and catalog operations. This class wraps DndSession to provide an
         asynchronous API while maintaining enterprise functionality.
+        
+        Architecture and Design:
+        - This constructor creates an asynchronous wrapper around a synchronous DndSession
+        - The wrapped session object is stored as self._session (via BaseSession)
+        - All method calls are delegated to the wrapped session using asyncio.to_thread
+        - Exceptions from the underlying session are properly translated to async-compatible exceptions
+        - The class implements __del__ to ensure proper cleanup when garbage collected
 
-        This constructor wraps an existing DndSession object from the enterprise client package
-        and exposes its methods as asynchronous coroutines. The wrapped session object is stored
-        as self.wrapped and all method calls are delegated to it after ensuring they're executed
-        in a non-blocking manner using asyncio.to_thread.
+        Lifecycle Management:
+        - CorePlusSession objects are typically short-lived and should be closed when no longer needed
+        - The session maintains a connection to server resources that should be released
+        - Multiple CorePlusSession instances can connect to the same persistent query
 
         Args:
             session: A DndSession instance from deephaven_enterprise.client.session_manager
@@ -859,13 +1170,16 @@ class CorePlusSession(BaseSession):
         Raises:
             InternalError: If the provided session is not a DndSession instance or doesn't
                          support the required enterprise functionality.
+            ValueError: If the session parameter is None or invalid.
 
         Note:
             - This class is typically not instantiated directly by users but rather obtained
-              through a CorePlusSessionManager's connect_to_new_worker or connect_to_persistent_query
+              through a CorePlusSessionFactory's connect_to_new_worker or connect_to_persistent_query
               methods.
             - The wrapped DndSession maintains its own connection to the server and enterprise
               resources like persistent queries and historical tables.
+            - Closing a CorePlusSession does not necessarily terminate the underlying persistent query,
+              which can continue running on the server.
             - The session is automatically marked as an enterprise session (is_enterprise=True)
               which enables specialized handling of enterprise-specific methods and objects.
 
@@ -889,6 +1203,16 @@ class CorePlusSession(BaseSession):
         interface for accessing the query information. The returned object includes details like
         the query ID, name, state, creation time, and associated metadata.
 
+        Key attributes available in the returned CorePlusQueryInfo include:
+        - id: Unique identifier for the persistent query
+        - name: Human-readable name of the query
+        - status: Current execution status (e.g., RUNNING, COMPLETED, FAILED)
+        - created_time: Timestamp when the query was created
+        - system_name: Name of the system where the query is running
+        - source: Source information for the query
+        - user_id: ID of the user who created the query
+        - tags: Any tags associated with the query
+
         Returns:
             CorePlusQueryInfo: A wrapper around the persistent query info protobuf message containing
                             information about the current persistent query session, including ID,
@@ -905,7 +1229,7 @@ class CorePlusSession(BaseSession):
             # Get information about the current persistent query
             query_info = await session.pqinfo()
 
-            # Access query attributes
+            # Basic attributes
             print(f"Query ID: {query_info.id}")
             print(f"Query name: {query_info.name}")
             print(f"Query status: {query_info.status}")
@@ -916,6 +1240,12 @@ class CorePlusSession(BaseSession):
                 print("Query is currently running")
             elif query_info.is_completed():
                 print("Query has completed")
+            elif query_info.is_failed():
+                print(f"Query failed with message: {query_info.status_message}")
+
+            # Use query info in application logic
+            if query_info.is_running() and query_info.system_name == "production":
+                print(f"Production query {query_info.name} has been running since {query_info.created_time}")
             ```
         """
         _LOGGER.debug("CorePlusSession.pqinfo called")
@@ -950,21 +1280,35 @@ class CorePlusSession(BaseSession):
         
         Historical tables are identified by a namespace and table name combination. The namespace
         provides a way to organize tables and prevent name collisions across different data domains
-        or applications.
+        or applications. Common namespaces include:
+        
+        - market_data: Financial market data such as prices, quotes, and trades
+        - metrics: System or application performance metrics
+        - analytics: Pre-computed analytical results
+        - reference: Reference data like securities information or customer records
+        
+        When a historical table is loaded, it represents an immutable snapshot of data as it
+        existed at the time of storage. This is in contrast to live tables, which are continuously
+        updated with new data.
         
         Args:
             namespace: The namespace of the table, which helps organize tables into logical groups
-                     or domains (e.g., 'market_data', 'user_analytics', etc.)
-            table_name: The name of the table within the specified namespace
+                     or domains (e.g., 'market_data', 'user_analytics', etc.). This parameter is
+                     case-sensitive.
+            table_name: The name of the table within the specified namespace. This parameter is
+                      also case-sensitive.
             
         Returns:
             Table: A Table object representing the requested historical table. This table
                  is immutable and represents data as it existed at the time of storage.
+                 The table has all the standard Table methods for querying, filtering,
+                 and transforming data.
             
         Raises:
             DeephavenConnectionError: If there is a network or connection error when attempting
                                     to communicate with the server
-            ResourceError: If the table cannot be found in the specified namespace
+            ResourceError: If the table cannot be found in the specified namespace or if the
+                         namespace itself does not exist
             QueryError: If the table exists but cannot be accessed due to a query-related error
                       such as permission issues or data corruption
                       
@@ -978,7 +1322,19 @@ class CorePlusSession(BaseSession):
                 .where("Symbol == 'AAPL'")\
                 .sort("Date")\
                 .to_table()
+                
+            # Compare multiple historical datasets
+            earnings = await session.historical_table("reference", "quarterly_earnings")
+            combined = await session.query(filtered_data).natural_join(earnings, on=["Symbol"]).to_table()
+            
+            # Export results
+            pa_table = await combined.to_arrow()
             ```
+            
+        Note:
+            - Historical tables are read-only and cannot be modified
+            - For time-series data, the columns typically include a timestamp
+            - Historical tables can be joined with other tables (both historical and live)
         """
         _LOGGER.debug(
             "CorePlusSession.historical_table called with namespace=%s, table_name=%s",
@@ -1013,32 +1369,45 @@ class CorePlusSession(BaseSession):
         - Real-time updates as new data becomes available
         - Continuous processing of incoming data
         - Dynamic views that reflect the latest state of the data
+        - Automated propagation of updates to derived tables
         
         Live tables are particularly useful for monitoring current market conditions,
         tracking real-time metrics, or implementing active trading strategies. They
         maintain a connection to the data source and automatically update when new
         data arrives.
         
+        Common use cases for live tables include:
+        - Market data feeds for trading applications
+        - Real-time analytics dashboards
+        - System monitoring and alerting
+        - Event-driven applications and stream processing
+        
         The relationship between live and historical tables:
         - A historical table is a snapshot of data at a specific point in time
         - A live table is continuously updated with new data
         - The same table can often be accessed in both live and historical modes
+        - Live tables can be converted to historical tables using snapshot operations
         
         Args:
             namespace: The namespace of the table, which helps organize tables into logical
-                     groups or domains (e.g., 'market_data', 'system_metrics')
-            table_name: The name of the table within the specified namespace
+                     groups or domains (e.g., 'market_data', 'system_metrics'). This parameter
+                     is case-sensitive.
+            table_name: The name of the table within the specified namespace. This parameter is
+                      also case-sensitive.
             
         Returns:
             Table: A Table object representing the requested live table. This table
-                 will automatically update as new data arrives at the server.
+                 will automatically update as new data arrives at the server. All operations
+                 performed on this table (filters, joins, etc.) will also automatically
+                 update to reflect the latest state of the data.
             
         Raises:
             DeephavenConnectionError: If there is a network or connection error when
                                     attempting to communicate with the server
-            ResourceError: If the table cannot be found in the specified namespace
+            ResourceError: If the table cannot be found in the specified namespace or if the
+                         namespace itself does not exist
             QueryError: If the table exists but cannot be accessed due to a
-                      query-related error such as permission issues
+                      query-related error such as permission issues or data corruption
                       
         Example:
             ```python
@@ -1051,7 +1420,23 @@ class CorePlusSession(BaseSession):
                 .to_table()
                 
             # The filtered_trades table will continue to update as new trades arrive
+            
+            # Create a joined view that combines live and historical data
+            historical_reference = await session.historical_table("reference", "securities")
+            enriched_trades = await (await session.query(filtered_trades))\
+                .join(historical_reference, on=["Symbol"], joins=["SecurityName", "SecurityType"])\
+                .to_table()
+                
+            # Bind the enriched table for access by other users
+            await session.bind_table("enriched_live_trades", enriched_trades)
             ```
+            
+        Note:
+            - All derived tables (via query operations) inherit the live update behavior
+            - Performance considerations: complex operations on frequently updating live tables
+              can consume significant resources
+            - For extremely high-frequency data, consider using aggregations or time-based
+              sampling to reduce update frequency
         """
         _LOGGER.debug(
             "CorePlusSession.live_table called with namespace=%s, table_name=%s",
@@ -1078,47 +1463,77 @@ class CorePlusSession(BaseSession):
 
     async def catalog_table(self) -> Table:
         """
-        Asynchronously fetches the catalog table from the database on the server.
-
-        The catalog table provides a comprehensive inventory of all tables available in the
-        Deephaven server environment. This includes system tables, user-created tables,
-        tables from database connections, and any other tables registered in the system.
-
-        The catalog table contains metadata about each table, such as:
-        - Table name
-        - Table type/source
-        - Column information
-        - Creation time
-        - Size information
-        - Owner/permission data
-
-        This method is particularly useful for discovery and exploration in environments
-        with many tables or when connecting to a server with unknown data structures.
-
+        Asynchronously retrieves the catalog table, which contains metadata about available tables.
+        
+        The catalog table in Deephaven provides a comprehensive overview of all tables accessible
+        to the current session. This includes both historical and live tables across all namespaces
+        the user has permission to access. Each row in the catalog table represents a table in the
+        system, with columns describing its properties.
+        
+        Common columns in the catalog table include:
+        - TableName: The name of the table
+        - Namespace: The namespace the table belongs to
+        - Type: The table type (e.g., 'HISTORICAL', 'LIVE', 'TEMP')
+        - Schema: Information about the table's column structure
+        - CreateTime: When the table was created
+        - UpdateTime: When the table was last updated
+        - Description: Optional description of the table's contents
+        - Owner: User or system that owns the table
+        - AccessControl: Information about who can access the table
+        
+        This method allows users to explore available data without needing to know specific table
+        names in advance. It's particularly useful for data discovery and exploration in large or
+        unfamiliar Deephaven deployments.
+        
         Returns:
-            Table: A Deephaven Table object representing the catalog with rows containing
-                metadata about all available tables in the system
-
+            Table: A Table object representing the catalog of available tables in the system.
+                 Each row represents a table, with columns describing the table's properties
+                 such as name, namespace, schema, and type. The catalog itself is a live table
+                 that updates automatically when new tables are created or existing tables are
+                 removed.
+            
         Raises:
             DeephavenConnectionError: If there is a network or connection error when
-                                    attempting to connect to the server
-            QueryError: If the operation fails due to a query-related error or
-                      insufficient permissions
-
+                                    attempting to communicate with the server
+            QueryError: If the catalog table cannot be retrieved due to a server-side error
+            SessionError: If the session has been closed or is otherwise invalid
+                      
         Example:
             ```python
-            # Fetch the catalog table
+            # Get the catalog table
             catalog = await session.catalog_table()
-
+            
+            # Find all tables in the 'market_data' namespace
+            market_tables = await (await session.query(catalog))\
+                .where("Namespace == 'market_data'")\
+                .to_table()
+                
             # Print the names of all available tables
-            print("Available tables:")
-            for table_name in catalog["TableName"].to_list():
-                print(f"- {table_name}")
-
-            # Find tables with a specific column
-            tables_with_timestamp = catalog.where("Columns.contains('Timestamp')")
+            table_names = await (await session.query(catalog)).select("TableName").to_table()
+            for name in await table_names.to_list():
+                print(name)
+                
+            # Find all tables that contain price data
+            price_tables = await (await session.query(catalog))\
+                .where("TableName.contains('price') || Description.contains('price')")\
+                .to_table()
+                
+            # Get metadata for a specific table
+            my_table_info = await (await session.query(catalog))\
+                .where(f"Namespace == 'analytics' && TableName == 'portfolio_metrics'")\
+                .to_table()
+                
+            # Check if the catalog contains a specific table
+            has_table = await (await session.query(catalog))\
+                .where(f"Namespace == 'market_data' && TableName == 'daily_prices'")\
+                .count() > 0
             ```
-        """
+            
+        Note:
+            - The catalog table is a live table that updates as tables are created and deleted
+            - Column names and availability may vary slightly between Deephaven versions
+            - Performance: For large deployments with many tables, consider using more specific
+              filters when querying the catalog table"""
         _LOGGER.debug("CorePlusSession.catalog_table called")
         try:
             return await asyncio.to_thread(self._session.catalog_table)

@@ -5,12 +5,38 @@ This module provides an asynchronous wrapper around the Deephaven ControllerClie
 operations with the Persistent Query Controller in the Deephaven MCP environment. It manages persistent queries,
 their state changes, and authentication, while maintaining the same interface as the original ControllerClient.
 
+The Persistent Query Controller is a core component of Deephaven Enterprise responsible for:
+- Creating and managing long-running query processes (workers)
+- Monitoring query lifecycle and state changes
+- Resource allocation and management for queries
+- Query replication and fault tolerance
+
+Key features of this asynchronous wrapper:
+1. Full compatibility with modern async/await programming paradigms
+2. Non-blocking operations that won't stall the Python event loop
+3. Enhanced error handling with specific exception types for better diagnostics
+4. Consistent logging for operations and error conditions
+5. Support for authentication token management and automatic reauthentication
+
 All blocking operations are performed using asyncio.to_thread, allowing client code to use async/await syntax
 without blocking the event loop. The wrapper also enhances error handling by wrapping exceptions in more specific
 and informative custom exception types (e.g., AuthenticationError, QueryError, DeephavenConnectionError).
 
+Typical usage flow:
+1. Create and authenticate a controller client
+2. Subscribe to receive query state updates
+3. Create query configurations and add queries
+4. Start queries and wait for them to reach the running state
+5. Monitor query status and handle state changes
+6. Stop, restart, or delete queries as needed
+7. Close the client when finished
+
 Classes:
     CorePlusControllerClient: Async wrapper around deephaven_enterprise.client.controller.ControllerClient
+
+See Also:
+    - ._protobuf: Contains wrapper classes for query state, configuration, and other protobuf objects
+    - ._auth_client: Provides authentication functionality used by the controller client
 """
 
 import asyncio
@@ -40,21 +66,37 @@ _LOGGER = logging.getLogger(__name__)
 class CorePlusControllerClient(
     ClientObjectWrapper["deephaven_enterprise.client.controller.ControllerClient"]
 ):
-    """Asynchronous wrapper around the ControllerClient.
+    """Asynchronous wrapper around the ControllerClient for managing persistent queries.
 
     This class provides an asynchronous interface to the ControllerClient, which connects to the
     Deephaven PersistentQueryController process. It enables subscription to the state of persistent
     queries, as well as creation, modification, and deletion of those queries.
 
+    The controller client facilitates the entire lifecycle of persistent queries, including:
+    - Authentication with the controller service
+    - Subscription to query state changes
+    - Creating query configurations with appropriate resource allocations
+    - Adding new queries to the controller
+    - Starting, stopping, restarting, and deleting queries
+    - Monitoring query state and health
+    - Managing query metadata and configuration
+    
     All blocking calls are performed in separate threads using asyncio.to_thread to avoid blocking
     the event loop. The wrapper maintains the same interface as the underlying ControllerClient
     while making it compatible with asynchronous code.
-
+    
+    Error handling is enhanced with specific exception types that provide more context and clarity
+    than the underlying Java exceptions. Network issues typically result in DeephavenConnectionError,
+    authentication problems in AuthenticationError, and query-related issues in QueryError.
+    
+    Attributes:
+        wrapped: The underlying Java ControllerClient instance being wrapped
+    
     Example:
-        # Create a controller client from an authenticated session manager
-        session_manager = await CorePlusSessionManager.from_url("https://deephaven-server:10000")
-        await session_manager.authenticate(username, password)
-        controller_client = await session_manager.create_controller_client()
+        # Create a controller client from an authenticated session factory
+        session_factory = await CorePlusSessionFactory.from_url("https://deephaven-server:10000")
+        await session_factory.authenticate(username, password)
+        controller_client = await session_factory.create_controller_client()
 
         # Subscribe to receive query state updates
         await controller_client.subscribe()
@@ -62,6 +104,17 @@ class CorePlusControllerClient(
         # Create a temporary query configuration and add it
         config = await controller_client.make_temporary_config("my-worker", heap_size_gb=2.0)
         serial = await controller_client.add_query(config)
+        
+        # Start the query and wait for it to initialize
+        await controller_client.start_and_wait(serial)
+        
+        # Monitor the query state
+        query_info = await controller_client.get(serial)
+        print(f"Query state: {query_info.state}")
+        
+        # Clean up when done
+        await controller_client.stop_query(serial)
+        await controller_client.delete_query(serial)
 
         # Wait for the query to start running
         await controller_client.start_and_wait(serial)
@@ -99,20 +152,43 @@ class CorePlusControllerClient(
 
         This method establishes an authenticated session with the Deephaven PersistentQueryController.
         Authentication must be completed before any other operations can be performed with the controller.
+        This is a required first step for most controller operations, including subscribing to query state,
+        creating queries, and managing existing queries.
 
         The token used for authentication should be created specifically for the PersistentQueryController
         service. You can obtain such a token from the CorePlusAuthClient using create_token with the service
-        parameter set to "PersistentQueryController".
+        parameter set to "PersistentQueryController". The token contains claims that determine the user's
+        permissions within the controller, such as which queries they can view, create, or manage.
+        
+        The optional timeout parameter controls how long to wait for authentication to complete before
+        raising an exception. If not specified, the underlying client's default timeout is used.
+        
+        Authentication credentials are verified against the Deephaven authentication service, and if valid,
+        the controller establishes a session that will be used for subsequent operations. This session
+        remains valid until either the token expires or the client is closed.
+
+        Args:
+            token: A CorePlusToken object containing authentication credentials for the
+                  PersistentQueryController service. This token must be valid and not expired.
+            timeout: Optional timeout in seconds for the authentication request. If not specified,
+                    the default timeout of the underlying client is used.
+                    
+        Raises:
+            AuthenticationError: If authentication fails due to invalid credentials, expired token,
+                               insufficient permissions, or authentication service issues.
+            DeephavenConnectionError: If unable to connect to the controller service due to
+                                    network issues or if the controller is unavailable.
+            TimeoutError: If the authentication operation times out.
 
         Example:
             ```python
             # Create a token for controller authentication
-            auth_client = await session_manager.create_auth_client()
+            auth_client = await session_factory.create_auth_client()
             await auth_client.authenticate(username, password)
             controller_token = await auth_client.create_token("PersistentQueryController")
 
             # Authenticate to the controller using the token
-            controller_client = await session_manager.create_controller_client()
+            controller_client = await session_factory.create_controller_client()
             await controller_client.authenticate(controller_token)
             ```
 

@@ -1,9 +1,28 @@
 """Wrapper classes for protobuf messages used by the Deephaven client module.
 
-This module provides convenience wrappers around protobuf messages to offer
-more Pythonic interfaces and utility methods for working with protobuf objects.
+This module provides convenience wrappers around Google Protocol Buffer (protobuf) messages
+to offer more Pythonic interfaces and utility methods for working with protobuf objects.
 These wrappers simplify interaction with the underlying protobuf API by providing
 standardized access methods, property accessors, and serialization helpers.
+
+Protobuf messages are the core data structures used for communication between the 
+Deephaven client and server components. They provide a compact, efficient, and 
+schema-driven serialization format for data exchange. However, working directly with 
+protobuf objects can be cumbersome in Python due to their C++-like accessor patterns 
+and lack of Pythonic features.
+
+These wrapper classes solve several problems:
+1. Provide a more natural Python interface with properties and methods
+2. Abstract away protobuf-specific implementation details
+3. Add helper methods for common operations and queries
+4. Enable easy JSON and dictionary conversions for debugging and logging
+5. Facilitate type checking and IDE auto-completion
+
+The architecture follows a consistent pattern where each wrapper class:
+- Wraps a specific protobuf message or enum type
+- Inherits from the ProtobufWrapper base class
+- Provides specialized methods relevant to the wrapped object's domain
+- Maintains access to the underlying protobuf object when needed
 
 The module contains wrapper classes for various protobuf message types used
 in client-server communication, including query configurations, state information,
@@ -16,6 +35,15 @@ Classes:
     CorePlusQueryConfig: Wrapper for query configuration messages.
     CorePlusQueryState: Wrapper for query state messages.
     CorePlusQueryInfo: Wrapper for comprehensive query information messages.
+    
+Type Definitions:
+    CorePlusQuerySerial: Type representing the serial number of a query.
+
+Usage Note:
+    These wrapper classes are designed to be used with the Deephaven Enterprise
+    protobuf definitions. The wrappers themselves do not depend on the Enterprise
+    package at import time (conditional imports are used), but they expect to
+    wrap specific protobuf message types at runtime.
 """
 
 from typing import Any, NewType
@@ -33,7 +61,19 @@ else:
 
 # Type definitions
 CorePlusQuerySerial = NewType("CorePlusQuerySerial", int)
-"""Type representing the serial number of a query."""
+"""Type representing the serial number of a persistent query.
+
+A query serial is a unique identifier assigned to each persistent query in the Deephaven system.
+It is used to reference, lookup, and manage specific query instances. Query serials are
+integers that are assigned incrementally by the controller service when queries are created.
+
+Unlike query names (which are optional and user-defined), serials are guaranteed to be unique
+within a Deephaven server instance and are the primary key for query identification in the API.
+
+Example:
+    >>> query_serial = CorePlusQuerySerial(12345)
+    >>> info = await controller_client.get_persistent_query(query_serial)
+"""
 
 
 class ProtobufWrapper:
@@ -50,6 +90,18 @@ class ProtobufWrapper:
     """
 
     def __init__(self, pb: Message):
+        """Initialize with a protobuf message object.
+        
+        This constructor validates that the provided protobuf message is not None
+        and stores it as the wrapped object. All wrapper subclasses will inherit
+        this validation behavior.
+        
+        Args:
+            pb: The protobuf message object to wrap. Must not be None.
+            
+        Raises:
+            ValueError: If the provided protobuf message is None.
+        """
         if pb is None:
             raise ValueError("Protobuf message cannot be None")
 
@@ -83,22 +135,52 @@ class ProtobufWrapper:
 
 
 class CorePlusQueryStatus(ProtobufWrapper):
-    """Wrapper for a PersistentQueryStatusEnum value.
+    """Wrapper for a PersistentQueryStatusEnum value providing status checking functionality.
 
-    This class wraps a protobuf enum value for query status.
-    It provides utility methods for checking status conditions
-    by delegating to ControllerClient methods.
+    This class wraps a protobuf enum value for persistent query status, which represents
+    the current lifecycle state of a query or worker process in the Deephaven system.
+    It provides utility methods and properties for checking status conditions
+    by delegating to ControllerClient methods, simplifying status-based decision making.
+
+    Common status values include:
+    - UNINITIALIZED: Initial state before query execution begins
+    - INITIALIZING: Query is being set up but not yet running
+    - RUNNING: Query is actively executing and processing data
+    - STOPPING: Query is in the process of shutting down gracefully
+    - STOPPED: Query has been gracefully terminated
+    - COMPLETED: Query has finished execution successfully
+    - FAILED: Query encountered an error and terminated abnormally
+    - KILLED: Query was forcibly terminated
+    
+    Typical status transitions follow this pattern:
+    UNINITIALIZED → INITIALIZING → RUNNING → [STOPPING] → STOPPED/COMPLETED/FAILED/KILLED
 
     This class simplifies status checking with properties like is_running, is_completed,
-    is_terminal and is_uninitialized. It also supports string comparison with the status
-    name and direct comparison with other status objects.
+    is_terminal and is_uninitialized. It also supports flexible equality comparison with:
+    - Other CorePlusQueryStatus objects
+    - String status names (e.g., "RUNNING")
+    - Raw enum values
 
     Example:
         >>> status = CorePlusQueryStatus(pb_status_enum)
         >>> if status.is_running:
         ...     print(f"Query is running with status: {status}")
+        >>> elif status.is_completed:
+        ...     print(f"Query has completed successfully")
+        >>> elif status.is_terminal and not status.is_completed:
+        ...     print(f"Query terminated abnormally with status: {status}")
+        >>> 
+        >>> # String comparison for specific status values
         >>> if status == "RUNNING":
         ...     print("Status matches string 'RUNNING'")
+        >>> elif status == "FAILED":
+        ...     print("Query has failed and needs attention")
+
+    Note:
+        The properties provided by this class (is_running, is_completed, etc.) are
+        preferred over direct string comparisons because they handle groups of related
+        states. For example, is_terminal will return True for all end states regardless
+        of whether they represent success or failure.
 
     This corresponds to PersistentQueryStatusEnum in the protobuf definition:
     https://docs.deephaven.io/protodoc/20240517/#io.deephaven.proto.controller.PersistentQueryStatusEnum
@@ -129,37 +211,77 @@ class CorePlusQueryStatus(ProtobufWrapper):
 
     @property
     def name(self) -> str:
-        """Get the string name of the status."""
+        """Get the string name of the status.
+        
+        Returns:
+            str: The name of the status enum value (e.g., "RUNNING", "COMPLETED", "FAILED").
+                This is useful for logging, display, and string-based comparisons.
+        """
         return ControllerClient.status_name(self.pb)
 
     @property
     def is_running(self) -> bool:
-        """Check if the query status is running."""
+        """Check if the query status is running.
+        
+        A running query is actively processing data and executing its defined operations.
+        The query may be in either the "RUNNING" state or certain transitional states
+        that are considered equivalent to running for most practical purposes.
+        
+        Returns:
+            bool: True if the query is in a running state, False otherwise.
+        """
         return ControllerClient.is_running(self.pb)
 
     @property
     def is_completed(self) -> bool:
-        """Check if the query status is completed."""
+        """Check if the query status is completed.
+        
+        A completed query has finished its execution successfully. This is different from
+        other terminal states like FAILED or KILLED, which indicate abnormal termination.
+        The COMPLETED state generally indicates that the query finished all its work as expected.
+        
+        Returns:
+            bool: True if the query has completed successfully, False otherwise.
+        """
         return ControllerClient.is_completed(self.pb)
 
     @property
     def is_terminal(self) -> bool:
-        """Check if the query status is in a terminal state."""
+        """Check if the query status is in a terminal state.
+        
+        Terminal states represent the end of a query's lifecycle. No further state transitions
+        will occur once a query reaches a terminal state. Terminal states include:
+        COMPLETED, FAILED, KILLED, and sometimes STOPPED depending on the configuration.
+        
+        A query in a terminal state will not resume processing without explicit
+        user intervention (such as restarting it).
+        
+        Returns:
+            bool: True if the query is in a terminal state, False otherwise.
+        """
         return ControllerClient.is_terminal(self.pb)
 
     @property
     def is_uninitialized(self) -> bool:
-        """Check if the query status is uninitialized."""
+        """Check if the query status is uninitialized.
+        
+        The uninitialized state is the initial state of a query before it starts executing.
+        A query in this state has been defined but has not yet begun the initialization process.
+        
+        Returns:
+            bool: True if the query is in the uninitialized state, False otherwise.
+        """
         return ControllerClient.is_status_uninitialized(self.pb)
 
 
 class CorePlusToken(ProtobufWrapper):
     """
-    Wrapper for authentication Token message.
+    Wrapper for authentication Token message in the Deephaven authentication system.
 
     This class wraps a protobuf Token message (type: deephaven_enterprise.proto.auth_pb2.Token)
     to provide a more convenient interface for accessing token information such as service name,
-    issuer, and expiration time.
+    issuer, and expiration time. Tokens are central to Deephaven's authentication and 
+    authorization system, representing a user's validated identity and permissions.
 
     It simplifies the interaction with authentication tokens in the Deephaven environment,
     allowing for easier token management and validation. The wrapped token contains
@@ -169,6 +291,18 @@ class CorePlusToken(ProtobufWrapper):
     - Expiration time (when the token becomes invalid)
     - Issuer information (who created/issued the token)
     - User identity information (who the token represents)
+    - Roles and permissions (what operations the token authorizes)
+
+    Tokens are typically obtained through authentication methods like password, SAML, or
+    private key authentication, and then used for subsequent API calls. They have a limited 
+    lifetime and may need to be refreshed periodically during long-running operations.
+
+    In the authentication flow:
+    1. A user authenticates using credentials (username/password, private key, SAML)
+    2. The auth service returns a token (wrapped by this class) 
+    3. The token is included in subsequent API requests
+    4. Services validate the token before processing requests
+    5. When the token expires, re-authentication is required
 
     Args:
         token: The protobuf Token message to wrap (type: deephaven_enterprise.proto.auth_pb2.Token)
@@ -178,6 +312,13 @@ class CorePlusToken(ProtobufWrapper):
         >>> token_dict = token.to_dict()
         >>> print(f"Token expires: {token_dict.get('expires_at')}")
         >>> print(f"Token issuer: {token_dict.get('issuer')}")
+        >>> print(f"Authenticated user: {token_dict.get('user_identity', {}).get('username')}")
+        >>> 
+        >>> # Check if token is expired
+        >>> import datetime
+        >>> now = datetime.datetime.now().isoformat()
+        >>> if token_dict.get('expires_at', now) < now:
+        ...     print("Token has expired, re-authentication required")
 
     This corresponds to Token in the protobuf definition:
     https://docs.deephaven.io/protodoc/20240517/#io.deephaven.proto.auth.Token
@@ -195,33 +336,55 @@ class CorePlusToken(ProtobufWrapper):
 
 
 class CorePlusQueryConfig(ProtobufWrapper):
-    """Wrapper for a PersistentQueryConfigMessage.
+    """Wrapper for a PersistentQueryConfigMessage defining how a query should be executed.
 
     Provides a more Pythonic interface to the query configuration. This class wraps
     the protobuf configuration message for persistent queries to make it easier to
-    work with in Python code.
+    work with in Python code. It enables defining all aspects of how a query should
+    be instantiated and executed in the Deephaven system.
 
     The configuration contains settings that determine how a persistent query is executed,
     including but not limited to:
-    - Query name and description
-    - Memory allocation (heap size)
-    - CPU allocation and priority
-    - Server/node placement constraints
-    - Engine type and version
-    - Query source definition (script, table, application)
-    - Initialization parameters
-    - Timeout settings
-    - Replication settings
+    - Query name and description: Identifiers and metadata for the query
+    - Memory allocation (heap_size_mb): JVM heap size in megabytes allocated to the query
+    - CPU allocation and priority: Resource limits and scheduling priority
+    - Server/node placement constraints: Which physical or virtual servers can run the query
+    - Engine type and version: The processing engine implementation to use (e.g., "DeephavenCommunity")
+    - Query source definition: The source code, table, or application to execute
+      - script: Python, Groovy, or other script code to execute
+      - table: Reference to an existing table to process
+      - application: Custom application-specific configuration
+    - Initialization parameters: Parameters passed to the query at startup
+    - Timeout settings: How long the query can run or remain idle
+    - Replication settings: How many replicas should be maintained for fault tolerance
+    - Auto-start policy: Whether the query should start automatically after creation
+    - Restart policy: How to handle query failures (restart automatically or not)
+    
+    Configuration objects are immutable - to modify a configuration, you must create a new
+    one with the desired changes.
 
     Query configurations are typically created using helper methods like
     `make_temporary_config()` from the controller client, rather than constructed manually.
+    These helper methods provide sensible defaults and validation to ensure a valid configuration.
 
-    Example:
+    Example - Basic config inspection:
         >>> config = CorePlusQueryConfig(pb_config)
         >>> config_dict = config.to_dict()
         >>> print(f"Query name: {config_dict.get('name')}")
         >>> print(f"Heap size: {config_dict.get('heap_size_mb')} MB")
         >>> print(f"Engine: {config_dict.get('engine_type')}")
+        >>> 
+        >>> # Check script source if present
+        >>> source = config_dict.get('source', {})
+        >>> if 'script' in source:
+        ...     print(f"Script language: {source['script'].get('language')}")
+        ...     script_text = source['script'].get('text', '')
+        ...     print(f"Script preview: {script_text[:50]}..." if len(script_text) > 50 else script_text)
+        >>> 
+        >>> # Check replication settings
+        >>> if 'replication' in config_dict:
+        ...     rep_config = config_dict['replication']
+        ...     print(f"Replicas: {rep_config.get('replicas', 0)}, Spares: {rep_config.get('spares', 0)}")
 
     This corresponds to PersistentQueryConfigMessage in the protobuf definition:
     https://docs.deephaven.io/protodoc/20240517/#io.deephaven.proto.persistent_query.PersistentQueryConfigMessage
@@ -354,20 +517,51 @@ class CorePlusQueryInfo(ProtobufWrapper):
 
     @property
     def config(self) -> CorePlusQueryConfig:
-        """The wrapped configuration of the query."""
+        """The wrapped configuration of the query.
+        
+        Returns:
+            CorePlusQueryConfig: A wrapper for the query's configuration settings,
+                containing parameters like name, heap size, and engine type.
+        """
         return self._config
 
     @property
     def state(self) -> CorePlusQueryState | None:
-        """The wrapped state of the query, if present."""
+        """The wrapped state of the query, if present.
+        
+        The state may be None if the query hasn't been initialized or if state
+        information wasn't included in the original protobuf message.
+        
+        Returns:
+            CorePlusQueryState | None: A wrapper for the query's primary state 
+                information if available, or None if no state exists.
+        """
         return self._state
 
     @property
     def replicas(self) -> list[CorePlusQueryState]:
-        """A list of wrapped replica states for the query."""
+        """A list of wrapped replica states for the query.
+        
+        Replicas are additional instances of the query that may be running for
+        high availability or load balancing purposes. Each replica has its own
+        state that can be monitored independently.
+        
+        Returns:
+            list[CorePlusQueryState]: A list of state wrappers for all active replicas.
+                Returns an empty list if no replicas exist.
+        """
         return self._replicas
 
     @property
     def spares(self) -> list[CorePlusQueryState]:
-        """A list of wrapped spare states for the query."""
+        """A list of wrapped spare states for the query.
+        
+        Spares are pre-initialized but inactive instances of the query that can
+        quickly take over if the primary or a replica instance fails. They are
+        part of the high availability strategy for critical queries.
+        
+        Returns:
+            list[CorePlusQueryState]: A list of state wrappers for all spare instances.
+                Returns an empty list if no spares exist.
+        """
         return self._spares
