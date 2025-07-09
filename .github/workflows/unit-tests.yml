@@ -71,6 +71,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          lfs: true
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
@@ -100,6 +102,7 @@ jobs:
             echo "ERROR: No Core Plus wheel file found in ops/artifacts/"
             exit 1
           fi
+          echo "Wheel file SHA256: $(sha256sum "$wheel_file" | cut -d' ' -f1)"
           ./bin/dev_manage_coreplus_client.sh install-wheel --file "$wheel_file"
 
       - name: Run tests with coverage
