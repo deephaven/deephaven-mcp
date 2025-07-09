@@ -177,9 +177,9 @@ The `enterprise` key with nested `"systems"` in `deephaven_mcp.json` is a dictio
         *   `password` (string): The password itself.
         *   `password_env_var` (string): The name of an environment variable that holds the password (e.g., `"MY_ENTERPRISE_PASSWORD"`).
 *   **If `auth_type` is `"private_key"`:**
-    *   `private_key_path` (string): The absolute path to the private key file (e.g., `"/path/to/your/private_key.pem"`) (required).
+    *   `private_key` (string): The absolute path to the private key file (e.g., `"/path/to/your/private_key.pem"`) (required).
 
-*Note: All paths, like `private_key_path`, should be absolute and accessible by the MCP server process.*
+*Note: All paths, like `private_key`, should be absolute and accessible by the MCP server process.*
 
 #### Example `deephaven_mcp.json`
 
@@ -213,7 +213,7 @@ The `enterprise` key with nested `"systems"` in `deephaven_mcp.json` is a dictio
       "data_science_env": {
         "connection_json_url": "https://data-science.enterprise.example.com/iris/connection.json",
         "auth_type": "private_key",
-        "private_key_path": "/path/to/your/private_key.pem"
+        "private_key": "/path/to/your/private_key.pem"
       }
     }
   }

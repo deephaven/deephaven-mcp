@@ -116,7 +116,7 @@ The [deephaven-mcp](https://github.com/deephaven/deephaven-mcp) project provides
 
 2. **Deephaven MCP Docs Server**:
    * Offers an agentic, LLM-powered API for Deephaven documentation Q&A and chat
-   * Uses Inkeep/OpenAI APIs for its LLM capabilities
+   * Uses [Inkeep](https://inkeep.com/)/[OpenAI](https://openai.com/) APIs for its LLM capabilities
    * Designed for integration with orchestration frameworks
 
 Both servers are designed for integration with MCP-compatible tools like the [MCP Inspector](https://github.com/modelcontextprotocol/inspector) and [Claude Desktop](https://claude.ai).
@@ -364,7 +364,7 @@ If the `"enterprise"` key is present, it must be a dictionary. Each individual e
       "analytics_private_key_auth": {
         "connection_json_url": "https://analytics.dept.com/iris/connection.json",
         "auth_type": "private_key",
-        "private_key_path": "/secure/keys/analytics_service_account.key"
+        "private_key": "/secure/keys/analytics_service_account.key"
       }
     }
   }
@@ -1239,52 +1239,97 @@ The codebase is organized as follows:
 ```
 deephaven-mcp/
 ├── src/
-│   └── deephaven_mcp/
+│   └── deephaven_mcp/      # Main Python package
+│       ├── client/             # Core Plus client components
+│       ├── config/             # Configuration models and validators
+│       ├── mcp_docs_server/    # Source for the Docs MCP server
+│       ├── mcp_systems_server/ # Source for the Systems MCP server
+│       ├── resource_manager/   # Resource (session, etc.) management
+│       │   ├── __init__.py         # Public API for resource management
+│       │   ├── _base.py            # Base classes for resource managers
+│       │   └── _registries.py      # Resource registries and factories
 │       ├── __init__.py
-│       ├── _version.py
-│       ├── config/                    # Configuration management and validation
-│       │   ├── __init__.py
-│       │   ├── _community_session.py
-│       │   ├── _enterprise_system.py
-│       │   └── _errors.py
-│       ├── io.py                     # I/O utilities
-│       ├── mcp_docs_server/          # Docs Server module
-│       │   ├── __init__.py
-│       │   └── _mcp.py
-│       ├── mcp_systems_server/       # Systems Server module
-│       │   ├── __init__.py
-│       │   └── _mcp.py
-│       ├── openai.py                 # OpenAI API client for LLM integration
-│       └── sessions/                 # Session management
-│           ├── __init__.py
-│           ├── _errors.py
-│           ├── _lifecycle/
-│           │   ├── __init__.py
-│           │   ├── community.py
-│           │   └── shared.py
-│           ├── _queries.py
-│           └── _sessions.py
-├── tests/                           # Unit and integration tests
+│       ├── _exceptions.py      # Custom exception classes
+│       ├── _logging.py         # Logging configuration
+│       ├── _monkeypatch.py     # Runtime patches
+│       ├── _version.py         # Version information
+│       ├── io.py               # I/O utilities
+│       ├── openai.py           # OpenAI client integration
+│       └── queries.py          # Query management
+├── tests/                    # Unit and integration tests
+│   ├── client/
 │   ├── config/
-│   ├── lifecycle/
 │   ├── mcp_docs_server/
 │   ├── mcp_systems_server/
 │   ├── openai_tests/
 │   ├── package/
 │   ├── queries/
-│   ├── sessions/
-│   └── testio/
-├── ops/                             # Operations and deployment
-│   ├── docker/
-│   └── terraform/
-├── docs/                            # Documentation
-│   ├── DEVELOPER_GUIDE.md
-│   └── UV.md
-├── scripts/                         # Utility scripts
-├── pyproject.toml                   # Python project configuration
-├── README.md
-└── ...
+│   ├── resource_manager/
+│   ├── testio/
+│   ├── utils/
+│   ├── conftest.py           # Pytest fixtures and helpers
+│   └── ...                   # Other test files and directories
+├── scripts/                  # Standalone utility and test scripts
+├── docs/                     # Project documentation
+├── ops/                      # Operations (Docker, Terraform)
+├── .github/                  # GitHub Actions workflows
+├── bin/                      # Executable scripts (e.g., pre-commit)
+├── pyproject.toml            # Project definition and dependencies
+├── README.md                 # Main project README
+├── LICENSE
+└── CONTRIBUTING.md
 ```
+
+- **`src/`**: Contains the main `deephaven_mcp` Python package source code.
+- **`tests/`**: Contains all unit and integration tests, with a structure that mirrors the `src/` directory.
+- **`scripts/`**: Holds utility scripts for tasks like running test servers or clients.
+- **`docs/`**: All project documentation, including this developer guide.
+- **`ops/`**: Contains operational configurations for deployment, infrastructure-as-code (Terraform), and containerization (Docker). This directory includes:
+  - `docker/`: Dockerfiles and Docker Compose configurations for each service
+  - `terraform/`: Terraform modules for cloud infrastructure (GCP resources, registries, etc.)
+  - `run_terraform.sh`: Unified helper script for workspace-aware Terraform operations
+  - `README.md`: Comprehensive guide for infrastructure and deployment operations
+- **`bin/`**: Executable helper scripts, often used for CI/CD or local development hooks.
+
+#### Key Module Details
+
+**MCP Systems Server (`mcp_systems_server/`)**:
+- Implements the MCP protocol for Deephaven Community Core and Enterprise workers
+- Provides tools for worker management, session orchestration, and script execution
+- Supports multiple transport modes (SSE, stdio, streamable-HTTP)
+- Built with FastMCP for robust async lifecycle management
+
+**MCP Docs Server (`mcp_docs_server/`)**:
+- Provides LLM-powered documentation Q&A capabilities
+- Integrates with Inkeep and OpenAI APIs for conversational assistance
+- Supports SSE transport for real-time streaming responses
+- Includes rate limiting and query management features
+
+**Resource Manager (`resource_manager/`)**:
+- Unified API for managing lifecycle of sessions, factories, and other resources
+- Automatic caching, liveness checking, and cleanup for Community/Enterprise sessions
+- Registry pattern for centralized resource management
+- Coroutine-safe operations with asyncio.Lock protection
+- Secure async loading of certificates and credentials using aiofiles
+
+**Configuration (`config/`)**:
+- Pydantic-based configuration models and validators
+- Support for Community and Enterprise session configurations
+- Environment variable integration with security redaction
+- Comprehensive validation with detailed error messages
+
+**Client (`client/`)**:
+- Core Plus client components for Enterprise Deephaven connections
+- Authentication handlers (API key, password, SAML private key)
+- Protocol buffer integration and session factory management
+- TLS/SSL support with custom certificate handling
+
+**Core Utilities**:
+- **`openai.py`**: OpenAI client integration with async support and rate limiting
+- **`queries.py`**: Query management and execution framework
+- **`io.py`**: I/O utilities for file operations and data handling
+- **`_exceptions.py`**: Custom exception classes for MCP-specific errors
+- **`_logging.py`**: Centralized logging configuration with sensitive data redaction
 
 #### Script References
 
@@ -1296,6 +1341,9 @@ The project includes several utility scripts to help with development and testin
 | [`../scripts/mcp_community_test_client.py`](../scripts/mcp_community_test_client.py) | Tests the Systems Server tools | `uv run scripts/mcp_community_test_client.py --transport sse` |
 | [`../scripts/mcp_docs_test_client.py`](../scripts/mcp_docs_test_client.py) | Tests the Docs Server chat functionality | `uv run scripts/mcp_docs_test_client.py --prompt "What is Deephaven?"` |
 | [`../scripts/mcp_docs_stress_sse.py`](../scripts/mcp_docs_stress_sse.py) | Stress tests the SSE endpoint | `uv run scripts/mcp_docs_stress_sse.py --sse-url "http://localhost:8000/sse"` |
+| [`../scripts/mcp_docs_stress_sse_cancel_queries.py`](../scripts/mcp_docs_stress_sse_cancel_queries.py) | Stress tests SSE with query cancellation | `uv run scripts/mcp_docs_stress_sse_cancel_queries.py --url http://localhost:8000/sse --runs 10` |
+| [`../scripts/mcp_docs_stress_sse_user_queries.py`](../scripts/mcp_docs_stress_sse_user_queries.py) | Stress tests SSE with user-defined queries | `uv run scripts/mcp_docs_stress_sse_user_queries.py --url http://localhost:8000/sse` |
+| [`../bin/precommit.sh`](../bin/precommit.sh) | Runs pre-commit code quality checks | `bin/precommit.sh` |
 
 ### Dependencies
 
@@ -1434,6 +1482,15 @@ The script will create multiple concurrent connections and send requests to the 
 7. **Session Errors:**
    - Review logs for session cache or connection errors
    - Try refreshing the session with the `refresh` tool
+
+8. **Development-Specific Issues:**
+   - **Test Execution**: Always use `uv run pytest` instead of `pytest` for consistency
+   - **Code Quality**: Run [`bin/precommit.sh`](../bin/precommit.sh) before committing to catch style and lint issues
+   - **Virtual Environment**: Ensure you're using the correct virtual environment with `uv` or `pip+venv`
+   - **IDE Configuration**: Use absolute paths in IDE configurations for MCP server integration
+   - **Module Import Errors**: If encountering import errors, verify the package is installed in development mode: `uv pip install -e ".[dev]"`
+   - **Resource Manager Issues**: Check async safety and ensure proper session lifecycle management
+   - **Performance Testing**: Use the stress test scripts in [`scripts/`](../scripts/) to identify bottlenecks or connection issues
 
 ---
 
