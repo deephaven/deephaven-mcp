@@ -9,47 +9,76 @@ import pytest
 
 import deephaven_mcp._exceptions as exc
 
-# Check if enterprise features are actually available
+# Check if enterprise features are actually available and set up mocks if needed
+# This MUST happen at import time before any other imports that depend on enterprise modules
 try:
     import deephaven_enterprise.client.session_manager  # noqa: F401
+    import deephaven_enterprise.client.controller  # noqa: F401
     ENTERPRISE_AVAILABLE = True
 except ImportError:
     ENTERPRISE_AVAILABLE = False
     
-    # Create comprehensive mock hierarchy
+    # Create robust mock classes that behave like the real ones
     class MockSessionManager:
+        """Mock for deephaven_enterprise.client.session_manager.SessionManager"""
         def __init__(self, *args, **kwargs):
             pass
+        
+        def __call__(self, *args, **kwargs):
+            return self
     
     class MockControllerClient:
+        """Mock for deephaven_enterprise.client.controller.ControllerClient"""
         def __init__(self, *args, **kwargs):
             pass
+        
+        def __call__(self, *args, **kwargs):
+            return self
     
-    # Create mock modules with proper hierarchy
+    # Create the complete module hierarchy with proper types
     mock_enterprise = types.ModuleType("deephaven_enterprise")
     mock_client = types.ModuleType("deephaven_enterprise.client")
-    mock_sm = types.ModuleType("deephaven_enterprise.client.session_manager")
+    mock_session_manager = types.ModuleType("deephaven_enterprise.client.session_manager")
     mock_controller = types.ModuleType("deephaven_enterprise.client.controller")
     
-    # Set up classes
-    mock_sm.SessionManager = MockSessionManager
+    # Set up the mock classes in their proper modules
+    mock_session_manager.SessionManager = MockSessionManager
     mock_controller.ControllerClient = MockControllerClient
     
-    # Set up the module hierarchy - ensure all paths work
+    # Build the complete module hierarchy with all possible access paths
     mock_enterprise.client = mock_client
-    mock_client.session_manager = mock_sm
+    mock_client.session_manager = mock_session_manager
     mock_client.controller = mock_controller
     
-    # Add all possible import paths
+    # Ensure classes are accessible via multiple import paths for maximum compatibility
     mock_client.SessionManager = MockSessionManager
+    mock_client.ControllerClient = MockControllerClient
     mock_enterprise.SessionManager = MockSessionManager
+    mock_enterprise.ControllerClient = MockControllerClient
     
-    # Install in sys.modules permanently
+    # Install the complete mock hierarchy in sys.modules
+    # This needs to be comprehensive to handle all possible import patterns
     sys.modules["deephaven_enterprise"] = mock_enterprise
     sys.modules["deephaven_enterprise.client"] = mock_client
-    sys.modules["deephaven_enterprise.client.session_manager"] = mock_sm
+    sys.modules["deephaven_enterprise.client.session_manager"] = mock_session_manager
     sys.modules["deephaven_enterprise.client.controller"] = mock_controller
+    
+    # Force the modules to have the correct __name__ and __path__ attributes
+    # This helps with certain import machinery edge cases
+    mock_enterprise.__name__ = "deephaven_enterprise"
+    mock_enterprise.__path__ = []
+    mock_client.__name__ = "deephaven_enterprise.client"
+    mock_client.__path__ = []
+    mock_session_manager.__name__ = "deephaven_enterprise.client.session_manager"
+    mock_controller.__name__ = "deephaven_enterprise.client.controller"
+    
+    # Ensure the mocks are persistent and not garbage collected
+    globals()['_mock_enterprise'] = mock_enterprise
+    globals()['_mock_client'] = mock_client
+    globals()['_mock_session_manager'] = mock_session_manager
+    globals()['_mock_controller'] = mock_controller
 
+# Import the session factory AFTER setting up mocks
 from deephaven_mcp.client._session_factory import CorePlusSessionFactory
 
 
