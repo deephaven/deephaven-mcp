@@ -231,29 +231,57 @@ class TestEnterpriseSessionManager:
     """Tests for the EnterpriseSessionManager class."""
 
     @pytest.mark.asyncio
-    async def test_create_item_raises_not_implemented(self):
-        """Test that _create_item raises NotImplementedError."""
+    async def test_create_item_success(self):
+        """Test that _create_item successfully calls the creation function."""
+        mock_session = AsyncMock()
+        mock_creation_function = AsyncMock(return_value=mock_session)
+        
         manager = EnterpriseSessionManager(
-            SystemType.ENTERPRISE, "test", "test_session"
+            "test_source", "test_session", mock_creation_function
         )
-        with pytest.raises(NotImplementedError):
-            await manager._create_item()
+        
+        result = await manager._create_item()
+        
+        assert result is mock_session
+        mock_creation_function.assert_awaited_once_with("test_source", "test_session")
 
     @pytest.mark.asyncio
-    async def test_get_raises_not_implemented(self):
-        """Test that get() raises NotImplementedError because _create_item is not implemented."""
+    async def test_create_item_raises_session_creation_error(self):
+        """Test that _create_item raises SessionCreationError when creation function fails."""
+        mock_creation_function = AsyncMock(side_effect=Exception("Creation failed"))
+        
         manager = EnterpriseSessionManager(
-            SystemType.ENTERPRISE, "test", "test_session"
+            "test_source", "test_session", mock_creation_function
         )
-        with pytest.raises(NotImplementedError):
-            await manager.get()
+        
+        with pytest.raises(SessionCreationError, match="Failed to create enterprise session for test_session: Creation failed"):
+            await manager._create_item()
+        
+        mock_creation_function.assert_awaited_once_with("test_source", "test_session")
+
+    @pytest.mark.asyncio
+    async def test_get_success(self):
+        """Test that get() successfully returns a session from the creation function."""
+        mock_session = AsyncMock()
+        mock_session.is_alive = AsyncMock(return_value=True)
+        mock_creation_function = AsyncMock(return_value=mock_session)
+        
+        manager = EnterpriseSessionManager(
+            "test_source", "test_session", mock_creation_function
+        )
+        
+        result = await manager.get()
+        
+        assert result is mock_session
+        mock_creation_function.assert_awaited_once_with("test_source", "test_session")
 
     @pytest.mark.asyncio
     async def test_close(self):
         """Test that close correctly closes the cached session."""
-        # Create a manager with a mock session
+        # Create a manager with a mock creation function
+        mock_creation_function = AsyncMock()
         manager = EnterpriseSessionManager(
-            SystemType.ENTERPRISE, "test", "test_session"
+            "test_source", "test_session", mock_creation_function
         )
         mock_session = AsyncMock()
 
@@ -271,9 +299,10 @@ class TestEnterpriseSessionManager:
     @pytest.mark.asyncio
     async def test_check_liveness(self):
         """Test that _check_liveness correctly calls the session's is_alive method."""
-        # Create a manager
+        # Create a manager with a mock creation function
+        mock_creation_function = AsyncMock()
         manager = EnterpriseSessionManager(
-            SystemType.ENTERPRISE, "test", "test_session"
+            "test_source", "test_session", mock_creation_function
         )
 
         # Test with a mock session where is_alive returns True
