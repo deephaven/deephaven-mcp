@@ -16,34 +16,39 @@ try:
 except ImportError:
     ENTERPRISE_AVAILABLE = False
     
-    # Patch sys.modules for enterprise imports BEFORE any tested imports
+    # Create comprehensive mock hierarchy
+    class MockSessionManager:
+        def __init__(self, *args, **kwargs):
+            pass
+    
+    class MockControllerClient:
+        def __init__(self, *args, **kwargs):
+            pass
+    
+    # Create mock modules with proper hierarchy
     mock_enterprise = types.ModuleType("deephaven_enterprise")
     mock_client = types.ModuleType("deephaven_enterprise.client")
     mock_sm = types.ModuleType("deephaven_enterprise.client.session_manager")
-    mock_sm.SessionManager = MagicMock()
     mock_controller = types.ModuleType("deephaven_enterprise.client.controller")
-    mock_controller.ControllerClient = MagicMock()
     
-    # Set up the module hierarchy properly - ensure all attributes exist
+    # Set up classes
+    mock_sm.SessionManager = MockSessionManager
+    mock_controller.ControllerClient = MockControllerClient
+    
+    # Set up the module hierarchy - ensure all paths work
     mock_enterprise.client = mock_client
     mock_client.session_manager = mock_sm
     mock_client.controller = mock_controller
     
-    # Also set SessionManager directly on the client module to ensure compatibility
-    mock_client.SessionManager = mock_sm.SessionManager
+    # Add all possible import paths
+    mock_client.SessionManager = MockSessionManager
+    mock_enterprise.SessionManager = MockSessionManager
     
+    # Install in sys.modules permanently
     sys.modules["deephaven_enterprise"] = mock_enterprise
     sys.modules["deephaven_enterprise.client"] = mock_client
     sys.modules["deephaven_enterprise.client.session_manager"] = mock_sm
     sys.modules["deephaven_enterprise.client.controller"] = mock_controller
-    
-    # Ensure the mock persists by setting it as a fixture
-    def _ensure_enterprise_mock():
-        if "deephaven_enterprise" not in sys.modules or not hasattr(sys.modules["deephaven_enterprise"], "client"):
-            sys.modules["deephaven_enterprise"] = mock_enterprise
-            sys.modules["deephaven_enterprise.client"] = mock_client
-            sys.modules["deephaven_enterprise.client.session_manager"] = mock_sm
-            sys.modules["deephaven_enterprise.client.controller"] = mock_controller
 
 from deephaven_mcp.client._session_factory import CorePlusSessionFactory
 
