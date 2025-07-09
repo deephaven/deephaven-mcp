@@ -13,9 +13,9 @@ from pathlib import Path
 from typing import TypeVar
 from unittest.mock import MagicMock, patch
 
-import deephaven_mcp._exceptions as exc
-
 import pytest
+
+import deephaven_mcp._exceptions as exc
 
 # Import InternalError directly since it's used in _base.py
 from deephaven_mcp._exceptions import InternalError
@@ -337,43 +337,43 @@ def test_import_without_enterprise_available():
     original_modules = {}
     enterprise_modules = [
         "deephaven_enterprise",
-        "deephaven_enterprise.client", 
+        "deephaven_enterprise.client",
         "deephaven_enterprise.client.controller",
         "deephaven_enterprise.proto",
         "deephaven_enterprise.proto.auth_pb2",
         "deephaven_enterprise.proto.common_pb2",
     ]
-    
+
     # Save and remove enterprise modules from sys.modules
     for module_name in enterprise_modules:
         if module_name in sys.modules:
             original_modules[module_name] = sys.modules[module_name]
             del sys.modules[module_name]
-    
+
     try:
         # Force ImportError by making the import fail
         def mock_import(name, *args, **kwargs):
-            if name.startswith('deephaven_enterprise'):
+            if name.startswith("deephaven_enterprise"):
                 raise ImportError(f"No module named '{name}'")
             return original_import(name, *args, **kwargs)
-        
-        original_import = __builtins__['__import__']
-        __builtins__['__import__'] = mock_import
-        
+
+        original_import = __builtins__["__import__"]
+        __builtins__["__import__"] = mock_import
+
         try:
             # Now reload the _base module to trigger the ImportError path
-            if 'deephaven_mcp.client._base' in sys.modules:
-                del sys.modules['deephaven_mcp.client._base']
-            
+            if "deephaven_mcp.client._base" in sys.modules:
+                del sys.modules["deephaven_mcp.client._base"]
+
             # Import _base which should trigger the except ImportError block
             import deephaven_mcp.client._base as base_module
-            
+
             # Verify that enterprise is not available
             assert base_module.is_enterprise_available is False
-            
+
         finally:
-            __builtins__['__import__'] = original_import
-            
+            __builtins__["__import__"] = original_import
+
     finally:
         # Restore original sys.modules state
         for module_name, module in original_modules.items():
@@ -384,8 +384,8 @@ def test_client_object_wrapper_none_coverage():
     """Ensure the ClientObjectWrapper None check is covered."""
     # Import after clearing sys.modules mocking to get clean module
     import deephaven_mcp.client._base as base_module
-    
-    # Test the None path specifically 
+
+    # Test the None path specifically
     with pytest.raises(ValueError, match="Cannot wrap None"):
         base_module.ClientObjectWrapper(None, is_enterprise=False)
 
@@ -393,9 +393,9 @@ def test_client_object_wrapper_none_coverage():
 def test_client_object_wrapper_none_coverage():
     """Test to ensure None coverage paths are tested."""
     import deephaven_mcp.client._base as base_mod
-    
+
     # Test the None path in constructor (should raise ValueError)
-    with patch.object(base_mod, 'is_enterprise_available', True):
+    with patch.object(base_mod, "is_enterprise_available", True):
         with pytest.raises(ValueError, match="Cannot wrap None"):
             base_mod.ClientObjectWrapper(None, is_enterprise=False)
 
@@ -403,15 +403,17 @@ def test_client_object_wrapper_none_coverage():
 def test_client_object_wrapper_enterprise_assertion_ci_robust():
     """CI-robust test for line 161: InternalError when enterprise=True but not available."""
     import deephaven_mcp.client._base as base_mod
-    
+
     # Create a mock object to wrap
     mock_obj = MagicMock()
-    
+
     # Patch is_enterprise_available to False at module level
-    with patch.object(base_mod, 'is_enterprise_available', False):
+    with patch.object(base_mod, "is_enterprise_available", False):
         # This should raise InternalError from line 161
         with pytest.raises(exc.InternalError) as excinfo:
             base_mod.ClientObjectWrapper(mock_obj, is_enterprise=True)
-    
-    assert "enterprise=True when enterprise features are not available" in str(excinfo.value)
+
+    assert "enterprise=True when enterprise features are not available" in str(
+        excinfo.value
+    )
     assert "Please report this issue" in str(excinfo.value)

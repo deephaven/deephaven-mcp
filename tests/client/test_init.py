@@ -88,6 +88,7 @@ def test_symbol_in_module(symbol):
 
 def test_import_client_init():
     import deephaven_mcp.client as client
+
     assert hasattr(client, "CoreSession")
     assert hasattr(client, "CorePlusSession")
     assert hasattr(client, "CorePlusAuthClient")
@@ -96,6 +97,7 @@ def test_import_client_init():
 
 def test___all__():
     import deephaven_mcp.client as client
+
     expected = {
         "ClientObjectWrapper",
         "BaseSession",
@@ -146,5 +148,5 @@ def test_import_star_behavior():
 
 def test_is_enterprise_available_type():
     import deephaven_mcp.client as client
-    assert isinstance(client.is_enterprise_available, bool)
 
+    assert isinstance(client.is_enterprise_available, bool)
