@@ -36,7 +36,8 @@ import enum
 import logging
 import sys
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, Generic, Protocol, TypeVar
+from collections.abc import Awaitable, Callable
+from typing import TYPE_CHECKING, Any, Generic, Protocol, TypeVar
 
 if TYPE_CHECKING:
     from typing_extensions import override  # pragma: no cover
@@ -73,11 +74,11 @@ class AsyncClosable(Protocol):
 
     async def close(self) -> None:
         """Close the underlying resource or session.
-        
+
         This method should perform all necessary cleanup operations, such as
         closing network connections, releasing resources, and notifying any
         dependent systems of the shutdown.
-        
+
         Raises:
             Exception: May raise exceptions during cleanup, which should be
                 handled by the caller.
@@ -90,11 +91,11 @@ T = TypeVar("T", bound=AsyncClosable)
 
 class SystemType(str, enum.Enum):
     """Enum representing the types of Deephaven backend systems.
-    
+
     This enum is used to categorize the different types of Deephaven deployments
     that can be managed by the session managers. Each type has different
     authentication requirements, capabilities, and management approaches.
-    
+
     Attributes:
         COMMUNITY: Free, open-source Deephaven Community deployment.
             Typically runs locally or in simple containerized environments.
@@ -159,7 +160,7 @@ class BaseItemManager(Generic[T], ABC):
     @property
     def system_type(self) -> SystemType:
         """The type of Deephaven system this manager connects to.
-        
+
         Returns:
             SystemType: Either COMMUNITY or ENTERPRISE, indicating the backend type.
         """
@@ -168,10 +169,10 @@ class BaseItemManager(Generic[T], ABC):
     @property
     def source(self) -> str:
         """The configuration source identifier for this manager.
-        
+
         This property provides the source identifier used to group related managers
         or trace back to their configuration origin.
-        
+
         Returns:
             str: The source identifier (e.g., file path, URL, or config key).
         """
@@ -180,10 +181,10 @@ class BaseItemManager(Generic[T], ABC):
     @property
     def name(self) -> str:
         """The unique name of this manager instance.
-        
+
         This name is used for identification within the source context, logging,
         debugging, and creating fully qualified identifiers.
-        
+
         Returns:
             str: The manager's unique name within its source.
         """
@@ -192,11 +193,11 @@ class BaseItemManager(Generic[T], ABC):
     @property
     def full_name(self) -> str:
         """A fully qualified name combining system type, source, and name.
-        
+
         This property creates a unique identifier that can be used for logging,
         debugging, and distinguishing between different manager instances across
         the entire system.
-        
+
         Returns:
             str: A colon-separated string in the format "system_type:source:name".
         """
@@ -205,14 +206,14 @@ class BaseItemManager(Generic[T], ABC):
     @abstractmethod
     async def _create_item(self) -> T:
         """Create and return a new instance of the managed item.
-        
+
         This abstract method must be implemented by subclasses to define how
         the specific type of managed item is created. It is called only when
         a new item needs to be created (lazy initialization).
-        
+
         Returns:
             T: A newly created instance of the managed item type.
-            
+
         Raises:
             Exception: May raise various exceptions depending on the specific
                 implementation and the type of resource being created.
@@ -222,17 +223,17 @@ class BaseItemManager(Generic[T], ABC):
     @abstractmethod
     async def _check_liveness(self, item: T) -> bool:
         """Check if the managed item is still alive and functional.
-        
+
         This abstract method must be implemented by subclasses to define how
         to determine if the managed item is still healthy and usable. It is
         called by the get() method to validate cached items.
-        
+
         Args:
             item: The managed item instance to check for liveness.
-            
+
         Returns:
             bool: True if the item is alive and functional, False otherwise.
-            
+
         Raises:
             Exception: May raise exceptions during the liveness check, which
                 should be handled appropriately by the caller.
@@ -241,18 +242,18 @@ class BaseItemManager(Generic[T], ABC):
 
     async def get(self) -> T:
         """Get the managed item, creating it lazily if it doesn't exist.
-        
+
         This method implements the lazy initialization pattern with thread safety.
         On the first call, it creates the item using _create_item(). Subsequent
         calls return the cached item without recreating it.
-        
+
         Returns:
             T: The managed item instance, either from cache or newly created.
-            
+
         Raises:
             Exception: May raise any exception from the _create_item() implementation,
                 such as connection errors, authentication failures, or configuration issues.
-        
+
         Thread Safety:
             This method is coroutine-safe and can be called concurrently from multiple
             tasks without race conditions.
@@ -272,19 +273,19 @@ class BaseItemManager(Generic[T], ABC):
 
     async def is_alive(self) -> bool:
         """Check if the cached item exists and is still alive.
-        
+
         This method first checks if an item is cached, then delegates to the
         subclass-specific _check_liveness() method to determine if the item
         is still functional. If no item is cached, returns False immediately.
-        
+
         Returns:
             bool: True if an item is cached and passes the liveness check,
                 False if no item is cached or the liveness check fails.
-                
+
         Thread Safety:
             This method is coroutine-safe and handles exceptions from the
             liveness check gracefully by logging warnings and returning False.
-        
+
         Note:
             This method never raises exceptions - liveness check failures are
             logged as warnings and the method returns False.
@@ -394,15 +395,15 @@ class CommunitySessionManager(BaseItemManager[CoreSession]):
     @override
     async def _create_item(self) -> CoreSession:
         """Create a new CoreSession from the stored configuration.
-        
+
         This method is called during lazy initialization to create a new
         CoreSession instance using the configuration provided during construction.
         It handles the async session creation process and wraps any exceptions
         in a SessionCreationError for consistent error handling.
-        
+
         Returns:
             CoreSession: A newly created and connected CoreSession instance.
-            
+
         Raises:
             SessionCreationError: If session creation fails due to connection
                 issues, authentication problems, or invalid configuration.
@@ -418,13 +419,13 @@ class CommunitySessionManager(BaseItemManager[CoreSession]):
     @override
     async def _check_liveness(self, item: CoreSession) -> bool:
         """Check if the CoreSession is still alive and responsive.
-        
+
         This method delegates to the session's own is_alive() method to
         determine if the session is still connected and functional.
-        
+
         Args:
             item: The CoreSession instance to check for liveness.
-            
+
         Returns:
             bool: True if the session is alive and responsive, False otherwise.
         """
@@ -508,15 +509,15 @@ class EnterpriseSessionManager(BaseItemManager[CorePlusSession]):
     @override
     async def _create_item(self) -> CorePlusSession:
         """Create a new CorePlusSession using the provided creation function.
-        
+
         This method invokes the creation function provided during initialization,
         passing the source and name parameters. It handles the async session creation
         process and wraps any exceptions in a SessionCreationError for consistent
         error handling.
-        
+
         Returns:
             CorePlusSession: A newly created and connected CorePlusSession instance.
-            
+
         Raises:
             SessionCreationError: If session creation fails due to any reason,
                 including connection issues, authentication problems, or creation
@@ -532,13 +533,13 @@ class EnterpriseSessionManager(BaseItemManager[CorePlusSession]):
     @override
     async def _check_liveness(self, item: CorePlusSession) -> bool:
         """Check if the CorePlusSession is still alive and responsive.
-        
+
         This method delegates to the session's own is_alive() method to
         determine if the session is still connected and functional.
-        
+
         Args:
             item: The CorePlusSession instance to check for liveness.
-            
+
         Returns:
             bool: True if the session is alive and responsive, False otherwise.
         """
@@ -614,15 +615,15 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
     @override
     async def _create_item(self) -> CorePlusSessionFactory:
         """Create a new CorePlusSessionFactory from the stored configuration.
-        
+
         This method is called during lazy initialization to create a new
         CorePlusSessionFactory instance using the configuration provided during
         construction. It handles the async factory creation process.
-        
+
         Returns:
             CorePlusSessionFactory: A newly created and configured factory instance
                 ready to create CorePlusSession instances.
-                
+
         Raises:
             Exception: May raise various exceptions during factory creation,
                 such as connection errors, authentication failures, or
@@ -633,14 +634,14 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
     @override
     async def _check_liveness(self, item: CorePlusSessionFactory) -> bool:
         """Check if the CorePlusSessionFactory is still alive and responsive.
-        
+
         This method uses the factory's ping() method to verify connectivity
         and readiness without creating a full session. This is more lightweight
         than session-based liveness checks.
-        
+
         Args:
             item: The CorePlusSessionFactory instance to check for liveness.
-            
+
         Returns:
             bool: True if the factory responds to ping and is ready to create
                 sessions, False otherwise.

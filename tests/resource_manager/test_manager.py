@@ -235,13 +235,13 @@ class TestEnterpriseSessionManager:
         """Test that _create_item successfully calls the creation function."""
         mock_session = AsyncMock()
         mock_creation_function = AsyncMock(return_value=mock_session)
-        
+
         manager = EnterpriseSessionManager(
             "test_source", "test_session", mock_creation_function
         )
-        
+
         result = await manager._create_item()
-        
+
         assert result is mock_session
         mock_creation_function.assert_awaited_once_with("test_source", "test_session")
 
@@ -249,14 +249,17 @@ class TestEnterpriseSessionManager:
     async def test_create_item_raises_session_creation_error(self):
         """Test that _create_item raises SessionCreationError when creation function fails."""
         mock_creation_function = AsyncMock(side_effect=Exception("Creation failed"))
-        
+
         manager = EnterpriseSessionManager(
             "test_source", "test_session", mock_creation_function
         )
-        
-        with pytest.raises(SessionCreationError, match="Failed to create enterprise session for test_session: Creation failed"):
+
+        with pytest.raises(
+            SessionCreationError,
+            match="Failed to create enterprise session for test_session: Creation failed",
+        ):
             await manager._create_item()
-        
+
         mock_creation_function.assert_awaited_once_with("test_source", "test_session")
 
     @pytest.mark.asyncio
@@ -265,13 +268,13 @@ class TestEnterpriseSessionManager:
         mock_session = AsyncMock()
         mock_session.is_alive = AsyncMock(return_value=True)
         mock_creation_function = AsyncMock(return_value=mock_session)
-        
+
         manager = EnterpriseSessionManager(
             "test_source", "test_session", mock_creation_function
         )
-        
+
         result = await manager.get()
-        
+
         assert result is mock_session
         mock_creation_function.assert_awaited_once_with("test_source", "test_session")
 
