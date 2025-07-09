@@ -105,12 +105,18 @@ usage() {
 run_pip_install() {
   local args=()
   local use_override=false
-  local override_file=""
+  local override_content=""
   
   # Parse arguments to handle uv-specific options
   while [[ $# -gt 0 ]]; do
     case $1 in
+      --override-content)
+        use_override=true
+        override_content="$2"
+        shift 2
+        ;;
       --override)
+        # Legacy support for file-based override (for uv)
         use_override=true
         override_file="$2"
         shift 2
@@ -124,19 +130,31 @@ run_pip_install() {
   
   if command -v uv >/dev/null 2>&1; then
     if [[ "$use_override" == "true" ]]; then
-      echo "Using uv with override: uv pip install --override $override_file ${args[*]}" >&2
-      uv pip install --override "$override_file" "${args[@]}"
+      if [[ -n "$override_file" ]]; then
+        # Legacy file-based override for uv
+        echo "Using uv with override file: uv pip install --override $override_file ${args[*]}" >&2
+        uv pip install --override "$override_file" "${args[@]}"
+      else
+        # Content-based override for uv
+        local temp_override_file
+        temp_override_file=$(mktemp)
+        echo "$override_content" > "$temp_override_file"
+        echo "Using uv with override: uv pip install --override $temp_override_file ${args[*]}" >&2
+        uv pip install --override "$temp_override_file" "${args[@]}"
+        local uv_exit_code=$?
+        rm -f "$temp_override_file"
+        return $uv_exit_code
+      fi
     else
       echo "Using uv: uv pip install ${args[*]}" >&2
       uv pip install "${args[@]}"
     fi
   else
     if [[ "$use_override" == "true" ]]; then
-      # Create temporary constraint file for pip (process substitution doesn't work reliably with pip --constraint)
+      # Create temporary constraint file for pip
       local temp_constraint_file
       temp_constraint_file=$(mktemp)
-      # Copy content from override_file to temp file
-      cat "$override_file" > "$temp_constraint_file"
+      echo "$override_content" > "$temp_constraint_file"
       echo "uv not found, using pip with constraint file: pip install --constraint $temp_constraint_file ${args[*]}" >&2
       command pip install --constraint "$temp_constraint_file" "${args[@]}"
       local pip_exit_code=$?
@@ -514,10 +532,9 @@ fn_install_wheel() {
   current_grpcio_version=$( (run_pip show grpcio || true) 2>/dev/null | awk '/^Version:/ {print $2}' | tr -d '[:space:]' )
 
   if [ -n "${current_grpcio_version}" ]; then
-    echo "Found existing grpcio version: '${current_grpcio_version}'. Will attempt to override grpcio to this version using process substitution." >&2
-    # For debugging, the content of the process substitution can be imagined as: echo "grpcio==${current_grpcio_version}"
-    # Bash replaces <(echo ...) with a file descriptor path like /dev/fd/XX
-    cmd_args+=(--override <(echo "grpcio==${current_grpcio_version}"))
+    echo "Found existing grpcio version: '${current_grpcio_version}'. Will attempt to override grpcio to this version." >&2
+    # Add override content with grpcio version constraint
+    cmd_args+=(--override-content "grpcio==${current_grpcio_version}")
   else
     echo "No existing grpcio installation found. grpcio will be installed based on wheel's dependencies if required." >&2
   fi
@@ -575,8 +592,8 @@ install_wheel_file() {
   echo "Checking for existing grpcio installation..." >&2
   current_grpcio_version=$( (run_pip show grpcio || true) 2>/dev/null | awk '/^Version:/ {print $2}' | tr -d '[:space:]' )
   if [ -n "$current_grpcio_version" ]; then
-    echo "Found existing grpcio version: '$current_grpcio_version'. Will attempt to override grpcio to this version using process substitution." >&2
-    cmd_args+=(--override <(echo "grpcio==${current_grpcio_version}"))
+    echo "Found existing grpcio version: '$current_grpcio_version'. Will attempt to override grpcio to this version." >&2
+    cmd_args+=(--override-content "grpcio==${current_grpcio_version}")
   else
     echo "No existing grpcio installation found. grpcio will be installed based on wheel's dependencies if required." >&2
   fi
