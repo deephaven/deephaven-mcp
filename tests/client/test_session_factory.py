@@ -1012,27 +1012,6 @@ async def test_from_config_unsupported_auth_type_branch(monkeypatch, caplog):
 
 
 @pytest.mark.asyncio
-async def test_enterprise_constructor_assertion_when_not_available(monkeypatch):
-    """Test that CorePlusSessionFactory constructor raises InternalError when enterprise not available."""
-    # Import the modules first so we can patch them correctly
-    import deephaven_mcp.client._base as base_mod
-    import deephaven_mcp.client._session_factory as sm_mod
-    
-    # Patch the is_enterprise_available flag in the base module where it's checked
-    monkeypatch.setattr(base_mod, 'is_enterprise_available', False)
-    
-    # Mock the SessionManager to avoid import issues
-    mock_session_manager = MagicMock()
-    
-    # This should raise InternalError due to the enterprise assertion
-    with pytest.raises(exc.InternalError) as excinfo:
-        sm_mod.CorePlusSessionFactory(mock_session_manager)
-    
-    assert "enterprise=True when enterprise features are not available" in str(excinfo.value)
-    assert "Please report this issue" in str(excinfo.value)
-
-
-@pytest.mark.asyncio
 async def test_from_config_when_enterprise_not_available(monkeypatch):
     """Test that from_config handles enterprise not available appropriately."""
     monkeypatch.setattr('deephaven_mcp.client._session_factory.is_enterprise_available', False)

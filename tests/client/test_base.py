@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import TypeVar
 from unittest.mock import MagicMock, patch
 
+import deephaven_mcp._exceptions as exc
+
 import pytest
 
 # Import InternalError directly since it's used in _base.py
@@ -386,3 +388,30 @@ def test_client_object_wrapper_none_coverage():
     # Test the None path specifically 
     with pytest.raises(ValueError, match="Cannot wrap None"):
         base_module.ClientObjectWrapper(None, is_enterprise=False)
+
+
+def test_client_object_wrapper_none_coverage():
+    """Test to ensure None coverage paths are tested."""
+    import deephaven_mcp.client._base as base_mod
+    
+    # Test the None path in constructor (should raise ValueError)
+    with patch.object(base_mod, 'is_enterprise_available', True):
+        with pytest.raises(ValueError, match="Cannot wrap None"):
+            base_mod.ClientObjectWrapper(None, is_enterprise=False)
+
+
+def test_client_object_wrapper_enterprise_assertion_ci_robust():
+    """CI-robust test for line 161: InternalError when enterprise=True but not available."""
+    import deephaven_mcp.client._base as base_mod
+    
+    # Create a mock object to wrap
+    mock_obj = MagicMock()
+    
+    # Patch is_enterprise_available to False at module level
+    with patch.object(base_mod, 'is_enterprise_available', False):
+        # This should raise InternalError from line 161
+        with pytest.raises(exc.InternalError) as excinfo:
+            base_mod.ClientObjectWrapper(mock_obj, is_enterprise=True)
+    
+    assert "enterprise=True when enterprise features are not available" in str(excinfo.value)
+    assert "Please report this issue" in str(excinfo.value)
