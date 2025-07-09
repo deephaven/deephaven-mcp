@@ -101,24 +101,16 @@ usage() {
   exit 1
 }
 
-# Centralized pip/uv installer function with proper argument handling
+# Centralized pip/uv installer function with grpcio constraint support
 run_pip_install() {
   local args=()
-  local use_override=false
-  local override_content=""
+  local grpcio_constraint=""
   
-  # Parse arguments to handle uv-specific options
+  # Parse arguments to extract grpcio constraint
   while [[ $# -gt 0 ]]; do
     case $1 in
-      --override-content)
-        use_override=true
-        override_content="$2"
-        shift 2
-        ;;
-      --override)
-        # Legacy support for file-based override (for uv)
-        use_override=true
-        override_file="$2"
+      --grpcio-constraint)
+        grpcio_constraint="$2"
         shift 2
         ;;
       *)
@@ -129,40 +121,33 @@ run_pip_install() {
   done
   
   if command -v uv >/dev/null 2>&1; then
-    if [[ "$use_override" == "true" ]]; then
-      if [[ -n "$override_file" ]]; then
-        # Legacy file-based override for uv
-        echo "Using uv with override file: uv pip install --override $override_file ${args[*]}" >&2
-        uv pip install --override "$override_file" "${args[@]}"
-      else
-        # Content-based override for uv
-        local temp_override_file
-        temp_override_file=$(mktemp)
-        echo "$override_content" > "$temp_override_file"
-        echo "Using uv with override: uv pip install --override $temp_override_file ${args[*]}" >&2
-        uv pip install --override "$temp_override_file" "${args[@]}"
-        local uv_exit_code=$?
-        rm -f "$temp_override_file"
-        return $uv_exit_code
-      fi
+    if [[ -n "$grpcio_constraint" ]]; then
+      # Create temp constraint file for uv --override
+      local temp_file
+      temp_file=$(mktemp)
+      echo "$grpcio_constraint" > "$temp_file"
+      echo "Using uv with grpcio constraint: uv pip install --override $temp_file ${args[*]}" >&2
+      uv pip install --override "$temp_file" "${args[@]}"
+      local exit_code=$?
+      rm -f "$temp_file"
+      return $exit_code
     else
       echo "Using uv: uv pip install ${args[*]}" >&2
       uv pip install "${args[@]}"
     fi
   else
-    if [[ "$use_override" == "true" ]]; then
-      # Create temporary constraint file for pip
-      local temp_constraint_file
-      temp_constraint_file=$(mktemp)
-      echo "$override_content" > "$temp_constraint_file"
-      echo "uv not found, using pip with constraint file: pip install --constraint $temp_constraint_file ${args[*]}" >&2
-      command pip install --constraint "$temp_constraint_file" "${args[@]}"
-      local pip_exit_code=$?
-      # Clean up temp file
-      rm -f "$temp_constraint_file"
-      return $pip_exit_code
+    if [[ -n "$grpcio_constraint" ]]; then
+      # Create temp constraint file for pip --constraint
+      local temp_file
+      temp_file=$(mktemp)
+      echo "$grpcio_constraint" > "$temp_file"
+      echo "Using pip with grpcio constraint: pip install --constraint $temp_file ${args[*]}" >&2
+      command pip install --constraint "$temp_file" "${args[@]}"
+      local exit_code=$?
+      rm -f "$temp_file"
+      return $exit_code
     else
-      echo "uv not found, falling back to pip: pip install ${args[*]}" >&2
+      echo "Using pip: pip install ${args[*]}" >&2
       command pip install "${args[@]}"
     fi
   fi
@@ -531,10 +516,10 @@ fn_install_wheel() {
   echo "Checking for existing grpcio installation..." >&2
   current_grpcio_version=$( (run_pip show grpcio || true) 2>/dev/null | awk '/^Version:/ {print $2}' | tr -d '[:space:]' )
 
-  if [ -n "${current_grpcio_version}" ]; then
+  if [[ -n "$current_grpcio_version" ]]; then
     echo "Found existing grpcio version: '${current_grpcio_version}'. Will attempt to override grpcio to this version." >&2
-    # Add override content with grpcio version constraint
-    cmd_args+=(--override-content "grpcio==${current_grpcio_version}")
+    # Add grpcio version constraint
+    cmd_args+=(--grpcio-constraint "grpcio==${current_grpcio_version}")
   else
     echo "No existing grpcio installation found. grpcio will be installed based on wheel's dependencies if required." >&2
   fi
@@ -591,9 +576,9 @@ install_wheel_file() {
   local cmd_args=()
   echo "Checking for existing grpcio installation..." >&2
   current_grpcio_version=$( (run_pip show grpcio || true) 2>/dev/null | awk '/^Version:/ {print $2}' | tr -d '[:space:]' )
-  if [ -n "$current_grpcio_version" ]; then
+  if [[ -n "$current_grpcio_version" ]]; then
     echo "Found existing grpcio version: '$current_grpcio_version'. Will attempt to override grpcio to this version." >&2
-    cmd_args+=(--override-content "grpcio==${current_grpcio_version}")
+    cmd_args+=(--grpcio-constraint "grpcio==${current_grpcio_version}")
   else
     echo "No existing grpcio installation found. grpcio will be installed based on wheel's dependencies if required." >&2
   fi
