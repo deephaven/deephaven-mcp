@@ -649,6 +649,9 @@ case "$COMMAND" in
     uv pip uninstall -y deephaven-coreplus-client || die "Failed to uninstall deephaven-coreplus-client"
     echo "deephaven-coreplus-client has been uninstalled." >&2
     ;;
+  patch)
+    patch_deephaven_enterprise_proto_package
+    ;;
   *)
     usage
     ;;
