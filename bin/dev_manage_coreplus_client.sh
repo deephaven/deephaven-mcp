@@ -132,9 +132,17 @@ run_pip_install() {
     fi
   else
     if [[ "$use_override" == "true" ]]; then
-      echo "uv not found, using pip with constraint file: pip install --constraint /dev/stdin ${args[*]}" >&2
-      # Use constraint file equivalent for pip (read constraint from override_file)
-      command pip install --constraint "$override_file" "${args[@]}"
+      # Create temporary constraint file for pip (process substitution doesn't work reliably with pip --constraint)
+      local temp_constraint_file
+      temp_constraint_file=$(mktemp)
+      # Copy content from override_file to temp file
+      cat "$override_file" > "$temp_constraint_file"
+      echo "uv not found, using pip with constraint file: pip install --constraint $temp_constraint_file ${args[*]}" >&2
+      command pip install --constraint "$temp_constraint_file" "${args[@]}"
+      local pip_exit_code=$?
+      # Clean up temp file
+      rm -f "$temp_constraint_file"
+      return $pip_exit_code
     else
       echo "uv not found, falling back to pip: pip install ${args[*]}" >&2
       command pip install "${args[@]}"
