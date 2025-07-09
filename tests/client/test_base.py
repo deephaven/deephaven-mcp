@@ -327,3 +327,62 @@ def test_is_enterprise_available_logging():
     _, mock_logger_false = get_base_module(enterprise_available=False)
     mock_logger_true.debug.assert_called_with("Enterprise features available")
     mock_logger_false.debug.assert_called_with("Enterprise features not available")
+
+
+def test_import_without_enterprise_available():
+    """Test the ImportError path when deephaven_enterprise is not available."""
+    # Save original sys.modules state
+    original_modules = {}
+    enterprise_modules = [
+        "deephaven_enterprise",
+        "deephaven_enterprise.client", 
+        "deephaven_enterprise.client.controller",
+        "deephaven_enterprise.proto",
+        "deephaven_enterprise.proto.auth_pb2",
+        "deephaven_enterprise.proto.common_pb2",
+    ]
+    
+    # Save and remove enterprise modules from sys.modules
+    for module_name in enterprise_modules:
+        if module_name in sys.modules:
+            original_modules[module_name] = sys.modules[module_name]
+            del sys.modules[module_name]
+    
+    try:
+        # Force ImportError by making the import fail
+        def mock_import(name, *args, **kwargs):
+            if name.startswith('deephaven_enterprise'):
+                raise ImportError(f"No module named '{name}'")
+            return original_import(name, *args, **kwargs)
+        
+        original_import = __builtins__['__import__']
+        __builtins__['__import__'] = mock_import
+        
+        try:
+            # Now reload the _base module to trigger the ImportError path
+            if 'deephaven_mcp.client._base' in sys.modules:
+                del sys.modules['deephaven_mcp.client._base']
+            
+            # Import _base which should trigger the except ImportError block
+            import deephaven_mcp.client._base as base_module
+            
+            # Verify that enterprise is not available
+            assert base_module.is_enterprise_available is False
+            
+        finally:
+            __builtins__['__import__'] = original_import
+            
+    finally:
+        # Restore original sys.modules state
+        for module_name, module in original_modules.items():
+            sys.modules[module_name] = module
+
+
+def test_client_object_wrapper_none_coverage():
+    """Ensure the ClientObjectWrapper None check is covered."""
+    # Import after clearing sys.modules mocking to get clean module
+    import deephaven_mcp.client._base as base_module
+    
+    # Test the None path specifically 
+    with pytest.raises(ValueError, match="Cannot wrap None"):
+        base_module.ClientObjectWrapper(None, is_enterprise=False)
