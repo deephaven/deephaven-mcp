@@ -39,7 +39,9 @@ def dummy_session_manager():
 
 
 @pytest.fixture
-def coreplus_session_manager(dummy_session_manager):
+def coreplus_session_manager(dummy_session_manager, monkeypatch):
+    # Patch is_enterprise_available to True for the constructor
+    monkeypatch.setattr('deephaven_mcp.client._base.is_enterprise_available', True)
     return CorePlusSessionFactory(dummy_session_manager)
 
 
@@ -422,13 +424,26 @@ async def test_from_config_password_success(monkeypatch):
         "password": "pw",
     }
     mock_manager = MagicMock()
+    
+    # Create mock modules for deephaven_enterprise hierarchy
+    mock_session_manager_class = MagicMock(return_value=mock_manager)
+    mock_session_manager_module = MagicMock()
+    mock_session_manager_module.SessionManager = mock_session_manager_class
+    
+    mock_client_module = MagicMock()
+    mock_client_module.session_manager = mock_session_manager_module
+    
+    mock_enterprise_module = MagicMock()
+    mock_enterprise_module.client = mock_client_module
+    
     with (
         patch("deephaven_mcp.client._session_factory.is_enterprise_available", True),
         patch("deephaven_mcp.config.validate_single_enterprise_system"),
-        patch(
-            "deephaven_enterprise.client.session_manager.SessionManager",
-            return_value=mock_manager,
-        ),
+        patch.dict('sys.modules', {
+            'deephaven_enterprise': mock_enterprise_module,
+            'deephaven_enterprise.client': mock_client_module,
+            'deephaven_enterprise.client.session_manager': mock_session_manager_module,
+        }),
     ):
         import deephaven_mcp.client._session_factory as sm_mod
 
@@ -452,13 +467,26 @@ async def test_from_config_password_env(monkeypatch):
     }
     monkeypatch.setenv("PW_ENV", "env_pw")
     mock_manager = MagicMock()
+    
+    # Create mock modules for deephaven_enterprise hierarchy
+    mock_session_manager_class = MagicMock(return_value=mock_manager)
+    mock_session_manager_module = MagicMock()
+    mock_session_manager_module.SessionManager = mock_session_manager_class
+    
+    mock_client_module = MagicMock()
+    mock_client_module.session_manager = mock_session_manager_module
+    
+    mock_enterprise_module = MagicMock()
+    mock_enterprise_module.client = mock_client_module
+    
     with (
         patch("deephaven_mcp.client._session_factory.is_enterprise_available", True),
         patch("deephaven_mcp.config.validate_single_enterprise_system"),
-        patch(
-            "deephaven_enterprise.client.session_manager.SessionManager",
-            return_value=mock_manager,
-        ),
+        patch.dict('sys.modules', {
+            'deephaven_enterprise': mock_enterprise_module,
+            'deephaven_enterprise.client': mock_client_module,
+            'deephaven_enterprise.client.session_manager': mock_session_manager_module,
+        }),
     ):
         import deephaven_mcp.client._session_factory as sm_mod
 
@@ -479,13 +507,26 @@ async def test_from_config_private_key_success(monkeypatch):
         "private_key": "---KEY---",
     }
     mock_manager = MagicMock()
+    
+    # Create mock modules for deephaven_enterprise hierarchy
+    mock_session_manager_class = MagicMock(return_value=mock_manager)
+    mock_session_manager_module = MagicMock()
+    mock_session_manager_module.SessionManager = mock_session_manager_class
+    
+    mock_client_module = MagicMock()
+    mock_client_module.session_manager = mock_session_manager_module
+    
+    mock_enterprise_module = MagicMock()
+    mock_enterprise_module.client = mock_client_module
+    
     with (
         patch("deephaven_mcp.client._session_factory.is_enterprise_available", True),
         patch("deephaven_mcp.config.validate_single_enterprise_system"),
-        patch(
-            "deephaven_enterprise.client.session_manager.SessionManager",
-            return_value=mock_manager,
-        ),
+        patch.dict('sys.modules', {
+            'deephaven_enterprise': mock_enterprise_module,
+            'deephaven_enterprise.client': mock_client_module,
+            'deephaven_enterprise.client.session_manager': mock_session_manager_module,
+        }),
     ):
         import deephaven_mcp.client._session_factory as sm_mod
 
@@ -541,13 +582,25 @@ async def test_from_config_connection_error(monkeypatch):
         "username": "bob",
         "password": "pw",
     }
+    # Create mock modules for deephaven_enterprise hierarchy
+    mock_session_manager_class = MagicMock(side_effect=ConnectionError("Connection failed"))
+    mock_session_manager_module = MagicMock()
+    mock_session_manager_module.SessionManager = mock_session_manager_class
+    
+    mock_client_module = MagicMock()
+    mock_client_module.session_manager = mock_session_manager_module
+    
+    mock_enterprise_module = MagicMock()
+    mock_enterprise_module.client = mock_client_module
+    
     with (
         patch("deephaven_mcp.client._session_factory.is_enterprise_available", True),
         patch("deephaven_mcp.config.validate_single_enterprise_system"),
-        patch(
-            "deephaven_enterprise.client.session_manager.SessionManager",
-            side_effect=Exception("fail connect"),
-        ),
+        patch.dict('sys.modules', {
+            'deephaven_enterprise': mock_enterprise_module,
+            'deephaven_enterprise.client': mock_client_module,
+            'deephaven_enterprise.client.session_manager': mock_session_manager_module,
+        }),
     ):
         import deephaven_mcp.client._session_factory as sm_mod
 
@@ -567,13 +620,26 @@ async def test_from_config_password_env_missing(monkeypatch):
     }
     # Do NOT setenv
     mock_manager = MagicMock()
+    
+    # Create mock modules for deephaven_enterprise hierarchy
+    mock_session_manager_class = MagicMock(return_value=mock_manager)
+    mock_session_manager_module = MagicMock()
+    mock_session_manager_module.SessionManager = mock_session_manager_class
+    
+    mock_client_module = MagicMock()
+    mock_client_module.session_manager = mock_session_manager_module
+    
+    mock_enterprise_module = MagicMock()
+    mock_enterprise_module.client = mock_client_module
+    
     with (
         patch("deephaven_mcp.client._session_factory.is_enterprise_available", True),
         patch("deephaven_mcp.config.validate_single_enterprise_system"),
-        patch(
-            "deephaven_enterprise.client.session_manager.SessionManager",
-            return_value=mock_manager,
-        ),
+        patch.dict('sys.modules', {
+            'deephaven_enterprise': mock_enterprise_module,
+            'deephaven_enterprise.client': mock_client_module,
+            'deephaven_enterprise.client.session_manager': mock_session_manager_module,
+        }),
     ):
         import deephaven_mcp.client._session_factory as sm_mod
 
@@ -595,13 +661,26 @@ async def test_from_config_password_missing(monkeypatch):
         "username": "alice",
     }
     mock_manager = MagicMock()
+    
+    # Create mock modules for deephaven_enterprise hierarchy
+    mock_session_manager_class = MagicMock(return_value=mock_manager)
+    mock_session_manager_module = MagicMock()
+    mock_session_manager_module.SessionManager = mock_session_manager_class
+    
+    mock_client_module = MagicMock()
+    mock_client_module.session_manager = mock_session_manager_module
+    
+    mock_enterprise_module = MagicMock()
+    mock_enterprise_module.client = mock_client_module
+    
     with (
         patch("deephaven_mcp.client._session_factory.is_enterprise_available", True),
         patch("deephaven_mcp.config.validate_single_enterprise_system"),
-        patch(
-            "deephaven_enterprise.client.session_manager.SessionManager",
-            return_value=mock_manager,
-        ),
+        patch.dict('sys.modules', {
+            'deephaven_enterprise': mock_enterprise_module,
+            'deephaven_enterprise.client': mock_client_module,
+            'deephaven_enterprise.client.session_manager': mock_session_manager_module,
+        }),
     ):
         import deephaven_mcp.client._session_factory as sm_mod
 
@@ -624,13 +703,26 @@ async def test_from_config_private_key_missing(monkeypatch):
         "auth_type": "private_key",
     }
     mock_manager = MagicMock()
+    
+    # Create mock modules for deephaven_enterprise hierarchy
+    mock_session_manager_class = MagicMock(return_value=mock_manager)
+    mock_session_manager_module = MagicMock()
+    mock_session_manager_module.SessionManager = mock_session_manager_class
+    
+    mock_client_module = MagicMock()
+    mock_client_module.session_manager = mock_session_manager_module
+    
+    mock_enterprise_module = MagicMock()
+    mock_enterprise_module.client = mock_client_module
+    
     with (
         patch("deephaven_mcp.client._session_factory.is_enterprise_available", True),
         patch("deephaven_mcp.config.validate_single_enterprise_system"),
-        patch(
-            "deephaven_enterprise.client.session_manager.SessionManager",
-            return_value=mock_manager,
-        ),
+        patch.dict('sys.modules', {
+            'deephaven_enterprise': mock_enterprise_module,
+            'deephaven_enterprise.client': mock_client_module,
+            'deephaven_enterprise.client.session_manager': mock_session_manager_module,
+        }),
     ):
         import deephaven_mcp.client._session_factory as sm_mod
 
@@ -651,13 +743,26 @@ async def test_from_config_unsupported_auth(monkeypatch):
         "auth_type": "saml",
     }
     mock_manager = MagicMock()
+    
+    # Create mock modules for deephaven_enterprise hierarchy
+    mock_session_manager_class = MagicMock(return_value=mock_manager)
+    mock_session_manager_module = MagicMock()
+    mock_session_manager_module.SessionManager = mock_session_manager_class
+    
+    mock_client_module = MagicMock()
+    mock_client_module.session_manager = mock_session_manager_module
+    
+    mock_enterprise_module = MagicMock()
+    mock_enterprise_module.client = mock_client_module
+    
     with (
         patch("deephaven_mcp.client._session_factory.is_enterprise_available", True),
         patch("deephaven_mcp.config.validate_single_enterprise_system"),
-        patch(
-            "deephaven_enterprise.client.session_manager.SessionManager",
-            return_value=mock_manager,
-        ),
+        patch.dict('sys.modules', {
+            'deephaven_enterprise': mock_enterprise_module,
+            'deephaven_enterprise.client': mock_client_module,
+            'deephaven_enterprise.client.session_manager': mock_session_manager_module,
+        }),
     ):
         import deephaven_mcp.client._session_factory as sm_mod
 
@@ -688,12 +793,27 @@ async def test_from_config_not_enterprise_available(monkeypatch):
 async def test_from_url_success(monkeypatch):
     # Test enterprise functionality when available
     monkeypatch.setattr('deephaven_mcp.client._base.is_enterprise_available', True)
+    
+    # Create mock modules for deephaven_enterprise hierarchy
+    instance = MagicMock()
+    mock_session_manager_class = MagicMock(return_value=instance)
+    mock_session_manager_module = MagicMock()
+    mock_session_manager_module.SessionManager = mock_session_manager_class
+    
+    mock_client_module = MagicMock()
+    mock_client_module.session_manager = mock_session_manager_module
+    
+    mock_enterprise_module = MagicMock()
+    mock_enterprise_module.client = mock_client_module
+    
     with (
         patch("deephaven_mcp.client._session_factory.is_enterprise_available", True),
-        patch("deephaven_enterprise.client.session_manager.SessionManager") as mock_sm,
+        patch.dict('sys.modules', {
+            'deephaven_enterprise': mock_enterprise_module,
+            'deephaven_enterprise.client': mock_client_module,
+            'deephaven_enterprise.client.session_manager': mock_session_manager_module,
+        }),
     ):
-        instance = MagicMock()
-        mock_sm.return_value = instance
         result = CorePlusSessionFactory.from_url("http://fake")
         assert isinstance(result, CorePlusSessionFactory)
         assert result.wrapped == instance
@@ -712,12 +832,25 @@ async def test_from_url_not_enterprise(monkeypatch):
 async def test_from_url_connection_error(monkeypatch):
     # Test enterprise functionality when available
     monkeypatch.setattr('deephaven_mcp.client._base.is_enterprise_available', True)
+    
+    # Create mock modules for deephaven_enterprise hierarchy
+    mock_session_manager_class = MagicMock(side_effect=Exception("fail"))
+    mock_session_manager_module = MagicMock()
+    mock_session_manager_module.SessionManager = mock_session_manager_class
+    
+    mock_client_module = MagicMock()
+    mock_client_module.session_manager = mock_session_manager_module
+    
+    mock_enterprise_module = MagicMock()
+    mock_enterprise_module.client = mock_client_module
+    
     with (
         patch("deephaven_mcp.client._session_factory.is_enterprise_available", True),
-        patch(
-            "deephaven_enterprise.client.session_manager.SessionManager",
-            side_effect=Exception("fail"),
-        ),
+        patch.dict('sys.modules', {
+            'deephaven_enterprise': mock_enterprise_module,
+            'deephaven_enterprise.client': mock_client_module,
+            'deephaven_enterprise.client.session_manager': mock_session_manager_module,
+        }),
     ):
         with pytest.raises(exc.DeephavenConnectionError):
             CorePlusSessionFactory.from_url("http://fake")
@@ -736,16 +869,29 @@ async def test_from_config_missing_password_branch(monkeypatch, caplog):
         "username": "alice",
     }
     mock_manager = MagicMock()
+    
+    # Create mock modules for deephaven_enterprise hierarchy
+    mock_session_manager_class = MagicMock(return_value=mock_manager)
+    mock_session_manager_module = MagicMock()
+    mock_session_manager_module.SessionManager = mock_session_manager_class
+    
+    mock_client_module = MagicMock()
+    mock_client_module.session_manager = mock_session_manager_module
+    
+    mock_enterprise_module = MagicMock()
+    mock_enterprise_module.client = mock_client_module
+    
     with (
         patch("deephaven_mcp.client._session_factory.is_enterprise_available", True),
         patch(
             "deephaven_mcp.client._session_factory.validate_single_enterprise_system",
             return_value=None,
         ),
-        patch(
-            "deephaven_enterprise.client.session_manager.SessionManager",
-            return_value=mock_manager,
-        ),
+        patch.dict('sys.modules', {
+            'deephaven_enterprise': mock_enterprise_module,
+            'deephaven_enterprise.client': mock_client_module,
+            'deephaven_enterprise.client.session_manager': mock_session_manager_module,
+        }),
     ):
         import deephaven_mcp.client._session_factory as sm_mod
 
@@ -768,16 +914,29 @@ async def test_from_config_missing_private_key_branch(monkeypatch, caplog):
         "auth_type": "private_key",
     }
     mock_manager = MagicMock()
+    
+    # Create mock modules for deephaven_enterprise hierarchy
+    mock_session_manager_class = MagicMock(return_value=mock_manager)
+    mock_session_manager_module = MagicMock()
+    mock_session_manager_module.SessionManager = mock_session_manager_class
+    
+    mock_client_module = MagicMock()
+    mock_client_module.session_manager = mock_session_manager_module
+    
+    mock_enterprise_module = MagicMock()
+    mock_enterprise_module.client = mock_client_module
+    
     with (
         patch("deephaven_mcp.client._session_factory.is_enterprise_available", True),
         patch(
             "deephaven_mcp.client._session_factory.validate_single_enterprise_system",
             return_value=None,
         ),
-        patch(
-            "deephaven_enterprise.client.session_manager.SessionManager",
-            return_value=mock_manager,
-        ),
+        patch.dict('sys.modules', {
+            'deephaven_enterprise': mock_enterprise_module,
+            'deephaven_enterprise.client': mock_client_module,
+            'deephaven_enterprise.client.session_manager': mock_session_manager_module,
+        }),
     ):
         import deephaven_mcp.client._session_factory as sm_mod
 
@@ -803,16 +962,29 @@ async def test_from_config_unsupported_auth_type_branch(monkeypatch, caplog):
         "auth_type": "saml",
     }
     mock_manager = MagicMock()
+    
+    # Create mock modules for deephaven_enterprise hierarchy
+    mock_session_manager_class = MagicMock(return_value=mock_manager)
+    mock_session_manager_module = MagicMock()
+    mock_session_manager_module.SessionManager = mock_session_manager_class
+    
+    mock_client_module = MagicMock()
+    mock_client_module.session_manager = mock_session_manager_module
+    
+    mock_enterprise_module = MagicMock()
+    mock_enterprise_module.client = mock_client_module
+    
     with (
         patch("deephaven_mcp.client._session_factory.is_enterprise_available", True),
         patch(
             "deephaven_mcp.client._session_factory.validate_single_enterprise_system",
             return_value=None,
         ),
-        patch(
-            "deephaven_enterprise.client.session_manager.SessionManager",
-            return_value=mock_manager,
-        ),
+        patch.dict('sys.modules', {
+            'deephaven_enterprise': mock_enterprise_module,
+            'deephaven_enterprise.client': mock_client_module,
+            'deephaven_enterprise.client.session_manager': mock_session_manager_module,
+        }),
     ):
         import deephaven_mcp.client._session_factory as sm_mod
 
