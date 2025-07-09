@@ -83,7 +83,7 @@ def pytest_sessionstart(session):
     sys.modules["deephaven_enterprise.client.session_manager"] = mock_session_manager
     sys.modules["deephaven_enterprise.client.controller"] = mock_controller
     
-    # Create all the proto modules as simple mock modules
+    # Create proto modules and establish parent-child relationships
     proto_modules = [
         "deephaven_enterprise.proto",
         "deephaven_enterprise.proto.acl_pb2",
@@ -106,7 +106,21 @@ def pytest_sessionstart(session):
         "deephaven_enterprise.proto.table_definition_pb2_grpc",
     ]
     
+    # Create and install proto modules with proper parent-child relationships
     for module_name in proto_modules:
         if module_name not in sys.modules:
             parent_name = module_name.rpartition('.')[0] if '.' in module_name else None
-            sys.modules[module_name] = create_mock_module(module_name, parent_name)
+            module = create_mock_module(module_name, parent_name)
+            sys.modules[module_name] = module
+            
+            # Establish parent-child relationship as attribute
+            if parent_name and parent_name in sys.modules:
+                child_name = module_name.rpartition('.')[2]
+                parent_module = sys.modules[parent_name]
+                setattr(parent_module, child_name, module)
+                parent_module.__dict__[child_name] = module
+    
+    # Make sure deephaven_enterprise.proto is accessible from deephaven_enterprise
+    if "deephaven_enterprise.proto" in sys.modules:
+        mock_enterprise.proto = sys.modules["deephaven_enterprise.proto"]
+        mock_enterprise.__dict__["proto"] = sys.modules["deephaven_enterprise.proto"]
