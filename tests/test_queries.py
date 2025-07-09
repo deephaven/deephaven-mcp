@@ -35,7 +35,7 @@ async def test_get_table_open_table_error():
 @pytest.mark.asyncio
 async def test_get_table_to_arrow_error():
     table_mock = MagicMock()
-    table_mock.to_arrow = lambda: (_ for _ in ()).throw(RuntimeError("fail arrow"))
+    table_mock.to_arrow = MagicMock(side_effect=RuntimeError("fail arrow"))
     session_mock = MagicMock()
     session_mock.open_table = AsyncMock(return_value=table_mock)
     with pytest.raises(RuntimeError, match="fail arrow"):
