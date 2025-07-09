@@ -32,6 +32,8 @@ The `ops/` directory is the single source of truth for all infrastructure, deplo
 ## Directory Structure
 ```
 ops/
+  artifacts/        # CI artifacts and dependencies needed for testing/deployment
+    *.whl           # Python wheel files (e.g., deephaven_coreplus_client)
   docker/           # Dockerfiles & Compose files per service
     mcp-docs/       # Example: MCP Docs service
       Dockerfile

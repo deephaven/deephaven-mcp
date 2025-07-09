@@ -48,6 +48,8 @@ JDK_VERSION_TAG="jdk17"
 _GCS_JENKINS_BASE_PATH="gs://illumon-software-repo/jenkins/${JDK_VERSION_TAG}"
 GCS_BUCKET_PATH="${_GCS_JENKINS_BASE_PATH}/release" # Default to release, may be overridden by --rc
 DEFAULT_CLIENT_WHEEL_PATTERN="deephaven_coreplus_client*.whl"
+# Environment variable to control whether to save wheel files to current directory
+SAVE_WHLS="${SAVE_WHLS:-false}"
 
 GLOBAL_TEMP_FILES=()
 # Ensures all globally registered temporary files are removed on script exit.
@@ -77,6 +79,9 @@ usage() {
   echo "  --pr <point_release>     Point release (e.g., 483 or 250506093038c2cba50b47)"
   echo "  --cv <community_ver>     Community version (e.g., 0.41.0rc1)"
   echo
+  echo "Environment Variables:"
+  echo "  SAVE_WHLS               Set to 'true' to save wheel files to current directory during install (default: false)"
+  echo
   echo "Commands:"
   echo "  list-release-channels                      List all release channels (RC codenames + prod)."
   echo "  list-enterprise-versions                   List enterprise versions (optionally for a channel)."
@@ -84,6 +89,7 @@ usage() {
   echo "  list-community-versions                    List community versions (optionally for a channel, EV, PR)."
   echo "  resolve-install-versions                   Resolve install versions (optionally for channel, EV, PR, CV)."
   echo "  install                                    Install the client wheel for the resolved versions."
+  echo "  install-wheel --file <path>                Install directly from a provided wheel file (for CI)."
   echo "  uninstall                                  Uninstall deephaven-coreplus-client from the current environment."
   echo
   echo "Examples:"
@@ -481,9 +487,79 @@ fn_install_wheel() {
   echo "Script finished successfully." >&2
 }
 
+# Core function to install a wheel file with grpcio override logic
+install_wheel_file() {
+  local whl_file="$1"
+  
+  if [ ! -f "$whl_file" ]; then
+    die "Wheel file not found: $whl_file"
+  fi
+  
+  echo "Installing wheel: $whl_file" >&2
+  
+  # --- grpcio override logic ---
+  # This section handles a specific dependency constraint for 'grpcio'.
+  # The client wheel being installed might have its own 'grpcio' version requirements
+  # that could conflict with the 'grpcio' version already in use by other critical
+  # packages in the environment (e.g., pydeephaven).
+  # To prevent 'uv' from upgrading or downgrading the existing 'grpcio', potentially
+  # breaking other parts of the system, we explicitly tell 'uv' to use the currently
+  # installed version of 'grpcio'.
+  #
+  # The 'uv pip install --override' command expects a file path as its argument,
+  # where the file contains the package==version specifiers.
+  # Instead of creating, writing to, and then deleting a temporary file,
+  # we use Bash's process substitution feature: <(echo "grpcio==${current_grpcio_version}").
+  # Bash executes the 'echo' command and provides its output via a special file
+  # descriptor (e.g., /dev/fd/63) that 'uv' can read like a file. This avoids
+  # manual temporary file management and keeps the script cleaner, provided 'uv'
+  # correctly handles reading from such file descriptors.
+  local current_grpcio_version
+  local cmd_args=()
+  echo "Checking for existing grpcio installation..." >&2
+  current_grpcio_version=$( (uv pip show grpcio || true) 2>/dev/null | awk '/^Version:/ {print $2}' | tr -d '[:space:]' )
+  if [ -n "$current_grpcio_version" ]; then
+    echo "Found existing grpcio version: '$current_grpcio_version'. Will attempt to override grpcio to this version using process substitution." >&2
+    cmd_args+=(--override <(echo "grpcio==${current_grpcio_version}"))
+  else
+    echo "No existing grpcio installation found. grpcio will be installed based on wheel's dependencies if required." >&2
+  fi
+  # --- end grpcio override logic ---
+  
+  cmd_args+=(--no-cache-dir --only-binary :all: "$whl_file")
+  echo "Installing wheel using uv: uv pip install ${cmd_args[@]}" >&2
+  # shellcheck disable=SC2290 # process substitution is intentional
+  if ! uv pip install "${cmd_args[@]}"; then
+    die "Failed to install $whl_file using uv."
+  fi
+  echo "Successfully installed $whl_file" >&2
+  
+  # copy the whl file to the current directory if requested
+  if [ "$SAVE_WHLS" = "true" ]; then
+    cp "$whl_file" .
+    echo "Saved wheel file: $(basename "$whl_file")" >&2
+  fi
+}
 
-install_coreplus_client() {
-  # Usage: install_coreplus_client <channel> <ev> <pr> <cv>
+# Install CorePlus client directly from a provided wheel file (for CI)
+install_from_wheel_file() {
+  local wheel_path="$1"
+  
+  if [ -z "$wheel_path" ]; then
+    die "Usage: install_from_wheel_file <wheel_path>"
+  fi
+  
+  if [ ! -f "$wheel_path" ]; then
+    die "Wheel file not found: $wheel_path"
+  fi
+  
+  echo "Installing CorePlus client from wheel file: $wheel_path" >&2
+  install_wheel_file "$wheel_path"
+  echo "Install complete." >&2
+}
+
+install_from_tgz_archive() {
+  # Usage: install_from_tgz_archive <channel> <ev> <pr> <cv>
   channel="$1"
   ev="$2"
   pr="$3"
@@ -509,41 +585,9 @@ install_coreplus_client() {
     if [ -z "$whl_file" ]; then
       die "No deephaven_coreplus_client-*.whl file found inside $artifact_file"
     fi
-    # --- grpcio override logic ---
-    # This section handles a specific dependency constraint for 'grpcio'.
-    # The client wheel being installed might have its own 'grpcio' version requirements
-    # that could conflict with the 'grpcio' version already in use by other critical
-    # packages in the environment (e.g., pydeephaven).
-    # To prevent 'uv' from upgrading or downgrading the existing 'grpcio', potentially
-    # breaking other parts of the system, we explicitly tell 'uv' to use the currently
-    # installed version of 'grpcio'.
-    #
-    # The 'uv pip install --override' command expects a file path as its argument,
-    # where the file contains the package==version specifiers.
-    # Instead of creating, writing to, and then deleting a temporary file,
-    # we use Bash's process substitution feature: <(echo "grpcio==${current_grpcio_version}").
-    # Bash executes the 'echo' command and provides its output via a special file
-    # descriptor (e.g., /dev/fd/63) that 'uv' can read like a file. This avoids
-    # manual temporary file management and keeps the script cleaner, provided 'uv'
-    # correctly handles reading from such file descriptors.
-    local current_grpcio_version
-    local cmd_args=()
-    echo "Checking for existing grpcio installation..." >&2
-    current_grpcio_version=$( (uv pip show grpcio || true) 2>/dev/null | awk '/^Version:/ {print $2}' | tr -d '[:space:]' )
-    if [ -n "$current_grpcio_version" ]; then
-      echo "Found existing grpcio version: '$current_grpcio_version'. Will attempt to override grpcio to this version using process substitution." >&2
-      cmd_args+=(--override <(echo "grpcio==${current_grpcio_version}"))
-    else
-      echo "No existing grpcio installation found. grpcio will be installed based on wheel's dependencies if required." >&2
-    fi
-    # --- end grpcio override logic ---
-    cmd_args+=(--no-cache-dir --only-binary :all: "$whl_file")
-    echo "Installing wheel using uv: uv pip install [1m${cmd_args[@]}[0m" >&2
-    # shellcheck disable=SC2290 # process substitution is intentional
-    if ! uv pip install "${cmd_args[@]}"; then
-      die "Failed to install $whl_file using uv."
-    fi
-    echo "Successfully installed $whl_file" >&2
+    
+    # Use the extracted wheel installation function
+    install_wheel_file "$whl_file"
   else
     die "Downloaded artifact is not a .tgz: $artifact_file"
   fi
@@ -641,7 +685,30 @@ case "$COMMAND" in
     parse_args "$@"
     set -- $(resolve_install_versions "$channel" "$ev" "$pr" "$cv")
     channel="$1"; ev="$2"; pr="$3"; cv="$4"
-    install_coreplus_client "$channel" "$ev" "$pr" "$cv"
+    install_from_tgz_archive "$channel" "$ev" "$pr" "$cv"
+    patch_deephaven_enterprise_proto_package
+    ;;
+  install-wheel)
+    # Parse for --file argument
+    wheel_file=""
+    shift # remove 'install-wheel' from arguments
+    while [[ $# -gt 0 ]]; do
+      case $1 in
+        --file)
+          wheel_file="$2"
+          shift 2
+          ;;
+        *)
+          die "Unknown option for install-wheel: $1. Use --file <path>"
+          ;;
+      esac
+    done
+    
+    if [ -z "$wheel_file" ]; then
+      die "install-wheel requires --file <path> argument"
+    fi
+    
+    install_from_wheel_file "$wheel_file"
     patch_deephaven_enterprise_proto_package
     ;;
   uninstall)
