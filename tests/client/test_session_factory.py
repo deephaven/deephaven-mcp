@@ -9,19 +9,30 @@ import pytest
 
 import deephaven_mcp._exceptions as exc
 
-# Patch sys.modules for enterprise imports BEFORE any tested imports
-mock_enterprise = types.ModuleType("deephaven_enterprise")
-mock_sm = types.ModuleType("deephaven_enterprise.client.session_manager")
-mock_sm.SessionManager = MagicMock()
-sys.modules["deephaven_enterprise"] = mock_enterprise
-sys.modules["deephaven_enterprise.client"] = types.ModuleType(
-    "deephaven_enterprise.client"
-)
-sys.modules["deephaven_enterprise.client.session_manager"] = mock_sm
-# Patch controller client as well for _protobuf.py import
-mock_controller = types.ModuleType("deephaven_enterprise.client.controller")
-mock_controller.ControllerClient = MagicMock()
-sys.modules["deephaven_enterprise.client.controller"] = mock_controller
+# Check if enterprise features are actually available
+try:
+    import deephaven_enterprise.client.session_manager  # noqa: F401
+    ENTERPRISE_AVAILABLE = True
+except ImportError:
+    ENTERPRISE_AVAILABLE = False
+    
+    # Patch sys.modules for enterprise imports BEFORE any tested imports
+    mock_enterprise = types.ModuleType("deephaven_enterprise")
+    mock_client = types.ModuleType("deephaven_enterprise.client")
+    mock_sm = types.ModuleType("deephaven_enterprise.client.session_manager")
+    mock_sm.SessionManager = MagicMock()
+    mock_controller = types.ModuleType("deephaven_enterprise.client.controller")
+    mock_controller.ControllerClient = MagicMock()
+    
+    # Set up the module hierarchy properly
+    mock_enterprise.client = mock_client
+    mock_client.session_manager = mock_sm
+    mock_client.controller = mock_controller
+    
+    sys.modules["deephaven_enterprise"] = mock_enterprise
+    sys.modules["deephaven_enterprise.client"] = mock_client
+    sys.modules["deephaven_enterprise.client.session_manager"] = mock_sm
+    sys.modules["deephaven_enterprise.client.controller"] = mock_controller
 
 from deephaven_mcp.client._session_factory import CorePlusSessionFactory
 
@@ -418,6 +429,8 @@ from unittest.mock import AsyncMock
 
 @pytest.mark.asyncio
 async def test_from_config_password_success(monkeypatch):
+    # Test enterprise functionality when available
+    monkeypatch.setattr('deephaven_mcp.client._base.is_enterprise_available', True)
     worker_cfg = {
         "connection_json_url": "https://server/iris/connection.json",
         "auth_type": "password",
@@ -445,6 +458,8 @@ async def test_from_config_password_success(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_from_config_password_env(monkeypatch):
+    # Test enterprise functionality when available
+    monkeypatch.setattr('deephaven_mcp.client._base.is_enterprise_available', True)
     worker_cfg = {
         "connection_json_url": "https://server/iris/connection.json",
         "auth_type": "password",
@@ -471,7 +486,9 @@ async def test_from_config_password_env(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_from_config_private_key_success():
+async def test_from_config_private_key_success(monkeypatch):
+    # Test enterprise functionality when available
+    monkeypatch.setattr('deephaven_mcp.client._base.is_enterprise_available', True)
     worker_cfg = {
         "connection_json_url": "https://server/iris/connection.json",
         "auth_type": "private_key",
@@ -527,7 +544,9 @@ async def test_from_config_not_enterprise():
 
 
 @pytest.mark.asyncio
-async def test_from_config_connection_error():
+async def test_from_config_connection_error(monkeypatch):
+    # Test enterprise functionality when available
+    monkeypatch.setattr('deephaven_mcp.client._base.is_enterprise_available', True)
     worker_cfg = {
         "connection_json_url": "url",
         "auth_type": "password",
@@ -550,6 +569,8 @@ async def test_from_config_connection_error():
 
 @pytest.mark.asyncio
 async def test_from_config_password_env_missing(monkeypatch):
+    # Test enterprise functionality when available
+    monkeypatch.setattr('deephaven_mcp.client._base.is_enterprise_available', True)
     worker_cfg = {
         "connection_json_url": "https://server/iris/connection.json",
         "auth_type": "password",
@@ -578,6 +599,8 @@ async def test_from_config_password_env_missing(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_from_config_password_missing(monkeypatch):
+    # Test enterprise functionality when available
+    monkeypatch.setattr('deephaven_mcp.client._base.is_enterprise_available', True)
     worker_cfg = {
         "connection_json_url": "https://server/iris/connection.json",
         "auth_type": "password",
@@ -605,7 +628,9 @@ async def test_from_config_password_missing(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_from_config_private_key_missing():
+async def test_from_config_private_key_missing(monkeypatch):
+    # Test enterprise functionality when available
+    monkeypatch.setattr('deephaven_mcp.client._base.is_enterprise_available', True)
     worker_cfg = {
         "connection_json_url": "https://server/iris/connection.json",
         "auth_type": "private_key",
@@ -630,7 +655,9 @@ async def test_from_config_private_key_missing():
 
 
 @pytest.mark.asyncio
-async def test_from_config_unsupported_auth():
+async def test_from_config_unsupported_auth(monkeypatch):
+    # Test enterprise functionality when available
+    monkeypatch.setattr('deephaven_mcp.client._base.is_enterprise_available', True)
     worker_cfg = {
         "connection_json_url": "https://server/iris/connection.json",
         "auth_type": "saml",
@@ -668,7 +695,9 @@ async def test_from_config_not_enterprise_available():
 
 
 @pytest.mark.asyncio
-async def test_from_url_success():
+async def test_from_url_success(monkeypatch):
+    # Test enterprise functionality when available
+    monkeypatch.setattr('deephaven_mcp.client._base.is_enterprise_available', True)
     with (
         patch("deephaven_mcp.client._session_factory.is_enterprise_available", True),
         patch("deephaven_enterprise.client.session_manager.SessionManager") as mock_sm,
@@ -688,7 +717,9 @@ async def test_from_url_not_enterprise():
 
 
 @pytest.mark.asyncio
-async def test_from_url_connection_error():
+async def test_from_url_connection_error(monkeypatch):
+    # Test enterprise functionality when available
+    monkeypatch.setattr('deephaven_mcp.client._base.is_enterprise_available', True)
     with (
         patch("deephaven_mcp.client._session_factory.is_enterprise_available", True),
         patch(
@@ -705,6 +736,8 @@ async def test_from_url_connection_error():
 
 @pytest.mark.asyncio
 async def test_from_config_missing_password_branch(monkeypatch, caplog):
+    # Test enterprise functionality when available
+    monkeypatch.setattr('deephaven_mcp.client._base.is_enterprise_available', True)
     worker_cfg = {
         "connection_json_url": "https://server/iris/connection.json",
         "auth_type": "password",
@@ -735,7 +768,9 @@ async def test_from_config_missing_password_branch(monkeypatch, caplog):
 
 
 @pytest.mark.asyncio
-async def test_from_config_missing_private_key_branch(caplog):
+async def test_from_config_missing_private_key_branch(monkeypatch, caplog):
+    # Test enterprise functionality when available
+    monkeypatch.setattr('deephaven_mcp.client._base.is_enterprise_available', True)
     worker_cfg = {
         "connection_json_url": "https://server/iris/connection.json",
         "auth_type": "private_key",
@@ -768,7 +803,9 @@ async def test_from_config_missing_private_key_branch(caplog):
 
 
 @pytest.mark.asyncio
-async def test_from_config_unsupported_auth_type_branch(caplog):
+async def test_from_config_unsupported_auth_type_branch(monkeypatch, caplog):
+    # Test enterprise functionality when available
+    monkeypatch.setattr('deephaven_mcp.client._base.is_enterprise_available', True)
     worker_cfg = {
         "connection_json_url": "https://server/iris/connection.json",
         "auth_type": "saml",
@@ -803,3 +840,61 @@ async def test_from_config_unsupported_auth_type_branch(caplog):
                     "Auth type 'saml' is not supported for automatic authentication"
                     in caplog.text
                 )
+
+
+# =============================================================================
+# Enterprise Not Available Tests
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_enterprise_constructor_assertion_when_not_available(monkeypatch):
+    """Test that CorePlusSessionFactory constructor raises InternalError when enterprise not available."""
+    monkeypatch.setattr('deephaven_mcp.client._base.is_enterprise_available', False)
+    
+    # Mock the SessionManager to avoid import issues
+    mock_session_manager = MagicMock()
+    
+    import deephaven_mcp.client._session_factory as sm_mod
+    
+    # This should raise InternalError due to the enterprise assertion
+    with pytest.raises(exc.InternalError) as excinfo:
+        sm_mod.CorePlusSessionFactory(mock_session_manager)
+    
+    assert "enterprise=True when enterprise features are not available" in str(excinfo.value)
+    assert "Please report this issue" in str(excinfo.value)
+
+
+@pytest.mark.asyncio
+async def test_from_config_when_enterprise_not_available(monkeypatch):
+    """Test that from_config handles enterprise not available appropriately."""
+    monkeypatch.setattr('deephaven_mcp.client._session_factory.is_enterprise_available', False)
+    
+    worker_cfg = {
+        "connection_json_url": "https://server/iris/connection.json",
+        "auth_type": "password",
+        "username": "username",
+        "password": "password",
+    }
+    
+    import deephaven_mcp.client._session_factory as sm_mod
+    
+    # Should raise InternalError when enterprise not available
+    with pytest.raises(exc.InternalError) as excinfo:
+        await sm_mod.CorePlusSessionFactory.from_config(worker_cfg)
+    
+    assert "Core+ features are not available" in str(excinfo.value)
+
+
+@pytest.mark.asyncio
+async def test_from_url_when_enterprise_not_available(monkeypatch):
+    """Test that from_url handles enterprise not available appropriately."""
+    monkeypatch.setattr('deephaven_mcp.client._session_factory.is_enterprise_available', False)
+    
+    import deephaven_mcp.client._session_factory as sm_mod
+    
+    # Should raise InternalError when enterprise not available
+    with pytest.raises(exc.InternalError) as excinfo:
+        sm_mod.CorePlusSessionFactory.from_url("https://example.com/iris/connection.json")
+    
+    assert "Core+ features are not available" in str(excinfo.value)
