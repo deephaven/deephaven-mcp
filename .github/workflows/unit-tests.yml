@@ -95,7 +95,12 @@ jobs:
         run: |
           # Install the Core Plus wheel using the dev management script (tolerant of filename changes)
           wheel_file=$(ls ops/artifacts/deephaven_coreplus_client*.whl | head -n1)
-          bin/dev_manage_coreplus_client.sh install-wheel --file "$wheel_file"
+          echo "Installing Core Plus wheel: $wheel_file"
+          if [ -z "$wheel_file" ]; then
+            echo "ERROR: No Core Plus wheel file found in ops/artifacts/"
+            exit 1
+          fi
+          ./bin/dev_manage_coreplus_client.sh install-wheel --file "$wheel_file"
 
       - name: Run tests with coverage
         run: pytest

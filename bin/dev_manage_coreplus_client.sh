@@ -691,7 +691,6 @@ case "$COMMAND" in
   install-wheel)
     # Parse for --file argument
     wheel_file=""
-    shift # remove 'install-wheel' from arguments
     while [[ $# -gt 0 ]]; do
       case $1 in
         --file)
