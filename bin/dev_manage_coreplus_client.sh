@@ -4,7 +4,7 @@
 #
 # Key features:
 # - Installs a specific or the latest available deephaven_coreplus_client:
-#   Downloads the CorePlus tarball, extracts it, and installs the client wheel using 'uv'.
+#   Downloads the CorePlus tarball, extracts it, and installs the client wheel using pip (or uv if available).
 # - Lists available Enterprise Versions, Point Releases, and Community Versions from GCS.
 # - Determines and displays the latest consistent set of EV, PR, and CV.
 #
@@ -101,6 +101,17 @@ usage() {
   exit 1
 }
 
+# Centralized pip/uv router function
+run_pip() {
+  if command -v uv >/dev/null 2>&1; then
+    echo "Using uv: uv pip $*" >&2
+    uv pip "$@"
+  else
+    echo "uv not found, falling back to pip: pip $*" >&2
+    command pip "$@"
+  fi
+}
+
 # Parse optional CLI arguments as flags or positionally
 parse_args() {
   positional_args=()  # Always initialize array first for strict mode
@@ -164,7 +175,6 @@ check_tools() {
       local install_hint=""
       case "$tool" in
         gsutil) install_hint="Please install Google Cloud SDK." ;;
-        uv)     install_hint="Please install uv (see https://astral.sh/uv/install)." ;;
         jq)     install_hint="Please install jq (e.g., 'sudo apt-get install jq' or 'brew install jq')." ;;
         tar)    install_hint="Please ensure 'tar' is installed and in your PATH." ;;
         find)   install_hint="Please ensure 'find' is installed and in your PATH." ;;
@@ -323,7 +333,7 @@ resolve_install_versions() {
 
 # --- Installation Function ---
 fn_install_wheel() {
-  check_tools "gsutil" "uv" "find"
+  check_tools "gsutil" "find"
   
   # Uses global _CONTEXT_EV, _CONTEXT_PR, _CONTEXT_CV
   echo "Determining versions for installation based on global context..." >&2
@@ -427,24 +437,24 @@ fn_install_wheel() {
   fi
   echo "Found client wheel: ${client_wheel_path}" >&2
 
-  echo "Installing ${client_wheel_path} using uv..." >&2
+  echo "Installing ${client_wheel_path}..." >&2
 
   # --- Start of grpcio override logic ---
   # This section handles a specific dependency constraint for 'grpcio'.
   # The client wheel being installed might have its own 'grpcio' version requirements
   # that could conflict with the 'grpcio' version already in use by other critical
   # packages in the environment (e.g., pydeephaven).
-  # To prevent 'uv' from upgrading or downgrading the existing 'grpcio', potentially
-  # breaking other parts of the system, we explicitly tell 'uv' to use the currently
+  # To prevent the installer from upgrading or downgrading the existing 'grpcio', potentially
+  # breaking other parts of the system, we explicitly tell the installer to use the currently
   # installed version of 'grpcio'.
   #
-  # The 'uv pip install --override' command expects a file path as its argument,
+  # The 'pip install --override' command expects a file path as its argument,
   # where the file contains the package==version specifiers.
   # Instead of creating, writing to, and then deleting a temporary file,
   # we use Bash's process substitution feature: <(echo "grpcio==${current_grpcio_version}").
   # Bash executes the 'echo' command and provides its output via a special file
-  # descriptor (e.g., /dev/fd/63) that 'uv' can read like a file. This avoids
-  # manual temporary file management and keeps the script cleaner, provided 'uv'
+  # descriptor (e.g., /dev/fd/63) that 'pip' can read like a file. This avoids
+  # manual temporary file management and keeps the script cleaner, provided 'pip'
   # correctly handles reading from such file descriptors.
 
   local current_grpcio_version
@@ -452,7 +462,7 @@ fn_install_wheel() {
 
   # Try to determine the currently installed grpcio version and clean it
   echo "Checking for existing grpcio installation..." >&2
-  current_grpcio_version=$( (uv pip show grpcio || true) 2>/dev/null | awk '/^Version:/ {print $2}' | tr -d '[:space:]' )
+  current_grpcio_version=$( (run_pip show grpcio || true) 2>/dev/null | awk '/^Version:/ {print $2}' | tr -d '[:space:]' )
 
   if [ -n "${current_grpcio_version}" ]; then
     echo "Found existing grpcio version: '${current_grpcio_version}'. Will attempt to override grpcio to this version using process substitution." >&2
@@ -469,16 +479,13 @@ fn_install_wheel() {
   # installed for the client wheel and its dependencies. This avoids potential
   # build issues, particularly with packages like 'grpcio' which can be problematic
   # to build from source on some platforms/architectures.
-  # --no-cache-dir is used to avoid issues with uv's caching mechanisms if needed.
+  # --no-cache-dir is used to avoid issues with pip's caching mechanisms if needed.
   cmd_args+=(--no-cache-dir --only-binary :all: "${client_wheel_path}")
 
-  echo "Installing wheel using uv: uv pip install ${cmd_args[@]}" >&2
-  # Ensure cmd_args is expanded correctly.
-  # Note: Process substitution <(...) happens before the command is executed by the shell.
-  # The actual value in cmd_args will be the /dev/fd/XX path.
-  if ! uv pip install "${cmd_args[@]}"; then # --only-binary :all: ensures only wheels; --no-cache-dir: avoid uv cache; override for grpcio if found
-    echo "ERROR: Failed to install ${client_wheel_path} using uv." >&2
-    cd "${original_dir}"; exit 1 # Return to original directory and exit function due to uv install failure
+  # Install using centralized helper function
+  if ! run_pip install "${cmd_args[@]}"; then # --only-binary :all: ensures only wheels; --no-cache-dir: avoid cache; override for grpcio if found
+    echo "ERROR: Failed to install ${client_wheel_path}." >&2
+    cd "${original_dir}"; exit 1 # Return to original directory and exit function due to install failure
   fi
   echo "Installation of ${client_wheel_path} successful." >&2
 
@@ -502,22 +509,22 @@ install_wheel_file() {
   # The client wheel being installed might have its own 'grpcio' version requirements
   # that could conflict with the 'grpcio' version already in use by other critical
   # packages in the environment (e.g., pydeephaven).
-  # To prevent 'uv' from upgrading or downgrading the existing 'grpcio', potentially
-  # breaking other parts of the system, we explicitly tell 'uv' to use the currently
+  # To prevent the installer from upgrading or downgrading the existing 'grpcio', potentially
+  # breaking other parts of the system, we explicitly tell the installer to use the currently
   # installed version of 'grpcio'.
   #
-  # The 'uv pip install --override' command expects a file path as its argument,
+  # The 'pip install --override' command expects a file path as its argument,
   # where the file contains the package==version specifiers.
   # Instead of creating, writing to, and then deleting a temporary file,
   # we use Bash's process substitution feature: <(echo "grpcio==${current_grpcio_version}").
   # Bash executes the 'echo' command and provides its output via a special file
-  # descriptor (e.g., /dev/fd/63) that 'uv' can read like a file. This avoids
-  # manual temporary file management and keeps the script cleaner, provided 'uv'
+  # descriptor (e.g., /dev/fd/63) that 'pip' can read like a file. This avoids
+  # manual temporary file management and keeps the script cleaner, provided 'pip'
   # correctly handles reading from such file descriptors.
   local current_grpcio_version
   local cmd_args=()
   echo "Checking for existing grpcio installation..." >&2
-  current_grpcio_version=$( (uv pip show grpcio || true) 2>/dev/null | awk '/^Version:/ {print $2}' | tr -d '[:space:]' )
+  current_grpcio_version=$( (run_pip show grpcio || true) 2>/dev/null | awk '/^Version:/ {print $2}' | tr -d '[:space:]' )
   if [ -n "$current_grpcio_version" ]; then
     echo "Found existing grpcio version: '$current_grpcio_version'. Will attempt to override grpcio to this version using process substitution." >&2
     cmd_args+=(--override <(echo "grpcio==${current_grpcio_version}"))
@@ -527,10 +534,11 @@ install_wheel_file() {
   # --- end grpcio override logic ---
   
   cmd_args+=(--no-cache-dir --only-binary :all: "$whl_file")
-  echo "Installing wheel using uv: uv pip install ${cmd_args[@]}" >&2
+  
+  # Install using centralized helper function
   # shellcheck disable=SC2290 # process substitution is intentional
-  if ! uv pip install "${cmd_args[@]}"; then
-    die "Failed to install $whl_file using uv."
+  if ! run_pip install "${cmd_args[@]}"; then
+    die "Failed to install $whl_file."
   fi
   echo "Successfully installed $whl_file" >&2
   
@@ -712,7 +720,7 @@ case "$COMMAND" in
     ;;
   uninstall)
     echo "Uninstalling deephaven-coreplus-client from the current environment..." >&2
-    uv pip uninstall -y deephaven-coreplus-client || die "Failed to uninstall deephaven-coreplus-client"
+    run_pip uninstall -y deephaven-coreplus-client || die "Failed to uninstall deephaven-coreplus-client"
     echo "deephaven-coreplus-client has been uninstalled." >&2
     ;;
   patch)
