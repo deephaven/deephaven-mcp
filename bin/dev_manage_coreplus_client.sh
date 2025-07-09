@@ -101,7 +101,48 @@ usage() {
   exit 1
 }
 
-# Centralized pip/uv router function
+# Centralized pip/uv installer function with proper argument handling
+run_pip_install() {
+  local args=()
+  local use_override=false
+  local override_file=""
+  
+  # Parse arguments to handle uv-specific options
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      --override)
+        use_override=true
+        override_file="$2"
+        shift 2
+        ;;
+      *)
+        args+=("$1")
+        shift
+        ;;
+    esac
+  done
+  
+  if command -v uv >/dev/null 2>&1; then
+    if [[ "$use_override" == "true" ]]; then
+      echo "Using uv with override: uv pip install --override $override_file ${args[*]}" >&2
+      uv pip install --override "$override_file" "${args[@]}"
+    else
+      echo "Using uv: uv pip install ${args[*]}" >&2
+      uv pip install "${args[@]}"
+    fi
+  else
+    if [[ "$use_override" == "true" ]]; then
+      echo "uv not found, using pip with constraint file: pip install --constraint /dev/stdin ${args[*]}" >&2
+      # Use constraint file equivalent for pip (read constraint from override_file)
+      command pip install --constraint "$override_file" "${args[@]}"
+    else
+      echo "uv not found, falling back to pip: pip install ${args[*]}" >&2
+      command pip install "${args[@]}"
+    fi
+  fi
+}
+
+# Simple pip show/uninstall router
 run_pip() {
   if command -v uv >/dev/null 2>&1; then
     echo "Using uv: uv pip $*" >&2
@@ -483,7 +524,7 @@ fn_install_wheel() {
   cmd_args+=(--no-cache-dir --only-binary :all: "${client_wheel_path}")
 
   # Install using centralized helper function
-  if ! run_pip install "${cmd_args[@]}"; then # --only-binary :all: ensures only wheels; --no-cache-dir: avoid cache; override for grpcio if found
+  if ! run_pip_install "${cmd_args[@]}"; then # --only-binary :all: ensures only wheels; --no-cache-dir: avoid cache; override for grpcio if found
     echo "ERROR: Failed to install ${client_wheel_path}." >&2
     cd "${original_dir}"; exit 1 # Return to original directory and exit function due to install failure
   fi
@@ -537,7 +578,7 @@ install_wheel_file() {
   
   # Install using centralized helper function
   # shellcheck disable=SC2290 # process substitution is intentional
-  if ! run_pip install "${cmd_args[@]}"; then
+  if ! run_pip_install "${cmd_args[@]}"; then
     die "Failed to install $whl_file."
   fi
   echo "Successfully installed $whl_file" >&2
