@@ -31,8 +31,8 @@ from contextlib import asynccontextmanager
 import aiofiles
 from mcp.server.fastmcp import Context, FastMCP
 
-import deephaven_mcp.sessions as sessions
-from deephaven_mcp import config
+from deephaven_mcp import config, queries
+from deephaven_mcp.resource_manager import CommunitySessionRegistry
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -68,30 +68,31 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
             - 'refresh_lock': An asyncio.Lock for atomic refresh operations.
     """
     _LOGGER.info("Starting MCP server '%s'", server.name)
-    session_manager = None
+    session_registry = None
 
     try:
         config_manager = config.ConfigManager()
 
         # Make sure config can be loaded before starting
         _LOGGER.info("Loading configuration...")
-        config_data = await config_manager.get_config()
+        await config_manager.get_config()
         _LOGGER.info("Configuration loaded.")
 
-        session_manager = sessions.SessionManager(config_data)
+        session_registry = CommunitySessionRegistry()
+        await session_registry.initialize(config_manager)
 
         # lock for refresh to prevent concurrent refresh operations.
         refresh_lock = asyncio.Lock()
 
         yield {
             "config_manager": config_manager,
-            "session_manager": session_manager,
+            "session_registry": session_registry,
             "refresh_lock": refresh_lock,
         }
     finally:
         _LOGGER.info("Shutting down MCP server '%s'", server.name)
-        if session_manager is not None:
-            await session_manager.close_all_sessions()
+        if session_registry is not None:
+            await session_registry.close()
         _LOGGER.info("MCP server '%s' shut down.", server.name)
 
 
@@ -115,7 +116,6 @@ See the module-level docstring for an overview of the available tools and error 
 """
 
 
-# TODO: implement refresh tool
 @mcp_server.tool()
 async def refresh(context: Context) -> dict:
     """
@@ -152,11 +152,11 @@ async def refresh(context: Context) -> dict:
     try:
         refresh_lock = context.request_context.lifespan_context["refresh_lock"]
         config_manager = context.request_context.lifespan_context["config_manager"]
-        session_manager = context.request_context.lifespan_context["session_manager"]
+        session_registry = context.request_context.lifespan_context["session_registry"]
 
         async with refresh_lock:
             await config_manager.clear_config_cache()
-            await session_manager.close_all_sessions()
+            await session_registry.close()
         _LOGGER.info(
             "[refresh] Success: Worker configuration and session cache have been reloaded."
         )
@@ -218,18 +218,16 @@ async def describe_workers(context: Context) -> dict:
     )
     try:
         config_manager = context.request_context.lifespan_context["config_manager"]
-        session_manager = context.request_context.lifespan_context["session_manager"]
+        session_registry = context.request_context.lifespan_context["session_registry"]
         full_config = await config_manager.get_config()
         names = config.get_all_config_names(full_config, ["community", "sessions"])
         results = []
         for name in names:
             try:
-                # Try to get session object for the worker. If this fails, mark as unavailable.
-                session_obj = await session_manager.get_by_name(name)
-                _LOGGER.info(
-                    f"[describe_workers] Session object obtained for worker: '{name}'"
-                )
-                available = session_obj is not None and await session_obj.is_alive
+                # Try to get or create a session for the worker. If this fails, mark as unavailable.
+                session_manager = await session_registry.get(name)
+                session = await session_manager.get()
+                available = session is not None and session.is_alive
             except Exception as e:
                 _LOGGER.warning(
                     f"[describe_workers] Worker '{name}' unavailable: {e!r}"
@@ -257,9 +255,7 @@ async def describe_workers(context: Context) -> dict:
             # Only add versions if Python
             if programming_language == "python" and available:
                 try:
-                    # Get the actual session from the session object
-                    session = await session_obj.get_session()
-                    core_version, enterprise_version = await sessions.get_dh_versions(
+                    core_version, enterprise_version = await queries.get_dh_versions(
                         session
                     )
                     _LOGGER.debug(
@@ -328,14 +324,10 @@ async def table_schemas(
     )
     results = []
     try:
-        session_manager = context.request_context.lifespan_context["session_manager"]
-        session_obj = await session_manager.get_by_name(worker_name)
-        _LOGGER.info(
-            f"[table_schemas] Session object obtained for worker: '{worker_name}'"
-        )
-
-        # Get the actual session from the session object
-        session = await session_obj.get_session()
+        # TODO: Package up these next 3 lines into a function
+        session_registry = context.request_context.lifespan_context["session_registry"]
+        session_manager = await session_registry.get(worker_name)
+        session = await session_manager.get()
         _LOGGER.info(f"[table_schemas] Session established for worker: '{worker_name}'")
 
         if table_names is not None:
@@ -351,7 +343,7 @@ async def table_schemas(
 
         for table_name in selected_table_names:
             try:
-                meta_table = await sessions.get_meta_table(session, table_name)
+                meta_table = await queries.get_meta_table(session, table_name)
                 # meta_table is a pyarrow.Table with columns: 'Name', 'DataType', etc.
                 schema = [
                     {"name": row["Name"], "type": row["DataType"]}
@@ -440,14 +432,9 @@ async def run_script(
             async with aiofiles.open(script_path) as f:
                 script = await f.read()
 
-        session_manager = context.request_context.lifespan_context["session_manager"]
-        session_obj = await session_manager.get_by_name(worker_name)
-        _LOGGER.info(
-            f"[run_script] Session object obtained for worker: '{worker_name}'"
-        )
-
-        # Get the actual session from the session object
-        session = await session_obj.get_session()
+        session_registry = context.request_context.lifespan_context["session_registry"]
+        session_manager = await session_registry.get(worker_name)
+        session = await session_manager.get()
         _LOGGER.info(f"[run_script] Session established for worker: '{worker_name}'")
 
         _LOGGER.info(f"[run_script] Executing script on worker: '{worker_name}'")
@@ -496,21 +483,16 @@ async def pip_packages(context: Context, worker_name: str) -> dict:
     _LOGGER.info(f"[pip_packages] Invoked for worker: {worker_name!r}")
     result: dict = {"success": False}
     try:
-        session_manager = context.request_context.lifespan_context["session_manager"]
-        session_obj = await session_manager.get_by_name(worker_name)
-        _LOGGER.info(
-            f"[pip_packages] Session object obtained for worker: '{worker_name}'"
-        )
-
-        # Get the actual session from the session object
-        session = await session_obj.get_session()
+        session_registry = context.request_context.lifespan_context["session_registry"]
+        session_manager = await session_registry.get(worker_name)
+        session = await session_manager.get()
         _LOGGER.info(f"[pip_packages] Session established for worker: '{worker_name}'")
 
         # Run the pip packages script and get the table in one step
         _LOGGER.info(
             f"[pip_packages] Getting pip packages table for worker: '{worker_name}'"
         )
-        arrow_table = await sessions.get_pip_packages_table(session)
+        arrow_table = await queries.get_pip_packages_table(session)
         _LOGGER.info(
             f"[pip_packages] Pip packages table retrieved successfully for worker: '{worker_name}'"
         )
