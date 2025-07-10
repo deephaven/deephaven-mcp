@@ -137,14 +137,16 @@ run_pip_install() {
     fi
   else
     if [[ -n "$grpcio_constraint" ]]; then
-      # Create temp constraint file for pip --constraint
-      local temp_file
-      temp_file=$(mktemp)
-      echo "$grpcio_constraint" > "$temp_file"
-      echo "Using pip with grpcio constraint: pip install --constraint $temp_file ${args[*]}" >&2
-      command pip install --constraint "$temp_file" "${args[@]}"
+      # pip doesn't have --override like uv, so use --force-reinstall --no-deps to bypass conflicts
+      echo "Using pip with forced grpcio override: pip install --force-reinstall --no-deps ${args[*]}" >&2
+      command pip install --force-reinstall --no-deps "${args[@]}"
       local exit_code=$?
-      rm -f "$temp_file"
+      if [[ $exit_code -eq 0 ]]; then
+        # Now ensure grpcio is at the forced version
+        echo "Ensuring grpcio version: pip install --force-reinstall $grpcio_constraint" >&2
+        command pip install --force-reinstall "$grpcio_constraint"
+        exit_code=$?
+      fi
       return $exit_code
     else
       echo "Using pip: pip install ${args[*]}" >&2
