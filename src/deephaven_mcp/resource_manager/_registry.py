@@ -132,6 +132,23 @@ class BaseRegistry(abc.ABC, Generic[T]):
                 raise KeyError(f"No item found for: {name}")
             return self._items[name]
 
+    async def get_all(self) -> dict[str, T]:
+        """
+        Retrieve all items from the registry.
+
+        Returns:
+            A copy of the items dictionary containing all registered items.
+
+        Raises:
+            InternalError: If the registry has not been initialized.
+        """
+        async with self._lock:
+            if not self._initialized:
+                raise InternalError(
+                    f"{self.__class__.__name__} not initialized. Call 'await initialize()' after construction."
+                )
+            return self._items.copy()
+
     async def close(self) -> None:
         """
         Close all managed items in the registry.

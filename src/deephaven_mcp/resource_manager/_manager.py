@@ -136,6 +136,20 @@ class BaseItemManager(Generic[T], ABC):
         to define how items are created and their health is monitored.
     """
 
+    @staticmethod
+    def make_full_name(system_type: 'SystemType', source: str, name: str) -> str:
+        """
+        Construct the canonical full name for a managed item or session.
+        This should be used for all key construction and lookups.
+        Format: "system_type:source:name"
+
+        Args:
+            system_type: The type of Deephaven system (COMMUNITY or ENTERPRISE).
+            source: The configuration source identifier (e.g., file path, URL, or config key).
+            name: The unique name of this manager instance within its source.
+        """
+        return f"{system_type.value}:{source}:{name}"
+
     def __init__(self, system_type: SystemType, source: str, name: str):
         """
         Initialize the manager with system identification and configuration.
@@ -201,7 +215,7 @@ class BaseItemManager(Generic[T], ABC):
         Returns:
             str: A colon-separated string in the format "system_type:source:name".
         """
-        return f"{self.system_type.value}:{self.source}:{self.name}"
+        return self.make_full_name(self.system_type, self.source, self.name)
 
     @abstractmethod
     async def _create_item(self) -> T:
@@ -411,7 +425,6 @@ class CommunitySessionManager(BaseItemManager[CoreSession]):
         try:
             return await CoreSession.from_config(self._config)
         except Exception as e:
-            # TODO: what exception strategy?
             raise SessionCreationError(
                 f"Failed to create session for community worker {self._name}: {e}"
             ) from e

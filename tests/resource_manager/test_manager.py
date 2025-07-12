@@ -7,6 +7,12 @@ from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
 
 import pytest
 
+import pytest
+from unittest.mock import AsyncMock
+from deephaven_mcp._exceptions import SessionCreationError
+from deephaven_mcp.resource_manager import EnterpriseSessionManager
+
+
 from deephaven_mcp import client
 from deephaven_mcp._exceptions import InternalError, SessionCreationError
 from deephaven_mcp.client import CorePlusSession
@@ -229,6 +235,62 @@ class TestCommunitySessionManager:
 
 class TestEnterpriseSessionManager:
     """Tests for the EnterpriseSessionManager class."""
+
+
+def test_make_full_name_static():
+    """Directly test BaseItemManager.make_full_name static method."""
+    from deephaven_mcp.resource_manager import BaseItemManager, SystemType
+    assert BaseItemManager.make_full_name(SystemType.ENTERPRISE, 'factoryA', 'sess42') == 'enterprise:factoryA:sess42'
+    assert BaseItemManager.make_full_name(SystemType.COMMUNITY, 'sourceX', 'foo') == 'community:sourceX:foo'
+
+
+def test_enterprise_session_manager_constructor():
+    """Explicitly test the constructor for coverage (lines 519-520)."""
+    from deephaven_mcp.resource_manager import EnterpriseSessionManager
+    def dummy_creation(source, name):
+        pass
+    mgr = EnterpriseSessionManager('src', 'nm', dummy_creation)
+    assert mgr._creation_function is dummy_creation
+    assert mgr.source == 'src'
+    assert mgr.name == 'nm'
+    assert mgr.system_type.value == 'enterprise'
+
+@pytest.mark.asyncio
+async def test_create_item_success_covers_try():
+    """Covers the try/return branch of _create_item (line 539-540)."""
+    mock_session = AsyncMock()
+    async def creation(source, name):
+        return mock_session
+    mgr = EnterpriseSessionManager('src', 'nm', creation)
+    result = await mgr._create_item()
+    assert result is mock_session
+
+@pytest.mark.asyncio
+async def test_create_item_exception_covers_except():
+    """Covers the except/raise branch of _create_item (lines 541-542)."""
+    async def creation(source, name):
+        raise RuntimeError('fail')
+    mgr = EnterpriseSessionManager('src', 'nm', creation)
+    with pytest.raises(SessionCreationError, match='Failed to create enterprise session for nm: fail'):
+        await mgr._create_item()
+
+@pytest.mark.asyncio
+async def test_check_liveness_covers_return():
+    """Covers line 559: return await item.is_alive()."""
+    mgr = EnterpriseSessionManager('src', 'nm', AsyncMock())
+    mock_session = AsyncMock()
+    mock_session.is_alive = AsyncMock(return_value=True)
+    result = await mgr._check_liveness(mock_session)
+    assert result is True
+
+@pytest.mark.asyncio
+async def test_check_liveness_exception():
+    """Covers line 559 when is_alive raises (exception propagates)."""
+    mgr = EnterpriseSessionManager('src', 'nm', AsyncMock())
+    mock_session = AsyncMock()
+    mock_session.is_alive = AsyncMock(side_effect=Exception('fail'))
+    with pytest.raises(Exception, match='fail'):
+        await mgr._check_liveness(mock_session)
 
     @pytest.mark.asyncio
     async def test_create_item_success(self):

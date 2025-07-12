@@ -108,8 +108,64 @@ async def test_get_returns_item(registry, mock_base_config_manager):
 async def test_get_unknown_raises_key_error(registry, mock_base_config_manager):
     """Test that get() raises KeyError for an unknown item."""
     await registry.initialize(mock_base_config_manager)
-    with pytest.raises(KeyError, match="No item found for: unknown_item"):
-        await registry.get("unknown_item")
+    with pytest.raises(KeyError, match="No item found for: unknown"):
+        await registry.get("unknown")
+
+
+@pytest.mark.asyncio
+async def test_get_all_raises_before_initialize(registry):
+    """Test that get_all() raises InternalError before initialization."""
+    with pytest.raises(InternalError, match="not initialized"):
+        await registry.get_all()
+
+
+@pytest.mark.asyncio
+async def test_get_all_returns_all_items(registry, mock_base_config_manager):
+    """Test that get_all() returns all items after initialization."""
+    await registry.initialize(mock_base_config_manager)
+    all_items = await registry.get_all()
+    
+    # Should return a dictionary with both configured items
+    assert isinstance(all_items, dict)
+    assert len(all_items) == 2
+    assert "item1" in all_items
+    assert "item2" in all_items
+    assert all_items["item1"].name == "alpha"
+    assert all_items["item2"].name == "beta"
+
+
+@pytest.mark.asyncio
+async def test_get_all_returns_copy(registry, mock_base_config_manager):
+    """Test that get_all() returns a copy of items, not the original dict."""
+    await registry.initialize(mock_base_config_manager)
+    all_items = await registry.get_all()
+    
+    # Modify the returned dict
+    all_items["new_item"] = MockItem("new")
+    
+    # Original registry should be unchanged
+    with pytest.raises(KeyError):
+        await registry.get("new_item")
+    
+    # Getting all items again should not include our modification
+    fresh_items = await registry.get_all()
+    assert "new_item" not in fresh_items
+    assert len(fresh_items) == 2
+
+
+@pytest.mark.asyncio
+async def test_get_all_empty_registry():
+    """Test that get_all() works with an empty registry."""
+    # Create a registry with no items configured
+    empty_config_manager = AsyncMock(spec=config.ConfigManager)
+    empty_config_manager.get_config = AsyncMock(return_value={"items": {}})
+    
+    registry = ConcreteRegistry()
+    await registry.initialize(empty_config_manager)
+    
+    all_items = await registry.get_all()
+    assert isinstance(all_items, dict)
+    assert len(all_items) == 0
 
 
 @pytest.mark.asyncio
