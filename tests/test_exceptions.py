@@ -92,39 +92,7 @@ class TestExceptionParameterized:
         assert isinstance(exc_info.value, Exception)
 
 
-class TestSessionExceptions:
-    """Additional tests for session-related exceptions."""
-
-    # Any session-specific tests that aren't covered by the parameterized tests
-    pass
-
-
-class TestAuthenticationExceptions:
-    """Additional tests for authentication-related exceptions."""
-
-    # Any authentication-specific tests that aren't covered by the parameterized tests
-    pass
-
-
-class TestQueryExceptions:
-    """Additional tests for query-related exceptions."""
-
-    # Any query-specific tests that aren't covered by the parameterized tests
-    pass
-
-
-class TestConnectionExceptions:
-    """Additional tests for connection-related exceptions."""
-
-    # Any connection-specific tests that aren't covered by the parameterized tests
-    pass
-
-
-class TestResourceExceptions:
-    """Additional tests for resource-related exceptions."""
-
-    # Any resource-specific tests that aren't covered by the parameterized tests
-    pass
+# Exception-specific tests can be added here if needed in the future
 
 
 class TestConfigurationExceptions:

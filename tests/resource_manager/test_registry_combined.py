@@ -332,28 +332,22 @@ class TestControllerClientCaching:
         # First create a client and add to cache
         combined_registry._controller_clients["test_factory"] = mock_client
 
-        # Mock the CorePlusControllerClient import directly
-        with patch(
-            "deephaven_mcp.resource_manager._registry_combined.CorePlusControllerClient",
-            MagicMock(),
-        ) as mock_controller_client_cls:
-            # Mock client creation for the factory
-            mock_controller_client_cls.return_value = MagicMock(
-                spec=CorePlusControllerClient
-            )
+        # Set up the factory with mocked methods
+        factory = MagicMock(spec=CorePlusSessionFactoryManager)
+        mock_factory_instance = MagicMock()
+        factory.get = AsyncMock(return_value=mock_factory_instance)
+        mock_factory_instance.create_controller_client = AsyncMock()
 
-            # Set up the factory
-            factory = MagicMock()
+        # Call should reuse the client since it's healthy
+        client = await combined_registry._get_or_create_controller_client(
+            factory, "test_factory"
+        )
 
-            # Call should reuse the client since it's healthy
-            client = await combined_registry._get_or_create_controller_client(
-                factory, "test_factory"
-            )
-
-            # Verify the client was reused not recreated
-            mock_controller_client_cls.assert_not_called()
-            assert client == mock_client
-            mock_client.ping.assert_awaited_once()
+        # Verify the client was reused not recreated
+        factory.get.assert_not_called()
+        mock_factory_instance.create_controller_client.assert_not_called()
+        assert client == mock_client
+        mock_client.ping.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_get_or_create_controller_client_recreate_dead(
