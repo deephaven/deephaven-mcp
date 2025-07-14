@@ -76,6 +76,17 @@ class BaseRegistry(abc.ABC, Generic[T]):
             self.__class__.__name__,
         )
 
+    def _check_initialized(self) -> None:
+        """Check if the registry is initialized and raise an error if not.
+
+        Raises:
+            InternalError: If the registry has not been initialized.
+        """
+        if not self._initialized:
+            raise InternalError(
+                f"{self.__class__.__name__} not initialized. Call 'await initialize()' after construction."
+            )
+
     @abc.abstractmethod
     async def _load_items(self, config_manager: config.ConfigManager) -> None:
         """
@@ -122,15 +133,16 @@ class BaseRegistry(abc.ABC, Generic[T]):
 
         Raises:
             InternalError: If the registry has not been initialized.
-            KeyError: If the item is not found in the registry.
+            KeyError: If no item with the given name exists in the registry.
         """
         async with self._lock:
-            if not self._initialized:
-                raise InternalError(
-                    f"{self.__class__.__name__} not initialized. Call 'await initialize()' after construction."
-                )
+            self._check_initialized()
+
             if name not in self._items:
-                raise KeyError(f"No item found for: {name}")
+                raise KeyError(
+                    f"No item with name '{name}' found in {self.__class__.__name__}"
+                )
+
             return self._items[name]
 
     async def get_all(self) -> dict[str, T]:
@@ -144,10 +156,9 @@ class BaseRegistry(abc.ABC, Generic[T]):
             InternalError: If the registry has not been initialized.
         """
         async with self._lock:
-            if not self._initialized:
-                raise InternalError(
-                    f"{self.__class__.__name__} not initialized. Call 'await initialize()' after construction."
-                )
+            self._check_initialized()
+
+            # Return a copy to avoid external modification
             return self._items.copy()
 
     async def close(self) -> None:
@@ -161,10 +172,7 @@ class BaseRegistry(abc.ABC, Generic[T]):
                 async `close` method.
         """
         async with self._lock:
-            if not self._initialized:
-                raise InternalError(
-                    f"{self.__class__.__name__} not initialized. Call 'await initialize()' after construction."
-                )
+            self._check_initialized()
 
             start_time = time.time()
             _LOGGER.info("[%s] closing all items...", self.__class__.__name__)

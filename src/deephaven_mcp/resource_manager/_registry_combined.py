@@ -517,10 +517,7 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             InternalError: If the registry has not been initialized.
             Exception: Any exception from factory session updates.
         """
-        if not self._initialized:
-            raise InternalError(
-                f"{self.__class__.__name__} not initialized. Call 'await initialize()' after construction."
-            )
+        self._check_initialized()
 
         # We know this is initialized at this point, so it's safe to cast
         factories = await cast(

@@ -112,7 +112,9 @@ async def test_get_returns_item(registry, mock_base_config_manager):
 async def test_get_unknown_raises_key_error(registry, mock_base_config_manager):
     """Test that get() raises KeyError for an unknown item."""
     await registry.initialize(mock_base_config_manager)
-    with pytest.raises(KeyError, match="No item found for: unknown"):
+    with pytest.raises(
+        KeyError, match="No item with name 'unknown' found in ConcreteRegistry"
+    ):
         await registry.get("unknown")
 
 
@@ -269,7 +271,10 @@ async def test_community_registry_get_unknown_raises_key_error(
 ):
     """Test that get() for an unknown worker raises KeyError."""
     await community_session_registry.initialize(mock_community_config_manager)
-    with pytest.raises(KeyError, match="No item found for: unknown_worker"):
+    with pytest.raises(
+        KeyError,
+        match="No item with name 'unknown_worker' found in CommunitySessionRegistry",
+    ):
         await community_session_registry.get("unknown_worker")
 
 
