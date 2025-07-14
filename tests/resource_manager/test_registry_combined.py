@@ -510,7 +510,7 @@ class TestEnterpriseSessionUpdate:
         mock_client.ping = AsyncMock(return_value=True)
 
         # Setup existing session manager that will be reused
-        session_key = "enterprise/factory1/session1"
+        session_key = BaseItemManager.make_full_name(SystemType.ENTERPRISE, "factory1", "session1")
         session_manager = AsyncMock(spec=EnterpriseSessionManager)
         session_manager.full_name = session_key
 
@@ -627,7 +627,7 @@ def test_add_new_enterprise_sessions(initialized_registry):
 
     def mock_make_manager_side_effect(factory, factory_name, session_name):
         manager = MagicMock(spec=EnterpriseSessionManager)
-        manager.full_name = f"enterprise/{factory_name}/{session_name}"
+        manager.full_name = BaseItemManager.make_full_name(SystemType.ENTERPRISE, factory_name, session_name)
         return manager
 
     with patch.object(
@@ -642,8 +642,10 @@ def test_add_new_enterprise_sessions(initialized_registry):
 
         # Assert
         assert mock_make_manager.call_count == 2
-        assert "enterprise/factory1/session1" in initialized_registry._items
-        assert "enterprise/factory1/session2" in initialized_registry._items
+        key1 = BaseItemManager.make_full_name(SystemType.ENTERPRISE, factory_name, "session1")
+        key2 = BaseItemManager.make_full_name(SystemType.ENTERPRISE, factory_name, "session2")
+        assert key1 in initialized_registry._items
+        assert key2 in initialized_registry._items
 
 
 def test_add_new_enterprise_sessions_skips_existing(initialized_registry):
@@ -653,12 +655,12 @@ def test_add_new_enterprise_sessions_skips_existing(initialized_registry):
     factory_name = "factory1"
     # session1 already exists, session2 is new
     sessions = {"session1", "session2"}
-    existing_key = "enterprise/factory1/session1"
+    existing_key = BaseItemManager.make_full_name(SystemType.ENTERPRISE, factory_name, "session1")
     initialized_registry._items = {existing_key: MagicMock()}
 
     def mock_make_manager_side_effect(factory, factory_name, session_name):
         manager = MagicMock(spec=EnterpriseSessionManager)
-        manager.full_name = f"enterprise/{factory_name}/{session_name}"
+        manager.full_name = BaseItemManager.make_full_name(SystemType.ENTERPRISE, factory_name, session_name)
         return manager
 
     with patch.object(
@@ -675,7 +677,8 @@ def test_add_new_enterprise_sessions_skips_existing(initialized_registry):
         # The creation method was only called for the new session.
         mock_make_manager.assert_called_once_with(factory, factory_name, "session2")
         assert existing_key in initialized_registry._items
-        assert "enterprise/factory1/session2" in initialized_registry._items
+        new_key = BaseItemManager.make_full_name(SystemType.ENTERPRISE, factory_name, "session2")
+        assert new_key in initialized_registry._items
 
 
 @pytest.mark.asyncio

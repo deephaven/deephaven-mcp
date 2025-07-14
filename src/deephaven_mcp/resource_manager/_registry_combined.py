@@ -399,7 +399,9 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             session_names: Set of session names to create managers for.
         """
         for session_name in session_names:
-            key = f"enterprise/{factory_name}/{session_name}"
+            key = BaseItemManager.make_full_name(
+                SystemType.ENTERPRISE, factory_name, session_name
+            )
             if key not in self._items:
                 session_manager = self._make_enterprise_session_manager(
                     factory, factory_name, session_name
