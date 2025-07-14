@@ -139,7 +139,6 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             factory_instance = await factory.get()
             return await factory_instance.connect_to_persistent_query(name)
 
-        # TODO: implement connect_to_persistent_query
         return EnterpriseSessionManager(
             source=factory_name,
             name=session_name,
