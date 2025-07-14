@@ -65,8 +65,16 @@ class TestExceptionParameterized:
             (ConfigurationError, [McpError], "configuration error"),
             # Specialized exceptions with additional inheritance
             (SessionCreationError, [SessionError, McpError], "session creation error"),
-            (CommunitySessionConfigurationError, [ConfigurationError, McpError], "community session configuration error"),
-            (EnterpriseSystemConfigurationError, [ConfigurationError, McpError], "enterprise system configuration error"),
+            (
+                CommunitySessionConfigurationError,
+                [ConfigurationError, McpError],
+                "community session configuration error",
+            ),
+            (
+                EnterpriseSystemConfigurationError,
+                [ConfigurationError, McpError],
+                "enterprise system configuration error",
+            ),
         ],
     )
     def test_exception_basics(self, exception_class, parent_classes, message):
@@ -75,59 +83,64 @@ class TestExceptionParameterized:
         with pytest.raises(exception_class) as exc_info:
             raise exception_class(message)
         assert str(exc_info.value) == message
-        
+
         # Test inheritance
         for parent_class in parent_classes:
             assert isinstance(exc_info.value, parent_class)
-        
+
         # All exceptions should inherit from Exception
         assert isinstance(exc_info.value, Exception)
 
 
 class TestSessionExceptions:
     """Additional tests for session-related exceptions."""
+
     # Any session-specific tests that aren't covered by the parameterized tests
     pass
 
 
 class TestAuthenticationExceptions:
     """Additional tests for authentication-related exceptions."""
+
     # Any authentication-specific tests that aren't covered by the parameterized tests
     pass
 
 
 class TestQueryExceptions:
     """Additional tests for query-related exceptions."""
+
     # Any query-specific tests that aren't covered by the parameterized tests
     pass
 
 
 class TestConnectionExceptions:
     """Additional tests for connection-related exceptions."""
+
     # Any connection-specific tests that aren't covered by the parameterized tests
     pass
 
 
 class TestResourceExceptions:
     """Additional tests for resource-related exceptions."""
+
     # Any resource-specific tests that aren't covered by the parameterized tests
     pass
 
 
-
 class TestConfigurationExceptions:
     """Additional tests for configuration-related exceptions."""
+
     # Any configuration-specific tests that aren't covered by the parameterized tests
     pass
 
 
 class TestExceptionModule:
     """Tests for module-level functionality of the exceptions module."""
-    
+
     def test_all_exceptions_exported(self):
         """Test that all exceptions are properly exported in __all__."""
         from deephaven_mcp import _exceptions
-        
+
         exported = set(_exceptions.__all__)
         expected_exceptions = {
             # Base exceptions
@@ -150,4 +163,6 @@ class TestExceptionModule:
             "EnterpriseSystemConfigurationError",
         }
         # Check that the exported set exactly matches the expected exceptions
-        assert exported == expected_exceptions, f"Exported exceptions don't match expected. Missing: {expected_exceptions - exported}, Extra: {exported - expected_exceptions}"
+        assert (
+            exported == expected_exceptions
+        ), f"Exported exceptions don't match expected. Missing: {expected_exceptions - exported}, Extra: {exported - expected_exceptions}"

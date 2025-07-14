@@ -206,6 +206,12 @@ from typing import Any, cast
 
 import aiofiles
 
+from deephaven_mcp._exceptions import (
+    CommunitySessionConfigurationError,
+    ConfigurationError,
+    EnterpriseSystemConfigurationError,
+)
+
 from ._community_session import (
     redact_community_session_config,
     validate_community_sessions_config,
@@ -216,11 +222,6 @@ from ._enterprise_system import (
     redact_enterprise_systems_map,
     validate_enterprise_systems_config,
     validate_single_enterprise_system,
-)
-from deephaven_mcp._exceptions import (
-    CommunitySessionConfigurationError,
-    EnterpriseSystemConfigurationError,
-    ConfigurationError,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -613,9 +614,7 @@ def _validate_unknown_keys(
     unknown_keys = set(data.keys()) - valid_keys
     if unknown_keys:
         _LOGGER.error(f"Unknown keys at config path {path}: {unknown_keys}")
-        raise ConfigurationError(
-            f"Unknown keys at config path {path}: {unknown_keys}"
-        )
+        raise ConfigurationError(f"Unknown keys at config path {path}: {unknown_keys}")
 
 
 def _validate_required_keys(
@@ -634,18 +633,18 @@ def _validate_key_type_and_value(
     key: str, value: Any, spec: "_ConfigPathSpec", path: tuple[str, ...]
 ) -> None:
     """Validate type and value for a single configuration key.
-    
+
     Performs two types of validation:
     1. Type validation - ensures the value matches the expected type in the spec
     2. Specialized validation - if a validator is provided in the spec, runs it
        and handles any configuration exceptions
-    
+
     Args:
         key: The configuration key being validated
         value: The value to validate
         spec: The configuration path specification containing type and validator
         path: The parent path tuple (will be combined with key to form current_path)
-    
+
     Raises:
         ConfigurationError: If validation fails for type or specialized validation
     """
@@ -675,14 +674,14 @@ def _validate_key_type_and_value(
 
 def _should_recurse_into_nested_dict(current_path: tuple[str, ...]) -> bool:
     """Check if there are nested schema paths for the current path.
-    
+
     Determines if we should continue recursing into a dictionary by checking if any
     schema paths exist that are children of the current path (i.e., they start with
     the current path and have at least one more component).
-    
+
     Args:
         current_path: The current path tuple to check for children
-        
+
     Returns:
         bool: True if there are nested paths that extend beyond the current path
     """
@@ -695,17 +694,17 @@ def _should_recurse_into_nested_dict(current_path: tuple[str, ...]) -> bool:
 
 def _validate_section(data: dict[str, Any], path: tuple[str, ...]) -> None:
     """Validate a configuration section in a single pass.
-    
+
     Performs comprehensive validation of a configuration section including:
     1. Checking for unknown keys not in the schema
     2. Checking for missing required keys
     3. Validating each key's type and value
     4. Recursively validating nested dictionary sections
-    
+
     Args:
         data: The dictionary containing configuration data to validate
         path: The current path tuple representing the location in the config
-        
+
     Raises:
         ConfigurationError: If validation fails for any reason
     """

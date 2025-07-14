@@ -14,6 +14,11 @@ import aiofiles
 import pytest
 
 from deephaven_mcp import config
+from deephaven_mcp._exceptions import (
+    CommunitySessionConfigurationError,
+    ConfigurationError,
+    EnterpriseSystemConfigurationError,
+)
 from deephaven_mcp.config import (
     CONFIG_ENV_VAR,
     ConfigManager,
@@ -24,11 +29,6 @@ from deephaven_mcp.config import (
     get_config_section,
     load_and_validate_config,
     validate_config,
-)
-from deephaven_mcp._exceptions import (
-    ConfigurationError,
-    CommunitySessionConfigurationError,
-    EnterpriseSystemConfigurationError,
 )
 
 
@@ -1839,8 +1839,8 @@ async def test_get_config_no_community_sessions_key_from_file(monkeypatch, caplo
 @pytest.mark.asyncio
 async def test_config_file_not_found_error(monkeypatch):
     """Test FileNotFoundError handling in _load_config_from_file."""
-    from deephaven_mcp.config import ConfigManager
     from deephaven_mcp._exceptions import ConfigurationError
+    from deephaven_mcp.config import ConfigManager
 
     monkeypatch.setenv("DH_MCP_CONFIG_FILE", "/nonexistent/path/config.json")
 
@@ -1857,8 +1857,8 @@ async def test_config_permission_error(monkeypatch):
     import os
     from unittest.mock import patch
 
-    from deephaven_mcp.config import ConfigManager
     from deephaven_mcp._exceptions import ConfigurationError
+    from deephaven_mcp.config import ConfigManager
 
     monkeypatch.setenv("DH_MCP_CONFIG_FILE", "/fake/path/config.json")
 
@@ -1878,8 +1878,8 @@ async def test_config_invalid_json_error(monkeypatch):
     """Test JSONDecodeError handling in _load_config_from_file."""
     from unittest.mock import AsyncMock, MagicMock, patch
 
-    from deephaven_mcp.config import ConfigManager
     from deephaven_mcp._exceptions import ConfigurationError
+    from deephaven_mcp.config import ConfigManager
 
     # Invalid JSON content
     invalid_json = "{ invalid json content"
@@ -1907,22 +1907,16 @@ async def test_config_invalid_json_error(monkeypatch):
 
 def test_validate_config_non_dict():
     """Test validation error when config is not a dictionary."""
-    from deephaven_mcp.config import validate_config
     from deephaven_mcp._exceptions import ConfigurationError
+    from deephaven_mcp.config import validate_config
 
-    with pytest.raises(
-        ConfigurationError, match="Configuration must be a dictionary"
-    ):
+    with pytest.raises(ConfigurationError, match="Configuration must be a dictionary"):
         validate_config("not a dict")
 
-    with pytest.raises(
-        ConfigurationError, match="Configuration must be a dictionary"
-    ):
+    with pytest.raises(ConfigurationError, match="Configuration must be a dictionary"):
         validate_config(123)
 
-    with pytest.raises(
-        ConfigurationError, match="Configuration must be a dictionary"
-    ):
+    with pytest.raises(ConfigurationError, match="Configuration must be a dictionary"):
         validate_config(["list", "not", "dict"])
 
 
@@ -1931,8 +1925,8 @@ async def test_config_validation_error_in_load_and_validate(monkeypatch):
     """Test configuration validation error handling in load_and_validate_config."""
     from unittest.mock import AsyncMock, MagicMock, patch
 
-    from deephaven_mcp.config import ConfigManager
     from deephaven_mcp._exceptions import ConfigurationError
+    from deephaven_mcp.config import ConfigManager
 
     # Create invalid config that will fail validation
     invalid_config_json = '{"unknown_top_level_key": "invalid"}'
@@ -1952,9 +1946,7 @@ async def test_config_validation_error_in_load_and_validate(monkeypatch):
         cm = ConfigManager()
         await cm.clear_config_cache()
 
-        with pytest.raises(
-            ConfigurationError, match="Configuration validation failed"
-        ):
+        with pytest.raises(ConfigurationError, match="Configuration validation failed"):
             await cm.get_config()
 
 
@@ -2000,8 +1992,8 @@ async def test_config_validation_error_in_load_and_validate(monkeypatch):
     """Test configuration validation error handling in load_and_validate_config."""
     from unittest.mock import AsyncMock, MagicMock, patch
 
-    from deephaven_mcp.config import ConfigManager
     from deephaven_mcp._exceptions import ConfigurationError
+    from deephaven_mcp.config import ConfigManager
 
     # Create invalid config that will fail validation
     invalid_config_json = '{"unknown_top_level_key": "invalid"}'

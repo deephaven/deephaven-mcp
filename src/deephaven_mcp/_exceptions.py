@@ -55,7 +55,6 @@ __all__ = [
     "ConfigurationError",
     "CommunitySessionConfigurationError",
     "EnterpriseSystemConfigurationError",
-
 ]
 
 
@@ -82,6 +81,7 @@ class McpError(Exception):
             logger.error(f"MCP operation failed: {e}")
         ```
     """
+
     pass
 
 
@@ -106,6 +106,7 @@ class InternalError(McpError, RuntimeError):
             raise InternalError("Unexpected state in registry: {state}")
         ```
     """
+
     pass
 
 
@@ -397,5 +398,3 @@ class EnterpriseSystemConfigurationError(ConfigurationError):
     """
 
     pass
-
-

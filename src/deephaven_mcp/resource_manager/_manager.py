@@ -137,9 +137,10 @@ class BaseItemManager(Generic[T], ABC):
     """
 
     @staticmethod
-    def make_full_name(system_type: 'SystemType', source: str, name: str) -> str:
+    def make_full_name(system_type: "SystemType", source: str, name: str) -> str:
         """
         Construct the canonical full name for a managed item or session.
+
         This should be used for all key construction and lookups.
         Format: "system_type:source:name"
 
