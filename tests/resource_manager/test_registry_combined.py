@@ -510,7 +510,9 @@ class TestEnterpriseSessionUpdate:
         mock_client.ping = AsyncMock(return_value=True)
 
         # Setup existing session manager that will be reused
-        session_key = BaseItemManager.make_full_name(SystemType.ENTERPRISE, "factory1", "session1")
+        session_key = BaseItemManager.make_full_name(
+            SystemType.ENTERPRISE, "factory1", "session1"
+        )
         session_manager = AsyncMock(spec=EnterpriseSessionManager)
         session_manager.full_name = session_key
 
@@ -609,7 +611,7 @@ class TestEnterpriseSessionUpdate:
         # Create a mock session info object with config.pb.name attribute
         mock_session_info = MagicMock()
         mock_session_info.config.pb.name = "session1"
-        
+
         # Mock controller client
         with patch.object(
             initialized_registry,
@@ -618,16 +620,18 @@ class TestEnterpriseSessionUpdate:
         ):
             # Mock session map from controller that doesn't include the stale session
             mock_client.map = AsyncMock(return_value={"session1": mock_session_info})
-            
+
             # Call the method under test
             await initialized_registry._update_enterprise_sessions()
-            
+
             # Assert stale session was removed and closed
             mock_old_session.close.assert_awaited_once()
             assert stale_key not in initialized_registry._items
-            
+
             # Assert new session was added
-            new_key = BaseItemManager.make_full_name(SystemType.ENTERPRISE, "factory1", "session1")
+            new_key = BaseItemManager.make_full_name(
+                SystemType.ENTERPRISE, "factory1", "session1"
+            )
             assert new_key in initialized_registry._items
 
 
@@ -641,7 +645,9 @@ def test_add_new_enterprise_sessions(initialized_registry):
 
     def mock_make_manager_side_effect(factory, factory_name, session_name):
         manager = MagicMock(spec=EnterpriseSessionManager)
-        manager.full_name = BaseItemManager.make_full_name(SystemType.ENTERPRISE, factory_name, session_name)
+        manager.full_name = BaseItemManager.make_full_name(
+            SystemType.ENTERPRISE, factory_name, session_name
+        )
         return manager
 
     with patch.object(
@@ -656,8 +662,12 @@ def test_add_new_enterprise_sessions(initialized_registry):
 
         # Assert
         assert mock_make_manager.call_count == 2
-        key1 = BaseItemManager.make_full_name(SystemType.ENTERPRISE, factory_name, "session1")
-        key2 = BaseItemManager.make_full_name(SystemType.ENTERPRISE, factory_name, "session2")
+        key1 = BaseItemManager.make_full_name(
+            SystemType.ENTERPRISE, factory_name, "session1"
+        )
+        key2 = BaseItemManager.make_full_name(
+            SystemType.ENTERPRISE, factory_name, "session2"
+        )
         assert key1 in initialized_registry._items
         assert key2 in initialized_registry._items
 
@@ -669,12 +679,16 @@ def test_add_new_enterprise_sessions_skips_existing(initialized_registry):
     factory_name = "factory1"
     # session1 already exists, session2 is new
     sessions = {"session1", "session2"}
-    existing_key = BaseItemManager.make_full_name(SystemType.ENTERPRISE, factory_name, "session1")
+    existing_key = BaseItemManager.make_full_name(
+        SystemType.ENTERPRISE, factory_name, "session1"
+    )
     initialized_registry._items = {existing_key: MagicMock()}
 
     def mock_make_manager_side_effect(factory, factory_name, session_name):
         manager = MagicMock(spec=EnterpriseSessionManager)
-        manager.full_name = BaseItemManager.make_full_name(SystemType.ENTERPRISE, factory_name, session_name)
+        manager.full_name = BaseItemManager.make_full_name(
+            SystemType.ENTERPRISE, factory_name, session_name
+        )
         return manager
 
     with patch.object(
@@ -691,7 +705,9 @@ def test_add_new_enterprise_sessions_skips_existing(initialized_registry):
         # The creation method was only called for the new session.
         mock_make_manager.assert_called_once_with(factory, factory_name, "session2")
         assert existing_key in initialized_registry._items
-        new_key = BaseItemManager.make_full_name(SystemType.ENTERPRISE, factory_name, "session2")
+        new_key = BaseItemManager.make_full_name(
+            SystemType.ENTERPRISE, factory_name, "session2"
+        )
         assert new_key in initialized_registry._items
 
 
