@@ -18,7 +18,7 @@ import logging
 import types
 from typing import Any
 
-from ._errors import CommunitySessionConfigurationError
+from deephaven_mcp._exceptions import CommunitySessionConfigurationError
 
 _LOGGER = logging.getLogger(__name__)
 

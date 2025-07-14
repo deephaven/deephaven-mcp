@@ -194,8 +194,6 @@ class CombinedSessionRegistry(BaseRegistry[Any]):
             await self._community_registry.initialize(config_manager)
             _LOGGER.debug("[%s] initialized community session registry", self.__class__.__name__)
             
-            # TODO: blow up if enterprise is not enabled?
-
             # Initialize enterprise session factory registry
             self._enterprise_registry = CorePlusSessionFactoryRegistry()
             await self._enterprise_registry.initialize(config_manager)

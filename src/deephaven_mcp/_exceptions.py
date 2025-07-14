@@ -9,12 +9,13 @@ system to signal recoverable or expected problems, allowing callers to implement
 recovery or reporting strategies.
 
 Exception Hierarchy:
-    - Session exceptions: SessionError (base), SessionCreationError
-    - Authentication exceptions: AuthenticationError
-    - Query exceptions: QueryError
-    - Connection exceptions: DeephavenConnectionError
-    - Resource exceptions: ResourceError
-    - Internal exceptions: InternalError (extends RuntimeError)
+    - Base exceptions: McpError (base for all MCP exceptions), InternalError (extends McpError and RuntimeError)
+    - Session exceptions: SessionError (extends McpError), SessionCreationError (extends SessionError)
+    - Authentication exceptions: AuthenticationError (extends McpError)
+    - Query exceptions: QueryError (extends McpError)
+    - Connection exceptions: DeephavenConnectionError (extends McpError)
+    - Resource exceptions: ResourceError (extends McpError)
+    - Configuration exceptions: ConfigurationError (extends McpError), CommunitySessionConfigurationError, EnterpriseSystemConfigurationError
 
 Usage Example:
     ```python
@@ -36,6 +37,9 @@ Usage Example:
 """
 
 __all__ = [
+    # Base exceptions
+    "McpError",
+    "InternalError",
     # Session exceptions
     "SessionCreationError",
     "SessionError",
@@ -47,15 +51,68 @@ __all__ = [
     "DeephavenConnectionError",
     # Resource exceptions
     "ResourceError",
-    # Internal exceptions
-    "InternalError",
+    # Configuration exceptions
+    "ConfigurationError",
+    "CommunitySessionConfigurationError",
+    "EnterpriseSystemConfigurationError",
+
 ]
+
+
+# Base Exceptions
+
+
+class McpError(Exception):
+    """Base exception for all Deephaven MCP errors.
+
+    This serves as the common base class for all MCP-related exceptions,
+    allowing callers to catch all MCP errors with a single except clause
+    while still maintaining specific exception types for detailed error handling.
+
+    All MCP exceptions should inherit from this class either directly or
+    through one of the more specific base classes (SessionError, ConfigurationError, etc.).
+
+    Examples:
+        ```python
+        try:
+            # MCP operations
+            pass
+        except McpError as e:
+            # Handle any MCP-related error
+            logger.error(f"MCP operation failed: {e}")
+        ```
+    """
+    pass
+
+
+class InternalError(McpError, RuntimeError):
+    """Internal errors indicating bugs in the MCP implementation.
+
+    This exception inherits from both McpError (for unified MCP error handling)
+    and RuntimeError (to emphasize that this represents a programming error,
+    not a user configuration or usage error).
+
+    InternalError should be raised when:
+    - Unexpected internal state is encountered
+    - Programming assumptions are violated
+    - System invariants are broken
+    - Unrecoverable implementation bugs occur
+
+
+
+    Examples:
+        ```python
+        if unexpected_internal_state:
+            raise InternalError("Unexpected state in registry: {state}")
+        ```
+    """
+    pass
 
 
 # Session Exceptions
 
 
-class SessionError(Exception):
+class SessionError(McpError):
     """Base exception for all session-related errors.
 
     This exception serves as a base class for more specific session-related exceptions
@@ -112,7 +169,7 @@ class SessionCreationError(SessionError):
 # Authentication Exceptions
 
 
-class AuthenticationError(Exception):
+class AuthenticationError(McpError):
     """Exception raised when authentication fails.
 
     This exception represents failures during authentication operations, including
@@ -146,7 +203,7 @@ class AuthenticationError(Exception):
 # Query Exceptions
 
 
-class QueryError(Exception):
+class QueryError(McpError):
     """Exception raised when a query operation fails.
 
     This exception represents failures during query creation, execution, or management,
@@ -180,7 +237,7 @@ class QueryError(Exception):
 # Connection Exceptions
 
 
-class DeephavenConnectionError(Exception):
+class DeephavenConnectionError(McpError):
     """Exception raised when connection to a Deephaven service fails.
 
     This exception represents failures to establish or maintain connections to
@@ -221,7 +278,7 @@ class DeephavenConnectionError(Exception):
 # Resource Exceptions
 
 
-class ResourceError(Exception):
+class ResourceError(McpError):
     """Exception raised when resource management operations fail.
 
     This exception represents failures related to resource allocation, deallocation,
@@ -253,39 +310,92 @@ class ResourceError(Exception):
     pass
 
 
-# Internal Exceptions
+# Configuration Exceptions
 
 
-class InternalError(RuntimeError):
-    """Exception raised for errors that are due to internal inconsistencies in the code.
+class ConfigurationError(McpError):
+    """Base class for all Deephaven MCP configuration errors.
 
-    This exception is used when there is a logical contradiction or unexpected state
-    in the internal implementation, rather than an error in user input or external resources.
+    This exception serves as a base class for configuration-related errors that occur
+    when loading, parsing, or validating configuration data for the Deephaven MCP system.
+    It represents user configuration mistakes or invalid configuration states that prevent
+    the system from operating correctly.
 
-    Unlike other exceptions in this module that represent expected or recoverable error
-    conditions, InternalError typically indicates a bug or logical flaw in the MCP
-    implementation that requires developer attention. It inherits from RuntimeError rather
-    than Exception to emphasize its different nature.
+    Unlike InternalError, which indicates bugs in the code, ConfigurationError indicates
+    problems with user-provided configuration data that can be corrected by updating
+    the configuration files or environment variables.
 
     Examples:
-        - Unexpected object types in internal methods
-        - Invalid state transitions
-        - Unhandled conditions in control flow
-        - Assertion failures in internal logic
-        - Implementation assumptions violated
+        - Invalid JSON syntax in configuration files
+        - Missing required configuration fields
+        - Invalid configuration field values
+        - Conflicting configuration settings
+        - Configuration referencing unavailable features
 
     Usage:
         ```python
-        def process_session_object(session):
-            if not isinstance(session, (CoreSession, CorePlusSession)):
-                raise InternalError(f"Expected CoreSession or CorePlusSession, got {type(session)}")
-            # Continue with processing
+        try:
+            config = load_configuration(config_file)
+        except ConfigurationError as e:
+            logger.error(f"Configuration error: {e}")
+            # Provide guidance to user on fixing configuration
         ```
-
-    Note:
-        This exception should generally not be caught by client code except at the highest
-        levels for general error handling and reporting. When encountered, it typically
-        requires code fixes rather than runtime recovery strategies.
     """
 
     pass
+
+
+class CommunitySessionConfigurationError(ConfigurationError):
+    """Raised when a community session's configuration cannot be retrieved or is invalid.
+
+    This exception is raised when there are problems with community session configuration
+    data, such as invalid session parameters, missing required fields, or conflicting
+    configuration values in the community sessions section of the configuration file.
+
+    Examples:
+        - Invalid host or port values
+        - Missing required authentication parameters
+        - Conflicting authentication methods specified
+        - Invalid session timeout values
+        - Malformed session configuration objects
+
+    Usage:
+        ```python
+        try:
+            session_config = validate_community_session_config(config_data)
+        except CommunitySessionConfigurationError as e:
+            logger.error(f"Community session configuration error: {e}")
+            # Guide user to fix community session configuration
+        ```
+    """
+
+    pass
+
+
+class EnterpriseSystemConfigurationError(ConfigurationError):
+    """Custom exception for errors in enterprise system configuration.
+
+    This exception is raised when there are problems with enterprise system configuration
+    data, such as invalid connection parameters, authentication configuration errors,
+    or missing required enterprise-specific settings.
+
+    Examples:
+        - Invalid connection URLs
+        - Missing or invalid authentication credentials
+        - Conflicting authentication methods
+        - Invalid TLS/SSL configuration
+        - Missing required enterprise system parameters
+
+    Usage:
+        ```python
+        try:
+            enterprise_config = validate_enterprise_system_config(system_name, config_data)
+        except EnterpriseSystemConfigurationError as e:
+            logger.error(f"Enterprise system configuration error for {system_name}: {e}")
+            # Guide user to fix enterprise system configuration
+        ```
+    """
+
+    pass
+
+

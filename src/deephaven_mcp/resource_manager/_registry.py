@@ -36,7 +36,8 @@ else:
     from typing_extensions import override  # pragma: no cover
 
 from deephaven_mcp import config
-from deephaven_mcp._exceptions import InternalError
+from deephaven_mcp._exceptions import InternalError, ConfigurationError
+from deephaven_mcp.client import is_enterprise_available
 
 from ._manager import CommunitySessionManager, CorePlusSessionFactoryManager
 
@@ -242,6 +243,12 @@ class CorePlusSessionFactoryRegistry(BaseRegistry[CorePlusSessionFactoryManager]
         """
         config_data = await config_manager.get_config()
         factories_config = config_data.get("enterprise", {}).get("factories", {})
+
+        if not is_enterprise_available and factories_config:
+            raise ConfigurationError(
+                "Enterprise factory configurations found but Core+ features are not available. "
+                "Please install deephaven-coreplus-client or remove enterprise factory configurations."
+            ) 
 
         _LOGGER.info(
             "[%s] Found %d core+ factory configurations to load.",

@@ -14,7 +14,7 @@ import pytest
 from pydeephaven import Session
 
 from deephaven_mcp import config
-from deephaven_mcp._exceptions import InternalError, SessionCreationError
+from deephaven_mcp._exceptions import InternalError, SessionCreationError, McpConfigurationError
 from deephaven_mcp.resource_manager import _registry  # noqa: F401
 from deephaven_mcp.resource_manager import (
     CommunitySessionRegistry,
@@ -387,6 +387,31 @@ async def test_factory_registry_no_factories_key():
     await registry.initialize(manager)
 
     assert len(registry._items) == 0
+
+
+@pytest.mark.asyncio
+async def test_factory_registry_enterprise_not_available_raises_config_error():
+    """Test that McpConfigurationError is raised when enterprise configs exist but enterprise is not available."""
+    manager = AsyncMock(spec=config.ConfigManager)
+    manager.get_config.return_value = {
+        "enterprise": {
+            "factories": {
+                "factory1": {"host": "localhost", "port": 8080},
+            }
+        }
+    }
+    
+    # Mock is_enterprise_available to be False
+    with patch("deephaven_mcp.resource_manager._registry.is_enterprise_available", False):
+        registry = CorePlusSessionFactoryRegistry()
+        
+        with pytest.raises(McpConfigurationError) as exc_info:
+            await registry.initialize(manager)
+        
+        # Verify the error message is helpful
+        assert "Enterprise factory configurations found" in str(exc_info.value)
+        assert "Core+ features are not available" in str(exc_info.value)
+        assert "install deephaven-coreplus-client" in str(exc_info.value)
 
 
 # --- Error Handling Tests ---
