@@ -559,16 +559,16 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             # Update enterprise sessions before retrieving (lock is already held)
             # This also checks initialization status
             await self._update_enterprise_sessions()
-            
+
             # Check initialization and raise KeyError if item not found
             # (avoid calling super().get() which would try to acquire the lock again)
             self._check_initialized()
-            
+
             if name not in self._items:
                 raise KeyError(
                     f"No item with name '{name}' found in {self.__class__.__name__}"
                 )
-            
+
             return self._items[name]
 
     @override
