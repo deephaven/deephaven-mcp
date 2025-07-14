@@ -133,7 +133,6 @@ class BaseRegistry(abc.ABC, Generic[T]):
                 raise KeyError(f"No item found for: {name}")
             return self._items[name]
 
-    @override
     async def get_all(self) -> dict[str, T]:
         """
         Retrieve all items from the registry.
