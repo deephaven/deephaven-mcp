@@ -36,7 +36,8 @@ else:
     from typing_extensions import override  # pragma: no cover
 
 from deephaven_mcp import config
-from deephaven_mcp._exceptions import InternalError
+from deephaven_mcp._exceptions import ConfigurationError, InternalError
+from deephaven_mcp.client import is_enterprise_available
 
 from ._manager import CommunitySessionManager, CorePlusSessionFactoryManager
 
@@ -74,6 +75,17 @@ class BaseRegistry(abc.ABC, Generic[T]):
             "[%s] created (must call and await initialize() after construction)",
             self.__class__.__name__,
         )
+
+    def _check_initialized(self) -> None:
+        """Check if the registry is initialized and raise an error if not.
+
+        Raises:
+            InternalError: If the registry has not been initialized.
+        """
+        if not self._initialized:
+            raise InternalError(
+                f"{self.__class__.__name__} not initialized. Call 'await initialize()' after construction."
+            )
 
     @abc.abstractmethod
     async def _load_items(self, config_manager: config.ConfigManager) -> None:
@@ -121,16 +133,33 @@ class BaseRegistry(abc.ABC, Generic[T]):
 
         Raises:
             InternalError: If the registry has not been initialized.
-            KeyError: If the item is not found in the registry.
+            KeyError: If no item with the given name exists in the registry.
         """
         async with self._lock:
-            if not self._initialized:
-                raise InternalError(
-                    f"{self.__class__.__name__} not initialized. Call 'await initialize()' after construction."
-                )
+            self._check_initialized()
+
             if name not in self._items:
-                raise KeyError(f"No item found for: {name}")
+                raise KeyError(
+                    f"No item with name '{name}' found in {self.__class__.__name__}"
+                )
+
             return self._items[name]
+
+    async def get_all(self) -> dict[str, T]:
+        """
+        Retrieve all items from the registry.
+
+        Returns:
+            A copy of the items dictionary containing all registered items.
+
+        Raises:
+            InternalError: If the registry has not been initialized.
+        """
+        async with self._lock:
+            self._check_initialized()
+
+            # Return a copy to avoid external modification
+            return self._items.copy()
 
     async def close(self) -> None:
         """
@@ -143,10 +172,7 @@ class BaseRegistry(abc.ABC, Generic[T]):
                 async `close` method.
         """
         async with self._lock:
-            if not self._initialized:
-                raise InternalError(
-                    f"{self.__class__.__name__} not initialized. Call 'await initialize()' after construction."
-                )
+            self._check_initialized()
 
             start_time = time.time()
             _LOGGER.info("[%s] closing all items...", self.__class__.__name__)
@@ -225,6 +251,12 @@ class CorePlusSessionFactoryRegistry(BaseRegistry[CorePlusSessionFactoryManager]
         """
         config_data = await config_manager.get_config()
         factories_config = config_data.get("enterprise", {}).get("factories", {})
+
+        if not is_enterprise_available and factories_config:
+            raise ConfigurationError(
+                "Enterprise factory configurations found but Core+ features are not available. "
+                "Please install deephaven-coreplus-client or remove enterprise factory configurations."
+            )
 
         _LOGGER.info(
             "[%s] Found %d core+ factory configurations to load.",

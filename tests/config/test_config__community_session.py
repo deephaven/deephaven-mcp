@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
-from deephaven_mcp.config import CommunitySessionConfigurationError
+from deephaven_mcp._exceptions import CommunitySessionConfigurationError
 from deephaven_mcp.config._community_session import (
     redact_community_session_config,
     validate_community_sessions_config,

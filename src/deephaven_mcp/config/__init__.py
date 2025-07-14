@@ -176,10 +176,7 @@ Async/Await & I/O:
 """
 
 __all__ = [
-    # Errors and core config
-    "McpConfigurationError",
-    "CommunitySessionConfigurationError",
-    "EnterpriseSystemConfigurationError",
+    # Core config
     "ConfigManager",
     "CONFIG_ENV_VAR",
     "validate_config",
@@ -209,6 +206,12 @@ from typing import Any, cast
 
 import aiofiles
 
+from deephaven_mcp._exceptions import (
+    CommunitySessionConfigurationError,
+    ConfigurationError,
+    EnterpriseSystemConfigurationError,
+)
+
 from ._community_session import (
     redact_community_session_config,
     validate_community_sessions_config,
@@ -219,11 +222,6 @@ from ._enterprise_system import (
     redact_enterprise_systems_map,
     validate_enterprise_systems_config,
     validate_single_enterprise_system,
-)
-from ._errors import (
-    CommunitySessionConfigurationError,
-    EnterpriseSystemConfigurationError,
-    McpConfigurationError,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -334,7 +332,7 @@ class ConfigManager:
             None
 
         Raises:
-            McpConfigurationError: If the provided configuration is invalid.
+            ConfigurationError: If the provided configuration is invalid.
 
         Example:
             >>> # Assuming config_manager is an instance of ConfigManager
@@ -360,7 +358,7 @@ class ConfigManager:
 
         Raises:
             RuntimeError: If the DH_MCP_CONFIG_FILE environment variable is not set.
-            McpConfigurationError: If the config file is invalid (e.g., not JSON, missing required keys,
+            ConfigurationError: If the config file is invalid (e.g., not JSON, missing required keys,
                 incorrect types, or fails validation).
 
         Example:
@@ -459,7 +457,7 @@ async def _load_config_from_file(config_path: str) -> dict[str, Any]:
         dict[str, Any]: The parsed configuration as a dictionary.
 
     Raises:
-        McpConfigurationError: If the file is not found, cannot be read, is not valid JSON, or any other I/O error occurs.
+        ConfigurationError: If the file is not found, cannot be read, is not valid JSON, or any other I/O error occurs.
 
     Example:
         >>> config = await _load_config_from_file('/path/to/config.json')
@@ -471,26 +469,26 @@ async def _load_config_from_file(config_path: str) -> dict[str, Any]:
         return cast(dict[str, Any], json.loads(content))
     except FileNotFoundError:
         _LOGGER.error(f"Configuration file not found: {config_path}")
-        raise McpConfigurationError(
+        raise ConfigurationError(
             f"Configuration file not found: {config_path}"
         ) from None
     except PermissionError:
         _LOGGER.error(
             f"Permission denied when trying to read configuration file: {config_path}"
         )
-        raise McpConfigurationError(
+        raise ConfigurationError(
             f"Permission denied when trying to read configuration file: {config_path}"
         ) from None
     except json.JSONDecodeError as e:
         _LOGGER.error(f"Invalid JSON in configuration file {config_path}: {e}")
-        raise McpConfigurationError(
+        raise ConfigurationError(
             f"Invalid JSON in configuration file {config_path}: {e}"
         ) from e
     except Exception as e:
         _LOGGER.error(
             f"Unexpected error loading or parsing config file {config_path}: {e}"
         )
-        raise McpConfigurationError(
+        raise ConfigurationError(
             f"Unexpected error loading or parsing config file {config_path}: {e}"
         ) from e
 
@@ -527,7 +525,7 @@ async def load_and_validate_config(config_path: str) -> dict[str, Any]:
 
     This function loads the configuration from the specified file path, parses it as JSON,
     and validates it according to the expected schema. All exceptions are logged and
-    re-raised as McpConfigurationError for unified error handling.
+    re-raised as ConfigurationError for unified error handling.
 
     Args:
         config_path (str): The path to the configuration JSON file.
@@ -536,7 +534,7 @@ async def load_and_validate_config(config_path: str) -> dict[str, Any]:
         dict[str, Any]: The loaded and validated configuration dictionary.
 
     Raises:
-        McpConfigurationError: If the file cannot be read, is not valid JSON, or fails validation.
+        ConfigurationError: If the file cannot be read, is not valid JSON, or fails validation.
 
     Example:
         >>> config = await _load_and_validate_config('/path/to/config.json')
@@ -547,7 +545,7 @@ async def load_and_validate_config(config_path: str) -> dict[str, Any]:
         return validate_config(data)
     except Exception as e:
         _LOGGER.error(f"Error loading configuration file {config_path}: {e}")
-        raise McpConfigurationError(f"Error loading configuration file: {e}") from e
+        raise ConfigurationError(f"Error loading configuration file: {e}") from e
 
 
 def _apply_redaction_to_config(config: dict[str, Any]) -> dict[str, Any]:
@@ -616,9 +614,7 @@ def _validate_unknown_keys(
     unknown_keys = set(data.keys()) - valid_keys
     if unknown_keys:
         _LOGGER.error(f"Unknown keys at config path {path}: {unknown_keys}")
-        raise McpConfigurationError(
-            f"Unknown keys at config path {path}: {unknown_keys}"
-        )
+        raise ConfigurationError(f"Unknown keys at config path {path}: {unknown_keys}")
 
 
 def _validate_required_keys(
@@ -628,7 +624,7 @@ def _validate_required_keys(
     missing_keys = required_keys - set(data.keys())
     if missing_keys:
         _LOGGER.error(f"Missing required keys at config path {path}: {missing_keys}")
-        raise McpConfigurationError(
+        raise ConfigurationError(
             f"Missing required keys at config path {path}: {missing_keys}"
         )
 
@@ -636,7 +632,22 @@ def _validate_required_keys(
 def _validate_key_type_and_value(
     key: str, value: Any, spec: "_ConfigPathSpec", path: tuple[str, ...]
 ) -> None:
-    """Validate type and value for a single configuration key."""
+    """Validate type and value for a single configuration key.
+
+    Performs two types of validation:
+    1. Type validation - ensures the value matches the expected type in the spec
+    2. Specialized validation - if a validator is provided in the spec, runs it
+       and handles any configuration exceptions
+
+    Args:
+        key: The configuration key being validated
+        value: The value to validate
+        spec: The configuration path specification containing type and validator
+        path: The parent path tuple (will be combined with key to form current_path)
+
+    Raises:
+        ConfigurationError: If validation fails for type or specialized validation
+    """
     current_path = path + (key,)
 
     # Type validation
@@ -644,7 +655,7 @@ def _validate_key_type_and_value(
         _LOGGER.error(
             f"Config path {current_path} must be of type {spec.expected_type.__name__}, got {type(value).__name__}"
         )
-        raise McpConfigurationError(
+        raise ConfigurationError(
             f"Config path {current_path} must be of type {spec.expected_type.__name__}, got {type(value).__name__}"
         )
 
@@ -656,13 +667,24 @@ def _validate_key_type_and_value(
             CommunitySessionConfigurationError,
             EnterpriseSystemConfigurationError,
         ) as e:
-            raise McpConfigurationError(
+            raise ConfigurationError(
                 f"Invalid configuration for {'.'.join(current_path)}: {e}"
             ) from e
 
 
 def _should_recurse_into_nested_dict(current_path: tuple[str, ...]) -> bool:
-    """Check if there are nested schema paths for the current path."""
+    """Check if there are nested schema paths for the current path.
+
+    Determines if we should continue recursing into a dictionary by checking if any
+    schema paths exist that are children of the current path (i.e., they start with
+    the current path and have at least one more component).
+
+    Args:
+        current_path: The current path tuple to check for children
+
+    Returns:
+        bool: True if there are nested paths that extend beyond the current path
+    """
     return any(
         nested_path[: len(current_path)] == current_path
         and len(nested_path) > len(current_path)
@@ -671,7 +693,21 @@ def _should_recurse_into_nested_dict(current_path: tuple[str, ...]) -> bool:
 
 
 def _validate_section(data: dict[str, Any], path: tuple[str, ...]) -> None:
-    """Validate a configuration section in a single pass."""
+    """Validate a configuration section in a single pass.
+
+    Performs comprehensive validation of a configuration section including:
+    1. Checking for unknown keys not in the schema
+    2. Checking for missing required keys
+    3. Validating each key's type and value
+    4. Recursively validating nested dictionary sections
+
+    Args:
+        data: The dictionary containing configuration data to validate
+        path: The current path tuple representing the location in the config
+
+    Raises:
+        ConfigurationError: If validation fails for any reason
+    """
     # Get specs for the current path level
     current_specs = {
         nested_path[len(path)]: spec
@@ -771,7 +807,7 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
         dict[str, Any]: The validated configuration dictionary.
 
     Raises:
-        McpConfigurationError: If validation fails due to unknown keys, wrong types, or invalid nested configurations.
+        ConfigurationError: If validation fails due to unknown keys, wrong types, or invalid nested configurations.
             This includes cases where community session or enterprise system configurations are invalid.
 
     Example:
@@ -779,7 +815,7 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
         >>> validated_config_empty = validate_config({})  # Also valid
     """
     if not isinstance(config, dict):
-        raise McpConfigurationError("Configuration must be a dictionary")
+        raise ConfigurationError("Configuration must be a dictionary")
 
     # Validate the entire configuration
     _validate_section(config, ())

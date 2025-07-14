@@ -14,7 +14,11 @@ import pytest
 from pydeephaven import Session
 
 from deephaven_mcp import config
-from deephaven_mcp._exceptions import InternalError, SessionCreationError
+from deephaven_mcp._exceptions import (
+    ConfigurationError,
+    InternalError,
+    SessionCreationError,
+)
 from deephaven_mcp.resource_manager import _registry  # noqa: F401
 from deephaven_mcp.resource_manager import (
     CommunitySessionRegistry,
@@ -108,8 +112,66 @@ async def test_get_returns_item(registry, mock_base_config_manager):
 async def test_get_unknown_raises_key_error(registry, mock_base_config_manager):
     """Test that get() raises KeyError for an unknown item."""
     await registry.initialize(mock_base_config_manager)
-    with pytest.raises(KeyError, match="No item found for: unknown_item"):
-        await registry.get("unknown_item")
+    with pytest.raises(
+        KeyError, match="No item with name 'unknown' found in ConcreteRegistry"
+    ):
+        await registry.get("unknown")
+
+
+@pytest.mark.asyncio
+async def test_get_all_raises_before_initialize(registry):
+    """Test that get_all() raises InternalError before initialization."""
+    with pytest.raises(InternalError, match="not initialized"):
+        await registry.get_all()
+
+
+@pytest.mark.asyncio
+async def test_get_all_returns_all_items(registry, mock_base_config_manager):
+    """Test that get_all() returns all items after initialization."""
+    await registry.initialize(mock_base_config_manager)
+    all_items = await registry.get_all()
+
+    # Should return a dictionary with both configured items
+    assert isinstance(all_items, dict)
+    assert len(all_items) == 2
+    assert "item1" in all_items
+    assert "item2" in all_items
+    assert all_items["item1"].name == "alpha"
+    assert all_items["item2"].name == "beta"
+
+
+@pytest.mark.asyncio
+async def test_get_all_returns_copy(registry, mock_base_config_manager):
+    """Test that get_all() returns a copy of items, not the original dict."""
+    await registry.initialize(mock_base_config_manager)
+    all_items = await registry.get_all()
+
+    # Modify the returned dict
+    all_items["new_item"] = MockItem("new")
+
+    # Original registry should be unchanged
+    with pytest.raises(KeyError):
+        await registry.get("new_item")
+
+    # Getting all items again should not include our modification
+    fresh_items = await registry.get_all()
+    assert "new_item" not in fresh_items
+    assert len(fresh_items) == 2
+
+
+@pytest.mark.asyncio
+async def test_get_all_empty_registry():
+    """Test that get_all() works with an empty registry."""
+    # Create a registry with no items configured
+    empty_config_manager = AsyncMock(spec=config.ConfigManager)
+    empty_config_manager.get_config = AsyncMock(return_value={"items": {}})
+
+    registry = ConcreteRegistry()
+    await registry.initialize(empty_config_manager)
+
+    all_items = await registry.get_all()
+    assert isinstance(all_items, dict)
+    assert len(all_items) == 0
 
 
 @pytest.mark.asyncio
@@ -209,7 +271,10 @@ async def test_community_registry_get_unknown_raises_key_error(
 ):
     """Test that get() for an unknown worker raises KeyError."""
     await community_session_registry.initialize(mock_community_config_manager)
-    with pytest.raises(KeyError, match="No item found for: unknown_worker"):
+    with pytest.raises(
+        KeyError,
+        match="No item with name 'unknown_worker' found in CommunitySessionRegistry",
+    ):
         await community_session_registry.get("unknown_worker")
 
 
@@ -331,6 +396,33 @@ async def test_factory_registry_no_factories_key():
     await registry.initialize(manager)
 
     assert len(registry._items) == 0
+
+
+@pytest.mark.asyncio
+async def test_factory_registry_enterprise_not_available_raises_config_error():
+    """Test that ConfigurationError is raised when enterprise configs exist but enterprise is not available."""
+    manager = AsyncMock(spec=config.ConfigManager)
+    manager.get_config.return_value = {
+        "enterprise": {
+            "factories": {
+                "factory1": {"host": "localhost", "port": 8080},
+            }
+        }
+    }
+
+    # Mock is_enterprise_available to be False
+    with patch(
+        "deephaven_mcp.resource_manager._registry.is_enterprise_available", False
+    ):
+        registry = CorePlusSessionFactoryRegistry()
+
+        with pytest.raises(ConfigurationError) as exc_info:
+            await registry.initialize(manager)
+
+        # Verify the error message is helpful
+        assert "Enterprise factory configurations found" in str(exc_info.value)
+        assert "Core+ features are not available" in str(exc_info.value)
+        assert "install deephaven-coreplus-client" in str(exc_info.value)
 
 
 # --- Error Handling Tests ---

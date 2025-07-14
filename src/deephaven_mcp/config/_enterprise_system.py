@@ -10,7 +10,7 @@ __all__ = [
 import logging
 from typing import Any
 
-from ._errors import EnterpriseSystemConfigurationError
+from deephaven_mcp._exceptions import EnterpriseSystemConfigurationError
 
 _LOGGER = logging.getLogger(__name__)
 
