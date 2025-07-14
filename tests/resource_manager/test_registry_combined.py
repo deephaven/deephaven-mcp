@@ -592,7 +592,6 @@ class TestEnterpriseSessionUpdate:
         # Setup mocks
         mock_factory = MagicMock(spec=CorePlusSessionFactoryManager)
         mock_client = MagicMock(spec=CorePlusControllerClient)
-        mock_session = MagicMock(spec=EnterpriseSessionManager)
         mock_old_session = MagicMock(spec=EnterpriseSessionManager)
 
         # Mock enterprise registry response
@@ -607,6 +606,10 @@ class TestEnterpriseSessionUpdate:
         initialized_registry._items[stale_key] = mock_old_session
         mock_old_session.close = AsyncMock()
 
+        # Create a mock session info object with config.pb.name attribute
+        mock_session_info = MagicMock()
+        mock_session_info.config.pb.name = "session1"
+        
         # Mock controller client
         with patch.object(
             initialized_registry,
@@ -614,7 +617,18 @@ class TestEnterpriseSessionUpdate:
             AsyncMock(return_value=mock_client),
         ):
             # Mock session map from controller that doesn't include the stale session
-            mock_client.map = AsyncMock(return_value={"session1": {"id": "123"}})
+            mock_client.map = AsyncMock(return_value={"session1": mock_session_info})
+            
+            # Call the method under test
+            await initialized_registry._update_enterprise_sessions()
+            
+            # Assert stale session was removed and closed
+            mock_old_session.close.assert_awaited_once()
+            assert stale_key not in initialized_registry._items
+            
+            # Assert new session was added
+            new_key = BaseItemManager.make_full_name(SystemType.ENTERPRISE, "factory1", "session1")
+            assert new_key in initialized_registry._items
 
 
 def test_add_new_enterprise_sessions(initialized_registry):

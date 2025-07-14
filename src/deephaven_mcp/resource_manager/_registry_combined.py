@@ -120,6 +120,11 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
         from the specified factory. It provides a closure over the factory that uses the
         factory's connect_to_persistent_query method to establish the session connection.
 
+        The closure pattern used here captures the factory reference in the creation_function,
+        allowing the EnterpriseSessionManager to lazily initialize the connection only when
+        needed. This approach ensures efficient resource usage by deferring the actual
+        connection establishment until the session is accessed.
+
         The resulting EnterpriseSessionManager will handle lifecycle management for the
         session, including lazy initialization and proper cleanup.
 
@@ -131,7 +136,7 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
         Returns:
             EnterpriseSessionManager: A new manager that provides access to the enterprise session.
 
-        Thread Safety:
+        Concurrency:
             This method is coroutine-safe and can be called concurrently.
         """
 
@@ -301,7 +306,7 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
         resource usage and improve performance. It follows this logic:
 
         1. Check if a cached controller client exists for the factory
-        2. If a cached client exists, verify its health by attempting a map() call
+        2. If a cached client exists, verify its health by attempting a ping() call
         3. If the cached client is healthy, return it
         4. If the cached client is dead or no cached client exists, create a new one
         5. Subscribe the new client to receive updates and cache it for future use
@@ -393,6 +398,12 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
         created with a closure that connects to the persistent query session through
         the factory.
 
+        Session keys are constructed using BaseItemManager.make_full_name with the format:
+        SystemType.ENTERPRISE:factory_name:session_name
+        This ensures consistent key formatting throughout the registry for storage,
+        retrieval, and existence checks. The colon-separated format is used across
+        all registry operations.
+
         Args:
             factory: The CorePlusSessionFactoryManager to create sessions from.
             factory_name: The name of the factory (used as the session source).
@@ -432,12 +443,13 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
 
             try:
                 await manager.close()
-            except Exception:
+            except Exception as e:
                 _LOGGER.error(
-                    "[%s] error closing EnterpriseSessionManager for key %s",
+                    "[%s] error closing stale session manager '%s' (type: %s): %s",
                     self.__class__.__name__,
                     key,
-                    exc_info=True,
+                    type(manager).__name__,
+                    e,
                 )
 
     async def _update_sessions_for_factory(
