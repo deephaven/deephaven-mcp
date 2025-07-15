@@ -12,6 +12,7 @@ def test_imports_and_all():
         CorePlusSessionFactoryManager,
         CorePlusSessionFactoryRegistry,
         EnterpriseSessionManager,
+        ResourceLivenessStatus,
     )
 
     # __all__ should be defined and contain all the public symbols
@@ -24,6 +25,7 @@ def test_imports_and_all():
         "CorePlusSessionFactoryManager",
         "CommunitySessionRegistry",
         "CorePlusSessionFactoryRegistry",
+        "ResourceLivenessStatus",
         "SystemType",
     ]
     assert sorted(mod.__all__) == sorted(expected_all)

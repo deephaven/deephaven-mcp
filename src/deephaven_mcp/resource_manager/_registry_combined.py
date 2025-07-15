@@ -441,16 +441,7 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             if not manager:
                 continue
 
-            try:
-                await manager.close()
-            except Exception as e:
-                _LOGGER.error(
-                    "[%s] error closing stale session manager '%s' (type: %s): %s",
-                    self.__class__.__name__,
-                    key,
-                    type(manager).__name__,
-                    e,
-                )
+            await manager.close()
 
     def _find_session_keys_for_factory(self, factory_name: str) -> set[str]:
         """Find all session keys associated with a specific factory.

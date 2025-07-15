@@ -546,24 +546,7 @@ class TestEnterpriseSessionUpdate:
 
             # The method might be called for other sessions, but not for our reused session
 
-    @pytest.mark.asyncio
-    async def test_close_stale_sessions_handles_exception(self, initialized_registry):
-        """Test that _close_stale_enterprise_sessions removes a manager even if close() fails."""
-        # Arrange
-        stale_key = "enterprise/factory1/stale_session"
-        mock_manager = MagicMock(spec=EnterpriseSessionManager)
-        mock_manager.close = AsyncMock(side_effect=RuntimeError("Close failed"))
-        initialized_registry._items = {stale_key: mock_manager}
 
-        # Act
-        # Directly call the method we want to test
-        await initialized_registry._close_stale_enterprise_sessions({stale_key})
-
-        # Assert
-        # The manager should be removed from the registry despite the error.
-        assert stale_key not in initialized_registry._items
-        # The close method should have been called.
-        mock_manager.close.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_close_stale_sessions_ignores_nonexistent_key(
@@ -769,23 +752,7 @@ async def test_close_stale_enterprise_sessions(initialized_registry):
     assert stale_key not in initialized_registry._items
 
 
-@pytest.mark.asyncio
-async def test_close_stale_enterprise_sessions_handles_exception(initialized_registry):
-    """Test that exceptions during close are handled and the manager is still removed."""
-    # Arrange
-    stale_key = "enterprise/factory1/stale_session"
-    mock_manager = MagicMock(spec=EnterpriseSessionManager)
-    mock_manager.close = AsyncMock(side_effect=RuntimeError("Close failed"))
-    initialized_registry._items = {stale_key: mock_manager}
 
-    # Act
-    with patch("logging.Logger.error") as mock_log_error:
-        await initialized_registry._close_stale_enterprise_sessions({stale_key})
-
-        # Assert
-        mock_manager.close.assert_awaited_once()
-        assert stale_key not in initialized_registry._items
-        mock_log_error.assert_called_once()
 
 
 @pytest.mark.asyncio
