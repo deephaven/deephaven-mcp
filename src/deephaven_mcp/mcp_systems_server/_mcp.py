@@ -33,6 +33,7 @@ from mcp.server.fastmcp import Context, FastMCP
 
 from deephaven_mcp import config, queries
 from deephaven_mcp.resource_manager import CommunitySessionRegistry
+from deephaven_mcp.resource_manager._registry_combined import CombinedSessionRegistry
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -78,7 +79,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
         await config_manager.get_config()
         _LOGGER.info("Configuration loaded.")
 
-        session_registry = CommunitySessionRegistry()
+        session_registry = CombinedSessionRegistry()
         await session_registry.initialize(config_manager)
 
         # lock for refresh to prevent concurrent refresh operations.

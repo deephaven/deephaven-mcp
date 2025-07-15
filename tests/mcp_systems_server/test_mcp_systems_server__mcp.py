@@ -833,7 +833,7 @@ async def test_app_lifespan_yields_context_and_cleans_up():
             return_value=config_manager,
         ),
         patch(
-            "deephaven_mcp.mcp_systems_server._mcp.CommunitySessionRegistry",
+            "deephaven_mcp.mcp_systems_server._mcp.CombinedSessionRegistry",
             return_value=session_registry,
         ),
         patch(
