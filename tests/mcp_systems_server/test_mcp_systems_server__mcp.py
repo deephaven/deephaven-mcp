@@ -11,6 +11,8 @@ import pytest
 
 import deephaven_mcp.mcp_systems_server._mcp as mcp_mod
 from deephaven_mcp import config
+from deephaven_mcp.resource_manager._manager import ResourceLivenessStatus
+from unittest.mock import PropertyMock
 
 
 class MockRequestContext:
@@ -1237,3 +1239,485 @@ async def test_pip_packages_worker_not_found():
 
         # Verify correct session access pattern
         mock_session_registry.get.assert_awaited_once_with("nonexistent_worker")
+
+
+# === enterprise_systems_status tests ===
+
+@pytest.mark.asyncio
+async def test_all_sessions_success():
+    """Test successful retrieval of all sessions."""
+    # Mock session registry
+    mock_registry = AsyncMock()
+    mock_session1 = MagicMock()
+    mock_session1.is_alive = True
+    mock_session_mgr1 = AsyncMock()
+    mock_session_mgr1.system_type = MagicMock()
+    mock_session_mgr1.system_type.name = "COMMUNITY"
+    mock_session_mgr1.source = "source1"
+    mock_session_mgr1.name = "session1"
+    mock_session_mgr1.get.return_value = mock_session1
+    
+    mock_session2 = MagicMock()
+    mock_session2.is_alive = False
+    mock_session_mgr2 = AsyncMock()
+    mock_session_mgr2.system_type = MagicMock()
+    mock_session_mgr2.system_type.name = "ENTERPRISE"
+    mock_session_mgr2.source = "source2"
+    mock_session_mgr2.name = "session2"
+    mock_session_mgr2.get.return_value = mock_session2
+    
+    mock_registry.get_all.return_value = {
+        "session1": mock_session_mgr1,
+        "session2": mock_session_mgr2
+    }
+    
+    # Mock context
+    mock_context = MagicMock()
+    mock_context.request_context.lifespan_context = {"session_registry": mock_registry}
+    
+    # Call function
+    result = await mcp_mod.all_sessions(mock_context)
+    
+    # Verify results
+    assert result["success"] is True
+    assert len(result["sessions"]) == 2
+    
+    # Check first session
+    session1 = next(s for s in result["sessions"] if s["name"] == "session1")
+    assert session1["type"] == "community"
+    assert session1["source"] == "source1"
+    assert session1["session_name"] == "session1"
+    assert session1["available"] is True
+    
+    # Check second session
+    session2 = next(s for s in result["sessions"] if s["name"] == "session2")
+    assert session2["type"] == "enterprise"
+    assert session2["source"] == "source2"
+    assert session2["session_name"] == "session2"
+    assert session2["available"] is False
+
+
+@pytest.mark.asyncio
+async def test_all_sessions_with_unknown_type():
+    """Test all_sessions with a session that has no system_type."""
+    # Mock session registry
+    mock_registry = AsyncMock()
+    mock_session = MagicMock()
+    mock_session.is_alive = True
+    mock_session_mgr = AsyncMock()
+    # No system_type attribute - use delattr to ensure it doesn't exist
+    mock_session_mgr.source = "source"
+    mock_session_mgr.name = "session"
+    mock_session_mgr.get.return_value = mock_session
+    # Ensure getattr returns None for system_type
+    mock_session_mgr.configure_mock(**{"system_type": None})
+    
+    mock_registry.get_all.return_value = {"session": mock_session_mgr}
+    
+    # Mock context
+    mock_context = MagicMock()
+    mock_context.request_context.lifespan_context = {"session_registry": mock_registry}
+    
+    # Call function
+    result = await mcp_mod.all_sessions(mock_context)
+    
+    # Verify results
+    assert result["success"] is True
+    assert len(result["sessions"]) == 1
+    assert result["sessions"][0]["type"] == "unknown"
+
+
+@pytest.mark.asyncio
+async def test_all_sessions_with_session_error():
+    """Test all_sessions when getting a session raises an exception."""
+    # Mock session registry
+    mock_registry = AsyncMock()
+    mock_session_mgr = AsyncMock()
+    mock_session_mgr.system_type = MagicMock()
+    mock_session_mgr.system_type.name = "COMMUNITY"
+    mock_session_mgr.source = "source"
+    mock_session_mgr.name = "session"
+    mock_session_mgr.get.side_effect = Exception("Session error")
+    
+    mock_registry.get_all.return_value = {"session": mock_session_mgr}
+    
+    # Mock context
+    mock_context = MagicMock()
+    mock_context.request_context.lifespan_context = {"session_registry": mock_registry}
+    
+    # Call function
+    result = await mcp_mod.all_sessions(mock_context)
+    
+    # Verify results
+    assert result["success"] is True
+    assert len(result["sessions"]) == 1
+    assert result["sessions"][0]["available"] is False
+
+
+@pytest.mark.asyncio
+async def test_all_sessions_with_processing_error():
+    """Test all_sessions when processing a session raises an exception."""
+    # Mock session registry
+    mock_registry = AsyncMock()
+    
+    # Create a session manager that will cause an exception during processing
+    mock_session_mgr = AsyncMock()
+    # Configure system_type.name to raise an exception when accessed
+    mock_system_type = MagicMock()
+    type(mock_system_type).name = PropertyMock(side_effect=Exception("Processing error"))
+    mock_session_mgr.system_type = mock_system_type
+    
+    mock_registry.get_all.return_value = {"session": mock_session_mgr}
+    
+    # Mock context
+    mock_context = MagicMock()
+    mock_context.request_context.lifespan_context = {"session_registry": mock_registry}
+    
+    # Call function
+    result = await mcp_mod.all_sessions(mock_context)
+    
+    # Verify results
+    assert result["success"] is True
+    assert len(result["sessions"]) == 1
+    assert "error" in result["sessions"][0]
+    assert result["sessions"][0]["name"] == "session"
+
+
+@pytest.mark.asyncio
+async def test_all_sessions_registry_error():
+    """Test all_sessions when the registry raises an exception."""
+    # Mock session registry to raise an exception
+    mock_registry = AsyncMock()
+    mock_registry.get_all.side_effect = Exception("Registry error")
+    
+    # Mock context
+    mock_context = MagicMock()
+    mock_context.request_context.lifespan_context = {"session_registry": mock_registry}
+    
+    # Call function
+    result = await mcp_mod.all_sessions(mock_context)
+    
+    # Verify results
+    assert result["success"] is False
+    assert "error" in result
+    assert result["isError"] is True
+
+
+@pytest.mark.asyncio
+async def test_enterprise_systems_status_success():
+    """Test successful retrieval of enterprise systems status."""
+    # Mock factory with liveness_status and is_alive methods
+    mock_factory1 = AsyncMock()
+    mock_factory1.liveness_status = AsyncMock(
+        return_value=(ResourceLivenessStatus.ONLINE, "System is healthy")
+    )
+    mock_factory1.is_alive = AsyncMock(return_value=True)
+    
+    mock_factory2 = AsyncMock()
+    mock_factory2.liveness_status = AsyncMock(
+        return_value=(ResourceLivenessStatus.OFFLINE, "System is not responding")
+    )
+    mock_factory2.is_alive = AsyncMock(return_value=False)
+    
+    # Mock enterprise registry
+    mock_enterprise_registry = AsyncMock()
+    mock_enterprise_registry.get_all = AsyncMock(
+        return_value={"system1": mock_factory1, "system2": mock_factory2}
+    )
+    
+    # Mock session registry
+    mock_session_registry = MagicMock()
+    mock_session_registry._enterprise_registry = mock_enterprise_registry
+    
+    # Mock config manager
+    mock_config_manager = AsyncMock()
+    mock_config_manager.get_config = AsyncMock(
+        return_value={
+            "enterprise": {
+                "factories": {
+                    "system1": {"url": "http://example.com", "api_key": "secret_key"},
+                    "system2": {"url": "http://example2.com", "password": "secret_password"}
+                }
+            }
+        }
+    )
+    
+    # Create context
+    context = MockContext({
+        "session_registry": mock_session_registry,
+        "config_manager": mock_config_manager,
+    })
+    
+    # Mock the redact function to match the actual implementation
+    with patch("deephaven_mcp.config._enterprise_system.redact_enterprise_system_config") as mock_redact:
+        # Configure the mock to replace only password with [REDACTED]
+        def redact_config(config):
+            result = config.copy()
+            if "password" in result:
+                result["password"] = "[REDACTED]"
+            return result
+        mock_redact.side_effect = redact_config
+        # Call the function with default parameters
+        result = await mcp_mod.enterprise_systems_status(context)
+    
+    # Verify the result
+    assert result["success"] is True
+    assert len(result["systems"]) == 2
+    
+    # Check system1
+    system1 = next(s for s in result["systems"] if s["name"] == "system1")
+    assert system1["status"] == "ONLINE"
+    assert system1["detail"] == "System is healthy"
+    assert system1["is_alive"] is True
+    assert system1["config"]["url"] == "http://example.com"
+    assert system1["config"]["api_key"] == "secret_key"
+    
+    # Check system2
+    system2 = next(s for s in result["systems"] if s["name"] == "system2")
+    assert system2["status"] == "OFFLINE"
+    assert system2["detail"] == "System is not responding"
+    assert system2["is_alive"] is False
+    assert system2["config"]["url"] == "http://example2.com"
+    assert system2["config"]["password"] == "[REDACTED]"
+    
+    # Verify liveness_status was called with attempt_to_connect=False
+    mock_factory1.liveness_status.assert_called_once_with(ensure_item=False)
+    mock_factory2.liveness_status.assert_called_once_with(ensure_item=False)
+
+
+@pytest.mark.asyncio
+async def test_enterprise_systems_status_with_attempt_to_connect():
+    """Test enterprise systems status with attempt_to_connect=True."""
+    # Mock factory with liveness_status and is_alive methods
+    mock_factory = AsyncMock()
+    mock_factory.liveness_status = AsyncMock(
+        return_value=(ResourceLivenessStatus.ONLINE, None)
+    )
+    mock_factory.is_alive = AsyncMock(return_value=True)
+    
+    # Mock enterprise registry
+    mock_enterprise_registry = AsyncMock()
+    mock_enterprise_registry.get_all = AsyncMock(
+        return_value={"system1": mock_factory}
+    )
+    
+    # Mock session registry
+    mock_session_registry = MagicMock()
+    mock_session_registry._enterprise_registry = mock_enterprise_registry
+    
+    # Mock config manager
+    mock_config_manager = AsyncMock()
+    mock_config_manager.get_config = AsyncMock(
+        return_value={"enterprise": {"factories": {"system1": {}}}}
+    )
+    
+    # Create context
+    context = MockContext({
+        "session_registry": mock_session_registry,
+        "config_manager": mock_config_manager,
+    })
+    
+    # Mock the redact function
+    with patch("deephaven_mcp.config._enterprise_system.redact_enterprise_system_config", 
+               return_value={}):
+        # Call the function with attempt_to_connect=True
+        result = await mcp_mod.enterprise_systems_status(context, attempt_to_connect=True)
+        
+        # Verify the result
+        assert result["success"] is True
+        assert len(result["systems"]) == 1
+        
+        # Check system1
+        system1 = result["systems"][0]
+        assert system1["name"] == "system1"
+        assert system1["status"] == "ONLINE"
+        assert "detail" not in system1  # No detail was provided
+        assert system1["is_alive"] is True
+        
+        # Verify liveness_status was called with attempt_to_connect=True
+        mock_factory.liveness_status.assert_called_once_with(ensure_item=True)
+
+
+@pytest.mark.asyncio
+async def test_enterprise_systems_status_no_systems():
+    """Test enterprise systems status with no systems available."""
+    # Mock enterprise registry with no systems
+    mock_enterprise_registry = AsyncMock()
+    mock_enterprise_registry.get_all = AsyncMock(return_value={})
+    
+    # Mock session registry
+    mock_session_registry = MagicMock()
+    mock_session_registry._enterprise_registry = mock_enterprise_registry
+    
+    # Mock config manager
+    mock_config_manager = AsyncMock()
+    mock_config_manager.get_config = AsyncMock(
+        return_value={"enterprise": {"factories": {}}}
+    )
+    
+    # Create context
+    context = MockContext({
+        "session_registry": mock_session_registry,
+        "config_manager": mock_config_manager,
+    })
+    
+    # Call the function
+    result = await mcp_mod.enterprise_systems_status(context)
+    
+    # Verify the result
+    assert result["success"] is True
+    assert len(result["systems"]) == 0
+
+
+@pytest.mark.asyncio
+async def test_enterprise_systems_status_all_status_types():
+    """Test enterprise systems status with all possible status types."""
+    # Create a mock factory for each status type
+    factories = {}
+    status_details = {
+        "online_system": (ResourceLivenessStatus.ONLINE, "System is healthy"),
+        "offline_system": (ResourceLivenessStatus.OFFLINE, "System is not responding"),
+        "unauthorized_system": (ResourceLivenessStatus.UNAUTHORIZED, "Authentication failed"),
+        "misconfigured_system": (ResourceLivenessStatus.MISCONFIGURED, "Invalid configuration"),
+        "unknown_system": (ResourceLivenessStatus.UNKNOWN, "Unknown error occurred")
+    }
+    
+    for name, (status, detail) in status_details.items():
+        mock_factory = AsyncMock()
+        mock_factory.liveness_status = AsyncMock(return_value=(status, detail))
+        mock_factory.is_alive = AsyncMock(return_value=(status == ResourceLivenessStatus.ONLINE))
+        factories[name] = mock_factory
+    
+    # Mock enterprise registry
+    mock_enterprise_registry = AsyncMock()
+    mock_enterprise_registry.get_all = AsyncMock(return_value=factories)
+    
+    # Mock session registry
+    mock_session_registry = MagicMock()
+    mock_session_registry._enterprise_registry = mock_enterprise_registry
+    
+    # Mock config manager with empty configs
+    mock_config_manager = AsyncMock()
+    mock_config_manager.get_config = AsyncMock(
+        return_value={"enterprise": {"factories": {name: {} for name in factories}}}
+    )
+    
+    # Create context
+    context = MockContext({
+        "session_registry": mock_session_registry,
+        "config_manager": mock_config_manager,
+    })
+    
+    # Mock the redact function
+    with patch("deephaven_mcp.config._enterprise_system.redact_enterprise_system_config", 
+               return_value={}):
+        # Call the function
+        result = await mcp_mod.enterprise_systems_status(context)
+        
+        # Verify the result
+        assert result["success"] is True
+        assert len(result["systems"]) == 5
+        
+        # Check each system has the correct status and detail
+        for name, (status, detail) in status_details.items():
+            system = next(s for s in result["systems"] if s["name"] == name)
+            assert system["status"] == status.name
+            assert system["detail"] == detail
+            assert system["is_alive"] == (status == ResourceLivenessStatus.ONLINE)
+
+
+@pytest.mark.asyncio
+async def test_enterprise_systems_status_config_error():
+    """Test enterprise systems status when config retrieval fails."""
+    # Mock session registry
+    mock_session_registry = MagicMock()
+    mock_enterprise_registry = AsyncMock()
+    mock_session_registry._enterprise_registry = mock_enterprise_registry
+    
+    # Mock config manager that raises an exception
+    mock_config_manager = AsyncMock()
+    mock_config_manager.get_config = AsyncMock(side_effect=Exception("Config error"))
+    
+    # Create context
+    context = MockContext({
+        "session_registry": mock_session_registry,
+        "config_manager": mock_config_manager,
+    })
+    
+    # Call the function
+    result = await mcp_mod.enterprise_systems_status(context)
+    
+    # Verify the result
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "Config error" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_enterprise_systems_status_registry_error():
+    """Test enterprise systems status when registry retrieval fails."""
+    # Mock enterprise registry that raises an exception
+    mock_enterprise_registry = AsyncMock()
+    mock_enterprise_registry.get_all.side_effect = Exception("Registry error")
+    
+    # Mock session registry
+    mock_session_registry = MagicMock()
+    mock_session_registry._enterprise_registry = mock_enterprise_registry
+    
+    # Mock config manager
+    mock_config_manager = AsyncMock()
+    mock_config_manager.get_config = AsyncMock(return_value={"enterprise": {"factories": {}}})
+    
+    # Create context
+    context = MockContext({
+        "session_registry": mock_session_registry,
+        "config_manager": mock_config_manager,
+    })
+    
+    # Call the function
+    result = await mcp_mod.enterprise_systems_status(context)
+    
+    # Verify the result
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "Registry error" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_enterprise_systems_status_liveness_error():
+    """Test enterprise systems status when liveness_status raises an exception."""
+    # Mock factory with liveness_status that raises an exception
+    mock_factory = AsyncMock()
+    mock_factory.liveness_status.side_effect = Exception("Liveness error")
+    mock_factory.is_alive.return_value = False
+    
+    # Mock enterprise registry
+    mock_enterprise_registry = AsyncMock()
+    mock_enterprise_registry.get_all = AsyncMock(return_value={"system1": mock_factory})
+    
+    # Mock session registry
+    mock_session_registry = MagicMock()
+    mock_session_registry._enterprise_registry = mock_enterprise_registry
+    
+    # Mock config manager
+    mock_config_manager = AsyncMock()
+    mock_config_manager.get_config = AsyncMock(
+        return_value={"enterprise": {"factories": {"system1": {}}}}
+    )
+    
+    # Create context
+    context = MockContext({
+        "session_registry": mock_session_registry,
+        "config_manager": mock_config_manager,
+    })
+    
+    # Mock the redact function
+    with patch("deephaven_mcp.config._enterprise_system.redact_enterprise_system_config", 
+               return_value={}):
+        # Call the function
+        result = await mcp_mod.enterprise_systems_status(context)
+        
+        # Verify the result
+        assert result["success"] is False
+        assert result["isError"] is True
+        assert "Liveness error" in result["error"]

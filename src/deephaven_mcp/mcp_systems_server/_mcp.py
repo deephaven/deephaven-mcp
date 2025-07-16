@@ -34,6 +34,7 @@ from mcp.server.fastmcp import Context, FastMCP
 from deephaven_mcp import config, queries
 from deephaven_mcp.resource_manager import CommunitySessionRegistry
 from deephaven_mcp.resource_manager._registry_combined import CombinedSessionRegistry
+from deephaven_mcp.config._enterprise_system import redact_enterprise_system_config
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -169,7 +170,119 @@ async def refresh(context: Context) -> dict:
         )
         return {"success": False, "error": str(e), "isError": True}
 
+@mcp_server.tool()
+async def enterprise_systems_status(context: Context, attempt_to_connect: bool = False) -> dict:
+    """
+    MCP Tool: List all enterprise (CorePlus) systems/factories with their status and configuration details (redacted).
+    
+    This tool provides comprehensive status information about all configured enterprise systems in the MCP
+    environment. It returns detailed health status using the ResourceLivenessStatus classification system,
+    along with explanatory details and configuration information (with sensitive fields redacted for security).
+    
+    The tool supports two operational modes:
+    1. Default mode (attempt_to_connect=False): Quick status check of existing connections
+       - Fast response time, minimal resource usage
+       - Suitable for dashboards, monitoring, and non-critical status checks
+       - Will report systems as OFFLINE if no connection exists
+       
+    2. Connection verification mode (attempt_to_connect=True): Active connection attempt
+       - Attempts to establish connections to verify actual availability
+       - Higher latency but more accurate status reporting
+       - Suitable for troubleshooting and pre-flight checks before critical operations
+       - May create new connections if none exist
+    
+    Status Classification:
+      - "ONLINE": System is healthy and ready for operational use
+      - "OFFLINE": System is unresponsive, failed health checks, or not connected
+      - "UNAUTHORIZED": Authentication or authorization failures prevent access
+      - "MISCONFIGURED": Configuration errors prevent proper system operation
+      - "UNKNOWN": Unexpected errors occurred during status determination
+    
+    Returns a list of all configured enterprise systems, each with:
+      - name (string): System name identifier
+      - status (string): ResourceLivenessStatus as string ("ONLINE", "OFFLINE", etc.)
+      - detail (string, optional): Explanation message for the status, especially useful for troubleshooting
+      - is_alive (boolean): Simple boolean indicating if the system is responsive
+      - config (dict): System configuration with sensitive fields redacted
+    
+    Example Usage:
+    ```python
+    # Get quick status of all enterprise systems
+    status_result = await mcp.enterprise_systems_status()
+    
+    # Get comprehensive status with connection attempts
+    detailed_status = await mcp.enterprise_systems_status(attempt_to_connect=True)
+    
+    # Check if all systems are online
+    systems = status_result.get("systems", [])
+    all_online = all(system["status"] == "ONLINE" for system in systems)
+    
+    # Get systems with specific status
+    offline_systems = [s for s in systems if s["status"] == "OFFLINE"]
+    ```
+    
+    Args:
+        context (Context): The FastMCP Context for this tool call.
+        attempt_to_connect (bool, optional): If True, actively attempts to connect to each system
+            to verify its status. This provides more accurate results but increases latency.
+            Default is False (only checks existing connections for faster response).
+    
+    Returns:
+        dict: Structured result object with keys:
+            - 'success' (bool): True if retrieval succeeded, False otherwise.
+            - 'systems' (list[dict]): List of system info dicts as described above.
+            - 'error' (str, optional): Error message if retrieval failed.
+            - 'isError' (bool, optional): Present and True if this is an error response.
+    
+    Raises:
+        No exceptions are raised; errors are captured in the return value.
+    
+    Performance Considerations:
+        - With attempt_to_connect=False: Typically completes in milliseconds
+        - With attempt_to_connect=True: May take seconds due to connection operations
+    """
+    _LOGGER.info("[enterprise_systems_status] Invoked.")
+    try:
+        session_registry = context.request_context.lifespan_context["session_registry"]
+        config_manager = context.request_context.lifespan_context["config_manager"]
+        # Get all factories (enterprise systems)
+        enterprise_registry = session_registry._enterprise_registry
+        factories = await enterprise_registry.get_all()
+        config = await config_manager.get_config()
+        systems_config = config.get("enterprise", {}).get("factories", {})
+        systems = []
+        for name, factory in factories.items():
+            # Use liveness_status() for detailed health information
+            status_enum, detail = await factory.liveness_status(ensure_item=attempt_to_connect)
+            status = status_enum.name  # Convert enum to string ("ONLINE", "OFFLINE", etc.)
+            
+            # Also get simple is_alive boolean
+            is_alive = await factory.is_alive()
+            
+            # Redact config for output
+            raw_config = systems_config.get(name, {})
+            redacted_config = redact_enterprise_system_config(raw_config)
+            
+            system_info = {
+                "name": name,
+                "status": status,
+                "is_alive": is_alive,
+                "config": redacted_config
+            }
+            
+            # Include detail if available
+            if detail is not None:
+                system_info["detail"] = detail
+                
+            systems.append(system_info)
+        return {"success": True, "systems": systems}
+    except Exception as e:
+        _LOGGER.error(f"[enterprise_systems_status] Failed: {e!r}", exc_info=True)
+        return {"success": False, "error": str(e), "isError": True}
 
+
+#TODO: rework to describe a single worker?
+#TODO: look at what is returned
 @mcp_server.tool()
 async def describe_workers(context: Context) -> dict:
     """
