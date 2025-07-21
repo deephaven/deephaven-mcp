@@ -41,9 +41,11 @@ def dummy_session_manager():
 
 @pytest.fixture
 def coreplus_session_manager(dummy_session_manager, monkeypatch):
-    # Patch is_enterprise_available to True for the constructor
-    monkeypatch.setattr("deephaven_mcp.client._base.is_enterprise_available", True)
-    return CorePlusSessionFactory(dummy_session_manager)
+    monkeypatch.setattr(
+        "deephaven_mcp.client._base.is_enterprise_available", lambda: True
+    )
+    # The factory is now created directly with the mocked SessionManager
+    return CorePlusSessionFactory(session_manager=dummy_session_manager)
 
 
 @pytest.mark.asyncio
@@ -213,13 +215,18 @@ async def test_delete_key_other_error(coreplus_session_manager, dummy_session_ma
 async def test_connect_to_new_worker_success(
     coreplus_session_manager, dummy_session_manager
 ):
-    dummy_session = MagicMock()
-    dummy_session_manager.connect_to_new_worker.return_value = dummy_session
+    mock_session_instance = MagicMock()
+    mock_session_instance._session_type = "python"  # Mock the _session_type attribute
+    dummy_session_manager.connect_to_new_worker.return_value = mock_session_instance
+
     with patch(
-        "deephaven_mcp.client._session_factory.CorePlusSession", autospec=True
-    ) as mock_session:
-        mock_session.return_value = "wrapped_session"
-        result = await coreplus_session_manager.connect_to_new_worker(name="worker")
+        "deephaven_mcp.client._session_factory.CorePlusSession",
+        return_value="wrapped_session",
+    ) as mock_core_plus_session:
+        result = await coreplus_session_manager.connect_to_new_worker(
+            name="worker", session_arguments={"programming_language": "python"}
+        )
+
         dummy_session_manager.connect_to_new_worker.assert_called_once_with(
             name="worker",
             heap_size_gb=None,
@@ -232,8 +239,9 @@ async def test_connect_to_new_worker_success(
             viewer_groups=None,
             timeout_seconds=60,
             configuration_transformer=None,
-            session_arguments=None,
+            session_arguments={"programming_language": "python"},
         )
+        mock_core_plus_session.assert_called_once_with(mock_session_instance, "python")
         assert result == "wrapped_session"
 
 
@@ -243,7 +251,9 @@ async def test_connect_to_new_worker_resource_error(
 ):
     dummy_session_manager.connect_to_new_worker.side_effect = exc.ResourceError("fail")
     with pytest.raises(exc.ResourceError):
-        await coreplus_session_manager.connect_to_new_worker(name="worker")
+        await coreplus_session_manager.connect_to_new_worker(
+            name="worker", session_arguments={"programming_language": "python"}
+        )
 
 
 @pytest.mark.asyncio
@@ -254,7 +264,9 @@ async def test_connect_to_new_worker_creation_error(
         "fail"
     )
     with pytest.raises(exc.SessionCreationError):
-        await coreplus_session_manager.connect_to_new_worker(name="worker")
+        await coreplus_session_manager.connect_to_new_worker(
+            name="worker", session_arguments={"programming_language": "python"}
+        )
 
 
 @pytest.mark.asyncio
@@ -263,7 +275,9 @@ async def test_connect_to_new_worker_connection_error(
 ):
     dummy_session_manager.connect_to_new_worker.side_effect = ConnectionError("fail")
     with pytest.raises(exc.DeephavenConnectionError):
-        await coreplus_session_manager.connect_to_new_worker(name="worker")
+        await coreplus_session_manager.connect_to_new_worker(
+            name="worker", session_arguments={"programming_language": "python"}
+        )
 
 
 @pytest.mark.asyncio
@@ -272,23 +286,33 @@ async def test_connect_to_new_worker_other_error(
 ):
     dummy_session_manager.connect_to_new_worker.side_effect = Exception("fail")
     with pytest.raises(exc.SessionCreationError):
-        await coreplus_session_manager.connect_to_new_worker(name="worker")
+        await coreplus_session_manager.connect_to_new_worker(
+            name="worker", session_arguments={"programming_language": "python"}
+        )
 
 
 @pytest.mark.asyncio
 async def test_connect_to_persistent_query_success(
     coreplus_session_manager, dummy_session_manager
 ):
-    dummy_session = MagicMock()
-    dummy_session_manager.connect_to_persistent_query.return_value = dummy_session
+    mock_session_instance = MagicMock()
+    mock_session_instance._session_type = "python"  # Mock the _session_type attribute
+    dummy_session_manager.connect_to_persistent_query.return_value = (
+        mock_session_instance
+    )
+
     with patch(
-        "deephaven_mcp.client._session_factory.CorePlusSession", autospec=True
-    ) as mock_session:
-        mock_session.return_value = "wrapped_session"
-        result = await coreplus_session_manager.connect_to_persistent_query(name="pq")
-        dummy_session_manager.connect_to_persistent_query.assert_called_once_with(
-            name="pq", serial=None, session_arguments=None
+        "deephaven_mcp.client._session_factory.CorePlusSession",
+        return_value="wrapped_session",
+    ) as mock_core_plus_session:
+        result = await coreplus_session_manager.connect_to_persistent_query(
+            name="pq", session_arguments={"programming_language": "python"}
         )
+
+        dummy_session_manager.connect_to_persistent_query.assert_called_once_with(
+            name="pq", serial=None, session_arguments={"programming_language": "python"}
+        )
+        mock_core_plus_session.assert_called_once_with(mock_session_instance, "python")
         assert result == "wrapped_session"
 
 
@@ -298,7 +322,9 @@ async def test_connect_to_persistent_query_value_error(
 ):
     dummy_session_manager.connect_to_persistent_query.side_effect = ValueError("fail")
     with pytest.raises(ValueError):
-        await coreplus_session_manager.connect_to_persistent_query(name="pq")
+        await coreplus_session_manager.connect_to_persistent_query(
+            name="pq", session_arguments={"programming_language": "python"}
+        )
 
 
 @pytest.mark.asyncio
@@ -309,7 +335,9 @@ async def test_connect_to_persistent_query_query_error(
         "fail"
     )
     with pytest.raises(exc.SessionCreationError):
-        await coreplus_session_manager.connect_to_persistent_query(name="pq")
+        await coreplus_session_manager.connect_to_persistent_query(
+            name="pq", session_arguments={"programming_language": "python"}
+        )
 
 
 @pytest.mark.asyncio
@@ -320,7 +348,9 @@ async def test_connect_to_persistent_query_creation_error(
         exc.SessionCreationError("fail")
     )
     with pytest.raises(exc.SessionCreationError):
-        await coreplus_session_manager.connect_to_persistent_query(name="pq")
+        await coreplus_session_manager.connect_to_persistent_query(
+            name="pq", session_arguments={"programming_language": "python"}
+        )
 
 
 @pytest.mark.asyncio
@@ -331,7 +361,9 @@ async def test_connect_to_persistent_query_connection_error(
         "fail"
     )
     with pytest.raises(exc.DeephavenConnectionError):
-        await coreplus_session_manager.connect_to_persistent_query(name="pq")
+        await coreplus_session_manager.connect_to_persistent_query(
+            name="pq", session_arguments={"programming_language": "python"}
+        )
 
 
 @pytest.mark.asyncio
@@ -340,7 +372,9 @@ async def test_connect_to_persistent_query_key_error(
 ):
     dummy_session_manager.connect_to_persistent_query.side_effect = KeyError("fail")
     with pytest.raises(exc.QueryError):
-        await coreplus_session_manager.connect_to_persistent_query(name="pq")
+        await coreplus_session_manager.connect_to_persistent_query(
+            name="pq", session_arguments={"programming_language": "python"}
+        )
 
 
 @pytest.mark.asyncio
@@ -511,7 +545,7 @@ async def test_from_config_private_key_success(monkeypatch):
     worker_cfg = {
         "connection_json_url": "https://server/iris/connection.json",
         "auth_type": "private_key",
-        "private_key": "---KEY---",
+        "private_key_path": "---KEY---",
     }
     mock_manager = MagicMock()
 
@@ -546,8 +580,7 @@ async def test_from_config_private_key_success(monkeypatch):
             result = await sm_mod.CorePlusSessionFactory.from_config(worker_cfg)
             assert mock_pk.await_count == 1
             arg = mock_pk.await_args.args[0]
-            assert hasattr(arg, "read")  # Should be a StringIO
-            assert arg.getvalue() == "---KEY---"
+            assert arg == "---KEY---"  # Should be the file path
 
 
 @pytest.mark.asyncio
@@ -755,7 +788,7 @@ async def test_from_config_private_key_missing(monkeypatch):
         ):
             with pytest.raises(sm_mod.EnterpriseSystemConfigurationError) as excinfo:
                 await sm_mod.CorePlusSessionFactory.from_config(worker_cfg)
-            assert "must define 'private_key'" in str(excinfo.value)
+            assert "must define 'private_key_path'" in str(excinfo.value)
 
 
 @pytest.mark.asyncio
@@ -985,9 +1018,9 @@ async def test_from_config_missing_private_key_branch(monkeypatch, caplog):
             ):
                 with pytest.raises(sm_mod.AuthenticationError) as excinfo:
                     await sm_mod.CorePlusSessionFactory.from_config(worker_cfg)
-                assert "No private_key provided" in str(excinfo.value)
+                assert "No private_key_path provided" in str(excinfo.value)
                 assert (
-                    "No private_key provided for private_key authentication"
+                    "No private_key_path provided for private_key authentication"
                     in caplog.text
                 )
 

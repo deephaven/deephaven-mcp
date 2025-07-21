@@ -441,32 +441,65 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             if not manager:
                 continue
 
-            try:
-                await manager.close()
-            except Exception as e:
-                _LOGGER.error(
-                    "[%s] error closing stale session manager '%s' (type: %s): %s",
-                    self.__class__.__name__,
-                    key,
-                    type(manager).__name__,
-                    e,
-                )
+            await manager.close()
+
+    def _find_session_keys_for_factory(self, factory_name: str) -> set[str]:
+        """Find all session keys associated with a specific factory.
+
+        Args:
+            factory_name: The name of the factory to find sessions for.
+
+        Returns:
+            set[str]: A set of session keys for the specified factory.
+        """
+        prefix = BaseItemManager.make_full_name(SystemType.ENTERPRISE, factory_name, "")
+        return {k for k in self._items if k.startswith(prefix)}
+
+    async def _remove_all_sessions_for_factory(self, factory_name: str) -> None:
+        """Remove all sessions for a specific factory when the system is offline.
+
+        This method finds all session keys associated with the given factory and
+        closes/removes them from the registry.
+
+        Args:
+            factory_name: The name of the factory to remove sessions for.
+        """
+        _LOGGER.warning(
+            "[%s] removing all sessions for offline factory '%s'",
+            self.__class__.__name__,
+            factory_name,
+        )
+
+        # Find all sessions for this factory and remove them
+        keys_to_remove = self._find_session_keys_for_factory(factory_name)
+        await self._close_stale_enterprise_sessions(keys_to_remove)
+
+        _LOGGER.info(
+            "[%s] removed %d sessions for offline factory '%s'",
+            self.__class__.__name__,
+            len(keys_to_remove),
+            factory_name,
+        )
 
     async def _update_sessions_for_factory(
         self, factory: CorePlusSessionFactoryManager, factory_name: str
     ) -> None:
-        """Update the sessions for a single enterprise factory.
+        """
+        Update the sessions for a single enterprise factory.
 
-        This method queries the controller client for the factory to get the current
-        list of available sessions, then synchronizes the registry by adding new
-        sessions and removing stale ones.
+        This method attempts to connect to the factory's controller client to retrieve
+        the current list of available sessions. It then synchronizes the registry by:
+        - Adding new sessions that are present on the controller but not in the registry.
+        - Removing stale sessions that are no longer present on the controller.
+
+        If a DeephavenConnectionError occurs (e.g., the system is offline or unreachable),
+        all sessions for that factory will be removed from the registry and closed.
+        Only connection-related exceptions trigger this removal; all other exceptions
+        are propagated to the caller for visibility and debugging.
 
         Args:
             factory: The CorePlusSessionFactoryManager to update sessions for.
             factory_name: The name of the factory being updated.
-
-        Raises:
-            Exception: Any exception from controller client operations.
         """
         _LOGGER.info(
             "[%s] updating enterprise sessions for factory '%s'",
@@ -474,16 +507,28 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             factory_name,
         )
 
-        controller_client = await self._get_or_create_controller_client(
-            factory, factory_name
-        )
-        session_info = await controller_client.map()
+        try:
+            # These two operations can fail if the system is offline
+            controller_client = await self._get_or_create_controller_client(
+                factory, factory_name
+            )
+            session_info = await controller_client.map()
+        except DeephavenConnectionError as e:
+            _LOGGER.warning(
+                "[%s] failed to connect to factory '%s': %s",
+                self.__class__.__name__,
+                factory_name,
+                e,
+            )
+            # If we can't connect to the factory, remove all sessions for it
+            await self._remove_all_sessions_for_factory(factory_name)
+            return
 
+        # If we successfully connected, proceed with normal session update
         session_names_from_controller = [
             si.config.pb.name for si in session_info.values()
         ]
-        prefix = BaseItemManager.make_full_name(SystemType.ENTERPRISE, factory_name, "")
-        existing_keys = {k for k in self._items if k.startswith(prefix)}
+        existing_keys = self._find_session_keys_for_factory(factory_name)
         controller_keys = {
             BaseItemManager.make_full_name(SystemType.ENTERPRISE, factory_name, name)
             for name in session_names_from_controller

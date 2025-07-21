@@ -15,6 +15,7 @@ from deephaven_mcp.resource_manager import (
     CommunitySessionManager,
     CorePlusSessionFactoryManager,
     EnterpriseSessionManager,
+    ResourceLivenessStatus,
     SystemType,
 )
 
@@ -47,8 +48,17 @@ class ConcreteItemManager(BaseItemManager[MockItem]):
     async def _create_item(self) -> MockItem:
         return await self._create_item_mock()
 
-    async def _check_liveness(self, item: MockItem) -> bool:
-        return await item.is_alive()
+    async def _check_liveness(
+        self, item: MockItem
+    ) -> tuple[ResourceLivenessStatus, str | None]:
+        try:
+            alive = await item.is_alive()
+            if alive:
+                return (ResourceLivenessStatus.ONLINE, None)
+            else:
+                return (ResourceLivenessStatus.OFFLINE, "Item not alive")
+        except Exception as e:
+            return (ResourceLivenessStatus.UNKNOWN, str(e))
 
 
 @pytest.mark.asyncio
@@ -160,8 +170,8 @@ async def test_concurrent_get():
 
 
 @pytest.mark.asyncio
-async def test_close_raises_on_sync_method():
-    """Test that close raises InternalError for a synchronous close method."""
+async def test_close_handles_sync_method_gracefully():
+    """Test that close handles synchronous close methods gracefully without raising errors."""
 
     class ConcreteSyncItemManager(BaseItemManager[MockSyncItem]):
         def __init__(self, system_type: SystemType, source: str, name: str):
@@ -171,18 +181,189 @@ async def test_close_raises_on_sync_method():
         async def _create_item(self) -> MockSyncItem:
             return await self._create_item_mock()
 
-        async def _check_liveness(self, item: MockSyncItem) -> bool:
+        async def _check_liveness(
+            self, item: MockSyncItem
+        ) -> tuple[ResourceLivenessStatus, str | None]:
             # Ensure liveness check passes so close() proceeds
-            return True
+            return (ResourceLivenessStatus.ONLINE, None)
 
     manager = ConcreteSyncItemManager(SystemType.COMMUNITY, "test_sync", "test_sync")
-    await manager.get()
+    item = await manager.get()
 
-    with pytest.raises(InternalError, match="is not a coroutine function"):
-        await manager.close()
+    # close() should complete gracefully even with sync close method
+    await manager.close()
+
+    # Verify that the sync close method was called during cleanup
+    # Note: May be called twice due to retry logic when sync method fails
+    assert item.close.call_count >= 1
+
+    # Verify cache is cleared
+    assert manager._item_cache is None
 
 
 # Session Manager Tests
+
+
+def test_resource_liveness_status_str():
+    """Covers line 231: str(enum) returns the enum name."""
+    for status in ResourceLivenessStatus:
+        assert str(status) == status.name
+
+
+def test_system_type_str():
+    """Covers line 286: str(enum) returns the enum name."""
+    for system_type in SystemType:
+        assert str(system_type) == system_type.name
+
+
+from deephaven_mcp._exceptions import AuthenticationError, ConfigurationError
+
+
+@pytest.mark.asyncio
+async def test_liveness_status_unlocked_exceptions(monkeypatch):
+    """Covers lines 961-962, 969-977: Exception handling in _liveness_status_unlocked."""
+
+    class DummyManager(BaseItemManager[MockItem]):
+        async def _create_item(self):
+            pass
+
+        async def _check_liveness(self, item):
+            return (ResourceLivenessStatus.ONLINE, None)
+
+        async def _get_unlocked(self):
+            return MockItem()
+
+    manager = DummyManager(SystemType.COMMUNITY, "src", "nm")
+    # Patch _get_unlocked to raise AuthenticationError
+    monkeypatch.setattr(
+        manager, "_get_unlocked", AsyncMock(side_effect=AuthenticationError("authfail"))
+    )
+    result = await manager._liveness_status_unlocked(ensure_item=True)
+    assert result[0] == ResourceLivenessStatus.UNAUTHORIZED
+    assert "authfail" in result[1]
+
+    # Patch _get_unlocked to raise ConfigurationError
+    monkeypatch.setattr(
+        manager, "_get_unlocked", AsyncMock(side_effect=ConfigurationError("cfgfail"))
+    )
+    result = await manager._liveness_status_unlocked(ensure_item=True)
+    assert result[0] == ResourceLivenessStatus.MISCONFIGURED
+    assert "cfgfail" in result[1]
+
+    # Patch _get_unlocked to raise SessionCreationError
+    monkeypatch.setattr(
+        manager, "_get_unlocked", AsyncMock(side_effect=SessionCreationError("scfail"))
+    )
+    result = await manager._liveness_status_unlocked(ensure_item=True)
+    assert result[0] == ResourceLivenessStatus.MISCONFIGURED
+    assert "scfail" in result[1]
+
+    # Patch _get_unlocked to raise generic Exception
+    monkeypatch.setattr(
+        manager, "_get_unlocked", AsyncMock(side_effect=RuntimeError("boom!"))
+    )
+    result = await manager._liveness_status_unlocked(ensure_item=True)
+    assert result[0] == ResourceLivenessStatus.UNKNOWN
+    assert "boom!" in result[1]
+
+
+@pytest.mark.asyncio
+async def test_liveness_status_logs_and_modes(caplog):
+    """Covers lines 1081-1089: Logging and return in liveness_status for both modes."""
+
+    class DummyManager(BaseItemManager[MockItem]):
+        async def _create_item(self):
+            return MockItem()
+
+        async def _check_liveness(self, item):
+            return (ResourceLivenessStatus.ONLINE, "ok")
+
+        async def _get_unlocked(self):
+            return MockItem()
+
+    manager = DummyManager(SystemType.COMMUNITY, "src", "nm")
+    # Mode: ensure_item=True
+    with caplog.at_level("INFO"):
+        status, detail = await manager.liveness_status(ensure_item=True)
+        assert status == ResourceLivenessStatus.ONLINE
+        assert "provisioning" in caplog.text or "cached-only" in caplog.text
+        assert "Liveness check" in caplog.text
+    # Mode: ensure_item=False (simulate cached item)
+    manager._item_cache = MockItem()
+    with caplog.at_level("INFO"):
+        status, detail = await manager.liveness_status(ensure_item=False)
+        assert status == ResourceLivenessStatus.ONLINE
+        assert "cached-only" in caplog.text or "provisioning" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_close_logs_on_liveness_failure(monkeypatch, caplog):
+    """Covers line 1319: Info log after successful close following liveness check failure."""
+
+    class DummyManager(BaseItemManager[MockItem]):
+        async def _create_item(self):
+            return MockItem()
+
+        async def _check_liveness(self, item):
+            raise Exception("liveness fail!")
+
+    manager = DummyManager(SystemType.COMMUNITY, "src", "nm")
+    item = MockItem()
+    manager._item_cache = item
+    item.close = AsyncMock()
+    # Patch _is_alive_unlocked to raise so that close takes the liveness failure path
+    monkeypatch.setattr(
+        manager,
+        "_is_alive_unlocked",
+        AsyncMock(side_effect=Exception("liveness fail!")),
+    )
+    with caplog.at_level("INFO"):
+        await manager.close()
+    expected = "[DummyManager] Successfully closed item for 'community:src:nm' despite earlier liveness failure"
+    assert any(
+        r.levelname == "INFO" and r.getMessage() == expected for r in caplog.records
+    )
+
+
+@pytest.mark.asyncio
+async def test_community_session_manager_check_liveness_offline(monkeypatch):
+    """Covers line 1698: CommunitySessionManager._check_liveness returns OFFLINE if is_alive() is False."""
+    mgr = CommunitySessionManager("test", {"server": "foo"})
+    mock_session = Mock()
+    mock_session.is_alive = AsyncMock(return_value=False)
+    result = await mgr._check_liveness(mock_session)
+    assert result == (ResourceLivenessStatus.OFFLINE, "Session not alive")
+
+
+@pytest.mark.asyncio
+async def test_enterprise_session_manager_check_liveness_offline(monkeypatch):
+    """Covers line 2137: EnterpriseSessionManager._check_liveness returns OFFLINE if is_alive() is False."""
+
+    async def dummy_creation(source, name):
+        return Mock()
+
+    mgr = EnterpriseSessionManager("src", "nm", dummy_creation)
+    mock_session = Mock()
+    mock_session.is_alive = AsyncMock(return_value=False)
+    result = await mgr._check_liveness(mock_session)
+    assert result == (ResourceLivenessStatus.OFFLINE, "Session not alive")
+
+
+# Additional obvious tests: public API error handling for BaseItemManager
+@pytest.mark.asyncio
+async def test_get_raises_if_create_item_fails(monkeypatch):
+    """Test that get() raises if _create_item fails with uncaught exception."""
+
+    class DummyManager(BaseItemManager[MockItem]):
+        async def _create_item(self):
+            raise RuntimeError("fail-create")
+
+        async def _check_liveness(self, item):
+            return (ResourceLivenessStatus.ONLINE, None)
+
+    manager = DummyManager(SystemType.COMMUNITY, "src", "nm")
+    with pytest.raises(RuntimeError, match="fail-create"):
+        await manager.get()
 
 
 class TestCommunitySessionManager:
@@ -224,7 +405,7 @@ class TestCommunitySessionManager:
         mock_session.is_alive.return_value = True
         result = await manager._check_liveness(mock_session)
         mock_session.is_alive.assert_awaited_once()
-        assert result is True
+        assert result == (ResourceLivenessStatus.ONLINE, None)
 
 
 class TestEnterpriseSessionManager:
@@ -293,15 +474,17 @@ async def test_check_liveness_covers_return():
     mock_session = AsyncMock()
     mock_session.is_alive = AsyncMock(return_value=True)
     result = await mgr._check_liveness(mock_session)
-    assert result is True
+    assert result == (ResourceLivenessStatus.ONLINE, None)
 
 
 @pytest.mark.asyncio
 async def test_check_liveness_exception():
-    """Covers line 559 when is_alive raises (exception propagates)."""
+    """Covers that _check_liveness lets exceptions propagate (handled by liveness_status)."""
     mgr = EnterpriseSessionManager("src", "nm", AsyncMock())
     mock_session = AsyncMock()
     mock_session.is_alive = AsyncMock(side_effect=Exception("fail"))
+
+    # _check_liveness no longer handles exceptions; they propagate up
     with pytest.raises(Exception, match="fail"):
         await mgr._check_liveness(mock_session)
 
@@ -445,11 +628,17 @@ class TestCorePlusSessionFactoryManager:
 
         # Test when ping returns True
         mock_factory.ping.return_value = True
-        assert await manager._check_liveness(mock_factory) is True
+        assert await manager._check_liveness(mock_factory) == (
+            ResourceLivenessStatus.ONLINE,
+            None,
+        )
         mock_factory.ping.assert_awaited_once()
 
         # Test when ping returns False
         mock_factory.ping.reset_mock()
         mock_factory.ping.return_value = False
-        assert await manager._check_liveness(mock_factory) is False
+        assert await manager._check_liveness(mock_factory) == (
+            ResourceLivenessStatus.OFFLINE,
+            "Ping returned False",
+        )
         mock_factory.ping.assert_awaited_once()

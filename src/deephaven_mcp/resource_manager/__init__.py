@@ -37,12 +37,14 @@ from ._manager import (
     CommunitySessionManager,
     CorePlusSessionFactoryManager,
     EnterpriseSessionManager,
+    ResourceLivenessStatus,
     SystemType,
 )
 from ._registry import CommunitySessionRegistry, CorePlusSessionFactoryRegistry
 
 __all__ = [
     "SystemType",
+    "ResourceLivenessStatus",
     "BaseItemManager",
     "CommunitySessionManager",
     "EnterpriseSessionManager",

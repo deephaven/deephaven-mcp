@@ -12,6 +12,7 @@ from deephaven_mcp._exceptions import (
     ResourceError,
     SessionCreationError,
     SessionError,
+    UnsupportedOperationError,
 )
 
 
@@ -49,6 +50,15 @@ class TestBaseExceptions:
             raise InternalError(message)
         assert str(exc_info.value) == message
 
+    def test_unsupported_operation_error(self):
+        """Test that UnsupportedOperationError can be raised and caught properly."""
+        message = "operation not supported"
+        with pytest.raises(UnsupportedOperationError) as exc_info:
+            raise UnsupportedOperationError(message)
+        assert str(exc_info.value) == message
+        assert isinstance(exc_info.value, McpError)
+        assert isinstance(exc_info.value, Exception)
+
 
 class TestExceptionParameterized:
     """Parameterized tests for common exception behaviors."""
@@ -63,6 +73,7 @@ class TestExceptionParameterized:
             (DeephavenConnectionError, [McpError], "connection error"),
             (ResourceError, [McpError], "resource error"),
             (ConfigurationError, [McpError], "configuration error"),
+            (UnsupportedOperationError, [McpError], "unsupported operation error"),
             # Specialized exceptions with additional inheritance
             (SessionCreationError, [SessionError, McpError], "session creation error"),
             (
@@ -114,6 +125,7 @@ class TestExceptionModule:
             # Base exceptions
             "McpError",
             "InternalError",
+            "UnsupportedOperationError",
             # Session exceptions
             "SessionError",
             "SessionCreationError",

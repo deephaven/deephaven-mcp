@@ -69,7 +69,7 @@ The configuration file must be a JSON object. It may contain the following top-l
                         - `password_env_var` (str, optional): Environment variable for the password.
                           (Note: `password` and `password_env_var` are mutually exclusive.)
                     * "private_key":
-                        - `private_key` (str, required): The private key.
+                        - `private_key_path` (str, required): The path to the private key file.
 
       Notes:
         - For the detailed schema of individual enterprise system configurations, please refer to the
@@ -311,11 +311,13 @@ class ConfigManager:
             >>> # Assuming config_manager is an instance of ConfigManager
             >>> await config_manager.clear_config_cache()
         """
-        _LOGGER.debug("Clearing Deephaven configuration cache...")
+        _LOGGER.debug(
+            "[ConfigManager:clear_config_cache] Clearing Deephaven configuration cache..."
+        )
         async with self._lock:
             self._cache = None
 
-        _LOGGER.debug("Configuration cache cleared.")
+        _LOGGER.debug("[ConfigManager:clear_config_cache] Configuration cache cleared.")
 
     async def _set_config_cache(self, config: dict[str, Any]) -> None:
         """
@@ -370,12 +372,12 @@ class ConfigManager:
             >>> print(config_dict['community'])
         """
         _LOGGER.debug(
-            "[ConfigManager] Loading Deephaven MCP application configuration..."
+            "[ConfigManager:get_config] Loading Deephaven MCP application configuration..."
         )
         async with self._lock:
             if self._cache is not None:
                 _LOGGER.debug(
-                    "[ConfigManager] Using cached Deephaven MCP application configuration."
+                    "[ConfigManager:get_config] Using cached Deephaven MCP application configuration."
                 )
                 return self._cache
 
@@ -403,7 +405,7 @@ def get_config_section(
     Raises:
         KeyError: If the section path does not exist.
     """
-    _LOGGER.debug(f"Getting config section for path: {section}")
+    _LOGGER.debug(f"[get_config_section] Getting config section for path: {section}")
     curr = config
     for key in section:
         if not isinstance(curr, dict) or key not in curr:
@@ -426,23 +428,27 @@ def get_all_config_names(
     Returns:
         list[str]: A list of names from the given config section. If the section doesn't exist, returns an empty list.
     """
-    _LOGGER.debug(f"Getting list of all names from config section path: {section}")
+    _LOGGER.debug(
+        f"[get_all_config_names] Getting list of all names from config section path: {section}"
+    )
     try:
         section_obj = get_config_section(config, section)
     except KeyError:
         _LOGGER.warning(
-            f"Section path {section} does not exist, returning empty list of names."
+            f"[get_all_config_names] Section path {section} does not exist, returning empty list of names."
         )
         return []
 
     if not isinstance(section_obj, dict):
         _LOGGER.warning(
-            f"Section at path {section} is not a dictionary, returning empty list of names."
+            f"[get_all_config_names] Section at path {section} is not a dictionary, returning empty list of names."
         )
         return []
 
     names = list(section_obj.keys())
-    _LOGGER.debug(f"Found {len(names)} names in section {section}: {names}")
+    _LOGGER.debug(
+        f"[get_all_config_names] Found {len(names)} names in section {section}: {names}"
+    )
     return names
 
 
@@ -468,25 +474,29 @@ async def _load_config_from_file(config_path: str) -> dict[str, Any]:
             content = await f.read()
         return cast(dict[str, Any], json.loads(content))
     except FileNotFoundError:
-        _LOGGER.error(f"Configuration file not found: {config_path}")
+        _LOGGER.error(
+            f"[load_and_validate_config] Configuration file not found: {config_path}"
+        )
         raise ConfigurationError(
             f"Configuration file not found: {config_path}"
         ) from None
     except PermissionError:
         _LOGGER.error(
-            f"Permission denied when trying to read configuration file: {config_path}"
+            f"[load_and_validate_config] Permission denied when trying to read configuration file: {config_path}"
         )
         raise ConfigurationError(
             f"Permission denied when trying to read configuration file: {config_path}"
         ) from None
     except json.JSONDecodeError as e:
-        _LOGGER.error(f"Invalid JSON in configuration file {config_path}: {e}")
+        _LOGGER.error(
+            f"[load_and_validate_config] Invalid JSON in configuration file {config_path}: {e}"
+        )
         raise ConfigurationError(
             f"Invalid JSON in configuration file {config_path}: {e}"
         ) from e
     except Exception as e:
         _LOGGER.error(
-            f"Unexpected error loading or parsing config file {config_path}: {e}"
+            f"[load_and_validate_config] Unexpected error reading configuration file {config_path}: {e}"
         )
         raise ConfigurationError(
             f"Unexpected error loading or parsing config file {config_path}: {e}"
@@ -512,10 +522,14 @@ def get_config_path() -> str:
         '/path/to/config.json'
     """
     if CONFIG_ENV_VAR not in os.environ:
-        _LOGGER.error(f"Environment variable {CONFIG_ENV_VAR} is not set.")
+        _LOGGER.error(
+            f"[get_config_path] Environment variable {CONFIG_ENV_VAR} is not set."
+        )
         raise RuntimeError(f"Environment variable {CONFIG_ENV_VAR} is not set.")
     config_path = os.environ[CONFIG_ENV_VAR]
-    _LOGGER.info(f"Environment variable {CONFIG_ENV_VAR} is set to: {config_path}")
+    _LOGGER.info(
+        f"[get_config_path] Environment variable {CONFIG_ENV_VAR} is set to: {config_path}"
+    )
     return config_path
 
 
@@ -544,19 +558,26 @@ async def load_and_validate_config(config_path: str) -> dict[str, Any]:
         data = await _load_config_from_file(config_path)
         return validate_config(data)
     except Exception as e:
-        _LOGGER.error(f"Error loading configuration file {config_path}: {e}")
+        _LOGGER.error(
+            f"[load_and_validate_config] Error loading configuration file {config_path}: {e}"
+        )
         raise ConfigurationError(f"Error loading configuration file: {e}") from e
 
 
 def _apply_redaction_to_config(config: dict[str, Any]) -> dict[str, Any]:
-    """
-    Apply all configured redaction functions to a deep copy of the config.
+    """Apply all configured redaction functions to a deep copy of the config.
+
+    This function creates a deep copy of the configuration and applies redaction functions
+    to sensitive fields as defined in the _SCHEMA_PATHS. Redaction is used to safely log
+    configuration data without exposing sensitive information like passwords or tokens.
+    If a configuration section doesn't exist, redaction is skipped for that section.
 
     Args:
         config (dict[str, Any]): The configuration dictionary to redact.
 
     Returns:
-        dict[str, Any]: A deep copy of the config with sensitive data redacted.
+        dict[str, Any]: A deep copy of the config with sensitive data redacted according
+                       to the redactor functions defined in _SCHEMA_PATHS.
     """
     config_copy = copy.deepcopy(config)
 
@@ -593,7 +614,7 @@ def _log_config_summary(config: dict[str, Any]) -> None:
         >>> config = {'community': {'sessions': {'local': {...}}}}
         >>> _log_config_summary(config)
     """
-    _LOGGER.info("[ConfigManager] Configuration summary:")
+    _LOGGER.info("[ConfigManager:get_config] Configuration summary:")
 
     # Create a redacted copy of the config for logging
     redacted_config = _apply_redaction_to_config(config)
@@ -601,29 +622,65 @@ def _log_config_summary(config: dict[str, Any]) -> None:
     # Log the redacted config as formatted JSON
     try:
         formatted_config = json.dumps(redacted_config, indent=2, sort_keys=True)
-        _LOGGER.info(f"[ConfigManager] Loaded configuration:\n{formatted_config}")
+        _LOGGER.info(
+            f"[ConfigManager:get_config] Loaded configuration:\n{formatted_config}"
+        )
     except (TypeError, ValueError) as e:
-        _LOGGER.warning(f"[ConfigManager] Failed to format config as JSON: {e}")
-        _LOGGER.info(f"[ConfigManager] Loaded configuration: {redacted_config}")
+        _LOGGER.warning(
+            f"[ConfigManager:get_config] Failed to format config as JSON: {e}"
+        )
+        _LOGGER.info(
+            f"[ConfigManager:get_config] Loaded configuration: {redacted_config}"
+        )
 
 
 def _validate_unknown_keys(
     data: dict[str, Any], path: tuple[str, ...], valid_keys: set[str]
 ) -> None:
-    """Check for unknown keys at the current path level."""
+    """Check for unknown keys at the current path level and raise ConfigurationError if found.
+
+    This validation helper ensures that only known configuration keys are present at the
+    specified path level. Any keys found in the data that are not in the valid_keys set
+    will cause validation to fail with a detailed error message.
+
+    Args:
+        data (dict[str, Any]): The configuration dictionary section to validate
+        path (tuple[str, ...]): The current path tuple for error reporting context
+        valid_keys (set[str]): Set of allowed key names at this path level
+
+    Raises:
+        ConfigurationError: If any unknown keys are found in the data
+    """
     unknown_keys = set(data.keys()) - valid_keys
     if unknown_keys:
-        _LOGGER.error(f"Unknown keys at config path {path}: {unknown_keys}")
+        _LOGGER.error(
+            f"[validate_config] Unknown keys at config path {path}: {unknown_keys}"
+        )
         raise ConfigurationError(f"Unknown keys at config path {path}: {unknown_keys}")
 
 
 def _validate_required_keys(
     data: dict[str, Any], path: tuple[str, ...], required_keys: set[str]
 ) -> None:
-    """Check for missing required keys at the current path level."""
+    """Check for missing required keys at the current path level and raise ConfigurationError if any are missing.
+
+    This validation helper ensures that all required configuration keys are present at the
+    specified path level. Any required keys that are missing from the data will cause
+    validation to fail with a detailed error message listing all missing keys.
+
+    Args:
+        data (dict[str, Any]): The configuration dictionary section to validate
+        path (tuple[str, ...]): The current path tuple for error reporting context
+        required_keys (set[str]): Set of key names that must be present at this path level
+
+    Raises:
+        ConfigurationError: If any required keys are missing from the data
+    """
     missing_keys = required_keys - set(data.keys())
     if missing_keys:
-        _LOGGER.error(f"Missing required keys at config path {path}: {missing_keys}")
+        _LOGGER.error(
+            f"[validate_config] Missing required keys at config path {path}: {missing_keys}"
+        )
         raise ConfigurationError(
             f"Missing required keys at config path {path}: {missing_keys}"
         )
@@ -640,10 +697,10 @@ def _validate_key_type_and_value(
        and handles any configuration exceptions
 
     Args:
-        key: The configuration key being validated
-        value: The value to validate
-        spec: The configuration path specification containing type and validator
-        path: The parent path tuple (will be combined with key to form current_path)
+        key (str): The configuration key being validated
+        value (Any): The value to validate
+        spec (_ConfigPathSpec): The configuration path specification containing type and validator
+        path (tuple[str, ...]): The parent path tuple (will be combined with key to form current_path)
 
     Raises:
         ConfigurationError: If validation fails for type or specialized validation
@@ -653,7 +710,7 @@ def _validate_key_type_and_value(
     # Type validation
     if not isinstance(value, spec.expected_type):
         _LOGGER.error(
-            f"Config path {current_path} must be of type {spec.expected_type.__name__}, got {type(value).__name__}"
+            f"[validate_config] Config path {current_path} must be of type {spec.expected_type.__name__}, got {type(value).__name__}"
         )
         raise ConfigurationError(
             f"Config path {current_path} must be of type {spec.expected_type.__name__}, got {type(value).__name__}"
@@ -677,13 +734,15 @@ def _should_recurse_into_nested_dict(current_path: tuple[str, ...]) -> bool:
 
     Determines if we should continue recursing into a dictionary by checking if any
     schema paths exist that are children of the current path (i.e., they start with
-    the current path and have at least one more component).
+    the current path and have at least one more component). This is used during
+    validation to decide whether to recursively validate nested dictionary sections.
 
     Args:
-        current_path: The current path tuple to check for children
+        current_path (tuple[str, ...]): The current path tuple to check for children
 
     Returns:
-        bool: True if there are nested paths that extend beyond the current path
+        bool: True if there are nested paths that extend beyond the current path,
+              False if this is a leaf node in the schema tree
     """
     return any(
         nested_path[: len(current_path)] == current_path
@@ -701,12 +760,16 @@ def _validate_section(data: dict[str, Any], path: tuple[str, ...]) -> None:
     3. Validating each key's type and value
     4. Recursively validating nested dictionary sections
 
+    This is the core validation engine that processes each level of the configuration
+    hierarchy according to the schema defined in _SCHEMA_PATHS.
+
     Args:
-        data: The dictionary containing configuration data to validate
-        path: The current path tuple representing the location in the config
+        data (dict[str, Any]): The dictionary containing configuration data to validate
+        path (tuple[str, ...]): The current path tuple representing the location in the config
 
     Raises:
-        ConfigurationError: If validation fails for any reason
+        ConfigurationError: If validation fails for any reason (unknown keys, missing required keys,
+                           type mismatches, or specialized validation failures)
     """
     # Get specs for the current path level
     current_specs = {
@@ -791,7 +854,7 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
                                   - 'password_env_var' (str, optional): Environment variable for the password.
                                     (Note: `password` and `password_env_var` are mutually exclusive.)
                               * "private_key":
-                                  - 'private_key' (str, required): The private key.
+                                  - 'private_key_path' (str, required): The path to the private key file.
 
     Validation Rules:
       - Only known keys are allowed at each level of nesting.
@@ -820,5 +883,5 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
     # Validate the entire configuration
     _validate_section(config, ())
 
-    _LOGGER.info("Configuration validation passed.")
+    _LOGGER.info("[validate_config] Configuration validation passed.")
     return config

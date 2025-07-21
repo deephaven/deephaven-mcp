@@ -41,7 +41,9 @@ This repository houses the Python-based Model Context Protocol (MCP) servers for
       - [Error Handling](#error-handling)
       - [MCP Tools](#mcp-tools)
         - [`refresh`](#refresh)
-        - [`describe_workers`](#describe_workers)
+        - [`enterprise_systems_status`](#enterprise_systems_status)
+        - [`list_sessions`](#list_sessions)
+        - [`get_session_details`](#get_session_details)
         - [`table_schemas`](#table_schemas)
         - [`run_script`](#run_script)
         - [`pip_packages`](#pip_packages)
@@ -306,8 +308,7 @@ All fields within a session's configuration object are optional. If a field is o
         "host": "secure.deephaven.example.com",
         "port": 10001,
         "auth_type": "token",
-        // "auth_token": "your-secret-api-token-here", // Option 1: Direct token (less secure for shared configs)
-        "auth_token_env_var": "MY_REMOTE_TOKEN_ENV_VAR", // Option 2: Token from environment variable (recommended)
+        "auth_token_env_var": "MY_REMOTE_TOKEN_ENV_VAR",
         "never_timeout": true,
         "session_type": "groovy",
         "use_tls": true,
@@ -331,8 +332,7 @@ If the `"enterprise"` key is present, it must be a dictionary. Each individual e
 *   `auth_type` (string, **required**): Specifies the authentication method to use. Must be one of the following values:
     *   `"password"`: Authenticate using a username and password.
     *   `"private_key"`: Authenticate using a private key (e.g., for service accounts or specific SAML/OAuth setups requiring a private key).
-    *   `"none"`: No authentication will be used. This is typically for development or trusted environments and should be used with caution.
-    Only configuration keys relevant to the selected `auth_type` (and the general `connection_json_url` and optional TLS keys) should be included. Extraneous keys will be ignored by the application but will generate a warning message in the logs, indicating which keys are unexpected for the chosen authentication method.
+    Only configuration keys relevant to the selected `auth_type` (and the general `connection_json_url`) should be included. Extraneous keys will be ignored by the application but will generate a warning message in the logs, indicating which keys are unexpected for the chosen authentication method.
 
 *   Conditional Authentication Fields (required based on `auth_type`):
     *   If `auth_type` is `"password"`:
@@ -341,6 +341,7 @@ If the `"enterprise"` key is present, it must be a dictionary. Each individual e
         *   **OR** `password_env_var` (string): The name of an environment variable that holds the password. Using an environment variable is recommended. If the `password` field is used directly, its value will be redacted in application logs.
     *   If `auth_type` is `"private_key"`:
         *   `private_key_path` (string, **required**): The absolute file system path to the private key file (e.g., a `.pem` file).
+
 **Example `deephaven_mcp.json` with Enterprise Systems:**
 
 ```json
@@ -364,7 +365,7 @@ If the `"enterprise"` key is present, it must be a dictionary. Each individual e
       "analytics_private_key_auth": {
         "connection_json_url": "https://analytics.dept.com/iris/connection.json",
         "auth_type": "private_key",
-        "private_key": "/secure/keys/analytics_service_account.key"
+        "private_key_path": "/secure/keys/analytics_service_account.pem"
       }
     }
   }
@@ -432,13 +433,36 @@ Once running, you can interact with the Systems Server in several ways:
 - Run the [Test Client](#test-client) script
 - Build your own MCP client application
 
+#### Session ID Format and Terminology
+
+The Systems Server uses a consistent session identifier format across all MCP tools:
+
+**Session ID Format**: `{type}:{source}:{session_name}`
+
+Where:
+- `type`: Either `"community"` or `"enterprise"`
+- `source`: The configuration key name (worker name for community, system name for enterprise)
+- `session_name`: The specific session name within that source
+
+**Examples**:
+- `"community:local_dev:my_session"` - A community session named "my_session" on the "local_dev" worker
+- `"enterprise:staging_env:analytics_session"` - An enterprise session named "analytics_session" on the "staging_env" system
+
+**Terminology Clarification**:
+- **Worker**: A Deephaven Community Core instance (configured under `"community"` → `"sessions"`)
+- **System**: A Deephaven Enterprise instance/factory (configured under `"enterprise"` → `"systems"`)
+- **Session**: A specific connection/session within a worker or system
+- **Session ID**: The fully qualified identifier used by MCP tools to reference a specific session
+
+All MCP tools that interact with Deephaven instances use the `session_id` parameter with this format, replacing the older `worker_name` parameter from previous versions.
+
 #### Systems Server Tools
 
 The Systems Server exposes the following MCP tools, each designed for a specific aspect of Deephaven worker management:
 
 All Systems Server tools return responses with a consistent format:
 - Success: `{ "success": true, ... }` with additional fields depending on the tool
-- Error: `{ "success": false, "error": { "type": "error_type", "message": "Error description" } }`
+- Error: `{ "success": false, "error": "Error description", "isError": true }`
 
 #### Error Handling
 
@@ -447,18 +471,10 @@ All Systems Server tools use a consistent error response format when encounterin
 ```json
 {
   "success": false,
-  "error": {
-    "type": "error_type",
-    "message": "Human-readable error description"
-  }
+  "error": "Human-readable error description",
+  "isError": true
 }
 ```
-
-**Common Error Types:**
-- `worker_not_found`: The specified worker does not exist or is not configured
-- `worker_unavailable`: The worker exists but is not currently running or accessible
-- `internal_error`: Unexpected internal server error
-- `invalid_argument`: Incorrect or missing parameters in the tool request
 
 This consistent format makes error handling and response parsing more predictable across all tools.
 
@@ -468,7 +484,7 @@ The Systems Server provides the following MCP tools:
 
 ##### `refresh`
 
-**Purpose**: Atomically reload configuration and clear all active worker sessions.
+**Purpose**: Atomically reload configuration and clear all active session cache.
 
 **Parameters**: None
 
@@ -488,30 +504,30 @@ On error:
 }
 ```
 
-**Description**: This tool reloads the worker configuration from the file specified in `DH_MCP_CONFIG_FILE` and clears all active sessions. It's useful after changing the worker configuration to ensure changes are immediately applied. The tool uses an asyncio.Lock to ensure thread safety and atomicity of the operation.
+**Description**: This tool reloads the Deephaven worker configuration from the file specified in `DH_MCP_CONFIG_FILE` and clears all active session objects for all workers. It uses dependency injection via the Context to access the config manager, session registry, and a coroutine-safe refresh lock. The operation is protected by the provided lock to prevent concurrent refreshes.
 
-##### `describe_workers`
+##### `enterprise_systems_status`
 
-**Purpose**: Describe all configured Deephaven workers, including their availability status and programming language.
+**Purpose**: List all enterprise (CorePlus) systems/factories with their status and configuration details (redacted).
 
-**Parameters**: None
+**Parameters**:
+- `attempt_to_connect` (optional, boolean): If True, actively attempts to connect to each system to verify its status. Default is False (only checks existing connections for faster response).
 
 **Returns**:
 ```json
 {
   "success": true,
-  "result": [
+  "systems": [
     {
-      "worker": "worker_name_1",
-      "available": true,
-      "programming_language": "python",
-      "deephaven_core_version": "1.2.3",
-      "deephaven_enterprise_version": "4.5.6"
-    },
-    {
-      "worker": "worker_name_2",
-      "available": false,
-      "programming_language": "groovy"
+      "name": "staging_env",
+      "status": "ONLINE",
+      "detail": "System is healthy and ready for operational use",
+      "is_alive": true,
+      "config": {
+        "connection_json_url": "https://staging.internal/iris/connection.json",
+        "auth_type": "password",
+        "username": "test_user"
+      }
     }
   ]
 }
@@ -526,70 +542,34 @@ On error:
 }
 ```
 
-**Description**: This tool checks the status of all configured workers, attempting to establish a connection to verify availability.
+**Description**: This tool provides comprehensive status information about all configured enterprise systems. Status values include "ONLINE", "OFFLINE", "UNAUTHORIZED", "MISCONFIGURED", or "UNKNOWN". Sensitive configuration fields are redacted for security.
 
-##### `table_schemas`
+##### `list_sessions`
 
-**Purpose**: Retrieve schemas for one or more tables from a specific worker.
+**Purpose**: List all sessions (community and enterprise) with basic metadata.
 
-**Parameters**:
-- `worker_name` (required): Name of the Deephaven worker.
-- `table_names` (optional): List of table names to fetch schemas for. If omitted, schemas for all tables are returned.
-
-**Returns**:
-The tool returns a list of objects, one for each table:
-```json
-[
-  {
-    "success": true,
-    "table": "table_name",
-    "schema": [
-      {"name": "column1", "type": "int"},
-      {"name": "column2", "type": "string"}
-    ]
-  },
-  {
-    "success": false,
-    "table": "missing_table",
-    "error": "Table not found",
-    "isError": true
-  }
-]
-```
-
-On complete failure (e.g., worker not available):
-```json
-[
-  {
-    "success": false,
-    "table": null,
-    "error": "Failed to connect to worker: ...",
-    "isError": true
-  }
-]
-```
-
-**Description**: This tool retrieves column schemas (name and type) for tables in the specified worker.
-
-##### `run_script`
-
-**Purpose**: Execute a script on a specified Deephaven worker.
-
-**Parameters**:
-- `worker_name` (required): Name of the Deephaven worker.
-- `script` (optional): Script content as a string. The script language (Python, Groovy, etc.) is determined by the worker's configuration.
-- `script_path` (optional): Path to a script file.
-
-**Note**: Either `script` or `script_path` must be provided, but not both.
+**Parameters**: None
 
 **Returns**:
 ```json
 {
-  "success": true
+  "success": true,
+  "sessions": [
+    {
+      "session_id": "community:local_dev:session_name",
+      "type": "community",
+      "source": "local_dev",
+      "session_name": "session_name"
+    },
+    {
+      "session_id": "enterprise:staging_env:analytics_session",
+      "type": "enterprise",
+      "source": "staging_env",
+      "session_name": "analytics_session"
+    }
+  ]
 }
 ```
-
-**Important Limitations**: The tool only returns a success status and does not include stdout or a list of created/modified tables in the response. Any output or tables created by the script will need to be accessed via other tools (like `table_schemas`), not from this response.
 
 On error:
 ```json
@@ -600,14 +580,124 @@ On error:
 }
 ```
 
-**Description**: This tool executes code on a specified worker. The script language is determined by the worker's configuration and can be Python, Groovy, or other supported languages. According to the source code, it only returns success status and does not include stdout or a list of created/modified tables in the response.
+**Description**: This is a lightweight operation that doesn't connect to sessions or check their status. For detailed information about a specific session, use `get_session_details`.
+
+##### `get_session_details`
+
+**Purpose**: Get detailed information about a specific session.
+
+**Parameters**:
+- `session_id` (required, string): The session identifier (fully qualified name) to get details for.
+- `attempt_to_connect` (optional, boolean): Whether to attempt connecting to the session to verify its status. Defaults to False for faster response.
+
+**Returns**:
+```json
+{
+  "success": true,
+  "session": {
+    "session_id": "community:local_dev:session_name",
+    "type": "community",
+    "source": "local_dev",
+    "session_name": "session_name",
+    "available": true,
+    "programming_language": "python",
+    "deephaven_core_version": "0.36.1",
+    "deephaven_enterprise_version": null
+  }
+}
+```
+
+On error:
+```json
+{
+  "success": false,
+  "error": "Error message",
+  "isError": true
+}
+```
+
+**Description**: This tool provides comprehensive status information about a specific session. It supports two operational modes: quick status check (default) or active connection verification.
+
+##### `table_schemas`
+
+**Purpose**: Retrieve schemas for one or more tables from a Deephaven session.
+
+**Parameters**:
+- `session_id` (required, string): ID of the Deephaven session to query.
+- `table_names` (optional, list[string]): List of table names to retrieve schemas for. If None, all available tables will be queried.
+
+**Returns**:
+```json
+{
+  "success": true,
+  "schemas": [
+    {
+      "success": true,
+      "table": "table_name",
+      "schema": [
+        {"name": "column1", "type": "int"},
+        {"name": "column2", "type": "string"}
+      ],
+      "error": null,
+      "isError": false
+    },
+    {
+      "success": false,
+      "table": "missing_table",
+      "schema": null,
+      "error": "Table not found",
+      "isError": true
+    }
+  ]
+}
+```
+
+On complete failure (e.g., session not available):
+```json
+{
+  "success": false,
+  "error": "Failed to connect to session: ...",
+  "isError": true
+}
+```
+
+**Description**: This tool returns the column schemas for the specified tables in the given Deephaven session. If no table_names are provided, schemas for all tables in the session are returned. The tool maintains the ability to report individual table successes/failures while providing an overall operation status.
+
+##### `run_script`
+
+**Purpose**: Execute a script on a specified Deephaven session.
+
+**Parameters**:
+- `session_id` (required, string): ID of the Deephaven session on which to execute the script.
+- `script` (optional, string): The Python script to execute.
+- `script_path` (optional, string): Path to a Python script file to execute.
+
+**Note**: Exactly one of `script` or `script_path` must be provided.
+
+**Returns**:
+```json
+{
+  "success": true
+}
+```
+
+On error:
+```json
+{
+  "success": false,
+  "error": "Error message",
+  "isError": true
+}
+```
+
+**Description**: This tool executes a Python script on the specified Deephaven session. The script can be provided either as a string or as a file path. The tool only returns success status and does not include stdout or created tables in the response.
 
 ##### `pip_packages`
 
-**Purpose**: Retrieve all installed pip packages (name and version) from a specified worker.
+**Purpose**: Retrieve installed pip packages from a specified Deephaven session.
 
 **Parameters**:
-- `worker_name` (str): The name of the Deephaven worker to query.
+- `session_id` (required, string): ID of the Deephaven session to query.
 
 **Returns**:
 ```json
@@ -615,7 +705,8 @@ On error:
   "success": true,
   "result": [
     {"package": "numpy", "version": "1.25.0"},
-    {"package": "pandas", "version": "2.0.1"}
+    {"package": "pandas", "version": "2.1.0"},
+    {"package": "deephaven-core", "version": "0.36.1"}
   ]
 }
 ```
@@ -624,13 +715,12 @@ On error:
 ```json
 {
   "success": false,
-  "error": "Table not found",
+  "error": "Error message",
   "isError": true
 }
 ```
 
-**Description**:  
-This tool connects to the specified Deephaven worker, gathers installed pip packages using Python's [`importlib.metadata`](https://docs.python.org/3/library/importlib.metadata.html), and returns them as a list of dictionaries.
+**Description**: This tool queries the specified Deephaven session for information about installed pip packages using importlib.metadata. It executes a query on the session to retrieve package names and versions for all installed Python packages available in that session's environment.
 
 #### Systems Server Test Components
 
@@ -914,7 +1004,7 @@ The [MCP Inspector](https://github.com/modelcontextprotocol/inspector) is a web-
 4. **Connect to the MCP server via SSE**:
    - Open the Inspector in your browser (URL shown in terminal, typically `http://localhost:6274`)
    - In the Inspector UI, select "Connect" and enter the SSE URL (e.g., `http://localhost:8000/sse`)
-   - Explore and invoke tools like `refresh`, `describe_workers`, `table_schemas` and `run_script`
+   - Explore and invoke tools like `refresh`, `enterprise_systems_status`, `list_sessions`, `table_schemas` and `run_script`
 
 #### With Docs Server
 
@@ -1030,10 +1120,10 @@ Both servers can be used programmatically within Python applications:
 from deephaven_mcp.mcp_systems_server import mcp_server, run_server
 
 # Use the MCP tools directly (synchronous)
-from deephaven_mcp.mcp_systems_server._mcp import refresh, describe_workers, table_schemas, run_script
+from deephaven_mcp.mcp_systems_server._mcp import refresh, enterprise_systems_status, list_sessions, get_session_details, table_schemas, run_script, pip_packages
 
-# Example: Get status of all workers
-result = describe_workers(context)  # Requires MCP context
+# Example: Get status of all enterprise systems
+result = enterprise_systems_status(context)  # Requires MCP context
 
 # Or start the server with a specific transport
 run_server(transport="sse")  # Starts SSE server

@@ -92,7 +92,7 @@ def test_redact_enterprise_system_config_without_password():
     config = {
         "connection_json_url": "http://test",
         "auth_type": "private_key",
-        "private_key": "/path/to/key",
+        "private_key_path": "/path/to/key",
     }
     redacted = redact_enterprise_system_config(config)
 
@@ -281,16 +281,16 @@ def test_redact_enterprise_systems_map_item_is_none():
         (
             "private_key_missing_key",  # Renamed from private_key_missing_key_path
             {"connection_json_url": "http://test", "auth_type": "private_key"},
-            r"Enterprise system 'private_key_missing_key' with auth_type 'private_key' must define 'private_key'",
+            r"Enterprise system 'private_key_missing_key' with auth_type 'private_key' must define 'private_key_path'",
         ),
         (
             "private_key_invalid_key_type",  # Renamed from private_key_invalid_key_path_type
             {
                 "connection_json_url": "http://test",
                 "auth_type": "private_key",
-                "private_key": 123,
+                "private_key_path": 123,
             },
-            r"Field 'private_key' for enterprise system 'private_key_invalid_key_type' \(auth_type: private_key\) must be of type str",
+            r"Field 'private_key_path' for enterprise system 'private_key_invalid_key_type' \(auth_type: private_key\) must be of type str",
         ),
         # Test case for unknown fields (they should log warnings but not fail validation)
         # This is a valid config that should pass validation with warnings
@@ -359,7 +359,7 @@ def test_single_enterprise_system_invalid_configs(
             "private_key_with_password",
             "private_key",
             {
-                "private_key": "/path/key.pem",
+                "private_key_path": "/path/key.pem",
                 "password": "secret",
             },  # Changed private_key_path to private_key
             "password",
@@ -393,7 +393,7 @@ def test_validate_single_system_unknown_key_warnings(
         base_config["username"] = "dummy_user"
         base_config["password_env_var"] = "DUMMY_PASS_ENV_VAR"
     elif auth_type == "private_key":
-        base_config["private_key"] = "/dummy/path/to/key.pem"
+        base_config["private_key_path"] = "/dummy/path/to/key.pem"
 
     full_system_config = {**base_config, **config_override}
     config_to_validate = {system_name: full_system_config}
