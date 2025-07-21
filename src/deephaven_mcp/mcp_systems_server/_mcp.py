@@ -4,7 +4,7 @@ Deephaven MCP Systems Tools Module.
 This module defines the set of MCP (Multi-Cluster Platform) tool functions for managing and interacting with Deephaven workers in a multi-server environment. All functions are designed for use as MCP tools and are decorated with @mcp_server.tool().
 
 Key Features:
-    - Structured, protocol-compliant error handling: all tools return dicts or lists of dicts with 'success' and 'error' keys as appropriate.
+    - Structured, protocol-compliant error handling: all tools return consistent dict structures with 'success' and 'error' keys as appropriate.
     - Async, coroutine-safe operations for configuration and session management.
     - Detailed logging for all tool invocations, results, and errors.
     - All docstrings are optimized for agentic and programmatic consumption and describe both user-facing and technical details.
@@ -19,8 +19,9 @@ Tools Provided:
     - pip_packages: Retrieve all installed pip packages (name and version) from a specified Deephaven session using importlib.metadata, returned as a list of dicts.
 
 Return Types:
-    - All tools return structured dicts or lists of dicts, never raise exceptions to the MCP layer.
+    - All tools return structured dict objects, never raise exceptions to the MCP layer.
     - On success, 'success': True. On error, 'success': False and 'error': str.
+    - Tools that return multiple items use nested structures (e.g., 'systems', 'sessions', 'schemas' arrays within the main dict).
 
 See individual tool docstrings for full argument, return, and error details.
 """
@@ -232,7 +233,7 @@ async def enterprise_systems_status(
       - "MISCONFIGURED": Configuration errors prevent proper system operation
       - "UNKNOWN": Unexpected errors occurred during status determination
 
-    Returns a list of all configured enterprise systems, each with:
+    Returns a structured dict containing all configured enterprise systems in the 'systems' field. Each system has:
       - name (string): System name identifier
       - status (string): ResourceLivenessStatus as string ("ONLINE", "OFFLINE", etc.)
       - detail (string, optional): Explanation message for the status, especially useful for troubleshooting
@@ -340,7 +341,7 @@ async def list_sessions(context: Context) -> dict:
     This is a lightweight operation that doesn't connect to sessions or check their status.
     For detailed information about a specific session, use get_session_details.
 
-    Returns a list of all sessions, each with:
+    Returns a structured dict containing all sessions in the 'sessions' field. Each session has:
       - session_id (fully qualified session name, used for lookup in get_session_details)
       - type ("community" or "enterprise")
       - source (community source or enterprise factory)
@@ -681,7 +682,7 @@ async def get_session_details(
 @mcp_server.tool()
 async def table_schemas(
     context: Context, session_id: str, table_names: list[str] | None = None
-) -> list[dict[str, object]]:
+) -> dict:
     """
     MCP Tool: Retrieve schemas for one or more tables from a Deephaven session.
 
@@ -694,23 +695,28 @@ async def table_schemas(
             If None, all available tables will be queried. Defaults to None.
 
     Returns:
-        list: List of dicts, one per table. Each dict contains:
-            - 'success' (bool): True if schema retrieval succeeded, False otherwise.
-            - 'table' (str or None): Table name. None if the operation failed for all tables.
-            - 'schema' (list[dict], optional): List of column definitions (name/type pairs) if successful.
-            - 'error' (str, optional): Error message if schema retrieval failed for this table.
-            - 'isError' (bool, optional): Present and True if this is an error response (i.e., success is False).
+        dict: Structured result object with keys:
+            - 'success' (bool): True if the operation completed, False if it failed entirely.
+            - 'schemas' (list[dict], optional): List of per-table results if operation completed. Each contains:
+                - 'success' (bool): True if this table's schema was retrieved successfully
+                - 'table' (str): Table name
+                - 'schema' (list[dict], optional): List of column definitions (name/type pairs) if successful
+                - 'error' (str, optional): Error message if this table's schema retrieval failed
+                - 'isError' (bool, optional): Present and True if this table had an error
+            - 'error' (str, optional): Error message if the entire operation failed.
+            - 'isError' (bool, optional): Present and True if this is an error response.
 
-    Example Successful Response:
-        [
-            {'success': True, 'table': 'MyTable', 'schema': [{'name': 'Col1', 'type': 'int'}, ...]},
-            {'success': False, 'table': 'MissingTable', 'error': 'Table not found', 'isError': True}
-        ]
+    Example Successful Response (mixed results):
+        {
+            'success': True,
+            'schemas': [
+                {'success': True, 'table': 'MyTable', 'schema': [{'name': 'Col1', 'type': 'int'}, ...]},
+                {'success': False, 'table': 'MissingTable', 'error': 'Table not found', 'isError': True}
+            ]
+        }
 
     Example Error Response (total failure):
-        [
-            {'success': False, 'table': None, 'error': 'Failed to connect to worker: ...', 'isError': True}
-        ]
+        {'success': False, 'error': 'Failed to connect to worker: ...', 'isError': True}
 
     Logging:
         - Logs tool invocation, per-table results, and error details at INFO/ERROR levels.
@@ -718,7 +724,7 @@ async def table_schemas(
     _LOGGER.info(
         f"[mcp_systems_server:table_schemas] Invoked: session_id={session_id!r}, table_names={table_names!r}"
     )
-    results = []
+    schemas = []
     try:
         session_registry: CombinedSessionRegistry = (
             context.request_context.lifespan_context["session_registry"]
@@ -748,7 +754,7 @@ async def table_schemas(
                     {"name": row["Name"], "type": row["DataType"]}
                     for row in meta_table.to_pylist()
                 ]
-                results.append({"success": True, "table": table_name, "schema": schema})
+                schemas.append({"success": True, "table": table_name, "schema": schema})
                 _LOGGER.info(
                     f"[mcp_systems_server:table_schemas] Success: Retrieved schema for table '{table_name}'"
                 )
@@ -757,7 +763,7 @@ async def table_schemas(
                     f"[mcp_systems_server:table_schemas] Failed to get schema for table '{table_name}': {table_exc!r}",
                     exc_info=True,
                 )
-                results.append(
+                schemas.append(
                     {
                         "success": False,
                         "table": table_name,
@@ -765,16 +771,17 @@ async def table_schemas(
                         "isError": True,
                     }
                 )
+
         _LOGGER.info(
-            f"[mcp_systems_server:table_schemas] Returning schemas: {results!r}"
+            f"[mcp_systems_server:table_schemas] Returning {len(schemas)} table results"
         )
-        return results
+        return {"success": True, "schemas": schemas}
     except Exception as e:
         _LOGGER.error(
             f"[mcp_systems_server:table_schemas] Failed for session: '{session_id}', error: {e!r}",
             exc_info=True,
         )
-        return [{"success": False, "table": None, "error": str(e), "isError": True}]
+        return {"success": False, "error": str(e), "isError": True}
 
 
 @mcp_server.tool()
@@ -869,8 +876,9 @@ async def pip_packages(context: Context, session_id: str) -> dict:
     """
     MCP Tool: Retrieve installed pip packages from a specified Deephaven session.
 
-    This tool queries the specified Deephaven session for information about installed pip packages.
-    It returns a dictionary containing package names, versions, and other metadata.
+    This tool queries the specified Deephaven session for information about installed pip packages
+    using importlib.metadata. It executes a query on the session to retrieve package names and versions
+    for all installed Python packages available in that session's environment.
 
     Args:
         context (Context): The MCP context object.

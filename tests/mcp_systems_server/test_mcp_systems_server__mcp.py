@@ -263,8 +263,8 @@ async def test_table_schemas_empty_table_names():
     session_registry.get = AsyncMock(return_value=mock_session_manager)
     context = MockContext({"session_registry": session_registry})
     res = await mcp_mod.table_schemas(context, session_id="worker", table_names=[])
-    assert isinstance(res, list)
-    assert res == []
+    assert isinstance(res, dict)
+    assert res == {"success": True, "schemas": []}
 
 
 @pytest.mark.asyncio
@@ -283,8 +283,8 @@ async def test_table_schemas_no_tables():
     session_registry.get = AsyncMock(return_value=mock_session_manager)
     context = MockContext({"session_registry": session_registry})
     res = await mcp_mod.table_schemas(context, session_id="worker", table_names=None)
-    assert isinstance(res, list)
-    assert res == []
+    assert isinstance(res, dict)
+    assert res == {"success": True, "schemas": []}
 
 
 @pytest.mark.asyncio
@@ -326,11 +326,13 @@ async def test_table_schemas_success():
     mock_session_manager.get.assert_awaited_once()
 
     # Verify the result
-    assert len(result) == 1
-    assert result[0]["success"] is True
-    assert result[0]["table"] == "table1"
-    assert result[0]["schema"][0]["name"] == "table1"
-    assert result[0]["schema"][0]["type"] == "int"
+    assert isinstance(result, dict)
+    assert result["success"] is True
+    assert len(result["schemas"]) == 1
+    assert result["schemas"][0]["success"] is True
+    assert result["schemas"][0]["table"] == "table1"
+    assert result["schemas"][0]["schema"][0]["name"] == "table1"
+    assert result["schemas"][0]["schema"][0]["type"] == "int"
 
 
 @pytest.mark.asyncio
@@ -370,16 +372,18 @@ async def test_table_schemas_all_tables():
         result = await mcp_mod.table_schemas(context, session_id="worker")
 
     # Should return results for both tables in the dummy_session.tables list
-    assert len(result) == 2
-    assert result[0]["success"] is True
-    assert result[1]["success"] is True
-    assert result[0]["table"] in ["t1", "t2"]
-    assert result[1]["table"] in ["t1", "t2"]
-    assert result[0]["table"] != result[1]["table"]
-    assert result[0]["schema"][0]["name"] in ["t1", "t2"]
-    assert result[1]["schema"][0]["name"] in ["t1", "t2"]
-    assert result[0]["schema"][0]["type"] == "int"
-    assert result[1]["schema"][0]["type"] == "int"
+    assert isinstance(result, dict)
+    assert result["success"] is True
+    assert len(result["schemas"]) == 2
+    assert result["schemas"][0]["success"] is True
+    assert result["schemas"][1]["success"] is True
+    assert result["schemas"][0]["table"] in ["t1", "t2"]
+    assert result["schemas"][1]["table"] in ["t1", "t2"]
+    assert result["schemas"][0]["table"] != result["schemas"][1]["table"]
+    assert result["schemas"][0]["schema"][0]["name"] in ["t1", "t2"]
+    assert result["schemas"][1]["schema"][0]["name"] in ["t1", "t2"]
+    assert result["schemas"][0]["schema"][0]["type"] == "int"
+    assert result["schemas"][1]["schema"][0]["type"] == "int"
 
 
 @pytest.mark.asyncio
@@ -423,10 +427,16 @@ async def test_table_schemas_schema_key_error():
     mock_session_manager.get.assert_awaited_once()
 
     # Verify that the function returns the expected error about the missing keys
-    assert result[0]["success"] is False
-    assert "Name" in result[0]["error"] or "'Name'" in result[0]["error"]
+    assert isinstance(result, dict)
+    assert result["success"] is True  # Overall operation succeeded
+    assert len(result["schemas"]) == 1
+    assert result["schemas"][0]["success"] is False
+    assert (
+        "Name" in result["schemas"][0]["error"]
+        or "'Name'" in result["schemas"][0]["error"]
+    )
     # Don't check for "required" word as the exact error message may vary
-    assert "isError" in result[0] and result[0]["isError"] is True
+    assert "isError" in result["schemas"][0] and result["schemas"][0]["isError"] is True
 
 
 @pytest.mark.asyncio
@@ -446,10 +456,10 @@ async def test_table_schemas_session_error():
         }
     )
     res = await mcp_mod.table_schemas(context, session_id="worker", table_names=["t1"])
-    assert isinstance(res, list)
-    assert res[0]["success"] is False
-    assert res[0]["isError"] is True
-    assert "fail" in res[0]["error"]
+    assert isinstance(res, dict)
+    assert res["success"] is False
+    assert res["isError"] is True
+    assert "fail" in res["error"]
 
 
 # === run_script ===
