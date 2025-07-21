@@ -228,7 +228,7 @@ class ResourceLivenessStatus(enum.Enum):
     UNKNOWN = 5
 
     def __str__(self):
-        return self.name.lower()
+        return self.name
 
 
 class SystemType(str, enum.Enum):
@@ -281,6 +281,10 @@ class SystemType(str, enum.Enum):
 
     COMMUNITY = "community"
     ENTERPRISE = "enterprise"
+
+    def __str__(self):
+        return self.name
+
 
 
 class BaseItemManager(Generic[T], ABC):

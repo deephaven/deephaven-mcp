@@ -7,6 +7,7 @@ This module provides coroutine-compatible utility functions for querying Deephav
     - `get_table(session, table_name)`: Retrieve a Deephaven table as a pyarrow.Table snapshot.
     - `get_meta_table(session, table_name)`: Retrieve a table's schema/meta table as a pyarrow.Table snapshot.
     - `get_pip_packages_table(session)`: Get a table of installed pip packages as a pyarrow.Table.
+    - `get_programming_language_version_table(session)`: Get a table with Python version information as a pyarrow.Table.
     - `get_dh_versions(session)`: Get the installed Deephaven Core and Core+ version strings from the session's pip environment.
 
 **Notes:**
@@ -22,6 +23,7 @@ import textwrap
 
 import pyarrow
 
+from deephaven_mcp._exceptions import UnsupportedOperationError
 from deephaven_mcp.client._session import BaseSession
 
 _LOGGER = logging.getLogger(__name__)
@@ -90,6 +92,83 @@ async def get_meta_table(session: BaseSession, table_name: str) -> pyarrow.Table
     return arrow_meta_table
 
 
+async def get_programming_language_version_table(session: BaseSession) -> pyarrow.Table:
+    """
+    Asynchronously retrieve Python version information from a Deephaven session as a pyarrow.Table.
+
+    This function runs a Python script in the given session to create a temporary table with Python version details,
+    then retrieves it as a pyarrow.Table snapshot. Useful for environment inspection and compatibility checking.
+
+    Args:
+        session (BaseSession): An active Deephaven session in which to run the script and retrieve the resulting table.
+
+    Returns:
+        pyarrow.Table: A table with columns for Python version information, including:
+            - 'Version' (str): The short Python version string (e.g., '3.9.7')
+            - 'Major' (int): Major version number
+            - 'Minor' (int): Minor version number
+            - 'Micro' (int): Micro/patch version number
+            - 'Implementation' (str): Python implementation (e.g., 'CPython')
+            - 'FullVersion' (str): The complete Python version string with build info
+
+    Raises:
+        UnsupportedOperationError: If the session is not a Python session.
+        Exception: If the script fails to execute, the table cannot be retrieved, or conversion to Arrow fails.
+
+    Example:
+        >>> arrow_table = await get_programming_language_version_table(session)
+
+    Note:
+        - The temporary table '_python_version_table' is created in the session and is not automatically deleted.
+        - Logging is performed at DEBUG level for script execution and table retrieval.
+        - Currently only supports Python sessions. Support for other programming languages may be added in the future.
+    """
+    # Check if the session is a Python session
+    if session.programming_language.lower() != "python":
+        # TODO: Add support for other programming languages.
+        _LOGGER.warning(
+            "[queries:get_programming_language_version_table] Unsupported programming language: %s",
+            session.programming_language
+        )
+        raise UnsupportedOperationError(
+            f"get_programming_language_version_table only supports Python sessions, "
+            f"but session uses {session.programming_language}."
+        )
+    
+    script = textwrap.dedent(
+        """
+        from deephaven import new_table, string_col, int_col
+        import sys
+        import platform
+
+        def _make_python_version_table():
+            version_info = sys.version_info
+            version_str = sys.version.split()[0]
+            implementation = platform.python_implementation()
+            
+            return new_table([
+                string_col('Version', [version_str]),
+                int_col('Major', [version_info.major]),
+                int_col('Minor', [version_info.minor]),
+                int_col('Micro', [version_info.micro]),
+                string_col('Implementation', [implementation]),
+                string_col('FullVersion', [sys.version]),
+            ])
+
+        _python_version_table = _make_python_version_table()
+        """
+    )
+    _LOGGER.debug(
+        "[queries:get_programming_language_version_table] Running Python version script in session..."
+    )
+    await session.run_script(script)
+    _LOGGER.debug("[queries:get_programming_language_version_table] Script executed successfully.")
+    arrow_table = await get_table(session, "_python_version_table")
+    _LOGGER.debug(
+        "[queries:get_programming_language_version_table] Table '_python_version_table' retrieved successfully."
+    )
+    return arrow_table
+
 async def get_pip_packages_table(session: BaseSession) -> pyarrow.Table:
     """
     Asynchronously retrieve a table of installed pip packages from a Deephaven session as a pyarrow.Table.
@@ -103,6 +182,7 @@ async def get_pip_packages_table(session: BaseSession) -> pyarrow.Table:
         pyarrow.Table: A table with columns 'Package' (str) and 'Version' (str), listing all installed pip packages.
 
     Raises:
+        UnsupportedOperationError: If the session is not a Python session.
         Exception: If the script fails to execute, the table cannot be retrieved, or conversion to Arrow fails.
 
     Example:
@@ -111,7 +191,19 @@ async def get_pip_packages_table(session: BaseSession) -> pyarrow.Table:
     Note:
         - The temporary table '_pip_packages_table' is created in the session and is not automatically deleted.
         - Logging is performed at DEBUG level for script execution and table retrieval.
+        - Currently only supports Python sessions. Support for other programming languages may be added in the future.
     """
+    # Check if the session is a Python session
+    if session.programming_language.lower() != "python":
+        _LOGGER.warning(
+            "[queries:get_pip_packages_table] Unsupported programming language: %s",
+            session.programming_language
+        )
+        raise UnsupportedOperationError(
+            f"get_pip_packages_table only supports Python sessions, "
+            f"but session uses {session.programming_language}."
+        )
+    
     script = textwrap.dedent(
         """
         from deephaven import new_table, string_col
@@ -158,12 +250,26 @@ async def get_dh_versions(session: BaseSession) -> tuple[str | None, str | None]
             - Index 1: The version string for Deephaven Core+, or None if not found.
 
     Raises:
+        UnsupportedOperationError: If the session is not a Python session.
         Exception: If the pip packages table cannot be retrieved.
 
     Note:
         - Returns (None, None) if neither package is found in the session environment.
         - Logging is performed at DEBUG level for entry, exit, and version reporting.
+        - Currently only supports Python sessions. Support for other programming languages may be added in the future.
     """
+    # Check if the session is a Python session
+    if session.programming_language.lower() != "python":
+        # TODO: Add support for other programming languages.
+        _LOGGER.warning(
+            "[queries:get_dh_versions] Unsupported programming language: %s",
+            session.programming_language
+        )
+        raise UnsupportedOperationError(
+            f"get_dh_versions only supports Python sessions, "
+            f"but session uses {session.programming_language}."
+        )
+    
     _LOGGER.debug(
         "[queries:get_dh_versions] Retrieving Deephaven Core and Core+ versions from session..."
     )
@@ -198,3 +304,4 @@ async def get_dh_versions(session: BaseSession) -> tuple[str | None, str | None]
         dh_coreplus_version,
     )
     return dh_core_version, dh_coreplus_version
+

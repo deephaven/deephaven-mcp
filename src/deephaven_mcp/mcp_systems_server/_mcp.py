@@ -11,10 +11,12 @@ Key Features:
 
 Tools Provided:
     - refresh: Reload configuration and clear all sessions atomically.
-    - worker_names: List all configured Deephaven worker names.
-    - table_schemas: Retrieve schemas for one or more tables from a worker (requires worker_name).
-    - run_script: Execute a script on a specified Deephaven worker (requires worker_name).
-    - pip_packages: Retrieve all installed pip packages (name and version) from a specified Deephaven worker using importlib.metadata, returned as a list of dicts.
+    - enterprise_systems_status: List all enterprise (CorePlus) systems with their status and configuration details.
+    - list_sessions: List all sessions (community and enterprise) with basic metadata.
+    - get_session_details: Get detailed information about a specific session.
+    - table_schemas: Retrieve schemas for one or more tables from a session (requires session_id).
+    - run_script: Execute a script on a specified Deephaven session (requires session_id).
+    - pip_packages: Retrieve all installed pip packages (name and version) from a specified Deephaven session using importlib.metadata, returned as a list of dicts.
 
 Return Types:
     - All tools return structured dicts or lists of dicts, never raise exceptions to the MCP layer.
@@ -31,10 +33,9 @@ from contextlib import asynccontextmanager
 import aiofiles
 from mcp.server.fastmcp import Context, FastMCP
 
-from deephaven_mcp import config, queries
-from deephaven_mcp.resource_manager import CommunitySessionRegistry
+from deephaven_mcp import queries
 from deephaven_mcp.resource_manager._registry_combined import CombinedSessionRegistry
-from deephaven_mcp.config._enterprise_system import redact_enterprise_system_config
+from deephaven_mcp.config import ConfigManager, get_config_section, redact_enterprise_system_config
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -45,35 +46,39 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
     Async context manager for the FastMCP server application lifespan.
 
     This function manages the startup and shutdown lifecycle of the MCP server. It is responsible for:
-      - Instantiating a ConfigManager and SessionManager for Deephaven worker configuration and session management.
+      - Instantiating a ConfigManager and CombinedSessionRegistry for Deephaven worker configuration and session management.
       - Creating a coroutine-safe asyncio.Lock (refresh_lock) for atomic configuration/session refreshes.
       - Loading and validating the Deephaven worker configuration before the server accepts requests.
-      - Yielding a context dictionary containing config_manager, session_manager, and refresh_lock for use by all tool functions via MCPRequest.context.
+      - Yielding a context dictionary containing config_manager, session_registry, and refresh_lock for use by all tool functions via dependency injection.
       - Ensuring all session resources are properly cleaned up on shutdown.
 
-    Startup actions:
-      - Loads and validates the Deephaven worker configuration using the ConfigManager.
-      - Logs progress and yields a context dict containing the loaded managers/lock.
+    Startup Process:
+      - Logs server startup initiation.
+      - Creates and initializes a ConfigManager instance.
+      - Loads and validates the Deephaven worker configuration.
+      - Creates a CombinedSessionRegistry for managing both community and enterprise sessions.
+      - Creates an asyncio.Lock for coordinating refresh operations.
+      - Yields the context dictionary for use by MCP tools.
 
-    Shutdown actions:
+    Shutdown Process:
       - Logs server shutdown initiation.
-      - Clears all active Deephaven sessions using the SessionManager.
+      - Closes all active Deephaven sessions via the session registry.
       - Logs completion of server shutdown.
 
     Args:
-        server: The FastMCP server instance (required by the FastMCP API, not directly used).
+        server (FastMCP): The FastMCP server instance (required by the FastMCP lifespan API).
 
     Yields:
-        dict: A context dictionary with the following keys for use in all MCP tool requests:
-            - 'config_manager': The ConfigManager instance for worker configuration.
-            - 'session_manager': The SessionManager instance for session management.
-            - 'refresh_lock': An asyncio.Lock for atomic refresh operations.
+        dict[str, object]: A context dictionary with the following keys for dependency injection into MCP tool requests:
+            - 'config_manager' (ConfigManager): Instance for accessing worker configuration.
+            - 'session_registry' (CombinedSessionRegistry): Instance for managing all session types.
+            - 'refresh_lock' (asyncio.Lock): Lock for atomic refresh operations across tools.
     """
     _LOGGER.info("Starting MCP server '%s'", server.name)
     session_registry = None
 
     try:
-        config_manager = config.ConfigManager()
+        config_manager = ConfigManager()
 
         # Make sure config can be loaded before starting
         _LOGGER.info("Loading configuration...")
@@ -102,10 +107,10 @@ mcp_server = FastMCP("deephaven-mcp-systems", lifespan=app_lifespan)
 """
 FastMCP Server Instance for Deephaven MCP Systems Tools
 
-This object is the singleton FastMCP server for the Deephaven MCP community toolset. It is responsible for registering and exposing all MCP tool functions defined in this module (such as refresh, worker_names, table_schemas, and run_script) to the MCP runtime environment.
+This object is the singleton FastMCP server for the Deephaven MCP systems toolset. It is responsible for registering and exposing all MCP tool functions defined in this module (such as refresh, enterprise_systems_status, list_sessions, get_session_details, table_schemas, run_script, and pip_packages) to the MCP runtime environment.
 
 Key Details:
-    - The server is instantiated with the name 'deephaven-mcp-community', which uniquely identifies this toolset in the MCP ecosystem.
+    - The server is instantiated with the name 'deephaven-mcp-systems', which uniquely identifies this toolset in the MCP ecosystem.
     - All functions decorated with @mcp_server.tool() are automatically registered as MCP tools and made available for remote invocation.
     - The server manages protocol compliance, tool metadata, and integration with the broader MCP infrastructure.
     - This object should not be instantiated more than once per process/module.
@@ -117,13 +122,13 @@ Usage:
 See the module-level docstring for an overview of the available tools and error handling conventions.
 """
 
-
+#TODO: remove refresh?
 @mcp_server.tool()
 async def refresh(context: Context) -> dict:
     """
     MCP Tool: Reload and refresh Deephaven worker configuration and session cache.
 
-    This tool atomically reloads the Deephaven worker configuration from disk and clears all active session objects for all workers. It uses dependency injection via the MCPRequest context to access the config manager, session manager, and a coroutine-safe refresh lock (all provided by app_lifespan). This ensures that any changes to the configuration (such as adding, removing, or updating workers) are applied immediately and that all sessions are reopened to reflect the new configuration. The operation is protected by the provided lock to prevent concurrent refreshes, reducing race conditions.
+    This tool atomically reloads the Deephaven worker configuration from disk and clears all active session objects for all workers. It uses dependency injection via the Context to access the config manager, session registry, and a coroutine-safe refresh lock (all provided by app_lifespan). This ensures that any changes to the configuration (such as adding, removing, or updating workers) are applied immediately and that all sessions are reopened to reflect the new configuration. The operation is protected by the provided lock to prevent concurrent refreshes, reducing race conditions.
 
     This tool is typically used by administrators or automated agents to force a full reload of the MCP environment after configuration changes.
 
@@ -152,9 +157,9 @@ async def refresh(context: Context) -> dict:
     # guarantee atomicity with respect to other config/session operations, but
     # it does ensure that only one refresh runs at a time and reduces race risk.
     try:
-        refresh_lock = context.request_context.lifespan_context["refresh_lock"]
-        config_manager = context.request_context.lifespan_context["config_manager"]
-        session_registry = context.request_context.lifespan_context["session_registry"]
+        refresh_lock: asyncio.Lock = context.request_context.lifespan_context["refresh_lock"]
+        config_manager: ConfigManager = context.request_context.lifespan_context["config_manager"]
+        session_registry: CombinedSessionRegistry = context.request_context.lifespan_context["session_registry"]
 
         async with refresh_lock:
             await config_manager.clear_config_cache()
@@ -243,18 +248,23 @@ async def enterprise_systems_status(context: Context, attempt_to_connect: bool =
     """
     _LOGGER.info("[enterprise_systems_status] Invoked.")
     try:
-        session_registry = context.request_context.lifespan_context["session_registry"]
-        config_manager = context.request_context.lifespan_context["config_manager"]
+        session_registry: CombinedSessionRegistry = context.request_context.lifespan_context["session_registry"]
+        config_manager: ConfigManager = context.request_context.lifespan_context["config_manager"]
         # Get all factories (enterprise systems)
         enterprise_registry = session_registry._enterprise_registry
         factories = await enterprise_registry.get_all()
         config = await config_manager.get_config()
-        systems_config = config.get("enterprise", {}).get("factories", {})
+        
+        try:
+            systems_config = get_config_section(config, ["enterprise", "systems"])
+        except KeyError:
+            systems_config = {}
+
         systems = []
         for name, factory in factories.items():
             # Use liveness_status() for detailed health information
-            status_enum, detail = await factory.liveness_status(ensure_item=attempt_to_connect)
-            status = status_enum.name  # Convert enum to string ("ONLINE", "OFFLINE", etc.)
+            status_enum, liveness_detail = await factory.liveness_status(ensure_item=attempt_to_connect)
+            liveness_status = status_enum.name 
             
             # Also get simple is_alive boolean
             is_alive = await factory.is_alive()
@@ -265,14 +275,14 @@ async def enterprise_systems_status(context: Context, attempt_to_connect: bool =
             
             system_info = {
                 "name": name,
-                "status": status,
+                "liveness_status": liveness_status,
                 "is_alive": is_alive,
                 "config": redacted_config
             }
             
             # Include detail if available
-            if detail is not None:
-                system_info["detail"] = detail
+            if liveness_detail is not None:
+                system_info["liveness_detail"] = liveness_detail
                 
             systems.append(system_info)
         return {"success": True, "systems": systems}
@@ -281,135 +291,231 @@ async def enterprise_systems_status(context: Context, attempt_to_connect: bool =
         return {"success": False, "error": str(e), "isError": True}
 
 
-#TODO: rework to describe a single worker?
-#TODO: look at what is returned
 @mcp_server.tool()
-async def describe_workers(context: Context) -> dict:
+async def list_sessions(context: Context) -> dict:
     """
-    MCP Tool: Describe all configured Deephaven workers, including availability and programming language.
+    MCP Tool: List all sessions (community and enterprise) with basic metadata.
+    
+    This is a lightweight operation that doesn't connect to sessions or check their status.
+    For detailed information about a specific session, use get_session_details.
 
-    This tool returns the list of all worker names currently defined in the loaded configuration, along with:
-      - a boolean indicating whether each worker is available (i.e., a session can be created for the worker)
-      - the programming language for each worker (from the worker's 'session_type', defaulting to 'python')
-    Configuration and session management are accessed via dependency injection using the MCPRequest context.
+    Returns a list of all sessions, each with:
+      - session_id (fully qualified session name, used for lookup in get_session_details)
+      - type ("community" or "enterprise")
+      - source (community source or enterprise factory)
+      - session_name (session name)
 
     Args:
         context (Context): The FastMCP Context for this tool call.
 
     Returns:
-        dict: Structured result object with the following keys:
-            - 'success' (bool): True if statuses were retrieved successfully, False otherwise.
-            - 'result' (list[dict], optional): List of dicts with keys:
-                - 'worker' (str): Worker name
-                - 'available' (bool): Whether the worker is available
-                - 'programming_language' (str): Programming language for the worker (e.g., 'python', 'groovy')
-                - 'deephaven_core_version' (str, optional): Deephaven Core version (if available)
-                - 'deephaven_enterprise_version' (str, optional): Deephaven Core+ (Enterprise) version (if available)
-            - 'error' (str, optional): Error message if retrieval failed. Omitted on success.
-            - 'isError' (bool, optional): Present and True if this is an error response (i.e., success is False).
-
-    Example Successful Response:
-        {
-            'success': True,
-            'result': [
-                {'worker': 'local', 'available': True, 'programming_language': 'python', 'deephaven_core_version': '1.2.3', 'deephaven_enterprise_version': '4.5.6'},
-                {'worker': 'remote1', 'available': False, 'programming_language': 'groovy'}
-            ]
-        }
-
-    Example Error Response:
-        {
-            'success': False,
-            'error': "WorkerConfigurationError: Worker nonexistent not found in configuration",
-            'isError': True
-        }
-
-    Logging:
-        - Logs tool invocation, checked workers, statuses, and error details at INFO/ERROR levels.
+        dict: Structured result object with keys:
+            - 'success' (bool): True if retrieval succeeded, False otherwise.
+            - 'sessions' (list[dict]): List of session info dicts (see above).
+            - 'error' (str, optional): Error message if retrieval failed.
+            - 'isError' (bool, optional): Present and True if this is an error response.
     """
-    _LOGGER.info(
-        "[describe_workers] Invoked: retrieving status of all configured workers."
-    )
+    _LOGGER.info("[list_sessions] Invoked.")
     try:
-        config_manager = context.request_context.lifespan_context["config_manager"]
-        session_registry = context.request_context.lifespan_context["session_registry"]
-        full_config = await config_manager.get_config()
-        names = config.get_all_config_names(full_config, ["community", "sessions"])
+        session_registry: CombinedSessionRegistry = context.request_context.lifespan_context["session_registry"]
+        sessions = await session_registry.get_all()
         results = []
-        for name in names:
+        for fq_name, mgr in sessions.items():
             try:
-                # Try to get or create a session for the worker. If this fails, mark as unavailable.
-                session_manager = await session_registry.get(name)
-                session = await session_manager.get()
-                available = session is not None and session.is_alive
+                system_type = mgr.system_type
+                system_type_str = system_type.name
+                source = mgr.source
+                session_name = mgr.name
+                
+                results.append({
+                    "session_id": fq_name,
+                    "type": system_type_str,
+                    "source": source,
+                    "session_name": session_name,
+                })
             except Exception as e:
-                _LOGGER.warning(
-                    f"[describe_workers] Worker '{name}' unavailable: {e!r}"
-                )
-                available = False
-
-            # Get programming_language from worker config
-            try:
-                worker_cfg = await config_manager.get_community_session_config(name)
-                programming_language = str(
-                    worker_cfg.get("session_type", "python")
-                ).lower()
-            except Exception as e:
-                _LOGGER.error(
-                    f"[describe_workers] Could not retrieve config for worker '{name}': {e!r}"
-                )
-                return {"success": False, "error": str(e), "isError": True}
-
-            result_dict = {
-                "worker": name,
-                "available": available,
-                "programming_language": programming_language,
-            }
-
-            # Only add versions if Python
-            if programming_language == "python" and available:
-                try:
-                    core_version, enterprise_version = await queries.get_dh_versions(
-                        session
-                    )
-                    _LOGGER.debug(
-                        f"[describe_workers] Worker '{name}' versions: core={core_version}, enterprise={enterprise_version}"
-                    )
-                    if core_version is not None:
-                        result_dict["deephaven_core_version"] = core_version
-                    if enterprise_version is not None:
-                        result_dict["deephaven_enterprise_version"] = enterprise_version
-                except Exception as e:
-                    _LOGGER.warning(
-                        f"[describe_workers] Could not get versions for worker '{name}': {e!r}"
-                    )
-
-            # TODO: Support getting deephaven versions for other languages
-
-            results.append(result_dict)
-        _LOGGER.info(f"[describe_workers] Statuses: {results!r}")
-        return {"success": True, "result": results}
+                _LOGGER.warning(f"[list_sessions] Could not process session '{fq_name}': {e!r}")
+                results.append({"session_id": fq_name, "error": str(e)})
+        return {"success": True, "sessions": results}
     except Exception as e:
-        _LOGGER.error(
-            f"[describe_workers] Failed to get worker descriptions: {e!r}",
-            exc_info=True,
-        )
+        _LOGGER.error(f"[list_sessions] Failed: {e!r}", exc_info=True)
         return {"success": False, "error": str(e), "isError": True}
+
+
+
+@mcp_server.tool()
+async def get_session_details(context: Context, session_id: str, attempt_to_connect: bool = False) -> dict:
+    """
+    MCP Tool: Get detailed information about a specific session.
+    
+    This tool provides comprehensive status information about a specific session in the MCP environment.
+    It returns detailed health status along with explanatory details and configuration information.
+    
+    The tool supports two operational modes:
+    1. Default mode (attempt_to_connect=False): Quick status check of existing connections
+       - Fast response time, minimal resource usage
+       - Suitable for dashboards, monitoring, and non-critical status checks
+       - Will report sessions as unavailable if no connection exists
+        
+    2. Connection verification mode (attempt_to_connect=True): Active connection attempt
+       - Attempts to establish connections to verify actual availability
+       - Higher latency but more accurate status reporting
+       - Suitable for troubleshooting and pre-flight checks before critical operations
+       - May create new connections if none exist
+    
+    For a lightweight list of all sessions without detailed status, use list_sessions first.
+
+    Args:
+        context (Context): The FastMCP Context for this tool call.
+        session_id (str): The session identifier (fully qualified name) to get details for.
+        attempt_to_connect (bool, optional): Whether to attempt connecting to the session 
+            to verify its status. Defaults to False for faster response.
+
+    Returns:
+        dict: Structured result object with keys:
+            - 'success' (bool): True if retrieval succeeded, False otherwise.
+            - 'session' (dict): Session details including:
+                - session_id (fully qualified session name)
+                - type ("community" or "enterprise")
+                - source (community source or enterprise factory)
+                - session_name (session name)
+                - available (bool): Whether the session is available
+                - liveness_status (str): Status classification ("ONLINE", "OFFLINE", etc.)
+                - liveness_detail (str): Detailed explanation of the status
+                - programming_language (str, optional): The programming language of the session (e.g., "python", "groovy")
+                - programming_language_version (str, optional): Version of the programming language (e.g., "3.9.7")
+                - deephaven_community_version (str, optional): Version of Deephaven Community/Core (e.g., "0.24.0")
+                - deephaven_enterprise_version (str, optional): Version of Deephaven Enterprise/Core+/CorePlus (e.g., "0.24.0") 
+                  if the session is an enterprise installation
+            - 'error' (str, optional): Error message if retrieval failed.
+            - 'isError' (bool, optional): Present and True if this is an error response.
+            
+        Note: The version fields (programming_language_version, deephaven_community_version, 
+        deephaven_enterprise_version) will only be present if the session is available and 
+        the information could be retrieved successfully. Fields with null values are excluded 
+        from the response.
+    """
+    _LOGGER.info(f"[get_session_details] Invoked for session_id: {session_id}")
+    try:
+        session_registry: CombinedSessionRegistry = context.request_context.lifespan_context["session_registry"]
+        
+        # Get the specific session manager directly
+        try:
+            mgr = await session_registry.get(session_id)
+        except Exception as e:
+            return {
+                "success": False, 
+                "error": f"Session with ID '{session_id}' not found: {str(e)}", 
+                "isError": True
+            }
+        
+        try:
+            # Get basic metadata
+            system_type = mgr.system_type
+            system_type_str = system_type.name
+            source = mgr.source
+            session_name = mgr.name
+            
+            # Get liveness status and availability
+            try:
+                status, detail = await mgr.liveness_status(ensure_item=attempt_to_connect)
+                liveness_status = status.name
+                liveness_detail = detail
+                available = await mgr.is_alive()
+                _LOGGER.debug(f"[mcp_systems_server:get_session_details] Session '{session_id}' liveness: {liveness_status}, detail: {liveness_detail}")
+            except Exception as e:
+                _LOGGER.warning(f"[mcp_systems_server:get_session_details] Could not check liveness for '{session_id}': {e!r}")
+                available = False
+                liveness_status = "OFFLINE"
+                liveness_detail = str(e)
+            
+            # Get session object and extract additional properties
+            programming_language = None
+            
+            try:
+                if available:
+                    session = await mgr.get()
+                    programming_language = session.programming_language
+                    _LOGGER.debug(f"[mcp_systems_server:get_session_details] Session '{session_id}' programming_language: {programming_language}")
+            except Exception as e:
+                _LOGGER.warning(f"[mcp_systems_server:get_session_details] Could not get additional properties for '{session_id}': {e!r}")
+
+            #TODO: should the versions be cached?
+
+            programming_language_version = None
+
+            try:
+                if available:
+                    session = await mgr.get()
+                    programming_language_version = await queries.get_programming_language_version(session)
+                    _LOGGER.debug(f"[mcp_systems_server:get_session_details] Session '{session_id}' programming_language_version: {programming_language_version}")
+            except Exception as e:
+                _LOGGER.warning(f"[mcp_systems_server:get_session_details] Could not get programming language version for '{session_id}': {e!r}")
+
+            community_version = None
+            enterprise_version = None
+
+            try:
+                if available:
+                    session = await mgr.get()
+                    community_version, enterprise_version = await queries.get_dh_versions(session)
+                    _LOGGER.debug(f"[mcp_systems_server:get_session_details] Session '{session_id}' versions: community={community_version}, enterprise={enterprise_version}")
+            except Exception as e:
+                _LOGGER.warning(f"[mcp_systems_server:get_session_details] Could not get Deephaven versions for '{session_id}': {e!r}")
+
+            # Build session info dictionary with all potential fields
+            session_info_with_nones = {
+                "session_id": session_id,
+                "type": system_type_str,
+                "source": source,
+                "session_name": session_name,
+                "available": available,
+                "liveness_status": liveness_status,
+                "liveness_detail": liveness_detail,
+                "programming_language": programming_language,
+                "programming_language_version": programming_language_version,
+                "deephaven_community_version": community_version,
+                "deephaven_enterprise_version": enterprise_version
+            }
+            
+            # Filter out None values
+            session_info = {k: v for k, v in session_info_with_nones.items() if v is not None}
+            
+            return {"success": True, "session": session_info}
+            
+        except Exception as e:
+            _LOGGER.warning(f"[mcp_systems_server:get_session_details] Could not process session '{session_id}': {e!r}")
+            return {
+                "success": False, 
+                "error": f"Error processing session '{session_id}': {str(e)}", 
+                "isError": True
+            }
+            
+    except Exception as e:
+        _LOGGER.error(f"[mcp_systems_server:get_session_details] Failed: {e!r}", exc_info=True)
+        return {"success": False, "error": str(e), "isError": True}
+
+
+
+
+
+
 
 
 @mcp_server.tool()
 async def table_schemas(
-    context: Context, worker_name: str, table_names: list[str] | None = None
-) -> list:
+    context: Context, session_id: str, table_names: list[str] | None = None
+) -> dict:
     """
-    MCP Tool: Retrieve schemas for one or more tables from a Deephaven worker.
+    MCP Tool: Retrieve schemas for one or more tables from a Deephaven session.
 
-    This tool returns the column schemas for the specified tables in the given Deephaven worker. If no table_names are provided, schemas for all tables in the worker are returned. Session management is accessed via dependency injection from the MCPRequest context.
+    This tool returns the column schemas for the specified tables in the given Deephaven session. If no table_names are provided, schemas for all tables in the session are returned. Session management is accessed via dependency injection from the FastMCP Context.
 
     Args:
-        context (Context): The FastMCP Context for this tool call.
-        worker_name (str): Name of the Deephaven worker to query. This argument is required.
-        table_names (list[str], optional): List of table names to fetch schemas for. If None, all tables are included.
+        context (Context): The MCP context object.
+        session_id (str): ID of the Deephaven session to query. This argument is required.
+        table_names (list[str], optional): List of table names to retrieve schemas for.
+            If None, all available tables will be queried. Defaults to None.
 
     Returns:
         list: List of dicts, one per table. Each dict contains:
@@ -434,15 +540,14 @@ async def table_schemas(
         - Logs tool invocation, per-table results, and error details at INFO/ERROR levels.
     """
     _LOGGER.info(
-        f"[table_schemas] Invoked: worker_name={worker_name!r}, table_names={table_names!r}"
+        f"[table_schemas] Invoked: session_id={session_id!r}, table_names={table_names!r}"
     )
     results = []
     try:
-        # TODO: Package up these next 3 lines into a function
-        session_registry = context.request_context.lifespan_context["session_registry"]
-        session_manager = await session_registry.get(worker_name)
+        session_registry: CombinedSessionRegistry = context.request_context.lifespan_context["session_registry"]
+        session_manager = await session_registry.get(session_id)
         session = await session_manager.get()
-        _LOGGER.info(f"[table_schemas] Session established for worker: '{worker_name}'")
+        _LOGGER.info(f"[table_schemas] Session established for session: '{session_id}'")
 
         if table_names is not None:
             selected_table_names = table_names
@@ -484,7 +589,7 @@ async def table_schemas(
         return results
     except Exception as e:
         _LOGGER.error(
-            f"[table_schemas] Failed for worker: '{worker_name}', error: {e!r}",
+            f"[table_schemas] Failed for session: '{session_id}', error: {e!r}",
             exc_info=True,
         )
         return [{"success": False, "table": None, "error": str(e), "isError": True}]
@@ -493,20 +598,22 @@ async def table_schemas(
 @mcp_server.tool()
 async def run_script(
     context: Context,
-    worker_name: str,
+    session_id: str,
     script: str | None = None,
     script_path: str | None = None,
 ) -> dict:
     """
-    MCP Tool: Execute a script on a specified Deephaven worker.
+    MCP Tool: Execute a script on a specified Deephaven session.
 
-    This tool executes a user-provided script (either as a direct string or loaded from a file path) on the specified Deephaven worker. The worker's language (e.g., Python, Groovy) is determined by its configuration. Script execution is performed in an isolated session for the worker. All session management is accessed via dependency injection using the MCPRequest context.
+    This tool executes a Python script on the specified Deephaven session. The script can be provided
+    either as a string in the 'script' parameter or as a file path in the 'script_path' parameter.
+    Exactly one of these parameters must be provided.
 
     Args:
-        context (Context): The FastMCP Context for this tool call.
-        worker_name (str): Name of the Deephaven worker on which to execute the script. This argument is required.
-        script (str, optional): The script source code to execute. Must be provided unless script_path is specified.
-        script_path (str, optional): Path to a file containing the script to execute. Used if script is not provided.
+        context (Context): The MCP context object.
+        session_id (str): ID of the Deephaven session on which to execute the script. This argument is required.
+        script (str, optional): The Python script to execute. Defaults to None.
+        script_path (str, optional): Path to a Python script file to execute. Defaults to None.
 
     Returns:
         dict: Structured result object with the following keys:
@@ -525,7 +632,7 @@ async def run_script(
         - Logs tool invocation, script source/path, execution status, and error details at INFO/WARNING/ERROR levels.
     """
     _LOGGER.info(
-        f"[run_script] Invoked: worker_name={worker_name!r}, script={'<provided>' if script else None}, script_path={script_path!r}"
+        f"[run_script] Invoked: session_id={session_id!r}, script={'<provided>' if script else None}, script_path={script_path!r}"
     )
     result = {"success": False, "error": ""}
     try:
@@ -546,37 +653,37 @@ async def run_script(
             async with aiofiles.open(script_path) as f:
                 script = await f.read()
 
-        session_registry = context.request_context.lifespan_context["session_registry"]
-        session_manager = await session_registry.get(worker_name)
+        session_registry: CombinedSessionRegistry = context.request_context.lifespan_context["session_registry"]
+        session_manager = await session_registry.get(session_id)
         session = await session_manager.get()
-        _LOGGER.info(f"[run_script] Session established for worker: '{worker_name}'")
+        _LOGGER.info(f"[run_script] Session established for session: '{session_id}'")
 
-        _LOGGER.info(f"[run_script] Executing script on worker: '{worker_name}'")
+        _LOGGER.info(f"[run_script] Executing script on session: '{session_id}'")
         await asyncio.to_thread(session.run_script, script)
         _LOGGER.info(
-            f"[run_script] Script executed successfully on worker: '{worker_name}'"
+            f"[run_script] Script executed successfully on session: '{session_id}'"
         )
         result["success"] = True
     except Exception as e:
         _LOGGER.error(
-            f"[run_script] Failed for worker: '{worker_name}', error: {e!r}",
+            f"[run_script] Failed for session: '{session_id}', error: {e!r}",
             exc_info=True,
         )
         result["error"] = str(e)
         result["isError"] = True
     return result
 
-
 @mcp_server.tool()
-async def pip_packages(context: Context, worker_name: str) -> dict:
+async def pip_packages(context: Context, session_id: str) -> dict:
     """
-    MCP Tool: Get all installed pip packages on a specified Deephaven worker.
+    MCP Tool: Retrieve installed pip packages from a specified Deephaven session.
 
-    This tool connects to the specified Deephaven worker using pydeephaven and retrieves the list of installed pip packages by executing `pip list --format=json` in the worker's Python environment.
+    This tool queries the specified Deephaven session for information about installed pip packages.
+    It returns a dictionary containing package names, versions, and other metadata.
 
     Args:
-        context (Context): The FastMCP Context for this tool call.
-        worker_name (str): Name of the Deephaven worker to query.
+        context (Context): The MCP context object.
+        session_id (str): ID of the Deephaven session to query.
 
     Returns:
         dict: Structured result object with the following keys:
@@ -592,23 +699,23 @@ async def pip_packages(context: Context, worker_name: str) -> dict:
         {'success': False, 'error': 'Failed to get pip packages: ...', 'isError': True}
 
     Logging:
-        - Logs tool invocation, script execution, and error details at INFO/ERROR levels.
+        - Logs tool invocation, package retrieval operations, and error details at INFO/ERROR levels.
     """
-    _LOGGER.info(f"[pip_packages] Invoked for worker: {worker_name!r}")
+    _LOGGER.info(f"[pip_packages] Invoked for session: {session_id!r}")
     result: dict = {"success": False}
     try:
-        session_registry = context.request_context.lifespan_context["session_registry"]
-        session_manager = await session_registry.get(worker_name)
+        session_registry: CombinedSessionRegistry = context.request_context.lifespan_context["session_registry"]
+        session_manager = await session_registry.get(session_id)
         session = await session_manager.get()
-        _LOGGER.info(f"[pip_packages] Session established for worker: '{worker_name}'")
+        _LOGGER.info(f"[pip_packages] Session established for session: '{session_id}'")
 
-        # Run the pip packages script and get the table in one step
+        # Run the pip packages query and get the table in one step
         _LOGGER.info(
-            f"[pip_packages] Getting pip packages table for worker: '{worker_name}'"
+            f"[pip_packages] Getting pip packages table for session: '{session_id}'"
         )
         arrow_table = await queries.get_pip_packages_table(session)
         _LOGGER.info(
-            f"[pip_packages] Pip packages table retrieved successfully for worker: '{worker_name}'"
+            f"[pip_packages] Pip packages table retrieved successfully for session: '{session_id}'"
         )
 
         # Convert the Arrow table to a list of dicts
@@ -635,7 +742,7 @@ async def pip_packages(context: Context, worker_name: str) -> dict:
         result["result"] = packages
     except Exception as e:
         _LOGGER.error(
-            f"[pip_packages] Failed for worker: '{worker_name}', error: {e!r}",
+            f"[pip_packages] Failed for session: '{session_id}', error: {e!r}",
             exc_info=True,
         )
         result["error"] = str(e)

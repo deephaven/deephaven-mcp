@@ -17,10 +17,10 @@ Example (standard):
     ```python
     import asyncio
     import pyarrow as pa
-    from deephaven_mcp.resource_manager import CoreSessionManager
+    from deephaven_mcp.sessions import CommunitySessionManager
 
     async def main():
-        manager = CoreSessionManager("localhost", 10000)
+        manager = CommunitySessionManager("localhost", 10000)
         session = await manager.get_session()
         table = await session.time_table("PT1S")
         result = await (await session.query(table)).update_view(["Value = i % 10"]).to_table()
@@ -144,10 +144,10 @@ class BaseSession(ClientObjectWrapper[T], Generic[T]):
     Example:
         ```python
         import asyncio
-        from deephaven_mcp.resource_manager import CoreSessionManager
+        from deephaven_mcp.sessions import CommunitySessionManager
 
         async def main():
-            manager = CoreSessionManager("localhost", 10000)
+            manager = CommunitySessionManager("localhost", 10000)
             session = await manager.get_session()
 
             # Create a time table
@@ -166,19 +166,33 @@ class BaseSession(ClientObjectWrapper[T], Generic[T]):
         ```
     """
 
-    def __init__(self, session: T, is_enterprise: bool = False):
+    def __init__(self, session: T, is_enterprise: bool, programming_language: str):
         """
         Initialize the async session wrapper with a pydeephaven Session instance.
 
         Args:
             session: An initialized pydeephaven Session object to wrap.
             is_enterprise: Set True for enterprise (Core+) sessions, False for standard sessions.
+            programming_language: The programming language associated with this session (e.g., "python", "groovy").
 
         Note:
             Do not instantiate this class directly; use a SessionManager to obtain session instances.
         """
         super().__init__(session, is_enterprise=is_enterprise)
+        self._programming_language = programming_language
 
+    # ===== Properties =====
+
+    @property
+    def programming_language(self) -> str:
+        """
+        Get the programming language associated with this session.
+        
+        Returns:
+            str: The programming language (e.g., "python", "groovy")
+        """
+        return self._programming_language
+        
     # ===== String representation methods =====
 
     def __str__(self) -> str:
@@ -976,10 +990,10 @@ class CoreSession(BaseSession[Session]):
     Example:
         ```python
         import asyncio
-        from deephaven_mcp.resource_manager import CoreSessionManager
+        from deephaven_mcp.sessions import CommunitySessionManager
 
         async def main():
-            manager = CoreSessionManager("localhost", 10000)
+            manager = CommunitySessionManager("localhost", 10000)
             session = await manager.get_session()
             table = await session.time_table("PT1S")
             result = await (await session.query(table))\
@@ -996,14 +1010,15 @@ class CoreSession(BaseSession[Session]):
     """
 
     @override
-    def __init__(self, session: Session):
+    def __init__(self, session: Session, programming_language: str):
         """
         Initialize with an underlying Session instance.
 
         Args:
             session: A pydeephaven Session instance that will be wrapped by this class.
+            programming_language: The programming language associated with this session (e.g., "python", "groovy").
         """
-        super().__init__(session, is_enterprise=False)
+        super().__init__(session, is_enterprise=False, programming_language=programming_language)
 
     @classmethod
     async def from_config(cls, worker_cfg: dict[str, Any]) -> "CoreSession":
@@ -1066,6 +1081,7 @@ class CoreSession(BaseSession[Session]):
             auth_token = ""
         never_timeout = worker_cfg.get("never_timeout", False)
         session_type = worker_cfg.get("session_type", "python")
+        programming_language = session_type
         use_tls = worker_cfg.get("use_tls", False)
         tls_root_certs = worker_cfg.get("tls_root_certs", None)
         client_cert_chain = worker_cfg.get("client_cert_chain", None)
@@ -1123,6 +1139,10 @@ class CoreSession(BaseSession[Session]):
                 f"[Community] Creating new Deephaven Community (Core) Session with config: {log_cfg}"
             )
             session = await asyncio.to_thread(PDHSession, **session_config)
+            _LOGGER.info(
+                f"[Community] Successfully created Deephaven Community (Core) Session: {session}"
+            )
+            return cls(session, programming_language=programming_language)
         except Exception as e:
             _LOGGER.warning(
                 f"[Community] Failed to create Deephaven Community (Core) Session with config: {log_cfg}: {e}"
@@ -1130,10 +1150,6 @@ class CoreSession(BaseSession[Session]):
             raise SessionCreationError(
                 f"Failed to create Deephaven Community (Core) Session with config: {log_cfg}: {e}"
             ) from e
-        _LOGGER.info(
-            f"[Community] Successfully created Deephaven Community (Core) Session: {session}"
-        )
-        return cls(session)
 
 
 class CorePlusSession(
@@ -1164,7 +1180,6 @@ class CorePlusSession(
     Example:
         ```python
         import asyncio
-        from deephaven_mcp.resource_manager import CorePlusSessionFactoryManager
         from deephaven_mcp.client import CorePlusSessionFactory
 
         async def work_with_enterprise_session():
@@ -1196,6 +1211,7 @@ class CorePlusSession(
     def __init__(
         self,
         session: "deephaven_enterprise.client.session_manager.DndSession",  # noqa: F821
+        programming_language: str,
     ):
         """
         Initialize with an underlying DndSession instance.
@@ -1243,7 +1259,7 @@ class CorePlusSession(
             from a single thread. Each method should be awaited before calling another method on the
             same session.
         """
-        super().__init__(session, is_enterprise=True)
+        super().__init__(session, is_enterprise=True, programming_language=programming_language)
 
     async def pqinfo(self) -> CorePlusQueryInfo:
         """

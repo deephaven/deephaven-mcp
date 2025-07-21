@@ -136,11 +136,17 @@ class DummySession:
         if table == "exc":
             raise Exception("fail")
         return Query()
+        
+    def run_script(self, script, systemic=None):
+        if script == "conn":
+            raise ConnectionError("fail")
+        if script == "exc":
+            raise Exception("fail")
 
 
 @pytest.fixture
 def core_session():
-    return CoreSession(DummySession())
+    return CoreSession(DummySession(), programming_language="python")
 
 
 @pytest.mark.asyncio
@@ -342,13 +348,13 @@ class DummyStrRepr:
 
 
 def test_str_minimal():
-    cs = CoreSession(DummyStrRepr())
+    cs = CoreSession(DummyStrRepr(), programming_language="python")
     assert str(cs) == "dummy-str"
     assert cs.__str__() == "dummy-str"
 
 
 def test_repr_minimal():
-    cs = CoreSession(DummyStrRepr())
+    cs = CoreSession(DummyStrRepr(), programming_language="python")
     assert repr(cs) == "dummy-repr"
     assert cs.__repr__() == "dummy-repr"
 
@@ -640,6 +646,93 @@ async def test_run_script_other_error(core_session):
         await core_session.run_script("print('hi')")
 
 
+# --- Programming Language Property Tests ---
+
+def test_base_session_programming_language():
+    """Test that BaseSession's programming_language property returns the value passed to the constructor."""
+    from deephaven_mcp.client._session import BaseSession
+    
+    # Create a session with programming_language specified
+    session = BaseSession(DummySession(), is_enterprise=False, programming_language="python")
+    
+    # Verify the programming_language property returns the specified value
+    assert session.programming_language == "python"
+
+
+def test_base_session_programming_language_custom():
+    """Test that BaseSession's programming_language property returns the value passed to the constructor."""
+    from deephaven_mcp.client._session import BaseSession
+    
+    # Create a session with a custom programming_language using a unique test value
+    test_lang = "test_unique_language_xyz123"
+    session = BaseSession(DummySession(), is_enterprise=False, programming_language=test_lang)
+    
+    # Verify the programming_language property returns the custom value
+    assert session.programming_language == test_lang
+
+
+def test_core_session_programming_language():
+    """Test that CoreSession's programming_language property returns the value passed to the constructor."""
+    from deephaven_mcp.client._session import CoreSession
+    
+    # Create a session with programming_language specified using a unique test value
+    test_lang = "test_core_lang_abc456"
+    session = CoreSession(DummySession(), programming_language=test_lang)
+    
+    # Verify the programming_language property returns the specified value
+    assert session.programming_language == test_lang
+
+
+def test_core_session_programming_language_custom():
+    """Test that CoreSession's programming_language property returns the value passed to the constructor."""
+    from deephaven_mcp.client._session import CoreSession
+    
+    # Create a session with a custom programming_language using a unique test value
+    test_lang = "test_custom_lang_def789"
+    session = CoreSession(DummySession(), programming_language=test_lang)
+    
+    # Verify the programming_language property returns the custom value
+    assert session.programming_language == test_lang
+
+
+def test_core_session_from_config_programming_language():
+    """Test that CoreSession.from_config sets programming_language from session_type."""
+    from deephaven_mcp.client._session import CoreSession
+    
+    # Mock the PDHSession class
+    with patch("pydeephaven.Session", DummyPDHSession):
+        # Create a config with a custom session_type
+        config = {"host": "localhost", "port": 10000, "session_type": "groovy"}
+        
+        # Create a session using from_config
+        session = asyncio.run(CoreSession.from_config(config))
+        
+        # Verify the programming_language property matches the session_type
+        assert session.programming_language == "groovy"
+
+
+def test_core_plus_session_programming_language():
+    """Test that CorePlusSession's programming_language property returns the value passed to the constructor."""
+    from deephaven_mcp.client._session import CorePlusSession
+    
+    # Create a session with programming_language specified
+    session = CorePlusSession(DummyDndSession(), programming_language="python")
+    
+    # Verify the programming_language property returns the specified value
+    assert session.programming_language == "python"
+
+
+def test_core_plus_session_programming_language_custom():
+    """Test that CorePlusSession's programming_language property returns the value passed to the constructor."""
+    from deephaven_mcp.client._session import CorePlusSession
+    
+    # Create a session with a custom programming_language
+    session = CorePlusSession(DummyDndSession(), programming_language="groovy")
+    
+    # Verify the programming_language property returns the custom value
+    assert session.programming_language == "groovy"
+
+
 # --- Enterprise / CorePlusSession tests ---
 from deephaven_mcp.client._session import CorePlusSession
 
@@ -683,13 +776,13 @@ session_mod.CorePlusQueryInfo = DummyCorePlusQueryInfo
 
 @pytest.fixture
 def core_plus_session():
-    cps = CorePlusSession(DummyDndSession())
+    cps = CorePlusSession(DummyDndSession(), programming_language="python")
     cps._session = DummyDndSession()  # patch only _session for enterprise methods
     return cps
 
 
 def test_core_plus_session_init():
-    cps = CorePlusSession(DummyDndSession())
+    cps = CorePlusSession(DummyDndSession(), programming_language="python")
     cps._session = DummyDndSession()
     assert isinstance(cps, CorePlusSession)
 

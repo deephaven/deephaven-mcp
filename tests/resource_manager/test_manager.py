@@ -201,9 +201,15 @@ async def test_close_handles_sync_method_gracefully():
 
 
 def test_resource_liveness_status_str():
-    """Covers line 231: str(enum) returns lowercase name."""
+    """Covers line 231: str(enum) returns the enum name."""
     for status in ResourceLivenessStatus:
-        assert str(status) == status.name.lower()
+        assert str(status) == status.name
+
+
+def test_system_type_str():
+    """Covers line 286: str(enum) returns the enum name."""
+    for system_type in SystemType:
+        assert str(system_type) == system_type.name
 
 
 from deephaven_mcp._exceptions import AuthenticationError, ConfigurationError

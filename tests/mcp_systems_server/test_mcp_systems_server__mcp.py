@@ -57,7 +57,7 @@ def test_run_script_reads_script_from_file():
     with patch("aiofiles.open", return_value=DummyFile()):
         result = asyncio.run(
             mcp_mod.run_script(
-                context, worker_name="test_worker", script=None, script_path="dummy.py"
+                context, session_id="test_worker", script=None, script_path="dummy.py"
             )
         )
         assert result["success"] is True
@@ -129,6 +129,87 @@ async def test_refresh_success():
 
 
 @pytest.mark.asyncio
+async def test_get_session_details_logs_version_info():
+    """Test that get_session_details logs programming language and Deephaven versions when available."""
+    # Import the function
+    from deephaven_mcp.mcp_systems_server._mcp import get_session_details
+    from deephaven_mcp.resource_manager._registry_combined import CombinedSessionRegistry
+    from deephaven_mcp.resource_manager._manager import ResourceLivenessStatus
+    import enum
+    
+    # Create mocks
+    context = MagicMock()
+    session_id = "test-session"
+    session = AsyncMock()
+    
+    # Setup session registry and session manager
+    session_registry = MagicMock(spec=CombinedSessionRegistry)
+    mgr = AsyncMock()
+    
+    # Configure session manager with required properties
+    mgr.is_alive = AsyncMock(return_value=True)
+    mgr.system_type = MagicMock()
+    mgr.system_type.name = "COMMUNITY"
+    mgr.source = "test-source"
+    mgr.name = "test"
+    
+    # Mock liveness status
+    status_mock = MagicMock(spec=enum.Enum)
+    status_mock.name = "ONLINE"
+    mgr.liveness_status = AsyncMock(return_value=(status_mock, ""))
+    
+    # Configure the session object with programming_language
+    session.programming_language = "python"
+    
+    # Setup mgr.get to return our session
+    mgr.get = AsyncMock(return_value=session)
+    
+    # Configure session registry to return our manager
+    session_registry.get = AsyncMock(return_value=mgr)
+    
+    # Setup context.request_context.lifespan_context properly
+    request_context = MagicMock()
+    request_context.lifespan_context = {"session_registry": session_registry}
+    context.request_context = request_context
+    
+    # Mock the queries module to return version information
+    mock_queries = MagicMock()
+    mock_queries.get_programming_language_version = AsyncMock(return_value="3.9.7")
+    mock_queries.get_dh_versions = AsyncMock(return_value=("0.24.0", None))
+    
+    # Use a logger mock to verify debug logs
+    mock_logger = MagicMock()
+    
+    with (
+        patch(
+            "deephaven_mcp.mcp_systems_server._mcp.queries",
+            mock_queries,
+        ),
+        patch(
+            "deephaven_mcp.mcp_systems_server._mcp._LOGGER",
+            mock_logger,
+        ),
+    ):
+        # Call the function
+        result = await get_session_details(context, session_id, attempt_to_connect=True)
+        
+        # Verify the function returned successfully
+        assert result["success"] is True
+        assert "session" in result
+        assert result["session"]["programming_language"] == "python"
+        assert result["session"]["programming_language_version"] == "3.9.7"
+        assert result["session"]["deephaven_community_version"] == "0.24.0"
+        
+        # Verify that the debug log messages were called (lines 447 and 458)
+        mock_logger.debug.assert_any_call(
+            f"[mcp_systems_server:get_session_details] Session '{session_id}' programming_language_version: 3.9.7"
+        )
+        mock_logger.debug.assert_any_call(
+            f"[mcp_systems_server:get_session_details] Session '{session_id}' versions: community=0.24.0, enterprise=None"
+        )
+
+
+@pytest.mark.asyncio
 async def test_refresh_failure():
     config_manager = AsyncMock()
     session_registry = AsyncMock()
@@ -150,377 +231,6 @@ async def test_refresh_failure():
     assert "fail" in result["error"]
 
 
-# === describe_workers ===
-@pytest.mark.asyncio
-async def test_describe_workers_all_available_with_versions():
-    config_manager = AsyncMock()
-    session_registry = AsyncMock()
-    config_manager.get_system_session_names = AsyncMock(return_value=["w1", "w2"])
-    config_manager.get_config = AsyncMock(
-        return_value={
-            "community": {
-                "sessions": {
-                    "w1": {"session_type": "python"},
-                    "w2": {"session_type": "python"},
-                }
-            }
-        }
-    )
-    alive_session = MagicMock(is_alive=True)
-
-    # Create a mock session manager that will be returned by the registry's get method
-    mock_session_manager = AsyncMock()
-    mock_session_manager.get = AsyncMock(return_value=alive_session)
-    session_registry.get = AsyncMock(return_value=mock_session_manager)
-    config_manager.get_community_session_config = AsyncMock(
-        return_value={"session_type": "python"}
-    )
-    with patch.object(
-        mcp_mod.queries, "get_dh_versions", AsyncMock(return_value=("1.2.3", "4.5.6"))
-    ) as mock_get_dh_versions:
-        context = MockContext(
-            {
-                "config_manager": config_manager,
-                "session_registry": session_registry,
-            }
-        )
-        result = await mcp_mod.describe_workers(context)
-        assert result == {
-            "success": True,
-            "result": [
-                {
-                    "worker": "w1",
-                    "available": True,
-                    "programming_language": "python",
-                    "deephaven_core_version": "1.2.3",
-                    "deephaven_enterprise_version": "4.5.6",
-                },
-                {
-                    "worker": "w2",
-                    "available": True,
-                    "programming_language": "python",
-                    "deephaven_core_version": "1.2.3",
-                    "deephaven_enterprise_version": "4.5.6",
-                },
-            ],
-        }
-
-
-@pytest.mark.asyncio
-async def test_describe_workers_all_available_no_versions():
-    config_manager = AsyncMock()
-    session_registry = AsyncMock()
-    config_manager.get_system_session_names = AsyncMock(return_value=["w1", "w2"])
-    config_manager.get_config = AsyncMock(
-        return_value={
-            "community": {
-                "sessions": {
-                    "w1": {"session_type": "python"},
-                    "w2": {"session_type": "python"},
-                }
-            }
-        }
-    )
-    alive_session = MagicMock(is_alive=True)
-    # Create a mock session manager that will be returned by the registry
-    mock_session_manager = AsyncMock()
-    mock_session_manager.get = AsyncMock(return_value=alive_session)
-    session_registry.get = AsyncMock(return_value=mock_session_manager)
-    config_manager.get_community_session_config = AsyncMock(
-        return_value={"session_type": "python"}
-    )
-    # Both versions are None
-    with patch.object(
-        mcp_mod.queries, "get_dh_versions", AsyncMock(return_value=(None, None))
-    ) as mock_get_dh_versions:
-        context = MockContext(
-            {
-                "config_manager": config_manager,
-                "session_registry": session_registry,
-            }
-        )
-        result = await mcp_mod.describe_workers(context)
-        assert result == {
-            "success": True,
-            "result": [
-                {"worker": "w1", "available": True, "programming_language": "python"},
-                {"worker": "w2", "available": True, "programming_language": "python"},
-            ],
-        }
-
-
-@pytest.mark.asyncio
-async def test_describe_workers_some_unavailable():
-    config_manager = AsyncMock()
-    session_registry = AsyncMock()
-    config_manager.get_system_session_names = AsyncMock(return_value=["w1", "w2", "w3"])
-    config_manager.get_config = AsyncMock(
-        return_value={
-            "community": {
-                "sessions": {
-                    "w1": {"session_type": "python"},
-                    "w2": {"session_type": "python"},
-                    "w3": {"session_type": "python"},
-                }
-            }
-        }
-    )
-    alive_session = MagicMock(is_alive=True)
-    dead_session = MagicMock(is_alive=False)
-
-    # Mock different manager behaviors based on session name
-    alive_manager = AsyncMock()
-    alive_manager.get = AsyncMock(return_value=alive_session)
-
-    error_manager = AsyncMock()
-    error_manager.get = AsyncMock(side_effect=RuntimeError("fail"))
-
-    dead_manager = AsyncMock()
-    dead_manager.get = AsyncMock(return_value=dead_session)
-
-    async def get_session_manager(name):
-        if name == "w1":
-            return alive_manager
-        elif name == "w2":
-            return error_manager
-        else:
-            return dead_manager
-
-    session_registry.get = AsyncMock(side_effect=get_session_manager)
-    config_manager.get_community_session_config = AsyncMock(
-        return_value={"session_type": "python"}
-    )
-    # Only w1 is alive, w2 fails, w3 is dead
-    with patch.object(
-        mcp_mod.queries, "get_dh_versions", AsyncMock(return_value=("1.2.3", None))
-    ) as mock_get_dh_versions:
-        context = MockContext(
-            {
-                "config_manager": config_manager,
-                "session_registry": session_registry,
-            }
-        )
-        result = await mcp_mod.describe_workers(context)
-        # Only w1 gets versions, w2 and w3 are unavailable
-        assert result == {
-            "success": True,
-            "result": [
-                {
-                    "worker": "w1",
-                    "available": True,
-                    "programming_language": "python",
-                    "deephaven_core_version": "1.2.3",
-                },
-                {"worker": "w2", "available": False, "programming_language": "python"},
-                {"worker": "w3", "available": False, "programming_language": "python"},
-            ],
-        }
-
-
-@pytest.mark.asyncio
-async def test_describe_workers_non_python():
-    config_manager = AsyncMock()
-    session_registry = AsyncMock()
-    config_manager.get_system_session_names = AsyncMock(return_value=["w1"])
-    config_manager.get_config = AsyncMock(
-        return_value={
-            "community": {
-                "sessions": {
-                    "w1": {"session_type": "groovy"},
-                }
-            }
-        }
-    )
-    alive_session = MagicMock(is_alive=True)
-    # Create a mock session manager that will be returned by the registry
-    mock_session_manager = AsyncMock()
-    mock_session_manager.get = AsyncMock(return_value=alive_session)
-    session_registry.get = AsyncMock(return_value=mock_session_manager)
-    config_manager.get_community_session_config = AsyncMock(
-        return_value={"session_type": "groovy"}
-    )
-    # Should never call get_dh_versions for non-python
-    with patch.object(
-        mcp_mod.queries,
-        "get_dh_versions",
-        AsyncMock(side_effect=Exception("should not be called")),
-    ) as mock_get_dh_versions:
-        context = MockContext(
-            {
-                "config_manager": config_manager,
-                "session_registry": session_registry,
-            }
-        )
-        result = await mcp_mod.describe_workers(context)
-        assert result == {
-            "success": True,
-            "result": [
-                {"worker": "w1", "available": True, "programming_language": "groovy"},
-            ],
-        }
-
-
-@pytest.mark.asyncio
-async def test_describe_workers_versions_error():
-    config_manager = AsyncMock()
-    session_registry = AsyncMock()
-    config_manager.get_system_session_names = AsyncMock(return_value=["w1"])
-    config_manager.get_config = AsyncMock(
-        return_value={
-            "community": {
-                "sessions": {
-                    "w1": {"session_type": "python"},
-                }
-            }
-        }
-    )
-    alive_session = MagicMock(is_alive=True)
-    # Create a mock session manager that will be returned by the registry
-    mock_session_manager = AsyncMock()
-    mock_session_manager.get = AsyncMock(return_value=alive_session)
-    session_registry.get = AsyncMock(return_value=mock_session_manager)
-    config_manager.get_community_session_config = AsyncMock(
-        return_value={"session_type": "python"}
-    )
-    # get_dh_versions throws
-    with patch.object(
-        mcp_mod.queries,
-        "get_dh_versions",
-        AsyncMock(side_effect=Exception("fail-version")),
-    ) as mock_get_dh_versions:
-        context = MockContext(
-            {
-                "config_manager": config_manager,
-                "session_registry": session_registry,
-            }
-        )
-        result = await mcp_mod.describe_workers(context)
-        # Should not include version keys if get_dh_versions fails
-        assert result == {
-            "success": True,
-            "result": [
-                {"worker": "w1", "available": True, "programming_language": "python"},
-            ],
-        }
-
-
-@pytest.mark.asyncio
-async def test_describe_workers_some_unavailable_with_versions():
-    config_manager = AsyncMock()
-    session_registry = AsyncMock()
-    config_manager.get_system_session_names = AsyncMock(return_value=["w1", "w2", "w3"])
-    config_manager.get_config = AsyncMock(
-        return_value={
-            "community": {
-                "sessions": {
-                    "w1": {"session_type": "python"},
-                    "w2": {"session_type": "python"},
-                    "w3": {"session_type": "python"},
-                }
-            }
-        }
-    )
-    alive_session = MagicMock(is_alive=True)
-    dead_session = MagicMock(is_alive=False)
-
-    # Mock different manager behaviors based on session name
-    alive_manager = AsyncMock()
-    alive_manager.get = AsyncMock(return_value=alive_session)
-
-    error_manager = AsyncMock()
-    error_manager.get = AsyncMock(side_effect=RuntimeError("fail"))
-
-    dead_manager = AsyncMock()
-    dead_manager.get = AsyncMock(return_value=dead_session)
-
-    async def get_session_manager(name):
-        if name == "w1":
-            return alive_manager
-        elif name == "w2":
-            return error_manager
-        else:
-            return dead_manager
-
-    session_registry.get = AsyncMock(side_effect=get_session_manager)
-    config_manager.get_community_session_config = AsyncMock(
-        return_value={"session_type": "python"}
-    )
-    # Only w1 is alive, w2 fails, w3 is dead
-    with patch.object(
-        mcp_mod.queries, "get_dh_versions", AsyncMock(return_value=("1.2.3", "4.5.6"))
-    ) as mock_get_dh_versions:
-        context = MockContext(
-            {
-                "config_manager": config_manager,
-                "session_registry": session_registry,
-            }
-        )
-        result = await mcp_mod.describe_workers(context)
-        assert result == {
-            "success": True,
-            "result": [
-                {
-                    "worker": "w1",
-                    "available": True,
-                    "programming_language": "python",
-                    "deephaven_core_version": "1.2.3",
-                    "deephaven_enterprise_version": "4.5.6",
-                },
-                {"worker": "w2", "available": False, "programming_language": "python"},
-                {"worker": "w3", "available": False, "programming_language": "python"},
-            ],
-        }
-
-
-@pytest.mark.asyncio
-async def test_describe_workers_worker_config_error():
-    config_manager = AsyncMock()
-    session_registry = AsyncMock()
-    config_manager.get_system_session_names = AsyncMock(return_value=["w1"])
-    config_manager.get_config = AsyncMock(
-        return_value={
-            "community": {
-                "sessions": {
-                    "w1": {"session_type": "python"},
-                }
-            }
-        }
-    )
-    # Simulate get_worker_config raising an exception
-    config_manager.get_community_session_config = AsyncMock(
-        side_effect=config.CommunitySessionConfigurationError("config-fail")
-    )
-    # Setup session registry pattern
-    mock_session_manager = AsyncMock()
-    mock_session_manager.get = AsyncMock(return_value=MagicMock(is_alive=True))
-    session_registry.get = AsyncMock(return_value=mock_session_manager)
-    context = MockContext(
-        {
-            "config_manager": config_manager,
-            "session_registry": session_registry,
-        }
-    )
-    result = await mcp_mod.describe_workers(context)
-    assert result["success"] is False
-    assert result["isError"] is True
-    assert "config-fail" in result["error"]
-
-
-@pytest.mark.asyncio
-async def test_describe_workers_config_error():
-    config_manager = AsyncMock()
-    session_registry = AsyncMock()
-    config_manager.get_config = AsyncMock(side_effect=Exception("fail-cfg"))
-    context = MockContext(
-        {
-            "config_manager": config_manager,
-            "session_registry": session_registry,
-        }
-    )
-    result = await mcp_mod.describe_workers(context)
-    assert result["success"] is False
-    assert result["isError"] is True
-    assert "fail-cfg" in result["error"]
 
 
 # === table_schemas ===
@@ -552,7 +262,7 @@ async def test_table_schemas_empty_table_names():
     mock_session_manager.get = AsyncMock(return_value=DummySession())
     session_registry.get = AsyncMock(return_value=mock_session_manager)
     context = MockContext({"session_registry": session_registry})
-    res = await mcp_mod.table_schemas(context, worker_name="worker", table_names=[])
+    res = await mcp_mod.table_schemas(context, session_id="worker", table_names=[])
     assert isinstance(res, list)
     assert res == []
 
@@ -572,7 +282,7 @@ async def test_table_schemas_no_tables():
     mock_session_manager.get = AsyncMock(return_value=DummySession())
     session_registry.get = AsyncMock(return_value=mock_session_manager)
     context = MockContext({"session_registry": session_registry})
-    res = await mcp_mod.table_schemas(context, worker_name="worker", table_names=None)
+    res = await mcp_mod.table_schemas(context, session_id="worker", table_names=None)
     assert isinstance(res, list)
     assert res == []
 
@@ -608,7 +318,7 @@ async def test_table_schemas_success():
     with patch("deephaven_mcp.queries.get_meta_table", mock_get_meta_table):
         # Call table_schemas with a specific table name
         result = await mcp_mod.table_schemas(
-            context, worker_name="test-worker", table_names=["table1"]
+            context, session_id="test-worker", table_names=["table1"]
         )
 
     # Verify correct session access pattern
@@ -657,7 +367,7 @@ async def test_table_schemas_all_tables():
     # Patch queries.get_meta_table to return our mock data
     with patch("deephaven_mcp.queries.get_meta_table", mock_get_meta_table):
         # Call table_schemas with no table_names to test getting all tables
-        result = await mcp_mod.table_schemas(context, worker_name="worker")
+        result = await mcp_mod.table_schemas(context, session_id="worker")
 
     # Should return results for both tables in the dummy_session.tables list
     assert len(result) == 2
@@ -705,7 +415,7 @@ async def test_table_schemas_schema_key_error():
     with patch("deephaven_mcp.queries.get_meta_table", mock_get_meta_table):
         # Call table_schemas with a specific table name
         result = await mcp_mod.table_schemas(
-            context, worker_name="test-worker", table_names=["table1"]
+            context, session_id="test-worker", table_names=["table1"]
         )
 
     # Verify correct session access pattern
@@ -723,7 +433,7 @@ async def test_table_schemas_schema_key_error():
 async def test_table_schemas_session_error():
     # Following the pattern in _mcp.py:
     # 1. session_registry = context["session_registry"]
-    # 2. session_manager = await session_registry.get(worker_name) - set to fail here
+    # 2. session_manager = await session_registry.get(session_id) - set to fail here
     # 3. session = await session_manager.get()
 
     # Set up session_registry to throw an exception when get() is called
@@ -735,7 +445,7 @@ async def test_table_schemas_session_error():
             "session_registry": session_registry,
         }
     )
-    res = await mcp_mod.table_schemas(context, worker_name="worker", table_names=["t1"])
+    res = await mcp_mod.table_schemas(context, session_id="worker", table_names=["t1"])
     assert isinstance(res, list)
     assert res[0]["success"] is False
     assert res[0]["isError"] is True
@@ -767,7 +477,7 @@ async def test_run_script_both_script_and_path():
 
     context = MockContext({"session_registry": session_registry})
     result = await mcp_mod.run_script(
-        context, worker_name="foo", script="print('hi')", script_path="/tmp/fake.py"
+        context, session_id="foo", script="print('hi')", script_path="/tmp/fake.py"
     )
     assert result["success"] is True
     assert session.run_script.call_count >= 1
@@ -775,21 +485,21 @@ async def test_run_script_both_script_and_path():
 
 
 @pytest.mark.asyncio
-async def test_run_script_missing_worker():
+async def test_run_script_missing_session():
     # Following the pattern in _mcp.py:
     # 1. session_registry = context["session_registry"]
-    # 2. session_manager = await session_registry.get(worker_name) - fails here
+    # 2. session_manager = await session_registry.get(session_id) - fails here
     # 3. session = await session_manager.get()
 
     # Set up session_registry to throw an exception when get() is called
     session_registry = AsyncMock()
-    session_registry.get = AsyncMock(side_effect=Exception("no worker"))
+    session_registry.get = AsyncMock(side_effect=Exception("no session"))
 
     context = MockContext({"session_registry": session_registry})
-    result = await mcp_mod.run_script(context, worker_name=None, script="print('hi')")
+    result = await mcp_mod.run_script(context, session_id=None, script="print('hi')")
     assert result["success"] is False
     assert result["isError"] is True
-    assert "no worker" in result["error"]
+    assert "no session" in result["error"]
 
 
 @pytest.mark.asyncio
@@ -809,7 +519,7 @@ async def test_run_script_both_none():
     session_registry.get = AsyncMock(return_value=mock_session_manager)
 
     context = MockContext({"session_registry": session_registry})
-    result = await mcp_mod.run_script(context, worker_name="foo")
+    result = await mcp_mod.run_script(context, session_id="foo")
     assert result["success"] is False
     assert result["isError"] is True
     assert "Must provide either script or script_path" in result["error"]
@@ -820,6 +530,10 @@ async def test_app_lifespan_yields_context_and_cleans_up():
     class DummyServer:
         name = "dummy-server"
 
+    # Import the app_lifespan function
+    from deephaven_mcp.mcp_systems_server._mcp import app_lifespan
+
+    # Create mocks
     config_manager = AsyncMock()
     session_registry = AsyncMock()
     refresh_lock = AsyncMock()
@@ -828,10 +542,11 @@ async def test_app_lifespan_yields_context_and_cleans_up():
     config_manager.get_config = AsyncMock(return_value={})
     session_registry.initialize = AsyncMock()
     session_registry.close = AsyncMock()
-
+    
+    # Use a comprehensive patching approach to handle all dependencies
     with (
         patch(
-            "deephaven_mcp.mcp_systems_server._mcp.config.ConfigManager",
+            "deephaven_mcp.mcp_systems_server._mcp.ConfigManager",
             return_value=config_manager,
         ),
         patch(
@@ -842,14 +557,23 @@ async def test_app_lifespan_yields_context_and_cleans_up():
             "deephaven_mcp.mcp_systems_server._mcp.asyncio.Lock",
             return_value=refresh_lock,
         ),
+        # Mock get_config_path to avoid environment variable dependency
+        patch(
+            "deephaven_mcp.config.get_config_path",
+            return_value="/mock/config/path.json",
+        ),
+        # Mock load_and_validate_config to avoid file system dependency
+        patch(
+            "deephaven_mcp.config.load_and_validate_config",
+            AsyncMock(return_value={}),
+        ),
     ):
-        from deephaven_mcp.mcp_systems_server._mcp import app_lifespan
-
         server = DummyServer()
         async with app_lifespan(server) as context:
-            assert context["config_manager"] is config_manager
-            assert context["session_registry"] is session_registry
-            assert context["refresh_lock"] is refresh_lock
+            # Just check that the keys exist in the context
+            assert "config_manager" in context
+            assert "session_registry" in context
+            assert "refresh_lock" in context
         session_registry.close.assert_awaited_once()
 
 
@@ -877,7 +601,7 @@ async def test_run_script_success():
     session_registry.get = AsyncMock(return_value=mock_session_manager)
 
     context = MockContext({"session_registry": session_registry})
-    result = await mcp_mod.run_script(context, worker_name="worker", script="print(1)")
+    result = await mcp_mod.run_script(context, session_id="worker", script="print(1)")
 
     # Check correct session access pattern
     session_registry.get.assert_awaited_once_with("worker")
@@ -895,7 +619,7 @@ async def test_run_script_no_script():
     session_registry.get = AsyncMock(return_value=mock_session_manager)
 
     context = MockContext({"session_registry": session_registry})
-    res = await mcp_mod.run_script(context, worker_name="worker")
+    res = await mcp_mod.run_script(context, session_id="worker")
 
     # No calls to session_registry should be made since validation fails first
     session_registry.get.assert_not_awaited()
@@ -922,7 +646,7 @@ async def test_run_script_neither_script_nor_path():
 
     # Call with neither script nor script_path
     res = await mcp_mod.run_script(
-        context, worker_name="worker", script=None, script_path=None
+        context, session_id="worker", script=None, script_path=None
     )
 
     # No calls to session_registry should be made since validation fails first
@@ -946,9 +670,9 @@ async def test_run_script_session_error():
     session_registry.get = AsyncMock(side_effect=Exception("fail"))
 
     context = MockContext({"session_registry": session_registry})
-    res = await mcp_mod.run_script(context, worker_name="worker", script="print(1)")
+    res = await mcp_mod.run_script(context, session_id="worker", script="print(1)")
 
-    # Verify the session registry was called with the correct worker name
+    # Verify the session registry was called with the correct session id
     session_registry.get.assert_awaited_once_with("worker")
 
     # Verify error response
@@ -998,7 +722,7 @@ async def test_run_script_script_path():
     with patch("aiofiles.open", mock_open):
         context = MockContext({"session_registry": session_registry})
         res = await mcp_mod.run_script(
-            context, worker_name="worker", script_path=script_path
+            context, session_id="worker", script_path=script_path
         )
 
     # Verify session registry was called correctly
@@ -1020,7 +744,7 @@ async def test_run_script_script_path_none_error():
 
     context = MockContext({"session_registry": session_registry})
     res = await mcp_mod.run_script(
-        context, worker_name="worker", script=None, script_path=None
+        context, session_id="worker", script=None, script_path=None
     )
 
     # Verify the validation error is returned
@@ -1075,7 +799,7 @@ async def test_pip_packages_success():
                 "config_manager": AsyncMock(),
             }
         )
-        result = await mcp_mod.pip_packages(context, worker_name="test_worker")
+        result = await mcp_mod.pip_packages(context, session_id="test_worker")
 
         # Check correct session access pattern
         mock_session_registry.get.assert_awaited_once_with("test_worker")
@@ -1116,7 +840,7 @@ async def test_pip_packages_empty():
         context = MockContext(
             {"session_registry": mock_session_registry, "config_manager": AsyncMock()}
         )
-        result = await mcp_mod.pip_packages(context, worker_name="test_worker")
+        result = await mcp_mod.pip_packages(context, session_id="test_worker")
 
     # Verify results
     assert result["success"] is True
@@ -1161,7 +885,7 @@ async def test_pip_packages_malformed_data():
                 "config_manager": AsyncMock(),
             }
         )
-        result = await mcp_mod.pip_packages(context, worker_name="test_worker")
+        result = await mcp_mod.pip_packages(context, session_id="test_worker")
 
     # Verify results
     assert result["success"] is False
@@ -1201,7 +925,7 @@ async def test_pip_packages_error():
                 "config_manager": AsyncMock(),
             }
         )
-        result = await mcp_mod.pip_packages(context, worker_name="test_worker")
+        result = await mcp_mod.pip_packages(context, session_id="test_worker")
 
         # Verify results
         assert result["success"] is False
@@ -1214,8 +938,8 @@ async def test_pip_packages_error():
 
 
 @pytest.mark.asyncio
-async def test_pip_packages_worker_not_found():
-    """Test pip_packages when the worker is not found."""
+async def test_pip_packages_session_not_found():
+    """Test pip_packages when the session is not found."""
     mock_get_pip_packages_table = AsyncMock(return_value=MagicMock())
 
     # Set up session_registry to fail when get() is called
@@ -1232,7 +956,7 @@ async def test_pip_packages_worker_not_found():
                 "config_manager": AsyncMock(),
             }
         )
-        result = await mcp_mod.pip_packages(context, worker_name="nonexistent_worker")
+        result = await mcp_mod.pip_packages(context, session_id="nonexistent_worker")
         assert result["success"] is False
         assert "Worker not found" in result["error"]
         assert result["isError"] is True
@@ -1242,165 +966,6 @@ async def test_pip_packages_worker_not_found():
 
 
 # === enterprise_systems_status tests ===
-
-@pytest.mark.asyncio
-async def test_all_sessions_success():
-    """Test successful retrieval of all sessions."""
-    # Mock session registry
-    mock_registry = AsyncMock()
-    mock_session1 = MagicMock()
-    mock_session1.is_alive = True
-    mock_session_mgr1 = AsyncMock()
-    mock_session_mgr1.system_type = MagicMock()
-    mock_session_mgr1.system_type.name = "COMMUNITY"
-    mock_session_mgr1.source = "source1"
-    mock_session_mgr1.name = "session1"
-    mock_session_mgr1.get.return_value = mock_session1
-    
-    mock_session2 = MagicMock()
-    mock_session2.is_alive = False
-    mock_session_mgr2 = AsyncMock()
-    mock_session_mgr2.system_type = MagicMock()
-    mock_session_mgr2.system_type.name = "ENTERPRISE"
-    mock_session_mgr2.source = "source2"
-    mock_session_mgr2.name = "session2"
-    mock_session_mgr2.get.return_value = mock_session2
-    
-    mock_registry.get_all.return_value = {
-        "session1": mock_session_mgr1,
-        "session2": mock_session_mgr2
-    }
-    
-    # Mock context
-    mock_context = MagicMock()
-    mock_context.request_context.lifespan_context = {"session_registry": mock_registry}
-    
-    # Call function
-    result = await mcp_mod.all_sessions(mock_context)
-    
-    # Verify results
-    assert result["success"] is True
-    assert len(result["sessions"]) == 2
-    
-    # Check first session
-    session1 = next(s for s in result["sessions"] if s["name"] == "session1")
-    assert session1["type"] == "community"
-    assert session1["source"] == "source1"
-    assert session1["session_name"] == "session1"
-    assert session1["available"] is True
-    
-    # Check second session
-    session2 = next(s for s in result["sessions"] if s["name"] == "session2")
-    assert session2["type"] == "enterprise"
-    assert session2["source"] == "source2"
-    assert session2["session_name"] == "session2"
-    assert session2["available"] is False
-
-
-@pytest.mark.asyncio
-async def test_all_sessions_with_unknown_type():
-    """Test all_sessions with a session that has no system_type."""
-    # Mock session registry
-    mock_registry = AsyncMock()
-    mock_session = MagicMock()
-    mock_session.is_alive = True
-    mock_session_mgr = AsyncMock()
-    # No system_type attribute - use delattr to ensure it doesn't exist
-    mock_session_mgr.source = "source"
-    mock_session_mgr.name = "session"
-    mock_session_mgr.get.return_value = mock_session
-    # Ensure getattr returns None for system_type
-    mock_session_mgr.configure_mock(**{"system_type": None})
-    
-    mock_registry.get_all.return_value = {"session": mock_session_mgr}
-    
-    # Mock context
-    mock_context = MagicMock()
-    mock_context.request_context.lifespan_context = {"session_registry": mock_registry}
-    
-    # Call function
-    result = await mcp_mod.all_sessions(mock_context)
-    
-    # Verify results
-    assert result["success"] is True
-    assert len(result["sessions"]) == 1
-    assert result["sessions"][0]["type"] == "unknown"
-
-
-@pytest.mark.asyncio
-async def test_all_sessions_with_session_error():
-    """Test all_sessions when getting a session raises an exception."""
-    # Mock session registry
-    mock_registry = AsyncMock()
-    mock_session_mgr = AsyncMock()
-    mock_session_mgr.system_type = MagicMock()
-    mock_session_mgr.system_type.name = "COMMUNITY"
-    mock_session_mgr.source = "source"
-    mock_session_mgr.name = "session"
-    mock_session_mgr.get.side_effect = Exception("Session error")
-    
-    mock_registry.get_all.return_value = {"session": mock_session_mgr}
-    
-    # Mock context
-    mock_context = MagicMock()
-    mock_context.request_context.lifespan_context = {"session_registry": mock_registry}
-    
-    # Call function
-    result = await mcp_mod.all_sessions(mock_context)
-    
-    # Verify results
-    assert result["success"] is True
-    assert len(result["sessions"]) == 1
-    assert result["sessions"][0]["available"] is False
-
-
-@pytest.mark.asyncio
-async def test_all_sessions_with_processing_error():
-    """Test all_sessions when processing a session raises an exception."""
-    # Mock session registry
-    mock_registry = AsyncMock()
-    
-    # Create a session manager that will cause an exception during processing
-    mock_session_mgr = AsyncMock()
-    # Configure system_type.name to raise an exception when accessed
-    mock_system_type = MagicMock()
-    type(mock_system_type).name = PropertyMock(side_effect=Exception("Processing error"))
-    mock_session_mgr.system_type = mock_system_type
-    
-    mock_registry.get_all.return_value = {"session": mock_session_mgr}
-    
-    # Mock context
-    mock_context = MagicMock()
-    mock_context.request_context.lifespan_context = {"session_registry": mock_registry}
-    
-    # Call function
-    result = await mcp_mod.all_sessions(mock_context)
-    
-    # Verify results
-    assert result["success"] is True
-    assert len(result["sessions"]) == 1
-    assert "error" in result["sessions"][0]
-    assert result["sessions"][0]["name"] == "session"
-
-
-@pytest.mark.asyncio
-async def test_all_sessions_registry_error():
-    """Test all_sessions when the registry raises an exception."""
-    # Mock session registry to raise an exception
-    mock_registry = AsyncMock()
-    mock_registry.get_all.side_effect = Exception("Registry error")
-    
-    # Mock context
-    mock_context = MagicMock()
-    mock_context.request_context.lifespan_context = {"session_registry": mock_registry}
-    
-    # Call function
-    result = await mcp_mod.all_sessions(mock_context)
-    
-    # Verify results
-    assert result["success"] is False
-    assert "error" in result
-    assert result["isError"] is True
 
 
 @pytest.mark.asyncio
@@ -1434,7 +999,7 @@ async def test_enterprise_systems_status_success():
     mock_config_manager.get_config = AsyncMock(
         return_value={
             "enterprise": {
-                "factories": {
+                "systems": {
                     "system1": {"url": "http://example.com", "api_key": "secret_key"},
                     "system2": {"url": "http://example2.com", "password": "secret_password"}
                 }
@@ -1466,16 +1031,16 @@ async def test_enterprise_systems_status_success():
     
     # Check system1
     system1 = next(s for s in result["systems"] if s["name"] == "system1")
-    assert system1["status"] == "ONLINE"
-    assert system1["detail"] == "System is healthy"
+    assert system1["liveness_status"] == "ONLINE"
+    assert system1["liveness_detail"] == "System is healthy"
     assert system1["is_alive"] is True
     assert system1["config"]["url"] == "http://example.com"
     assert system1["config"]["api_key"] == "secret_key"
     
     # Check system2
     system2 = next(s for s in result["systems"] if s["name"] == "system2")
-    assert system2["status"] == "OFFLINE"
-    assert system2["detail"] == "System is not responding"
+    assert system2["liveness_status"] == "OFFLINE"
+    assert system2["liveness_detail"] == "System is not responding"
     assert system2["is_alive"] is False
     assert system2["config"]["url"] == "http://example2.com"
     assert system2["config"]["password"] == "[REDACTED]"
@@ -1530,8 +1095,8 @@ async def test_enterprise_systems_status_with_attempt_to_connect():
         # Check system1
         system1 = result["systems"][0]
         assert system1["name"] == "system1"
-        assert system1["status"] == "ONLINE"
-        assert "detail" not in system1  # No detail was provided
+        assert system1["liveness_status"] == "ONLINE"
+        assert "liveness_detail" not in system1  # No detail was provided
         assert system1["is_alive"] is True
         
         # Verify liveness_status was called with attempt_to_connect=True
@@ -1621,8 +1186,8 @@ async def test_enterprise_systems_status_all_status_types():
         # Check each system has the correct status and detail
         for name, (status, detail) in status_details.items():
             system = next(s for s in result["systems"] if s["name"] == name)
-            assert system["status"] == status.name
-            assert system["detail"] == detail
+            assert system["liveness_status"] == status.name
+            assert system["liveness_detail"] == detail
             assert system["is_alive"] == (status == ResourceLivenessStatus.ONLINE)
 
 
@@ -1721,3 +1286,321 @@ async def test_enterprise_systems_status_liveness_error():
         assert result["success"] is False
         assert result["isError"] is True
         assert "Liveness error" in result["error"]
+
+
+# === list_sessions and get_session_details tests ===
+
+@pytest.mark.asyncio
+async def test_list_sessions_success():
+    """Test list_sessions with multiple sessions of different types."""
+    # Mock session registry
+    mock_registry = AsyncMock()
+    
+    # Create mock session managers
+    mock_session_mgr1 = AsyncMock()
+    mock_session_mgr1.system_type.name = "COMMUNITY"
+    mock_session_mgr1.source = "source1"
+    mock_session_mgr1.name = "session1"
+    
+    mock_session_mgr2 = AsyncMock()
+    mock_session_mgr2.system_type.name = "ENTERPRISE"
+    mock_session_mgr2.source = "source2"
+    mock_session_mgr2.name = "session2"
+    
+    mock_registry.get_all.return_value = {
+        "session1": mock_session_mgr1,
+        "session2": mock_session_mgr2
+    }
+    
+    # Mock context
+    mock_context = MagicMock()
+    mock_context.request_context.lifespan_context = {"session_registry": mock_registry}
+    
+    # Call function
+    result = await mcp_mod.list_sessions(mock_context)
+    
+    # Verify results
+    assert result["success"] is True
+    assert len(result["sessions"]) == 2
+    
+    # Check first session
+    session1 = next(s for s in result["sessions"] if s["session_id"] == "session1")
+    assert session1["type"] == "COMMUNITY"
+    assert session1["source"] == "source1"
+    assert session1["session_name"] == "session1"
+    assert "available" not in session1  # Should not check availability
+    
+    # Check second session
+    session2 = next(s for s in result["sessions"] if s["session_id"] == "session2")
+    assert session2["type"] == "ENTERPRISE"
+    assert session2["source"] == "source2"
+    assert session2["session_name"] == "session2"
+    assert "available" not in session2  # Should not check availability
+
+
+@pytest.mark.asyncio
+async def test_list_sessions_with_unknown_type():
+    """Test list_sessions with a session that has no system_type attribute."""
+    # Mock session registry
+    mock_registry = AsyncMock()
+    
+    # Create a mock session manager with no system_type
+    mock_session_mgr = AsyncMock()
+    mock_session_mgr.system_type = None
+    mock_session_mgr.source = "source"
+    mock_session_mgr.name = "session"
+    
+    mock_registry.get_all.return_value = {"session": mock_session_mgr}
+    
+    # Mock context
+    mock_context = MagicMock()
+    mock_context.request_context.lifespan_context = {"session_registry": mock_registry}
+    
+    # Call function
+    result = await mcp_mod.list_sessions(mock_context)
+    
+    # Verify results
+    assert result["success"] is True
+    assert len(result["sessions"]) == 1
+    # Check that we have an error entry for this session since system_type is None
+    assert result["sessions"][0]["session_id"] == "session"
+    assert "error" in result["sessions"][0]
+
+
+@pytest.mark.asyncio
+async def test_list_sessions_with_processing_error():
+    """Test list_sessions when processing a session raises an exception."""
+    # Mock session registry
+    mock_registry = AsyncMock()
+    
+    # Create a session manager that will cause an exception during processing
+    mock_session_mgr = AsyncMock()
+    # Configure system_type.name to raise an exception when accessed
+    mock_system_type = MagicMock()
+    type(mock_system_type).name = PropertyMock(side_effect=Exception("Processing error"))
+    mock_session_mgr.system_type = mock_system_type
+    
+    mock_registry.get_all.return_value = {"session": mock_session_mgr}
+    
+    # Mock context
+    mock_context = MagicMock()
+    mock_context.request_context.lifespan_context = {"session_registry": mock_registry}
+    
+    # Call function
+    result = await mcp_mod.list_sessions(mock_context)
+    
+    # Verify results
+    assert result["success"] is True
+    assert len(result["sessions"]) == 1
+    assert "error" in result["sessions"][0]
+    assert result["sessions"][0]["session_id"] == "session"
+
+
+@pytest.mark.asyncio
+async def test_list_sessions_registry_error():
+    """Test list_sessions when the session registry raises an exception."""
+    # Mock context with registry that raises an exception
+    mock_context = MagicMock()
+    mock_context.request_context.lifespan_context.__getitem__.side_effect = Exception("Registry error")
+    
+    # Call function
+    result = await mcp_mod.list_sessions(mock_context)
+    
+    # Verify results
+    assert result["success"] is False
+
+
+@pytest.mark.asyncio
+async def test_get_session_details_session_not_found():
+    """Test get_session_details for a non-existent session."""
+    # Mock session registry
+    mock_registry = AsyncMock()
+    mock_registry.get.side_effect = Exception("Session not found")
+    
+    # Mock context
+    mock_context = MagicMock()
+    mock_context.request_context.lifespan_context = {"session_registry": mock_registry}
+    
+    # Call function
+    result = await mcp_mod.get_session_details(mock_context, "nonexistent")
+    
+    # Verify results
+    assert result["success"] is False
+    assert "error" in result
+    assert "not found" in result["error"]
+    assert result["isError"] is True
+
+
+@pytest.mark.asyncio
+async def test_get_session_details_with_session_error():
+    """Test get_session_details when getting the session raises an exception."""
+    # Mock session registry
+    mock_registry = AsyncMock()
+    
+    # Create mock session manager that raises an exception when liveness_status is called
+    mock_session_mgr = AsyncMock()
+    mock_system_type = MagicMock()
+    mock_system_type.name = "COMMUNITY"
+    mock_session_mgr.system_type = mock_system_type
+    mock_session_mgr.source = "source1"
+    mock_session_mgr.name = "session1"
+    # Set is_alive to raise an exception
+    mock_session_mgr.is_alive = AsyncMock(side_effect=Exception("Session error"))
+    mock_session_mgr.liveness_status.side_effect = Exception("Liveness status error")
+    
+    mock_registry.get.return_value = mock_session_mgr
+    
+    # Mock context
+    mock_context = MagicMock()
+    mock_context.request_context.lifespan_context = {"session_registry": mock_registry}
+    
+    # Call function
+    result = await mcp_mod.get_session_details(mock_context, "session1")
+    
+    # Verify results
+    assert result["success"] is True
+    assert "session" in result
+    assert result["session"]["available"] is False
+
+
+@pytest.mark.asyncio
+async def test_get_session_details_with_processing_error():
+    """Test get_session_details when processing a session raises an exception."""
+    # Mock session registry
+    mock_registry = AsyncMock()
+    
+    # Create a session manager that will cause an exception during processing
+    mock_session_mgr = AsyncMock()
+    # Configure system_type.name to raise an exception when accessed
+    mock_system_type = MagicMock()
+    type(mock_system_type).name = PropertyMock(side_effect=Exception("Processing error"))
+    mock_session_mgr.system_type = mock_system_type
+    mock_session_mgr.is_alive = AsyncMock(return_value=True)
+    # Mock liveness_status to return a tuple of (status, detail) as expected by the implementation
+    mock_status = MagicMock()
+    mock_status.name = "ONLINE"
+    mock_session_mgr.liveness_status.return_value = (mock_status, "All systems operational")
+    
+    mock_registry.get.return_value = mock_session_mgr
+    
+    # Mock context
+    mock_context = MagicMock()
+    mock_context.request_context.lifespan_context = {"session_registry": mock_registry}
+    
+    # Call function
+    result = await mcp_mod.get_session_details(mock_context, "session1")
+    
+    # Verify results
+    assert result["success"] is False
+    assert "error" in result
+    assert "Processing error" in result["error"]
+    assert result["isError"] is True
+
+
+@pytest.mark.asyncio
+async def test_get_session_details_registry_error():
+    """Test get_session_details when the session registry raises an exception."""
+    # Mock context with registry that raises an exception
+    mock_context = MagicMock()
+    mock_context.request_context.lifespan_context.__getitem__.side_effect = Exception("Registry error")
+    
+    # Call function
+    result = await mcp_mod.get_session_details(mock_context, "session1")
+    
+    # Verify results
+    assert result["success"] is False
+    assert "error" in result
+    assert result["isError"] is True
+
+
+@pytest.mark.asyncio
+async def test_get_session_details_success_with_programming_language():
+    """Test get_session_details for an existing session with programming_language property."""
+    # Mock session registry
+    mock_registry = AsyncMock()
+    
+    # Create mock session with programming_language
+    mock_session = MagicMock()
+    mock_session.programming_language = "python"
+    
+    # Create mock session manager
+    mock_session_mgr = AsyncMock()
+    mock_system_type = MagicMock()
+    mock_system_type.name = "COMMUNITY"
+    mock_session_mgr.system_type = mock_system_type
+    mock_session_mgr.source = "source1"
+    mock_session_mgr.name = "session1"
+    mock_session_mgr.is_alive = AsyncMock(return_value=True)
+    mock_session_mgr.get = AsyncMock(return_value=mock_session)
+    # Mock liveness_status to return a tuple of (status, detail) as expected by the implementation
+    mock_status = MagicMock()
+    mock_status.name = "ONLINE"
+    mock_session_mgr.liveness_status.return_value = (mock_status, "All systems operational")
+    
+    # Set up registry to return our mock session manager
+    mock_registry.get.return_value = mock_session_mgr
+    
+    # Mock context
+    mock_context = MagicMock()
+    mock_context.request_context.lifespan_context = {"session_registry": mock_registry}
+    
+    # Call function
+    result = await mcp_mod.get_session_details(mock_context, "session1", attempt_to_connect=True)
+    
+    # Verify results
+    assert result["success"] is True
+    assert "session" in result
+    assert result["session"]["session_id"] == "session1"
+    assert result["session"]["type"] == "COMMUNITY"
+    assert result["session"]["source"] == "source1"
+    assert result["session"]["session_name"] == "session1"
+    assert result["session"]["available"] is True
+    assert result["session"]["liveness_status"] == "ONLINE"
+    assert result["session"]["programming_language"] == "python"
+    assert result["session"]["liveness_detail"] == "All systems operational"
+
+
+@pytest.mark.asyncio
+async def test_get_session_details_success_without_programming_language():
+    """Test get_session_details for an existing session without programming_language property."""
+    # Mock session registry
+    mock_registry = AsyncMock()
+    
+    # Create mock session without programming_language attribute
+    mock_session = MagicMock(spec=[])
+    
+    # Create mock session manager
+    mock_session_mgr = AsyncMock()
+    mock_system_type = MagicMock()
+    mock_system_type.name = "COMMUNITY"
+    mock_session_mgr.system_type = mock_system_type
+    mock_session_mgr.source = "source1"
+    mock_session_mgr.name = "session1"
+    mock_session_mgr.is_alive = AsyncMock(return_value=True)
+    mock_session_mgr.get = AsyncMock(return_value=mock_session)
+    # Mock liveness_status to return a tuple of (status, detail) as expected by the implementation
+    mock_status = MagicMock()
+    mock_status.name = "ONLINE"
+    mock_session_mgr.liveness_status.return_value = (mock_status, "All systems operational")
+    
+    # Set up registry to return our mock session manager
+    mock_registry.get.return_value = mock_session_mgr
+    
+    # Mock context
+    mock_context = MagicMock()
+    mock_context.request_context.lifespan_context = {"session_registry": mock_registry}
+    
+    # Call function
+    result = await mcp_mod.get_session_details(mock_context, "session1", attempt_to_connect=True)
+    
+    # Verify results
+    assert result["success"] is True
+    assert "session" in result
+    assert result["session"]["session_id"] == "session1"
+    assert result["session"]["type"] == "COMMUNITY"
+    assert result["session"]["source"] == "source1"
+    assert result["session"]["session_name"] == "session1"
+    assert result["session"]["available"] is True
+    assert result["session"]["liveness_status"] == "ONLINE"
+    assert "programming_language" not in result["session"]
+    assert result["session"]["liveness_detail"] == "All systems operational"

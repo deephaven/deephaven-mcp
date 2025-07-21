@@ -40,6 +40,7 @@ __all__ = [
     # Base exceptions
     "McpError",
     "InternalError",
+    "UnsupportedOperationError",
     # Session exceptions
     "SessionCreationError",
     "SessionError",
@@ -394,6 +395,29 @@ class EnterpriseSystemConfigurationError(ConfigurationError):
         except EnterpriseSystemConfigurationError as e:
             logger.error(f"Enterprise system configuration error for {system_name}: {e}")
             # Guide user to fix enterprise system configuration
+        ```
+    """
+
+    pass
+
+
+class UnsupportedOperationError(McpError):
+    """Exception raised when an operation is not supported in the current context.
+
+    This exception is raised when a method or operation is called in a context where
+    it cannot be executed, such as when a Python-specific operation is attempted on
+    a non-Python session, or when a feature is not available for the current session type.
+
+    Examples:
+        - Python-specific operations on non-Python sessions
+        - Enterprise features on community sessions
+        - Operations requiring specific programming languages or environments
+        - Features not yet implemented for certain session types
+
+    Usage:
+        ```python
+        if session.programming_language != "python":
+            raise UnsupportedOperationError("This operation requires a Python session")
         ```
     """
 
