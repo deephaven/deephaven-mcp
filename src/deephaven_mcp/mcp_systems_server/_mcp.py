@@ -34,8 +34,12 @@ import aiofiles
 from mcp.server.fastmcp import Context, FastMCP
 
 from deephaven_mcp import queries
+from deephaven_mcp.config import (
+    ConfigManager,
+    get_config_section,
+    redact_enterprise_system_config,
+)
 from deephaven_mcp.resource_manager._registry_combined import CombinedSessionRegistry
-from deephaven_mcp.config import ConfigManager, get_config_section, redact_enterprise_system_config
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -122,7 +126,8 @@ Usage:
 See the module-level docstring for an overview of the available tools and error handling conventions.
 """
 
-#TODO: remove refresh?
+
+# TODO: remove refresh?
 @mcp_server.tool()
 async def refresh(context: Context) -> dict:
     """
@@ -157,9 +162,15 @@ async def refresh(context: Context) -> dict:
     # guarantee atomicity with respect to other config/session operations, but
     # it does ensure that only one refresh runs at a time and reduces race risk.
     try:
-        refresh_lock: asyncio.Lock = context.request_context.lifespan_context["refresh_lock"]
-        config_manager: ConfigManager = context.request_context.lifespan_context["config_manager"]
-        session_registry: CombinedSessionRegistry = context.request_context.lifespan_context["session_registry"]
+        refresh_lock: asyncio.Lock = context.request_context.lifespan_context[
+            "refresh_lock"
+        ]
+        config_manager: ConfigManager = context.request_context.lifespan_context[
+            "config_manager"
+        ]
+        session_registry: CombinedSessionRegistry = (
+            context.request_context.lifespan_context["session_registry"]
+        )
 
         async with refresh_lock:
             await config_manager.clear_config_cache()
@@ -175,86 +186,93 @@ async def refresh(context: Context) -> dict:
         )
         return {"success": False, "error": str(e), "isError": True}
 
+
 @mcp_server.tool()
-async def enterprise_systems_status(context: Context, attempt_to_connect: bool = False) -> dict:
+async def enterprise_systems_status(
+    context: Context, attempt_to_connect: bool = False
+) -> dict:
     """
     MCP Tool: List all enterprise (CorePlus) systems/factories with their status and configuration details (redacted).
-    
+
     This tool provides comprehensive status information about all configured enterprise systems in the MCP
     environment. It returns detailed health status using the ResourceLivenessStatus classification system,
     along with explanatory details and configuration information (with sensitive fields redacted for security).
-    
+
     The tool supports two operational modes:
     1. Default mode (attempt_to_connect=False): Quick status check of existing connections
        - Fast response time, minimal resource usage
        - Suitable for dashboards, monitoring, and non-critical status checks
        - Will report systems as OFFLINE if no connection exists
-       
+
     2. Connection verification mode (attempt_to_connect=True): Active connection attempt
        - Attempts to establish connections to verify actual availability
        - Higher latency but more accurate status reporting
        - Suitable for troubleshooting and pre-flight checks before critical operations
        - May create new connections if none exist
-    
+
     Status Classification:
       - "ONLINE": System is healthy and ready for operational use
       - "OFFLINE": System is unresponsive, failed health checks, or not connected
       - "UNAUTHORIZED": Authentication or authorization failures prevent access
       - "MISCONFIGURED": Configuration errors prevent proper system operation
       - "UNKNOWN": Unexpected errors occurred during status determination
-    
+
     Returns a list of all configured enterprise systems, each with:
       - name (string): System name identifier
       - status (string): ResourceLivenessStatus as string ("ONLINE", "OFFLINE", etc.)
       - detail (string, optional): Explanation message for the status, especially useful for troubleshooting
       - is_alive (boolean): Simple boolean indicating if the system is responsive
       - config (dict): System configuration with sensitive fields redacted
-    
+
     Example Usage:
     ```python
     # Get quick status of all enterprise systems
     status_result = await mcp.enterprise_systems_status()
-    
+
     # Get comprehensive status with connection attempts
     detailed_status = await mcp.enterprise_systems_status(attempt_to_connect=True)
-    
+
     # Check if all systems are online
     systems = status_result.get("systems", [])
     all_online = all(system["status"] == "ONLINE" for system in systems)
-    
+
     # Get systems with specific status
     offline_systems = [s for s in systems if s["status"] == "OFFLINE"]
     ```
-    
+
     Args:
         context (Context): The FastMCP Context for this tool call.
         attempt_to_connect (bool, optional): If True, actively attempts to connect to each system
             to verify its status. This provides more accurate results but increases latency.
             Default is False (only checks existing connections for faster response).
-    
+
     Returns:
         dict: Structured result object with keys:
             - 'success' (bool): True if retrieval succeeded, False otherwise.
             - 'systems' (list[dict]): List of system info dicts as described above.
             - 'error' (str, optional): Error message if retrieval failed.
             - 'isError' (bool, optional): Present and True if this is an error response.
-    
+
     Raises:
         No exceptions are raised; errors are captured in the return value.
-    
+
     Performance Considerations:
         - With attempt_to_connect=False: Typically completes in milliseconds
         - With attempt_to_connect=True: May take seconds due to connection operations
     """
     _LOGGER.info("[enterprise_systems_status] Invoked.")
     try:
-        session_registry: CombinedSessionRegistry = context.request_context.lifespan_context["session_registry"]
-        config_manager: ConfigManager = context.request_context.lifespan_context["config_manager"]
+        session_registry: CombinedSessionRegistry = (
+            context.request_context.lifespan_context["session_registry"]
+        )
+        config_manager: ConfigManager = context.request_context.lifespan_context[
+            "config_manager"
+        ]
         # Get all factories (enterprise systems)
         enterprise_registry = session_registry._enterprise_registry
         factories = await enterprise_registry.get_all()
         config = await config_manager.get_config()
-        
+
         try:
             systems_config = get_config_section(config, ["enterprise", "systems"])
         except KeyError:
@@ -263,27 +281,29 @@ async def enterprise_systems_status(context: Context, attempt_to_connect: bool =
         systems = []
         for name, factory in factories.items():
             # Use liveness_status() for detailed health information
-            status_enum, liveness_detail = await factory.liveness_status(ensure_item=attempt_to_connect)
-            liveness_status = status_enum.name 
-            
+            status_enum, liveness_detail = await factory.liveness_status(
+                ensure_item=attempt_to_connect
+            )
+            liveness_status = status_enum.name
+
             # Also get simple is_alive boolean
             is_alive = await factory.is_alive()
-            
+
             # Redact config for output
             raw_config = systems_config.get(name, {})
             redacted_config = redact_enterprise_system_config(raw_config)
-            
+
             system_info = {
                 "name": name,
                 "liveness_status": liveness_status,
                 "is_alive": is_alive,
-                "config": redacted_config
+                "config": redacted_config,
             }
-            
+
             # Include detail if available
             if liveness_detail is not None:
                 system_info["liveness_detail"] = liveness_detail
-                
+
             systems.append(system_info)
         return {"success": True, "systems": systems}
     except Exception as e:
@@ -295,7 +315,7 @@ async def enterprise_systems_status(context: Context, attempt_to_connect: bool =
 async def list_sessions(context: Context) -> dict:
     """
     MCP Tool: List all sessions (community and enterprise) with basic metadata.
-    
+
     This is a lightweight operation that doesn't connect to sessions or check their status.
     For detailed information about a specific session, use get_session_details.
 
@@ -317,7 +337,9 @@ async def list_sessions(context: Context) -> dict:
     """
     _LOGGER.info("[list_sessions] Invoked.")
     try:
-        session_registry: CombinedSessionRegistry = context.request_context.lifespan_context["session_registry"]
+        session_registry: CombinedSessionRegistry = (
+            context.request_context.lifespan_context["session_registry"]
+        )
         sessions = await session_registry.get_all()
         results = []
         for fq_name, mgr in sessions.items():
@@ -326,15 +348,19 @@ async def list_sessions(context: Context) -> dict:
                 system_type_str = system_type.name
                 source = mgr.source
                 session_name = mgr.name
-                
-                results.append({
-                    "session_id": fq_name,
-                    "type": system_type_str,
-                    "source": source,
-                    "session_name": session_name,
-                })
+
+                results.append(
+                    {
+                        "session_id": fq_name,
+                        "type": system_type_str,
+                        "source": source,
+                        "session_name": session_name,
+                    }
+                )
             except Exception as e:
-                _LOGGER.warning(f"[list_sessions] Could not process session '{fq_name}': {e!r}")
+                _LOGGER.warning(
+                    f"[list_sessions] Could not process session '{fq_name}': {e!r}"
+                )
                 results.append({"session_id": fq_name, "error": str(e)})
         return {"success": True, "sessions": results}
     except Exception as e:
@@ -342,33 +368,34 @@ async def list_sessions(context: Context) -> dict:
         return {"success": False, "error": str(e), "isError": True}
 
 
-
 @mcp_server.tool()
-async def get_session_details(context: Context, session_id: str, attempt_to_connect: bool = False) -> dict:
+async def get_session_details(
+    context: Context, session_id: str, attempt_to_connect: bool = False
+) -> dict:
     """
     MCP Tool: Get detailed information about a specific session.
-    
+
     This tool provides comprehensive status information about a specific session in the MCP environment.
     It returns detailed health status along with explanatory details and configuration information.
-    
+
     The tool supports two operational modes:
     1. Default mode (attempt_to_connect=False): Quick status check of existing connections
        - Fast response time, minimal resource usage
        - Suitable for dashboards, monitoring, and non-critical status checks
        - Will report sessions as unavailable if no connection exists
-        
+
     2. Connection verification mode (attempt_to_connect=True): Active connection attempt
        - Attempts to establish connections to verify actual availability
        - Higher latency but more accurate status reporting
        - Suitable for troubleshooting and pre-flight checks before critical operations
        - May create new connections if none exist
-    
+
     For a lightweight list of all sessions without detailed status, use list_sessions first.
 
     Args:
         context (Context): The FastMCP Context for this tool call.
         session_id (str): The session identifier (fully qualified name) to get details for.
-        attempt_to_connect (bool, optional): Whether to attempt connecting to the session 
+        attempt_to_connect (bool, optional): Whether to attempt connecting to the session
             to verify its status. Defaults to False for faster response.
 
     Returns:
@@ -385,72 +412,90 @@ async def get_session_details(context: Context, session_id: str, attempt_to_conn
                 - programming_language (str, optional): The programming language of the session (e.g., "python", "groovy")
                 - programming_language_version (str, optional): Version of the programming language (e.g., "3.9.7")
                 - deephaven_community_version (str, optional): Version of Deephaven Community/Core (e.g., "0.24.0")
-                - deephaven_enterprise_version (str, optional): Version of Deephaven Enterprise/Core+/CorePlus (e.g., "0.24.0") 
+                - deephaven_enterprise_version (str, optional): Version of Deephaven Enterprise/Core+/CorePlus (e.g., "0.24.0")
                   if the session is an enterprise installation
             - 'error' (str, optional): Error message if retrieval failed.
             - 'isError' (bool, optional): Present and True if this is an error response.
-            
-        Note: The version fields (programming_language_version, deephaven_community_version, 
-        deephaven_enterprise_version) will only be present if the session is available and 
-        the information could be retrieved successfully. Fields with null values are excluded 
+
+        Note: The version fields (programming_language_version, deephaven_community_version,
+        deephaven_enterprise_version) will only be present if the session is available and
+        the information could be retrieved successfully. Fields with null values are excluded
         from the response.
     """
     _LOGGER.info(f"[get_session_details] Invoked for session_id: {session_id}")
     try:
-        session_registry: CombinedSessionRegistry = context.request_context.lifespan_context["session_registry"]
-        
+        session_registry: CombinedSessionRegistry = (
+            context.request_context.lifespan_context["session_registry"]
+        )
+
         # Get the specific session manager directly
         try:
             mgr = await session_registry.get(session_id)
         except Exception as e:
             return {
-                "success": False, 
-                "error": f"Session with ID '{session_id}' not found: {str(e)}", 
-                "isError": True
+                "success": False,
+                "error": f"Session with ID '{session_id}' not found: {str(e)}",
+                "isError": True,
             }
-        
+
         try:
             # Get basic metadata
             system_type = mgr.system_type
             system_type_str = system_type.name
             source = mgr.source
             session_name = mgr.name
-            
+
             # Get liveness status and availability
             try:
-                status, detail = await mgr.liveness_status(ensure_item=attempt_to_connect)
+                status, detail = await mgr.liveness_status(
+                    ensure_item=attempt_to_connect
+                )
                 liveness_status = status.name
                 liveness_detail = detail
                 available = await mgr.is_alive()
-                _LOGGER.debug(f"[mcp_systems_server:get_session_details] Session '{session_id}' liveness: {liveness_status}, detail: {liveness_detail}")
+                _LOGGER.debug(
+                    f"[mcp_systems_server:get_session_details] Session '{session_id}' liveness: {liveness_status}, detail: {liveness_detail}"
+                )
             except Exception as e:
-                _LOGGER.warning(f"[mcp_systems_server:get_session_details] Could not check liveness for '{session_id}': {e!r}")
+                _LOGGER.warning(
+                    f"[mcp_systems_server:get_session_details] Could not check liveness for '{session_id}': {e!r}"
+                )
                 available = False
                 liveness_status = "OFFLINE"
                 liveness_detail = str(e)
-            
+
             # Get session object and extract additional properties
             programming_language = None
-            
+
             try:
                 if available:
                     session = await mgr.get()
                     programming_language = session.programming_language
-                    _LOGGER.debug(f"[mcp_systems_server:get_session_details] Session '{session_id}' programming_language: {programming_language}")
+                    _LOGGER.debug(
+                        f"[mcp_systems_server:get_session_details] Session '{session_id}' programming_language: {programming_language}"
+                    )
             except Exception as e:
-                _LOGGER.warning(f"[mcp_systems_server:get_session_details] Could not get additional properties for '{session_id}': {e!r}")
+                _LOGGER.warning(
+                    f"[mcp_systems_server:get_session_details] Could not get additional properties for '{session_id}': {e!r}"
+                )
 
-            #TODO: should the versions be cached?
+            # TODO: should the versions be cached?
 
             programming_language_version = None
 
             try:
                 if available:
                     session = await mgr.get()
-                    programming_language_version = await queries.get_programming_language_version(session)
-                    _LOGGER.debug(f"[mcp_systems_server:get_session_details] Session '{session_id}' programming_language_version: {programming_language_version}")
+                    programming_language_version = (
+                        await queries.get_programming_language_version(session)
+                    )
+                    _LOGGER.debug(
+                        f"[mcp_systems_server:get_session_details] Session '{session_id}' programming_language_version: {programming_language_version}"
+                    )
             except Exception as e:
-                _LOGGER.warning(f"[mcp_systems_server:get_session_details] Could not get programming language version for '{session_id}': {e!r}")
+                _LOGGER.warning(
+                    f"[mcp_systems_server:get_session_details] Could not get programming language version for '{session_id}': {e!r}"
+                )
 
             community_version = None
             enterprise_version = None
@@ -458,10 +503,16 @@ async def get_session_details(context: Context, session_id: str, attempt_to_conn
             try:
                 if available:
                     session = await mgr.get()
-                    community_version, enterprise_version = await queries.get_dh_versions(session)
-                    _LOGGER.debug(f"[mcp_systems_server:get_session_details] Session '{session_id}' versions: community={community_version}, enterprise={enterprise_version}")
+                    community_version, enterprise_version = (
+                        await queries.get_dh_versions(session)
+                    )
+                    _LOGGER.debug(
+                        f"[mcp_systems_server:get_session_details] Session '{session_id}' versions: community={community_version}, enterprise={enterprise_version}"
+                    )
             except Exception as e:
-                _LOGGER.warning(f"[mcp_systems_server:get_session_details] Could not get Deephaven versions for '{session_id}': {e!r}")
+                _LOGGER.warning(
+                    f"[mcp_systems_server:get_session_details] Could not get Deephaven versions for '{session_id}': {e!r}"
+                )
 
             # Build session info dictionary with all potential fields
             session_info_with_nones = {
@@ -475,31 +526,31 @@ async def get_session_details(context: Context, session_id: str, attempt_to_conn
                 "programming_language": programming_language,
                 "programming_language_version": programming_language_version,
                 "deephaven_community_version": community_version,
-                "deephaven_enterprise_version": enterprise_version
+                "deephaven_enterprise_version": enterprise_version,
             }
-            
+
             # Filter out None values
-            session_info = {k: v for k, v in session_info_with_nones.items() if v is not None}
-            
-            return {"success": True, "session": session_info}
-            
-        except Exception as e:
-            _LOGGER.warning(f"[mcp_systems_server:get_session_details] Could not process session '{session_id}': {e!r}")
-            return {
-                "success": False, 
-                "error": f"Error processing session '{session_id}': {str(e)}", 
-                "isError": True
+            session_info = {
+                k: v for k, v in session_info_with_nones.items() if v is not None
             }
-            
+
+            return {"success": True, "session": session_info}
+
+        except Exception as e:
+            _LOGGER.warning(
+                f"[mcp_systems_server:get_session_details] Could not process session '{session_id}': {e!r}"
+            )
+            return {
+                "success": False,
+                "error": f"Error processing session '{session_id}': {str(e)}",
+                "isError": True,
+            }
+
     except Exception as e:
-        _LOGGER.error(f"[mcp_systems_server:get_session_details] Failed: {e!r}", exc_info=True)
+        _LOGGER.error(
+            f"[mcp_systems_server:get_session_details] Failed: {e!r}", exc_info=True
+        )
         return {"success": False, "error": str(e), "isError": True}
-
-
-
-
-
-
 
 
 @mcp_server.tool()
@@ -544,7 +595,9 @@ async def table_schemas(
     )
     results = []
     try:
-        session_registry: CombinedSessionRegistry = context.request_context.lifespan_context["session_registry"]
+        session_registry: CombinedSessionRegistry = (
+            context.request_context.lifespan_context["session_registry"]
+        )
         session_manager = await session_registry.get(session_id)
         session = await session_manager.get()
         _LOGGER.info(f"[table_schemas] Session established for session: '{session_id}'")
@@ -653,7 +706,9 @@ async def run_script(
             async with aiofiles.open(script_path) as f:
                 script = await f.read()
 
-        session_registry: CombinedSessionRegistry = context.request_context.lifespan_context["session_registry"]
+        session_registry: CombinedSessionRegistry = (
+            context.request_context.lifespan_context["session_registry"]
+        )
         session_manager = await session_registry.get(session_id)
         session = await session_manager.get()
         _LOGGER.info(f"[run_script] Session established for session: '{session_id}'")
@@ -672,6 +727,7 @@ async def run_script(
         result["error"] = str(e)
         result["isError"] = True
     return result
+
 
 @mcp_server.tool()
 async def pip_packages(context: Context, session_id: str) -> dict:
@@ -704,7 +760,9 @@ async def pip_packages(context: Context, session_id: str) -> dict:
     _LOGGER.info(f"[pip_packages] Invoked for session: {session_id!r}")
     result: dict = {"success": False}
     try:
-        session_registry: CombinedSessionRegistry = context.request_context.lifespan_context["session_registry"]
+        session_registry: CombinedSessionRegistry = (
+            context.request_context.lifespan_context["session_registry"]
+        )
         session_manager = await session_registry.get(session_id)
         session = await session_manager.get()
         _LOGGER.info(f"[pip_packages] Session established for session: '{session_id}'")

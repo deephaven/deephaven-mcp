@@ -41,7 +41,9 @@ def dummy_session_manager():
 
 @pytest.fixture
 def coreplus_session_manager(dummy_session_manager, monkeypatch):
-    monkeypatch.setattr("deephaven_mcp.client._base.is_enterprise_available", lambda: True)
+    monkeypatch.setattr(
+        "deephaven_mcp.client._base.is_enterprise_available", lambda: True
+    )
     # The factory is now created directly with the mocked SessionManager
     return CorePlusSessionFactory(session_manager=dummy_session_manager)
 
@@ -217,7 +219,8 @@ async def test_connect_to_new_worker_success(
     dummy_session_manager.connect_to_new_worker.return_value = mock_session_instance
 
     with patch(
-        "deephaven_mcp.client._session_factory.CorePlusSession", return_value="wrapped_session"
+        "deephaven_mcp.client._session_factory.CorePlusSession",
+        return_value="wrapped_session",
     ) as mock_core_plus_session:
         result = await coreplus_session_manager.connect_to_new_worker(
             name="worker", session_arguments={"programming_language": "python"}
@@ -247,7 +250,9 @@ async def test_connect_to_new_worker_resource_error(
 ):
     dummy_session_manager.connect_to_new_worker.side_effect = exc.ResourceError("fail")
     with pytest.raises(exc.ResourceError):
-        await coreplus_session_manager.connect_to_new_worker(name="worker", session_arguments={"programming_language": "python"})
+        await coreplus_session_manager.connect_to_new_worker(
+            name="worker", session_arguments={"programming_language": "python"}
+        )
 
 
 @pytest.mark.asyncio
@@ -258,7 +263,9 @@ async def test_connect_to_new_worker_creation_error(
         "fail"
     )
     with pytest.raises(exc.SessionCreationError):
-        await coreplus_session_manager.connect_to_new_worker(name="worker", session_arguments={"programming_language": "python"})
+        await coreplus_session_manager.connect_to_new_worker(
+            name="worker", session_arguments={"programming_language": "python"}
+        )
 
 
 @pytest.mark.asyncio
@@ -267,7 +274,9 @@ async def test_connect_to_new_worker_connection_error(
 ):
     dummy_session_manager.connect_to_new_worker.side_effect = ConnectionError("fail")
     with pytest.raises(exc.DeephavenConnectionError):
-        await coreplus_session_manager.connect_to_new_worker(name="worker", session_arguments={"programming_language": "python"})
+        await coreplus_session_manager.connect_to_new_worker(
+            name="worker", session_arguments={"programming_language": "python"}
+        )
 
 
 @pytest.mark.asyncio
@@ -276,7 +285,9 @@ async def test_connect_to_new_worker_other_error(
 ):
     dummy_session_manager.connect_to_new_worker.side_effect = Exception("fail")
     with pytest.raises(exc.SessionCreationError):
-        await coreplus_session_manager.connect_to_new_worker(name="worker", session_arguments={"programming_language": "python"})
+        await coreplus_session_manager.connect_to_new_worker(
+            name="worker", session_arguments={"programming_language": "python"}
+        )
 
 
 @pytest.mark.asyncio
@@ -284,10 +295,13 @@ async def test_connect_to_persistent_query_success(
     coreplus_session_manager, dummy_session_manager
 ):
     mock_session_instance = MagicMock()
-    dummy_session_manager.connect_to_persistent_query.return_value = mock_session_instance
+    dummy_session_manager.connect_to_persistent_query.return_value = (
+        mock_session_instance
+    )
 
     with patch(
-        "deephaven_mcp.client._session_factory.CorePlusSession", return_value="wrapped_session"
+        "deephaven_mcp.client._session_factory.CorePlusSession",
+        return_value="wrapped_session",
     ) as mock_core_plus_session:
         result = await coreplus_session_manager.connect_to_persistent_query(
             name="pq", session_arguments={"programming_language": "python"}
@@ -306,7 +320,9 @@ async def test_connect_to_persistent_query_value_error(
 ):
     dummy_session_manager.connect_to_persistent_query.side_effect = ValueError("fail")
     with pytest.raises(ValueError):
-        await coreplus_session_manager.connect_to_persistent_query(name="pq", session_arguments={"programming_language": "python"})
+        await coreplus_session_manager.connect_to_persistent_query(
+            name="pq", session_arguments={"programming_language": "python"}
+        )
 
 
 @pytest.mark.asyncio
@@ -317,7 +333,9 @@ async def test_connect_to_persistent_query_query_error(
         "fail"
     )
     with pytest.raises(exc.SessionCreationError):
-        await coreplus_session_manager.connect_to_persistent_query(name="pq", session_arguments={"programming_language": "python"})
+        await coreplus_session_manager.connect_to_persistent_query(
+            name="pq", session_arguments={"programming_language": "python"}
+        )
 
 
 @pytest.mark.asyncio
@@ -328,7 +346,9 @@ async def test_connect_to_persistent_query_creation_error(
         exc.SessionCreationError("fail")
     )
     with pytest.raises(exc.SessionCreationError):
-        await coreplus_session_manager.connect_to_persistent_query(name="pq", session_arguments={"programming_language": "python"})
+        await coreplus_session_manager.connect_to_persistent_query(
+            name="pq", session_arguments={"programming_language": "python"}
+        )
 
 
 @pytest.mark.asyncio
@@ -339,7 +359,9 @@ async def test_connect_to_persistent_query_connection_error(
         "fail"
     )
     with pytest.raises(exc.DeephavenConnectionError):
-        await coreplus_session_manager.connect_to_persistent_query(name="pq", session_arguments={"programming_language": "python"})
+        await coreplus_session_manager.connect_to_persistent_query(
+            name="pq", session_arguments={"programming_language": "python"}
+        )
 
 
 @pytest.mark.asyncio
@@ -348,7 +370,9 @@ async def test_connect_to_persistent_query_key_error(
 ):
     dummy_session_manager.connect_to_persistent_query.side_effect = KeyError("fail")
     with pytest.raises(exc.QueryError):
-        await coreplus_session_manager.connect_to_persistent_query(name="pq", session_arguments={"programming_language": "python"})
+        await coreplus_session_manager.connect_to_persistent_query(
+            name="pq", session_arguments={"programming_language": "python"}
+        )
 
 
 @pytest.mark.asyncio

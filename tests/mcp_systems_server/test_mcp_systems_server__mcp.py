@@ -5,14 +5,13 @@ Tests for the deephaven_mcp.mcp_systems_server server and tools.
 import asyncio
 import warnings
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
 
 import deephaven_mcp.mcp_systems_server._mcp as mcp_mod
 from deephaven_mcp import config
 from deephaven_mcp.resource_manager._manager import ResourceLivenessStatus
-from unittest.mock import PropertyMock
 
 
 class MockRequestContext:
@@ -132,54 +131,57 @@ async def test_refresh_success():
 async def test_get_session_details_logs_version_info():
     """Test that get_session_details logs programming language and Deephaven versions when available."""
     # Import the function
-    from deephaven_mcp.mcp_systems_server._mcp import get_session_details
-    from deephaven_mcp.resource_manager._registry_combined import CombinedSessionRegistry
-    from deephaven_mcp.resource_manager._manager import ResourceLivenessStatus
     import enum
-    
+
+    from deephaven_mcp.mcp_systems_server._mcp import get_session_details
+    from deephaven_mcp.resource_manager._manager import ResourceLivenessStatus
+    from deephaven_mcp.resource_manager._registry_combined import (
+        CombinedSessionRegistry,
+    )
+
     # Create mocks
     context = MagicMock()
     session_id = "test-session"
     session = AsyncMock()
-    
+
     # Setup session registry and session manager
     session_registry = MagicMock(spec=CombinedSessionRegistry)
     mgr = AsyncMock()
-    
+
     # Configure session manager with required properties
     mgr.is_alive = AsyncMock(return_value=True)
     mgr.system_type = MagicMock()
     mgr.system_type.name = "COMMUNITY"
     mgr.source = "test-source"
     mgr.name = "test"
-    
+
     # Mock liveness status
     status_mock = MagicMock(spec=enum.Enum)
     status_mock.name = "ONLINE"
     mgr.liveness_status = AsyncMock(return_value=(status_mock, ""))
-    
+
     # Configure the session object with programming_language
     session.programming_language = "python"
-    
+
     # Setup mgr.get to return our session
     mgr.get = AsyncMock(return_value=session)
-    
+
     # Configure session registry to return our manager
     session_registry.get = AsyncMock(return_value=mgr)
-    
+
     # Setup context.request_context.lifespan_context properly
     request_context = MagicMock()
     request_context.lifespan_context = {"session_registry": session_registry}
     context.request_context = request_context
-    
+
     # Mock the queries module to return version information
     mock_queries = MagicMock()
     mock_queries.get_programming_language_version = AsyncMock(return_value="3.9.7")
     mock_queries.get_dh_versions = AsyncMock(return_value=("0.24.0", None))
-    
+
     # Use a logger mock to verify debug logs
     mock_logger = MagicMock()
-    
+
     with (
         patch(
             "deephaven_mcp.mcp_systems_server._mcp.queries",
@@ -192,14 +194,14 @@ async def test_get_session_details_logs_version_info():
     ):
         # Call the function
         result = await get_session_details(context, session_id, attempt_to_connect=True)
-        
+
         # Verify the function returned successfully
         assert result["success"] is True
         assert "session" in result
         assert result["session"]["programming_language"] == "python"
         assert result["session"]["programming_language_version"] == "3.9.7"
         assert result["session"]["deephaven_community_version"] == "0.24.0"
-        
+
         # Verify that the debug log messages were called (lines 447 and 458)
         mock_logger.debug.assert_any_call(
             f"[mcp_systems_server:get_session_details] Session '{session_id}' programming_language_version: 3.9.7"
@@ -229,8 +231,6 @@ async def test_refresh_failure():
     assert result["success"] is False
     assert result["isError"] is True
     assert "fail" in result["error"]
-
-
 
 
 # === table_schemas ===
@@ -542,7 +542,7 @@ async def test_app_lifespan_yields_context_and_cleans_up():
     config_manager.get_config = AsyncMock(return_value={})
     session_registry.initialize = AsyncMock()
     session_registry.close = AsyncMock()
-    
+
     # Use a comprehensive patching approach to handle all dependencies
     with (
         patch(
@@ -977,23 +977,23 @@ async def test_enterprise_systems_status_success():
         return_value=(ResourceLivenessStatus.ONLINE, "System is healthy")
     )
     mock_factory1.is_alive = AsyncMock(return_value=True)
-    
+
     mock_factory2 = AsyncMock()
     mock_factory2.liveness_status = AsyncMock(
         return_value=(ResourceLivenessStatus.OFFLINE, "System is not responding")
     )
     mock_factory2.is_alive = AsyncMock(return_value=False)
-    
+
     # Mock enterprise registry
     mock_enterprise_registry = AsyncMock()
     mock_enterprise_registry.get_all = AsyncMock(
         return_value={"system1": mock_factory1, "system2": mock_factory2}
     )
-    
+
     # Mock session registry
     mock_session_registry = MagicMock()
     mock_session_registry._enterprise_registry = mock_enterprise_registry
-    
+
     # Mock config manager
     mock_config_manager = AsyncMock()
     mock_config_manager.get_config = AsyncMock(
@@ -1001,34 +1001,42 @@ async def test_enterprise_systems_status_success():
             "enterprise": {
                 "systems": {
                     "system1": {"url": "http://example.com", "api_key": "secret_key"},
-                    "system2": {"url": "http://example2.com", "password": "secret_password"}
+                    "system2": {
+                        "url": "http://example2.com",
+                        "password": "secret_password",
+                    },
                 }
             }
         }
     )
-    
+
     # Create context
-    context = MockContext({
-        "session_registry": mock_session_registry,
-        "config_manager": mock_config_manager,
-    })
-    
+    context = MockContext(
+        {
+            "session_registry": mock_session_registry,
+            "config_manager": mock_config_manager,
+        }
+    )
+
     # Mock the redact function to match the actual implementation
-    with patch("deephaven_mcp.config._enterprise_system.redact_enterprise_system_config") as mock_redact:
+    with patch(
+        "deephaven_mcp.config._enterprise_system.redact_enterprise_system_config"
+    ) as mock_redact:
         # Configure the mock to replace only password with [REDACTED]
         def redact_config(config):
             result = config.copy()
             if "password" in result:
                 result["password"] = "[REDACTED]"
             return result
+
         mock_redact.side_effect = redact_config
         # Call the function with default parameters
         result = await mcp_mod.enterprise_systems_status(context)
-    
+
     # Verify the result
     assert result["success"] is True
     assert len(result["systems"]) == 2
-    
+
     # Check system1
     system1 = next(s for s in result["systems"] if s["name"] == "system1")
     assert system1["liveness_status"] == "ONLINE"
@@ -1036,7 +1044,7 @@ async def test_enterprise_systems_status_success():
     assert system1["is_alive"] is True
     assert system1["config"]["url"] == "http://example.com"
     assert system1["config"]["api_key"] == "secret_key"
-    
+
     # Check system2
     system2 = next(s for s in result["systems"] if s["name"] == "system2")
     assert system2["liveness_status"] == "OFFLINE"
@@ -1044,7 +1052,7 @@ async def test_enterprise_systems_status_success():
     assert system2["is_alive"] is False
     assert system2["config"]["url"] == "http://example2.com"
     assert system2["config"]["password"] == "[REDACTED]"
-    
+
     # Verify liveness_status was called with attempt_to_connect=False
     mock_factory1.liveness_status.assert_called_once_with(ensure_item=False)
     mock_factory2.liveness_status.assert_called_once_with(ensure_item=False)
@@ -1059,46 +1067,50 @@ async def test_enterprise_systems_status_with_attempt_to_connect():
         return_value=(ResourceLivenessStatus.ONLINE, None)
     )
     mock_factory.is_alive = AsyncMock(return_value=True)
-    
+
     # Mock enterprise registry
     mock_enterprise_registry = AsyncMock()
-    mock_enterprise_registry.get_all = AsyncMock(
-        return_value={"system1": mock_factory}
-    )
-    
+    mock_enterprise_registry.get_all = AsyncMock(return_value={"system1": mock_factory})
+
     # Mock session registry
     mock_session_registry = MagicMock()
     mock_session_registry._enterprise_registry = mock_enterprise_registry
-    
+
     # Mock config manager
     mock_config_manager = AsyncMock()
     mock_config_manager.get_config = AsyncMock(
         return_value={"enterprise": {"factories": {"system1": {}}}}
     )
-    
+
     # Create context
-    context = MockContext({
-        "session_registry": mock_session_registry,
-        "config_manager": mock_config_manager,
-    })
-    
+    context = MockContext(
+        {
+            "session_registry": mock_session_registry,
+            "config_manager": mock_config_manager,
+        }
+    )
+
     # Mock the redact function
-    with patch("deephaven_mcp.config._enterprise_system.redact_enterprise_system_config", 
-               return_value={}):
+    with patch(
+        "deephaven_mcp.config._enterprise_system.redact_enterprise_system_config",
+        return_value={},
+    ):
         # Call the function with attempt_to_connect=True
-        result = await mcp_mod.enterprise_systems_status(context, attempt_to_connect=True)
-        
+        result = await mcp_mod.enterprise_systems_status(
+            context, attempt_to_connect=True
+        )
+
         # Verify the result
         assert result["success"] is True
         assert len(result["systems"]) == 1
-        
+
         # Check system1
         system1 = result["systems"][0]
         assert system1["name"] == "system1"
         assert system1["liveness_status"] == "ONLINE"
         assert "liveness_detail" not in system1  # No detail was provided
         assert system1["is_alive"] is True
-        
+
         # Verify liveness_status was called with attempt_to_connect=True
         mock_factory.liveness_status.assert_called_once_with(ensure_item=True)
 
@@ -1109,26 +1121,28 @@ async def test_enterprise_systems_status_no_systems():
     # Mock enterprise registry with no systems
     mock_enterprise_registry = AsyncMock()
     mock_enterprise_registry.get_all = AsyncMock(return_value={})
-    
+
     # Mock session registry
     mock_session_registry = MagicMock()
     mock_session_registry._enterprise_registry = mock_enterprise_registry
-    
+
     # Mock config manager
     mock_config_manager = AsyncMock()
     mock_config_manager.get_config = AsyncMock(
         return_value={"enterprise": {"factories": {}}}
     )
-    
+
     # Create context
-    context = MockContext({
-        "session_registry": mock_session_registry,
-        "config_manager": mock_config_manager,
-    })
-    
+    context = MockContext(
+        {
+            "session_registry": mock_session_registry,
+            "config_manager": mock_config_manager,
+        }
+    )
+
     # Call the function
     result = await mcp_mod.enterprise_systems_status(context)
-    
+
     # Verify the result
     assert result["success"] is True
     assert len(result["systems"]) == 0
@@ -1142,47 +1156,59 @@ async def test_enterprise_systems_status_all_status_types():
     status_details = {
         "online_system": (ResourceLivenessStatus.ONLINE, "System is healthy"),
         "offline_system": (ResourceLivenessStatus.OFFLINE, "System is not responding"),
-        "unauthorized_system": (ResourceLivenessStatus.UNAUTHORIZED, "Authentication failed"),
-        "misconfigured_system": (ResourceLivenessStatus.MISCONFIGURED, "Invalid configuration"),
-        "unknown_system": (ResourceLivenessStatus.UNKNOWN, "Unknown error occurred")
+        "unauthorized_system": (
+            ResourceLivenessStatus.UNAUTHORIZED,
+            "Authentication failed",
+        ),
+        "misconfigured_system": (
+            ResourceLivenessStatus.MISCONFIGURED,
+            "Invalid configuration",
+        ),
+        "unknown_system": (ResourceLivenessStatus.UNKNOWN, "Unknown error occurred"),
     }
-    
+
     for name, (status, detail) in status_details.items():
         mock_factory = AsyncMock()
         mock_factory.liveness_status = AsyncMock(return_value=(status, detail))
-        mock_factory.is_alive = AsyncMock(return_value=(status == ResourceLivenessStatus.ONLINE))
+        mock_factory.is_alive = AsyncMock(
+            return_value=(status == ResourceLivenessStatus.ONLINE)
+        )
         factories[name] = mock_factory
-    
+
     # Mock enterprise registry
     mock_enterprise_registry = AsyncMock()
     mock_enterprise_registry.get_all = AsyncMock(return_value=factories)
-    
+
     # Mock session registry
     mock_session_registry = MagicMock()
     mock_session_registry._enterprise_registry = mock_enterprise_registry
-    
+
     # Mock config manager with empty configs
     mock_config_manager = AsyncMock()
     mock_config_manager.get_config = AsyncMock(
         return_value={"enterprise": {"factories": {name: {} for name in factories}}}
     )
-    
+
     # Create context
-    context = MockContext({
-        "session_registry": mock_session_registry,
-        "config_manager": mock_config_manager,
-    })
-    
+    context = MockContext(
+        {
+            "session_registry": mock_session_registry,
+            "config_manager": mock_config_manager,
+        }
+    )
+
     # Mock the redact function
-    with patch("deephaven_mcp.config._enterprise_system.redact_enterprise_system_config", 
-               return_value={}):
+    with patch(
+        "deephaven_mcp.config._enterprise_system.redact_enterprise_system_config",
+        return_value={},
+    ):
         # Call the function
         result = await mcp_mod.enterprise_systems_status(context)
-        
+
         # Verify the result
         assert result["success"] is True
         assert len(result["systems"]) == 5
-        
+
         # Check each system has the correct status and detail
         for name, (status, detail) in status_details.items():
             system = next(s for s in result["systems"] if s["name"] == name)
@@ -1198,20 +1224,22 @@ async def test_enterprise_systems_status_config_error():
     mock_session_registry = MagicMock()
     mock_enterprise_registry = AsyncMock()
     mock_session_registry._enterprise_registry = mock_enterprise_registry
-    
+
     # Mock config manager that raises an exception
     mock_config_manager = AsyncMock()
     mock_config_manager.get_config = AsyncMock(side_effect=Exception("Config error"))
-    
+
     # Create context
-    context = MockContext({
-        "session_registry": mock_session_registry,
-        "config_manager": mock_config_manager,
-    })
-    
+    context = MockContext(
+        {
+            "session_registry": mock_session_registry,
+            "config_manager": mock_config_manager,
+        }
+    )
+
     # Call the function
     result = await mcp_mod.enterprise_systems_status(context)
-    
+
     # Verify the result
     assert result["success"] is False
     assert result["isError"] is True
@@ -1224,24 +1252,28 @@ async def test_enterprise_systems_status_registry_error():
     # Mock enterprise registry that raises an exception
     mock_enterprise_registry = AsyncMock()
     mock_enterprise_registry.get_all.side_effect = Exception("Registry error")
-    
+
     # Mock session registry
     mock_session_registry = MagicMock()
     mock_session_registry._enterprise_registry = mock_enterprise_registry
-    
+
     # Mock config manager
     mock_config_manager = AsyncMock()
-    mock_config_manager.get_config = AsyncMock(return_value={"enterprise": {"factories": {}}})
-    
+    mock_config_manager.get_config = AsyncMock(
+        return_value={"enterprise": {"factories": {}}}
+    )
+
     # Create context
-    context = MockContext({
-        "session_registry": mock_session_registry,
-        "config_manager": mock_config_manager,
-    })
-    
+    context = MockContext(
+        {
+            "session_registry": mock_session_registry,
+            "config_manager": mock_config_manager,
+        }
+    )
+
     # Call the function
     result = await mcp_mod.enterprise_systems_status(context)
-    
+
     # Verify the result
     assert result["success"] is False
     assert result["isError"] is True
@@ -1255,33 +1287,37 @@ async def test_enterprise_systems_status_liveness_error():
     mock_factory = AsyncMock()
     mock_factory.liveness_status.side_effect = Exception("Liveness error")
     mock_factory.is_alive.return_value = False
-    
+
     # Mock enterprise registry
     mock_enterprise_registry = AsyncMock()
     mock_enterprise_registry.get_all = AsyncMock(return_value={"system1": mock_factory})
-    
+
     # Mock session registry
     mock_session_registry = MagicMock()
     mock_session_registry._enterprise_registry = mock_enterprise_registry
-    
+
     # Mock config manager
     mock_config_manager = AsyncMock()
     mock_config_manager.get_config = AsyncMock(
         return_value={"enterprise": {"factories": {"system1": {}}}}
     )
-    
+
     # Create context
-    context = MockContext({
-        "session_registry": mock_session_registry,
-        "config_manager": mock_config_manager,
-    })
-    
+    context = MockContext(
+        {
+            "session_registry": mock_session_registry,
+            "config_manager": mock_config_manager,
+        }
+    )
+
     # Mock the redact function
-    with patch("deephaven_mcp.config._enterprise_system.redact_enterprise_system_config", 
-               return_value={}):
+    with patch(
+        "deephaven_mcp.config._enterprise_system.redact_enterprise_system_config",
+        return_value={},
+    ):
         # Call the function
         result = await mcp_mod.enterprise_systems_status(context)
-        
+
         # Verify the result
         assert result["success"] is False
         assert result["isError"] is True
@@ -1290,46 +1326,47 @@ async def test_enterprise_systems_status_liveness_error():
 
 # === list_sessions and get_session_details tests ===
 
+
 @pytest.mark.asyncio
 async def test_list_sessions_success():
     """Test list_sessions with multiple sessions of different types."""
     # Mock session registry
     mock_registry = AsyncMock()
-    
+
     # Create mock session managers
     mock_session_mgr1 = AsyncMock()
     mock_session_mgr1.system_type.name = "COMMUNITY"
     mock_session_mgr1.source = "source1"
     mock_session_mgr1.name = "session1"
-    
+
     mock_session_mgr2 = AsyncMock()
     mock_session_mgr2.system_type.name = "ENTERPRISE"
     mock_session_mgr2.source = "source2"
     mock_session_mgr2.name = "session2"
-    
+
     mock_registry.get_all.return_value = {
         "session1": mock_session_mgr1,
-        "session2": mock_session_mgr2
+        "session2": mock_session_mgr2,
     }
-    
+
     # Mock context
     mock_context = MagicMock()
     mock_context.request_context.lifespan_context = {"session_registry": mock_registry}
-    
+
     # Call function
     result = await mcp_mod.list_sessions(mock_context)
-    
+
     # Verify results
     assert result["success"] is True
     assert len(result["sessions"]) == 2
-    
+
     # Check first session
     session1 = next(s for s in result["sessions"] if s["session_id"] == "session1")
     assert session1["type"] == "COMMUNITY"
     assert session1["source"] == "source1"
     assert session1["session_name"] == "session1"
     assert "available" not in session1  # Should not check availability
-    
+
     # Check second session
     session2 = next(s for s in result["sessions"] if s["session_id"] == "session2")
     assert session2["type"] == "ENTERPRISE"
@@ -1343,22 +1380,22 @@ async def test_list_sessions_with_unknown_type():
     """Test list_sessions with a session that has no system_type attribute."""
     # Mock session registry
     mock_registry = AsyncMock()
-    
+
     # Create a mock session manager with no system_type
     mock_session_mgr = AsyncMock()
     mock_session_mgr.system_type = None
     mock_session_mgr.source = "source"
     mock_session_mgr.name = "session"
-    
+
     mock_registry.get_all.return_value = {"session": mock_session_mgr}
-    
+
     # Mock context
     mock_context = MagicMock()
     mock_context.request_context.lifespan_context = {"session_registry": mock_registry}
-    
+
     # Call function
     result = await mcp_mod.list_sessions(mock_context)
-    
+
     # Verify results
     assert result["success"] is True
     assert len(result["sessions"]) == 1
@@ -1372,23 +1409,25 @@ async def test_list_sessions_with_processing_error():
     """Test list_sessions when processing a session raises an exception."""
     # Mock session registry
     mock_registry = AsyncMock()
-    
+
     # Create a session manager that will cause an exception during processing
     mock_session_mgr = AsyncMock()
     # Configure system_type.name to raise an exception when accessed
     mock_system_type = MagicMock()
-    type(mock_system_type).name = PropertyMock(side_effect=Exception("Processing error"))
+    type(mock_system_type).name = PropertyMock(
+        side_effect=Exception("Processing error")
+    )
     mock_session_mgr.system_type = mock_system_type
-    
+
     mock_registry.get_all.return_value = {"session": mock_session_mgr}
-    
+
     # Mock context
     mock_context = MagicMock()
     mock_context.request_context.lifespan_context = {"session_registry": mock_registry}
-    
+
     # Call function
     result = await mcp_mod.list_sessions(mock_context)
-    
+
     # Verify results
     assert result["success"] is True
     assert len(result["sessions"]) == 1
@@ -1401,11 +1440,13 @@ async def test_list_sessions_registry_error():
     """Test list_sessions when the session registry raises an exception."""
     # Mock context with registry that raises an exception
     mock_context = MagicMock()
-    mock_context.request_context.lifespan_context.__getitem__.side_effect = Exception("Registry error")
-    
+    mock_context.request_context.lifespan_context.__getitem__.side_effect = Exception(
+        "Registry error"
+    )
+
     # Call function
     result = await mcp_mod.list_sessions(mock_context)
-    
+
     # Verify results
     assert result["success"] is False
 
@@ -1416,14 +1457,14 @@ async def test_get_session_details_session_not_found():
     # Mock session registry
     mock_registry = AsyncMock()
     mock_registry.get.side_effect = Exception("Session not found")
-    
+
     # Mock context
     mock_context = MagicMock()
     mock_context.request_context.lifespan_context = {"session_registry": mock_registry}
-    
+
     # Call function
     result = await mcp_mod.get_session_details(mock_context, "nonexistent")
-    
+
     # Verify results
     assert result["success"] is False
     assert "error" in result
@@ -1436,7 +1477,7 @@ async def test_get_session_details_with_session_error():
     """Test get_session_details when getting the session raises an exception."""
     # Mock session registry
     mock_registry = AsyncMock()
-    
+
     # Create mock session manager that raises an exception when liveness_status is called
     mock_session_mgr = AsyncMock()
     mock_system_type = MagicMock()
@@ -1447,16 +1488,16 @@ async def test_get_session_details_with_session_error():
     # Set is_alive to raise an exception
     mock_session_mgr.is_alive = AsyncMock(side_effect=Exception("Session error"))
     mock_session_mgr.liveness_status.side_effect = Exception("Liveness status error")
-    
+
     mock_registry.get.return_value = mock_session_mgr
-    
+
     # Mock context
     mock_context = MagicMock()
     mock_context.request_context.lifespan_context = {"session_registry": mock_registry}
-    
+
     # Call function
     result = await mcp_mod.get_session_details(mock_context, "session1")
-    
+
     # Verify results
     assert result["success"] is True
     assert "session" in result
@@ -1468,28 +1509,33 @@ async def test_get_session_details_with_processing_error():
     """Test get_session_details when processing a session raises an exception."""
     # Mock session registry
     mock_registry = AsyncMock()
-    
+
     # Create a session manager that will cause an exception during processing
     mock_session_mgr = AsyncMock()
     # Configure system_type.name to raise an exception when accessed
     mock_system_type = MagicMock()
-    type(mock_system_type).name = PropertyMock(side_effect=Exception("Processing error"))
+    type(mock_system_type).name = PropertyMock(
+        side_effect=Exception("Processing error")
+    )
     mock_session_mgr.system_type = mock_system_type
     mock_session_mgr.is_alive = AsyncMock(return_value=True)
     # Mock liveness_status to return a tuple of (status, detail) as expected by the implementation
     mock_status = MagicMock()
     mock_status.name = "ONLINE"
-    mock_session_mgr.liveness_status.return_value = (mock_status, "All systems operational")
-    
+    mock_session_mgr.liveness_status.return_value = (
+        mock_status,
+        "All systems operational",
+    )
+
     mock_registry.get.return_value = mock_session_mgr
-    
+
     # Mock context
     mock_context = MagicMock()
     mock_context.request_context.lifespan_context = {"session_registry": mock_registry}
-    
+
     # Call function
     result = await mcp_mod.get_session_details(mock_context, "session1")
-    
+
     # Verify results
     assert result["success"] is False
     assert "error" in result
@@ -1502,11 +1548,13 @@ async def test_get_session_details_registry_error():
     """Test get_session_details when the session registry raises an exception."""
     # Mock context with registry that raises an exception
     mock_context = MagicMock()
-    mock_context.request_context.lifespan_context.__getitem__.side_effect = Exception("Registry error")
-    
+    mock_context.request_context.lifespan_context.__getitem__.side_effect = Exception(
+        "Registry error"
+    )
+
     # Call function
     result = await mcp_mod.get_session_details(mock_context, "session1")
-    
+
     # Verify results
     assert result["success"] is False
     assert "error" in result
@@ -1518,11 +1566,11 @@ async def test_get_session_details_success_with_programming_language():
     """Test get_session_details for an existing session with programming_language property."""
     # Mock session registry
     mock_registry = AsyncMock()
-    
+
     # Create mock session with programming_language
     mock_session = MagicMock()
     mock_session.programming_language = "python"
-    
+
     # Create mock session manager
     mock_session_mgr = AsyncMock()
     mock_system_type = MagicMock()
@@ -1535,18 +1583,23 @@ async def test_get_session_details_success_with_programming_language():
     # Mock liveness_status to return a tuple of (status, detail) as expected by the implementation
     mock_status = MagicMock()
     mock_status.name = "ONLINE"
-    mock_session_mgr.liveness_status.return_value = (mock_status, "All systems operational")
-    
+    mock_session_mgr.liveness_status.return_value = (
+        mock_status,
+        "All systems operational",
+    )
+
     # Set up registry to return our mock session manager
     mock_registry.get.return_value = mock_session_mgr
-    
+
     # Mock context
     mock_context = MagicMock()
     mock_context.request_context.lifespan_context = {"session_registry": mock_registry}
-    
+
     # Call function
-    result = await mcp_mod.get_session_details(mock_context, "session1", attempt_to_connect=True)
-    
+    result = await mcp_mod.get_session_details(
+        mock_context, "session1", attempt_to_connect=True
+    )
+
     # Verify results
     assert result["success"] is True
     assert "session" in result
@@ -1565,10 +1618,10 @@ async def test_get_session_details_success_without_programming_language():
     """Test get_session_details for an existing session without programming_language property."""
     # Mock session registry
     mock_registry = AsyncMock()
-    
+
     # Create mock session without programming_language attribute
     mock_session = MagicMock(spec=[])
-    
+
     # Create mock session manager
     mock_session_mgr = AsyncMock()
     mock_system_type = MagicMock()
@@ -1581,18 +1634,23 @@ async def test_get_session_details_success_without_programming_language():
     # Mock liveness_status to return a tuple of (status, detail) as expected by the implementation
     mock_status = MagicMock()
     mock_status.name = "ONLINE"
-    mock_session_mgr.liveness_status.return_value = (mock_status, "All systems operational")
-    
+    mock_session_mgr.liveness_status.return_value = (
+        mock_status,
+        "All systems operational",
+    )
+
     # Set up registry to return our mock session manager
     mock_registry.get.return_value = mock_session_mgr
-    
+
     # Mock context
     mock_context = MagicMock()
     mock_context.request_context.lifespan_context = {"session_registry": mock_registry}
-    
+
     # Call function
-    result = await mcp_mod.get_session_details(mock_context, "session1", attempt_to_connect=True)
-    
+    result = await mcp_mod.get_session_details(
+        mock_context, "session1", attempt_to_connect=True
+    )
+
     # Verify results
     assert result["success"] is True
     assert "session" in result

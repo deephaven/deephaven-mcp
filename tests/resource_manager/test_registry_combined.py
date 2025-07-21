@@ -546,8 +546,6 @@ class TestEnterpriseSessionUpdate:
 
             # The method might be called for other sessions, but not for our reused session
 
-
-
     @pytest.mark.asyncio
     async def test_close_stale_sessions_ignores_nonexistent_key(
         self, initialized_registry
@@ -610,14 +608,16 @@ class TestEnterpriseSessionUpdate:
                 SystemType.ENTERPRISE, "factory1", "session1"
             )
             assert new_key in initialized_registry._items
-            
+
     @pytest.mark.asyncio
-    async def test_update_sessions_for_factory_removes_all_when_offline(self, initialized_registry):
+    async def test_update_sessions_for_factory_removes_all_when_offline(
+        self, initialized_registry
+    ):
         """Test that _update_sessions_for_factory removes all sessions when the system is offline."""
         # Setup mocks
         mock_factory = MagicMock(spec=CorePlusSessionFactoryManager)
         mock_factory.name = "factory1"
-        
+
         # Add existing sessions for the factory
         session1_key = BaseItemManager.make_full_name(
             SystemType.ENTERPRISE, "factory1", "session1"
@@ -625,22 +625,22 @@ class TestEnterpriseSessionUpdate:
         session2_key = BaseItemManager.make_full_name(
             SystemType.ENTERPRISE, "factory1", "session2"
         )
-        
+
         # Create mock session managers
         mock_session1 = MagicMock(spec=EnterpriseSessionManager)
         mock_session1.close = AsyncMock()
         mock_session1.full_name = session1_key
-        
+
         mock_session2 = MagicMock(spec=EnterpriseSessionManager)
         mock_session2.close = AsyncMock()
         mock_session2.full_name = session2_key
-        
+
         # Add sessions to registry
         initialized_registry._items = {
             session1_key: mock_session1,
             session2_key: mock_session2,
         }
-        
+
         # Mock _get_or_create_controller_client to raise an exception (system offline)
         with patch.object(
             initialized_registry,
@@ -648,12 +648,14 @@ class TestEnterpriseSessionUpdate:
             AsyncMock(side_effect=DeephavenConnectionError("Connection failed")),
         ):
             # Call the method under test
-            await initialized_registry._update_sessions_for_factory(mock_factory, "factory1")
-            
+            await initialized_registry._update_sessions_for_factory(
+                mock_factory, "factory1"
+            )
+
             # Assert all sessions for the factory were removed
             assert session1_key not in initialized_registry._items
             assert session2_key not in initialized_registry._items
-            
+
             # Assert close was called on both sessions
             mock_session1.close.assert_awaited_once()
             mock_session2.close.assert_awaited_once()
@@ -752,22 +754,25 @@ async def test_close_stale_enterprise_sessions(initialized_registry):
     assert stale_key not in initialized_registry._items
 
 
-
-
-
 @pytest.mark.asyncio
 async def test_find_session_keys_for_factory(initialized_registry):
     """Test that _find_session_keys_for_factory correctly identifies session keys for a factory."""
     # Arrange
     factory_name = "test_factory"
-    
+
     # Create session keys with different prefixes
-    factory_prefix = BaseItemManager.make_full_name(SystemType.ENTERPRISE, factory_name, "")
+    factory_prefix = BaseItemManager.make_full_name(
+        SystemType.ENTERPRISE, factory_name, ""
+    )
     session1_key = f"{factory_prefix}session1"
     session2_key = f"{factory_prefix}session2"
-    other_factory_key = BaseItemManager.make_full_name(SystemType.ENTERPRISE, "other_factory", "session3")
-    community_key = BaseItemManager.make_full_name(SystemType.COMMUNITY, "community", "session4")
-    
+    other_factory_key = BaseItemManager.make_full_name(
+        SystemType.ENTERPRISE, "other_factory", "session3"
+    )
+    community_key = BaseItemManager.make_full_name(
+        SystemType.COMMUNITY, "community", "session4"
+    )
+
     # Add sessions to the registry
     initialized_registry._items = {
         session1_key: MagicMock(),
@@ -775,10 +780,10 @@ async def test_find_session_keys_for_factory(initialized_registry):
         other_factory_key: MagicMock(),
         community_key: MagicMock(),
     }
-    
+
     # Act
     result = initialized_registry._find_session_keys_for_factory(factory_name)
-    
+
     # Assert
     assert len(result) == 2
     assert session1_key in result

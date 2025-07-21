@@ -187,12 +187,12 @@ class BaseSession(ClientObjectWrapper[T], Generic[T]):
     def programming_language(self) -> str:
         """
         Get the programming language associated with this session.
-        
+
         Returns:
             str: The programming language (e.g., "python", "groovy")
         """
         return self._programming_language
-        
+
     # ===== String representation methods =====
 
     def __str__(self) -> str:
@@ -1018,7 +1018,9 @@ class CoreSession(BaseSession[Session]):
             session: A pydeephaven Session instance that will be wrapped by this class.
             programming_language: The programming language associated with this session (e.g., "python", "groovy").
         """
-        super().__init__(session, is_enterprise=False, programming_language=programming_language)
+        super().__init__(
+            session, is_enterprise=False, programming_language=programming_language
+        )
 
     @classmethod
     async def from_config(cls, worker_cfg: dict[str, Any]) -> "CoreSession":
@@ -1259,7 +1261,9 @@ class CorePlusSession(
             from a single thread. Each method should be awaited before calling another method on the
             same session.
         """
-        super().__init__(session, is_enterprise=True, programming_language=programming_language)
+        super().__init__(
+            session, is_enterprise=True, programming_language=programming_language
+        )
 
     async def pqinfo(self) -> CorePlusQueryInfo:
         """

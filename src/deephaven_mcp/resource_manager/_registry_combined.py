@@ -469,11 +469,11 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             self.__class__.__name__,
             factory_name,
         )
-        
+
         # Find all sessions for this factory and remove them
         keys_to_remove = self._find_session_keys_for_factory(factory_name)
         await self._close_stale_enterprise_sessions(keys_to_remove)
-        
+
         _LOGGER.info(
             "[%s] removed %d sessions for offline factory '%s'",
             self.__class__.__name__,
@@ -523,7 +523,7 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             # If we can't connect to the factory, remove all sessions for it
             await self._remove_all_sessions_for_factory(factory_name)
             return
-            
+
         # If we successfully connected, proceed with normal session update
         session_names_from_controller = [
             si.config.pb.name for si in session_info.values()

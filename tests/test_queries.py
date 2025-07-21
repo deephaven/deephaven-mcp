@@ -169,8 +169,10 @@ async def test_get_pip_packages_table_table_failure():
 async def test_get_pip_packages_table_unsupported_language():
     session_mock = MagicMock()
     session_mock.programming_language = "groovy"
-    
-    with pytest.raises(UnsupportedOperationError, match="only supports Python sessions"):
+
+    with pytest.raises(
+        UnsupportedOperationError, match="only supports Python sessions"
+    ):
         await get_pip_packages_table(session_mock)
 
 
@@ -267,8 +269,10 @@ async def test_get_dh_versions_malformed():
 async def test_get_dh_versions_unsupported_language():
     session_mock = MagicMock()
     session_mock.programming_language = "groovy"
-    
-    with pytest.raises(UnsupportedOperationError, match="only supports Python sessions"):
+
+    with pytest.raises(
+        UnsupportedOperationError, match="only supports Python sessions"
+    ):
         await get_dh_versions(session_mock)
 
 
@@ -305,9 +309,13 @@ async def test_get_programming_language_version_table_success(caplog):
             assert result is arrow_mock
             assert "Running Python version script in session..." in caplog.text
             assert "Script executed successfully." in caplog.text
-            assert "Table '_python_version_table' retrieved successfully." in caplog.text
+            assert (
+                "Table '_python_version_table' retrieved successfully." in caplog.text
+            )
             session_mock.run_script.assert_awaited_once()
-            mock_get_table.assert_awaited_once_with(session_mock, "_python_version_table")
+            mock_get_table.assert_awaited_once_with(
+                session_mock, "_python_version_table"
+            )
 
 
 @pytest.mark.asyncio
@@ -354,6 +362,8 @@ async def test_get_programming_language_version_table_table_failure():
 async def test_get_programming_language_version_table_unsupported_language():
     session_mock = MagicMock()
     session_mock.programming_language = "groovy"
-    
-    with pytest.raises(UnsupportedOperationError, match="only supports Python sessions"):
+
+    with pytest.raises(
+        UnsupportedOperationError, match="only supports Python sessions"
+    ):
         await get_programming_language_version_table(session_mock)

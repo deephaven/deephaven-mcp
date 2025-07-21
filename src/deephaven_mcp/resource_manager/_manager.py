@@ -44,16 +44,16 @@ Usage Pattern:
     ```python
     # Create manager
     manager = CommunitySessionManager("worker1", config)
-    
+
     # Get resource (lazy initialization)
     session = await manager.get()
-    
+
     # Check health (cached mode)
     status, detail = await manager.liveness_status()
-    
+
     # Check provisioning capability
     status, detail = await manager.liveness_status(ensure_item=True)
-    
+
     # Clean up
     await manager.close()
     ```
@@ -87,7 +87,11 @@ elif sys.version_info >= (3, 12):
 else:
     from typing_extensions import override  # pragma: no cover
 
-from deephaven_mcp._exceptions import SessionCreationError, ConfigurationError, AuthenticationError
+from deephaven_mcp._exceptions import (
+    AuthenticationError,
+    ConfigurationError,
+    SessionCreationError,
+)
 from deephaven_mcp.client import (
     CorePlusSession,
     CorePlusSessionFactory,
@@ -118,13 +122,13 @@ class AsyncClosable(Protocol):
     Compatible Types:
         The following Deephaven client types implement this protocol:
         - CoreSession: Community session cleanup
-        - CorePlusSession: Enterprise session cleanup  
+        - CorePlusSession: Enterprise session cleanup
         - CorePlusSessionFactory: Factory resource cleanup
 
     Usage in Type Hints:
         ```python
         T = TypeVar("T", bound=AsyncClosable)
-        
+
         class Manager(Generic[T]):
             async def cleanup(self, item: T) -> None:
                 await item.close()  # Type checker validates this is available
@@ -193,16 +197,16 @@ class ResourceLivenessStatus(enum.Enum):
     Values:
         ONLINE: Resource is healthy, responsive, and ready for operational use.
             Indicates successful connectivity and passing health checks.
-        
+
         OFFLINE: Resource is unavailable, unresponsive, or has failed health checks.
             May indicate network issues, service downtime, or resource termination.
-        
+
         UNAUTHORIZED: Resource access failed due to authentication or authorization issues.
             Indicates invalid credentials, expired tokens, or insufficient permissions.
-        
+
         MISCONFIGURED: Resource cannot be used due to invalid or incomplete configuration.
             Indicates configuration errors, missing parameters, or incompatible settings.
-        
+
         UNKNOWN: Resource status could not be determined due to unexpected errors.
             Indicates exceptions during status checking that prevent classification.
 
@@ -221,6 +225,7 @@ class ResourceLivenessStatus(enum.Enum):
             logger.warning(f"Auth failed: {detail}")
         ```
     """
+
     ONLINE = 1
     OFFLINE = 2
     UNAUTHORIZED = 3
@@ -256,7 +261,7 @@ class SystemType(str, enum.Enum):
             - Suitable for development, testing, and simple production use
             - Typically deployed locally, in containers, or simple cloud setups
             - Configuration-based session creation
-        
+
         ENTERPRISE: Commercial Deephaven Enterprise Edition deployments.
             - Advanced authentication (SSO, LDAP, OAuth, etc.)
             - Uses CorePlusSession and Enterprise client libraries
@@ -284,7 +289,6 @@ class SystemType(str, enum.Enum):
 
     def __str__(self):
         return self.name
-
 
 
 class BaseItemManager(Generic[T], ABC):
@@ -344,12 +348,12 @@ class BaseItemManager(Generic[T], ABC):
         class MyResourceManager(BaseItemManager[MyResource]):
             async def _create_item(self) -> MyResource:
                 return await MyResource.create(self._config)
-            
+
             async def _check_liveness(self, item: MyResource) -> tuple[ResourceLivenessStatus, str | None]:
                 if await item.is_alive():
                     return (ResourceLivenessStatus.ONLINE, None)
                 return (ResourceLivenessStatus.OFFLINE, "Resource not responding")
-        
+
         # Usage
         manager = MyResourceManager(SystemType.COMMUNITY, "config.yaml", "worker1")
         resource = await manager.get()  # Lazy creation
@@ -403,7 +407,7 @@ class BaseItemManager(Generic[T], ABC):
                 SystemType.COMMUNITY, "local-config.yaml", "worker-1"
             )
             # Result: "community:local-config.yaml:worker-1"
-            
+
             # Create identifier for an enterprise factory
             full_name = BaseItemManager.make_full_name(
                 SystemType.ENTERPRISE, "prod-env", "factory-east-1"
@@ -455,11 +459,11 @@ class BaseItemManager(Generic[T], ABC):
             # Create a manager for a community session
             manager = CommunitySessionManager(
                 SystemType.COMMUNITY,
-                "local-config.yaml", 
+                "local-config.yaml",
                 "worker-1"
             )
             # Manager is ready, but resource not yet created
-            
+
             # First access triggers lazy creation
             session = await manager.get()
             ```
@@ -469,9 +473,11 @@ class BaseItemManager(Generic[T], ABC):
         self._name = name
         self._item_cache: T | None = None
         self._lock = asyncio.Lock()
-        
+
         full_name = self.make_full_name(system_type, source, name)
-        _LOGGER.info("[%s] Initialized manager for '%s'", self.__class__.__name__, full_name)
+        _LOGGER.info(
+            "[%s] Initialized manager for '%s'", self.__class__.__name__, full_name
+        )
 
     @abstractmethod
     async def _create_item(self) -> T:
@@ -540,7 +546,9 @@ class BaseItemManager(Generic[T], ABC):
         raise NotImplementedError  # pragma: no cover
 
     @abstractmethod
-    async def _check_liveness(self, item: T) -> tuple[ResourceLivenessStatus, str | None]:
+    async def _check_liveness(
+        self, item: T
+    ) -> tuple[ResourceLivenessStatus, str | None]:
         """Check the health and operational status of a managed resource.
 
         This abstract method defines the liveness checking logic that concrete
@@ -601,7 +609,7 @@ class BaseItemManager(Generic[T], ABC):
             async def _check_liveness(self, item: CoreSession) -> tuple[ResourceLivenessStatus, str | None]:
                 # Let exceptions bubble up to caller
                 is_alive = await item.is_alive()
-                
+
                 if is_alive:
                     return (ResourceLivenessStatus.ONLINE, None)
                 else:
@@ -741,61 +749,63 @@ class BaseItemManager(Generic[T], ABC):
 
     async def _get_unlocked(self) -> T:
         """Get the managed resource without acquiring the synchronization lock.
-        
+
         This private method provides non-locking access to the managed resource,
         implementing lazy initialization when no cached resource exists. It assumes
         the caller has already acquired self._lock to ensure thread-safe operation.
-        
+
         Lazy Initialization Pattern:
             - If a resource is cached, returns it immediately (cache hit)
             - If no resource is cached, creates a new one via _create_item() (cache miss)
             - Caches the newly created resource for future requests
             - Provides comprehensive logging for debugging and monitoring
-        
+
         Lock Safety:
             This method MUST be called while holding self._lock. It is designed to be
             used by other methods that need resource access within their critical sections,
             avoiding the overhead and potential deadlock issues of nested lock acquisition.
-        
+
         Usage Context:
             Called by:
             - liveness_status() when ensure_item=True and no cached resource exists
             - Other internal methods that need lock-free resource access
             - Should NOT be called directly by external code
-        
+
         Performance Characteristics:
             - Cache hits are very fast (simple attribute access)
             - Cache misses involve resource creation overhead
             - Comprehensive logging helps with performance monitoring
-        
+
         Error Propagation:
             This method does not handle exceptions from resource creation. All exceptions
             from _create_item() bubble up to the caller, where they can be handled
             appropriately based on the calling context.
-        
+
         Returns:
             T: The managed resource instance, either:
                 - An existing cached resource (immediate return)
                 - A newly created and cached resource (after successful creation)
-        
+
         Raises:
             Exception: Any exception raised by the _create_item() implementation,
                 including but not limited to:
                 - ConfigurationError: Invalid or missing configuration
-                - AuthenticationError: Authentication or authorization failures  
+                - AuthenticationError: Authentication or authorization failures
                 - SessionCreationError: Resource creation failures
                 - NetworkError: Connectivity or communication issues
-        
+
         Thread Safety:
             This method is NOT thread-safe by itself. The caller MUST hold self._lock
             before calling this method to ensure proper synchronization.
-        
+
         See Also:
             get(): The public, thread-safe method that acquires the lock and calls this
             liveness_status(): Another caller that uses this for resource access
         """
         if self._item_cache:
-            _LOGGER.debug("[%s] Cache hit for '%s'", self.__class__.__name__, self.full_name)
+            _LOGGER.debug(
+                "[%s] Cache hit for '%s'", self.__class__.__name__, self.full_name
+            )
             return self._item_cache
 
         _LOGGER.info(
@@ -840,12 +850,12 @@ class BaseItemManager(Generic[T], ABC):
             ```python
             # Basic usage - get a resource
             resource = await manager.get()
-            
+
             # Safe concurrent access
             async def worker(manager):
                 resource = await manager.get()  # Thread-safe
                 # Use resource...
-            
+
             # Multiple concurrent workers
             await asyncio.gather(
                 worker(manager),
@@ -882,77 +892,87 @@ class BaseItemManager(Generic[T], ABC):
             liveness_status(): Check resource health without necessarily creating it
             close(): Clean up and invalidate the cached resource
         """
-        _LOGGER.debug("[%s] Getting managed item for '%s'", self.__class__.__name__, self.full_name)
+        _LOGGER.debug(
+            "[%s] Getting managed item for '%s'",
+            self.__class__.__name__,
+            self.full_name,
+        )
         async with self._lock:
             result = await self._get_unlocked()
-            _LOGGER.debug("[%s] Successfully retrieved managed item for '%s'", self.__class__.__name__, self.full_name)
+            _LOGGER.debug(
+                "[%s] Successfully retrieved managed item for '%s'",
+                self.__class__.__name__,
+                self.full_name,
+            )
             return result
 
-    async def _liveness_status_unlocked(self, ensure_item: bool = False) -> tuple[ResourceLivenessStatus, str | None]:
+    async def _liveness_status_unlocked(
+        self, ensure_item: bool = False
+    ) -> tuple[ResourceLivenessStatus, str | None]:
         """Check resource liveness without acquiring the synchronization lock.
-        
+
         This private method provides non-locking access to liveness checking functionality,
         implementing the same dual-mode liveness checking as the public liveness_status()
         method. It assumes the caller has already acquired self._lock for thread safety.
-        
+
         Dual Liveness Check Modes:
             The method supports two distinct liveness checking scenarios:
-            
+
             **Mode 1: Manager Capability Check (ensure_item=True)**
             - Question: "Can this manager provide a working resource?"
             - Behavior: Creates resource if none cached, then checks its health
             - Use Case: Pre-flight checks, resource provisioning validation
-            
+
             **Mode 2: Cached Resource Check (ensure_item=False, default)**
             - Question: "Is the currently cached resource alive?"
             - Behavior: Only checks cached resource, returns OFFLINE if none exists
             - Use Case: Health monitoring, periodic status checks
-        
+
         Exception Handling Strategy:
             This method implements centralized exception handling that converts various
             error types into appropriate ResourceLivenessStatus values:
             - AuthenticationError → UNAUTHORIZED
-            - ConfigurationError → MISCONFIGURED  
+            - ConfigurationError → MISCONFIGURED
             - SessionCreationError → MISCONFIGURED
             - Other exceptions → UNKNOWN (with warning log)
-        
+
         Lock Safety:
             This method MUST be called while holding self._lock. It delegates to other
             non-locking methods (_get_unlocked, _check_liveness) to avoid nested lock
             acquisition that could cause deadlocks.
-        
+
         Usage Context:
             Called by:
             - liveness_status(): The public thread-safe wrapper method
             - Other internal methods needing lock-free liveness checking
             - Should NOT be called directly by external code
-        
+
         Performance Characteristics:
             - Mode 1 (ensure_item=True): May be slow due to resource creation
             - Mode 2 (ensure_item=False): Fast for cached resources, immediate for none
             - Exception handling adds minimal overhead
             - Error logging provides debugging context
-        
+
         Args:
             ensure_item: Controls the liveness checking mode:
                 - False (default): Only check cached resource, return OFFLINE if none
                 - True: Ensure resource exists (create if needed) before checking
-            
+
         Returns:
             tuple[ResourceLivenessStatus, str | None]: A tuple containing:
                 - ResourceLivenessStatus: The health status classification
                 - str | None: Optional detail message explaining non-ONLINE statuses,
                   particularly useful for debugging and error reporting
-        
+
         Thread Safety:
             This method is NOT thread-safe by itself. The caller MUST hold self._lock
             before calling this method to ensure proper synchronization.
-        
+
         Logging:
             - Warning logs for unexpected exceptions with full context
             - No logging for successful operations (handled by calling methods)
             - Error details included in return value for caller processing
-        
+
         See Also:
             liveness_status(): The public, thread-safe wrapper for this method
             _check_liveness(): The abstract method that performs actual health checks
@@ -977,10 +997,17 @@ class BaseItemManager(Generic[T], ABC):
         except SessionCreationError as e:
             return (ResourceLivenessStatus.MISCONFIGURED, str(e))
         except Exception as e:
-            _LOGGER.warning("[%s] Liveness check failed for %s: %s", self.__class__.__name__, self.full_name, e)
+            _LOGGER.warning(
+                "[%s] Liveness check failed for %s: %s",
+                self.__class__.__name__,
+                self.full_name,
+                e,
+            )
             return (ResourceLivenessStatus.UNKNOWN, str(e))
 
-    async def liveness_status(self, ensure_item: bool = False) -> tuple[ResourceLivenessStatus, str | None]:
+    async def liveness_status(
+        self, ensure_item: bool = False
+    ) -> tuple[ResourceLivenessStatus, str | None]:
         """Check the health and operational status of the managed resource.
 
         This is the primary public method for checking resource liveness with full thread
@@ -989,7 +1016,7 @@ class BaseItemManager(Generic[T], ABC):
 
         Dual Liveness Check Modes:
             This method supports two fundamentally different approaches to liveness checking:
-            
+
             **Mode 1: Cached Resource Monitoring (ensure_item=False, default)**
             - Purpose: "Is my cached resource currently healthy?"
             - Behavior: Only checks existing cached resource, no resource creation
@@ -1000,7 +1027,7 @@ class BaseItemManager(Generic[T], ABC):
               * Status dashboards and alerts
               * Quick health checks before using cached resources
               * Resource cleanup decisions
-            
+
             **Mode 2: Manager Capability Validation (ensure_item=True)**
             - Purpose: "Can this manager provide a working resource right now?"
             - Behavior: Ensures resource exists (creates if needed), then checks health
@@ -1037,13 +1064,13 @@ class BaseItemManager(Generic[T], ABC):
             status, detail = await manager.liveness_status()
             if status == ResourceLivenessStatus.ONLINE:
                 resource = await manager.get()  # Safe to use
-            
+
             # Comprehensive capability check
             status, detail = await manager.liveness_status(ensure_item=True)
             if status != ResourceLivenessStatus.ONLINE:
                 logger.error(f"Manager unavailable: {detail}")
                 return  # Handle the error appropriately
-            
+
             # Monitoring loop
             async def monitor_resources():
                 while True:
@@ -1083,53 +1110,63 @@ class BaseItemManager(Generic[T], ABC):
             is_alive(): Simplified boolean health check wrapper
         """
         mode = "provisioning" if ensure_item else "cached-only"
-        _LOGGER.debug("[%s] Checking liveness status (%s mode) for '%s'", self.__class__.__name__, mode, self.full_name)
-        
+        _LOGGER.debug(
+            "[%s] Checking liveness status (%s mode) for '%s'",
+            self.__class__.__name__,
+            mode,
+            self.full_name,
+        )
+
         async with self._lock:
             status, detail = await self._liveness_status_unlocked(ensure_item)
-            _LOGGER.info("[%s] Liveness check (%s mode) for '%s': %s%s", 
-                        self.__class__.__name__, mode, self.full_name, status.name, 
-                        f" ({detail})" if detail else "")
+            _LOGGER.info(
+                "[%s] Liveness check (%s mode) for '%s': %s%s",
+                self.__class__.__name__,
+                mode,
+                self.full_name,
+                status.name,
+                f" ({detail})" if detail else "",
+            )
             return status, detail
 
     async def _is_alive_unlocked(self) -> bool:
         """Check if the cached resource is alive without acquiring the synchronization lock.
-        
+
         This private method provides a simplified boolean health check for the cached
         resource without lock acquisition. It assumes the caller has already acquired
         self._lock and delegates to _liveness_status_unlocked for the actual health check.
-        
+
         Simplified Health Check:
             This method provides a boolean interface to the more comprehensive liveness
             checking functionality, returning True only if the resource status is
             ResourceLivenessStatus.ONLINE, False for any other status.
-        
+
         Lock Safety:
             This method MUST be called while holding self._lock. It is designed for use
             within critical sections where simplified health checking is needed without
             the complexity of status detail messages.
-        
+
         Usage Context:
             Called by:
             - close(): To check if a resource needs cleanup before closing
             - is_alive(): The public thread-safe wrapper method
             - Other internal methods needing simple boolean health checks
             - Should NOT be called directly by external code
-        
+
         Performance:
             Very fast operation that delegates to _liveness_status_unlocked() and
             performs a simple enum comparison. The performance characteristics depend
             on the default cached-only mode of _liveness_status_unlocked().
-        
+
         Returns:
             bool: True if the cached resource is ONLINE and ready for use,
                   False for any other status (OFFLINE, UNAUTHORIZED, MISCONFIGURED, UNKNOWN)
                   or if no resource is cached.
-        
+
         Thread Safety:
             This method is NOT thread-safe by itself. The caller MUST hold self._lock
             before calling this method to ensure proper synchronization.
-        
+
         See Also:
             is_alive(): The public, thread-safe wrapper for this method
             _liveness_status_unlocked(): The underlying method that provides detailed status
@@ -1139,26 +1176,26 @@ class BaseItemManager(Generic[T], ABC):
 
     async def is_alive(self) -> bool:
         """Check if the cached resource is currently alive and ready for use.
-        
+
         This is a convenience method that provides a simple boolean interface to resource
         health checking with full thread safety. It returns True only if the cached resource
         is in the ONLINE state, making it ideal for quick health checks and conditional logic.
-        
+
         Simplified Health Check:
             This method abstracts away the complexity of ResourceLivenessStatus values,
             providing a straightforward True/False answer to "Is my cached resource healthy?"
             It only returns True for ONLINE status, treating all other statuses as "not alive".
-        
+
         Cached Resource Only:
             This method only checks cached resources (equivalent to liveness_status(ensure_item=False)).
             If no resource is cached, it returns False. It does not trigger resource creation.
-        
+
         Performance Characteristics:
             - Very fast operation for cached resources
             - Immediate False return if no resource is cached
             - Full thread safety with minimal overhead
             - Suitable for frequent health checking
-        
+
         Common Usage Patterns:
             ```python
             # Quick health check before using resource
@@ -1168,40 +1205,40 @@ class BaseItemManager(Generic[T], ABC):
             else:
                 # Handle unhealthy resource
                 logger.warning(f"Resource {manager.full_name} is not alive")
-            
+
             # Conditional resource cleanup
             if await manager.is_alive():
                 await manager.close()  # Clean shutdown
-            
+
             # Health monitoring with simple boolean logic
             healthy_managers = []
             for manager in all_managers:
                 if await manager.is_alive():
                     healthy_managers.append(manager)
             ```
-        
+
         Comparison with liveness_status():
             - is_alive(): Simple boolean, fast, no detail messages
             - liveness_status(): Detailed status with explanatory messages, more comprehensive
-            
+
             Use is_alive() for:
             - Quick conditional checks
             - Boolean logic and filtering
             - Frequent monitoring loops
-            
+
             Use liveness_status() for:
             - Detailed health analysis
             - Error reporting and debugging
             - Status dashboards and diagnostics
-        
+
         Returns:
             bool: True if the cached resource is ONLINE and operational,
                   False for any other condition (no cached resource, non-ONLINE status)
-        
+
         Thread Safety:
             This method is fully thread-safe and coroutine-safe. Multiple concurrent
             calls are properly serialized to ensure consistent state observation.
-        
+
         See Also:
             liveness_status(): More detailed health checking with status explanations
             get(): Method to retrieve the managed resource
@@ -1212,12 +1249,12 @@ class BaseItemManager(Generic[T], ABC):
 
     async def close(self) -> None:
         """Clean up and release the managed resource with comprehensive error handling.
-        
+
         This method performs graceful shutdown of the managed resource by attempting
         to close the cached resource (if it exists and is responsive) and clearing
         the internal cache. It implements robust error handling to ensure cleanup
         proceeds even when individual operations fail.
-        
+
         Cleanup Process:
             The method follows a multi-step cleanup process:
             1. **Liveness Check**: Verify if the cached resource is still responsive
@@ -1225,46 +1262,46 @@ class BaseItemManager(Generic[T], ABC):
             3. **Fallback Close**: If liveness check fails, attempt close anyway
             4. **Cache Clearing**: Always clear the cache regardless of close results
             5. **Comprehensive Logging**: Log all steps for debugging and monitoring
-        
+
         Error Handling Strategy:
             This method uses a layered error handling approach:
             - **Liveness Failures**: Log warning, attempt close anyway
             - **Close Failures**: Log warning, continue with cache clearing
             - **Always Complete**: Cache is always cleared regardless of errors
             - **No Exception Propagation**: All exceptions are caught and logged
-        
+
         Resource State Management:
             After this method completes:
             - The internal cache is guaranteed to be cleared (set to None)
             - Future get() calls will create a new resource instance
             - The manager returns to its initial uninitialized state
             - Any existing resource references become independent of the manager
-        
+
         Liveness-Based Closing:
             The method performs a liveness check before attempting to close:
             - **Alive Resources**: Closed normally with proper AsyncClosable protocol
             - **Unresponsive Resources**: Close attempted but may be unreliable
             - **No Cached Resource**: No action needed, cache cleared immediately
-        
+
         Idempotent Operation:
             This method is safe to call multiple times:
             - First call: Performs actual cleanup if resource exists
             - Subsequent calls: No-op with debug logging, no errors
             - Always safe: No side effects or state corruption
-        
+
         Usage Patterns:
             ```python
             # Explicit cleanup in application shutdown
             async def shutdown():
                 for manager in all_managers:
                     await manager.close()
-            
+
             # Context manager pattern (if implemented)
             async with manager:
                 resource = await manager.get()
                 # Use resource...
             # manager.close() called automatically
-            
+
             # Error recovery - reset manager state
             try:
                 resource = await manager.get()
@@ -1272,65 +1309,109 @@ class BaseItemManager(Generic[T], ABC):
             except Exception:
                 await manager.close()  # Reset for retry
             ```
-        
+
         Performance Considerations:
             - **Fast Path**: No cached resource results in immediate return
             - **Network Operations**: Closing remote resources may be slow
             - **Error Resilience**: Failed operations don't block overall cleanup
             - **Lock Contention**: Full synchronization ensures clean state transitions
-        
+
         Logging Behavior:
             This method provides comprehensive logging at multiple levels:
             - **Debug**: Entry/exit, cache state, liveness results
             - **Info**: Successful close operations and completion
             - **Warning**: Liveness failures, close failures with context
             - **All logs**: Include manager class name and full_name for context
-        
+
         Thread Safety:
             This method is fully thread-safe and coroutine-safe. The entire cleanup
             process is performed within a single critical section to ensure atomic
             state transitions and prevent race conditions with other operations.
-        
+
         Exception Safety:
             This method never propagates exceptions to the caller. All errors are
             caught, logged with appropriate detail, and cleanup continues. This makes
             it safe to use in shutdown code, error handlers, and cleanup routines.
-        
+
         See Also:
             get(): Method to retrieve resources (will create new after close)
             is_alive(): Method to check resource health before closing
             AsyncClosable: Protocol that managed resources must implement
         """
-        _LOGGER.debug("[%s] Starting close operation for '%s'", self.__class__.__name__, self.full_name)
-        
+        _LOGGER.debug(
+            "[%s] Starting close operation for '%s'",
+            self.__class__.__name__,
+            self.full_name,
+        )
+
         async with self._lock:
             if self._item_cache:
-                _LOGGER.debug("[%s] Found cached item for '%s', checking liveness before close", self.__class__.__name__, self.full_name)
+                _LOGGER.debug(
+                    "[%s] Found cached item for '%s', checking liveness before close",
+                    self.__class__.__name__,
+                    self.full_name,
+                )
                 try:
                     # Check liveness using the unlocked method since we already hold the lock
                     if await self._is_alive_unlocked():
-                        _LOGGER.info("[%s] Closing live item for '%s'", self.__class__.__name__, self.full_name)
+                        _LOGGER.info(
+                            "[%s] Closing live item for '%s'",
+                            self.__class__.__name__,
+                            self.full_name,
+                        )
                         await self._item_cache.close()
-                        _LOGGER.info("[%s] Successfully closed item for '%s'", self.__class__.__name__, self.full_name)
+                        _LOGGER.info(
+                            "[%s] Successfully closed item for '%s'",
+                            self.__class__.__name__,
+                            self.full_name,
+                        )
                     else:
-                        _LOGGER.debug("[%s] Item for '%s' is not alive, skipping close", self.__class__.__name__, self.full_name)
+                        _LOGGER.debug(
+                            "[%s] Item for '%s' is not alive, skipping close",
+                            self.__class__.__name__,
+                            self.full_name,
+                        )
                 except Exception as e:
                     # If liveness check fails, still try to close the item
-                    _LOGGER.warning("[%s] Liveness check failed during close for %s: %s", self.__class__.__name__, self.full_name, e)
+                    _LOGGER.warning(
+                        "[%s] Liveness check failed during close for %s: %s",
+                        self.__class__.__name__,
+                        self.full_name,
+                        e,
+                    )
                     try:
-                        _LOGGER.info("[%s] Attempting to close item despite liveness check failure for '%s'", self.__class__.__name__, self.full_name)
+                        _LOGGER.info(
+                            "[%s] Attempting to close item despite liveness check failure for '%s'",
+                            self.__class__.__name__,
+                            self.full_name,
+                        )
                         await self._item_cache.close()
-                        _LOGGER.info("[%s] Successfully closed item for '%s' despite earlier liveness failure", self.__class__.__name__, self.full_name)
+                        _LOGGER.info(
+                            "[%s] Successfully closed item for '%s' despite earlier liveness failure",
+                            self.__class__.__name__,
+                            self.full_name,
+                        )
                     except Exception as close_e:
                         # Log close failures but continue cleanup
-                        _LOGGER.warning("[%s] Failed to close item for %s: %s", self.__class__.__name__, self.full_name, close_e)
+                        _LOGGER.warning(
+                            "[%s] Failed to close item for %s: %s",
+                            self.__class__.__name__,
+                            self.full_name,
+                            close_e,
+                        )
             else:
-                _LOGGER.debug("[%s] No cached item to close for '%s'", self.__class__.__name__, self.full_name)
+                _LOGGER.debug(
+                    "[%s] No cached item to close for '%s'",
+                    self.__class__.__name__,
+                    self.full_name,
+                )
 
             self._item_cache = None
-            _LOGGER.debug("[%s] Cleared cache for '%s', close operation complete", self.__class__.__name__, self.full_name)
-
-
+            _LOGGER.debug(
+                "[%s] Cleared cache for '%s', close operation complete",
+                self.__class__.__name__,
+                self.full_name,
+            )
 
 
 class CommunitySessionManager(BaseItemManager[CoreSession]):
@@ -1347,19 +1428,19 @@ class CommunitySessionManager(BaseItemManager[CoreSession]):
         - Intelligent caching: Single session instance reused across requests
         - Health monitoring: Regular liveness checks via session.is_alive()
         - Graceful cleanup: Proper session disposal with error handling
-        
+
         **Configuration-Driven**:
         - Dictionary-based configuration for flexible session setup
         - Support for all CoreSession configuration parameters
         - Server URL, authentication, and connection parameter handling
         - Environment-specific configuration support
-        
+
         **Thread Safety**:
         - Full asyncio concurrency support for multi-task environments
         - Race condition prevention during session creation
         - Atomic operations for cache management and cleanup
         - Safe concurrent access from multiple coroutines
-        
+
         **Error Resilience**:
         - Comprehensive exception handling during session creation
         - Liveness check failure recovery with fallback strategies
@@ -1368,7 +1449,7 @@ class CommunitySessionManager(BaseItemManager[CoreSession]):
 
     Session Lifecycle Management:
         The manager implements a complete session lifecycle with these phases:
-        
+
         1. **Initialization**: Manager created with name and configuration
         2. **Lazy Creation**: First get() call triggers CoreSession creation
         3. **Active Usage**: Cached session served for subsequent requests
@@ -1382,7 +1463,7 @@ class CommunitySessionManager(BaseItemManager[CoreSession]):
         - **username/password**: Credentials if using basic auth
         - **session_type**: Session configuration type
         - **extra**: Additional session-specific parameters
-        
+
         Example configuration:
         ```python
         config = {
@@ -1400,7 +1481,7 @@ class CommunitySessionManager(BaseItemManager[CoreSession]):
         manager = CommunitySessionManager("worker-1", config)
         registry.add_manager(manager)
         ```
-        
+
         **Standalone Usage**:
         Can be used independently for single-session applications:
         ```python
@@ -1409,7 +1490,7 @@ class CommunitySessionManager(BaseItemManager[CoreSession]):
         # Use session for Deephaven operations...
         await manager.close()
         ```
-        
+
         **Health Monitoring**:
         Regular health checks for operational monitoring:
         ```python
@@ -1489,7 +1570,7 @@ class CommunitySessionManager(BaseItemManager[CoreSession]):
                 "session_type": "python"
             }
             manager = CommunitySessionManager("worker-1", config)
-            
+
             # Authenticated Community session
             config = {
                 "server": "https://deephaven.example.com:10000",
@@ -1607,13 +1688,20 @@ class CommunitySessionManager(BaseItemManager[CoreSession]):
         try:
             return await CoreSession.from_config(self._config)
         except Exception as e:
-            _LOGGER.error("[%s] Failed to create community session for %s: %s", self.__class__.__name__, self.full_name, e)
+            _LOGGER.error(
+                "[%s] Failed to create community session for %s: %s",
+                self.__class__.__name__,
+                self.full_name,
+                e,
+            )
             raise SessionCreationError(
                 f"Failed to create session for community worker {self._name}: {e}"
             ) from e
 
     @override
-    async def _check_liveness(self, item: CoreSession) -> tuple[ResourceLivenessStatus, str | None]:
+    async def _check_liveness(
+        self, item: CoreSession
+    ) -> tuple[ResourceLivenessStatus, str | None]:
         """Assess the health and responsiveness of a Deephaven Community session.
 
         This method implements the abstract _check_liveness() method from BaseItemManager
@@ -1634,7 +1722,7 @@ class CommunitySessionManager(BaseItemManager[CoreSession]):
             - **Authentication Valid**: Session credentials are still accepted
             - **Server Responsive**: Server responds to health check requests
             - **Protocol Functional**: Session can execute basic operations
-            
+
             A session is considered OFFLINE when:
             - **Connection Lost**: Network connection has been dropped
             - **Authentication Expired**: Session credentials are no longer valid
@@ -1659,7 +1747,7 @@ class CommunitySessionManager(BaseItemManager[CoreSession]):
             The method maps CoreSession health to ResourceLivenessStatus:
             - **True → ONLINE**: Session is healthy and ready for use
             - **False → OFFLINE**: Session is unhealthy with explanatory detail message
-            
+
             Note: This method only returns ONLINE or OFFLINE. Other status values
             (UNAUTHORIZED, MISCONFIGURED, UNKNOWN) are handled by the exception
             handling in the calling liveness_status() method.
@@ -1695,7 +1783,7 @@ class CommunitySessionManager(BaseItemManager[CoreSession]):
             ResourceLivenessStatus: The enumeration of possible health states
         """
         alive = await item.is_alive()
-        
+
         if alive:
             return (ResourceLivenessStatus.ONLINE, None)
         else:
@@ -1716,19 +1804,19 @@ class EnterpriseSessionManager(BaseItemManager[CorePlusSession]):
         - Decoupled session creation logic from lifecycle management
         - Support for complex authentication flows and custom protocols
         - Enables factory patterns, connection pooling, and advanced creation strategies
-        
+
         **Enterprise-Specific Features**:
         - Support for CorePlusSession with Enterprise-only capabilities
         - Complex authentication handling (SAML, OAuth, custom protocols)
         - Multi-tenant and workspace-aware session management
         - Advanced security and compliance features
-        
+
         **Lifecycle Management**:
         - Lazy initialization with custom creation functions
         - Intelligent caching of expensive Enterprise sessions
         - Health monitoring via CorePlusSession.is_alive()
         - Graceful cleanup with comprehensive error handling
-        
+
         **Thread Safety**:
         - Full asyncio concurrency support for Enterprise workloads
         - Race condition prevention during complex session creation
@@ -1737,14 +1825,14 @@ class EnterpriseSessionManager(BaseItemManager[CorePlusSession]):
 
     Creation Function Pattern:
         The manager uses dependency injection for session creation:
-        
+
         **Function Signature**:
         ```python
         async def creation_function(source: str, name: str) -> CorePlusSession:
             # Custom creation logic here
             return session
         ```
-        
+
         **Flexibility Benefits**:
         - **Authentication Strategies**: Support for any Enterprise auth method
         - **Configuration Sources**: Database, vault, config service, etc.
@@ -1759,23 +1847,23 @@ class EnterpriseSessionManager(BaseItemManager[CorePlusSession]):
         creation_func = lambda src, name: factory.create_session(src, name)
         manager = EnterpriseSessionManager("enterprise", "worker-1", creation_func)
         ```
-        
+
         **Custom Authentication**:
         ```python
         async def saml_session_creator(source: str, name: str) -> CorePlusSession:
             token = await saml_auth.get_token()
             return await CorePlusSession.from_token(server_url, token)
-        
+
         manager = EnterpriseSessionManager("saml", "user-123", saml_session_creator)
         ```
-        
+
         **Registry Integration**:
         ```python
         registry = EnterpriseSessionRegistry()
         manager = EnterpriseSessionManager("enterprise", "session-1", creation_func)
         registry.add_manager(manager)
         ```
-        
+
         **Health Monitoring**:
         ```python
         async def monitor_enterprise_session(manager):
@@ -1886,26 +1974,26 @@ class EnterpriseSessionManager(BaseItemManager[CorePlusSession]):
             ```python
             factory = CorePlusSessionFactory(config)
             manager = EnterpriseSessionManager(
-                "enterprise", "worker-1", 
+                "enterprise", "worker-1",
                 lambda src, name: factory.create_session(src, name)
             )
             ```
-            
+
             **Custom Authentication**:
             ```python
             async def saml_creator(source: str, name: str) -> CorePlusSession:
                 token = await saml_provider.authenticate(name)
                 return await CorePlusSession.from_token(server_url, token)
-            
+
             manager = EnterpriseSessionManager("saml", "user-123", saml_creator)
             ```
-            
+
             **Configuration Service**:
             ```python
             async def config_service_creator(source: str, name: str) -> CorePlusSession:
                 config = await config_service.get_session_config(source, name)
                 return await CorePlusSession.from_config(config)
-            
+
             manager = EnterpriseSessionManager("config-svc", "session-1", config_service_creator)
             ```
 
@@ -2026,13 +2114,20 @@ class EnterpriseSessionManager(BaseItemManager[CorePlusSession]):
         try:
             return await self._creation_function(self._source, self._name)
         except Exception as e:
-            _LOGGER.error("[%s] Failed to create enterprise session for %s: %s", self.__class__.__name__, self.full_name, e)
+            _LOGGER.error(
+                "[%s] Failed to create enterprise session for %s: %s",
+                self.__class__.__name__,
+                self.full_name,
+                e,
+            )
             raise SessionCreationError(
                 f"Failed to create enterprise session for {self._name}: {e}"
             ) from e
 
     @override
-    async def _check_liveness(self, item: CorePlusSession) -> tuple[ResourceLivenessStatus, str | None]:
+    async def _check_liveness(
+        self, item: CorePlusSession
+    ) -> tuple[ResourceLivenessStatus, str | None]:
         """Evaluate the health and responsiveness of a Deephaven Enterprise session.
 
         This method implements the abstract _check_liveness() method from BaseItemManager
@@ -2089,7 +2184,7 @@ class EnterpriseSessionManager(BaseItemManager[CorePlusSession]):
             The method maps CorePlusSession health to ResourceLivenessStatus:
             - **True → ONLINE**: Enterprise session is healthy and ready for use
             - **False → OFFLINE**: Enterprise session is unhealthy with explanatory detail message
-            
+
             Note: This method only returns ONLINE or OFFLINE. Other status values
             (UNAUTHORIZED, MISCONFIGURED, UNKNOWN) are handled by the exception
             handling in the calling liveness_status() method.
@@ -2155,19 +2250,19 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
         - Provides shared configuration and authentication across multiple sessions
         - Enables connection pooling and resource sharing at the factory level
         - Supports Enterprise-wide factory configuration and management
-        
+
         **Configuration-Driven Creation**:
         - Uses dictionary-based configuration for factory creation
         - Supports complex Enterprise configuration with nested parameters
         - Validates configuration during factory creation process
         - Enables dynamic factory configuration from external sources
-        
+
         **Lifecycle Management**:
         - Lazy initialization with thread-safe caching of expensive factories
         - Health monitoring via factory ping() method for lightweight checks
         - Graceful cleanup with comprehensive resource disposal
         - Integration with registry patterns for multi-factory management
-        
+
         **Enterprise Integration**:
         - Designed for Enterprise-scale deployments with multiple configurations
         - Supports complex authentication and connection strategies
@@ -2176,14 +2271,14 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
 
     Factory vs Session Management:
         This manager operates at a higher abstraction level than session managers:
-        
+
         **Factory Management (This Class)**:
         - Manages CorePlusSessionFactory instances
         - Configuration-driven creation with complex parameter support
         - Health checks via lightweight ping() operations
         - Shared across multiple session creation requests
         - Optimized for Enterprise-scale factory lifecycle management
-        
+
         **Session Management (EnterpriseSessionManager)**:
         - Manages individual CorePlusSession instances
         - Function-based creation with injectable logic
@@ -2207,14 +2302,14 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
         registry.add_manager(manager)
         factory = await registry.get_factory("prod-factory")
         ```
-        
+
         **Factory-Based Session Creation**:
         ```python
         factory_manager = CorePlusSessionFactoryManager("enterprise", config)
         factory = await factory_manager.get()
         session = await factory.create_session(source="app", name="worker-1")
         ```
-        
+
         **Multi-Configuration Support**:
         ```python
         configs = {
@@ -2227,7 +2322,7 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
             for env, config in configs.items()
         }
         ```
-        
+
         **Health Monitoring**:
         ```python
         async def monitor_factory_health(manager):
@@ -2327,21 +2422,21 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
                 "url": "https://enterprise.deephaven.io",
                 "port": 8443,
                 "timeout": 30.0,
-                
+
                 # Authentication configuration
                 "auth": {
                     "type": "saml",
                     "saml_config": {...},
                     "credentials": {...}
                 },
-                
+
                 # Factory-specific options
                 "factory_options": {
                     "connection_pool_size": 10,
                     "cache_sessions": True,
                     "retry_policy": {...}
                 },
-                
+
                 # Enterprise features
                 "enterprise": {
                     "multi_tenant": True,
@@ -2367,7 +2462,7 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
             factory = await manager.get()  # Creates factory on first access
             session = await factory.create_session("app", "worker-1")
             ```
-            
+
             **Multi-Environment Support**:
             ```python
             environments = {"prod": prod_config, "dev": dev_config, "test": test_config}
@@ -2376,7 +2471,7 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
                 for env, config in environments.items()
             }
             ```
-            
+
             **Registry Integration**:
             ```python
             registry = CorePlusSessionFactoryRegistry()
@@ -2384,11 +2479,11 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
                 manager = CorePlusSessionFactoryManager(f"{env}-factory", config)
                 registry.add_manager(manager)
             ```
-            
+
             **Health Monitoring Setup**:
             ```python
             manager = CorePlusSessionFactoryManager("enterprise", config)
-            
+
             async def monitor_factory():
                 status, detail = await manager.liveness_status(ensure_item=True)
                 if status != ResourceLivenessStatus.ONLINE:
@@ -2538,7 +2633,9 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
         return await CorePlusSessionFactory.from_config(self._config)
 
     @override
-    async def _check_liveness(self, item: CorePlusSessionFactory) -> tuple[ResourceLivenessStatus, str | None]:
+    async def _check_liveness(
+        self, item: CorePlusSessionFactory
+    ) -> tuple[ResourceLivenessStatus, str | None]:
         """Verify Enterprise session factory health and responsiveness through lightweight ping operation.
 
         This method implements the abstract _check_liveness() method from BaseItemManager
@@ -2607,7 +2704,7 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
             - Verifies infrastructure connectivity
             - Checks authentication validity
             - Minimal resource consumption
-            
+
             **Session-Level Health** (EnterpriseSessionManager):
             - Tests individual session responsiveness
             - Verifies session-specific operations
@@ -2619,13 +2716,13 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
             ```python
             manager = CorePlusSessionFactoryManager("prod", config)
             factory = await manager.get()
-            
+
             # Regular health checking
             status, detail = await manager.liveness_status()
             if status != ResourceLivenessStatus.ONLINE:
                 logger.warning(f"Factory {manager.full_name} health issue: {detail}")
             ```
-            
+
             **Pre-Session Creation Verification**:
             ```python
             # Verify factory health before creating sessions
@@ -2635,7 +2732,7 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
             else:
                 logger.error("Factory not responsive, cannot create session")
             ```
-            
+
             **Cleanup Verification**:
             ```python
             # Verify factory state during cleanup
@@ -2688,4 +2785,3 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
             return (ResourceLivenessStatus.ONLINE, None)
         else:
             return (ResourceLivenessStatus.OFFLINE, "Ping returned False")
-

@@ -128,13 +128,13 @@ async def get_programming_language_version_table(session: BaseSession) -> pyarro
         # TODO: Add support for other programming languages.
         _LOGGER.warning(
             "[queries:get_programming_language_version_table] Unsupported programming language: %s",
-            session.programming_language
+            session.programming_language,
         )
         raise UnsupportedOperationError(
             f"get_programming_language_version_table only supports Python sessions, "
             f"but session uses {session.programming_language}."
         )
-    
+
     script = textwrap.dedent(
         """
         from deephaven import new_table, string_col, int_col
@@ -162,12 +162,15 @@ async def get_programming_language_version_table(session: BaseSession) -> pyarro
         "[queries:get_programming_language_version_table] Running Python version script in session..."
     )
     await session.run_script(script)
-    _LOGGER.debug("[queries:get_programming_language_version_table] Script executed successfully.")
+    _LOGGER.debug(
+        "[queries:get_programming_language_version_table] Script executed successfully."
+    )
     arrow_table = await get_table(session, "_python_version_table")
     _LOGGER.debug(
         "[queries:get_programming_language_version_table] Table '_python_version_table' retrieved successfully."
     )
     return arrow_table
+
 
 async def get_pip_packages_table(session: BaseSession) -> pyarrow.Table:
     """
@@ -197,13 +200,13 @@ async def get_pip_packages_table(session: BaseSession) -> pyarrow.Table:
     if session.programming_language.lower() != "python":
         _LOGGER.warning(
             "[queries:get_pip_packages_table] Unsupported programming language: %s",
-            session.programming_language
+            session.programming_language,
         )
         raise UnsupportedOperationError(
             f"get_pip_packages_table only supports Python sessions, "
             f"but session uses {session.programming_language}."
         )
-    
+
     script = textwrap.dedent(
         """
         from deephaven import new_table, string_col
@@ -263,13 +266,13 @@ async def get_dh_versions(session: BaseSession) -> tuple[str | None, str | None]
         # TODO: Add support for other programming languages.
         _LOGGER.warning(
             "[queries:get_dh_versions] Unsupported programming language: %s",
-            session.programming_language
+            session.programming_language,
         )
         raise UnsupportedOperationError(
             f"get_dh_versions only supports Python sessions, "
             f"but session uses {session.programming_language}."
         )
-    
+
     _LOGGER.debug(
         "[queries:get_dh_versions] Retrieving Deephaven Core and Core+ versions from session..."
     )
@@ -304,4 +307,3 @@ async def get_dh_versions(session: BaseSession) -> tuple[str | None, str | None]
         dh_coreplus_version,
     )
     return dh_core_version, dh_coreplus_version
-

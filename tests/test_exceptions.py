@@ -49,7 +49,7 @@ class TestBaseExceptions:
         with pytest.raises(RuntimeError) as exc_info:
             raise InternalError(message)
         assert str(exc_info.value) == message
-        
+
     def test_unsupported_operation_error(self):
         """Test that UnsupportedOperationError can be raised and caught properly."""
         message = "operation not supported"
