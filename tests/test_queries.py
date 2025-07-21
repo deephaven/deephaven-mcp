@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pyarrow
@@ -373,8 +374,6 @@ async def test_get_programming_language_version_table_unsupported_language():
 @pytest.mark.asyncio
 async def test_get_programming_language_version_success(caplog):
     """Test successful extraction of version string from pyarrow table."""
-    import logging
-
     caplog.set_level(logging.DEBUG)
 
     # Create a mock pyarrow table with Version column
