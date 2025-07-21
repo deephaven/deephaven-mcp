@@ -545,7 +545,7 @@ async def test_from_config_private_key_success(monkeypatch):
     worker_cfg = {
         "connection_json_url": "https://server/iris/connection.json",
         "auth_type": "private_key",
-        "private_key": "---KEY---",
+        "private_key_path": "---KEY---",
     }
     mock_manager = MagicMock()
 
@@ -580,8 +580,7 @@ async def test_from_config_private_key_success(monkeypatch):
             result = await sm_mod.CorePlusSessionFactory.from_config(worker_cfg)
             assert mock_pk.await_count == 1
             arg = mock_pk.await_args.args[0]
-            assert hasattr(arg, "read")  # Should be a StringIO
-            assert arg.getvalue() == "---KEY---"
+            assert arg == "---KEY---"  # Should be the file path
 
 
 @pytest.mark.asyncio
@@ -789,7 +788,7 @@ async def test_from_config_private_key_missing(monkeypatch):
         ):
             with pytest.raises(sm_mod.EnterpriseSystemConfigurationError) as excinfo:
                 await sm_mod.CorePlusSessionFactory.from_config(worker_cfg)
-            assert "must define 'private_key'" in str(excinfo.value)
+            assert "must define 'private_key_path'" in str(excinfo.value)
 
 
 @pytest.mark.asyncio
@@ -1019,9 +1018,9 @@ async def test_from_config_missing_private_key_branch(monkeypatch, caplog):
             ):
                 with pytest.raises(sm_mod.AuthenticationError) as excinfo:
                     await sm_mod.CorePlusSessionFactory.from_config(worker_cfg)
-                assert "No private_key provided" in str(excinfo.value)
+                assert "No private_key_path provided" in str(excinfo.value)
                 assert (
-                    "No private_key provided for private_key authentication"
+                    "No private_key_path provided for private_key authentication"
                     in caplog.text
                 )
 

@@ -28,12 +28,16 @@ _AUTH_SPECIFIC_FIELDS: dict[str, dict[str, type | tuple[type, ...]]] = {
         "password_env_var": str,  # Type if present
     },
     "private_key": {
-        "private_key": str,  # Required for this auth_type
+        "private_key_path": str,  # Required for this auth_type
     },
 }
-"""
-Defines auth-type specific fields and their expected types. 
-Each key is an auth_type, and its value is a dictionary of fields specific to that auth_type.
+"""Authentication-specific field definitions and validation rules.
+
+Maps each supported authentication type to its required and optional fields:
+- 'password': Requires 'username' and either 'password' or 'password_env_var' (mutually exclusive)
+- 'private_key': Requires 'private_key_path' field
+
+Each field maps to its expected Python type for validation purposes.
 """
 
 
@@ -57,16 +61,19 @@ def redact_enterprise_system_config(system_config: dict[str, Any]) -> dict[str, 
 def redact_enterprise_systems_map(
     enterprise_systems_map: dict[str, Any],
 ) -> dict[str, Any]:
-    """
-    Redacts sensitive fields from an enterprise systems map dictionary.
+    """Redact sensitive fields from an enterprise systems map dictionary.
 
-    For each entry, if the value is a dict, redact sensitive fields. If not, include the value as-is (for robust logging).
+    Creates a new dictionary where each enterprise system configuration has sensitive
+    fields (like passwords) redacted for safe logging. If a system configuration is
+    not a dictionary (malformed), it's included as-is to preserve error information.
 
     Args:
-        enterprise_systems_map (dict[str, Any]): The enterprise systems map configuration.
+        enterprise_systems_map (dict[str, Any]): Dictionary mapping system names to their configurations.
+            Expected format: {"system_name": {"connection_json_url": "...", ...}}
 
     Returns:
-        dict[str, Any]: A new dictionary with sensitive fields redacted where possible.
+        dict[str, Any]: A new dictionary with the same structure but sensitive fields replaced with
+        "[REDACTED]" placeholders. Non-dict values are preserved unchanged.
     """
     redacted_map = {}
     for system_name, system_config in enterprise_systems_map.items():
@@ -78,19 +85,41 @@ def redact_enterprise_systems_map(
 
 
 def validate_enterprise_systems_config(enterprise_systems_map: Any | None) -> None:
-    """
-    Validate the 'enterprise_systems' part of the MCP configuration.
+    """Validate the 'enterprise_systems' section of the MCP configuration.
 
-    The 'enterprise_systems' key in the config should map to a dictionary.
-    Each key in this dictionary is a system name, and its value is the
-    configuration object for that enterprise system.
+    Validates the structure and content of enterprise system configurations. Each
+    enterprise system must have valid base fields (connection_json_url, auth_type)
+    and appropriate auth-specific fields based on the authentication type.
+
+    Supported authentication types:
+    - 'password': Requires 'username' and either 'password' or 'password_env_var'
+    - 'private_key': Requires 'private_key_path'
 
     Args:
-        enterprise_systems_map: The value associated with the 'enterprise_systems'
-                                 key in the configuration. Expected to be a dict or None.
+        enterprise_systems_map (Any | None): The value from the 'enterprise_systems' config key.
+            Expected to be None (no enterprise systems) or a dictionary mapping
+            system names to their configuration dictionaries.
 
     Raises:
-        EnterpriseSystemConfigurationError: If validation fails.
+        EnterpriseSystemConfigurationError: If the configuration is invalid,
+            including missing required fields, incorrect types, or invalid
+            authentication configurations.
+
+    Example:
+        Valid configuration structure:
+        {
+            "production": {
+                "connection_json_url": "https://prod.example.com/iris/connection.json",
+                "auth_type": "password",
+                "username": "admin",
+                "password_env_var": "DH_PROD_PASSWORD"
+            },
+            "staging": {
+                "connection_json_url": "https://staging.example.com/iris/connection.json",
+                "auth_type": "private_key",
+                "private_key_path": "/path/to/staging.pem"
+            }
+        }
     """
     # For logging purposes, create a redacted version of the map
     # We do this only if the map is a dictionary, otherwise log as is or let validation catch it
@@ -130,15 +159,18 @@ def validate_enterprise_systems_config(enterprise_systems_map: Any | None) -> No
 
 
 def validate_single_enterprise_system(system_name: str, config: Any) -> None:
-    """
-    Validate a single enterprise system's configuration dictionary.
+    """Validate a single enterprise system's configuration.
+
+    Performs comprehensive validation including base fields, auth_type validation,
+    auth-specific fields, and auth-type logic validation.
 
     Args:
-        system_name (str): The name of the enterprise system.
-        config (Any): The configuration dictionary for the system.
+        system_name (str): The name of the enterprise system being validated.
+        config (Any): The configuration object for the system (expected to be a dict).
 
     Raises:
-        EnterpriseSystemConfigurationError: If the configuration is invalid.
+        EnterpriseSystemConfigurationError: If the configuration is invalid,
+            including structural issues, missing fields, or invalid auth logic.
     """
     _validate_enterprise_system_base_fields(system_name, config)
     auth_type, all_allowed_fields = _validate_and_get_auth_type(system_name, config)
@@ -149,15 +181,18 @@ def validate_single_enterprise_system(system_name: str, config: Any) -> None:
 
 
 def _validate_enterprise_system_base_fields(system_name: str, config: Any) -> None:
-    """
-    Validate that the enterprise system config is a dict and that all base fields are present and of correct type.
+    """Validate that the enterprise system config is a dict with all required base fields.
+
+    Checks that the configuration is a dictionary and contains all required base fields
+    (connection_json_url, auth_type) with the correct types.
 
     Args:
-        system_name (str): The name of the enterprise system.
-        config (Any): The configuration dictionary for the system.
+        system_name (str): The name of the enterprise system being validated.
+        config (Any): The configuration object for the system (expected to be a dict).
 
     Raises:
-        EnterpriseSystemConfigurationError: If the config is not a dict, or if any base field is missing or of wrong type.
+        EnterpriseSystemConfigurationError: If the config is not a dictionary,
+            if any required base field is missing, or if any field has the wrong type.
     """
     if not isinstance(config, dict):
         msg = f"Enterprise system '{system_name}' configuration must be a dictionary, but got {type(config).__name__}."
@@ -192,18 +227,24 @@ def _validate_enterprise_system_base_fields(system_name: str, config: Any) -> No
 def _validate_and_get_auth_type(
     system_name: str, config: dict[str, Any]
 ) -> tuple[str, dict[str, type | tuple[type, ...]]]:
-    """
-    Validate the 'auth_type' field and return it along with the allowed fields for that auth_type.
+    """Validate the auth_type field and return allowed fields for that authentication type.
+
+    Checks that the auth_type is supported and returns a combined dictionary of all
+    allowed fields (base fields + auth-specific fields) with their expected types.
 
     Args:
-        system_name (str): The name of the enterprise system.
+        system_name (str): The name of the enterprise system being validated.
         config (dict[str, Any]): The configuration dictionary for the system.
 
     Returns:
-        Tuple[str, dict[str, type | tuple[type, ...]]]: The auth_type and a dict of all allowed fields for this auth_type.
+        tuple[str, dict[str, type | tuple[type, ...]]]: A tuple containing:
+        - The validated auth_type string
+        - Dictionary mapping all allowed field names to their expected types
+          (combines base fields and auth-specific fields)
 
     Raises:
-        EnterpriseSystemConfigurationError: If 'auth_type' is missing or invalid.
+        EnterpriseSystemConfigurationError: If auth_type is missing, invalid,
+            or not in the list of supported authentication types.
     """
     auth_type = config.get("auth_type")
     if auth_type not in _AUTH_SPECIFIC_FIELDS:
@@ -226,6 +267,23 @@ def _validate_enterprise_system_auth_specific_fields(
     auth_type: str,
     all_allowed_fields_for_this_auth_type: dict[str, type | tuple[type, ...]],
 ) -> None:
+    """Validate authentication-specific fields in an enterprise system configuration.
+
+    Validates all non-base fields (e.g., 'username', 'password', 'private_key_path') to ensure
+    they are allowed for the given auth_type and have correct types. Base fields like
+    'connection_json_url' and 'auth_type' are skipped as they're validated separately.
+    Unknown fields generate warnings but don't cause validation failure.
+
+    Args:
+        system_name (str): The name of the enterprise system being validated.
+        config (dict[str, Any]): The configuration dictionary for the system.
+        auth_type (str): The authentication type for the system ('password' or 'private_key').
+        all_allowed_fields_for_this_auth_type (dict[str, type | tuple[type, ...]]): Dictionary mapping field names to their
+            expected types for this auth_type (includes both base and auth-specific fields).
+
+    Raises:
+        EnterpriseSystemConfigurationError: If any field has an incorrect type.
+    """
     for field_name, field_value in config.items():
         if field_name in _BASE_ENTERPRISE_SYSTEM_FIELDS:
             continue
@@ -260,16 +318,21 @@ def _validate_enterprise_system_auth_specific_fields(
 def _validate_enterprise_system_auth_type_logic(
     system_name: str, config: dict[str, Any], auth_type: str
 ) -> None:
-    """
-    Perform additional validation logic specific to the given auth_type (e.g., required sub-fields, mutual exclusivity).
+    """Perform auth-type-specific validation logic.
+
+    Validates authentication-specific requirements such as required fields and
+    mutual exclusivity rules. For 'password' auth: requires 'username' and either
+    'password' or 'password_env_var' (but not both). For 'private_key' auth:
+    requires 'private_key_path'.
 
     Args:
-        system_name (str): The name of the enterprise system.
+        system_name (str): The name of the enterprise system being validated.
         config (dict[str, Any]): The configuration dictionary for the system.
         auth_type (str): The authentication type for the system.
 
     Raises:
-        EnterpriseSystemConfigurationError: If any auth-type-specific validation fails.
+        EnterpriseSystemConfigurationError: If any auth-type-specific validation
+            fails, including missing required fields or mutual exclusivity violations.
     """
     if auth_type == "password":
         if "username" not in config:
@@ -288,7 +351,7 @@ def _validate_enterprise_system_auth_type_logic(
             _LOGGER.error(msg)
             raise EnterpriseSystemConfigurationError(msg)
     elif auth_type == "private_key":
-        if "private_key" not in config:
-            msg = f"Enterprise system '{system_name}' with auth_type 'private_key' must define 'private_key'."
+        if "private_key_path" not in config:
+            msg = f"Enterprise system '{system_name}' with auth_type 'private_key' must define 'private_key_path'."
             _LOGGER.error(msg)
             raise EnterpriseSystemConfigurationError(msg)

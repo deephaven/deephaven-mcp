@@ -66,7 +66,7 @@ def valid_enterprise_config():
                 "staging": {
                     "connection_json_url": "https://bar",
                     "auth_type": "private_key",
-                    "private_key": "key.pem",
+                    "private_key_path": "key.pem",
                 },
             }
         }
