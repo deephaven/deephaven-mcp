@@ -232,7 +232,8 @@ class ResourceLivenessStatus(enum.Enum):
     MISCONFIGURED = 4
     UNKNOWN = 5
 
-    def __str__(self):
+    def __str__(self) -> str:
+        """Return the uppercase name of the resource liveness status."""
         return self.name
 
 
@@ -287,7 +288,8 @@ class SystemType(str, enum.Enum):
     COMMUNITY = "community"
     ENTERPRISE = "enterprise"
 
-    def __str__(self):
+    def __str__(self) -> str:
+        """Return the uppercase name of the system type."""
         return self.name
 
 

@@ -1324,6 +1324,35 @@ async def test_enterprise_systems_status_liveness_error():
         assert "Liveness error" in result["error"]
 
 
+@pytest.mark.asyncio
+async def test_enterprise_systems_status_no_enterprise_registry():
+    """Test enterprise systems status when enterprise_registry is None."""
+    # Mock session registry with None enterprise registry
+    mock_session_registry = MagicMock()
+    mock_session_registry._enterprise_registry = None
+
+    # Mock config manager
+    mock_config_manager = AsyncMock()
+    mock_config_manager.get_config = AsyncMock(
+        return_value={"enterprise": {"systems": {}}}
+    )
+
+    # Create context
+    context = MockContext(
+        {
+            "session_registry": mock_session_registry,
+            "config_manager": mock_config_manager,
+        }
+    )
+
+    # Call the function
+    result = await mcp_mod.enterprise_systems_status(context)
+
+    # Verify the result
+    assert result["success"] is True
+    assert len(result["systems"]) == 0
+
+
 # === list_sessions and get_session_details tests ===
 
 

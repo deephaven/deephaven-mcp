@@ -8,6 +8,7 @@ This module provides coroutine-compatible utility functions for querying Deephav
     - `get_meta_table(session, table_name)`: Retrieve a table's schema/meta table as a pyarrow.Table snapshot.
     - `get_pip_packages_table(session)`: Get a table of installed pip packages as a pyarrow.Table.
     - `get_programming_language_version_table(session)`: Get a table with Python version information as a pyarrow.Table.
+    - `get_programming_language_version(session)`: Get the programming language version string from a Deephaven session.
     - `get_dh_versions(session)`: Get the installed Deephaven Core and Core+ version strings from the session's pip environment.
 
 **Notes:**
@@ -123,6 +124,10 @@ async def get_programming_language_version_table(session: BaseSession) -> pyarro
         - Logging is performed at DEBUG level for script execution and table retrieval.
         - Currently only supports Python sessions. Support for other programming languages may be added in the future.
     """
+    _LOGGER.debug(
+        "[queries:get_programming_language_version_table] Retrieving Python version information from session..."
+    )
+
     # Check if the session is a Python session
     if session.programming_language.lower() != "python":
         # TODO: Add support for other programming languages.
@@ -170,6 +175,37 @@ async def get_programming_language_version_table(session: BaseSession) -> pyarro
         "[queries:get_programming_language_version_table] Table '_python_version_table' retrieved successfully."
     )
     return arrow_table
+
+
+async def get_programming_language_version(session: BaseSession) -> str:
+    """
+    Asynchronously retrieve the programming language version string from a Deephaven session.
+
+    This function gets the programming language version table and extracts the version string.
+
+    Args:
+        session (BaseSession): An active Deephaven session.
+
+    Returns:
+        str: The programming language version string (e.g., "3.9.7").
+
+    Raises:
+        UnsupportedOperationError: If the session is not a Python session.
+        Exception: If the version information cannot be retrieved.
+    """
+    _LOGGER.debug(
+        "[queries:get_programming_language_version] Retrieving programming language version..."
+    )
+    version_table = await get_programming_language_version_table(session)
+
+    # Extract the version string from the first row of the Version column
+    version_column = version_table.column("Version")
+    version_str = str(version_column[0].as_py())
+
+    _LOGGER.debug(
+        f"[queries:get_programming_language_version] Retrieved version: {version_str}"
+    )
+    return version_str
 
 
 async def get_pip_packages_table(session: BaseSession) -> pyarrow.Table:

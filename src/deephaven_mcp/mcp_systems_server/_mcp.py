@@ -27,19 +27,27 @@ See individual tool docstrings for full argument, return, and error details.
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from typing import TypeVar
 
 import aiofiles
 from mcp.server.fastmcp import Context, FastMCP
 
 from deephaven_mcp import queries
+from deephaven_mcp.client._session import BaseSession
 from deephaven_mcp.config import (
     ConfigManager,
     get_config_section,
     redact_enterprise_system_config,
 )
+from deephaven_mcp.resource_manager._manager import (
+    BaseItemManager,
+    CorePlusSessionFactoryManager,
+)
 from deephaven_mcp.resource_manager._registry_combined import CombinedSessionRegistry
+
+T = TypeVar("T")
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -78,16 +86,18 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
             - 'session_registry' (CombinedSessionRegistry): Instance for managing all session types.
             - 'refresh_lock' (asyncio.Lock): Lock for atomic refresh operations across tools.
     """
-    _LOGGER.info("Starting MCP server '%s'", server.name)
+    _LOGGER.info(
+        "[mcp_systems_server:app_lifespan] Starting MCP server '%s'", server.name
+    )
     session_registry = None
 
     try:
         config_manager = ConfigManager()
 
         # Make sure config can be loaded before starting
-        _LOGGER.info("Loading configuration...")
+        _LOGGER.info("[mcp_systems_server:app_lifespan] Loading configuration...")
         await config_manager.get_config()
-        _LOGGER.info("Configuration loaded.")
+        _LOGGER.info("[mcp_systems_server:app_lifespan] Configuration loaded.")
 
         session_registry = CombinedSessionRegistry()
         await session_registry.initialize(config_manager)
@@ -101,10 +111,15 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
             "refresh_lock": refresh_lock,
         }
     finally:
-        _LOGGER.info("Shutting down MCP server '%s'", server.name)
+        _LOGGER.info(
+            "[mcp_systems_server:app_lifespan] Shutting down MCP server '%s'",
+            server.name,
+        )
         if session_registry is not None:
             await session_registry.close()
-        _LOGGER.info("MCP server '%s' shut down.", server.name)
+        _LOGGER.info(
+            "[mcp_systems_server:app_lifespan] MCP server '%s' shut down.", server.name
+        )
 
 
 mcp_server = FastMCP("deephaven-mcp-systems", lifespan=app_lifespan)
@@ -156,7 +171,7 @@ async def refresh(context: Context) -> dict:
         - Logs tool invocation, success, and error details at INFO/ERROR levels.
     """
     _LOGGER.info(
-        "[refresh] Invoked: refreshing worker configuration and session cache."
+        "[mcp_systems_server:refresh] Invoked: refreshing worker configuration and session cache."
     )
     # Acquire the refresh lock to prevent concurrent refreshes. This does not
     # guarantee atomicity with respect to other config/session operations, but
@@ -176,12 +191,12 @@ async def refresh(context: Context) -> dict:
             await config_manager.clear_config_cache()
             await session_registry.close()
         _LOGGER.info(
-            "[refresh] Success: Worker configuration and session cache have been reloaded."
+            "[mcp_systems_server:refresh] Success: Worker configuration and session cache have been reloaded."
         )
         return {"success": True}
     except Exception as e:
         _LOGGER.error(
-            f"[refresh] Failed to refresh worker configuration/session cache: {e!r}",
+            f"[mcp_systems_server:refresh] Failed to refresh worker configuration/session cache: {e!r}",
             exc_info=True,
         )
         return {"success": False, "error": str(e), "isError": True}
@@ -260,7 +275,7 @@ async def enterprise_systems_status(
         - With attempt_to_connect=False: Typically completes in milliseconds
         - With attempt_to_connect=True: May take seconds due to connection operations
     """
-    _LOGGER.info("[enterprise_systems_status] Invoked.")
+    _LOGGER.info("[mcp_systems_server:enterprise_systems_status] Invoked.")
     try:
         session_registry: CombinedSessionRegistry = (
             context.request_context.lifespan_context["session_registry"]
@@ -270,7 +285,10 @@ async def enterprise_systems_status(
         ]
         # Get all factories (enterprise systems)
         enterprise_registry = session_registry._enterprise_registry
-        factories = await enterprise_registry.get_all()
+        if enterprise_registry is None:
+            factories: dict[str, CorePlusSessionFactoryManager] = {}
+        else:
+            factories = await enterprise_registry.get_all()
         config = await config_manager.get_config()
 
         try:
@@ -307,7 +325,10 @@ async def enterprise_systems_status(
             systems.append(system_info)
         return {"success": True, "systems": systems}
     except Exception as e:
-        _LOGGER.error(f"[enterprise_systems_status] Failed: {e!r}", exc_info=True)
+        _LOGGER.error(
+            f"[mcp_systems_server:enterprise_systems_status] Failed: {e!r}",
+            exc_info=True,
+        )
         return {"success": False, "error": str(e), "isError": True}
 
 
@@ -335,7 +356,7 @@ async def list_sessions(context: Context) -> dict:
             - 'error' (str, optional): Error message if retrieval failed.
             - 'isError' (bool, optional): Present and True if this is an error response.
     """
-    _LOGGER.info("[list_sessions] Invoked.")
+    _LOGGER.info("[mcp_systems_server:list_sessions] Invoked.")
     try:
         session_registry: CombinedSessionRegistry = (
             context.request_context.lifespan_context["session_registry"]
@@ -359,13 +380,162 @@ async def list_sessions(context: Context) -> dict:
                 )
             except Exception as e:
                 _LOGGER.warning(
-                    f"[list_sessions] Could not process session '{fq_name}': {e!r}"
+                    f"[mcp_systems_server:list_sessions] Could not process session '{fq_name}': {e!r}"
                 )
                 results.append({"session_id": fq_name, "error": str(e)})
         return {"success": True, "sessions": results}
     except Exception as e:
-        _LOGGER.error(f"[list_sessions] Failed: {e!r}", exc_info=True)
+        _LOGGER.error(
+            f"[mcp_systems_server:list_sessions] Failed: {e!r}", exc_info=True
+        )
         return {"success": False, "error": str(e), "isError": True}
+
+
+async def _get_session_liveness_info(
+    mgr: BaseItemManager, session_id: str, attempt_to_connect: bool
+) -> tuple[bool, str, str | None]:
+    """
+    Get session liveness status and availability.
+
+    This function checks the liveness status of a session using the provided manager.
+    It can optionally attempt to connect to the session to verify its actual status.
+
+    Args:
+        mgr: Session manager for the target session
+        session_id: Session identifier for logging purposes
+        attempt_to_connect: Whether to attempt connecting to verify status
+
+    Returns:
+        tuple: A 3-tuple containing:
+            - available (bool): Whether the session is available and responsive
+            - liveness_status (str): Status classification ("ONLINE", "OFFLINE", etc.)
+            - liveness_detail (str): Detailed explanation of the status
+    """
+    try:
+        status, detail = await mgr.liveness_status(ensure_item=attempt_to_connect)
+        liveness_status = status.name
+        liveness_detail = detail
+        available = await mgr.is_alive()
+        _LOGGER.debug(
+            f"[mcp_systems_server:get_session_details] Session '{session_id}' liveness: {liveness_status}, detail: {liveness_detail}"
+        )
+        return available, liveness_status, liveness_detail
+    except Exception as e:
+        _LOGGER.warning(
+            f"[mcp_systems_server:get_session_details] Could not check liveness for '{session_id}': {e!r}"
+        )
+        return False, "OFFLINE", str(e)
+
+
+async def _get_session_property(
+    mgr: BaseItemManager,
+    session_id: str,
+    available: bool,
+    property_name: str,
+    getter_func: Callable[[BaseSession], Awaitable[T]],
+) -> T | None:
+    """
+    Safely get a session property.
+
+    Args:
+        mgr: Session manager
+        session_id: Session identifier
+        available: Whether the session is available
+        property_name: Name of the property for logging
+        getter_func: Async function to get the property from the session
+
+    Returns:
+        The property value or None if unavailable/failed
+    """
+    if not available:
+        return None
+
+    try:
+        session = await mgr.get()
+        result = await getter_func(session)
+        _LOGGER.debug(
+            f"[mcp_systems_server:get_session_details] Session '{session_id}' {property_name}: {result}"
+        )
+        return result
+    except Exception as e:
+        _LOGGER.warning(
+            f"[mcp_systems_server:get_session_details] Could not get {property_name} for '{session_id}': {e!r}"
+        )
+        return None
+
+
+async def _get_session_programming_language(
+    mgr: BaseItemManager, session_id: str, available: bool
+) -> str | None:
+    """
+    Get the programming language of a session.
+
+    This function retrieves the programming language (e.g., "python", "groovy")
+    associated with the session. If the session is not available, it returns None
+    immediately without attempting to connect.
+
+    Args:
+        mgr: Session manager for the target session
+        session_id: Session identifier for logging purposes
+        available: Whether the session is available (pre-checked)
+
+    Returns:
+        str | None: The programming language name (e.g., "python") or None if
+                   unavailable/failed to retrieve
+    """
+    if not available:
+        return None
+
+    try:
+        session: BaseSession = await mgr.get()
+        programming_language = str(session.programming_language)
+        _LOGGER.debug(
+            f"[mcp_systems_server:get_session_details] Session '{session_id}' programming_language: {programming_language}"
+        )
+        return programming_language
+    except Exception as e:
+        _LOGGER.warning(
+            f"[mcp_systems_server:get_session_details] Could not get programming_language for '{session_id}': {e!r}"
+        )
+        return None
+
+
+async def _get_session_versions(
+    mgr: BaseItemManager, session_id: str, available: bool
+) -> tuple[str | None, str | None]:
+    """
+    Get Deephaven version information.
+
+    This function retrieves both community (Core) and enterprise (Core+/CorePlus)
+    version information from the session. If the session is not available, it returns
+    (None, None) immediately without attempting to connect.
+
+    Args:
+        mgr: Session manager for the target session
+        session_id: Session identifier for logging purposes
+        available: Whether the session is available (pre-checked)
+
+    Returns:
+        tuple: A 2-tuple containing:
+            - community_version (str | None): Deephaven Community/Core version (e.g., "0.24.0")
+            - enterprise_version (str | None): Deephaven Enterprise/Core+/CorePlus version
+                                              (e.g., "0.24.0") or None if not enterprise
+    """
+    if not available:
+        return None, None
+
+    try:
+        session = await mgr.get()
+        community_version, enterprise_version = await queries.get_dh_versions(session)
+        _LOGGER.debug(
+            f"[mcp_systems_server:get_session_details] Session '{session_id}' versions: community={community_version}, enterprise={enterprise_version}"
+        )
+        return community_version, enterprise_version
+    except Exception as e:
+        _LOGGER.warning(
+            f"[mcp_systems_server:get_session_details] Could not get Deephaven versions for '{session_id}': {e!r}"
+        )
+        return None, None
 
 
 @mcp_server.tool()
@@ -422,7 +592,9 @@ async def get_session_details(
         the information could be retrieved successfully. Fields with null values are excluded
         from the response.
     """
-    _LOGGER.info(f"[get_session_details] Invoked for session_id: {session_id}")
+    _LOGGER.info(
+        f"[mcp_systems_server:get_session_details] Invoked for session_id: {session_id}"
+    )
     try:
         session_registry: CombinedSessionRegistry = (
             context.request_context.lifespan_context["session_registry"]
@@ -440,79 +612,32 @@ async def get_session_details(
 
         try:
             # Get basic metadata
-            system_type = mgr.system_type
-            system_type_str = system_type.name
+            system_type_str = mgr.system_type.name
             source = mgr.source
             session_name = mgr.name
 
             # Get liveness status and availability
-            try:
-                status, detail = await mgr.liveness_status(
-                    ensure_item=attempt_to_connect
-                )
-                liveness_status = status.name
-                liveness_detail = detail
-                available = await mgr.is_alive()
-                _LOGGER.debug(
-                    f"[mcp_systems_server:get_session_details] Session '{session_id}' liveness: {liveness_status}, detail: {liveness_detail}"
-                )
-            except Exception as e:
-                _LOGGER.warning(
-                    f"[mcp_systems_server:get_session_details] Could not check liveness for '{session_id}': {e!r}"
-                )
-                available = False
-                liveness_status = "OFFLINE"
-                liveness_detail = str(e)
+            available, liveness_status, liveness_detail = (
+                await _get_session_liveness_info(mgr, session_id, attempt_to_connect)
+            )
 
-            # Get session object and extract additional properties
-            programming_language = None
-
-            try:
-                if available:
-                    session = await mgr.get()
-                    programming_language = session.programming_language
-                    _LOGGER.debug(
-                        f"[mcp_systems_server:get_session_details] Session '{session_id}' programming_language: {programming_language}"
-                    )
-            except Exception as e:
-                _LOGGER.warning(
-                    f"[mcp_systems_server:get_session_details] Could not get additional properties for '{session_id}': {e!r}"
-                )
+            # Get session properties using helper functions
+            programming_language = await _get_session_programming_language(
+                mgr, session_id, available
+            )
 
             # TODO: should the versions be cached?
+            programming_language_version = await _get_session_property(
+                mgr,
+                session_id,
+                available,
+                "programming_language_version",
+                queries.get_programming_language_version,
+            )
 
-            programming_language_version = None
-
-            try:
-                if available:
-                    session = await mgr.get()
-                    programming_language_version = (
-                        await queries.get_programming_language_version(session)
-                    )
-                    _LOGGER.debug(
-                        f"[mcp_systems_server:get_session_details] Session '{session_id}' programming_language_version: {programming_language_version}"
-                    )
-            except Exception as e:
-                _LOGGER.warning(
-                    f"[mcp_systems_server:get_session_details] Could not get programming language version for '{session_id}': {e!r}"
-                )
-
-            community_version = None
-            enterprise_version = None
-
-            try:
-                if available:
-                    session = await mgr.get()
-                    community_version, enterprise_version = (
-                        await queries.get_dh_versions(session)
-                    )
-                    _LOGGER.debug(
-                        f"[mcp_systems_server:get_session_details] Session '{session_id}' versions: community={community_version}, enterprise={enterprise_version}"
-                    )
-            except Exception as e:
-                _LOGGER.warning(
-                    f"[mcp_systems_server:get_session_details] Could not get Deephaven versions for '{session_id}': {e!r}"
-                )
+            community_version, enterprise_version = await _get_session_versions(
+                mgr, session_id, available
+            )
 
             # Build session info dictionary with all potential fields
             session_info_with_nones = {
@@ -556,7 +681,7 @@ async def get_session_details(
 @mcp_server.tool()
 async def table_schemas(
     context: Context, session_id: str, table_names: list[str] | None = None
-) -> dict:
+) -> list[dict[str, object]]:
     """
     MCP Tool: Retrieve schemas for one or more tables from a Deephaven session.
 
@@ -591,7 +716,7 @@ async def table_schemas(
         - Logs tool invocation, per-table results, and error details at INFO/ERROR levels.
     """
     _LOGGER.info(
-        f"[table_schemas] Invoked: session_id={session_id!r}, table_names={table_names!r}"
+        f"[mcp_systems_server:table_schemas] Invoked: session_id={session_id!r}, table_names={table_names!r}"
     )
     results = []
     try:
@@ -600,17 +725,19 @@ async def table_schemas(
         )
         session_manager = await session_registry.get(session_id)
         session = await session_manager.get()
-        _LOGGER.info(f"[table_schemas] Session established for session: '{session_id}'")
+        _LOGGER.info(
+            f"[mcp_systems_server:table_schemas] Session established for session: '{session_id}'"
+        )
 
         if table_names is not None:
             selected_table_names = table_names
             _LOGGER.info(
-                f"[table_schemas] Fetching schemas for specified tables: {selected_table_names!r}"
+                f"[mcp_systems_server:table_schemas] Fetching schemas for specified tables: {selected_table_names!r}"
             )
         else:
             selected_table_names = list(session.tables)
             _LOGGER.info(
-                f"[table_schemas] Fetching schemas for all tables in worker: {selected_table_names!r}"
+                f"[mcp_systems_server:table_schemas] Fetching schemas for all tables in worker: {selected_table_names!r}"
             )
 
         for table_name in selected_table_names:
@@ -623,11 +750,11 @@ async def table_schemas(
                 ]
                 results.append({"success": True, "table": table_name, "schema": schema})
                 _LOGGER.info(
-                    f"[table_schemas] Success: Retrieved schema for table '{table_name}'"
+                    f"[mcp_systems_server:table_schemas] Success: Retrieved schema for table '{table_name}'"
                 )
             except Exception as table_exc:
                 _LOGGER.error(
-                    f"[table_schemas] Failed to get schema for table '{table_name}': {table_exc!r}",
+                    f"[mcp_systems_server:table_schemas] Failed to get schema for table '{table_name}': {table_exc!r}",
                     exc_info=True,
                 )
                 results.append(
@@ -638,11 +765,13 @@ async def table_schemas(
                         "isError": True,
                     }
                 )
-        _LOGGER.info(f"[table_schemas] Returning schemas: {results!r}")
+        _LOGGER.info(
+            f"[mcp_systems_server:table_schemas] Returning schemas: {results!r}"
+        )
         return results
     except Exception as e:
         _LOGGER.error(
-            f"[table_schemas] Failed for session: '{session_id}', error: {e!r}",
+            f"[mcp_systems_server:table_schemas] Failed for session: '{session_id}', error: {e!r}",
             exc_info=True,
         )
         return [{"success": False, "table": None, "error": str(e), "isError": True}]
@@ -685,20 +814,22 @@ async def run_script(
         - Logs tool invocation, script source/path, execution status, and error details at INFO/WARNING/ERROR levels.
     """
     _LOGGER.info(
-        f"[run_script] Invoked: session_id={session_id!r}, script={'<provided>' if script else None}, script_path={script_path!r}"
+        f"[mcp_systems_server:run_script] Invoked: session_id={session_id!r}, script={'<provided>' if script else None}, script_path={script_path!r}"
     )
     result = {"success": False, "error": ""}
     try:
         if script is None and script_path is None:
             _LOGGER.warning(
-                "[run_script] No script or script_path provided. Returning error."
+                "[mcp_systems_server:run_script] No script or script_path provided. Returning error."
             )
             result["error"] = "Must provide either script or script_path."
             result["isError"] = True
             return result
 
         if script is None:
-            _LOGGER.info(f"[run_script] Loading script from file: {script_path!r}")
+            _LOGGER.info(
+                f"[mcp_systems_server:run_script] Loading script from file: {script_path!r}"
+            )
             if script_path is None:
                 raise RuntimeError(
                     "Internal error: script_path is None after prior guard"
@@ -711,17 +842,21 @@ async def run_script(
         )
         session_manager = await session_registry.get(session_id)
         session = await session_manager.get()
-        _LOGGER.info(f"[run_script] Session established for session: '{session_id}'")
+        _LOGGER.info(
+            f"[mcp_systems_server:run_script] Session established for session: '{session_id}'"
+        )
 
-        _LOGGER.info(f"[run_script] Executing script on session: '{session_id}'")
+        _LOGGER.info(
+            f"[mcp_systems_server:run_script] Executing script on session: '{session_id}'"
+        )
         await asyncio.to_thread(session.run_script, script)
         _LOGGER.info(
-            f"[run_script] Script executed successfully on session: '{session_id}'"
+            f"[mcp_systems_server:run_script] Script executed successfully on session: '{session_id}'"
         )
         result["success"] = True
     except Exception as e:
         _LOGGER.error(
-            f"[run_script] Failed for session: '{session_id}', error: {e!r}",
+            f"[mcp_systems_server:run_script] Failed for session: '{session_id}', error: {e!r}",
             exc_info=True,
         )
         result["error"] = str(e)
@@ -757,7 +892,9 @@ async def pip_packages(context: Context, session_id: str) -> dict:
     Logging:
         - Logs tool invocation, package retrieval operations, and error details at INFO/ERROR levels.
     """
-    _LOGGER.info(f"[pip_packages] Invoked for session: {session_id!r}")
+    _LOGGER.info(
+        f"[mcp_systems_server:pip_packages] Invoked for session: {session_id!r}"
+    )
     result: dict = {"success": False}
     try:
         session_registry: CombinedSessionRegistry = (
@@ -765,15 +902,17 @@ async def pip_packages(context: Context, session_id: str) -> dict:
         )
         session_manager = await session_registry.get(session_id)
         session = await session_manager.get()
-        _LOGGER.info(f"[pip_packages] Session established for session: '{session_id}'")
+        _LOGGER.info(
+            f"[mcp_systems_server:pip_packages] Session established for session: '{session_id}'"
+        )
 
         # Run the pip packages query and get the table in one step
         _LOGGER.info(
-            f"[pip_packages] Getting pip packages table for session: '{session_id}'"
+            f"[mcp_systems_server:pip_packages] Getting pip packages table for session: '{session_id}'"
         )
         arrow_table = await queries.get_pip_packages_table(session)
         _LOGGER.info(
-            f"[pip_packages] Pip packages table retrieved successfully for session: '{session_id}'"
+            f"[mcp_systems_server:pip_packages] Pip packages table retrieved successfully for session: '{session_id}'"
         )
 
         # Convert the Arrow table to a list of dicts
@@ -800,7 +939,7 @@ async def pip_packages(context: Context, session_id: str) -> dict:
         result["result"] = packages
     except Exception as e:
         _LOGGER.error(
-            f"[pip_packages] Failed for session: '{session_id}', error: {e!r}",
+            f"[mcp_systems_server:pip_packages] Failed for session: '{session_id}', error: {e!r}",
             exc_info=True,
         )
         result["error"] = str(e)

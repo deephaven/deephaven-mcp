@@ -216,6 +216,7 @@ async def test_connect_to_new_worker_success(
     coreplus_session_manager, dummy_session_manager
 ):
     mock_session_instance = MagicMock()
+    mock_session_instance._session_type = "python"  # Mock the _session_type attribute
     dummy_session_manager.connect_to_new_worker.return_value = mock_session_instance
 
     with patch(
@@ -240,7 +241,7 @@ async def test_connect_to_new_worker_success(
             configuration_transformer=None,
             session_arguments={"programming_language": "python"},
         )
-        mock_core_plus_session.assert_called_once_with(mock_session_instance)
+        mock_core_plus_session.assert_called_once_with(mock_session_instance, "python")
         assert result == "wrapped_session"
 
 
@@ -295,6 +296,7 @@ async def test_connect_to_persistent_query_success(
     coreplus_session_manager, dummy_session_manager
 ):
     mock_session_instance = MagicMock()
+    mock_session_instance._session_type = "python"  # Mock the _session_type attribute
     dummy_session_manager.connect_to_persistent_query.return_value = (
         mock_session_instance
     )
@@ -310,7 +312,7 @@ async def test_connect_to_persistent_query_success(
         dummy_session_manager.connect_to_persistent_query.assert_called_once_with(
             name="pq", serial=None, session_arguments={"programming_language": "python"}
         )
-        mock_core_plus_session.assert_called_once_with(mock_session_instance)
+        mock_core_plus_session.assert_called_once_with(mock_session_instance, "python")
         assert result == "wrapped_session"
 
 

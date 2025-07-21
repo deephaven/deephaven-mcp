@@ -9,6 +9,7 @@ from deephaven_mcp.queries import (
     get_dh_versions,
     get_meta_table,
     get_pip_packages_table,
+    get_programming_language_version,
     get_programming_language_version_table,
     get_table,
 )
@@ -367,3 +368,118 @@ async def test_get_programming_language_version_table_unsupported_language():
         UnsupportedOperationError, match="only supports Python sessions"
     ):
         await get_programming_language_version_table(session_mock)
+
+
+@pytest.mark.asyncio
+async def test_get_programming_language_version_success(caplog):
+    """Test successful extraction of version string from pyarrow table."""
+    import logging
+
+    caplog.set_level(logging.DEBUG)
+
+    # Create a mock pyarrow table with Version column
+    version_column_mock = MagicMock()
+    version_value_mock = MagicMock()
+    version_value_mock.as_py.return_value = "3.9.7"
+    version_column_mock.__getitem__.return_value = version_value_mock
+
+    version_table_mock = MagicMock(spec=pyarrow.Table)
+    version_table_mock.column.return_value = version_column_mock
+
+    session_mock = MagicMock()
+
+    # Mock get_programming_language_version_table to return our mock table
+    with patch(
+        "deephaven_mcp.queries.get_programming_language_version_table",
+        return_value=version_table_mock,
+    ) as mock_get_table:
+        result = await get_programming_language_version(session_mock)
+
+    # Verify the result
+    assert result == "3.9.7"
+
+    # Verify the function calls (lines 200-204)
+    mock_get_table.assert_awaited_once_with(session_mock)
+    version_table_mock.column.assert_called_once_with("Version")  # line 200
+    version_column_mock.__getitem__.assert_called_once_with(0)  # line 201
+    version_value_mock.as_py.assert_called_once()  # line 201
+
+    # Verify logging
+    assert (
+        "[queries:get_programming_language_version] Retrieving programming language version..."
+        in caplog.text
+    )
+    assert (
+        "[queries:get_programming_language_version] Retrieved version: 3.9.7"
+        in caplog.text
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_programming_language_version_column_access_error():
+    """Test error handling when accessing Version column fails."""
+    version_table_mock = MagicMock(spec=pyarrow.Table)
+    version_table_mock.column.side_effect = KeyError("Version column not found")
+
+    session_mock = MagicMock()
+
+    with patch(
+        "deephaven_mcp.queries.get_programming_language_version_table",
+        return_value=version_table_mock,
+    ):
+        with pytest.raises(KeyError, match="Version column not found"):
+            await get_programming_language_version(session_mock)
+
+
+@pytest.mark.asyncio
+async def test_get_programming_language_version_index_error():
+    """Test error handling when accessing first row fails (empty table)."""
+    version_column_mock = MagicMock()
+    version_column_mock.__getitem__.side_effect = IndexError("list index out of range")
+
+    version_table_mock = MagicMock(spec=pyarrow.Table)
+    version_table_mock.column.return_value = version_column_mock
+
+    session_mock = MagicMock()
+
+    with patch(
+        "deephaven_mcp.queries.get_programming_language_version_table",
+        return_value=version_table_mock,
+    ):
+        with pytest.raises(IndexError, match="list index out of range"):
+            await get_programming_language_version(session_mock)
+
+
+@pytest.mark.asyncio
+async def test_get_programming_language_version_as_py_error():
+    """Test error handling when converting pyarrow value to Python fails."""
+    version_value_mock = MagicMock()
+    version_value_mock.as_py.side_effect = RuntimeError("Conversion failed")
+
+    version_column_mock = MagicMock()
+    version_column_mock.__getitem__.return_value = version_value_mock
+
+    version_table_mock = MagicMock(spec=pyarrow.Table)
+    version_table_mock.column.return_value = version_column_mock
+
+    session_mock = MagicMock()
+
+    with patch(
+        "deephaven_mcp.queries.get_programming_language_version_table",
+        return_value=version_table_mock,
+    ):
+        with pytest.raises(RuntimeError, match="Conversion failed"):
+            await get_programming_language_version(session_mock)
+
+
+@pytest.mark.asyncio
+async def test_get_programming_language_version_table_failure():
+    """Test error handling when get_programming_language_version_table fails."""
+    session_mock = MagicMock()
+
+    with patch(
+        "deephaven_mcp.queries.get_programming_language_version_table",
+        side_effect=RuntimeError("Table retrieval failed"),
+    ):
+        with pytest.raises(RuntimeError, match="Table retrieval failed"):
+            await get_programming_language_version(session_mock)
