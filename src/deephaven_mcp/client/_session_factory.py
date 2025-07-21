@@ -1244,7 +1244,9 @@ class CorePlusSessionFactory(
                 "[CorePlusSessionFactory:password] Successfully authenticated"
             )
         except ConnectionError as e:
-            _LOGGER.error(f"[CorePlusSessionFactory:password] Failed to connect to authentication server: {e}")
+            _LOGGER.error(
+                f"[CorePlusSessionFactory:password] Failed to connect to authentication server: {e}"
+            )
             raise DeephavenConnectionError(
                 f"Failed to connect to authentication server: {e}"
             ) from e
@@ -1401,7 +1403,9 @@ class CorePlusSessionFactory(
             )
             raise AuthenticationError(f"Private key file not found: {e}") from e
         except ConnectionError as e:
-            _LOGGER.error(f"[CorePlusSessionFactory:private_key] Failed to connect to authentication server: {e}")
+            _LOGGER.error(
+                f"[CorePlusSessionFactory:private_key] Failed to connect to authentication server: {e}"
+            )
             raise DeephavenConnectionError(
                 f"Failed to connect to authentication server: {e}"
             ) from e
@@ -1495,10 +1499,14 @@ class CorePlusSessionFactory(
                 f"Failed to connect to authentication server or SAML provider: {e}"
             ) from e
         except ValueError as e:
-            _LOGGER.error(f"[CorePlusSessionFactory:saml] SAML configuration error: {e}")
+            _LOGGER.error(
+                f"[CorePlusSessionFactory:saml] SAML configuration error: {e}"
+            )
             raise AuthenticationError(f"SAML configuration error: {e}") from e
         except Exception as e:
-            _LOGGER.error(f"[CorePlusSessionFactory:saml] SAML authentication failed: {e}")
+            _LOGGER.error(
+                f"[CorePlusSessionFactory:saml] SAML authentication failed: {e}"
+            )
             raise AuthenticationError(f"Failed to authenticate via SAML: {e}") from e
 
     async def upload_key(self, public_key_text: str) -> None:
