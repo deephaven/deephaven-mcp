@@ -6,9 +6,11 @@ This module provides a function to monkey-patch Uvicorn's RequestResponseCycle s
 Call `monkeypatch_uvicorn_exception_handling()` once at process startup to ensure robust error visibility for ASGI server exceptions.
 """
 
+import json
 import logging
 import sys
 import traceback
+from datetime import datetime
 from typing import Any
 
 from uvicorn.protocols.http.httptools_impl import RequestResponseCycle
@@ -93,6 +95,35 @@ def monkeypatch_uvicorn_exception_handling() -> None:
                         "exception_message": str(exc_value),
                         "exception_args": getattr(exc_value, "args", None),
                         "full_traceback": full_traceback,
+                    },
+                )
+
+                # Option 1: JSON structured logging for GCP Cloud Run (6)
+                log_data = {
+                    "severity": "ERROR",
+                    "message": "Unhandled exception in ASGI application (6) - JSON structured",
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "exception": {
+                        "type": exc_type.__name__,
+                        "module": exc_type.__module__,
+                        "message": str(exc_value),
+                        "args": getattr(exc_value, "args", None),
+                    },
+                    "stack_trace": full_traceback,  # Preserves original formatting
+                }
+                _LOGGER.error(json.dumps(log_data))
+
+                # Option 2: Structured logging with extra parameters (7)
+                _LOGGER.error(
+                    "Unhandled exception in ASGI application (7) - structured extra",
+                    extra={
+                        "severity": "ERROR",
+                        "exception_type": exc_type.__name__,
+                        "exception_module": exc_type.__module__,
+                        "exception_message": str(exc_value),
+                        "exception_args": getattr(exc_value, "args", None),
+                        "stack_trace": full_traceback,
+                        "timestamp": datetime.utcnow().isoformat(),
                     },
                 )
 
