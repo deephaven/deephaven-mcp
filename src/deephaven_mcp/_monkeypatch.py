@@ -37,6 +37,7 @@ def monkeypatch_uvicorn_exception_handling() -> None:
             try:
                 return await app(*args)
             except Exception as e:
+                # Original logging methods (0-3)
                 print(
                     f"Unhandled exception in ASGI application (0): {type(e)} {e}",
                     file=sys.stderr,
@@ -54,6 +55,43 @@ def monkeypatch_uvicorn_exception_handling() -> None:
                     "Unhandled exception in ASGI application (3)",
                     exc_info=(type(e), e, e.__traceback__),
                 )
+                
+                # New comprehensive logging (4-5)
+                exc_type = type(e)
+                exc_value = e
+                exc_traceback = e.__traceback__
+                
+                # Format the full stack trace as a string
+                full_traceback = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+                
+                # Log comprehensive error information at ERROR level
+                error_msg = (
+                    f"UNHANDLED ASGI EXCEPTION (4):\n"
+                    f"Exception Type: {exc_type.__name__}\n"
+                    f"Exception Module: {exc_type.__module__}\n"
+                    f"Exception Message: {str(exc_value)}\n"
+                    f"Exception Args: {getattr(exc_value, 'args', 'N/A')}\n"
+                    f"Full Stack Trace:\n{full_traceback}"
+                )
+
+                _LOGGER.error(error_msg)
+
+                # Log to stderr for immediate visibility in Cloud Run
+                print(f"\n{'='*80}\n{error_msg}\n{'='*80}\n", file=sys.stderr, flush=True)
+                
+                # Log using the logger at ERROR level with exc_info
+                _LOGGER.error(
+                    "Unhandled exception in ASGI application (5) - comprehensive logging",
+                    exc_info=(exc_type, exc_value, exc_traceback),
+                    extra={
+                        'exception_type': exc_type.__name__,
+                        'exception_module': exc_type.__module__,
+                        'exception_message': str(exc_value),
+                        'exception_args': getattr(exc_value, 'args', None),
+                        'full_traceback': full_traceback
+                    }
+                )
+                
                 raise
 
         await orig_run_asgi(self, wrapped_app)
