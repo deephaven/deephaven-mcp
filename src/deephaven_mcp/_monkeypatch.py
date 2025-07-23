@@ -80,7 +80,7 @@ def _setup_json_logging() -> logging.Logger:
     Returns:
         logging.Logger: Configured logger with StreamHandler(sys.stderr) attached,
             using JsonFormatter with ISO 8601 timestamps, set to ERROR level
-            with propagation enabled.
+            with propagation disabled to prevent duplicate log entries.
 
     Note:
         Uses ISO 8601 timestamp format (%Y-%m-%dT%H:%M:%S.%fZ) with microsecond
