@@ -194,7 +194,7 @@ def monkeypatch_uvicorn_exception_handling() -> None:
                     # Return gracefully without re-raising - let connection close naturally
                     return
 
-                # Strategy #3: Google Cloud Logging for native GCP integration
+                # Google Cloud Logging: The primary logging strategy for native GCP integration
                 # Provides structured metadata and automatic log aggregation
                 # (This is the best log message)
                 try:
