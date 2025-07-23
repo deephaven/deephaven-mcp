@@ -193,14 +193,12 @@ def monkeypatch_uvicorn_exception_handling() -> None:
 
                 timestamp = datetime.now(timezone.utc).isoformat() + "Z"
 
-                """
-                Logging is performed multiple times because these errors are rare, 
-                and different logging strategies have been more or less reliable in 
-                recording important details. The following strategies are used:
-                1. Direct stderr JSON logging for maximum reliability.
-                2. Google Cloud Logging for native GCP integration.
-                3. Python JSON Logger for standardized JSON formatting.
-                """
+                # Logging is performed multiple times because these errors are rare,
+                # and different logging strategies have been more or less reliable in
+                # recording important details. The following strategies are used:
+                # 1. Direct stderr JSON logging for maximum reliability.
+                # 2. Google Cloud Logging for native GCP integration.
+                # 3. Python JSON Logger for standardized JSON formatting.
 
                 # Strategy #1: Direct stderr JSON logging for maximum reliability
                 # Bypasses Python logging infrastructure to ensure log delivery
