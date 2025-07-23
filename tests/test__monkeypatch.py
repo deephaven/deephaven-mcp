@@ -63,7 +63,7 @@ def test_monkeypatch_gcp_logging_exception_handling(caplog, capsys):
     """Test that GCP Logging failures are handled gracefully."""
     with (
         patch("deephaven_mcp._monkeypatch.RequestResponseCycle") as MockCycle,
-        patch("deephaven_mcp._monkeypatch.gcp_logging.Client") as MockGCPClient,
+        patch("deephaven_mcp._monkeypatch._get_gcp_logger") as MockGetGCPLogger,
     ):
         import deephaven_mcp._monkeypatch as monkeypatch_mod
 
@@ -73,8 +73,10 @@ def test_monkeypatch_gcp_logging_exception_handling(caplog, capsys):
 
         MockCycle.run_asgi = dummy_orig_run_asgi
 
-        # Make GCP Client creation fail
-        MockGCPClient.side_effect = Exception("GCP auth failed")
+        # Make GCP logger fail when error() is called
+        mock_gcp_logger = MagicMock()
+        mock_gcp_logger.error.side_effect = Exception("GCP auth failed")
+        MockGetGCPLogger.return_value = mock_gcp_logger
 
         monkeypatch_mod.monkeypatch_uvicorn_exception_handling()
         run_asgi = MockCycle.run_asgi
@@ -97,9 +99,7 @@ def test_monkeypatch_gcp_logging_successful_setup(caplog, capsys):
     """Test that GCP Logging setup code is executed when client creation succeeds."""
     with (
         patch("deephaven_mcp._monkeypatch.RequestResponseCycle") as MockCycle,
-        patch("deephaven_mcp._monkeypatch.gcp_logging.Client") as MockGCPClient,
-        patch("deephaven_mcp._monkeypatch.CloudLoggingHandler") as MockHandler,
-        patch("deephaven_mcp._monkeypatch.logging.getLogger") as MockGetLogger,
+        patch("deephaven_mcp._monkeypatch._get_gcp_logger") as MockGetGCPLogger,
     ):
         import deephaven_mcp._monkeypatch as monkeypatch_mod
 
@@ -109,25 +109,9 @@ def test_monkeypatch_gcp_logging_successful_setup(caplog, capsys):
 
         MockCycle.run_asgi = dummy_orig_run_asgi
 
-        # Make GCP Client creation succeed
-        mock_client = MagicMock()
-        MockGCPClient.return_value = mock_client
-
-        # Mock the handler
-        mock_handler = MagicMock()
-        MockHandler.return_value = mock_handler
-
-        # Create a mock logger that has no handlers initially
+        # Create a mock GCP logger that works normally
         mock_gcp_logger = MagicMock()
-        mock_gcp_logger.handlers = []  # No handlers initially
-
-        # Make getLogger return our mock logger only for "gcp_asgi_errors"
-        def mock_get_logger(name):
-            if name == "gcp_asgi_errors":
-                return mock_gcp_logger
-            return MagicMock()  # Return normal mock for other loggers
-
-        MockGetLogger.side_effect = mock_get_logger
+        MockGetGCPLogger.return_value = mock_gcp_logger
 
         monkeypatch_mod.monkeypatch_uvicorn_exception_handling()
         run_asgi = MockCycle.run_asgi
@@ -141,11 +125,8 @@ def test_monkeypatch_gcp_logging_successful_setup(caplog, capsys):
 
             asyncio.run(run_asgi(dummy_self, bad_app))
 
-        # Verify that GCP logging setup was executed
-        MockGCPClient.assert_called_once()
-        MockHandler.assert_called_once_with(mock_client)
-        mock_gcp_logger.addHandler.assert_called_once_with(mock_handler)
-        mock_gcp_logger.setLevel.assert_called_once_with(logging.ERROR)
+        # Verify that GCP logger was called (setup happened lazily)
+        MockGetGCPLogger.assert_called_once()
         mock_gcp_logger.error.assert_called_once()
 
 
@@ -153,7 +134,7 @@ def test_monkeypatch_json_logger_exception_handling(caplog, capsys):
     """Test that Python JSON Logger failures are handled gracefully."""
     with (
         patch("deephaven_mcp._monkeypatch.RequestResponseCycle") as MockCycle,
-        patch("deephaven_mcp._monkeypatch.logging.getLogger") as MockGetLogger,
+        patch("deephaven_mcp._monkeypatch._get_json_logger") as MockGetJSONLogger,
     ):
         import deephaven_mcp._monkeypatch as monkeypatch_mod
 
@@ -165,16 +146,8 @@ def test_monkeypatch_json_logger_exception_handling(caplog, capsys):
 
         # Create a mock logger that fails when error() is called
         mock_json_logger = MagicMock()
-        mock_json_logger.handlers = []  # Ensure handler setup runs
         mock_json_logger.error.side_effect = Exception("JSON formatter failed")
-
-        # Make getLogger return our failing logger only for "json_asgi_errors"
-        def mock_get_logger(name):
-            if name == "json_asgi_errors":
-                return mock_json_logger
-            return MagicMock()  # Return normal mock for other loggers
-
-        MockGetLogger.side_effect = mock_get_logger
+        MockGetJSONLogger.return_value = mock_json_logger
 
         monkeypatch_mod.monkeypatch_uvicorn_exception_handling()
         run_asgi = MockCycle.run_asgi
