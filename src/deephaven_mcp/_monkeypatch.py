@@ -215,24 +215,7 @@ def monkeypatch_uvicorn_exception_handling() -> None:
                 }
                 print(json.dumps(stderr_log), file=sys.stderr, flush=True)
 
-                # Strategy #2: Google Cloud Logging for native GCP integration
-                # Provides structured metadata and automatic log aggregation
-                try:
-                    _get_gcp_logger().error(
-                        f"Unhandled exception in ASGI application (GCP Cloud Logging): {exc_type.__name__}: {str(exc_value)}",
-                        extra={
-                            "exception_type": exc_type.__name__,
-                            "exception_module": exc_type.__module__,
-                            "exception_message": str(exc_value),
-                            "stack_trace": full_traceback,
-                        },
-                        exc_info=(exc_type, exc_value, exc_traceback),
-                    )
-                except Exception as gcp_err:
-                    # Defensive handling: Log GCP logging failures to stderr
-                    print(f"GCP Logging failed: {gcp_err}", file=sys.stderr)
-
-                # Strategy #3: Python JSON Logger for standardized JSON formatting
+                # Strategy #2: Python JSON Logger for standardized JSON formatting
                 # Provides consistent JSON structure with GCP-compatible fields
                 try:
                     # Log with human-readable message and structured metadata
@@ -251,6 +234,24 @@ def monkeypatch_uvicorn_exception_handling() -> None:
                 except Exception as json_err:
                     # Defensive handling: Log JSON logging failures to stderr
                     print(f"Python JSON Logger failed: {json_err}", file=sys.stderr)
+
+                # Strategy #3: Google Cloud Logging for native GCP integration
+                # Provides structured metadata and automatic log aggregation
+                # (This is the best log message)
+                try:
+                    _get_gcp_logger().error(
+                        f"Unhandled exception in ASGI application (GCP Cloud Logging): {exc_type.__name__}: {str(exc_value)}",
+                        extra={
+                            "exception_type": exc_type.__name__,
+                            "exception_module": exc_type.__module__,
+                            "exception_message": str(exc_value),
+                            "stack_trace": full_traceback,
+                        },
+                        exc_info=(exc_type, exc_value, exc_traceback),
+                    )
+                except Exception as gcp_err:
+                    # Defensive handling: Log GCP logging failures to stderr
+                    print(f"GCP Logging failed: {gcp_err}", file=sys.stderr)
 
                 # Re-raise the original exception to maintain normal ASGI error flow
                 raise
