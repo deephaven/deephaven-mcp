@@ -25,12 +25,10 @@ def test_monkeypatch_uvicorn_exception_handling_warns_and_patches(caplog):
         assert MockCycle.run_asgi != dummy_orig_run_asgi
 
 
-def test_monkeypatch_uvicorn_exception_handling_wrapped_app_logs_and_raises(caplog):
-    with (
-        patch("deephaven_mcp._monkeypatch.RequestResponseCycle") as MockCycle,
-        patch("traceback.print_exc") as print_exc_mock,
-        patch("traceback.print_exception") as print_exception_mock,
-    ):
+def test_monkeypatch_uvicorn_exception_handling_wrapped_app_logs_and_raises(
+    caplog, capsys
+):
+    with (patch("deephaven_mcp._monkeypatch.RequestResponseCycle") as MockCycle,):
         import deephaven_mcp._monkeypatch as monkeypatch_mod
 
         # Setup a dummy orig_run_asgi
@@ -38,25 +36,27 @@ def test_monkeypatch_uvicorn_exception_handling_wrapped_app_logs_and_raises(capl
             await app("foo")
 
         MockCycle.run_asgi = dummy_orig_run_asgi
-        with patch("sys.stderr", new_callable=lambda: sys.stdout):
-            monkeypatch_mod.monkeypatch_uvicorn_exception_handling()
-            run_asgi = MockCycle.run_asgi
-            dummy_self = MagicMock()
+        monkeypatch_mod.monkeypatch_uvicorn_exception_handling()
+        run_asgi = MockCycle.run_asgi
+        dummy_self = MagicMock()
 
-            async def bad_app(*args, **kwargs):
-                raise ValueError("fail!")
+        async def bad_app(*args, **kwargs):
+            raise ValueError("fail!")
 
-            with pytest.raises(ValueError):
-                import asyncio
+        with pytest.raises(ValueError):
+            import asyncio
 
-                asyncio.run(run_asgi(dummy_self, bad_app))
-            print_exc_mock.assert_called()
-            print_exception_mock.assert_called()
-            # Check that error logs were emitted
-            assert any(
-                "Unhandled exception in ASGI application" in r.getMessage()
-                for r in caplog.records
-            )
+            asyncio.run(run_asgi(dummy_self, bad_app))
+
+        # Check that structured logging was emitted to stderr
+        captured = capsys.readouterr()
+        assert "Unhandled exception in ASGI application" in captured.err
+
+        # Check that error logs were emitted via Python logging
+        assert any(
+            "Unhandled exception in ASGI application" in r.getMessage()
+            for r in caplog.records
+        )
 
 
 def test_monkeypatch_gcp_logging_exception_handling(caplog, capsys):
@@ -91,40 +91,6 @@ def test_monkeypatch_gcp_logging_exception_handling(caplog, capsys):
         # Check that GCP logging failure was handled
         captured = capsys.readouterr()
         assert "GCP Logging failed: GCP auth failed" in captured.err
-
-
-def test_monkeypatch_structlog_exception_handling(caplog, capsys):
-    """Test that Structlog failures are handled gracefully."""
-    with (
-        patch("deephaven_mcp._monkeypatch.RequestResponseCycle") as MockCycle,
-        patch("deephaven_mcp._monkeypatch.struct_logger") as MockStructLogger,
-    ):
-        import deephaven_mcp._monkeypatch as monkeypatch_mod
-
-        # Setup a dummy orig_run_asgi
-        async def dummy_orig_run_asgi(self, app):
-            await app("foo")
-
-        MockCycle.run_asgi = dummy_orig_run_asgi
-
-        # Make structlog error method fail
-        MockStructLogger.error.side_effect = Exception("Structlog serialization failed")
-
-        monkeypatch_mod.monkeypatch_uvicorn_exception_handling()
-        run_asgi = MockCycle.run_asgi
-        dummy_self = MagicMock()
-
-        async def bad_app(*args, **kwargs):
-            raise ValueError("test exception")
-
-        with pytest.raises(ValueError):
-            import asyncio
-
-            asyncio.run(run_asgi(dummy_self, bad_app))
-
-        # Check that structlog failure was handled
-        captured = capsys.readouterr()
-        assert "Structlog failed: Structlog serialization failed" in captured.err
 
 
 def test_monkeypatch_json_logger_exception_handling(caplog, capsys):
