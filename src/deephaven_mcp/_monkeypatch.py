@@ -34,8 +34,6 @@ from google.cloud.logging_v2.handlers import CloudLoggingHandler
 from pythonjsonlogger import json as jsonlogger
 from uvicorn.protocols.http.httptools_impl import RequestResponseCycle
 
-_LOGGER = logging.getLogger(__name__)
-
 
 def _setup_gcp_logging() -> logging.Logger:
     """
@@ -172,7 +170,7 @@ def monkeypatch_uvicorn_exception_handling() -> None:
         This function should be called exactly once at process startup to ensure
         the patch is applied globally without interference.
     """
-    _LOGGER.warning(
+    logging.getLogger(__name__).warning(
         "Monkey-patching Uvicorn's RequestResponseCycle to log unhandled ASGI exceptions."
     )
     orig_run_asgi = RequestResponseCycle.run_asgi
