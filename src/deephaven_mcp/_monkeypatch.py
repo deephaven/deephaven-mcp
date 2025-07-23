@@ -191,6 +191,8 @@ def monkeypatch_uvicorn_exception_handling() -> None:
                     traceback.format_exception(exc_type, exc_value, exc_traceback)
                 )
 
+                timestamp = datetime.now(timezone.utc).isoformat() + "Z"
+
                 """
                 Logging is performed multiple times because these errors are rare, 
                 and different logging strategies have been more or less reliable in 
@@ -203,7 +205,7 @@ def monkeypatch_uvicorn_exception_handling() -> None:
                 # Strategy #1: Direct stderr JSON logging for maximum reliability
                 # Bypasses Python logging infrastructure to ensure log delivery
                 stderr_log = {
-                    "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
+                    "timestamp": timestamp,
                     "severity": "ERROR",
                     "message": f"Unhandled exception in ASGI application (Direct stderr JSON): {exc_type.__name__}: {str(exc_value)}",
                     "exception": {
@@ -245,8 +247,7 @@ def monkeypatch_uvicorn_exception_handling() -> None:
                             "exception_message": str(exc_value),
                             "exception_args": getattr(exc_value, "args", None),
                             "stack_trace": full_traceback,
-                            "gcp_timestamp": datetime.now(timezone.utc).isoformat()
-                            + "Z",
+                            "gcp_timestamp": timestamp,
                         },
                         exc_info=(exc_type, exc_value, exc_traceback),
                     )
