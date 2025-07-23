@@ -245,7 +245,7 @@ def monkeypatch_uvicorn_exception_handling() -> None:
                             "exception_type": exc_type.__name__,
                             "exception_module": exc_type.__module__,
                             "exception_message": str(exc_value),
-                            "exception_args": getattr(exc_value, "args", None),
+                            "exception_args": str(getattr(exc_value, "args", None)),
                             "stack_trace": full_traceback,
                         },
                         exc_info=(exc_type, exc_value, exc_traceback),
