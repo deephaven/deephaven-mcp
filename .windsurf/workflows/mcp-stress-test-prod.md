@@ -51,5 +51,5 @@ This workflow performs a stress test on the **deephaven-docs-prod-remote** MCP s
 - Rate limiting may cause failures - wait and retry if needed
 - Connection timeouts indicate server overload or network issues
 - If the docs_chat tool from deephaven-docs-prod-remote is not found, verify the server is properly connected
-- Do NOT fall back to the docs_chat tool from deephaven-docs-dev-remote - this test is specifically for the dev server
+- Do NOT fall back to the docs_chat tool from deephaven-docs-dev-remote - this test is specifically for the production server
 - Check available MCP servers and their tools if there's confusion about which tool to use
