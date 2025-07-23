@@ -108,27 +108,27 @@ def test_monkeypatch_gcp_logging_successful_setup(caplog, capsys):
             await app("foo")
 
         MockCycle.run_asgi = dummy_orig_run_asgi
-        
+
         # Make GCP Client creation succeed
         mock_client = MagicMock()
         MockGCPClient.return_value = mock_client
-        
+
         # Mock the handler
         mock_handler = MagicMock()
         MockHandler.return_value = mock_handler
-        
+
         # Create a mock logger that has no handlers initially
         mock_gcp_logger = MagicMock()
         mock_gcp_logger.handlers = []  # No handlers initially
-        
+
         # Make getLogger return our mock logger only for "gcp_asgi_errors"
         def mock_get_logger(name):
             if name == "gcp_asgi_errors":
                 return mock_gcp_logger
             return MagicMock()  # Return normal mock for other loggers
-        
+
         MockGetLogger.side_effect = mock_get_logger
-        
+
         monkeypatch_mod.monkeypatch_uvicorn_exception_handling()
         run_asgi = MockCycle.run_asgi
         dummy_self = MagicMock()
@@ -138,8 +138,9 @@ def test_monkeypatch_gcp_logging_successful_setup(caplog, capsys):
 
         with pytest.raises(ValueError):
             import asyncio
+
             asyncio.run(run_asgi(dummy_self, bad_app))
-        
+
         # Verify that GCP logging setup was executed
         MockGCPClient.assert_called_once()
         MockHandler.assert_called_once_with(mock_client)
