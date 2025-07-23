@@ -52,8 +52,9 @@ def test_monkeypatch_uvicorn_exception_handling_wrapped_app_logs_and_raises(
         captured = capsys.readouterr()
         assert "Unhandled exception in ASGI application" in captured.err
 
-        # Check that error logs were emitted via Python logging
-        assert any(
+        # Check that error logs were NOT propagated to root logger (propagate=False)
+        # This prevents duplicate log entries from parent loggers
+        assert not any(
             "Unhandled exception in ASGI application" in r.getMessage()
             for r in caplog.records
         )
@@ -198,7 +199,7 @@ def test_lazy_gcp_logger_initialization():
         MockGetLogger.assert_called_once_with("gcp_asgi_errors")
         mock_logger.addHandler.assert_called_once_with(mock_handler)
         mock_logger.setLevel.assert_called_once_with(logging.ERROR)
-        assert mock_logger.propagate is True
+        assert mock_logger.propagate is False
         assert result1 is mock_logger
 
         # Second call should return cached logger (covers line 128)
@@ -249,7 +250,7 @@ def test_lazy_json_logger_initialization():
         mock_handler.setFormatter.assert_called_once_with(mock_formatter)
         mock_logger.addHandler.assert_called_once_with(mock_handler)
         mock_logger.setLevel.assert_called_once_with(logging.ERROR)
-        assert mock_logger.propagate is True
+        assert mock_logger.propagate is False
         assert result1 is mock_logger
 
         # Second call should return cached logger

@@ -64,8 +64,8 @@ def _setup_gcp_logging() -> logging.Logger:
         gcp_logger.addHandler(handler)
         gcp_logger.setLevel(logging.ERROR)
 
-    # Enable propagation for compatibility with other logging handlers
-    gcp_logger.propagate = True
+    # Disable propagation to prevent duplicate log entries from parent loggers
+    gcp_logger.propagate = False
     return gcp_logger
 
 
@@ -102,8 +102,8 @@ def _setup_json_logging() -> logging.Logger:
         json_logger.addHandler(json_handler)
         json_logger.setLevel(logging.ERROR)
 
-        # Enable propagation for compatibility with other logging handlers
-        json_logger.propagate = True
+        # Disable propagation to prevent duplicate log entries from parent loggers
+        json_logger.propagate = False
     return json_logger
 
 
