@@ -191,7 +191,9 @@ def monkeypatch_uvicorn_exception_handling() -> None:
                     traceback.format_exception(exc_type, exc_value, exc_traceback)
                 )
 
-                timestamp = datetime.now(timezone.utc).isoformat() + "Z"
+                timestamp = (
+                    datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+                )
 
                 """
                 Logging is performed multiple times because these errors are rare, 
