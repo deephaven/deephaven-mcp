@@ -202,7 +202,7 @@ def test_lazy_gcp_logger_initialization():
         assert mock_logger.propagate is False
         assert result1 is mock_logger
 
-        # Second call should return cached logger (covers line 128)
+        # Second call should return the previously cached logger instance
         result2 = monkeypatch_mod._get_gcp_logger()
 
         # Verify no additional setup calls were made
