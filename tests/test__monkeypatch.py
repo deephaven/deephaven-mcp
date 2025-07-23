@@ -199,7 +199,6 @@ def test_lazy_gcp_logger_initialization():
         MockHandler.assert_called_once_with(mock_client)
         MockGetLogger.assert_called_once_with("gcp_asgi_errors")
         mock_logger.addHandler.assert_called_once_with(mock_handler)
-        mock_logger.setLevel.assert_called_once_with(logging.ERROR)
         assert mock_logger.propagate is False
         assert result1 is mock_logger
 
@@ -253,7 +252,6 @@ def test_lazy_json_logger_initialization():
         )
         mock_handler.setFormatter.assert_called_once_with(mock_formatter)
         mock_logger.addHandler.assert_called_once_with(mock_handler)
-        mock_logger.setLevel.assert_called_once_with(logging.ERROR)
         assert mock_logger.propagate is False
         assert result1 is mock_logger
 

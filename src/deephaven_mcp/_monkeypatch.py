@@ -48,10 +48,10 @@ def _setup_gcp_logging() -> logging.Logger:
 
     Returns:
         logging.Logger: Configured logger with CloudLoggingHandler attached,
-            set to ERROR level with propagation disabled.
+            with propagation disabled.
 
     Note:
-        The type ignore comment is required due to missing type stubs in the
+        The type ignore comment is required due to untyped call in the
         Google Cloud Logging library. Only adds handler if none exists to
         prevent duplicate log entries.
     """
@@ -62,7 +62,6 @@ def _setup_gcp_logging() -> logging.Logger:
     # Only add handler if none exists to prevent duplicate log entries
     if not gcp_logger.handlers:
         gcp_logger.addHandler(handler)
-        gcp_logger.setLevel(logging.ERROR)
 
     # Disable propagation to prevent duplicate log entries from parent loggers
     gcp_logger.propagate = False
@@ -79,8 +78,8 @@ def _setup_json_logging() -> logging.Logger:
 
     Returns:
         logging.Logger: Configured logger with StreamHandler(sys.stderr) attached,
-            using JsonFormatter with ISO 8601 timestamps, set to ERROR level
-            with propagation disabled to prevent duplicate log entries.
+            using JsonFormatter with ISO 8601 timestamps, with propagation
+            disabled to prevent duplicate log entries.
 
     Note:
         Uses ISO 8601 timestamp format (%Y-%m-%dT%H:%M:%S.%fZ) with microsecond
@@ -100,7 +99,6 @@ def _setup_json_logging() -> logging.Logger:
         )
         json_handler.setFormatter(json_formatter)
         json_logger.addHandler(json_handler)
-        json_logger.setLevel(logging.ERROR)
 
         # Disable propagation to prevent duplicate log entries from parent loggers
         json_logger.propagate = False
