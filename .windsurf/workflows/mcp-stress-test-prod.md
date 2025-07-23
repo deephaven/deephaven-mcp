@@ -42,7 +42,7 @@ This workflow performs a stress test on the **deephaven-docs-prod-remote** MCP s
 
 - **Target Server**: deephaven-docs-prod-remote (production environment)
 - **Alternative Server**: deephaven-docs-dev-remote (development/testing environment) - DO NOT USE for this test
-- Both servers have a `docs_chat` tool, but this test specifically targets the dev server
+- Both servers have a `docs_chat` tool, but this test specifically targets the prod server
 - The actual tool names may vary (e.g., mcp0_docs_chat, mcp1_docs_chat) but the server names are stable
 
 ## Troubleshooting
@@ -51,5 +51,5 @@ This workflow performs a stress test on the **deephaven-docs-prod-remote** MCP s
 - Rate limiting may cause failures - wait and retry if needed
 - Connection timeouts indicate server overload or network issues
 - If the docs_chat tool from deephaven-docs-prod-remote is not found, verify the server is properly connected
-- Do NOT fall back to the docs_chat tool from deephaven-docs-dev-remote - this test is specifically for the dev server
+- Do NOT fall back to the docs_chat tool from deephaven-docs-dev-remote - this test is specifically for the production server
 - Check available MCP servers and their tools if there's confusion about which tool to use
