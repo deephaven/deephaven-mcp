@@ -209,17 +209,17 @@ def test_is_client_disconnect_error():
     value_error = ValueError("test")
     assert monkeypatch_mod._is_client_disconnect_error(value_error) is False
 
-    # Test ExceptionGroup containing ClosedResourceError
-    # Create a mock exception with 'exceptions' attribute to test the recursive call
+    # Test exception group containing ClosedResourceError
+    # Create a mock exception with 'exceptions' attribute for Python 3.9+ compatibility
     class MockExceptionGroup(Exception):
         def __init__(self, exceptions):
             self.exceptions = exceptions
 
-    # Test ExceptionGroup with ClosedResourceError (covers lines 94-96)
+    # Test exception group with ClosedResourceError
     mock_group = MockExceptionGroup([closed_error, value_error])
     assert monkeypatch_mod._is_client_disconnect_error(mock_group) is True
 
-    # Test ExceptionGroup without ClosedResourceError
+    # Test exception group without ClosedResourceError
     mock_group_no_closed = MockExceptionGroup([value_error, RuntimeError("test")])
     assert monkeypatch_mod._is_client_disconnect_error(mock_group_no_closed) is False
 

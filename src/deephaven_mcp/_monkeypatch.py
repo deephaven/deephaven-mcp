@@ -104,8 +104,9 @@ def _is_client_disconnect_error(exc: BaseException) -> bool:
     if isinstance(exc, anyio.ClosedResourceError):
         return True
 
-    # ExceptionGroup containing ClosedResourceError
-    if hasattr(exc, "exceptions"):  # ExceptionGroup
+    # ExceptionGroup containing ClosedResourceError (compatible with Python 3.9+)
+    # Use hasattr to detect exception groups for broader Python version compatibility
+    if hasattr(exc, "exceptions"):
         for sub_exc in exc.exceptions:
             if _is_client_disconnect_error(sub_exc):
                 return True
