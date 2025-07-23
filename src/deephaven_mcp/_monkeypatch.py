@@ -10,7 +10,7 @@ import json
 import logging
 import sys
 import traceback
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from uvicorn.protocols.http.httptools_impl import RequestResponseCycle
@@ -102,7 +102,7 @@ def monkeypatch_uvicorn_exception_handling() -> None:
                 log_data = {
                     "severity": "ERROR",
                     "message": "Unhandled exception in ASGI application (6) - JSON structured",
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                     "exception": {
                         "type": exc_type.__name__,
                         "module": exc_type.__module__,
@@ -123,7 +123,7 @@ def monkeypatch_uvicorn_exception_handling() -> None:
                         "exception_message": str(exc_value),
                         "exception_args": getattr(exc_value, "args", None),
                         "stack_trace": full_traceback,
-                        "timestamp": datetime.utcnow().isoformat(),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
                     },
                 )
 
