@@ -271,7 +271,7 @@ def test_monkeypatch_client_disconnect_handling(caplog, capsys):
         # Verify DEBUG logging was called for client disconnect
         mock_gcp_logger.debug.assert_called_once()
         debug_call = mock_gcp_logger.debug.call_args
-        assert "Client disconnect detected" in debug_call[0][0]
+        assert "Unhandled client disconnect detected" in debug_call[0][0]
         assert debug_call[1]["extra"]["event_type"] == "client_disconnect"
 
         # Verify ERROR logging was NOT called (no server error)

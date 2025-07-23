@@ -176,7 +176,7 @@ def monkeypatch_uvicorn_exception_handling() -> None:
                     # Log client disconnect at DEBUG level with full details for debugging
                     try:
                         _get_gcp_logger().debug(
-                            f"Client disconnect detected in ASGI application: {exc_type.__name__}: {str(exc_value)}",
+                            f"Unhandled client disconnect detected in ASGI application: {exc_type.__name__}: {str(exc_value)}",
                             extra={
                                 "event_type": "client_disconnect",
                                 "exception_type": exc_type.__name__,
