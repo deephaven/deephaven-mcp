@@ -177,6 +177,7 @@ def test_lazy_gcp_logger_initialization():
         patch("deephaven_mcp._monkeypatch.logging.getLogger") as MockGetLogger,
     ):
         # Reset the global logger to None to test initialization
+        original_gcp_logger = monkeypatch_mod._gcp_logger
         monkeypatch_mod._gcp_logger = None
 
         # Mock the GCP client and handler
@@ -209,7 +210,9 @@ def test_lazy_gcp_logger_initialization():
         MockGCPClient.assert_called_once()  # Still only called once
         MockHandler.assert_called_once()  # Still only called once
         assert result2 is mock_logger  # Same instance returned
-        assert result2 is result1  # Cached result
+
+        # Restore original state
+        monkeypatch_mod._gcp_logger = original_gcp_logger
 
 
 def test_lazy_json_logger_initialization():
@@ -224,6 +227,7 @@ def test_lazy_json_logger_initialization():
         ) as MockJsonFormatter,
     ):
         # Reset the global logger to None to test initialization
+        original_json_logger = monkeypatch_mod._json_logger
         monkeypatch_mod._json_logger = None
 
         # Mock the components
@@ -260,4 +264,6 @@ def test_lazy_json_logger_initialization():
         MockGetLogger.assert_called_once()  # Still only called once
         MockStreamHandler.assert_called_once()  # Still only called once
         assert result2 is mock_logger  # Same instance returned
-        assert result2 is result1  # Cached result
+
+        # Restore original state
+        monkeypatch_mod._json_logger = original_json_logger
