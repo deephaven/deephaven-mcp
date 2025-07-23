@@ -43,7 +43,11 @@ dependencies = [
     # Rate limiting and advanced agent tools
     "aiolimiter>=1.1.0",        # Global async rate limiting
     "autogen-core",             # Test client CancellationToken, etc.
-    "autogen-ext"               # Test client SseServerParams, etc.
+    "autogen-ext",              # Test client SseServerParams, etc.
+    # Structured logging for GCP Cloud Run
+    "google-cloud-logging>=3.8.0",  # Google Cloud Logging
+    "structlog>=23.1.0",        # Structured logging
+    "python-json-logger>=2.0.7", # JSON formatter for Python logging
 ]
 
 [project.optional-dependencies]

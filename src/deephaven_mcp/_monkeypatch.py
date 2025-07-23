@@ -13,9 +13,32 @@ import traceback
 from datetime import datetime, timezone
 from typing import Any
 
+import structlog
+from google.cloud import logging as gcp_logging
+from google.cloud.logging_v2.handlers import CloudLoggingHandler
+from pythonjsonlogger import json as jsonlogger
 from uvicorn.protocols.http.httptools_impl import RequestResponseCycle
 
 _LOGGER = logging.getLogger(__name__)
+
+# Configure structlog for JSON output at module level
+structlog.configure(
+    processors=[
+        structlog.stdlib.filter_by_level,
+        structlog.stdlib.add_logger_name,
+        structlog.stdlib.add_log_level,
+        structlog.stdlib.PositionalArgumentsFormatter(),
+        structlog.processors.TimeStamper(fmt="iso"),
+        structlog.processors.StackInfoRenderer(),
+        structlog.processors.format_exc_info,
+        structlog.processors.JSONRenderer(),
+    ],
+    wrapper_class=structlog.stdlib.BoundLogger,
+    logger_factory=structlog.stdlib.LoggerFactory(),
+    cache_logger_on_first_use=True,
+)
+
+struct_logger = structlog.get_logger()
 
 
 def monkeypatch_uvicorn_exception_handling() -> None:
@@ -126,6 +149,93 @@ def monkeypatch_uvicorn_exception_handling() -> None:
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                     },
                 )
+
+                # Option 3: GCP-specific structured logging format (8)
+                gcp_log_entry = {
+                    "severity": "ERROR",
+                    "message": f"Unhandled exception in ASGI application (8) - GCP format: {exc_type.__name__}: {str(exc_value)}",
+                    "labels": {
+                        "exception_type": exc_type.__name__,
+                        "exception_module": exc_type.__module__,
+                    },
+                    "jsonPayload": {
+                        "exception_args": getattr(exc_value, "args", None),
+                        "stack_trace": full_traceback,
+                    },
+                    "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
+                }
+                _LOGGER.error(json.dumps(gcp_log_entry))
+
+                # Option 6: Direct stderr with GCP JSON format (9)
+                stderr_log = {
+                    "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
+                    "severity": "ERROR",
+                    "message": f"Unhandled exception in ASGI application (9) - stderr GCP: {exc_type.__name__}: {str(exc_value)}",
+                    "exception": {
+                        "type": exc_type.__name__,
+                        "module": exc_type.__module__,
+                        "args": str(getattr(exc_value, "args", None)),
+                        "traceback": full_traceback.replace("\n", "\\n"),
+                    },
+                }
+                print(json.dumps(stderr_log), file=sys.stderr, flush=True)
+
+                # Option 7: Google Cloud Logging (10)
+                try:
+                    client = gcp_logging.Client()  # type: ignore[no-untyped-call]
+                    handler = CloudLoggingHandler(client)
+                    gcp_logger = logging.getLogger("gcp_asgi_errors")
+                    if not gcp_logger.handlers:
+                        gcp_logger.addHandler(handler)
+                        gcp_logger.setLevel(logging.ERROR)
+                    gcp_logger.error(
+                        f"Unhandled exception in ASGI application (10) - GCP Cloud Logging: {exc_type.__name__}: {str(exc_value)}",
+                        extra={
+                            "exception_type": exc_type.__name__,
+                            "exception_module": exc_type.__module__,
+                            "exception_message": str(exc_value),
+                            "stack_trace": full_traceback,
+                        },
+                        exc_info=(exc_type, exc_value, exc_traceback),
+                    )
+                except Exception as gcp_err:
+                    print(f"GCP Logging failed: {gcp_err}", file=sys.stderr)
+
+                # Option 8: Structlog (11)
+                try:
+                    struct_logger.error(
+                        f"Unhandled exception in ASGI application (11) - Structlog: {exc_type.__name__}: {str(exc_value)}",
+                        exception_type=exc_type.__name__,
+                        exception_module=exc_type.__module__,
+                        exception_message=str(exc_value),
+                        exception_args=getattr(exc_value, "args", None),
+                        stack_trace=full_traceback,
+                    )
+                except Exception as struct_err:
+                    print(f"Structlog failed: {struct_err}", file=sys.stderr)
+
+                # Option 9: Python JSON Logger (12)
+                try:
+                    json_logger = logging.getLogger("json_asgi_errors")
+                    if not json_logger.handlers:
+                        json_handler = logging.StreamHandler(sys.stderr)
+                        json_formatter = jsonlogger.JsonFormatter()
+                        json_handler.setFormatter(json_formatter)
+                        json_logger.addHandler(json_handler)
+                        json_logger.setLevel(logging.ERROR)
+                    json_logger.error(
+                        f"Unhandled exception in ASGI application (12) - Python JSON Logger: {exc_type.__name__}: {str(exc_value)}",
+                        extra={
+                            "exception_type": exc_type.__name__,
+                            "exception_module": exc_type.__module__,
+                            "exception_message": str(exc_value),
+                            "exception_args": getattr(exc_value, "args", None),
+                            "stack_trace": full_traceback,
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        },
+                    )
+                except Exception as json_err:
+                    print(f"Python JSON Logger failed: {json_err}", file=sys.stderr)
 
                 raise
 
