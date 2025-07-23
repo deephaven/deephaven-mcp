@@ -164,3 +164,97 @@ def test_monkeypatch_json_logger_exception_handling(caplog, capsys):
         # Check that JSON logger failure was handled
         captured = capsys.readouterr()
         assert "Python JSON Logger failed: JSON formatter failed" in captured.err
+
+
+def test_lazy_gcp_logger_initialization():
+    """Test that _get_gcp_logger creates and caches the GCP logger properly."""
+    import deephaven_mcp._monkeypatch as monkeypatch_mod
+    
+    with (
+        patch("deephaven_mcp._monkeypatch.gcp_logging.Client") as MockGCPClient,
+        patch("deephaven_mcp._monkeypatch.CloudLoggingHandler") as MockHandler,
+        patch("deephaven_mcp._monkeypatch.logging.getLogger") as MockGetLogger,
+    ):
+        # Reset the global logger to None to test initialization
+        monkeypatch_mod._gcp_logger = None
+        
+        # Mock the GCP client and handler
+        mock_client = MagicMock()
+        MockGCPClient.return_value = mock_client
+        mock_handler = MagicMock()
+        MockHandler.return_value = mock_handler
+        
+        # Mock the logger
+        mock_logger = MagicMock()
+        mock_logger.handlers = []  # No existing handlers
+        MockGetLogger.return_value = mock_logger
+        
+        # First call should create the logger
+        result1 = monkeypatch_mod._get_gcp_logger()
+        
+        # Verify setup was called
+        MockGCPClient.assert_called_once()
+        MockHandler.assert_called_once_with(mock_client)
+        MockGetLogger.assert_called_once_with("gcp_asgi_errors")
+        mock_logger.addHandler.assert_called_once_with(mock_handler)
+        mock_logger.setLevel.assert_called_once_with(logging.ERROR)
+        assert mock_logger.propagate is True
+        assert result1 is mock_logger
+        
+        # Second call should return cached logger (covers line 128)
+        result2 = monkeypatch_mod._get_gcp_logger()
+        
+        # Verify no additional setup calls were made
+        MockGCPClient.assert_called_once()  # Still only called once
+        MockHandler.assert_called_once()  # Still only called once
+        assert result2 is mock_logger  # Same instance returned
+        assert result2 is result1  # Cached result
+
+
+def test_lazy_json_logger_initialization():
+    """Test that _get_json_logger creates and caches the JSON logger properly."""
+    import deephaven_mcp._monkeypatch as monkeypatch_mod
+    
+    with (
+        patch("deephaven_mcp._monkeypatch.logging.getLogger") as MockGetLogger,
+        patch("deephaven_mcp._monkeypatch.logging.StreamHandler") as MockStreamHandler,
+        patch("deephaven_mcp._monkeypatch.jsonlogger.JsonFormatter") as MockJsonFormatter,
+    ):
+        # Reset the global logger to None to test initialization
+        monkeypatch_mod._json_logger = None
+        
+        # Mock the components
+        mock_logger = MagicMock()
+        mock_logger.handlers = []  # No existing handlers
+        MockGetLogger.return_value = mock_logger
+        
+        mock_handler = MagicMock()
+        MockStreamHandler.return_value = mock_handler
+        
+        mock_formatter = MagicMock()
+        MockJsonFormatter.return_value = mock_formatter
+        
+        # First call should create the logger
+        result1 = monkeypatch_mod._get_json_logger()
+        
+        # Verify setup was called
+        MockGetLogger.assert_called_once_with("json_asgi_errors")
+        MockStreamHandler.assert_called_once()
+        MockJsonFormatter.assert_called_once_with(
+            fmt="%(asctime)s %(name)s %(levelname)s %(message)s",
+            datefmt="%Y-%m-%dT%H:%M:%S.%fZ"
+        )
+        mock_handler.setFormatter.assert_called_once_with(mock_formatter)
+        mock_logger.addHandler.assert_called_once_with(mock_handler)
+        mock_logger.setLevel.assert_called_once_with(logging.ERROR)
+        assert mock_logger.propagate is True
+        assert result1 is mock_logger
+        
+        # Second call should return cached logger
+        result2 = monkeypatch_mod._get_json_logger()
+        
+        # Verify no additional setup calls were made
+        MockGetLogger.assert_called_once()  # Still only called once
+        MockStreamHandler.assert_called_once()  # Still only called once
+        assert result2 is mock_logger  # Same instance returned
+        assert result2 is result1  # Cached result
