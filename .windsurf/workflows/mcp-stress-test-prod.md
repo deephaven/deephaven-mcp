@@ -42,7 +42,7 @@ This workflow performs a stress test on the **deephaven-docs-prod-remote** MCP s
 
 - **Target Server**: deephaven-docs-prod-remote (production environment)
 - **Alternative Server**: deephaven-docs-dev-remote (development/testing environment) - DO NOT USE for this test
-- Both servers have a `docs_chat` tool, but this test specifically targets the dev server
+- Both servers have a `docs_chat` tool, but this test specifically targets the prod server
 - The actual tool names may vary (e.g., mcp0_docs_chat, mcp1_docs_chat) but the server names are stable
 
 ## Troubleshooting
