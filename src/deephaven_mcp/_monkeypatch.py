@@ -55,7 +55,7 @@ def _setup_gcp_logging() -> logging.Logger:
         Google Cloud Logging library. Only adds handler if none exists to
         prevent duplicate log entries.
     """
-    client = gcp_logging.Client()  # type: ignore[no-untyped-call]
+    client = gcp_logging.Client()  # type: ignore[no-untyped-call]  # Suppression required because google-cloud-logging Client lacks type hints
     handler = CloudLoggingHandler(client)
     gcp_logger = logging.getLogger("gcp_asgi_errors")
 
