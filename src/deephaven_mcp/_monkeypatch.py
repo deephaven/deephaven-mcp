@@ -48,7 +48,7 @@ def _setup_gcp_logging() -> logging.Logger:
 
     Returns:
         logging.Logger: Configured logger with CloudLoggingHandler attached,
-            set to ERROR level with propagation enabled.
+            set to ERROR level with propagation disabled.
 
     Note:
         The type ignore comment is required due to missing type stubs in the
