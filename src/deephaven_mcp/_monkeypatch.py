@@ -247,7 +247,6 @@ def monkeypatch_uvicorn_exception_handling() -> None:
                             "exception_message": str(exc_value),
                             "exception_args": getattr(exc_value, "args", None),
                             "stack_trace": full_traceback,
-                            "gcp_timestamp": timestamp,
                         },
                         exc_info=(exc_type, exc_value, exc_traceback),
                     )
