@@ -102,10 +102,15 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
 
     try:
         # Create the OpenAI client for Inkeep API communication
+        # Use extended timeouts to handle slow Inkeep API responses during stress testing
         inkeep_client = OpenAIClient(
             api_key=_INKEEP_API_KEY,
             base_url="https://api.inkeep.com/v1",
             model="inkeep-context-expert",
+            timeout=300.0,  # 5 minutes - handles slow Inkeep API responses
+            connect_timeout=30.0,  # 30 seconds to establish connection
+            write_timeout=30.0,  # 30 seconds to send request
+            max_retries=1,  # Reduce retries to fail faster on real errors
         )
         _LOGGER.info("[app_lifespan] Inkeep client initialized")
 
