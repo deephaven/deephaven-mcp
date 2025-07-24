@@ -9,6 +9,7 @@ import time
 from collections.abc import AsyncGenerator, Sequence
 from typing import Any
 
+import httpx
 import openai
 
 _LOGGER = logging.getLogger(__name__)
@@ -29,20 +30,32 @@ class OpenAIClient:
     Asynchronous client for OpenAI-compatible chat APIs, supporting chat completion and streaming.
 
     This class wraps the OpenAI Python SDK (or compatible APIs) and provides methods to send chat
-    completion requests with configurable parameters such as base URL, API key, and model. It supports dependency injection of the OpenAI async client for testability, and provides robust validation of chat message history.
+    completion requests with configurable parameters such as base URL, API key, and model. It supports
+    dependency injection of the OpenAI async client for testability, and provides robust validation
+    of chat message history.
+
+    The client includes advanced HTTP connection management to prevent "Truncated response body" errors
+    during high-volume usage by configuring connection pool limits, timeouts, and retry logic.
 
     Attributes:
         api_key (str): The API key for authentication.
         base_url (str): The base URL of the OpenAI-compatible API endpoint.
         model (str): The model name to use for chat completions.
-        client (openai.AsyncOpenAI): The underlying OpenAI async client instance. Can be injected for testing.
+        client (openai.AsyncOpenAI): The underlying OpenAI async client instance.
+
+    Private Attributes:
+        _client_owned (bool): Whether this instance owns the client and is responsible for cleanup.
 
     Example:
-        >>> import openai
-        >>> client = OpenAIClient(api_key="sk-...", base_url="https://api.openai.com/v1", model="gpt-3.5-turbo")
+        >>> client = OpenAIClient(
+        ...     api_key="sk-...",
+        ...     base_url="https://api.openai.com/v1",
+        ...     model="gpt-3.5-turbo"
+        ... )
         >>> response = await client.chat("Hello, who are you?", max_tokens=100, temperature=0.7)
         >>> print(response)
         I am an AI language model developed by OpenAI...
+        >>> await client.close()  # Clean up resources
     """
 
     def __init__(
@@ -51,15 +64,29 @@ class OpenAIClient:
         base_url: str,
         model: str,
         client: openai.AsyncOpenAI | None = None,
-    ):
+        timeout: float = 60.0,
+        max_retries: int = 2,
+        max_connections: int = 10,
+        max_keepalive_connections: int = 5,
+        connect_timeout: float = 10.0,
+        write_timeout: float = 10.0,
+        pool_timeout: float = 5.0,
+    ) -> None:
         """
         Initialize an OpenAIClient instance.
 
         Args:
-            api_key (str): API key for authentication with the OpenAI-compatible API.
-            base_url (str): Base URL for the OpenAI-compatible API endpoint.
-            model (str): Model name to use for chat completions (e.g., 'gpt-3.5-turbo').
-            client (openai.AsyncOpenAI | None, optional): Optionally inject a custom OpenAI async client (for testing or advanced usage).
+            api_key (str): The API key for authentication. Must be a non-empty string.
+            base_url (str): The base URL of the OpenAI-compatible API endpoint. Must be a non-empty string.
+            model (str): The model name to use for chat completions. Must be a non-empty string.
+            client (openai.AsyncOpenAI | None, optional): Optionally inject a custom OpenAI async client (for testing only).
+            timeout (float, optional): Request timeout in seconds. Defaults to 60.0.
+            max_retries (int, optional): Maximum number of retries for failed requests. Defaults to 2.
+            max_connections (int, optional): Maximum total HTTP connections in the pool. Defaults to 10.
+            max_keepalive_connections (int, optional): Maximum keep-alive connections. Defaults to 5.
+            connect_timeout (float, optional): Connection establishment timeout in seconds. Defaults to 10.0.
+            write_timeout (float, optional): Write operation timeout in seconds. Defaults to 10.0.
+            pool_timeout (float, optional): Connection pool timeout in seconds. Defaults to 5.0.
 
         Raises:
             OpenAIClientError: If any required parameter is missing or invalid.
@@ -76,9 +103,47 @@ class OpenAIClient:
         self.api_key: str = api_key
         self.base_url: str = base_url
         self.model: str = model
-        self.client: openai.AsyncOpenAI = client or openai.AsyncOpenAI(
-            api_key=api_key, base_url=base_url
-        )
+        # Client Creation Strategy:
+        # We create our own HTTP client configuration to prevent "Truncated response body" errors
+        # that occur during high-volume usage (e.g., stress testing with 100+ sequential requests).
+        # The default OpenAI client configuration can lead to connection pool exhaustion and timeouts.
+
+        if client is None:
+            # PRODUCTION PATH: Create a properly configured client with resource limits
+            # This prevents connection pool exhaustion that causes truncated responses
+
+            # Step 1: Configure the underlying HTTP client with connection pool limits
+            # This is the key to preventing resource exhaustion during stress testing
+            http_client: httpx.AsyncClient = httpx.AsyncClient(
+                # Connection Pool Limits (prevents resource exhaustion)
+                limits=httpx.Limits(
+                    max_connections=max_connections,  # Total connections across all hosts
+                    max_keepalive_connections=max_keepalive_connections,  # Reusable connections
+                ),
+                # Timeout Configuration (prevents hanging requests)
+                timeout=httpx.Timeout(
+                    connect=connect_timeout,  # Time to establish connection (handshake)
+                    read=timeout,  # Time to read response (main request timeout)
+                    write=write_timeout,  # Time to send request data
+                    pool=pool_timeout,  # Time to get connection from pool
+                ),
+            )
+
+            # Step 2: Create OpenAI client with our configured HTTP client
+            # This ensures all requests use our connection limits and timeout settings
+            self.client: openai.AsyncOpenAI = openai.AsyncOpenAI(
+                api_key=api_key,
+                base_url=base_url,
+                timeout=timeout,  # OpenAI-level timeout (should match read timeout)
+                max_retries=max_retries,  # Retry failed requests (handles transient errors)
+                http_client=http_client,  # Use our configured HTTP client
+            )
+            self._client_owned = True  # We created it, so we're responsible for cleanup
+        else:
+            # TESTING PATH: Use injected client (for unit tests)
+            # This allows tests to inject mock clients without our production configuration
+            self.client = client
+            self._client_owned = False  # We don't own it, so don't close it
 
     def _validate_history(self, history: Sequence[dict[str, str]] | None) -> None:
         """
@@ -253,7 +318,10 @@ class OpenAIClient:
     ) -> AsyncGenerator[str, None]:
         r"""Asynchronously send a streaming chat completion request to the OpenAI API, yielding tokens as they arrive.
 
-        This method validates the chat history, constructs the message list (including system prompt(s) and user prompt), and sends a streaming chat completion request using the injected or default OpenAI async client. It logs request and response details, and raises a custom error on failure. Each yielded string is a new token or chunk from the assistant's response.
+        This method validates the chat history, constructs the message list (including system prompt(s)
+        and user prompt), and sends a streaming chat completion request using the configured OpenAI
+        async client. It logs request and response details, and raises a custom error on failure.
+        Each yielded string is a new token or chunk from the assistant's response.
 
         Args:
             prompt (str): The user's question or message to send to the assistant.
@@ -319,3 +387,28 @@ class OpenAIClient:
                 f"[OpenAIClient.stream_chat] Unexpected error: {e}", exc_info=True
             )
             raise OpenAIClientError(f"Unexpected error: {e}") from e
+
+    async def close(self) -> None:
+        """
+        Close the underlying OpenAI client and release HTTP connection resources.
+
+        This method should be called when the OpenAIClient is no longer needed to prevent
+        resource leaks, especially during high-volume usage or stress testing. It closes
+        the internal HTTP connection pool used by the OpenAI client.
+
+        Note:
+            - Only closes the client if it was created by this instance (not injected)
+            - Safe to call multiple times (idempotent)
+            - After calling close(), this client should not be used for further requests
+
+        Example:
+            >>> client = OpenAIClient(api_key="sk-...", base_url="https://api.openai.com/v1", model="gpt-3.5-turbo")
+            >>> # ... use client for requests
+            >>> await client.close()  # Clean up resources
+        """
+        if self._client_owned:
+            try:
+                await self.client.close()
+                _LOGGER.debug("[OpenAIClient.close] HTTP client connections closed")
+            except Exception as e:
+                _LOGGER.warning(f"[OpenAIClient.close] Error closing HTTP client: {e}")

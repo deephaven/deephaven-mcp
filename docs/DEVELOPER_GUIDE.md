@@ -1430,6 +1430,7 @@ The project includes several utility scripts to help with development and testin
 | [`../scripts/run_deephaven_test_server.py`](../scripts/run_deephaven_test_server.py) | Starts a local Deephaven server for testing | `uv run scripts/run_deephaven_test_server.py --table-group simple` |
 | [`../scripts/mcp_community_test_client.py`](../scripts/mcp_community_test_client.py) | Tests the Systems Server tools | `uv run scripts/mcp_community_test_client.py --transport sse` |
 | [`../scripts/mcp_docs_test_client.py`](../scripts/mcp_docs_test_client.py) | Tests the Docs Server chat functionality | `uv run scripts/mcp_docs_test_client.py --prompt "What is Deephaven?"` |
+| [`../scripts/mcp_docs_stress_test.py`](../scripts/mcp_docs_stress_test.py) | Comprehensive stress test for docs server (validates timeout fixes) | `uv run scripts/mcp_docs_stress_test.py` |
 | [`../scripts/mcp_docs_stress_sse.py`](../scripts/mcp_docs_stress_sse.py) | Stress tests the SSE endpoint | `uv run scripts/mcp_docs_stress_sse.py --sse-url "http://localhost:8000/sse"` |
 | [`../scripts/mcp_docs_stress_sse_cancel_queries.py`](../scripts/mcp_docs_stress_sse_cancel_queries.py) | Stress tests SSE with query cancellation | `uv run scripts/mcp_docs_stress_sse_cancel_queries.py --url http://localhost:8000/sse --runs 10` |
 | [`../scripts/mcp_docs_stress_sse_user_queries.py`](../scripts/mcp_docs_stress_sse_user_queries.py) | Stress tests SSE with user-defined queries | `uv run scripts/mcp_docs_stress_sse_user_queries.py --url http://localhost:8000/sse` |
@@ -1467,7 +1468,44 @@ docker compose -f ops/docker/mcp-docs/docker-compose.yml down
 
 ### Performance Testing
 
-A script is provided for stress testing the SSE transport for production deployments. This is useful for validating the stability and performance of production or staging deployments under load. The script uses [aiohttp](https://docs.aiohttp.org/) for asynchronous HTTP requests and [aiolimiter](https://github.com/mjpieters/aiolimiter) for rate limiting.
+Multiple scripts are provided for comprehensive performance testing of the MCP servers under various conditions and transport methods.
+
+#### MCP Docs Server Stress Testing
+
+The [`../scripts/mcp_docs_stress_test.py`](../scripts/mcp_docs_stress_test.py) script provides comprehensive stress testing of the MCP docs server to validate performance, stability, and error handling under concurrent load. This script was specifically created to validate fixes for "Truncated response body" timeout errors that occurred during high-volume usage.
+
+**Key Features:**
+- Tests concurrent requests against the `docs_chat` tool
+- Validates timeout fixes and connection management
+- Measures response times, throughput, and success rates
+- Generates detailed performance metrics and error reports
+- Uses the same dependency injection pattern as production
+- Includes proper resource cleanup to prevent connection leaks
+
+**Usage:**
+```sh
+# Ensure INKEEP_API_KEY is set (via .env file or environment)
+echo "INKEEP_API_KEY=your-api-key-here" > .env
+
+# Run the stress test (100 concurrent requests by default)
+uv run scripts/mcp_docs_stress_test.py
+```
+
+**Expected Results:**
+- 100% success rate (no timeout errors)
+- Response times: 15-180 seconds per request
+- Throughput: 0.5-2.0 requests/second
+- Detailed JSON results saved to `stress_test_results.json`
+
+**Troubleshooting:**
+- Ensure `INKEEP_API_KEY` is properly set in your `.env` file
+- Run from the project root directory
+- Check network connectivity if requests fail
+- Review the JSON results file for detailed error analysis
+
+#### SSE Transport Stress Testing
+
+A script is also provided for stress testing the SSE transport for production deployments. This is useful for validating the stability and performance of production or staging deployments under load. The script uses [aiohttp](https://docs.aiohttp.org/) for asynchronous HTTP requests and [aiolimiter](https://github.com/mjpieters/aiolimiter) for rate limiting.
 
 #### Usage Example
 

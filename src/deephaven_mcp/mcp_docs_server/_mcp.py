@@ -1,7 +1,7 @@
 """
 Deephaven MCP Docs Tools Module.
 
-This module defines the MCP (Multi-Cluster Platform) server and tools for the Deephaven documentation assistant, powered by Inkeep LLM APIs. It exposes agentic, LLM-friendly tool endpoints for documentation Q&A and future extensibility.
+This module defines the MCP (Model Context Protocol) server and tools for the Deephaven documentation assistant, powered by Inkeep LLM APIs. It exposes agentic, LLM-friendly tool endpoints for documentation Q&A and future extensibility.
 
 Key Features:
     - Asynchronous, agentic tool interface for documentation chat.
@@ -22,17 +22,20 @@ Tools:
 Usage:
     Import this module and use the registered tools via MCP-compatible agent frameworks, or invoke directly for backend automation.
 
-Example (agentic usage):
-    >>> from deephaven_mcp.mcp_docs_server._mcp import mcp_server
-    >>> response = await mcp_server.tools['docs_chat'](prompt="How do I install Deephaven?")
+Example (direct tool usage):
+    >>> from deephaven_mcp.mcp_docs_server._mcp import docs_chat
+    >>> context = {"inkeep_client": client_instance}
+    >>> response = await docs_chat(context=context, prompt="How do I install Deephaven?")
     >>> print(response)
     To install Deephaven, ...
 """
 
 import logging
 import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
@@ -40,44 +43,90 @@ from ..openai import OpenAIClient, OpenAIClientError
 
 _LOGGER = logging.getLogger(__name__)
 
-#: The API key for authenticating with the Inkeep-powered LLM API. Must be set in the environment. Private to this module.
-_INKEEP_API_KEY = os.environ.get("INKEEP_API_KEY")
-"""str: The API key for authenticating with the Inkeep-powered LLM API. Must be set in the environment. Private to this module."""
-if not _INKEEP_API_KEY:
-    _LOGGER.error(
-        "INKEEP_API_KEY environment variable is not set. Please set it to use the Inkeep-powered documentation tools."
-    )
+# The API key for authenticating with the Inkeep-powered LLM API. Must be set in the environment.
+try:
+    _INKEEP_API_KEY: str = os.environ["INKEEP_API_KEY"]
+except KeyError:
     raise RuntimeError(
         "INKEEP_API_KEY environment variable must be set to use the Inkeep-powered documentation tools."
-    )
+    ) from None
 
-inkeep_client = OpenAIClient(
-    api_key=_INKEEP_API_KEY,
-    base_url="https://api.inkeep.com/v1",
-    model="inkeep-context-expert",
-)
-"""
-OpenAIClient: Configured for Inkeep-powered Deephaven documentation Q&A.
-- api_key: Pulled from _INKEEP_API_KEY env var.
-- base_url: https://api.inkeep.com/v1
-- model: inkeep-context-expert
-
-This client is injected into tools for agentic and programmatic use. It should not be instantiated directly by users.
-"""
-
-mcp_docs_host = os.environ.get("MCP_DOCS_HOST", "127.0.0.1")
+mcp_docs_host: str = os.environ.get("MCP_DOCS_HOST", "127.0.0.1")
 """
 str: The host to bind the FastMCP server to. Defaults to 127.0.0.1 (localhost).
 Set MCP_DOCS_HOST to '0.0.0.0' for external access, or another interface as needed.
 """
 
-mcp_docs_port = int(os.environ.get("PORT", 8000))
+mcp_docs_port: int = int(
+    os.environ.get("MCP_DOCS_PORT", os.environ.get("PORT", "8001"))
+)
 """
-int: The port to bind the FastMCP server to. Defaults to 8000.
-If running in a Cloud Run environment, this will automatically use the PORT environment variable.
+int: The port to bind the FastMCP server to. Defaults to 8001.
+Uses MCP_DOCS_PORT if set, otherwise falls back to PORT (for Cloud Run compatibility).
 """
 
-mcp_server = FastMCP("deephaven-mcp-docs", host=mcp_docs_host, port=mcp_docs_port)
+
+@asynccontextmanager
+async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
+    """
+    Async context manager for the FastMCP docs server application lifespan.
+
+    This function manages the startup and shutdown lifecycle of the MCP docs server,
+    ensuring proper resource cleanup to prevent connection leaks and resource exhaustion
+    during high-volume usage or stress testing.
+
+    Startup:
+        - Logs server initialization
+        - Creates the OpenAI client for Inkeep API communication
+        - Yields the client via dependency injection
+
+    Shutdown:
+        - Closes the OpenAI client HTTP connections
+        - Releases all associated resources
+        - Logs successful cleanup
+
+    Args:
+        server (FastMCP): The FastMCP server instance (required by the FastMCP lifespan API).
+
+    Yields:
+        dict[str, object]: Context dictionary containing the inkeep_client for dependency injection.
+
+    Note:
+        This function is automatically called by FastMCP during server startup and shutdown.
+        It ensures that the inkeep_client's HTTP connections are properly closed when the
+        server shuts down, preventing resource leaks that could cause "Truncated response body"
+        errors during stress testing.
+    """
+    _LOGGER.info("[app_lifespan] MCP docs server starting up")
+    inkeep_client = None
+
+    try:
+        # Create the OpenAI client for Inkeep API communication
+        inkeep_client = OpenAIClient(
+            api_key=_INKEEP_API_KEY,
+            base_url="https://api.inkeep.com/v1",
+            model="inkeep-context-expert",
+        )
+        _LOGGER.info("[app_lifespan] Inkeep client initialized")
+
+        yield {"inkeep_client": inkeep_client}
+    finally:
+        _LOGGER.info(
+            "[app_lifespan] MCP docs server shutting down, cleaning up resources"
+        )
+        if inkeep_client is not None:
+            try:
+                await inkeep_client.close()
+                _LOGGER.info(
+                    "[app_lifespan] Successfully closed OpenAI client connections"
+                )
+            except Exception as e:
+                _LOGGER.error(f"[app_lifespan] Error during cleanup: {e}")
+
+
+mcp_server = FastMCP(
+    "deephaven-mcp-docs", host=mcp_docs_host, port=mcp_docs_port, lifespan=app_lifespan
+)
 """
 FastMCP: The server instance for the Deephaven documentation tools.
 - All tools decorated with @mcp_server.tool are registered here and discoverable by agentic frameworks.
@@ -187,6 +236,7 @@ Generate a Deephaven query string based on the following user request: [USER_REQ
 
 @mcp_server.tool()
 async def docs_chat(
+    context: Context,
     prompt: str,
     history: list[dict[str, str]] | None = None,
     deephaven_core_version: str | None = None,
@@ -199,6 +249,8 @@ async def docs_chat(
     This tool provides conversational access to the Deephaven documentation assistant, powered by LLM APIs. It is designed for LLM agents, orchestration frameworks, and backend automation to answer Deephaven documentation questions in natural language.
 
     Parameters:
+        context (Context):
+            The MCP context containing the injected inkeep_client for dependency injection.
         prompt (str):
             The user's query or question for the documentation assistant. Should be a clear, natural language string describing the information sought.
         history (list[dict[str, str]] | None, optional):
@@ -229,7 +281,9 @@ async def docs_chat(
         - Designed for integration with LLM agents, RAG pipelines, chatbots, and automation scripts.
 
     Example (agentic call):
+        >>> context = {"inkeep_client": client_instance}
         >>> response = await docs_chat(
+        ...     context=context,
         ...     prompt="How do I install Deephaven?",
         ...     history=[{"role": "user", "content": "Hi"}],
         ...     deephaven_core_version="1.2.3",
@@ -239,13 +293,22 @@ async def docs_chat(
         >>> print(response)
         To install Deephaven, ...
     """
+    _LOGGER.debug(
+        f"[docs_chat] Processing documentation query | prompt_len={len(prompt)} | has_history={history is not None} | programming_language={programming_language}"
+    )
+
     try:
+        # Get the inkeep_client from the injected context
+        inkeep_client: OpenAIClient = context.request_context.lifespan_context[
+            "inkeep_client"
+        ]
+
         system_prompts = [
             _prompt_basic,
             _prompt_good_query_strings,
         ]
 
-        # Optionally add version info to prompt context if provided
+        # Optionally add version info to system prompts if provided
         if deephaven_core_version:
             system_prompts.append(
                 f"Worker environment: Deephaven Community Core version: {deephaven_core_version}"
@@ -266,17 +329,21 @@ async def docs_chat(
             else:
                 return f"[ERROR] Unsupported programming language: {programming_language}. Supported languages are: {', '.join(supported_languages)}."
 
-        return await inkeep_client.chat(
+        response = await inkeep_client.chat(
             prompt=prompt, history=history, system_prompts=system_prompts
         )
+        _LOGGER.debug(
+            f"[docs_chat] Documentation query completed successfully | response_len={len(response)}"
+        )
+        return response
     except OpenAIClientError as exc:
         # This could be logged at a lower level since it is potentially not a problem with the MCP server itself,
         # but rather an issue with the OpenAI client or API.
         # However, we log it at the exception level to ensure visibility in case of issues.
-        _LOGGER.exception(f"[ERROR] OpenAIClientError: {exc}")
+        _LOGGER.exception(f"[docs_chat] OpenAI client error: {exc}")
         return f"[ERROR] OpenAIClientError: {exc}"
     except Exception as exc:
-        _LOGGER.exception(f"[ERROR] {type(exc).__name__}: {exc}")
+        _LOGGER.exception(f"[docs_chat] Unexpected error: {exc}")
         return f"[ERROR] {type(exc).__name__}: {exc}"
 
 
