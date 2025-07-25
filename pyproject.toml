@@ -3,7 +3,7 @@ name = "deephaven-mcp"
 dynamic = ["version"]
 description = "Unified Python package providing Model Context Protocol (MCP) servers for Deephaven: orchestrate Community Core data workers and power Documentation Q&A with LLMs. Supports AI-driven data workflows and agentic documentation assistance in a single deployable package."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 authors = [
     { name = "Deephaven Data Labs", email = "support@deephaven.io" }
 ]
@@ -15,7 +15,6 @@ classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -145,7 +144,7 @@ asyncio_default_fixture_loop_scope = "function"
 
 # Mypy configuration for type checking
 [tool.mypy]
-python_version = "3.10"  # Target Python version
+python_version = "3.11"  # Target Python version
 ignore_missing_imports = true  # Allow imports that may not be present at runtime
 strict_optional = true  # Enable strict optional checking
 warn_unused_ignores = true  # Warn about unused # type: ignore comments

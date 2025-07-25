@@ -408,18 +408,177 @@ async def test_app_lifespan_exception_in_context(monkeypatch):
 
     with patch("deephaven_mcp.mcp_docs_server._mcp._LOGGER") as mock_logger:
         # Test exception handling in the context manager
-        with pytest.raises(ValueError):
+        # With except* syntax, individual exceptions are wrapped in ExceptionGroup
+        with pytest.raises(ExceptionGroup) as exc_info:
             async with mcp_mod.app_lifespan(None) as context:
                 # Raise an exception inside the context
                 raise ValueError("Test exception in context")
 
-        # Verify exception was logged with traceback (lines 237-238)
+        # Verify the ExceptionGroup contains our ValueError
+        assert len(exc_info.value.exceptions) == 1
+        assert isinstance(exc_info.value.exceptions[0], ValueError)
+        assert str(exc_info.value.exceptions[0]) == "Test exception in context"
+
+        # Verify exception was logged with new exception group format
         mock_logger.error.assert_any_call(
-            "[mcp_docs_server:app_lifespan] Exception in lifespan: Test exception in context"
+            "[mcp_docs_server:app_lifespan] ValueError: Test exception in context"
         )
+
+
+@pytest.mark.asyncio
+async def test_app_lifespan_anyio_closed_resource_error(monkeypatch):
+    """Test app_lifespan handling of anyio.ClosedResourceError."""
+    monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
+    sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
+    import anyio
+
+    import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
+
+    with patch("deephaven_mcp.mcp_docs_server._mcp._LOGGER") as mock_logger:
+        with pytest.raises(ExceptionGroup) as exc_info:
+            async with mcp_mod.app_lifespan(None) as context:
+                raise anyio.ClosedResourceError("Stream closed")
+
+        # Verify the ExceptionGroup contains our ClosedResourceError
+        assert len(exc_info.value.exceptions) == 1
+        assert isinstance(exc_info.value.exceptions[0], anyio.ClosedResourceError)
+
+        # Verify specific error message for ClosedResourceError (line 372-374)
         mock_logger.error.assert_any_call(
-            "[mcp_docs_server:app_lifespan] Exception type: ValueError"
+            "[mcp_docs_server:app_lifespan] This indicates a stream/connection was closed unexpectedly during server operation"
         )
+
+
+@pytest.mark.asyncio
+async def test_app_lifespan_cancelled_error_handling(monkeypatch):
+    """Test app_lifespan handling of CancelledError (line 376)."""
+    monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
+    sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
+    import asyncio
+
+    import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
+
+    # Create a custom CancelledError subclass that can be used in ExceptionGroup
+    class TestCancelledError(asyncio.CancelledError, Exception):
+        """Custom CancelledError that inherits from Exception for ExceptionGroup compatibility."""
+
+        pass
+
+    with patch("deephaven_mcp.mcp_docs_server._mcp._LOGGER") as mock_logger:
+        with pytest.raises(ExceptionGroup) as exc_info:
+            async with mcp_mod.app_lifespan(None) as context:
+                raise TestCancelledError("Task cancelled")
+
+        # Verify the ExceptionGroup contains our exception
+        assert len(exc_info.value.exceptions) == 1
+        assert isinstance(exc_info.value.exceptions[0], asyncio.CancelledError)
+
+        # Check that the specific CancelledError message was logged (line 376)
+        mock_logger.error.assert_any_call(
+            "[mcp_docs_server:app_lifespan] This indicates the server task was cancelled during operation"
+        )
+
+
+@pytest.mark.asyncio
+async def test_app_lifespan_connection_error(monkeypatch):
+    """Test app_lifespan handling of ConnectionError."""
+    monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
+    sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
+    import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
+
+    with patch("deephaven_mcp.mcp_docs_server._mcp._LOGGER") as mock_logger:
+        with pytest.raises(ExceptionGroup) as exc_info:
+            async with mcp_mod.app_lifespan(None) as context:
+                raise ConnectionError("Connection failed")
+
+        # Verify the ExceptionGroup contains our ConnectionError
+        assert len(exc_info.value.exceptions) == 1
+        assert isinstance(exc_info.value.exceptions[0], ConnectionError)
+
+        # Verify specific error message for ConnectionError (line 380-382)
+        mock_logger.error.assert_any_call(
+            "[mcp_docs_server:app_lifespan] This indicates a connection or system-level error during server operation"
+        )
+
+
+@pytest.mark.asyncio
+async def test_app_lifespan_os_error(monkeypatch):
+    """Test app_lifespan handling of OSError."""
+    monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
+    sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
+    import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
+
+    with patch("deephaven_mcp.mcp_docs_server._mcp._LOGGER") as mock_logger:
+        with pytest.raises(ExceptionGroup) as exc_info:
+            async with mcp_mod.app_lifespan(None) as context:
+                raise OSError("System error")
+
+        # Verify the ExceptionGroup contains our OSError
+        assert len(exc_info.value.exceptions) == 1
+        assert isinstance(exc_info.value.exceptions[0], OSError)
+
+        # Verify specific error message for OSError (line 380-382)
+        mock_logger.error.assert_any_call(
+            "[mcp_docs_server:app_lifespan] This indicates a connection or system-level error during server operation"
+        )
+
+
+@pytest.mark.asyncio
+async def test_app_lifespan_timeout_error_handling(monkeypatch):
+    """Test app_lifespan handling of TimeoutError (line 384)."""
+    monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
+    sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
+    import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
+
+    # Now that TimeoutError is checked before OSError, we can test it properly
+    with patch("deephaven_mcp.mcp_docs_server._mcp._LOGGER") as mock_logger:
+        with pytest.raises(ExceptionGroup) as exc_info:
+            async with mcp_mod.app_lifespan(None) as context:
+                # Raise a real TimeoutError
+                raise TimeoutError("Operation timed out")
+
+        # Verify the ExceptionGroup contains our TimeoutError
+        assert len(exc_info.value.exceptions) == 1
+        assert isinstance(exc_info.value.exceptions[0], TimeoutError)
+
+        # Check that the specific TimeoutError message was logged (line 379-381)
+        mock_logger.error.assert_any_call(
+            "[mcp_docs_server:app_lifespan] This indicates an operation timed out during server operation"
+        )
+
+
+@pytest.mark.asyncio
+async def test_app_lifespan_diagnostic_logging_exception(monkeypatch):
+    """Test app_lifespan handling when diagnostic logging fails (lines 405-406)."""
+    monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
+    sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
+    import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
+
+    with patch("deephaven_mcp.mcp_docs_server._mcp._LOGGER") as mock_logger:
+        # Mock _log_process_state to raise an exception during diagnostic logging in except* block only
+        with patch(
+            "deephaven_mcp.mcp_docs_server._mcp._log_process_state"
+        ) as mock_log_process:
+            # Set up the mock to work during startup and shutdown, but fail during exception handling
+            def side_effect_func(context):
+                if context == "exception_group_time":
+                    raise Exception("Diagnostic failed")
+                return None  # Work normally for startup and shutdown
+
+            mock_log_process.side_effect = side_effect_func
+
+            with pytest.raises(ExceptionGroup) as exc_info:
+                async with mcp_mod.app_lifespan(None) as context:
+                    raise ValueError("Test exception")
+
+            # Verify the ExceptionGroup contains our ValueError
+            assert len(exc_info.value.exceptions) == 1
+            assert isinstance(exc_info.value.exceptions[0], ValueError)
+
+            # Check that diagnostic logging failure was handled (lines 405-406)
+            mock_logger.error.assert_any_call(
+                "[mcp_docs_server:app_lifespan] Failed to log diagnostic state: Diagnostic failed"
+            )
 
 
 def test_log_process_state_exception_handling(monkeypatch):

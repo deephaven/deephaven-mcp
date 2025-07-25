@@ -79,6 +79,7 @@ import traceback
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+import anyio
 import psutil
 from mcp.server.fastmcp import Context, FastMCP
 from starlette.requests import Request
@@ -134,8 +135,8 @@ def _signal_handler(signum: int, frame: object) -> None:
     shutdowns during stress testing or production use.
 
     Args:
-        signum (int): The signal number that was received
-        frame (object): The current stack frame when the signal was received
+        signum (int): The signal number that was received.
+        frame (object): The current stack frame when the signal was received.
     """
     _LOGGER.warning(
         f"[mcp_docs_server:signal_handler] Received signal {signum} ({signal.Signals(signum).name})"
@@ -172,7 +173,7 @@ def _log_process_state(context: str) -> None:
     stress testing.
 
     Args:
-        context (str): Context string to include in log messages (e.g., "startup", "shutdown")
+        context (str): Context string to include in log messages (e.g., "startup", "shutdown").
 
     Note:
         Process ID is only logged during startup to avoid log spam during shutdown.
@@ -212,7 +213,7 @@ def _log_asyncio_and_thread_state(
     during server lifecycle events.
 
     Args:
-        context (str): Context string to include in log messages (e.g., "startup", "shutdown")
+        context (str): Context string to include in log messages (e.g., "startup", "shutdown").
         warn_on_running_tasks (bool): If True, log running tasks as warnings instead of info.
                                      Typically used during shutdown to highlight tasks that
                                      should have completed. Defaults to False.
@@ -355,14 +356,58 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
         )
         yield {}
         _LOGGER.info("[mcp_docs_server:app_lifespan] Context manager exiting normally")
-    except Exception as e:
-        _LOGGER.error(f"[mcp_docs_server:app_lifespan] Exception in lifespan: {e}")
+    except* Exception as eg:
+        # Handle all exception groups that can occur during yield {}
         _LOGGER.error(
-            f"[mcp_docs_server:app_lifespan] Exception type: {type(e).__name__}"
+            f"[mcp_docs_server:app_lifespan] CRITICAL: Exception group during runtime yield: {eg}"
         )
+
+        # Log details for each exception in the group
+        for exc in eg.exceptions:
+            exc_type = type(exc).__name__
+            _LOGGER.error(f"[mcp_docs_server:app_lifespan] {exc_type}: {exc}")
+
+            # Provide specific context based on exception type
+            if isinstance(exc, anyio.ClosedResourceError):
+                _LOGGER.error(
+                    "[mcp_docs_server:app_lifespan] This indicates a stream/connection was closed unexpectedly during server operation"
+                )
+            elif isinstance(exc, asyncio.CancelledError):
+                _LOGGER.error(
+                    "[mcp_docs_server:app_lifespan] This indicates the server task was cancelled during operation"
+                )
+            elif isinstance(exc, TimeoutError):
+                _LOGGER.error(
+                    "[mcp_docs_server:app_lifespan] This indicates an operation timed out during server operation"
+                )
+            elif isinstance(exc, ConnectionError | OSError):
+                _LOGGER.error(
+                    "[mcp_docs_server:app_lifespan] This indicates a connection or system-level error during server operation"
+                )
+            else:
+                _LOGGER.error(
+                    f"[mcp_docs_server:app_lifespan] Unexpected exception type: {exc_type}"
+                )
+
         _LOGGER.error(
-            f"[mcp_docs_server:app_lifespan] Traceback: {traceback.format_exc()}"
+            f"[mcp_docs_server:app_lifespan] Full traceback: {traceback.format_exc()}"
         )
+
+        # Log diagnostic state when critical errors occur
+        try:
+            _LOGGER.error(
+                "[mcp_docs_server:app_lifespan] Diagnostic state at time of exception group:"
+            )
+            _log_process_state("exception_group_time")
+            _log_asyncio_and_thread_state(
+                "exception_group_time", warn_on_running_tasks=True
+            )
+        except Exception as diag_error:
+            _LOGGER.error(
+                f"[mcp_docs_server:app_lifespan] Failed to log diagnostic state: {diag_error}"
+            )
+
+        # Re-raise to maintain proper error propagation
         raise
     finally:
         # Log final process and asyncio state before shutdown
@@ -529,7 +574,7 @@ async def docs_chat(
     deephaven_core_version: str | None = None,
     deephaven_enterprise_version: str | None = None,
     programming_language: str | None = None,
-) -> dict:
+) -> dict[str, object]:
     """
     docs_chat - Asynchronous Documentation Q&A Tool (MCP Tool).
 

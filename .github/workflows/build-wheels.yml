@@ -11,4 +11,4 @@ jobs:
   build:
     uses: ./.github/workflows/reusable-build-wheel.yml
     with:
-      python-version: "3.10"
+      python-version: "3.11"
