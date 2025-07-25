@@ -41,16 +41,16 @@ Usage Patterns:
     **MCP Framework Integration:**
     >>> # Via MCP-compatible agent frameworks (recommended)
     >>> # Tools are automatically discovered and invoked by MCP protocol
-    
+
     **Direct Tool Invocation:**
     >>> from deephaven_mcp.mcp_docs_server._mcp import docs_chat
     >>> context = {}  # Context not currently used but required by MCP protocol
-    >>> 
+    >>>
     >>> # Basic query
     >>> result = await docs_chat(context=context, prompt="How do I install Deephaven?")
     >>> print(result)
     {'success': True, 'response': 'To install Deephaven, ...'}
-    >>> 
+    >>>
     >>> # Context-aware query with version and language
     >>> result = await docs_chat(
     ...     context=context,
@@ -58,9 +58,9 @@ Usage Patterns:
     ...     deephaven_core_version="0.35.1",
     ...     programming_language="python"
     ... )
-    >>> 
+    >>>
     >>> # Multi-turn conversation
-    >>> history = [{"role": "user", "content": "What are tables?"}, 
+    >>> history = [{"role": "user", "content": "What are tables?"},
     ...            {"role": "assistant", "content": "Tables are..."}]
     >>> result = await docs_chat(
     ...     context=context,
@@ -137,14 +137,14 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
         >>> # The lifespan manager automatically handles startup/shutdown
     """
     _LOGGER.info("[mcp_docs_server:app_lifespan] MCP docs server starting up")
-    _LOGGER.info("[mcp_docs_server:app_lifespan] Using per-request OpenAI client creation for connection stability")
+    _LOGGER.info(
+        "[mcp_docs_server:app_lifespan] Using per-request OpenAI client creation for connection stability"
+    )
 
     try:
         yield {}
     finally:
-        _LOGGER.info(
-            "[mcp_docs_server:app_lifespan] MCP docs server shutting down"
-        )
+        _LOGGER.info("[mcp_docs_server:app_lifespan] MCP docs server shutting down")
 
 
 mcp_server = FastMCP(
@@ -310,37 +310,37 @@ async def docs_chat(
         prompt (str):
             The user's query or question for the documentation assistant. Should be a clear,
             specific natural language string describing what the user wants to know about Deephaven.
-            
+
             **Best Practices for AI Agents:**
             - Use specific, detailed questions rather than vague requests
             - Include relevant context (e.g., "How do I join two tables in Python?")
             - Mention specific Deephaven concepts when known (tables, queries, aggregations)
             - For code examples, specify the desired programming language
-            
+
             **Effective Examples:**
             - "How do I join two tables using a common column?"
             - "What's the syntax for time-based queries in Deephaven?"
             - "Show me how to create a real-time aggregation in Python"
             - "How do I filter a table for rows where column value is greater than 100?"
-            
+
             **Less Effective Examples:**
             - "Help me with tables" (too vague)
             - "How does Deephaven work?" (too broad)
         history (list[dict[str, str]] | None, optional):
             Previous chat messages for conversational context in multi-turn conversations.
             Each message must be a dict with exactly two keys: 'role' and 'content'.
-            
+
             **Message Format Requirements:**
             - 'role' (str): Must be either "user" or "assistant"
             - 'content' (str): The actual message content
-            
+
             **AI Agent Usage Guidelines:**
             - Include relevant recent messages (typically last 3-5 exchanges)
             - Maintain chronological order (oldest first)
             - Only include messages directly related to the current query
             - Omit history for unrelated new topics to avoid confusion
             - Use history for follow-up questions, clarifications, or related queries
-            
+
             **Example Multi-Turn Conversation:**
             [
                 {"role": "user", "content": "How do I create a table in Deephaven?"},
@@ -348,7 +348,7 @@ async def docs_chat(
                 {"role": "user", "content": "What about filtering that table?"},
                 {"role": "assistant", "content": "To filter a table, use the where() method..."}
             ]
-            
+
             **When to Omit History:**
             - First question in a conversation
             - Completely unrelated new topic
@@ -364,42 +364,42 @@ async def docs_chat(
         programming_language (str | None, optional):
             The programming language context for tailoring responses with language-specific
             syntax, examples, and best practices. Case-insensitive input is accepted.
-            
+
             **Supported Languages:**
             - "python": Python-specific Deephaven syntax and examples
             - "groovy": Groovy-specific Deephaven syntax and examples
-            
+
             **AI Agent Usage Guidelines:**
             - Always specify when requesting code examples or syntax help
             - Use when the user's environment or preference is known
             - Omit for general conceptual questions that don't require code
             - Invalid languages return structured error responses (not exceptions)
-            
+
             **Impact on Responses:**
             - Code examples will use the specified language syntax
             - API method calls will show language-appropriate patterns
             - Best practices will be language-specific
             - Documentation links will prioritize the specified language
-            
+
             **Error Handling:**
             - Unsupported languages return: {"success": False, "error": "Unsupported programming language: <lang>. Supported languages are: python, groovy", "isError": True}
 
     Returns:
         dict: Structured result object optimized for AI agent parsing and error handling.
-        
+
         **Success Response Structure:**
         {
             "success": True,
             "response": "<natural_language_answer>"
         }
-        
+
         **Error Response Structure:**
         {
             "success": False,
             "error": "<descriptive_error_message>",
             "isError": True
         }
-        
+
         **Field Descriptions:**
         - 'success' (bool): **Always present**. True if query completed successfully, False on any error.
                            AI agents should check this field first before accessing other fields.
@@ -411,11 +411,11 @@ async def docs_chat(
                         or validation errors. Messages are actionable for debugging.
         - 'isError' (bool): **Present only when success=False**. Always True when present. Explicit error
                            flag for frameworks that need boolean error indicators beyond the 'success' field.
-        
+
         **AI Agent Parsing Guidelines:**
         ```python
         result = await docs_chat(context={}, prompt="How do I join tables?")
-        
+
         if result["success"]:
             # Safe to access 'response'
             answer = result["response"]
@@ -428,33 +428,33 @@ async def docs_chat(
 
     Error Handling for AI Agents:
         This tool implements comprehensive error handling designed for reliable AI agent integration:
-        
+
         **Critical Safety Guarantees:**
         - **Never raises exceptions** - all errors return structured dict responses
         - **Always includes 'success' field** - reliable for programmatic error detection
         - **Consistent error format** - predictable structure for error handling logic
-        
+
         **Common Error Categories:**
         1. **API Communication Errors:**
            - "OpenAIClientError: <details>" - Issues with Inkeep/OpenAI API communication
            - "Request timeout" - API response exceeded 300-second timeout
            - "Connection failed" - Network connectivity issues
-        
+
         2. **Parameter Validation Errors:**
            - "Unsupported programming language: <lang>" - Invalid programming_language value
            - "Invalid history format" - Malformed history parameter structure
            - "Empty prompt" - Missing or empty prompt parameter
-        
+
         3. **System Configuration Errors:**
            - "Missing INKEEP_API_KEY" - Required environment variable not set
            - "Client initialization failed" - OpenAI client setup issues
-        
+
         **AI Agent Error Handling Best Practices:**
         ```python
         # Always check success first
         if not result.get("success", False):
             error_msg = result.get("error", "Unknown error")
-            
+
             # Handle specific error types
             if "Unsupported programming language" in error_msg:
                 # Retry with supported language or omit parameter
@@ -483,7 +483,6 @@ async def docs_chat(
         - Responses are optimized for both human readability and programmatic processing
 
     Examples:
-        
         Basic successful query:
         >>> result = await docs_chat(
         ...     context={},
@@ -491,7 +490,7 @@ async def docs_chat(
         ... )
         >>> print(result)
         {'success': True, 'response': 'To create a table in Deephaven, you can use...'}
-        
+
         Context-aware query with version and language:
         >>> result = await docs_chat(
         ...     context={},
@@ -501,7 +500,7 @@ async def docs_chat(
         ... )
         >>> print(result)
         {'success': True, 'response': 'In Deephaven 0.35.1 with Python, you can join tables using...'}
-        
+
         Multi-turn conversation with history:
         >>> result = await docs_chat(
         ...     context={},
@@ -513,7 +512,7 @@ async def docs_chat(
         ... )
         >>> print(result)
         {'success': True, 'response': 'The where clause in Deephaven allows you to...'}
-        
+
         Error response - invalid programming language:
         >>> result = await docs_chat(
         ...     context={},
@@ -522,7 +521,7 @@ async def docs_chat(
         ... )
         >>> print(result)
         {'success': False, 'error': 'Unsupported programming language: javascript. Supported languages are: python, groovy', 'isError': True}
-        
+
         Error response - API timeout:
         >>> result = await docs_chat(
         ...     context={},
@@ -530,7 +529,7 @@ async def docs_chat(
         ... )
         >>> print(result)
         {'success': False, 'error': 'OpenAIClientError: Request timeout after 300 seconds', 'isError': True}
-        
+
         AI Agent error handling pattern:
         >>> result = await docs_chat(context={}, prompt="How do I use aggregations?")
         >>> if result['success']:
@@ -555,7 +554,7 @@ async def docs_chat(
             _prompt_basic,
             _prompt_good_query_strings,
         ]
-        
+
         # Optionally add version info to system prompts if provided
         if deephaven_core_version:
             system_prompts.append(
@@ -592,15 +591,15 @@ async def docs_chat(
         ) as inkeep_client:
             # Call Inkeep API with performance-optimized parameters
             response = await inkeep_client.chat(
-                prompt=prompt, 
-                history=history, 
+                prompt=prompt,
+                history=history,
                 system_prompts=system_prompts,
                 # Performance optimization parameters for faster responses
                 # These parameters tell Inkeep: "Give me the best response you can in ~30-60 seconds"
-                max_tokens=1500,      # Limit response length for faster generation
-                temperature=0.1,      # Lower temperature = faster, more deterministic responses
-                top_p=0.9,           # Nucleus sampling for balanced speed vs quality
-                presence_penalty=0.1, # Slight penalty to encourage conciseness
+                max_tokens=1500,  # Limit response length for faster generation
+                temperature=0.1,  # Lower temperature = faster, more deterministic responses
+                top_p=0.9,  # Nucleus sampling for balanced speed vs quality
+                presence_penalty=0.1,  # Slight penalty to encourage conciseness
             )
             _LOGGER.debug(
                 f"[mcp_docs_server:docs_chat] Documentation query completed successfully | response_len={len(response)}"
@@ -615,7 +614,11 @@ async def docs_chat(
         return {"success": False, "error": f"OpenAIClientError: {exc}", "isError": True}
     except Exception as exc:
         _LOGGER.exception(f"[mcp_docs_server:docs_chat] Unexpected error: {exc}")
-        return {"success": False, "error": f"{type(exc).__name__}: {exc}", "isError": True}
+        return {
+            "success": False,
+            "error": f"{type(exc).__name__}: {exc}",
+            "isError": True,
+        }
 
 
 __all__ = ["mcp_server"]

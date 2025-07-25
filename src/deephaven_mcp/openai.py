@@ -70,7 +70,7 @@ class OpenAIClientError(Exception):
         ...     client = OpenAIClient(api_key="", base_url="invalid", model="")
         ... except OpenAIClientError as e:
         ...     print(f"Client initialization failed: {e}")
-        
+
         >>> try:
         ...     response = await client.chat("Hello")
         ... except OpenAIClientError as e:
@@ -136,17 +136,17 @@ class OpenAIClient:
         ... ) as client:
         ...     # Single request
         ...     response = await client.chat("Hello, world!")
-        ...     
+        ...
         ...     # With conversation history
         ...     history = [{"role": "user", "content": "Hi"}, {"role": "assistant", "content": "Hello!"}]
         ...     response = await client.chat("How are you?", history=history)
-        ...     
+        ...
         ...     # With system prompts
         ...     response = await client.chat(
         ...         "Tell me a joke",
         ...         system_prompts=["You are a helpful assistant", "Be concise"]
         ...     )
-        ...     
+        ...
         ...     # Streaming response
         ...     async for chunk in client.stream_chat("Tell me a story"):
         ...         print(chunk, end="")
@@ -276,9 +276,11 @@ class OpenAIClient:
             raise OpenAIClientError("base_url must be a non-empty string.")
         if not model or not isinstance(model, str):
             raise OpenAIClientError("model must be a non-empty string.")
-        
-        _LOGGER.debug(f"[OpenAIClient.__init__] Initializing client | model={model}, base_url={base_url}, timeout={timeout}")
-        
+
+        _LOGGER.debug(
+            f"[OpenAIClient.__init__] Initializing client | model={model}, base_url={base_url}, timeout={timeout}"
+        )
+
         self.api_key: str = api_key
         self.base_url: str = base_url
         self.model: str = model
@@ -318,7 +320,9 @@ class OpenAIClient:
                 http_client=http_client,  # Use our configured HTTP client
             )
             self._client_owned = True  # We created it, so we're responsible for cleanup
-            _LOGGER.debug(f"[OpenAIClient.__init__] Created production client with connection limits | max_connections={max_connections}, max_keepalive={max_keepalive_connections}")
+            _LOGGER.debug(
+                f"[OpenAIClient.__init__] Created production client with connection limits | max_connections={max_connections}, max_keepalive={max_keepalive_connections}"
+            )
         else:
             # TESTING PATH: Use injected client (for unit tests)
             # This allows tests to inject mock clients without our production configuration
@@ -335,12 +339,12 @@ class OpenAIClient:
         Valid roles include 'user', 'assistant', and 'system'.
 
         Args:
-            history (Sequence[dict[str, str]] | None): The chat history to validate. 
+            history (Sequence[dict[str, str]] | None): The chat history to validate.
                 Each entry must be a dict with string 'role' and 'content' keys.
                 If None, validation is skipped.
 
         Raises:
-            OpenAIClientError: If history is not a sequence of dicts, or if any entry 
+            OpenAIClientError: If history is not a sequence of dicts, or if any entry
                 is missing required keys or has non-string values.
 
         Example:
@@ -376,7 +380,7 @@ class OpenAIClient:
         Each prompt must be a string that will be sent as a system message.
 
         Args:
-            system_prompts (Sequence[str] | None): The system prompts to validate. 
+            system_prompts (Sequence[str] | None): The system prompts to validate.
                 Each entry must be a string. If None, validation is skipped.
 
         Raises:
@@ -409,9 +413,9 @@ class OpenAIClient:
 
         Args:
             prompt (str): The latest user message to append to the conversation.
-            history (Sequence[dict[str, str]] | None): Previous chat messages for context. 
+            history (Sequence[dict[str, str]] | None): Previous chat messages for context.
                 Each must be a dict with 'role' and 'content' keys. If None, no history is added.
-            system_prompts (Sequence[str] | None): Optional sequence of system prompt strings 
+            system_prompts (Sequence[str] | None): Optional sequence of system prompt strings
                 to prepend as system messages. If None, no system messages are added.
 
         Returns:
@@ -459,11 +463,11 @@ class OpenAIClient:
 
         Args:
             prompt (str): The prompt to send to the model.
-            history (Sequence[dict[str, str]] | None, optional): Previous chat messages for context. 
+            history (Sequence[dict[str, str]] | None, optional): Previous chat messages for context.
                 Each must be a dict with 'role' and 'content' keys. Defaults to None.
-            system_prompts (Sequence[str] | None, optional): Optional sequence of system prompt strings 
+            system_prompts (Sequence[str] | None, optional): Optional sequence of system prompt strings
                 to prepend as system messages. Defaults to None.
-            **kwargs (Any): Additional keyword arguments to pass to the OpenAI API 
+            **kwargs (Any): Additional keyword arguments to pass to the OpenAI API
                 (e.g., max_tokens, temperature, stop, presence_penalty, frequency_penalty, etc.).
 
         Returns:
@@ -532,11 +536,11 @@ class OpenAIClient:
 
         Args:
             prompt (str): The user's question or message to send to the assistant.
-            history (Sequence[dict[str, str]] | None, optional): Previous chat messages for context. 
+            history (Sequence[dict[str, str]] | None, optional): Previous chat messages for context.
                 Each must be a dict with 'role' and 'content' keys. Defaults to None.
-            system_prompts (Sequence[str] | None, optional): Optional sequence of system prompt strings 
+            system_prompts (Sequence[str] | None, optional): Optional sequence of system prompt strings
                 to prepend as system messages. Defaults to None.
-            **kwargs (Any): Additional keyword arguments to pass to the OpenAI API 
+            **kwargs (Any): Additional keyword arguments to pass to the OpenAI API
                 (e.g., max_tokens, temperature, stop, presence_penalty, frequency_penalty, etc.).
 
         Yields:
@@ -675,7 +679,12 @@ class OpenAIClient:
         """
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: object | None,
+    ) -> None:
         """
         Async context manager exit point with automatic resource cleanup.
 

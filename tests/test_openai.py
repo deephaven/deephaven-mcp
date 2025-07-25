@@ -550,18 +550,18 @@ async def test_async_context_manager_success():
         api_key="test-key",
         base_url="https://api.openai.com/v1",
         model="gpt-3.5-turbo",
-        client=dummy_client
+        client=dummy_client,
     )
-    
+
     # Test that async context manager works correctly
     async with client as context_client:
         # Should return the same client instance (covers line 429: return self)
         assert context_client is client
-        
+
         # Should be able to use the client normally
         response = await client.chat("Test prompt")
         assert response == "Hello, world!"
-    
+
     # After exiting context, __aexit__ was called (covers line 444: await self.close())
 
 
@@ -569,13 +569,11 @@ async def test_async_context_manager_success():
 async def test_async_context_manager_with_exception():
     """Test OpenAIClient async context manager properly handles exceptions and still closes."""
     client = OpenAIClient(
-        api_key="test-key",
-        base_url="https://api.openai.com/v1",
-        model="gpt-3.5-turbo"
+        api_key="test-key", base_url="https://api.openai.com/v1", model="gpt-3.5-turbo"
     )
-    
+
     # Test that context manager still calls close() even when exception occurs
-    with patch.object(client, 'close', new_callable=AsyncMock) as mock_close:
+    with patch.object(client, "close", new_callable=AsyncMock) as mock_close:
         try:
             async with client as context_client:
                 assert context_client is client  # Covers line 429
@@ -583,7 +581,7 @@ async def test_async_context_manager_with_exception():
                 raise ValueError("Test exception")
         except ValueError:
             pass  # Expected exception
-        
+
         # Verify close was called even though exception occurred (covers line 444)
         mock_close.assert_called_once()
 
@@ -597,18 +595,18 @@ async def test_async_context_manager_close_exception():
         api_key="test-key",
         base_url="https://api.openai.com/v1",
         model="gpt-3.5-turbo",
-        client=dummy_client
+        client=dummy_client,
     )
-    
+
     # Test that exceptions in close() are handled gracefully in __aexit__
     # We need to patch the actual close method to raise an exception
     original_close = client.close
-    
+
     async def failing_close():
         raise Exception("Close failed")
-    
+
     client.close = failing_close
-    
+
     # Should not raise exception even if close() fails
     try:
         async with client as context_client:
@@ -617,7 +615,9 @@ async def test_async_context_manager_close_exception():
     except Exception as e:
         # The __aexit__ method should handle close() exceptions gracefully
         # If we get an exception here, the test should fail
-        pytest.fail(f"__aexit__ should handle close() exceptions gracefully, but got: {e}")
-    
+        pytest.fail(
+            f"__aexit__ should handle close() exceptions gracefully, but got: {e}"
+        )
+
     # Restore original close method
     client.close = original_close

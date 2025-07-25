@@ -93,15 +93,19 @@ async def test_docs_chat_programming_language(monkeypatch):
     import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
 
     dummy_client = DummyOpenAIClient(response="lang!")
-    
+
     # Mock OpenAI client creation to return our dummy client
-    with patch("deephaven_mcp.mcp_docs_server._mcp.OpenAIClient", return_value=dummy_client):
+    with patch(
+        "deephaven_mcp.mcp_docs_server._mcp.OpenAIClient", return_value=dummy_client
+    ):
         result = await mcp_mod.docs_chat(
             context={}, prompt="language?", history=None, programming_language="groovy"
         )
         assert result == {"success": True, "response": "lang!"}
         prompts = dummy_client.last_system_prompts
-        assert any("Worker environment: Programming language: groovy" in p for p in prompts)
+        assert any(
+            "Worker environment: Programming language: groovy" in p for p in prompts
+        )
 
 
 @pytest.mark.asyncio
@@ -111,9 +115,11 @@ async def test_docs_chat_programming_language_invalid(monkeypatch):
     import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
 
     dummy_client = DummyOpenAIClient(response="should not matter")
-    
+
     # Mock OpenAI client creation (though it won't be called due to early validation error)
-    with patch("deephaven_mcp.mcp_docs_server._mcp.OpenAIClient", return_value=dummy_client):
+    with patch(
+        "deephaven_mcp.mcp_docs_server._mcp.OpenAIClient", return_value=dummy_client
+    ):
         result = await mcp_mod.docs_chat(
             context={}, prompt="language?", history=None, programming_language="java"
         )
@@ -130,9 +136,11 @@ async def test_docs_chat_success(monkeypatch):
 
     # Create mock client
     mock_client = DummyOpenAIClient(response="Hello from docs!")
-    
+
     # Mock OpenAI client creation to return our mock client
-    with patch("deephaven_mcp.mcp_docs_server._mcp.OpenAIClient", return_value=mock_client):
+    with patch(
+        "deephaven_mcp.mcp_docs_server._mcp.OpenAIClient", return_value=mock_client
+    ):
         result = await mcp_mod.docs_chat(
             context={},
             prompt="hi",
@@ -149,8 +157,10 @@ async def test_docs_chat_with_core_version(monkeypatch):
     import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
 
     dummy_client = DummyOpenAIClient(response="core!")
-    
-    with patch("deephaven_mcp.mcp_docs_server._mcp.OpenAIClient", return_value=dummy_client):
+
+    with patch(
+        "deephaven_mcp.mcp_docs_server._mcp.OpenAIClient", return_value=dummy_client
+    ):
         result = await mcp_mod.docs_chat(
             context={},
             prompt="core version?",
@@ -171,8 +181,10 @@ async def test_docs_chat_with_enterprise_version(monkeypatch):
     import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
 
     dummy_client = DummyOpenAIClient(response="enterprise!")
-    
-    with patch("deephaven_mcp.mcp_docs_server._mcp.OpenAIClient", return_value=dummy_client):
+
+    with patch(
+        "deephaven_mcp.mcp_docs_server._mcp.OpenAIClient", return_value=dummy_client
+    ):
         result = await mcp_mod.docs_chat(
             context={},
             prompt="enterprise version?",
@@ -193,8 +205,10 @@ async def test_docs_chat_with_both_versions(monkeypatch):
     import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
 
     dummy_client = DummyOpenAIClient(response="both!")
-    
-    with patch("deephaven_mcp.mcp_docs_server._mcp.OpenAIClient", return_value=dummy_client):
+
+    with patch(
+        "deephaven_mcp.mcp_docs_server._mcp.OpenAIClient", return_value=dummy_client
+    ):
         result = await mcp_mod.docs_chat(
             context={},
             prompt="both?",
@@ -217,8 +231,10 @@ async def test_docs_chat_with_neither_version(monkeypatch):
     import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
 
     dummy_client = DummyOpenAIClient(response="no version!")
-    
-    with patch("deephaven_mcp.mcp_docs_server._mcp.OpenAIClient", return_value=dummy_client):
+
+    with patch(
+        "deephaven_mcp.mcp_docs_server._mcp.OpenAIClient", return_value=dummy_client
+    ):
         result = await mcp_mod.docs_chat(
             context={}, prompt="no version?", history=None, programming_language=None
         )
@@ -254,8 +270,10 @@ async def test_docs_chat_error(monkeypatch):
 
     # Create dummy client that raises
     dummy_client = DummyOpenAIClient(exc=OpenAIClientError("fail!"))
-    
-    with patch("deephaven_mcp.mcp_docs_server._mcp.OpenAIClient", return_value=dummy_client):
+
+    with patch(
+        "deephaven_mcp.mcp_docs_server._mcp.OpenAIClient", return_value=dummy_client
+    ):
         result = await mcp_mod.docs_chat(
             context={}, prompt="fail", history=None, programming_language=None
         )
@@ -273,8 +291,10 @@ async def test_docs_chat_generic_exception(monkeypatch):
 
     # Create dummy client that raises a generic exception
     dummy_client = DummyOpenAIClient(exc=ValueError("Generic error!"))
-    
-    with patch("deephaven_mcp.mcp_docs_server._mcp.OpenAIClient", return_value=dummy_client):
+
+    with patch(
+        "deephaven_mcp.mcp_docs_server._mcp.OpenAIClient", return_value=dummy_client
+    ):
         result = await mcp_mod.docs_chat(
             context={}, prompt="fail", history=None, programming_language=None
         )
