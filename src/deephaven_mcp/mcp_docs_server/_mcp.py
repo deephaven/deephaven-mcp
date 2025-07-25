@@ -334,8 +334,18 @@ async def docs_chat(
             else:
                 return f"[ERROR] Unsupported programming language: {programming_language}. Supported languages are: {', '.join(supported_languages)}."
 
+        # Call Inkeep API with performance-optimized parameters
         response = await inkeep_client.chat(
-            prompt=prompt, history=history, system_prompts=system_prompts
+            prompt=prompt, 
+            history=history, 
+            system_prompts=system_prompts,
+            #TODO: remove?
+            # Performance optimization parameters for faster responses
+            # These parameters tell Inkeep: "Give me the best response you can in ~30-60 seconds"
+            max_tokens=1500,      # Limit response length for faster generation
+            temperature=0.1,      # Lower temperature = faster, more deterministic responses
+            top_p=0.9,           # Nucleus sampling for balanced speed vs quality
+            presence_penalty=0.1, # Slight penalty to encourage conciseness
         )
         _LOGGER.debug(
             f"[docs_chat] Documentation query completed successfully | response_len={len(response)}"
