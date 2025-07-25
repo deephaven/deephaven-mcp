@@ -335,3 +335,133 @@ async def test_app_lifespan_successful_cleanup(monkeypatch):
 
         # Verify that startup and shutdown logging occurred
         mock_logger.info.assert_called()
+
+
+@pytest.mark.asyncio
+async def test_signal_handler_coverage(monkeypatch):
+    """Test signal handler function for coverage."""
+    monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
+    sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
+    import signal
+
+    import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
+
+    with patch("deephaven_mcp.mcp_docs_server._mcp._LOGGER") as mock_logger:
+        # Test the signal handler function directly
+        frame = MagicMock()
+        mcp_mod._signal_handler(signal.SIGTERM, frame)
+
+        # Verify all three warning messages are logged
+        assert mock_logger.warning.call_count == 3
+        mock_logger.warning.assert_any_call(
+            "[mcp_docs_server:signal_handler] Received signal 15 (SIGTERM)"
+        )
+        mock_logger.warning.assert_any_call(
+            f"[mcp_docs_server:signal_handler] Signal frame: {frame}"
+        )
+        mock_logger.warning.assert_any_call(
+            "[mcp_docs_server:signal_handler] Process will likely terminate soon"
+        )
+
+
+def test_signal_handler_registration_failure(monkeypatch):
+    """Test signal handler registration failure for coverage."""
+    monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
+
+    # Remove the module first
+    sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
+
+    # Mock signal.signal to raise an exception during module import
+    with patch("signal.signal", side_effect=OSError("Signal registration failed")):
+        # Import the module to trigger signal registration
+        # The warning should be logged during import (lines 127-128)
+        importlib.import_module("deephaven_mcp.mcp_docs_server._mcp")
+
+        # Test passes if no exception is raised during import
+        # The actual warning logging is verified by the coverage report
+
+
+def test_log_asyncio_runtime_error_handling(monkeypatch):
+    """Test _log_asyncio_and_thread_state RuntimeError handling for coverage."""
+    monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
+    sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
+    import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
+
+    # Mock asyncio.get_running_loop to raise RuntimeError (no event loop)
+    with patch("asyncio.get_running_loop", side_effect=RuntimeError("No event loop")):
+        with patch("deephaven_mcp.mcp_docs_server._mcp._LOGGER") as mock_logger:
+            # Call the helper function that should handle the RuntimeError
+            mcp_mod._log_asyncio_and_thread_state("test")
+
+            # Verify info message was logged for no event loop (line 182)
+            mock_logger.info.assert_any_call(
+                "[mcp_docs_server:app_lifespan] No asyncio event loop running during test"
+            )
+
+
+@pytest.mark.asyncio
+async def test_app_lifespan_exception_in_context(monkeypatch):
+    """Test app_lifespan exception handling during context execution."""
+    monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
+    sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
+    import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
+
+    with patch("deephaven_mcp.mcp_docs_server._mcp._LOGGER") as mock_logger:
+        # Test exception handling in the context manager
+        with pytest.raises(ValueError):
+            async with mcp_mod.app_lifespan(None) as context:
+                # Raise an exception inside the context
+                raise ValueError("Test exception in context")
+
+        # Verify exception was logged with traceback (lines 237-238)
+        mock_logger.error.assert_any_call(
+            "[mcp_docs_server:app_lifespan] Exception in lifespan: Test exception in context"
+        )
+        mock_logger.error.assert_any_call(
+            "[mcp_docs_server:app_lifespan] Exception type: ValueError"
+        )
+
+
+def test_log_process_state_exception_handling(monkeypatch):
+    """Test _log_process_state exception handling for coverage."""
+    monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
+    sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
+    import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
+
+    # Mock psutil.Process to raise an exception (lines 161-162)
+    with patch("psutil.Process", side_effect=Exception("Process access failed")):
+        with patch("deephaven_mcp.mcp_docs_server._mcp._LOGGER") as mock_logger:
+            # Call the helper function that should handle the exception
+            mcp_mod._log_process_state("test")
+
+            # Verify error was logged
+            mock_logger.error.assert_called_with(
+                "[mcp_docs_server:app_lifespan] Error getting test process state: Process access failed"
+            )
+
+
+@pytest.mark.asyncio
+async def test_dependency_version_logging_exception(monkeypatch):
+    """Test dependency version logging exception handling for coverage."""
+    monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
+    sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
+    import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
+
+    # Mock the import statement inside the try block to raise an exception (lines 279-280)
+    original_import = __builtins__["__import__"]
+
+    def mock_import(name, *args, **kwargs):
+        if name == "uvicorn":
+            raise ImportError("Uvicorn module not found")
+        return original_import(name, *args, **kwargs)
+
+    with patch("builtins.__import__", side_effect=mock_import):
+        with patch("deephaven_mcp.mcp_docs_server._mcp._LOGGER") as mock_logger:
+            # Test the lifespan function which contains the dependency version logging
+            async with mcp_mod.app_lifespan(None) as context:
+                assert context == {}
+
+            # Verify warning was logged for dependency version failure
+            mock_logger.warning.assert_any_call(
+                "[mcp_docs_server:app_lifespan] Could not get dependency versions: Uvicorn module not found"
+            )

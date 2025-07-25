@@ -69,14 +69,17 @@ Usage Patterns:
     ... )
 """
 
+import asyncio
 import logging
 import os
 import signal
-import psutil
+import sys
+import threading
+import traceback
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-import traceback
 
+import psutil
 from mcp.server.fastmcp import Context, FastMCP
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -85,9 +88,20 @@ from ..openai import OpenAIClient, OpenAIClientError
 
 _LOGGER = logging.getLogger(__name__)
 
-# The API key for authenticating with the Inkeep-powered LLM API. Must be set in the environment.
+# The API key for authenticating with the Inkeep-powered LLM API
 try:
     _INKEEP_API_KEY: str = os.environ["INKEEP_API_KEY"]
+    """str: The API key for authenticating with the Inkeep-powered LLM API.
+    
+    This environment variable must be set for the docs server to function. The API key
+    is used to authenticate requests to the Inkeep documentation assistant service.
+    
+    Environment Variable:
+        INKEEP_API_KEY: Required. The API key provided by Inkeep for documentation queries.
+    
+    Raises:
+        RuntimeError: If the INKEEP_API_KEY environment variable is not set.
+    """
 except KeyError:
     raise RuntimeError(
         "INKEEP_API_KEY environment variable must be set to use the Inkeep-powered documentation tools."
@@ -107,22 +121,151 @@ int: The port to bind the FastMCP server to. Defaults to 8001.
 Uses MCP_DOCS_PORT if set, otherwise falls back to PORT (for Cloud Run compatibility).
 """
 
+# TODO: move signal handlers to init.py or main.py
+
+
 # Set up signal handlers at module level to detect what's causing shutdown
-def _signal_handler(signum: int, frame) -> None:
-    """Signal handler to log received signals that might cause server shutdown."""
-    _LOGGER.warning(f"[mcp_docs_server:signal_handler] Received signal {signum} ({signal.Signals(signum).name})")
+def _signal_handler(signum: int, frame: object) -> None:
+    """Signal handler to log received signals that might cause server shutdown.
+
+    This handler is registered for SIGTERM, SIGINT, and SIGHUP signals to provide
+    diagnostic information when the server process is being terminated. It logs
+    the signal number, name, and frame information to help diagnose unexpected
+    shutdowns during stress testing or production use.
+
+    Args:
+        signum (int): The signal number that was received
+        frame (object): The current stack frame when the signal was received
+    """
+    _LOGGER.warning(
+        f"[mcp_docs_server:signal_handler] Received signal {signum} ({signal.Signals(signum).name})"
+    )
     _LOGGER.warning(f"[mcp_docs_server:signal_handler] Signal frame: {frame}")
-    _LOGGER.warning(f"[mcp_docs_server:signal_handler] Process will likely terminate soon")
+    _LOGGER.warning(
+        "[mcp_docs_server:signal_handler] Process will likely terminate soon"
+    )
+
 
 # Register signal handlers for common termination signals
 try:
+    registered_signals = []
     signal.signal(signal.SIGTERM, _signal_handler)
+    registered_signals.append("SIGTERM")
     signal.signal(signal.SIGINT, _signal_handler)
-    if hasattr(signal, 'SIGHUP'):
+    registered_signals.append("SIGINT")
+    if hasattr(signal, "SIGHUP"):
         signal.signal(signal.SIGHUP, _signal_handler)
-    _LOGGER.info("[mcp_docs_server:init] Signal handlers registered for SIGTERM, SIGINT, SIGHUP")
+        registered_signals.append("SIGHUP")
+    _LOGGER.info(
+        f"[mcp_docs_server:init] Signal handlers registered for: {', '.join(registered_signals)}"
+    )
 except Exception as e:
     _LOGGER.warning(f"[mcp_docs_server:init] Failed to register signal handlers: {e}")
+
+
+def _log_process_state(context: str) -> None:
+    """Log current process resource state for debugging.
+
+    Logs memory usage, CPU percentage, open file descriptors, and process ID
+    to help diagnose resource issues during server lifecycle events. This is
+    particularly useful for identifying resource leaks or exhaustion during
+    stress testing.
+
+    Args:
+        context (str): Context string to include in log messages (e.g., "startup", "shutdown")
+
+    Note:
+        Process ID is only logged during startup to avoid log spam during shutdown.
+        All exceptions are caught and logged to prevent diagnostic failures from
+        affecting server operation.
+    """
+    try:
+        process = psutil.Process()
+        prefix = "Final " if context == "shutdown" else ""
+        _LOGGER.info(
+            f"[mcp_docs_server:app_lifespan] {prefix}memory usage: {process.memory_info().rss / 1024 / 1024:.2f} MB"
+        )
+        _LOGGER.info(
+            f"[mcp_docs_server:app_lifespan] {prefix}CPU percent: {process.cpu_percent()}%"
+        )
+        _LOGGER.info(
+            f"[mcp_docs_server:app_lifespan] {prefix}open file descriptors: {process.num_fds()}"
+        )
+
+        # Only log PID during startup
+        if context != "shutdown":
+            _LOGGER.info(f"[mcp_docs_server:app_lifespan] Process PID: {process.pid}")
+    except Exception as e:
+        _LOGGER.error(
+            f"[mcp_docs_server:app_lifespan] Error getting {context} process state: {e}"
+        )
+
+
+def _log_asyncio_and_thread_state(
+    context: str, warn_on_running_tasks: bool = False
+) -> None:
+    """Log current asyncio and threading state for debugging.
+
+    Logs active asyncio tasks, event loop status, pending/running tasks, and
+    active thread count to help diagnose concurrency issues and resource leaks.
+    This is particularly useful for identifying stuck tasks or threading problems
+    during server lifecycle events.
+
+    Args:
+        context (str): Context string to include in log messages (e.g., "startup", "shutdown")
+        warn_on_running_tasks (bool): If True, log running tasks as warnings instead of info.
+                                     Typically used during shutdown to highlight tasks that
+                                     should have completed. Defaults to False.
+
+    Note:
+        Event loop status and main thread info are only logged during startup.
+        During shutdown, running tasks are logged as warnings to highlight potential
+        cleanup issues. All exceptions are caught to prevent diagnostic failures.
+    """
+    # Log asyncio state
+    try:
+        loop = asyncio.get_running_loop()
+        tasks = asyncio.all_tasks(loop)
+        _LOGGER.info(
+            f"[mcp_docs_server:app_lifespan] {context} active asyncio tasks: {len(tasks)}"
+        )
+        if context != "shutdown":  # Only log loop status during startup
+            _LOGGER.info(
+                f"[mcp_docs_server:app_lifespan] Event loop running: {loop.is_running()}"
+            )
+
+        # Log pending/running tasks
+        incomplete_tasks = [task for task in tasks if not task.done()]
+        if incomplete_tasks:
+            task_type = "running" if warn_on_running_tasks else "pending"
+            log_func = _LOGGER.warning if warn_on_running_tasks else _LOGGER.info
+            log_func(
+                f"[mcp_docs_server:app_lifespan] {task_type.title()} tasks during {context}: {len(incomplete_tasks)}"
+            )
+
+            # Log first few tasks for debugging
+            max_tasks = 3 if warn_on_running_tasks else 5
+            for i, task in enumerate(incomplete_tasks[:max_tasks]):
+                task_info = f"{task.get_name()}"
+                if not warn_on_running_tasks:  # Include coroutine info during startup
+                    task_info += f" - {task.get_coro()}"
+                log_func(
+                    f"[mcp_docs_server:app_lifespan] {task_type.title()} task {i+1}: {task_info}"
+                )
+
+    except RuntimeError:
+        _LOGGER.info(
+            f"[mcp_docs_server:app_lifespan] No asyncio event loop running during {context}"
+        )
+
+    # Log threading state
+    _LOGGER.info(
+        f"[mcp_docs_server:app_lifespan] {context} active threads: {threading.active_count()}"
+    )
+    if context != "shutdown":  # Only log main thread info during startup
+        _LOGGER.info(
+            f"[mcp_docs_server:app_lifespan] Main thread: {threading.current_thread().name}"
+        )
 
 
 @asynccontextmanager
@@ -130,63 +273,102 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
     """
     Async context manager for the FastMCP docs server application lifespan.
 
-    This function manages the startup and shutdown lifecycle of the MCP docs server.
-    The implementation uses per-request OpenAI client creation to prevent connection
-    pool exhaustion and "Truncated response body" errors during high-volume usage
-    or stress testing scenarios.
+    This function manages the complete startup and shutdown lifecycle of the MCP docs server
+    with comprehensive diagnostic logging and resource monitoring. The implementation uses
+    per-request OpenAI client creation to prevent connection pool exhaustion and "Truncated
+    response body" errors during high-volume usage or stress testing scenarios.
 
     Lifecycle Management:
-        - Startup: Logs server initialization and configuration
-        - Runtime: Yields empty context (clients created per-request)
-        - Shutdown: Logs graceful server termination
+        - Startup: Logs server initialization, configuration, dependency versions, and resource state
+        - Runtime: Yields empty context (clients created per-request for connection stability)
+        - Shutdown: Logs final resource state and graceful server termination with cleanup monitoring
+
+    Diagnostic Features:
+        - Environment variable and configuration logging for debugging
+        - Dependency version logging (MCP, Uvicorn) with exception handling
+        - Process resource monitoring (memory, CPU, file descriptors) via psutil
+        - Asyncio and threading state monitoring for concurrency debugging
+        - Enhanced exception logging with traceback information
 
     Args:
         server (FastMCP): The FastMCP server instance being managed.
 
     Yields:
         dict[str, object]: An empty context dictionary. OpenAI clients are created
-                          per-request rather than shared to ensure connection stability.
+                          per-request rather than shared to ensure connection stability
+                          and prevent resource leaks during sustained operations.
+
+    Raises:
+        Exception: Re-raises any exceptions that occur during the lifespan context
+                  after logging detailed diagnostic information.
 
     Note:
         This function is automatically called by FastMCP during server startup and shutdown.
         The per-request client strategy prevents resource leaks and connection pool issues
         that could cause server instability during sustained high-volume operations.
+        All diagnostic logging uses structured log messages for easy parsing and monitoring.
 
     Example:
         >>> mcp_server = FastMCP("server-name", lifespan=app_lifespan)
-        >>> # The lifespan manager automatically handles startup/shutdown
+        >>> # The lifespan manager automatically handles startup/shutdown with diagnostics
     """
     _LOGGER.info("[mcp_docs_server:app_lifespan] MCP docs server starting up")
     _LOGGER.info(
         "[mcp_docs_server:app_lifespan] Using per-request OpenAI client creation for connection stability"
     )
-    
+
+    # Log critical environment and configuration state
+    _LOGGER.info(
+        f"[mcp_docs_server:app_lifespan] Server config - Host: {mcp_docs_host}, Port: {mcp_docs_port}"
+    )
+    _LOGGER.info(
+        f"[mcp_docs_server:app_lifespan] INKEEP_API_KEY configured: {'Yes' if _INKEEP_API_KEY else 'No'}"
+    )
+    _LOGGER.info(f"[mcp_docs_server:app_lifespan] Python version: {sys.version}")
+    _LOGGER.info(f"[mcp_docs_server:app_lifespan] Working directory: {os.getcwd()}")
+
+    # Log dependency versions for debugging (before state logging for context)
+    try:
+        import mcp
+        import uvicorn
+
+        _LOGGER.info(
+            f"[mcp_docs_server:app_lifespan] MCP version: {getattr(mcp, '__version__', 'unknown')}"
+        )
+        _LOGGER.info(
+            f"[mcp_docs_server:app_lifespan] Uvicorn version: {uvicorn.__version__}"
+        )
+    except Exception as e:
+        _LOGGER.warning(
+            f"[mcp_docs_server:app_lifespan] Could not get dependency versions: {e}"
+        )
+
     # Log initial process state
-    process = psutil.Process()
-    _LOGGER.info(f"[mcp_docs_server:app_lifespan] Process PID: {process.pid}")
-    _LOGGER.info(f"[mcp_docs_server:app_lifespan] Memory usage: {process.memory_info().rss / 1024 / 1024:.2f} MB")
-    _LOGGER.info(f"[mcp_docs_server:app_lifespan] CPU percent: {process.cpu_percent()}%")
-    _LOGGER.info(f"[mcp_docs_server:app_lifespan] Open file descriptors: {process.num_fds()}")
+    _log_process_state("startup")
+
+    # Log asyncio and threading state
+    _log_asyncio_and_thread_state("startup")
 
     try:
-        _LOGGER.info("[mcp_docs_server:app_lifespan] MCP docs server ready and yielding context")
+        _LOGGER.info(
+            "[mcp_docs_server:app_lifespan] MCP docs server ready and yielding context"
+        )
         yield {}
         _LOGGER.info("[mcp_docs_server:app_lifespan] Context manager exiting normally")
     except Exception as e:
         _LOGGER.error(f"[mcp_docs_server:app_lifespan] Exception in lifespan: {e}")
-        _LOGGER.error(f"[mcp_docs_server:app_lifespan] Exception type: {type(e).__name__}")
-        _LOGGER.error(f"[mcp_docs_server:app_lifespan] Traceback: {traceback.format_exc()}")
+        _LOGGER.error(
+            f"[mcp_docs_server:app_lifespan] Exception type: {type(e).__name__}"
+        )
+        _LOGGER.error(
+            f"[mcp_docs_server:app_lifespan] Traceback: {traceback.format_exc()}"
+        )
         raise
     finally:
-        # Log final process state before shutdown
-        try:
-            process = psutil.Process()
-            _LOGGER.info(f"[mcp_docs_server:app_lifespan] Final memory usage: {process.memory_info().rss / 1024 / 1024:.2f} MB")
-            _LOGGER.info(f"[mcp_docs_server:app_lifespan] Final CPU percent: {process.cpu_percent()}%")
-            _LOGGER.info(f"[mcp_docs_server:app_lifespan] Final open file descriptors: {process.num_fds()}")
-        except Exception as e:
-            _LOGGER.error(f"[mcp_docs_server:app_lifespan] Error getting final process state: {e}")
-        
+        # Log final process and asyncio state before shutdown
+        _log_process_state("shutdown")
+        _log_asyncio_and_thread_state("shutdown", warn_on_running_tasks=True)
+
         _LOGGER.info("[mcp_docs_server:app_lifespan] MCP docs server shutting down")
 
 
@@ -196,22 +378,38 @@ mcp_server = FastMCP(
 """
 FastMCP: The primary server instance for the Deephaven MCP documentation tools.
 
-This server exposes all MCP tools and endpoints for AI agent consumption:
-- Tools: docs_chat (documentation Q&A)
-- Endpoints: /health (liveness/readiness checks)
-- Discovery: All @mcp_server.tool decorated functions are automatically registered
-- Lifecycle: Managed by app_lifespan context manager for proper startup/shutdown
+This server exposes all MCP tools and endpoints for AI agent consumption with
+comprehensive diagnostic capabilities and production-ready error handling.
 
-Configuration:
-- Server name: "deephaven-mcp-docs"
-- Host: Controlled by MCP_DOCS_HOST environment variable (default: 127.0.0.1)
-- Port: Controlled by MCP_DOCS_PORT environment variable (default: 8001, fallback: PORT)
-- Lifespan: Uses per-request client creation strategy for connection stability
+Exposed Tools:
+    - docs_chat: Asynchronous documentation Q&A tool with context-aware responses,
+                 conversation history support, and structured error handling
 
-Usage:
-- Designed for MCP-compatible orchestration environments and AI agent frameworks
-- Supports both direct tool invocation and HTTP endpoint access
-- Optimized for high-volume, concurrent usage with robust error handling
+Exposed Endpoints:
+    - /health (GET): Liveness and readiness probe for deployment environments
+
+Server Configuration:
+    - Server name: "deephaven-mcp-docs"
+    - Host: Controlled by MCP_DOCS_HOST environment variable (default: 127.0.0.1)
+    - Port: Controlled by MCP_DOCS_PORT environment variable (default: 8001, fallback: PORT)
+    - Lifespan: Managed by app_lifespan context manager with enhanced diagnostics
+
+Architecture Features:
+    - Per-request OpenAI client creation prevents connection pool exhaustion
+    - Signal handlers for diagnostic logging during unexpected shutdowns
+    - Process and asyncio state monitoring for resource leak detection
+    - Comprehensive startup/shutdown logging for debugging
+    - Structured error responses optimized for AI agent consumption
+
+Usage Patterns:
+    - Designed for MCP-compatible orchestration environments and AI agent frameworks
+    - Supports both direct tool invocation and HTTP endpoint access
+    - Optimized for high-volume, concurrent usage with robust error handling
+    - Suitable for stress testing and production deployment scenarios
+
+Discovery:
+    All functions decorated with @mcp_server.tool() are automatically registered
+    and discoverable via the MCP protocol for AI agent consumption.
 """
 
 
@@ -428,7 +626,9 @@ async def docs_chat(
             - Unsupported languages return: {"success": False, "error": "Unsupported programming language: <lang>. Supported languages are: python, groovy", "isError": True}
 
     Returns:
-        dict: Structured result object optimized for AI agent parsing and error handling.
+        dict[str, object]: Structured result object optimized for AI agent parsing and error handling.
+                          Always contains 'success' (bool) field. On success, contains 'response' (str).
+                          On error, contains 'error' (str) and 'isError' (bool) fields.
 
         **Success Response Structure:**
         {
@@ -613,6 +813,9 @@ async def docs_chat(
             programming_language = programming_language.strip().lower()
             supported_languages = {"python", "groovy"}
             if programming_language in supported_languages:
+                _LOGGER.debug(
+                    f"[mcp_docs_server:docs_chat] Using programming language context: {programming_language}"
+                )
                 system_prompts.append(
                     f"Worker environment: Programming language: {programming_language}"
                 )
@@ -623,6 +826,8 @@ async def docs_chat(
 
         # Use OpenAI client as async context manager for automatic resource cleanup
         # This prevents connection pool exhaustion and "Truncated response body" errors
+        _LOGGER.info("[mcp_docs_server:docs_chat] Creating OpenAI client for request")
+
         async with OpenAIClient(
             api_key=_INKEEP_API_KEY,
             base_url="https://api.inkeep.com/v1",
@@ -632,6 +837,10 @@ async def docs_chat(
             write_timeout=30.0,  # 30 seconds to send request
             max_retries=1,  # Reduce retries to fail faster on real errors
         ) as inkeep_client:
+            _LOGGER.info(
+                "[mcp_docs_server:docs_chat] OpenAI client created successfully"
+            )
+
             # Call Inkeep API with performance-optimized parameters
             response = await inkeep_client.chat(
                 prompt=prompt,
@@ -644,7 +853,7 @@ async def docs_chat(
                 top_p=0.9,  # Nucleus sampling for balanced speed vs quality
                 presence_penalty=0.1,  # Slight penalty to encourage conciseness
             )
-            _LOGGER.debug(
+            _LOGGER.info(
                 f"[mcp_docs_server:docs_chat] Documentation query completed successfully | response_len={len(response)}"
             )
             return {"success": True, "response": response}
