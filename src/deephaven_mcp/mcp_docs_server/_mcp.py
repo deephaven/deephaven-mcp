@@ -71,8 +71,11 @@ Usage Patterns:
 
 import logging
 import os
+import signal
+import psutil
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+import traceback
 
 from mcp.server.fastmcp import Context, FastMCP
 from starlette.requests import Request
@@ -103,6 +106,23 @@ mcp_docs_port: int = int(
 int: The port to bind the FastMCP server to. Defaults to 8001.
 Uses MCP_DOCS_PORT if set, otherwise falls back to PORT (for Cloud Run compatibility).
 """
+
+# Set up signal handlers at module level to detect what's causing shutdown
+def _signal_handler(signum: int, frame) -> None:
+    """Signal handler to log received signals that might cause server shutdown."""
+    _LOGGER.warning(f"[mcp_docs_server:signal_handler] Received signal {signum} ({signal.Signals(signum).name})")
+    _LOGGER.warning(f"[mcp_docs_server:signal_handler] Signal frame: {frame}")
+    _LOGGER.warning(f"[mcp_docs_server:signal_handler] Process will likely terminate soon")
+
+# Register signal handlers for common termination signals
+try:
+    signal.signal(signal.SIGTERM, _signal_handler)
+    signal.signal(signal.SIGINT, _signal_handler)
+    if hasattr(signal, 'SIGHUP'):
+        signal.signal(signal.SIGHUP, _signal_handler)
+    _LOGGER.info("[mcp_docs_server:init] Signal handlers registered for SIGTERM, SIGINT, SIGHUP")
+except Exception as e:
+    _LOGGER.warning(f"[mcp_docs_server:init] Failed to register signal handlers: {e}")
 
 
 @asynccontextmanager
@@ -140,10 +160,33 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
     _LOGGER.info(
         "[mcp_docs_server:app_lifespan] Using per-request OpenAI client creation for connection stability"
     )
+    
+    # Log initial process state
+    process = psutil.Process()
+    _LOGGER.info(f"[mcp_docs_server:app_lifespan] Process PID: {process.pid}")
+    _LOGGER.info(f"[mcp_docs_server:app_lifespan] Memory usage: {process.memory_info().rss / 1024 / 1024:.2f} MB")
+    _LOGGER.info(f"[mcp_docs_server:app_lifespan] CPU percent: {process.cpu_percent()}%")
+    _LOGGER.info(f"[mcp_docs_server:app_lifespan] Open file descriptors: {process.num_fds()}")
 
     try:
+        _LOGGER.info("[mcp_docs_server:app_lifespan] MCP docs server ready and yielding context")
         yield {}
+        _LOGGER.info("[mcp_docs_server:app_lifespan] Context manager exiting normally")
+    except Exception as e:
+        _LOGGER.error(f"[mcp_docs_server:app_lifespan] Exception in lifespan: {e}")
+        _LOGGER.error(f"[mcp_docs_server:app_lifespan] Exception type: {type(e).__name__}")
+        _LOGGER.error(f"[mcp_docs_server:app_lifespan] Traceback: {traceback.format_exc()}")
+        raise
     finally:
+        # Log final process state before shutdown
+        try:
+            process = psutil.Process()
+            _LOGGER.info(f"[mcp_docs_server:app_lifespan] Final memory usage: {process.memory_info().rss / 1024 / 1024:.2f} MB")
+            _LOGGER.info(f"[mcp_docs_server:app_lifespan] Final CPU percent: {process.cpu_percent()}%")
+            _LOGGER.info(f"[mcp_docs_server:app_lifespan] Final open file descriptors: {process.num_fds()}")
+        except Exception as e:
+            _LOGGER.error(f"[mcp_docs_server:app_lifespan] Error getting final process state: {e}")
+        
         _LOGGER.info("[mcp_docs_server:app_lifespan] MCP docs server shutting down")
 
 

@@ -46,6 +46,8 @@ dependencies = [
     "autogen-ext",              # Test client SseServerParams, etc.
     # Structured logging for GCP Cloud Run
     "google-cloud-logging>=3.8.0",  # Google Cloud Logging
+    # Process monitoring for debugging
+    "psutil>=5.9.0",               # Process and system monitoring
 ]
 
 [project.optional-dependencies]
