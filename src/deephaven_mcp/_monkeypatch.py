@@ -1,37 +1,33 @@
-"""
-Monkeypatch utilities for Deephaven MCP servers.
+"""Monkeypatch utilities for Deephaven MCP servers.
 
 This module provides comprehensive structured logging for unhandled ASGI exceptions
-by monkey-patching Uvicorn's RequestResponseCycle. It implements multiple logging
-strategies optimized for Google Cloud Platform (GCP) Cloud Run environments.
+by monkey-patching Uvicorn's RequestResponseCycle. It implements Google Cloud
+Platform (GCP) Cloud Logging optimized for production environments.
 
 Key Features:
-- Multiple structured logging approaches for GCP Cloud Run compatibility
-- Direct stderr JSON logging for reliable error capture
+- Client disconnect detection and graceful handling
 - Google Cloud Logging integration for native GCP log aggregation
-- Python JSON Logger for standardized JSON formatting
+- Structured exception metadata for filtering and alerting
 - Defensive error handling to prevent logging failures from masking exceptions
+- DEBUG-level logging for expected client disconnects vs ERROR-level for server errors
 
 Usage:
     Call `monkeypatch_uvicorn_exception_handling()` once at process startup to
     ensure robust error visibility for ASGI server exceptions.
 
-Logging Strategies:
-    1. Direct stderr JSON: Bypasses Python logging for maximum reliability
-    2. Google Cloud Logging: Native GCP integration with structured metadata
-    3. Python JSON Logger: Standardized JSON formatting with GCP fields
+Logging Strategy:
+    Google Cloud Logging: Native GCP integration with structured metadata,
+    automatic log aggregation, and appropriate severity levels for different
+    exception types (client disconnects vs server errors).
 """
 
-import json
 import logging
-import sys
 import traceback
-from datetime import datetime, timezone
 from typing import Any
 
+import anyio
 from google.cloud import logging as gcp_logging
 from google.cloud.logging_v2.handlers import CloudLoggingHandler
-from pythonjsonlogger import json as jsonlogger
 from uvicorn.protocols.http.httptools_impl import RequestResponseCycle
 
 
@@ -66,46 +62,8 @@ def _setup_gcp_logging() -> logging.Logger:
     return gcp_logger
 
 
-def _setup_json_logging() -> logging.Logger:
-    """
-    Configure Python JSON Logger for structured ASGI exception logging.
-
-    Creates a logger named 'json_asgi_errors' that outputs structured JSON log
-    entries to stderr using pythonjsonlogger.JsonFormatter. The output is
-    formatted for compatibility with GCP Cloud Run log parsing.
-
-    Returns:
-        logging.Logger: Configured logger with StreamHandler(sys.stderr) attached,
-            using JsonFormatter with ISO 8601 timestamps, with propagation
-            disabled to prevent duplicate log entries.
-
-    Note:
-        Uses ISO 8601 timestamp format (%Y-%m-%dT%H:%M:%S.%fZ) with microsecond
-        precision for optimal GCP Cloud Run log correlation and filtering.
-        Only adds handler if none exists to prevent duplicate log entries.
-    """
-    json_logger = logging.getLogger("json_asgi_errors")
-
-    # Only add handler if none exists to prevent duplicate log entries
-    if not json_logger.handlers:
-        json_handler = logging.StreamHandler(sys.stderr)
-
-        # Configure JsonFormatter with GCP-compatible timestamp and field formatting
-        json_formatter = jsonlogger.JsonFormatter(
-            fmt="%(asctime)s %(name)s %(levelname)s %(message)s",
-            datefmt="%Y-%m-%dT%H:%M:%S.%fZ",  # ISO 8601 with microseconds
-        )
-        json_handler.setFormatter(json_formatter)
-        json_logger.addHandler(json_handler)
-
-        # Disable propagation to prevent duplicate log entries from parent loggers
-        json_logger.propagate = False
-    return json_logger
-
-
 # Lazy initialization - loggers created only when needed
 _gcp_logger: logging.Logger | None = None
-_json_logger: logging.Logger | None = None
 
 
 def _get_gcp_logger() -> logging.Logger:
@@ -124,20 +82,42 @@ def _get_gcp_logger() -> logging.Logger:
     return _gcp_logger
 
 
-def _get_json_logger() -> logging.Logger:
-    """
-    Get or create the JSON logger using lazy initialization.
+def _is_client_disconnect_error(exc: BaseException) -> bool:
+    """Check if exception indicates client disconnect rather than server error.
 
-    This prevents early initialization issues by only creating the JSON logger
-    when it's actually needed, rather than at module import time.
+    This function recursively examines exceptions to detect anyio.ClosedResourceError,
+    which typically indicates that a client has disconnected during request processing.
+    It handles direct exceptions, ExceptionGroups, and nested exceptions via __cause__
+    and __context__ attributes.
+
+    Args:
+        exc: The exception to examine for client disconnect indicators.
 
     Returns:
-        logging.Logger: The JSON logger instance.
+        bool: True if the exception indicates a client disconnect, False otherwise.
+
+    Note:
+        Client disconnects are expected behavior and should be logged at DEBUG level
+        rather than ERROR level to reduce noise in production logs.
     """
-    global _json_logger
-    if _json_logger is None:
-        _json_logger = _setup_json_logging()
-    return _json_logger
+    # Direct ClosedResourceError
+    if isinstance(exc, anyio.ClosedResourceError):
+        return True
+
+    # ExceptionGroup containing ClosedResourceError (compatible with Python 3.9+)
+    # Use hasattr to detect exception groups for broader Python version compatibility
+    if hasattr(exc, "exceptions"):
+        for sub_exc in exc.exceptions:
+            if _is_client_disconnect_error(sub_exc):
+                return True
+
+    # Check nested __cause__ and __context__
+    if exc.__cause__ and _is_client_disconnect_error(exc.__cause__):
+        return True
+    if exc.__context__ and _is_client_disconnect_error(exc.__context__):
+        return True
+
+    return False
 
 
 def monkeypatch_uvicorn_exception_handling() -> None:
@@ -145,23 +125,25 @@ def monkeypatch_uvicorn_exception_handling() -> None:
     Monkey-patch Uvicorn's RequestResponseCycle for comprehensive ASGI exception logging.
 
     This function addresses limitations in Uvicorn's default exception handling by
-    wrapping ASGI application execution with multiple structured logging strategies.
-    It ensures that unhandled exceptions are captured and logged using formats
-    optimized for Google Cloud Platform (GCP) Cloud Run environments.
+    wrapping ASGI application execution with structured logging optimized for
+    Google Cloud Platform (GCP) Cloud Run environments. It distinguishes between
+    client disconnects and actual server errors for appropriate log severity.
 
-    Logging Strategies Implemented:
-        1. Direct stderr JSON logging: Bypasses Python logging for maximum reliability
-        2. Google Cloud Logging: Native GCP integration with structured metadata
-        3. Python JSON Logger: Standardized JSON formatting with GCP-compatible fields
-
-    Each logging strategy includes:
-        - Exception type, module, and message details
-        - Complete stack trace for debugging
-        - Structured metadata for filtering and alerting
+    Exception Handling:
+        - Client disconnects (anyio.ClosedResourceError): Logged at DEBUG level
+        - Server errors: Logged at ERROR level with full structured metadata
+        - Recursive detection of nested exceptions and ExceptionGroups
         - Defensive error handling to prevent logging failures
 
+    Logging Strategy:
+        Google Cloud Logging with structured metadata including:
+        - Exception type, module, and message details
+        - Complete stack trace for debugging
+        - Event type classification (client_disconnect vs server_error)
+        - Structured metadata for filtering and alerting
+
     This patch is essential for:
-        - Production monitoring and alerting
+        - Production monitoring and alerting with reduced noise
         - Debugging silent failures in ASGI applications
         - Ensuring log visibility in containerized environments
         - Meeting observability requirements for cloud deployments
@@ -171,7 +153,7 @@ def monkeypatch_uvicorn_exception_handling() -> None:
         the patch is applied globally without interference.
     """
     logging.getLogger(__name__).warning(
-        "Monkey-patching Uvicorn's RequestResponseCycle to log unhandled ASGI exceptions."
+        "[_monkeypatch:monkeypatch_uvicorn_exception_handling] Monkey-patching Uvicorn's RequestResponseCycle to log unhandled ASGI exceptions."
     )
     orig_run_asgi = RequestResponseCycle.run_asgi
 
@@ -189,53 +171,31 @@ def monkeypatch_uvicorn_exception_handling() -> None:
                     traceback.format_exception(exc_type, exc_value, exc_traceback)
                 )
 
-                timestamp = (
-                    datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-                )
+                # Check if this is a client disconnect (not a server error)
+                if _is_client_disconnect_error(exc_value):
+                    # Log client disconnect at DEBUG level with full details for debugging
+                    try:
+                        _get_gcp_logger().debug(
+                            f"Unhandled client disconnect detected in ASGI application: {exc_type.__name__}: {str(exc_value)}",
+                            extra={
+                                "event_type": "client_disconnect",
+                                "exception_type": exc_type.__name__,
+                                "exception_module": exc_type.__module__,
+                                "exception_message": str(exc_value),
+                                "stack_trace": full_traceback,
+                            },
+                            exc_info=(exc_type, exc_value, exc_traceback),
+                        )
+                    except Exception as disconnect_log_err:
+                        # Defensive handling: Log disconnect logging failures to stderr
+                        logging.getLogger(__name__).error(
+                            f"[_monkeypatch:wrapped_app] Client disconnect logging failed: {disconnect_log_err}"
+                        )
 
-                # Logging is performed multiple times because these errors are rare,
-                # and different logging strategies have been more or less reliable in
-                # recording important details. The following strategies are used:
-                # 1. Direct stderr JSON logging for maximum reliability.
-                # 2. Google Cloud Logging for native GCP integration.
-                # 3. Python JSON Logger for standardized JSON formatting.
+                    # Return gracefully without re-raising - let connection close naturally
+                    return
 
-                # Strategy #1: Direct stderr JSON logging for maximum reliability
-                # Bypasses Python logging infrastructure to ensure log delivery
-                stderr_log = {
-                    "timestamp": timestamp,
-                    "severity": "ERROR",
-                    "message": f"Unhandled exception in ASGI application (Direct stderr JSON): {exc_type.__name__}: {str(exc_value)}",
-                    "exception": {
-                        "type": exc_type.__name__,
-                        "module": exc_type.__module__,
-                        "args": str(getattr(exc_value, "args", None)),
-                        "traceback": full_traceback,
-                    },
-                }
-                print(json.dumps(stderr_log), file=sys.stderr, flush=True)
-
-                # Strategy #2: Python JSON Logger for standardized JSON formatting
-                # Provides consistent JSON structure with GCP-compatible fields
-                try:
-                    # Log with human-readable message and structured metadata
-                    _get_json_logger().error(
-                        f"Unhandled exception in ASGI application (Python JSON Logger): {exc_type.__name__}: {str(exc_value)}",
-                        extra={
-                            "severity": "ERROR",
-                            "exception_type": exc_type.__name__,
-                            "exception_module": exc_type.__module__,
-                            "exception_message": str(exc_value),
-                            "exception_args": str(getattr(exc_value, "args", None)),
-                            "stack_trace": full_traceback,
-                        },
-                        exc_info=(exc_type, exc_value, exc_traceback),
-                    )
-                except Exception as json_err:
-                    # Defensive handling: Log JSON logging failures to stderr
-                    print(f"Python JSON Logger failed: {json_err}", file=sys.stderr)
-
-                # Strategy #3: Google Cloud Logging for native GCP integration
+                # Google Cloud Logging: The primary logging strategy for native GCP integration
                 # Provides structured metadata and automatic log aggregation
                 # (This is the best log message)
                 try:
@@ -251,7 +211,9 @@ def monkeypatch_uvicorn_exception_handling() -> None:
                     )
                 except Exception as gcp_err:
                     # Defensive handling: Log GCP logging failures to stderr
-                    print(f"GCP Logging failed: {gcp_err}", file=sys.stderr)
+                    logging.getLogger(__name__).error(
+                        f"[_monkeypatch:wrapped_app] GCP Logging failed: {gcp_err}"
+                    )
 
                 # Re-raise the original exception to maintain normal ASGI error flow
                 raise
