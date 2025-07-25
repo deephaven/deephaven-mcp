@@ -67,7 +67,7 @@ dev = [
 
     # Development and CI
     "pre-commit>=3.4.0",   # Git hooks management
-    "deephaven-server>=0.38", # Deephaven server for integration tests
+    "deephaven-server>=0.39", # Deephaven server for integration tests
 
     # Testing frameworks and tools
     "pytest>=8.0.0",           # Main test framework

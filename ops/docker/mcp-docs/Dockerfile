@@ -46,7 +46,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY . .
 
 # Install Python dependencies using uv for fast and reliable installs
-RUN uv venv && uv pip install ".[dev]"
+# Only install production dependencies to avoid deephaven-server conflict
+RUN uv venv && uv pip install "."
 
 # Always bind the docs server to all interfaces by default
 ENV MCP_DOCS_HOST=0.0.0.0
