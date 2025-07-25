@@ -71,62 +71,41 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
     """
     Async context manager for the FastMCP docs server application lifespan.
 
-    This function manages the startup and shutdown lifecycle of the MCP docs server,
-    ensuring proper resource cleanup to prevent connection leaks and resource exhaustion
-    during high-volume usage or stress testing.
+    This function manages the startup and shutdown lifecycle of the MCP docs server.
+    The implementation uses per-request OpenAI client creation to prevent connection
+    pool exhaustion and "Truncated response body" errors during high-volume usage
+    or stress testing scenarios.
 
-    Startup:
-        - Logs server initialization
-        - Creates the OpenAI client for Inkeep API communication
-        - Yields the client via dependency injection
-
-    Shutdown:
-        - Closes the OpenAI client HTTP connections
-        - Releases all associated resources
-        - Logs successful cleanup
+    Lifecycle Management:
+        - Startup: Logs server initialization and configuration
+        - Runtime: Yields empty context (clients created per-request)
+        - Shutdown: Logs graceful server termination
 
     Args:
-        server (FastMCP): The FastMCP server instance (required by the FastMCP lifespan API).
+        server (FastMCP): The FastMCP server instance being managed.
 
     Yields:
-        dict[str, object]: Context dictionary containing the inkeep_client for dependency injection.
+        dict[str, object]: An empty context dictionary. OpenAI clients are created
+                          per-request rather than shared to ensure connection stability.
 
     Note:
         This function is automatically called by FastMCP during server startup and shutdown.
-        It ensures that the inkeep_client's HTTP connections are properly closed when the
-        server shuts down, preventing resource leaks that could cause "Truncated response body"
-        errors during stress testing.
+        The per-request client strategy prevents resource leaks and connection pool issues
+        that could cause server instability during sustained high-volume operations.
+
+    Example:
+        >>> mcp_server = FastMCP("server-name", lifespan=app_lifespan)
+        >>> # The lifespan manager automatically handles startup/shutdown
     """
-    _LOGGER.info("[app_lifespan] MCP docs server starting up")
-    inkeep_client = None
+    _LOGGER.info("[mcp_docs_server:app_lifespan] MCP docs server starting up")
+    _LOGGER.info("[mcp_docs_server:app_lifespan] Using per-request OpenAI client creation for connection stability")
 
     try:
-        # Create the OpenAI client for Inkeep API communication
-        # Use extended timeouts to handle slow Inkeep API responses during stress testing
-        inkeep_client = OpenAIClient(
-            api_key=_INKEEP_API_KEY,
-            base_url="https://api.inkeep.com/v1",
-            model="inkeep-context-expert",
-            timeout=300.0,  # 5 minutes - handles slow Inkeep API responses
-            connect_timeout=30.0,  # 30 seconds to establish connection
-            write_timeout=30.0,  # 30 seconds to send request
-            max_retries=1,  # Reduce retries to fail faster on real errors
-        )
-        _LOGGER.info("[app_lifespan] Inkeep client initialized")
-
-        yield {"inkeep_client": inkeep_client}
+        yield {}
     finally:
         _LOGGER.info(
-            "[app_lifespan] MCP docs server shutting down, cleaning up resources"
+            "[mcp_docs_server:app_lifespan] MCP docs server shutting down"
         )
-        if inkeep_client is not None:
-            try:
-                await inkeep_client.close()
-                _LOGGER.info(
-                    "[app_lifespan] Successfully closed OpenAI client connections"
-                )
-            except Exception as e:
-                _LOGGER.error(f"[app_lifespan] Error during cleanup: {e}")
 
 
 mcp_server = FastMCP(
@@ -160,6 +139,7 @@ async def health_check(request: Request) -> JSONResponse:
         - HTTP 200 with JSON body: {"status": "ok"}
         - Indicates the server is alive and able to handle requests.
     """
+    _LOGGER.debug("[mcp_docs_server:health_check] Health check requested")
     return JSONResponse({"status": "ok"})
 
 
@@ -299,20 +279,29 @@ async def docs_chat(
         To install Deephaven, ...
     """
     _LOGGER.debug(
-        f"[docs_chat] Processing documentation query | prompt_len={len(prompt)} | has_history={history is not None} | programming_language={programming_language}"
+        f"[mcp_docs_server:docs_chat] Processing documentation query | prompt_len={len(prompt)} | has_history={history is not None} | programming_language={programming_language}"
     )
 
+    inkeep_client = None
     try:
-        # Get the inkeep_client from the injected context
-        inkeep_client: OpenAIClient = context.request_context.lifespan_context[
-            "inkeep_client"
-        ]
+        # Create a fresh OpenAI client for each request to prevent connection pool exhaustion
+        # This eliminates "Truncated response body" errors during high-volume stress testing
+        inkeep_client = OpenAIClient(
+            api_key=_INKEEP_API_KEY,
+            base_url="https://api.inkeep.com/v1",
+            model="inkeep-context-expert",
+            timeout=300.0,  # 5 minutes - handles slow Inkeep API responses
+            connect_timeout=30.0,  # 30 seconds to establish connection
+            write_timeout=30.0,  # 30 seconds to send request
+            max_retries=1,  # Reduce retries to fail faster on real errors
+        )
 
+        # Build system prompts for context-aware responses
         system_prompts = [
             _prompt_basic,
             _prompt_good_query_strings,
         ]
-
+        
         # Optionally add version info to system prompts if provided
         if deephaven_core_version:
             system_prompts.append(
@@ -336,30 +325,39 @@ async def docs_chat(
 
         # Call Inkeep API with performance-optimized parameters
         response = await inkeep_client.chat(
-            prompt=prompt,
-            history=history,
+            prompt=prompt, 
+            history=history, 
             system_prompts=system_prompts,
-            # TODO: remove?
+            #TODO: remove?
             # Performance optimization parameters for faster responses
             # These parameters tell Inkeep: "Give me the best response you can in ~30-60 seconds"
-            max_tokens=1500,  # Limit response length for faster generation
-            temperature=0.1,  # Lower temperature = faster, more deterministic responses
-            top_p=0.9,  # Nucleus sampling for balanced speed vs quality
-            presence_penalty=0.1,  # Slight penalty to encourage conciseness
+            max_tokens=1500,      # Limit response length for faster generation
+            temperature=0.1,      # Lower temperature = faster, more deterministic responses
+            top_p=0.9,           # Nucleus sampling for balanced speed vs quality
+            presence_penalty=0.1, # Slight penalty to encourage conciseness
         )
         _LOGGER.debug(
-            f"[docs_chat] Documentation query completed successfully | response_len={len(response)}"
+            f"[mcp_docs_server:docs_chat] Documentation query completed successfully | response_len={len(response)}"
         )
         return response
+
     except OpenAIClientError as exc:
         # This could be logged at a lower level since it is potentially not a problem with the MCP server itself,
         # but rather an issue with the OpenAI client or API.
         # However, we log it at the exception level to ensure visibility in case of issues.
-        _LOGGER.exception(f"[docs_chat] OpenAI client error: {exc}")
+        _LOGGER.exception(f"[mcp_docs_server:docs_chat] OpenAI client error: {exc}")
         return f"[ERROR] OpenAIClientError: {exc}"
     except Exception as exc:
-        _LOGGER.exception(f"[docs_chat] Unexpected error: {exc}")
+        _LOGGER.exception(f"[mcp_docs_server:docs_chat] Unexpected error: {exc}")
         return f"[ERROR] {type(exc).__name__}: {exc}"
+    finally:
+        # Always clean up the client to prevent resource leaks
+        if inkeep_client is not None:
+            try:
+                await inkeep_client.close()
+                _LOGGER.debug("[mcp_docs_server:docs_chat] OpenAI client closed successfully")
+            except Exception as cleanup_error:
+                _LOGGER.warning(f"[mcp_docs_server:docs_chat] Failed to close OpenAI client: {cleanup_error}")
 
 
 __all__ = ["mcp_server"]
