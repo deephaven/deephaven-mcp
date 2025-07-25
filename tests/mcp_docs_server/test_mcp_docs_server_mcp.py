@@ -58,6 +58,12 @@ class DummyOpenAIClient:
             raise self.exc
         return self.response
 
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        pass  # No cleanup needed for dummy client
+
 
 def create_mock_context(inkeep_client):
     """Create a mock context that matches FastMCP's context.request_context.lifespan_context structure."""
@@ -87,14 +93,15 @@ async def test_docs_chat_programming_language(monkeypatch):
     import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
 
     dummy_client = DummyOpenAIClient(response="lang!")
-    context = create_mock_context(dummy_client)
-
-    result = await mcp_mod.docs_chat(
-        context=context, prompt="language?", history=None, programming_language="groovy"
-    )
-    assert result == "lang!"
-    prompts = dummy_client.last_system_prompts
-    assert any("Worker environment: Programming language: groovy" in p for p in prompts)
+    
+    # Mock OpenAI client creation to return our dummy client
+    with patch("deephaven_mcp.mcp_docs_server._mcp.OpenAIClient", return_value=dummy_client):
+        result = await mcp_mod.docs_chat(
+            context={}, prompt="language?", history=None, programming_language="groovy"
+        )
+        assert result == {"success": True, "response": "lang!"}
+        prompts = dummy_client.last_system_prompts
+        assert any("Worker environment: Programming language: groovy" in p for p in prompts)
 
 
 @pytest.mark.asyncio
@@ -104,13 +111,15 @@ async def test_docs_chat_programming_language_invalid(monkeypatch):
     import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
 
     dummy_client = DummyOpenAIClient(response="should not matter")
-    context = create_mock_context(dummy_client)
-
-    result = await mcp_mod.docs_chat(
-        context=context, prompt="language?", history=None, programming_language="java"
-    )
-    assert result.startswith("[ERROR]")
-    assert "Unsupported programming language: java" in result
+    
+    # Mock OpenAI client creation (though it won't be called due to early validation error)
+    with patch("deephaven_mcp.mcp_docs_server._mcp.OpenAIClient", return_value=dummy_client):
+        result = await mcp_mod.docs_chat(
+            context={}, prompt="language?", history=None, programming_language="java"
+        )
+        assert result["success"] is False
+        assert "Unsupported programming language: java" in result["error"]
+        assert result["isError"] is True
 
 
 @pytest.mark.asyncio
@@ -119,17 +128,18 @@ async def test_docs_chat_success(monkeypatch):
     sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
     import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
 
-    # Create mock context with inkeep_client
+    # Create mock client
     mock_client = DummyOpenAIClient(response="Hello from docs!")
-    context = create_mock_context(mock_client)
-
-    result = await mcp_mod.docs_chat(
-        context=context,
-        prompt="hi",
-        history=[{"role": "user", "content": "hi"}],
-        programming_language=None,
-    )
-    assert result == "Hello from docs!"
+    
+    # Mock OpenAI client creation to return our mock client
+    with patch("deephaven_mcp.mcp_docs_server._mcp.OpenAIClient", return_value=mock_client):
+        result = await mcp_mod.docs_chat(
+            context={},
+            prompt="hi",
+            history=[{"role": "user", "content": "hi"}],
+            programming_language=None,
+        )
+        assert result == {"success": True, "response": "Hello from docs!"}
 
 
 @pytest.mark.asyncio
@@ -139,19 +149,19 @@ async def test_docs_chat_with_core_version(monkeypatch):
     import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
 
     dummy_client = DummyOpenAIClient(response="core!")
-    context = create_mock_context(dummy_client)
-
-    result = await mcp_mod.docs_chat(
-        context=context,
-        prompt="core version?",
-        history=None,
-        deephaven_core_version="0.39.0",
-        programming_language=None,
-    )
-    assert result == "core!"
-    prompts = dummy_client.last_system_prompts
-    assert any("Deephaven Community Core version: 0.39.0" in p for p in prompts)
-    assert any("helpful assistant" in p for p in prompts)
+    
+    with patch("deephaven_mcp.mcp_docs_server._mcp.OpenAIClient", return_value=dummy_client):
+        result = await mcp_mod.docs_chat(
+            context={},
+            prompt="core version?",
+            history=None,
+            deephaven_core_version="0.39.0",
+            programming_language=None,
+        )
+        assert result == {"success": True, "response": "core!"}
+        prompts = dummy_client.last_system_prompts
+        assert any("Deephaven Community Core version: 0.39.0" in p for p in prompts)
+        assert any("helpful assistant" in p for p in prompts)
 
 
 @pytest.mark.asyncio
@@ -161,19 +171,19 @@ async def test_docs_chat_with_enterprise_version(monkeypatch):
     import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
 
     dummy_client = DummyOpenAIClient(response="enterprise!")
-    context = create_mock_context(dummy_client)
-
-    result = await mcp_mod.docs_chat(
-        context=context,
-        prompt="enterprise version?",
-        history=None,
-        deephaven_enterprise_version="1.2.3",
-        programming_language=None,
-    )
-    assert result == "enterprise!"
-    prompts = dummy_client.last_system_prompts
-    assert any("Deephaven Core+ (Enterprise) version: 1.2.3" in p for p in prompts)
-    assert any("helpful assistant" in p for p in prompts)
+    
+    with patch("deephaven_mcp.mcp_docs_server._mcp.OpenAIClient", return_value=dummy_client):
+        result = await mcp_mod.docs_chat(
+            context={},
+            prompt="enterprise version?",
+            history=None,
+            deephaven_enterprise_version="1.2.3",
+            programming_language=None,
+        )
+        assert result == {"success": True, "response": "enterprise!"}
+        prompts = dummy_client.last_system_prompts
+        assert any("Deephaven Core+ (Enterprise) version: 1.2.3" in p for p in prompts)
+        assert any("helpful assistant" in p for p in prompts)
 
 
 @pytest.mark.asyncio
@@ -183,21 +193,21 @@ async def test_docs_chat_with_both_versions(monkeypatch):
     import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
 
     dummy_client = DummyOpenAIClient(response="both!")
-    context = create_mock_context(dummy_client)
-
-    result = await mcp_mod.docs_chat(
-        context=context,
-        prompt="both?",
-        history=None,
-        deephaven_core_version="0.39.0",
-        deephaven_enterprise_version="1.2.3",
-        programming_language=None,
-    )
-    assert result == "both!"
-    prompts = dummy_client.last_system_prompts
-    assert any("Deephaven Community Core version: 0.39.0" in p for p in prompts)
-    assert any("Deephaven Core+ (Enterprise) version: 1.2.3" in p for p in prompts)
-    assert any("helpful assistant" in p for p in prompts)
+    
+    with patch("deephaven_mcp.mcp_docs_server._mcp.OpenAIClient", return_value=dummy_client):
+        result = await mcp_mod.docs_chat(
+            context={},
+            prompt="both?",
+            history=None,
+            deephaven_core_version="0.39.0",
+            deephaven_enterprise_version="1.2.3",
+            programming_language=None,
+        )
+        assert result == {"success": True, "response": "both!"}
+        prompts = dummy_client.last_system_prompts
+        assert any("Deephaven Community Core version: 0.39.0" in p for p in prompts)
+        assert any("Deephaven Core+ (Enterprise) version: 1.2.3" in p for p in prompts)
+        assert any("helpful assistant" in p for p in prompts)
 
 
 @pytest.mark.asyncio
@@ -207,18 +217,18 @@ async def test_docs_chat_with_neither_version(monkeypatch):
     import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
 
     dummy_client = DummyOpenAIClient(response="no version!")
-    context = create_mock_context(dummy_client)
-
-    result = await mcp_mod.docs_chat(
-        context=context, prompt="no version?", history=None, programming_language=None
-    )
-    assert result == "no version!"
-    prompts = dummy_client.last_system_prompts
-    # Only the base system prompt should be present
-    assert any("helpful assistant" in p for p in prompts)
-    assert not any(
-        "Core version" in p or "Core+ (Enterprise) version" in p for p in prompts
-    )
+    
+    with patch("deephaven_mcp.mcp_docs_server._mcp.OpenAIClient", return_value=dummy_client):
+        result = await mcp_mod.docs_chat(
+            context={}, prompt="no version?", history=None, programming_language=None
+        )
+        assert result == {"success": True, "response": "no version!"}
+        prompts = dummy_client.last_system_prompts
+        # Only the base system prompt should be present
+        assert any("helpful assistant" in p for p in prompts)
+        assert not any(
+            "Core version" in p or "Core+ (Enterprise) version" in p for p in prompts
+        )
 
 
 @pytest.mark.asyncio
@@ -242,15 +252,16 @@ async def test_docs_chat_error(monkeypatch):
     sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
     import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
 
-    # Create context with dummy client that raises
+    # Create dummy client that raises
     dummy_client = DummyOpenAIClient(exc=OpenAIClientError("fail!"))
-    context = create_mock_context(dummy_client)
-
-    result = await mcp_mod.docs_chat(
-        context=context, prompt="fail", history=None, programming_language=None
-    )
-    assert result.startswith("[ERROR]")
-    assert "fail!" in result
+    
+    with patch("deephaven_mcp.mcp_docs_server._mcp.OpenAIClient", return_value=dummy_client):
+        result = await mcp_mod.docs_chat(
+            context={}, prompt="fail", history=None, programming_language=None
+        )
+        assert result["success"] is False
+        assert "OpenAIClientError: fail!" in result["error"]
+        assert result["isError"] is True
 
 
 @pytest.mark.asyncio
@@ -260,72 +271,47 @@ async def test_docs_chat_generic_exception(monkeypatch):
     sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
     import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
 
-    # Create context with dummy client that raises a generic exception
+    # Create dummy client that raises a generic exception
     dummy_client = DummyOpenAIClient(exc=ValueError("Generic error!"))
-    context = create_mock_context(dummy_client)
-
-    result = await mcp_mod.docs_chat(
-        context=context, prompt="fail", history=None, programming_language=None
-    )
-    assert result.startswith("[ERROR]")
-    assert "ValueError: Generic error!" in result
+    
+    with patch("deephaven_mcp.mcp_docs_server._mcp.OpenAIClient", return_value=dummy_client):
+        result = await mcp_mod.docs_chat(
+            context={}, prompt="fail", history=None, programming_language=None
+        )
+        assert result["success"] is False
+        assert "ValueError: Generic error!" in result["error"]
+        assert result["isError"] is True
 
 
 @pytest.mark.asyncio
 async def test_app_lifespan_cleanup_exception(monkeypatch):
-    """Test app_lifespan handles exceptions during client cleanup."""
+    """Test app_lifespan context manager yields empty context and handles startup/shutdown."""
     monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
     sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
     import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
 
-    # Create a mock client that raises an exception on close()
-    mock_client = AsyncMock()
-    mock_client.close.side_effect = Exception("Cleanup failed")
-
-    # Mock the OpenAIClient constructor to return our mock client
-    with (
-        patch(
-            "deephaven_mcp.mcp_docs_server._mcp.OpenAIClient", return_value=mock_client
-        ),
-        patch("deephaven_mcp.mcp_docs_server._mcp._LOGGER") as mock_logger,
-    ):
-
+    with patch("deephaven_mcp.mcp_docs_server._mcp._LOGGER") as mock_logger:
         # Test the app_lifespan context manager
         async with mcp_mod.app_lifespan(None) as context:
-            assert "inkeep_client" in context
-            assert context["inkeep_client"] == mock_client
+            # Context should be empty since we create clients per-request
+            assert context == {}
 
-        # Verify that the error was logged during cleanup
-        mock_logger.error.assert_called_once_with(
-            "[app_lifespan] Error during cleanup: Cleanup failed"
-        )
+        # Verify startup and shutdown logging
+        mock_logger.info.assert_called()
 
 
 @pytest.mark.asyncio
 async def test_app_lifespan_successful_cleanup(monkeypatch):
-    """Test app_lifespan logs success message during normal cleanup."""
+    """Test app_lifespan logs startup and shutdown messages."""
     monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
     sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
     import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
 
-    # Create a mock client that closes successfully
-    mock_client = AsyncMock()
-    mock_client.close.return_value = None  # Successful close
-
-    # Mock the OpenAIClient constructor to return our mock client
-    with (
-        patch(
-            "deephaven_mcp.mcp_docs_server._mcp.OpenAIClient", return_value=mock_client
-        ),
-        patch("deephaven_mcp.mcp_docs_server._mcp._LOGGER") as mock_logger,
-    ):
-
+    with patch("deephaven_mcp.mcp_docs_server._mcp._LOGGER") as mock_logger:
         # Test the app_lifespan context manager
         async with mcp_mod.app_lifespan(None) as context:
-            assert "inkeep_client" in context
-            assert context["inkeep_client"] == mock_client
+            # Context should be empty since we create clients per-request
+            assert context == {}
 
-        # Verify that the success message was logged during cleanup
-        # Note: info is called multiple times during app lifecycle, so check if our message is in the calls
-        success_call = ("[app_lifespan] Successfully closed OpenAI client connections",)
-        assert success_call in [call.args for call in mock_logger.info.call_args_list]
+        # Verify that startup and shutdown logging occurred
+        mock_logger.info.assert_called()
