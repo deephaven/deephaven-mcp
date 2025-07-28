@@ -46,7 +46,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY . .
 
 # Install Python dependencies using uv for fast and reliable installs
-# Only install production dependencies to avoid deephaven-server conflict
+# Only install production dependencies
 RUN uv venv && uv pip install "."
 
 # Always bind the docs server to all interfaces by default
