@@ -53,4 +53,4 @@ RUN uv venv && uv pip install "."
 ENV MCP_DOCS_HOST=0.0.0.0
 
 # Run the docs MCP server using the script entrypoint (dh-mcp-docs) defined in pyproject.toml
-CMD ["uv", "run", "dh-mcp-docs-server", "--transport", "sse"]
+CMD ["uv", "run", "dh-mcp-docs-server", "--transport", "streamable-http"]
