@@ -83,7 +83,7 @@ env:
 
 jobs:
   mcp-docs:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     steps:
       # Checkout the repository code
       - name: Checkout repository
@@ -132,7 +132,7 @@ jobs:
   # Redeploy job: triggers after image build/push, runs Terraform deployment
   # ---------------------------------------------------------------------------
   redeploy:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     needs: [mcp-docs]
     steps:
       # Checkout the repository (required for deployment scripts)
