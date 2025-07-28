@@ -9,7 +9,7 @@ on:
 jobs:
   test-python-community:
     name: Test Python (Community)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
       matrix:
@@ -63,7 +63,7 @@ jobs:
 
   test-python-enterprise:
     name: Test Python (Enterprise)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
       matrix:

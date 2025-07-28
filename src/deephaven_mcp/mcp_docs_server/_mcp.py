@@ -413,7 +413,6 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
         # Log final process and asyncio state before shutdown
         _log_process_state("shutdown")
         _log_asyncio_and_thread_state("shutdown", warn_on_running_tasks=True)
-
         _LOGGER.info("[mcp_docs_server:app_lifespan] MCP docs server shutting down")
 
 
