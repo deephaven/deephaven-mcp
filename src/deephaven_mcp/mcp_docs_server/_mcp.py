@@ -72,26 +72,18 @@ Usage Patterns:
 import asyncio
 import logging
 import os
-import signal
 import sys
 import threading
 import traceback
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-import json
-import logging
-import os
-import sys
-import traceback
-from typing import Any
 
 import anyio
-import psutil
-
-from deephaven_mcp._logging import log_process_state, setup_signal_handler_logging
 from mcp.server.fastmcp import Context, FastMCP
 from starlette.requests import Request
 from starlette.responses import JSONResponse
+
+from deephaven_mcp._logging import log_process_state
 
 from ..openai import OpenAIClient, OpenAIClientError
 
@@ -129,8 +121,6 @@ mcp_docs_port: int = int(
 int: The port to bind the FastMCP server to. Defaults to 8001.
 Uses MCP_DOCS_PORT if set, otherwise falls back to PORT (for Cloud Run compatibility).
 """
-
-
 
 
 def _log_asyncio_and_thread_state(
@@ -349,7 +339,11 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
 
 
 mcp_server = FastMCP(
-    "deephaven-mcp-docs", host=mcp_docs_host, port=mcp_docs_port, lifespan=app_lifespan, stateless_http=True
+    "deephaven-mcp-docs",
+    host=mcp_docs_host,
+    port=mcp_docs_port,
+    lifespan=app_lifespan,
+    stateless_http=True,
 )
 """
 FastMCP: The primary server instance for the Deephaven MCP documentation tools.

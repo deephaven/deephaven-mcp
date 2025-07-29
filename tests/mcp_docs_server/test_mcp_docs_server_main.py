@@ -230,8 +230,9 @@ def test_docs_module_main_invocation():
 def test_main_invocation():
     """Test that main() correctly parses args and calls run_server."""
     # We patch run_server to prevent the server from actually starting.
-    with patch("deephaven_mcp.mcp_docs_server.main.run_server") as mock_run_server, patch.dict(
-        os.environ, {"INKEEP_API_KEY": "dummy-key"}
+    with (
+        patch("deephaven_mcp.mcp_docs_server.main.run_server") as mock_run_server,
+        patch.dict(os.environ, {"INKEEP_API_KEY": "dummy-key"}),
     ):
         from deephaven_mcp.mcp_docs_server.main import main
 

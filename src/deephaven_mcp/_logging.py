@@ -14,6 +14,7 @@ Call `setup_global_exception_logging()` once at process startup to guarantee rob
 import asyncio
 import logging
 import os
+import signal
 import sys
 from types import TracebackType
 from typing import Any
@@ -121,23 +122,23 @@ def log_process_state(log_tag: str, context: str) -> None:
       - Number of open file descriptors
       - Process ID (only during startup)
 
-    This function is particularly useful for monitoring resource consumption during 
-    server lifecycle events, identifying memory leaks, resource exhaustion, or 
+    This function is particularly useful for monitoring resource consumption during
+    server lifecycle events, identifying memory leaks, resource exhaustion, or
     performance issues during stress testing and long-running operations.
 
     Args:
         log_tag (str): Tag to use in log message prefix (e.g., "app_lifespan" becomes "[app_lifespan]").
             This helps identify the source of the metric logs.
-        context (str): Context string describing when metrics are being collected (e.g., "startup", 
+        context (str): Context string describing when metrics are being collected (e.g., "startup",
             "shutdown", "periodic_check"). Special handling is applied for "shutdown" context.
 
     Example usage:
         # At server startup
         log_process_state("mcp_docs_server:app_lifespan", "startup")
-        
+
         # During server shutdown
         log_process_state("mcp_docs_server:app_lifespan", "shutdown")
-        
+
         # During periodic health check
         log_process_state("health_monitor", "hourly_check")
 
@@ -152,20 +153,14 @@ def log_process_state(log_tag: str, context: str) -> None:
         logging.info(
             f"[{log_tag}] {prefix}memory usage: {process.memory_info().rss / 1024 / 1024:.2f} MB"
         )
-        logging.info(
-            f"[{log_tag}] {prefix}CPU percent: {process.cpu_percent()}%"
-        )
-        logging.info(
-            f"[{log_tag}] {prefix}open file descriptors: {process.num_fds()}"
-        )
+        logging.info(f"[{log_tag}] {prefix}CPU percent: {process.cpu_percent()}%")
+        logging.info(f"[{log_tag}] {prefix}open file descriptors: {process.num_fds()}")
 
         # Only log PID during startup
         if context != "shutdown":
             logging.info(f"[{log_tag}] Process PID: {process.pid}")
     except Exception as e:
-        logging.error(
-            f"[{log_tag}] Error getting {context} process state: {e}"
-        )
+        logging.error(f"[{log_tag}] Error getting {context} process state: {e}")
 
 
 def setup_signal_handler_logging() -> None:
@@ -186,10 +181,10 @@ def setup_signal_handler_logging() -> None:
     Example usage:
         # In your main application entry point
         from deephaven_mcp._logging import setup_logging, setup_signal_handler_logging
-        
+
         # Set up logging before any other imports
         setup_logging()
-        
+
         # Set up signal handlers for improved shutdown diagnostics
         setup_signal_handler_logging()
 
@@ -216,18 +211,14 @@ def setup_signal_handler_logging() -> None:
             signum (int): The signal number that was received.
             frame (object): The current stack frame when the signal was received.
         """
-        import signal
         logging.warning(
             f"[signal_handler] Received signal {signum} ({signal.Signals(signum).name})"
         )
         logging.warning(f"[signal_handler] Signal frame: {frame}")
-        logging.warning(
-            "[signal_handler] Process will likely terminate soon"
-        )
+        logging.warning("[signal_handler] Process will likely terminate soon")
 
     # Register signal handlers for common termination signals
     try:
-        import signal
         registered_signals = []
         signal.signal(signal.SIGTERM, _signal_handler)
         registered_signals.append("SIGTERM")

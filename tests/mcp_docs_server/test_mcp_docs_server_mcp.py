@@ -337,8 +337,6 @@ async def test_app_lifespan_successful_cleanup(monkeypatch):
         mock_logger.info.assert_called()
 
 
-
-
 def test_log_asyncio_runtime_error_handling(monkeypatch):
     """Test _log_asyncio_and_thread_state RuntimeError handling for coverage."""
     monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
@@ -514,15 +512,19 @@ async def test_app_lifespan_diagnostic_logging_exception(monkeypatch):
 
     with patch("deephaven_mcp.mcp_docs_server._mcp._LOGGER") as mock_logger:
         # Mock log_process_state to raise an exception during diagnostic logging in except* block only
-        with patch(
-            "deephaven_mcp._logging.log_process_state"
-        ) as mock_log_process, patch(
-            "deephaven_mcp.mcp_docs_server._mcp._log_asyncio_and_thread_state"
-        ) as mock_log_asyncio:
+        with (
+            patch("deephaven_mcp._logging.log_process_state") as mock_log_process,
+            patch(
+                "deephaven_mcp.mcp_docs_server._mcp._log_asyncio_and_thread_state"
+            ) as mock_log_asyncio,
+        ):
             # Set up the mock to work during startup and shutdown, but fail during exception handling
             def side_effect_func(*args, **kwargs):
                 # Check if 'exception_group_time' is in any of the arguments
-                if "exception_group_time" in args or "exception_group_time" in kwargs.values():
+                if (
+                    "exception_group_time" in args
+                    or "exception_group_time" in kwargs.values()
+                ):
                     raise Exception("Diagnostic failed")
                 return None  # Work normally for startup and shutdown
 
@@ -541,8 +543,6 @@ async def test_app_lifespan_diagnostic_logging_exception(monkeypatch):
             mock_logger.error.assert_any_call(
                 "[mcp_docs_server:app_lifespan] Failed to log diagnostic state: Diagnostic failed"
             )
-
-
 
 
 @pytest.mark.asyncio
@@ -582,8 +582,11 @@ async def test_docs_chat_session_id_exception(monkeypatch):
     session_error = Exception("No valid session ID provided")
     dummy_client = DummyOpenAIClient(exc=session_error)
 
-    with patch("deephaven_mcp.mcp_docs_server._mcp._LOGGER") as mock_logger, patch(
-        "deephaven_mcp.mcp_docs_server._mcp.OpenAIClient", return_value=dummy_client
+    with (
+        patch("deephaven_mcp.mcp_docs_server._mcp._LOGGER") as mock_logger,
+        patch(
+            "deephaven_mcp.mcp_docs_server._mcp.OpenAIClient", return_value=dummy_client
+        ),
     ):
         result = await mcp_mod.docs_chat(context={}, prompt="test", history=None)
 
@@ -596,7 +599,9 @@ async def test_docs_chat_session_id_exception(monkeypatch):
             f"[mcp_docs_server:docs_chat] SESSION ERROR: {session_error} - This may indicate that a request was routed to an instance that doesn't have the session state. "
             f"Consider using a shared session store or constraining to a single instance."
         )
-        expected_generic_msg = f"[mcp_docs_server:docs_chat] Unexpected error: {session_error}"
+        expected_generic_msg = (
+            f"[mcp_docs_server:docs_chat] Unexpected error: {session_error}"
+        )
 
         # Use call_args_list to check the sequence of calls
         calls = mock_logger.exception.call_args_list
