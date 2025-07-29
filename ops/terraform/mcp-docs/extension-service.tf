@@ -11,6 +11,24 @@ resource "google_cloud_run_v2_service" "mcp_docs_service" {
   }
 
   template {
+    # TODO: revisit -- Cloud Run service request timeout.
+    # Request timeout for the Cloud Run service. Default is 300s (5 minutes).
+    # Maximum is 3600s (60 minutes). For long-running requests, such as those
+    # used by MCP persistent connections, a longer timeout is required to prevent
+    # premature disconnection.
+    # timeout = "3600s"
+    
+    # TODO: revisit -- Cloud Run service request concurrency.
+    # The number of concurrent requests a single container instance will handle.
+    # While this I/O-bound service can handle many concurrent tasks internally, this
+    # setting controls Cloud Run's scaling behavior. A lower value (e.g., 20)
+    # encourages Cloud Run to scale out (add more instances) sooner. This is a
+    # safer, more stable strategy for I/O-bound tasks that are not trivially
+    # lightweight, as it prevents any single instance from becoming a memory or
+    # resource bottleneck. The default is 80. This value should be tuned based
+    # on performance testing.
+    # max_instance_request_concurrency = 20
+    
     containers {
       image = var.image
 
@@ -18,6 +36,12 @@ resource "google_cloud_run_v2_service" "mcp_docs_service" {
         startup_cpu_boost = true
         limits = {
           memory = var.container_memory
+          # TODO: revisit -- Cloud Run service container CPU limit.
+          # The amount of CPU allocated to the container instance. Default is "1000m" (1 vCPU).
+          # Can be configured up to "8000m" (8 vCPUs). Increasing this to "2000m" (2 vCPUs)
+          # or higher is recommended for production environments or during stress tests
+          # to handle higher loads.
+          cpu = "2000m"
         }
       }
 
