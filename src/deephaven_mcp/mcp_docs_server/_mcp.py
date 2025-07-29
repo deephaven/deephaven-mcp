@@ -78,9 +78,17 @@ import threading
 import traceback
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+import json
+import logging
+import os
+import sys
+import traceback
+from typing import Any
 
 import anyio
 import psutil
+
+from deephaven_mcp._logging import log_process_state, setup_signal_handler_logging
 from mcp.server.fastmcp import Context, FastMCP
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -122,84 +130,7 @@ int: The port to bind the FastMCP server to. Defaults to 8001.
 Uses MCP_DOCS_PORT if set, otherwise falls back to PORT (for Cloud Run compatibility).
 """
 
-# TODO: move signal handlers to init.py or main.py
 
-
-# Set up signal handlers at module level to detect what's causing shutdown
-def _signal_handler(signum: int, frame: object) -> None:
-    """Signal handler to log received signals that might cause server shutdown.
-
-    This handler is registered for SIGTERM, SIGINT, and SIGHUP signals to provide
-    diagnostic information when the server process is being terminated. It logs
-    the signal number, name, and frame information to help diagnose unexpected
-    shutdowns during stress testing or production use.
-
-    Args:
-        signum (int): The signal number that was received.
-        frame (object): The current stack frame when the signal was received.
-    """
-    _LOGGER.warning(
-        f"[mcp_docs_server:signal_handler] Received signal {signum} ({signal.Signals(signum).name})"
-    )
-    _LOGGER.warning(f"[mcp_docs_server:signal_handler] Signal frame: {frame}")
-    _LOGGER.warning(
-        "[mcp_docs_server:signal_handler] Process will likely terminate soon"
-    )
-
-
-# Register signal handlers for common termination signals
-try:
-    registered_signals = []
-    signal.signal(signal.SIGTERM, _signal_handler)
-    registered_signals.append("SIGTERM")
-    signal.signal(signal.SIGINT, _signal_handler)
-    registered_signals.append("SIGINT")
-    if hasattr(signal, "SIGHUP"):
-        signal.signal(signal.SIGHUP, _signal_handler)
-        registered_signals.append("SIGHUP")
-    _LOGGER.info(
-        f"[mcp_docs_server:init] Signal handlers registered for: {', '.join(registered_signals)}"
-    )
-except Exception as e:
-    _LOGGER.warning(f"[mcp_docs_server:init] Failed to register signal handlers: {e}")
-
-
-def _log_process_state(context: str) -> None:
-    """Log current process resource state for debugging.
-
-    Logs memory usage, CPU percentage, open file descriptors, and process ID
-    to help diagnose resource issues during server lifecycle events. This is
-    particularly useful for identifying resource leaks or exhaustion during
-    stress testing.
-
-    Args:
-        context (str): Context string to include in log messages (e.g., "startup", "shutdown").
-
-    Note:
-        Process ID is only logged during startup to avoid log spam during shutdown.
-        All exceptions are caught and logged to prevent diagnostic failures from
-        affecting server operation.
-    """
-    try:
-        process = psutil.Process()
-        prefix = "Final " if context == "shutdown" else ""
-        _LOGGER.info(
-            f"[mcp_docs_server:app_lifespan] {prefix}memory usage: {process.memory_info().rss / 1024 / 1024:.2f} MB"
-        )
-        _LOGGER.info(
-            f"[mcp_docs_server:app_lifespan] {prefix}CPU percent: {process.cpu_percent()}%"
-        )
-        _LOGGER.info(
-            f"[mcp_docs_server:app_lifespan] {prefix}open file descriptors: {process.num_fds()}"
-        )
-
-        # Only log PID during startup
-        if context != "shutdown":
-            _LOGGER.info(f"[mcp_docs_server:app_lifespan] Process PID: {process.pid}")
-    except Exception as e:
-        _LOGGER.error(
-            f"[mcp_docs_server:app_lifespan] Error getting {context} process state: {e}"
-        )
 
 
 def _log_asyncio_and_thread_state(
@@ -345,7 +276,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
         )
 
     # Log initial process state
-    _log_process_state("startup")
+    log_process_state("mcp_docs_server:app_lifespan", "startup")
 
     # Log asyncio and threading state
     _log_asyncio_and_thread_state("startup")
@@ -398,7 +329,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
             _LOGGER.error(
                 "[mcp_docs_server:app_lifespan] Diagnostic state at time of exception group:"
             )
-            _log_process_state("exception_group_time")
+            log_process_state("mcp_docs_server:app_lifespan", "exception_group_time")
             _log_asyncio_and_thread_state(
                 "exception_group_time", warn_on_running_tasks=True
             )
@@ -411,14 +342,14 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
         raise
     finally:
         # Log final process and asyncio state before shutdown
-        _log_process_state("shutdown")
+        log_process_state("mcp_docs_server:app_lifespan", "shutdown")
         _log_asyncio_and_thread_state("shutdown", warn_on_running_tasks=True)
 
         _LOGGER.info("[mcp_docs_server:app_lifespan] MCP docs server shutting down")
 
 
 mcp_server = FastMCP(
-    "deephaven-mcp-docs", host=mcp_docs_host, port=mcp_docs_port, lifespan=app_lifespan
+    "deephaven-mcp-docs", host=mcp_docs_host, port=mcp_docs_port, lifespan=app_lifespan, stateless_http=True
 )
 """
 FastMCP: The primary server instance for the Deephaven MCP documentation tools.
@@ -438,6 +369,18 @@ Server Configuration:
     - Host: Controlled by MCP_DOCS_HOST environment variable (default: 127.0.0.1)
     - Port: Controlled by MCP_DOCS_PORT environment variable (default: 8001, fallback: PORT)
     - Lifespan: Managed by app_lifespan context manager with enhanced diagnostics
+    - stateless_http: Set to True for better scalability in Cloud Run environments
+
+Session Management:
+    - With stateless_http=True, the server operates in a stateless HTTP mode which is optimized for
+      horizontal scaling but has implications for session management.
+    - In stateless mode, session state is maintained in memory within each server instance.
+    - When running multiple instances (Cloud Run auto-scaling), sessions are NOT shared between instances.
+    - This can result in "No valid session ID provided" errors when requests from the same client
+      are routed to different instances that don't have the session state.
+    - For proper scaling, session state should be externalized to a shared store (e.g., Redis, Firestore).
+    - Current workaround: Configure Cloud Run with min_instance_count=1, max_instance_count=1 to ensure
+      all requests are handled by the same instance (sacrificing scalability for session consistency).
 
 Architecture Features:
     - Per-request OpenAI client creation prevents connection pool exhaustion
@@ -910,6 +853,12 @@ async def docs_chat(
         _LOGGER.exception(f"[mcp_docs_server:docs_chat] OpenAI client error: {exc}")
         return {"success": False, "error": f"OpenAIClientError: {exc}", "isError": True}
     except Exception as exc:
+        # Enhanced error logging for session-related errors
+        if "No valid session ID provided" in str(exc):
+            _LOGGER.exception(
+                f"[mcp_docs_server:docs_chat] SESSION ERROR: {exc} - This may indicate that a request was routed to an instance that doesn't have the session state. "
+                f"Consider using a shared session store or constraining to a single instance."
+            )
         _LOGGER.exception(f"[mcp_docs_server:docs_chat] Unexpected error: {exc}")
         return {
             "success": False,

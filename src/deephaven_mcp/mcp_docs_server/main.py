@@ -7,7 +7,7 @@ It provides a command-line interface to launch the server with a specified trans
 See the project README for configuration details, available tools, and usage examples.
 """
 
-from .._logging import setup_global_exception_logging, setup_logging  # noqa: E402
+from .._logging import setup_signal_handler_logging, setup_global_exception_logging, setup_logging  # noqa: E402
 
 # Ensure logging is set up before any other imports
 setup_logging()
@@ -18,6 +18,9 @@ from .._monkeypatch import monkeypatch_uvicorn_exception_handling  # noqa: E402
 
 # Ensure Uvicorn's exception handling is patched before any server code runs
 monkeypatch_uvicorn_exception_handling()
+
+# Register signal handlers for improved debugging of termination signals
+setup_signal_handler_logging()
 
 import argparse  # noqa: E402
 import logging  # noqa: E402

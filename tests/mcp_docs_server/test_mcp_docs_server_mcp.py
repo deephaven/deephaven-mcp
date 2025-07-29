@@ -337,48 +337,6 @@ async def test_app_lifespan_successful_cleanup(monkeypatch):
         mock_logger.info.assert_called()
 
 
-@pytest.mark.asyncio
-async def test_signal_handler_coverage(monkeypatch):
-    """Test signal handler function for coverage."""
-    monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
-    sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
-    import signal
-
-    import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
-
-    with patch("deephaven_mcp.mcp_docs_server._mcp._LOGGER") as mock_logger:
-        # Test the signal handler function directly
-        frame = MagicMock()
-        mcp_mod._signal_handler(signal.SIGTERM, frame)
-
-        # Verify all three warning messages are logged
-        assert mock_logger.warning.call_count == 3
-        mock_logger.warning.assert_any_call(
-            "[mcp_docs_server:signal_handler] Received signal 15 (SIGTERM)"
-        )
-        mock_logger.warning.assert_any_call(
-            f"[mcp_docs_server:signal_handler] Signal frame: {frame}"
-        )
-        mock_logger.warning.assert_any_call(
-            "[mcp_docs_server:signal_handler] Process will likely terminate soon"
-        )
-
-
-def test_signal_handler_registration_failure(monkeypatch):
-    """Test signal handler registration failure for coverage."""
-    monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
-
-    # Remove the module first
-    sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
-
-    # Mock signal.signal to raise an exception during module import
-    with patch("signal.signal", side_effect=OSError("Signal registration failed")):
-        # Import the module to trigger signal registration
-        # The warning should be logged during import (lines 127-128)
-        importlib.import_module("deephaven_mcp.mcp_docs_server._mcp")
-
-        # Test passes if no exception is raised during import
-        # The actual warning logging is verified by the coverage report
 
 
 def test_log_asyncio_runtime_error_handling(monkeypatch):
@@ -555,17 +513,21 @@ async def test_app_lifespan_diagnostic_logging_exception(monkeypatch):
     import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
 
     with patch("deephaven_mcp.mcp_docs_server._mcp._LOGGER") as mock_logger:
-        # Mock _log_process_state to raise an exception during diagnostic logging in except* block only
+        # Mock log_process_state to raise an exception during diagnostic logging in except* block only
         with patch(
-            "deephaven_mcp.mcp_docs_server._mcp._log_process_state"
-        ) as mock_log_process:
+            "deephaven_mcp._logging.log_process_state"
+        ) as mock_log_process, patch(
+            "deephaven_mcp.mcp_docs_server._mcp._log_asyncio_and_thread_state"
+        ) as mock_log_asyncio:
             # Set up the mock to work during startup and shutdown, but fail during exception handling
-            def side_effect_func(context):
-                if context == "exception_group_time":
+            def side_effect_func(*args, **kwargs):
+                # Check if 'exception_group_time' is in any of the arguments
+                if "exception_group_time" in args or "exception_group_time" in kwargs.values():
                     raise Exception("Diagnostic failed")
                 return None  # Work normally for startup and shutdown
 
             mock_log_process.side_effect = side_effect_func
+            mock_log_asyncio.side_effect = side_effect_func
 
             with pytest.raises(ExceptionGroup) as exc_info:
                 async with mcp_mod.app_lifespan(None) as context:
@@ -581,22 +543,6 @@ async def test_app_lifespan_diagnostic_logging_exception(monkeypatch):
             )
 
 
-def test_log_process_state_exception_handling(monkeypatch):
-    """Test _log_process_state exception handling for coverage."""
-    monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
-    sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
-    import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
-
-    # Mock psutil.Process to raise an exception (lines 161-162)
-    with patch("psutil.Process", side_effect=Exception("Process access failed")):
-        with patch("deephaven_mcp.mcp_docs_server._mcp._LOGGER") as mock_logger:
-            # Call the helper function that should handle the exception
-            mcp_mod._log_process_state("test")
-
-            # Verify error was logged
-            mock_logger.error.assert_called_with(
-                "[mcp_docs_server:app_lifespan] Error getting test process state: Process access failed"
-            )
 
 
 @pytest.mark.asyncio
