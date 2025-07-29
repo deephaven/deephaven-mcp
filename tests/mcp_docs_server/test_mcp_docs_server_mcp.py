@@ -570,3 +570,36 @@ async def test_dependency_version_logging_exception(monkeypatch):
             mock_logger.warning.assert_any_call(
                 "[mcp_docs_server:app_lifespan] Could not get dependency versions: Uvicorn module not found"
             )
+
+
+@pytest.mark.asyncio
+async def test_docs_chat_session_id_exception(monkeypatch):
+    """Test docs_chat handles session ID exceptions with special logging (line 858)."""
+    monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
+    sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
+    import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
+
+    session_error = Exception("No valid session ID provided")
+    dummy_client = DummyOpenAIClient(exc=session_error)
+
+    with patch("deephaven_mcp.mcp_docs_server._mcp._LOGGER") as mock_logger, patch(
+        "deephaven_mcp.mcp_docs_server._mcp.OpenAIClient", return_value=dummy_client
+    ):
+        result = await mcp_mod.docs_chat(context={}, prompt="test", history=None)
+
+        assert not result["success"]
+        assert "No valid session ID provided" in result["error"]
+
+        # Check that the special log message was recorded (line 858)
+        # and also that the generic one was called right after.
+        expected_session_msg = (
+            f"[mcp_docs_server:docs_chat] SESSION ERROR: {session_error} - This may indicate that a request was routed to an instance that doesn't have the session state. "
+            f"Consider using a shared session store or constraining to a single instance."
+        )
+        expected_generic_msg = f"[mcp_docs_server:docs_chat] Unexpected error: {session_error}"
+
+        # Use call_args_list to check the sequence of calls
+        calls = mock_logger.exception.call_args_list
+        assert len(calls) == 2
+        assert calls[0].args[0] == expected_session_msg
+        assert calls[1].args[0] == expected_generic_msg
