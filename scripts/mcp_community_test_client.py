@@ -1,7 +1,7 @@
 """
 mcp_community_test_client.py
 
-Async Python client for discovering and calling all tools on an MCP (Model Context Protocol) server using SSE or stdio transport.
+Async Python client for discovering and calling all tools on an MCP (Model Context Protocol) server using streamable-http, SSE, or stdio transport.
 
 Features:
 - Connects to a running MCP server via SSE endpoint or spawns a stdio server process.
@@ -11,15 +11,18 @@ Features:
 - Requires `autogen-ext[mcp]` to be installed.
 
 Usage examples:
-    # Connect via SSE (default)
+    # Connect via streamable-http (default)
+    $ python mcp_community_test_client.py --transport streamable-http --url http://localhost:8000/mcp
+
+    # Connect via SSE
     $ python mcp_community_test_client.py --transport sse --url http://localhost:8000/sse
 
     # Connect via stdio
     $ python mcp_community_test_client.py --transport stdio --stdio-cmd "uv run dh-mcp-systems --transport stdio" --env DH_MCP_CONFIG_FILE=/path/to/file.json
 
 Arguments:
-    --transport   Transport type: 'sse' (default) or 'stdio'.
-    --url         SSE server URL (default: http://localhost:8000/sse).
+    --transport   Transport type: 'streamable-http' (default), 'sse', or 'stdio'.
+    --url         HTTP server URL (auto-detected: http://localhost:8000/mcp for streamable-http, http://localhost:8000/sse for SSE).
     --stdio-cmd   Command to launch stdio server (default: uv run dh-mcp-systems --transport stdio).
     --env         Environment variable for stdio, format KEY=VALUE. Can be specified multiple times.
 
@@ -30,10 +33,20 @@ See the project README for further details.
 
 import argparse
 import asyncio
+import logging
 import shlex
+import sys
 
 from autogen_core import CancellationToken
 from autogen_ext.tools.mcp import SseServerParams, StdioServerParams, mcp_server_tools
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+_LOGGER = logging.getLogger(__name__)
 
 
 def parse_args():
@@ -42,22 +55,25 @@ def parse_args():
 
     Returns:
         argparse.Namespace: Parsed arguments with fields:
-            - transport: 'sse' or 'stdio'
-            - url: SSE server URL
+            - transport: Transport type ('streamable-http', 'sse', or 'stdio')
+            - url: HTTP server URL (auto-detected if not specified)
             - stdio_cmd: Command to launch stdio server
             - env: List of environment variable strings (KEY=VALUE)
+            - token: Optional authorization token for HTTP transports
     """
     parser = argparse.ArgumentParser(
         description="MCP test client for SSE or stdio server"
     )
     parser.add_argument(
         "--transport",
-        choices=["sse", "stdio"],
-        default="sse",
-        help="Transport type (sse or stdio)",
+        choices=["sse", "stdio", "streamable-http"],
+        default="streamable-http",
+        help="Transport type (sse, stdio, or streamable-http)",
     )
     parser.add_argument(
-        "--url", default="http://localhost:8000/sse", help="SSE server URL"
+        "--url",
+        default=None,
+        help="HTTP server URL (auto-detected based on transport if not specified)",
     )
     parser.add_argument(
         "--stdio-cmd",
@@ -69,6 +85,11 @@ def parse_args():
         action="append",
         default=[],
         help="Environment variable for stdio transport, format KEY=VALUE. Can be specified multiple times.",
+    )
+    parser.add_argument(
+        "--token",
+        default=None,
+        help="Optional authorization token for HTTP transports (Bearer token)",
     )
     return parser.parse_args()
 
@@ -85,11 +106,22 @@ async def main():
     """
     args = parse_args()
 
-    if args.transport == "sse":
+    # Auto-detect URL based on transport if not specified
+    if args.url is None:
+        if args.transport == "sse":
+            args.url = "http://localhost:8000/sse"
+        elif args.transport == "streamable-http":
+            args.url = "http://localhost:8000/mcp"
+        # stdio doesn't need a URL
+
+    if args.transport in ["sse", "streamable-http"]:
+        headers = {}
+        if args.token:
+            headers["Authorization"] = f"Bearer {args.token}"
         server_params = SseServerParams(
-            url=args.url, headers={"Authorization": "Bearer YOUR_TOKEN"}  # Optional
+            url=args.url, headers=headers if headers else None
         )
-    else:
+    else:  # stdio
         # Parse env vars from --env KEY=VALUE
         env_dict = {}
         for item in args.env:
@@ -108,34 +140,45 @@ async def main():
             command=stdio_command, args=stdio_args, env=env_dict if env_dict else None
         )
 
+    _LOGGER.info(f"Connecting to MCP Systems server via {args.transport} transport")
+    if args.transport in ["sse", "streamable-http"]:
+        _LOGGER.info(f"Server URL: {args.url}")
+
     tools = await mcp_server_tools(server_params)
 
     # List all tools
+    _LOGGER.info(f"Available tools: {[t.name for t in tools]}")
     print("Available tools:", [t.name for t in tools])
 
     # Build a map for tool lookup by name
     tool_map = {t.name: t for t in tools}
 
     # 1. refresh
+    _LOGGER.info("Testing tool: refresh")
     print("\nCalling tool: refresh")
     if "refresh" in tool_map:
         try:
             result = await tool_map["refresh"].run_json(
                 {}, cancellation_token=CancellationToken()
             )
+            _LOGGER.info("refresh tool call completed successfully")
             print(f"Result for refresh: {result}")
         except Exception as e:
+            _LOGGER.error(f"Error calling refresh: {e}")
             print(f"Error calling refresh: {e}")
 
     # 2. default_worker
+    _LOGGER.info("Testing tool: default_worker")
     print("\nCalling tool: default_worker")
     if "default_worker" in tool_map:
         try:
             result = await tool_map["default_worker"].run_json(
                 {}, cancellation_token=CancellationToken()
             )
+            _LOGGER.info("default_worker tool call completed successfully")
             print(f"Result for default_worker: {result}")
         except Exception as e:
+            _LOGGER.error(f"Error calling default_worker: {e}")
             print(f"Error calling default_worker: {e}")
 
     # 3. worker_names
@@ -208,4 +251,14 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        _LOGGER.info("Starting MCP Community test client")
+        asyncio.run(main())
+        _LOGGER.info("Test client completed successfully")
+    except KeyboardInterrupt:
+        _LOGGER.info("Interrupted by user")
+        print("\nInterrupted by user.", file=sys.stderr)
+    except Exception as e:
+        _LOGGER.error(f"Fatal error in main: {e}")
+        print(f"Fatal error in main: {e}", file=sys.stderr)
+        raise

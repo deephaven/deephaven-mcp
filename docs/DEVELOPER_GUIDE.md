@@ -10,7 +10,7 @@ This repository houses the Python-based Model Context Protocol (MCP) servers for
 1. **Deephaven MCP Systems Server**: Orchestrates Deephaven Community Core worker nodes.
 2. **Deephaven MCP Docs Server**: Provides conversational Q&A about Deephaven documentation.
 
-> **Requirements**: [Python](https://www.python.org/) 3.10 or later is required to run these servers.
+> **Requirements**: [Python](https://www.python.org/) 3.11 or later is required to run these servers.
 
 ---
 
@@ -126,16 +126,19 @@ Both servers are designed for integration with MCP-compatible tools like the [MC
 ### Key Features
 
 **Systems Server Features:**
-* **MCP Server:** Implements the MCP protocol for Deephaven Community Core workers
-* **Multiple Transports:** Supports both SSE (for web) and stdio (for local/subprocess) communication
+* **MCP Server:** Implements the MCP protocol for Deephaven Community Core and Enterprise systems
+* **stdio Transport:** Designed for stdio-based MCP clients like Claude Desktop (typical usage)
+* **Multiple Transports:** Also supports streamable-http and SSE for advanced use cases
 * **Configurable:** Loads worker configuration from a JSON file or environment variable
 * **Async Lifecycle:** Uses FastMCP's async lifespan for robust startup and shutdown handling
 * **Lazy Loading:** Sessions are created on-demand to improve startup performance and resilience
 
 **Docs Server Features:**
 * **MCP-compatible server** for documentation Q&A and chat
-* **LLM-powered:** Uses Inkeep/OpenAI APIs
-* **FastAPI backend:** Deployable locally or via Docker
+* **Multiple Transports:** Supports streamable-http (default), SSE, and stdio for flexible integration
+* **HTTP-first Design:** Optimized for streamable-http transport with stateless operation
+* **LLM-powered:** Uses Inkeep/OpenAI APIs for conversational documentation assistance
+* **FastMCP backend:** Built on FastMCP framework, deployable locally or via Docker
 * **Single tool:** `docs_chat` for conversational documentation assistance
 * **Extensible:** Python-based for adding new tools or extending context
 
@@ -145,22 +148,35 @@ Both servers are designed for integration with MCP-compatible tools like the [MC
 
 ```mermaid
 graph TD
-    A[Clients: MCP Inspector / Claude Desktop / etc.] -- SSE/stdio (MCP) --> B(MCP Systems Server);
+    A[MCP Clients (Claude Desktop, etc.)] -- stdio (MCP) --> B(MCP Systems Server);
     B -- Manages --> C(Deephaven Community Core Worker 1);
     B -- Manages --> D(Deephaven Community Core Worker N);
+    B -- Manages --> E(Deephaven Enterprise System 1);
+    B -- Manages --> F(Deephaven Enterprise System N);
+    E -- Manages --> G(Enterprise Worker 1.1);
+    E -- Manages --> H(Enterprise Worker 1.N);
+    F -- Manages --> I(Enterprise Worker N.1);
+    F -- Manages --> J(Enterprise Worker N.N);
 ```
 
-Clients (Inspector, Claude Desktop) connect to the MCP Server via SSE or stdio. The MCP Server manages multiple Deephaven Community Core workers. The architecture allows for scalable worker management and flexible client integrations.
+**Typical Usage:**
+Most users connect to the Systems Server via stdio transport (the default for tools like Claude Desktop). The Systems Server manages both Deephaven Community Core workers and Deephaven Enterprise systems. Each enterprise system can manage multiple enterprise workers, providing comprehensive session management, table operations, and script execution across your entire Deephaven infrastructure.
 
 **Docs Server Architecture:**
 
 ```mermaid
 graph TD
-    A[User/Client/API] -- HTTP/MCP --> B(MCP Docs Server - FastAPI, LLM);
-    B -- Accesses --> C[Deephaven Documentation Corpus];
+    A[MCP Clients with streamable-http support] -- streamable-http (direct) --> B(MCP Docs Server);
+    C[MCP Clients without streamable-http support] -- stdio --> D[mcp-proxy];
+    D -- streamable-http --> B;
+    B -- Accesses --> E[Deephaven Documentation Corpus via Inkeep API];
 ```
 
-Users or API clients send natural language questions or documentation queries over HTTP using the Model Context Protocol (MCP). These requests are received by the server, which is built on FastAPI and powered by a large language model (LLM) via the Inkeep API.
+**Transport Options:**
+- **Direct streamable-http**: Modern MCP clients that support streamable-http can connect directly for optimal performance and scalability
+- **Proxy-based streamable-http**: Clients without native streamable-http support can use mcp-proxy to bridge stdio to streamable-http
+
+The MCP Docs Server processes natural language questions about Deephaven documentation using LLM capabilities via the Inkeep API.
 
 ## Quick Start Guide
 
@@ -198,7 +214,7 @@ Users or API clients send natural language questions or documentation queries ov
    ```sh
    npx @modelcontextprotocol/inspector@latest
    ```
-   Connect to `http://localhost:8000/sse` in the Inspector UI.
+   Connect to `http://localhost:8000/mcp` (for streamable-http) or `http://localhost:8000/sse` (for SSE) in the Inspector UI.
 
 ### Docs Server Quick Start
 
@@ -209,14 +225,14 @@ Users or API clients send natural language questions or documentation queries ov
    
 2. **Run the Docs Server:**
    ```sh
-   uv run dh-mcp-docs-server --transport sse
+   uv run dh-mcp-docs-server --transport streamable-http
    ```
 
 3. **Test with the MCP Inspector:**
    ```sh
    npx @modelcontextprotocol/inspector@latest
    ```
-   Connect to `http://localhost:8000/sse` in the Inspector UI and test the `docs_chat` tool.
+   Connect to `http://localhost:8001/mcp` (for streamable-http) or `http://localhost:8001/sse` (for SSE) in the Inspector UI and test the `docs_chat` tool.
 
 ## Command Line Entry Points
 
@@ -395,19 +411,26 @@ Follow these steps to start the Systems Server:
 
 2. **Start the MCP Systems Server**:
    ```sh
-   uv run dh-mcp-systems-server --transport sse --port 8000
+   DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json uv run dh-mcp-systems-server
    ```
 
-   Remember to set `DH_MCP_CONFIG_FILE` first.
+   The Systems Server uses stdio transport by default (suitable for Claude Desktop and similar tools).
 
 ##### CLI Arguments
 
 | Argument | Description | Default |
 |----------|-------------|---------|
-| `-t, --transport` | Transport type (`sse` or `stdio`) | `stdio` |
+| `-t, --transport` | Transport type (`stdio`, `sse`, or `streamable-http`) | `stdio` |
 | `-h, --help` | Show help message | - |
 
-> **Note:** When using SSE transport, the server binds to port 8000 by default. This can be modified by setting the `PORT` environment variable.
+> **Note:** When using HTTP transports (streamable-http or SSE), the server binds to port 8000 by default. This can be modified by setting the `PORT` environment variable.
+
+*   **stdio Transport (Default):**
+    ```sh
+    DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json uv run dh-mcp-systems-server
+    # or explicitly
+    DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json uv run dh-mcp-systems-server --transport stdio
+    ```
 
 *   **SSE Transport (for web/Inspector):**
     ```sh
@@ -419,9 +442,16 @@ Follow these steps to start the Systems Server:
     # or
     uv run dh-mcp-systems-server --transport sse --port 8001
     ```
-*   **stdio Transport (for direct/subprocess use):**
+
+*   **Streamable-HTTP Transport (advanced use):**
     ```sh
-    DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json uv run dh-mcp-systems-server --transport stdio
+    # Default port (8000)
+    DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json uv run dh-mcp-systems-server --transport streamable-http
+    
+    # Custom port (8001)
+    PORT=8001 DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json uv run dh-mcp-systems-server --transport streamable-http
+    # or
+    uv run dh-mcp-systems-server --transport streamable-http --port 8001
     ```
 
 #### Using the Systems Server
@@ -746,13 +776,16 @@ uv run scripts/mcp_community_test_client.py --transport {sse|stdio|streamable-ht
 ```
 
 **Key Arguments:**
-* `--transport`: Choose `sse` (default) or `stdio`
+* `--transport`: Choose `streamable-http` (default), `sse`, or `stdio`
 * `--env`: Pass environment variables as `KEY=VALUE` (e.g., `DH_MCP_CONFIG_FILE=/path/to/config.json`). Can be repeated for multiple variables
-* `--url`: URL for SSE server (default: `http://localhost:8000/sse`)
+* `--url`: URL for HTTP server (default: `http://localhost:8000/mcp` for streamable-http, `http://localhost:8000/sse` for SSE)
 * `--stdio-cmd`: Command to launch stdio server (default: `uv run dh-mcp-systems-server --transport stdio`)
 
 **Example Usage:**
 ```sh
+# Connect to running streamable-http server (default)
+uv run scripts/mcp_community_test_client.py --transport streamable-http --url http://localhost:8000/mcp
+
 # Connect to running SSE server
 uv run scripts/mcp_community_test_client.py --transport sse --url http://localhost:8000/sse
 
@@ -766,7 +799,9 @@ uv run scripts/mcp_community_test_client.py --transport stdio --env DH_MCP_CONFI
 > - For troubleshooting connection issues, see [Common Errors & Solutions](#common-errors--solutions)
 
 > 💡 **Tips:** 
-> - Use stdio mode in CI/CD pipelines and SSE mode for interactive development
+> - Use stdio mode in CI/CD pipelines and HTTP modes (streamable-http, SSE) for interactive development
+> - Streamable-http (default) provides optimal performance and scalability
+> - SSE mode is useful for interactive testing with MCP Inspector
 > - Environment variables can be set in your shell or passed via `--env` parameter
 > - For multiple environment variables, use `--env` multiple times: `--env VAR1=value1 --env VAR2=value2`
 
@@ -815,7 +850,7 @@ The MCP Docs Server requires an Inkeep API key for accessing documentation and g
 - **`INKEEP_API_KEY`**: (Required) Your Inkeep API key for accessing the documentation assistant. This is the primary API used by the `docs_chat` tool and must be set.
 - **`OPENAI_API_KEY`**: (Optional) Your OpenAI API key as a fallback option. If provided, the system will attempt to use OpenAI's services if the Inkeep API call fails, providing redundancy.
 - **`PYTHONLOGLEVEL`**: (Optional) Set to 'DEBUG', 'INFO', 'WARNING', etc. to control logging verbosity. Useful for troubleshooting issues.
-- **`PORT`**: (Optional) Port for the [FastAPI](https://fastapi.tiangolo.com/) HTTP server (powered by [Uvicorn](https://www.uvicorn.org/)) when using SSE transport mode (default: `8000`). This setting only affects the server when running in SSE mode and has no effect on stdio mode. It controls which port the `/health` endpoint and SSE connections will be available on.
+- **`PORT`**: (Optional) Port for the MCP HTTP server (powered by [Uvicorn](https://www.uvicorn.org/)) when using streamable-http or SSE transport modes (default: `8001`). This setting only affects the server when running in HTTP-based modes and has no effect on stdio mode. It controls which port the `/health` endpoint and HTTP connections will be available on.
 
 ##### Example Configuration
 
@@ -840,9 +875,21 @@ Ensure `INKEEP_API_KEY` is set before running the Docs Server.
 
 | Argument | Description | Default |
 |----------|-------------|---------|
-| `-t, --transport` | Transport type (`sse` or `stdio`) | `stdio` |
-| `-p, --port` | Port for SSE server (overrides PORT env var) | `8000` |
+| `-t, --transport` | Transport type (`streamable-http`, `sse`, or `stdio`) | `streamable-http` |
+| `-p, --port` | Port for HTTP server (overrides PORT env var) | `8001` |
 | `-h, --help` | Show help message | - |
+
+##### Streamable-HTTP Transport Mode (Default)
+
+```sh
+# Default port (8000)
+INKEEP_API_KEY=your-api-key uv run dh-mcp-docs-server --transport streamable-http
+
+# Custom port (8001)
+INKEEP_API_KEY=your-api-key uv run dh-mcp-docs-server --transport streamable-http --port 8001
+# or
+PORT=8001 INKEEP_API_KEY=your-api-key uv run dh-mcp-docs-server --transport streamable-http
+```
 
 ##### SSE Transport Mode
 
@@ -862,7 +909,7 @@ PORT=8001 INKEEP_API_KEY=your-api-key uv run dh-mcp-docs-server --transport sse
 INKEEP_API_KEY=your-api-key uv run dh-mcp-docs-server --transport stdio
 ```
 
-> **Note:** The SSE transport is useful for interactive testing with tools like MCP Inspector, while stdio transport is better for integration with LLM platforms like Claude.
+> **Note:** The streamable-http transport (default) provides stateless streaming HTTP for optimal performance and scalability. SSE transport is useful for interactive testing with tools like MCP Inspector, while stdio transport is better for integration with LLM platforms like Claude.
 
 #### Docs Server Tools
 
@@ -919,7 +966,7 @@ async def get_docs_answer():
 
 **Example Usage:**
 ```bash
-curl http://localhost:8000/health
+curl http://localhost:8001/health
 # Response: {"status": "ok"}
 ```
 
@@ -929,7 +976,7 @@ curl http://localhost:8000/health
 - **Returns**: JSON response `{"status": "ok"}` with HTTP 200 status code
 - **Usage**: Used by load balancers, orchestrators, or monitoring tools to verify the server is running
 - **Implementation**: Defined using `@mcp_server.custom_route("/health", methods=["GET"])` decorator in the source code
-- **Availability**: Available in both SSE and stdio transport modes, but only accessible via HTTP when using SSE transport
+- **Availability**: Only available when using HTTP-based transports (streamable-http or SSE). Not available in stdio mode
 - **Authentication**: No authentication or parameters required
 - **Deployment**: Intended for use as a liveness or readiness probe in Kubernetes, Cloud Run, or similar environments
 - **Note**: This endpoint is only available in the Docs Server, not in the Systems Server
@@ -943,17 +990,20 @@ A Python script is provided for testing the MCP Docs tool and validating server 
 **Script Location**: [`../scripts/mcp_docs_test_client.py`](../scripts/mcp_docs_test_client.py)
 
 **Arguments:**
-- `--transport`: Choose `sse` or `stdio` (default: `sse`)
+- `--transport`: Choose `streamable-http`, `sse`, or `stdio` (default: `streamable-http`)
 - `--env`: Pass environment variables as `KEY=VALUE` (can be repeated; for stdio mode)
-- `--url`: URL for SSE server (default: `http://localhost:8000/sse`)
+- `--url`: URL for HTTP server (default: `http://localhost:8001/mcp` for streamable-http, `http://localhost:8001/sse` for SSE)
 - `--stdio-cmd`: Command to launch stdio server (default: `uv run dh-mcp-docs-server --transport stdio`)
 - `--prompt`: Prompt/question to send to the docs_chat tool (required)
 - `--history`: Optional chat history (JSON string) for multi-turn conversations
 
 **Example Usage:**
 ```sh
-# Connect to a running SSE server
+# Connect to a running streamable-http server (default)
 uv run scripts/mcp_docs_test_client.py --prompt "What is Deephaven?"
+
+# Connect to a running SSE server
+uv run scripts/mcp_docs_test_client.py --transport sse --prompt "What is Deephaven?"
 
 # Launch a new stdio server with environment variables set
 uv run scripts/mcp_docs_test_client.py --transport stdio \
@@ -991,8 +1041,12 @@ The [MCP Inspector](https://github.com/modelcontextprotocol/inspector) is a web-
    uv run scripts/run_deephaven_test_server.py --table-group simple
    ```
 
-2. **Start the MCP Community server in SSE mode** (in another terminal):
+2. **Start the MCP Systems server** (in another terminal):
    ```sh
+   # Using streamable-http (default)
+   DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json uv run dh-mcp-systems-server --transport streamable-http
+   
+   # Or using SSE
    DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json uv run dh-mcp-systems-server --transport sse
    ```
 
@@ -1001,15 +1055,19 @@ The [MCP Inspector](https://github.com/modelcontextprotocol/inspector) is a web-
    npx @modelcontextprotocol/inspector@latest
    ```
 
-4. **Connect to the MCP server via SSE**:
+4. **Connect to the MCP server**:
    - Open the Inspector in your browser (URL shown in terminal, typically `http://localhost:6274`)
-   - In the Inspector UI, select "Connect" and enter the SSE URL (e.g., `http://localhost:8000/sse`)
+   - In the Inspector UI, select "Connect" and enter the server URL (e.g., `http://localhost:8000/mcp` for streamable-http or `http://localhost:8000/sse` for SSE)
    - Explore and invoke tools like `refresh`, `enterprise_systems_status`, `list_sessions`, `table_schemas` and `run_script`
 
 #### With Docs Server
 
-1. **Start the MCP Docs server in SSE mode** (in a terminal):
+1. **Start the MCP Docs server** (in a terminal):
    ```sh
+   # Using streamable-http (default)
+   INKEEP_API_KEY=your-api-key uv run dh-mcp-docs-server --transport streamable-http
+   
+   # Or using SSE for interactive testing
    INKEEP_API_KEY=your-api-key uv run dh-mcp-docs-server --transport sse
    ```
 
@@ -1018,9 +1076,9 @@ The [MCP Inspector](https://github.com/modelcontextprotocol/inspector) is a web-
    npx @modelcontextprotocol/inspector@latest
    ```
 
-3. **Connect to the MCP server via SSE**:
+3. **Connect to the MCP server**:
    - Open the Inspector in your browser (URL shown in terminal, typically `http://localhost:6274`)
-   - In the Inspector UI, select "Connect" and enter the SSE URL (e.g., `http://localhost:8000/sse`)
+   - In the Inspector UI, select "Connect" and enter the server URL (e.g., `http://localhost:8001/mcp` for streamable-http or `http://localhost:8001/sse` for SSE)
    - Explore and invoke the `docs_chat` tool to ask questions about Deephaven documentation
 
 ### Claude Desktop
@@ -1078,18 +1136,31 @@ For troubleshooting Claude Desktop MCP integration, log files are located at:
 
 ### mcp-proxy
 
-[mcp-proxy](https://github.com/modelcontextprotocol/mcp-proxy) can bridge an MCP server's SSE endpoint to stdio for tools like Claude Desktop. This is useful when connecting to tools that don't natively support SSE. The `mcp-proxy` utility is included as a dependency in this project.
+[mcp-proxy](https://github.com/modelcontextprotocol/mcp-proxy) enables MCP clients that only support stdio to connect to servers using HTTP-based transports (streamable-http or SSE). This is essential for tools like Claude Desktop that don't natively support streamable-http but can benefit from the performance advantages of the streamable-http transport. The `mcp-proxy` utility is included as a dependency in this project.
+
+**Use Cases:**
+- **Claude Desktop Integration**: Bridge stdio-only Claude Desktop to streamable-http servers for optimal performance
+- **Legacy Client Support**: Enable older MCP clients to use modern streamable-http transport
+- **Development Testing**: Test streamable-http servers with stdio-based tooling
 
 #### With Systems Server
 
-1. Ensure the MCP Systems Server is running in SSE mode:
+1. Ensure the MCP Systems Server is running in HTTP mode:
    ```sh
+   # Using streamable-http (default)
+   DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json uv run dh-mcp-systems-server --transport streamable-http
+   
+   # Or using SSE
    DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json uv run dh-mcp-systems-server --transport sse
    ```
 
 2. Run `mcp-proxy` to connect to your running MCP server:
    ```sh
-   mcp-proxy --server-url http://localhost:8000/sse --stdio
+   # For streamable-http (default)
+   mcp-proxy --transport=streamablehttp http://localhost:8000/mcp
+   
+   # For SSE
+   mcp-proxy http://localhost:8000/sse
    ```
    (Replace URL if your server runs elsewhere)
 
@@ -1097,14 +1168,22 @@ For troubleshooting Claude Desktop MCP integration, log files are located at:
 
 #### With Docs Server
 
-1. Ensure the MCP Docs Server is running in SSE mode:
+1. Ensure the MCP Docs Server is running in HTTP mode:
    ```sh
+   # Using streamable-http (default)
+   INKEEP_API_KEY=your-api-key uv run dh-mcp-docs-server --transport streamable-http
+   
+   # Or using SSE
    INKEEP_API_KEY=your-api-key uv run dh-mcp-docs-server --transport sse
    ```
 
 2. Run `mcp-proxy`:
    ```sh
-   mcp-proxy --server-url http://localhost:8000/sse --stdio
+   # For streamable-http (default)
+   mcp-proxy --transport=streamablehttp http://localhost:8001/mcp
+   
+   # For SSE
+   mcp-proxy http://localhost:8001/sse
    ```
 
 3. Configure your client (e.g., Claude Desktop) to use the stdio interface provided by `mcp-proxy`
@@ -1126,6 +1205,7 @@ from deephaven_mcp.mcp_systems_server._mcp import refresh, enterprise_systems_st
 result = enterprise_systems_status(context)  # Requires MCP context
 
 # Or start the server with a specific transport
+run_server(transport="streamable-http")  # Starts streamable-http server (default)
 run_server(transport="sse")  # Starts SSE server
 ```
 
@@ -1148,6 +1228,8 @@ async def get_answer():
     return response
 
 # Or start the server with a specific transport
+run_server(transport="streamable-http")  # Starts streamable-http server (default)
+run_server(transport="sse")  # Starts SSE server
 run_server(transport="stdio")  # Starts stdio server
 ```
 
@@ -1335,9 +1417,7 @@ deephaven-mcp/
 │       ├── mcp_docs_server/    # Source for the Docs MCP server
 │       ├── mcp_systems_server/ # Source for the Systems MCP server
 │       ├── resource_manager/   # Resource (session, etc.) management
-│       │   ├── __init__.py         # Public API for resource management
-│       │   ├── _base.py            # Base classes for resource managers
-│       │   └── _registries.py      # Resource registries and factories
+│       ├── sessions/           # Session management components
 │       ├── __init__.py
 │       ├── _exceptions.py      # Custom exception classes
 │       ├── _logging.py         # Logging configuration
@@ -1355,10 +1435,10 @@ deephaven-mcp/
 │   ├── package/
 │   ├── queries/
 │   ├── resource_manager/
+│   ├── sessions/
 │   ├── testio/
 │   ├── utils/
-│   ├── conftest.py           # Pytest fixtures and helpers
-│   └── ...                   # Other test files and directories
+│   └── ...                   # Individual test files and other directories
 ├── scripts/                  # Standalone utility and test scripts
 ├── docs/                     # Project documentation
 ├── ops/                      # Operations (Docker, Terraform)
@@ -1386,13 +1466,13 @@ deephaven-mcp/
 **MCP Systems Server (`mcp_systems_server/`)**:
 - Implements the MCP protocol for Deephaven Community Core and Enterprise workers
 - Provides tools for worker management, session orchestration, and script execution
-- Supports multiple transport modes (SSE, stdio, streamable-HTTP)
+- Supports multiple transport modes (streamable-http, SSE, stdio)
 - Built with FastMCP for robust async lifecycle management
 
 **MCP Docs Server (`mcp_docs_server/`)**:
 - Provides LLM-powered documentation Q&A capabilities
 - Integrates with Inkeep and OpenAI APIs for conversational assistance
-- Supports SSE transport for real-time streaming responses
+- Supports streamable-http (default), SSE, and stdio transports for flexible deployment
 - Includes rate limiting and query management features
 
 **Resource Manager (`resource_manager/`)**:
@@ -1431,7 +1511,7 @@ The project includes several utility scripts to help with development and testin
 | [`../scripts/mcp_community_test_client.py`](../scripts/mcp_community_test_client.py) | Tests the Systems Server tools | `uv run scripts/mcp_community_test_client.py --transport sse` |
 | [`../scripts/mcp_docs_test_client.py`](../scripts/mcp_docs_test_client.py) | Tests the Docs Server chat functionality | `uv run scripts/mcp_docs_test_client.py --prompt "What is Deephaven?"` |
 | [`../scripts/mcp_docs_stress_test.py`](../scripts/mcp_docs_stress_test.py) | Comprehensive stress test for docs server (validates timeout fixes) | `uv run scripts/mcp_docs_stress_test.py` |
-| [`../scripts/mcp_docs_stress_sse.py`](../scripts/mcp_docs_stress_sse.py) | Stress tests the SSE endpoint | `uv run scripts/mcp_docs_stress_sse.py --sse-url "http://localhost:8000/sse"` |
+| [`../scripts/mcp_docs_stress_http.py`](../scripts/mcp_docs_stress_http.py) | Stress tests HTTP endpoints (streamable-http or SSE) | `uv run scripts/mcp_docs_stress_http.py --url "http://localhost:8001/mcp"` |
 | [`../scripts/mcp_docs_stress_sse_cancel_queries.py`](../scripts/mcp_docs_stress_sse_cancel_queries.py) | Stress tests SSE with query cancellation | `uv run scripts/mcp_docs_stress_sse_cancel_queries.py --url http://localhost:8000/sse --runs 10` |
 | [`../scripts/mcp_docs_stress_sse_user_queries.py`](../scripts/mcp_docs_stress_sse_user_queries.py) | Stress tests SSE with user-defined queries | `uv run scripts/mcp_docs_stress_sse_user_queries.py --url http://localhost:8000/sse` |
 | [`../bin/precommit.sh`](../bin/precommit.sh) | Runs pre-commit code quality checks | `bin/precommit.sh` |
@@ -1503,19 +1583,19 @@ uv run scripts/mcp_docs_stress_test.py
 - Check network connectivity if requests fail
 - Review the JSON results file for detailed error analysis
 
-#### SSE Transport Stress Testing
+#### HTTP Transport Stress Testing
 
-A script is also provided for stress testing the SSE transport for production deployments. This is useful for validating the stability and performance of production or staging deployments under load. The script uses [aiohttp](https://docs.aiohttp.org/) for asynchronous HTTP requests and [aiolimiter](https://github.com/mjpieters/aiolimiter) for rate limiting.
+A script is also provided for stress testing the HTTP transports (streamable-http and SSE) for production deployments. This is useful for validating the stability and performance of production or staging deployments under load. The script uses [aiohttp](https://docs.aiohttp.org/) for asynchronous HTTP requests and [aiolimiter](https://github.com/mjpieters/aiolimiter) for rate limiting.
 
 #### Usage Example
 
-The [`../scripts/mcp_docs_stress_sse.py`](../scripts/mcp_docs_stress_sse.py) script can be used to stress test the SSE endpoint:
+The [`../scripts/mcp_docs_stress_http.py`](../scripts/mcp_docs_stress_http.py) script can be used to stress test HTTP endpoints:
 
 ```sh
-uv run scripts/mcp_docs_stress_sse.py \
+uv run scripts/mcp_docs_stress_http.py \
     --concurrency 10 \
     --requests-per-conn 100 \
-    --sse-url "http://localhost:8000/sse" \
+    --url "http://localhost:8001/mcp" \
     --max-errors 5 \
     --rps 10 \
     --max-response-time 2
@@ -1555,10 +1635,12 @@ The script will create multiple concurrent connections and send requests to the 
    - Verify the API key is properly set in environment variables
    - Check for typos in key names or values
 
-3. **SSE Connection Failures**:
-   - Verify the SSE server is running on the expected port
+3. **HTTP Transport Connection Failures**:
+   - Verify the server is running on the expected port (default: 8000)
    - Check for firewall or network issues
-   - Ensure the client is using the correct URL
+   - Ensure the client is using the correct URL and transport mode
+   - For streamable-http (default): Connect to `http://localhost:8000/mcp`
+   - For SSE: Connect to `http://localhost:8000/sse`
 
 4. **Deephaven Worker Connectivity**:
    - Confirm the Deephaven server is running and accessible
@@ -1572,7 +1654,7 @@ The script will create multiple concurrent connections and send requests to the 
 
 6. **Debug with Logging**:
    - Set `PYTHONLOGLEVEL=DEBUG` for more detailed logs
-   - For SSE mode, logs appear in the terminal
+   - For HTTP modes (streamable-http, SSE), logs appear in the terminal
    - For stdio mode, logs are sent to stderr, which may require redirection
    - The server automatically redacts sensitive fields (auth_token, binary credentials) in logs
 
@@ -1600,8 +1682,9 @@ The script will create multiple concurrent connections and send requests to the 
 
 5. **Transport Issues:**
    - Verify you are using the correct transport and URL/command
-   - For SSE, ensure ports are open and not firewalled
+   - For streamable-http (default) and SSE, ensure ports are open and not firewalled
    - For stdio, check the command path and environment variables
+   - Default transport is now `streamable-http` - update any hardcoded `sse` references
 
 6. **Missing Dependencies:**
    - Ensure all Python dependencies are installed (`uv pip install ".[dev]"`)
@@ -1647,7 +1730,7 @@ The script will create multiple concurrent connections and send requests to the 
 ### Tools & Related Projects
 
 - [MCP Inspector](https://github.com/modelcontextprotocol/inspector) - Interactive UI for exploring MCP servers
-- [MCP Proxy](https://github.com/modelcontextprotocol/mcp-proxy) - Bridge from SSE to stdio transport
+- [MCP Proxy](https://github.com/modelcontextprotocol/mcp-proxy) - Bridge from HTTP transports to stdio transport
 - [FastMCP](https://github.com/jlowin/fastmcp) - Python library for building MCP servers
 - [FastMCP Tutorial](https://www.firecrawl.dev/blog/fastmcp-tutorial-building-mcp-servers-python) - Guide to building MCP servers with Python
 - [autogen-ext](https://github.com/jlowin/autogen-ext) - Extensions for AutoGen including MCP support

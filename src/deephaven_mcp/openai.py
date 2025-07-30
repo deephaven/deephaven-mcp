@@ -663,6 +663,10 @@ class OpenAIClient:
                 _LOGGER.debug("[OpenAIClient.close] HTTP client connections closed")
             except Exception as e:
                 _LOGGER.warning(f"[OpenAIClient.close] Error closing HTTP client: {e}")
+        else:
+            _LOGGER.debug(
+                "[OpenAIClient.close] Not closing HTTP client since it was not owned by this instance"
+            )
 
     async def __aenter__(self) -> "OpenAIClient":
         """
