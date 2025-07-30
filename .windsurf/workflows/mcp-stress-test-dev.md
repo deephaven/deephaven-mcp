@@ -37,6 +37,7 @@ This workflow performs a stress test on the **deephaven-docs-dev-remote** MCP se
 - Responses may vary slightly but should cover similar concepts (as-of joins, aj method, etc.)
 - All calls should complete successfully unless there are server issues
 - Responses should come from the deephaven-docs-dev-remote server specifically
+- Provide pass/fail status updates as the tests are run.
 
 ## Server Identification
 

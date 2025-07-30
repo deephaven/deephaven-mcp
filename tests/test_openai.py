@@ -1,6 +1,8 @@
 import asyncio
 import types
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import openai
 import pytest
 
@@ -300,6 +302,138 @@ def test_openai_client_constructor_validation():
         OpenAIClient(api_key="x", base_url="y", model=123)
 
 
+@patch("deephaven_mcp.openai.httpx.AsyncClient")
+@patch("deephaven_mcp.openai.openai.AsyncOpenAI")
+def test_openai_client_constructor_with_advanced_config(mock_openai, mock_httpx):
+    """Test that constructor properly configures HTTP client with advanced settings."""
+    mock_http_client = MagicMock()
+    mock_httpx.return_value = mock_http_client
+    mock_openai_client = MagicMock()
+    mock_openai.return_value = mock_openai_client
+
+    client = OpenAIClient(
+        api_key="test-key",
+        base_url="https://api.test.com",
+        model="test-model",
+        timeout=30.0,
+        max_retries=5,
+        max_connections=20,
+        max_keepalive_connections=10,
+        connect_timeout=15.0,
+        write_timeout=20.0,
+        pool_timeout=8.0,
+    )
+
+    # Verify httpx.AsyncClient was called with correct limits and timeout
+    mock_httpx.assert_called_once_with(
+        limits=httpx.Limits(
+            max_connections=20,
+            max_keepalive_connections=10,
+        ),
+        timeout=httpx.Timeout(connect=15.0, read=30.0, write=20.0, pool=8.0),
+    )
+
+    # Verify OpenAI client was configured correctly
+    mock_openai.assert_called_once_with(
+        api_key="test-key",
+        base_url="https://api.test.com",
+        timeout=30.0,
+        max_retries=5,
+        http_client=mock_http_client,
+    )
+
+    # Verify client ownership tracking
+    assert client._client_owned is True
+    assert client.client == mock_openai_client
+
+
+def test_openai_client_constructor_with_injected_client():
+    """Test that constructor properly handles injected client for testing."""
+    injected_client = MagicMock()
+
+    client = OpenAIClient(
+        api_key="test-key",
+        base_url="https://api.test.com",
+        model="test-model",
+        client=injected_client,
+    )
+
+    # Verify injected client is used and not owned
+    assert client.client == injected_client
+    assert client._client_owned is False
+
+
+@pytest.mark.asyncio
+async def test_close_method_owned_client():
+    """Test close method properly closes owned HTTP client."""
+    mock_client = AsyncMock()
+
+    with (
+        patch("deephaven_mcp.openai.httpx.AsyncClient"),
+        patch("deephaven_mcp.openai.openai.AsyncOpenAI", return_value=mock_client),
+    ):
+
+        client = OpenAIClient(
+            api_key="test-key", base_url="https://api.test.com", model="test-model"
+        )
+
+        # Verify client is owned
+        assert client._client_owned is True
+
+        # Call close method
+        await client.close()
+
+        # Verify close was called on the OpenAI client
+        mock_client.close.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_close_method_injected_client():
+    """Test close method does not close injected client."""
+    mock_client = AsyncMock()
+
+    client = OpenAIClient(
+        api_key="test-key",
+        base_url="https://api.test.com",
+        model="test-model",
+        client=mock_client,
+    )
+
+    # Verify client is not owned
+    assert client._client_owned is False
+
+    # Call close method
+    await client.close()
+
+    # Verify close was NOT called on the injected client
+    mock_client.close.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_close_method_handles_exceptions():
+    """Test close method handles exceptions gracefully."""
+    mock_client = AsyncMock()
+    mock_client.close.side_effect = Exception("Close failed")
+
+    with (
+        patch("deephaven_mcp.openai.httpx.AsyncClient"),
+        patch("deephaven_mcp.openai.openai.AsyncOpenAI", return_value=mock_client),
+        patch("deephaven_mcp.openai._LOGGER") as mock_logger,
+    ):
+
+        client = OpenAIClient(
+            api_key="test-key", base_url="https://api.test.com", model="test-model"
+        )
+
+        # Call close method - should not raise exception
+        await client.close()
+
+        # Verify warning was logged
+        mock_logger.warning.assert_called_once_with(
+            "[OpenAIClient.close] Error closing HTTP client: Close failed"
+        )
+
+
 @pytest.mark.asyncio
 async def test_chat_malformed_response():
     class MalformedDummy:
@@ -405,3 +539,85 @@ async def test_chat_and_stream_chat_wraps_non_openai_error():
     with pytest.raises(OpenAIClientError):
         async for _ in client.stream_chat("test"):
             pass
+
+
+@pytest.mark.asyncio
+async def test_async_context_manager_success():
+    """Test OpenAIClient works as async context manager with successful operation."""
+    # Use a dummy client to avoid real HTTP calls
+    dummy_client = DummyAsyncOpenAI()
+    client = OpenAIClient(
+        api_key="test-key",
+        base_url="https://api.openai.com/v1",
+        model="gpt-3.5-turbo",
+        client=dummy_client,
+    )
+
+    # Test that async context manager works correctly
+    async with client as context_client:
+        # Should return the same client instance (covers line 429: return self)
+        assert context_client is client
+
+        # Should be able to use the client normally
+        response = await client.chat("Test prompt")
+        assert response == "Hello, world!"
+
+    # After exiting context, __aexit__ was called (covers line 444: await self.close())
+
+
+@pytest.mark.asyncio
+async def test_async_context_manager_with_exception():
+    """Test OpenAIClient async context manager properly handles exceptions and still closes."""
+    client = OpenAIClient(
+        api_key="test-key", base_url="https://api.openai.com/v1", model="gpt-3.5-turbo"
+    )
+
+    # Test that context manager still calls close() even when exception occurs
+    with patch.object(client, "close", new_callable=AsyncMock) as mock_close:
+        try:
+            async with client as context_client:
+                assert context_client is client  # Covers line 429
+                # Raise an exception inside the context
+                raise ValueError("Test exception")
+        except ValueError:
+            pass  # Expected exception
+
+        # Verify close was called even though exception occurred (covers line 444)
+        mock_close.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_async_context_manager_close_exception():
+    """Test OpenAIClient async context manager handles close() exceptions gracefully."""
+    # Use dummy client to avoid real HTTP calls
+    dummy_client = DummyAsyncOpenAI()
+    client = OpenAIClient(
+        api_key="test-key",
+        base_url="https://api.openai.com/v1",
+        model="gpt-3.5-turbo",
+        client=dummy_client,
+    )
+
+    # Test that exceptions in close() are handled gracefully in __aexit__
+    # We need to patch the actual close method to raise an exception
+    original_close = client.close
+
+    async def failing_close():
+        raise Exception("Close failed")
+
+    client.close = failing_close
+
+    # Should not raise exception even if close() fails
+    try:
+        async with client as context_client:
+            assert context_client is client  # Covers line 429
+        # If we get here, __aexit__ handled the exception properly (covers line 444)
+    except Exception as e:
+        # The __aexit__ method should handle close() exceptions gracefully
+        # If we get an exception here, the test should fail
+        pytest.fail(
+            f"__aexit__ should handle close() exceptions gracefully, but got: {e}"
+        )
+
+    # Restore original close method
+    client.close = original_close

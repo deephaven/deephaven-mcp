@@ -225,3 +225,19 @@ def test_docs_module_main_invocation():
         )
         assert result.returncode == 0
         assert "Starting MCP server" in result.stdout or result.stderr
+
+
+def test_main_invocation():
+    """Test that main() correctly parses args and calls run_server."""
+    # We patch run_server to prevent the server from actually starting.
+    with (
+        patch("deephaven_mcp.mcp_docs_server.main.run_server") as mock_run_server,
+        patch.dict(os.environ, {"INKEEP_API_KEY": "dummy-key"}),
+    ):
+        from deephaven_mcp.mcp_docs_server.main import main
+
+        # Directly call the main function, which is the entry point.
+        main()
+
+        # Verify that it called run_server with the default transport.
+        mock_run_server.assert_called_once_with("streamable-http")

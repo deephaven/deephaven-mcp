@@ -54,11 +54,15 @@ Provides access to an LLM-powered conversational Q&A interface for Deephaven doc
 
 ```mermaid
 graph TD
-    A[Clients: MCP Inspector / Claude Desktop / etc.] -- SSE/stdio (MCP) --> B(MCP Systems Server);
-    B -- Manages --> C(Deephaven Community Worker 1);
-    B -- Manages --> D(Deephaven Community Worker N);
+    A[MCP Clients (Claude Desktop, etc.)] -- stdio (MCP) --> B(MCP Systems Server);
+    B -- Manages --> C(Deephaven Community Core Worker 1);
+    B -- Manages --> D(Deephaven Community Core Worker N);
     B -- Manages --> E(Deephaven Enterprise System 1);
     B -- Manages --> F(Deephaven Enterprise System N);
+    E -- Manages --> G(Enterprise Worker 1.1);
+    E -- Manages --> H(Enterprise Worker 1.N);
+    F -- Manages --> I(Enterprise Worker N.1);
+    F -- Manages --> J(Enterprise Worker N.N);
 ```
 *Clients connect to the [MCP Systems Server](#systems-server-architecture), which in turn manages and communicates with [Deephaven Community Core](https://deephaven.io/community/) workers and [Deephaven Enterprise](https://deephaven.io/enterprise/) systems.*
 
@@ -66,17 +70,18 @@ graph TD
 
 ```mermaid
 graph TD
-    A[User/Client/API e.g., Claude Desktop] -- stdio (MCP) --> PROXY(mcp-proxy);
-    PROXY -- HTTP (SSE) --> B(MCP Docs Server - FastAPI, LLM);
-    B -- Accesses --> C[Deephaven Documentation Corpus];
+    A[MCP Clients with streamable-http support] -- streamable-http (direct) --> B(MCP Docs Server);
+    C[MCP Clients without streamable-http support] -- stdio --> D[mcp-proxy];
+    D -- streamable-http --> B;
+    B -- Accesses --> E[Deephaven Documentation Corpus via Inkeep API];
 ```
-*LLM tools and other stdio-based clients connect to the [Docs Server](#docs-server) via the [`mcp-proxy`](https://github.com/modelcontextprotocol/mcp-proxy), which forwards requests to the main HTTP/SSE-based Docs Server.*
+*Modern MCP clients can connect directly via streamable-http for optimal performance. Clients without native streamable-http support can use [`mcp-proxy`](https://github.com/modelcontextprotocol/mcp-proxy) to bridge stdio to streamable-http.*
 
 ---
 
 ## Prerequisites
 
-*   **Python**: Version 3.9 or later. ([Download Python](https://www.python.org/downloads/))
+*   **Python**: Version 3.11 or later. ([Download Python](https://www.python.org/downloads/))
 *   **Access to [Deephaven Community Core](https://deephaven.io/community/) instance(s):** To use the [MCP Systems Server](#systems-server-architecture) for interacting with Deephaven, you will need one or more [Deephaven Community Core](https://deephaven.io/community/) instances running and network-accessible.
 *   **Choose your Python environment setup method:**
     *   **Option A: [`uv`](https://docs.astral.sh/uv/) (Recommended)**: A very fast Python package installer and resolver. If you don't have it, you can install it via `pip install uv` or see the [uv installation guide](https://github.com/astral-sh/uv#installation).
@@ -310,7 +315,8 @@ Consult your LLM tool's documentation for the precise file name and location. Be
         "/full/path/to/deephaven-mcp",
         "run",
         "mcp-proxy",
-        "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/sse"
+        "--transport=streamablehttp",
+        "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"
       ]
     }
   }
@@ -334,7 +340,8 @@ Consult your LLM tool's documentation for the precise file name and location. Be
     "deephaven-docs": {
       "command": "/full/path/to/your/deephaven-mcp/.venv/bin/mcp-proxy",
       "args": [
-        "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/sse"
+        "--transport=streamablehttp",
+        "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"
       ]
     }
   }
@@ -391,7 +398,7 @@ If the servers are not listed or you encounter errors at this stage, please proc
     *   Ensure [`uv`](docs/UV.md) is installed and its installation directory is in your system's `PATH` environment variable, accessible by the LLM tool.
 *   **`command not found` for `dh-mcp-systems-server` or [`mcp-proxy`](https://github.com/modelcontextprotocol/mcp-proxy) (venv option in LLM tool logs):**
     *   Double-check that the `command` field in your JSON config uses the **correct absolute path** to the executable within your `.venv/bin/` (or `.venv\Scripts\`) directory.
-*   **Port Conflicts:** If a server fails to start (check logs), another process might be using the required port (e.g., port 8000 for default SSE).
+*   **Port Conflicts:** If a server fails to start (check logs), another process might be using the required port (e.g., port 8000 for default streamable-http/SSE).
 *   **Python Errors in Server Logs:** Check the server logs for Python tracebacks. Ensure all dependencies were installed correctly (see [Installation & Initial Setup](#installation--initial-setup)).
 *   **Worker Configuration Issues:**
         *   If the [Systems Server](#systems-server) starts but can't connect to [Deephaven Community Core](https://deephaven.io/community/) workers, verify your `deephaven_mcp.json` file (see [The `deephaven_mcp.json` File (Defining Your Community Sessions)](#the-deephaven_mcp.json-file-defining-your-community-sessions) for details on its structure and content).

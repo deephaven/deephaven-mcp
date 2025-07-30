@@ -46,10 +46,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY . .
 
 # Install Python dependencies using uv for fast and reliable installs
-RUN uv venv && uv pip install ".[dev]"
+# Only install production dependencies
+RUN uv venv && uv pip install "."
 
 # Always bind the docs server to all interfaces by default
 ENV MCP_DOCS_HOST=0.0.0.0
 
 # Run the docs MCP server using the script entrypoint (dh-mcp-docs) defined in pyproject.toml
-CMD ["uv", "run", "dh-mcp-docs-server", "--transport", "sse"]
+CMD ["uv", "run", "dh-mcp-docs-server", "--transport", "streamable-http"]

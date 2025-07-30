@@ -7,12 +7,19 @@ It provides a command-line interface to launch the server with a specified trans
 See the project README for configuration details, available tools, and usage examples.
 """
 
-from .._logging import setup_global_exception_logging, setup_logging  # noqa: E402
+from .._logging import (  # noqa: E402
+    setup_global_exception_logging,
+    setup_logging,
+    setup_signal_handler_logging,
+)
 
 # Ensure logging is set up before any other imports
 setup_logging()
 # Ensure global exception logging is set up before any server code runs
 setup_global_exception_logging()
+
+# Register signal handlers for improved debugging of termination signals
+setup_signal_handler_logging()
 
 import logging  # noqa: E402
 from typing import Literal  # noqa: E402
