@@ -443,6 +443,84 @@ The following environment variables are supported:
   ```
 - **uv-specific issues:** If `uv run` commands fail, ensure `uv` is installed and the project's `pyproject.toml` is properly configured
 
+### Cursor IDE
+
+*   **Configuration File Location**: `~/.cursor/mcp.json` (create this file if it doesn't exist)
+*   **Tested Working Configuration** (replace paths with your actual absolute paths):
+    
+    ```json
+    {
+      "mcpServers": {
+        "deephaven-systems": {
+          "command": "uv",
+          "args": [
+            "--directory",
+            "/Users/yourname/path/to/deephaven-mcp-branch",
+            "run",
+            "dh-mcp-systems-server"
+          ],
+          "env": {
+            "DH_MCP_CONFIG_FILE": "/Users/yourname/path/to/deephaven-mcp-branch/deephaven_mcp.json",
+            "PYTHONLOGLEVEL": "INFO"
+          }
+        },
+        "deephaven-docs": {
+          "command": "uv",
+          "args": [
+            "--directory",
+            "/Users/yourname/path/to/deephaven-mcp-branch",
+            "run",
+            "mcp-proxy",
+            "--transport=streamablehttp",
+            "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"
+          ]
+        }
+      }
+    }
+    ```
+    
+    **Important Setup Notes for Cursor:**
+    - **Python Version**: Requires Python 3.11 or later (Python 3.10 will not work)
+    - **Virtual Environment**: Must use `uv venv .venv -p 3.11` or `python3.11 -m venv .venv`
+    - **Configuration File**: Must exist at project root: `deephaven_mcp.json`
+    - **Restart Required**: After creating/updating MCP configuration, completely restart Cursor
+    
+    **Quick Setup Commands for Cursor:**
+    ```bash
+    # 1. Create virtual environment with correct Python version
+    cd /path/to/your/project
+    uv venv .venv -p 3.11
+    source .venv/bin/activate
+    
+    # 2. Install deephaven-mcp
+    uv pip install deephaven-mcp
+    
+    # 3. Create basic configuration file
+    echo '{"community": {"sessions": {}}}' > deephaven_mcp.json
+    
+    # 4. Create Cursor MCP config (update paths!)
+    mkdir -p ~/.cursor
+    # Then edit ~/.cursor/mcp.json with the configuration above
+    
+    # 5. Restart Cursor completely
+    ```
+    
+    **Testing Your Setup:**
+    - Both servers should show green dots in Cursor's MCP interface
+    - Systems server should show "7 tools enabled"
+    - Docs server should show available tools
+    - If you see red dots, check the troubleshooting section below
+    
+    **Cursor-Specific Troubleshooting:**
+    - **Red dots/Loading tools**: Verify all paths are absolute and correct
+    - **Python version errors**: Ensure you're using Python 3.11+ (not 3.10)
+    - **Configuration file not found**: Check that `deephaven_mcp.json` exists at project root
+    - **External docs server 404**: The external docs server URL may be down; consider using local docs server instead
+    - **Permission errors**: Run `chmod 600 deephaven_mcp.json` to set proper permissions
+
+*   **JetBrains IDEs** (e.g., [IntelliJ IDEA](https://www.jetbrains.com/idea/), [PyCharm](https://www.jetbrains.com/pycharm/)):
+    *   The method for configuring custom MCP servers may vary. Please consult the official [GitHub Copilot](https://github.com/features/copilot) extension documentation for your specific JetBrains IDE for the most current instructions. It might involve a specific settings panel or a designated configuration file.
+
 ### Restarting Your LLM Tool (Applying the Configuration)
 
 Once you have saved the `"mcpServers"` JSON object in the correct location for your LLM tool, **restart the tool** ([Claude Desktop](https://www.anthropic.com/claude), [VS Code](https://code.visualstudio.com/), [JetBrains IDEs](https://www.jetbrains.com/products/#type=ide), etc.). The configured servers (e.g., `deephaven-systems`, `deephaven-docs`) should then be available in its MCP interface.
