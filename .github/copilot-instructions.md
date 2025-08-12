@@ -10,14 +10,12 @@ Bootstrap and build the repository:
 - `pip install uv` -- if uv not installed
 - `uv venv .venv -p 3.12` -- takes 0.01 seconds  
 - `source .venv/bin/activate` (Linux/macOS) or `.venv\Scripts\activate` (Windows)
-- `uv pip install -e .` -- takes 3 seconds. NEVER CANCEL. Set timeout to 60+ seconds.
-- `uv pip install -e ".[test]"` -- adds test dependencies, takes 1.5 seconds
-- `uv pip install black ruff isort mypy pydocstyle types-aiofiles` -- adds dev tools, takes 1 second
+- `uv pip install ".[dev]"` -- installs all dependencies including dev tools, takes 3 seconds. NEVER CANCEL. Set timeout to 60+ seconds.
 
 Run tests:
-- `pytest tests/test_init.py -v` -- basic smoke test, takes 0.5 seconds
-- `pytest tests/test__*.py -v` -- core tests, takes 2 seconds. NEVER CANCEL.
-- `pytest` -- full test suite (may require additional dependencies)
+- `uv run pytest tests/test_init.py -v` -- basic smoke test, takes 0.5 seconds
+- `uv run pytest tests/test__*.py -v` -- core tests, takes 2 seconds. NEVER CANCEL.
+- `uv run pytest` -- full test suite (may require additional dependencies)
 
 ## MCP Servers
 
@@ -53,6 +51,8 @@ cat > /tmp/deephaven_mcp.json << 'EOF'
 EOF
 ```
 
+Note: The docs server uses environment variables for configuration, not the main config file.
+
 Required environment variables:
 - `DH_MCP_CONFIG_FILE` -- path to JSON config file (required for systems server)
 - `INKEEP_API_KEY` -- required for docs server functionality
@@ -64,11 +64,11 @@ Always run code quality checks before committing:
 - `./bin/precommit.sh` -- runs all checks, takes 22 seconds. NEVER CANCEL. Set timeout to 60+ seconds.
 
 Individual checks:
-- `black --check --diff . --exclude '_version\.py|\.venv'` -- formatting check, takes 1.3 seconds
-- `ruff check src --exclude _version.py` -- linting, takes 0.015 seconds  
-- `isort . --check-only --diff --skip _version.py --skip .venv` -- import sorting, takes 0.34 seconds
-- `mypy src/` -- type checking, takes ~15 seconds (part of precommit.sh)
-- `pydocstyle src` -- docstring style check
+- `uv run black --check --diff . --exclude '_version\.py|\.venv'` -- formatting check, takes 1.3 seconds
+- `uv run ruff check src --exclude _version.py` -- linting, takes 0.015 seconds  
+- `uv run isort . --check-only --diff --skip _version.py --skip .venv` -- import sorting, takes 0.34 seconds
+- `uv run mypy src/` -- type checking, takes ~15 seconds (part of precommit.sh)
+- `uv run pydocstyle src` -- docstring style check
 
 ## Testing MCP Functionality
 
