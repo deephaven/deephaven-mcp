@@ -826,8 +826,10 @@ The MCP Docs Server acts as a bridge between users (or client applications) and 
 
 ```mermaid
 graph TD
-    A["User/Client/API"] --"HTTP/MCP"--> B("MCP Docs Server (FastAPI, LLM)")
-    B --"Accesses"--> C["Deephaven Docs"]
+    A["MCP Clients with streamable-http support"] --"streamable-http (direct)"--> B("MCP Docs Server")
+    C["MCP Clients without streamable-http support"] --"stdio"--> D["mcp-proxy"]
+    D --"streamable-http"--> B
+    B --"Accesses"--> E["Deephaven Documentation Corpus via Inkeep API"]
 ```
 
 Users or API clients send natural language questions or documentation queries over HTTP using the Model Context Protocol (MCP). These requests are received by the server, which is built on FastAPI and powered by a large language model (LLM) via the Inkeep API.
