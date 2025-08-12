@@ -54,15 +54,15 @@ Provides access to an LLM-powered conversational Q&A interface for Deephaven doc
 
 ```mermaid
 graph TD
-    A[MCP Clients (Claude Desktop, etc.)] -- stdio (MCP) --> B(MCP Systems Server);
-    B -- Manages --> C(Deephaven Community Core Worker 1);
-    B -- Manages --> D(Deephaven Community Core Worker N);
-    B -- Manages --> E(Deephaven Enterprise System 1);
-    B -- Manages --> F(Deephaven Enterprise System N);
-    E -- Manages --> G(Enterprise Worker 1.1);
-    E -- Manages --> H(Enterprise Worker 1.N);
-    F -- Manages --> I(Enterprise Worker N.1);
-    F -- Manages --> J(Enterprise Worker N.N);
+    A["MCP Clients (Claude Desktop, etc.)"] --"stdio (MCP)"--> B("MCP Systems Server")
+    B --"Manages"--> C("Deephaven Community Core Worker 1")
+    B --"Manages"--> D("Deephaven Community Core Worker N")
+    B --"Manages"--> E("Deephaven Enterprise System 1")
+    B --"Manages"--> F("Deephaven Enterprise System N")
+    E --"Manages"--> G("Enterprise Worker 1.1")
+    E --"Manages"--> H("Enterprise Worker 1.N")
+    F --"Manages"--> I("Enterprise Worker N.1")
+    F --"Manages"--> J("Enterprise Worker N.N")
 ```
 *Clients connect to the [MCP Systems Server](#systems-server-architecture), which in turn manages and communicates with [Deephaven Community Core](https://deephaven.io/community/) workers and [Deephaven Enterprise](https://deephaven.io/enterprise/) systems.*
 
@@ -70,10 +70,10 @@ graph TD
 
 ```mermaid
 graph TD
-    A[MCP Clients with streamable-http support] -- streamable-http (direct) --> B(MCP Docs Server);
-    C[MCP Clients without streamable-http support] -- stdio --> D[mcp-proxy];
-    D -- streamable-http --> B;
-    B -- Accesses --> E[Deephaven Documentation Corpus via Inkeep API];
+    A["MCP Clients with streamable-http support"] --"streamable-http (direct)"--> B("MCP Docs Server")
+    C["MCP Clients without streamable-http support"] --"stdio"--> D["mcp-proxy"]
+    D --"streamable-http"--> B
+    B --"Accesses"--> E["Deephaven Documentation Corpus via Inkeep API"]
 ```
 *Modern MCP clients can connect directly via streamable-http for optimal performance. Clients without native streamable-http support can use [`mcp-proxy`](https://github.com/modelcontextprotocol/mcp-proxy) to bridge stdio to streamable-http.*
 
