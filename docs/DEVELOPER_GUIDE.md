@@ -148,15 +148,15 @@ Both servers are designed for integration with MCP-compatible tools like the [MC
 
 ```mermaid
 graph TD
-    A[MCP Clients (Claude Desktop, etc.)] -- stdio (MCP) --> B(MCP Systems Server);
-    B -- Manages --> C(Deephaven Community Core Worker 1);
-    B -- Manages --> D(Deephaven Community Core Worker N);
-    B -- Manages --> E(Deephaven Enterprise System 1);
-    B -- Manages --> F(Deephaven Enterprise System N);
-    E -- Manages --> G(Enterprise Worker 1.1);
-    E -- Manages --> H(Enterprise Worker 1.N);
-    F -- Manages --> I(Enterprise Worker N.1);
-    F -- Manages --> J(Enterprise Worker N.N);
+    A["MCP Clients (Claude Desktop, etc.)"] --"stdio (MCP)"--> B("MCP Systems Server")
+    B --"Manages"--> C("Deephaven Community Core Worker 1")
+    B --"Manages"--> D("Deephaven Community Core Worker N")
+    B --"Manages"--> E("Deephaven Enterprise System 1")
+    B --"Manages"--> F("Deephaven Enterprise System N")
+    E --"Manages"--> G("Enterprise Worker 1.1")
+    E --"Manages"--> H("Enterprise Worker 1.N")
+    F --"Manages"--> I("Enterprise Worker N.1")
+    F --"Manages"--> J("Enterprise Worker N.N")
 ```
 
 **Typical Usage:**
@@ -166,10 +166,10 @@ Most users connect to the Systems Server via stdio transport (the default for to
 
 ```mermaid
 graph TD
-    A[MCP Clients with streamable-http support] -- streamable-http (direct) --> B(MCP Docs Server);
-    C[MCP Clients without streamable-http support] -- stdio --> D[mcp-proxy];
-    D -- streamable-http --> B;
-    B -- Accesses --> E[Deephaven Documentation Corpus via Inkeep API];
+    A["MCP Clients with streamable-http support"] --"streamable-http (direct)"--> B("MCP Docs Server")
+    C["MCP Clients without streamable-http support"] --"stdio"--> D["mcp-proxy"]
+    D --"streamable-http"--> B
+    B --"Accesses"--> E["Deephaven Documentation Corpus via Inkeep API"]
 ```
 
 **Transport Options:**
@@ -824,19 +824,12 @@ The server helps users learn and troubleshoot Deephaven through natural language
 
 The MCP Docs Server acts as a bridge between users (or client applications) and the Deephaven documentation.
 
-```
-+--------------------+
-|  User/Client/API   |
-+---------+----------+
-          |
-      HTTP/MCP
-          |
-+---------v----------+
-|   MCP Docs Server  |
-|   (FastAPI, LLM)   |
-+---------+----------+
-          |
-  [Deephaven Docs]
+```mermaid
+graph TD
+    A["MCP Clients with streamable-http support"] --"streamable-http (direct)"--> B("MCP Docs Server")
+    C["MCP Clients without streamable-http support"] --"stdio"--> D["mcp-proxy"]
+    D --"streamable-http"--> B
+    B --"Accesses"--> E["Deephaven Documentation Corpus via Inkeep API"]
 ```
 
 Users or API clients send natural language questions or documentation queries over HTTP using the Model Context Protocol (MCP). These requests are received by the server, which is built on FastAPI and powered by a large language model (LLM) via the Inkeep API.
