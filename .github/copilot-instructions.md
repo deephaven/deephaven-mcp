@@ -12,6 +12,9 @@ Bootstrap and build the repository:
 - `source .venv/bin/activate` (Linux/macOS) or `.venv\Scripts\activate` (Windows)
 - `uv pip install ".[dev]"` -- installs all dependencies including dev tools, takes 3 seconds. NEVER CANCEL. Set timeout to 60+ seconds.
 
+For enterprise features, install the Core Plus wheel separately:
+- `./bin/dev_manage_coreplus_client.sh install-wheel --file /path/to/wheel.whl` -- install from local wheel file
+
 Run tests:
 - `uv run pytest tests/test_init.py -v` -- basic smoke test, takes 0.5 seconds
 - `uv run pytest tests/test__*.py -v` -- core tests, takes 2 seconds. NEVER CANCEL.
@@ -33,7 +36,9 @@ This repository provides two Model Context Protocol (MCP) servers:
 
 ## Configuration
 
-Create a basic config file for testing:
+**Systems Server Configuration:**
+- Requires `DH_MCP_CONFIG_FILE` environment variable pointing to JSON config file
+- Create a basic config file for testing:
 ```bash
 cat > /tmp/deephaven_mcp.json << 'EOF'
 {
@@ -51,10 +56,7 @@ cat > /tmp/deephaven_mcp.json << 'EOF'
 EOF
 ```
 
-Note: The docs server uses environment variables for configuration, not the main config file.
-
-Required environment variables:
-- `DH_MCP_CONFIG_FILE` -- path to JSON config file (required for systems server)
+**Docs Server Configuration:**
 - `INKEEP_API_KEY` -- required for docs server functionality
 - `OPENAI_API_KEY` -- optional fallback for docs server
 
