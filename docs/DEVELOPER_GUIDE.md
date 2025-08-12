@@ -824,19 +824,10 @@ The server helps users learn and troubleshoot Deephaven through natural language
 
 The MCP Docs Server acts as a bridge between users (or client applications) and the Deephaven documentation.
 
-```
-+--------------------+
-|  User/Client/API   |
-+---------+----------+
-          |
-      HTTP/MCP
-          |
-+---------v----------+
-|   MCP Docs Server  |
-|   (FastAPI, LLM)   |
-+---------+----------+
-          |
-  [Deephaven Docs]
+```mermaid
+graph TD
+    A["User/Client/API"] --"HTTP/MCP"--> B("MCP Docs Server (FastAPI, LLM)")
+    B --"Accesses"--> C["Deephaven Docs"]
 ```
 
 Users or API clients send natural language questions or documentation queries over HTTP using the Model Context Protocol (MCP). These requests are received by the server, which is built on FastAPI and powered by a large language model (LLM) via the Inkeep API.
