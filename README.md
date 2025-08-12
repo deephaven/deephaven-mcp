@@ -364,6 +364,137 @@ The `"mcpServers"` JSON object, whose structure is detailed in [Defining MCP Ser
 *   **[GitHub Copilot](https://github.com/features/copilot) ([JetBrains IDEs](https://www.jetbrains.com/products/#type=ide) - [IntelliJ IDEA](https://www.jetbrains.com/idea/), [PyCharm](https://www.jetbrains.com/pycharm/), etc.):**
     *   The method for configuring custom MCP servers may vary. Please consult the official [GitHub Copilot](https://github.com/features/copilot) extension documentation for your specific JetBrains IDE for the most current instructions. It might involve a specific settings panel or a designated configuration file.
 
+### GitHub Copilot in Visual Studio Code
+
+[GitHub Copilot](https://github.com/features/copilot) in [Visual Studio Code](https://code.visualstudio.com/) supports MCP servers for enhanced development workflows with AI-assisted data exploration and Deephaven integration.
+
+#### Setting up MCP Configuration for VS Code
+
+1. **Create the MCP configuration file:**
+   In your project's root directory, create or edit `.vscode/mcp.json`:
+
+   ```json
+   {
+     "deephaven-systems": {
+       "command": "uv",
+       "args": [
+         "--directory",
+         "/full/path/to/deephaven-mcp",
+         "run",
+         "dh-mcp-systems-server"
+       ],
+       "env": {
+         "DH_MCP_CONFIG_FILE": "/full/path/to/your/deephaven_mcp.json",
+         "PYTHONLOGLEVEL": "INFO"
+       }
+     },
+     "deephaven-docs": {
+       "command": "uv",
+       "args": [
+         "--directory",
+         "/full/path/to/deephaven-mcp",
+         "run",
+         "mcp-proxy",
+         "--transport=streamablehttp",
+         "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"
+       ]
+     }
+   }
+   ```
+
+2. **Enable MCP in VS Code settings:**
+   Create or edit `.vscode/settings.json` in your project:
+
+   ```json
+   {
+     "github.copilot.enable": {
+       "*": true
+     },
+     "github.copilot.experimental.mcp.enabled": true
+   }
+   ```
+
+3. **Replace the placeholder paths:**
+   - `/full/path/to/deephaven-mcp`: Replace with the absolute path to your deephaven-mcp project directory
+   - `/full/path/to/your/deephaven_mcp.json`: Replace with the absolute path to your Deephaven configuration file
+
+#### Quick Setup Commands for VS Code
+
+```bash
+# 1. Navigate to your project directory
+cd /path/to/your/project
+
+# 2. Create .vscode directory if it doesn't exist
+mkdir -p .vscode
+
+# 3. Install deephaven-mcp if not already installed
+uv pip install deephaven-mcp
+
+# 4. Create basic Deephaven configuration file
+echo '{
+  "community": {
+    "sessions": {
+      "my_local_deephaven": {
+        "host": "localhost",
+        "port": 10000,
+        "session_type": "python",
+        "auth_type": "anonymous"
+      }
+    }
+  }
+}' > deephaven_mcp.json
+
+# 5. Create MCP configuration (update paths in the file!)
+# Edit .vscode/mcp.json with the configuration above
+
+# 6. Create VS Code settings to enable MCP
+echo '{
+  "github.copilot.enable": {
+    "*": true
+  },
+  "github.copilot.experimental.mcp.enabled": true
+}' > .vscode/settings.json
+
+# 7. Restart VS Code completely
+```
+
+#### Prerequisites for VS Code Setup
+
+- **VS Code Version**: Ensure you have the latest version of Visual Studio Code
+- **GitHub Copilot Extension**: Install and configure the GitHub Copilot extension
+- **Python**: Version 3.11 or later
+- **Deephaven Instance**: A running Deephaven Community Core instance (see setup instructions above)
+
+#### Using Deephaven MCP with GitHub Copilot
+
+Once configured, you can interact with Deephaven through GitHub Copilot Chat:
+
+**Example Prompts:**
+- "Show me the status of my Deephaven sessions"
+- "What tables are available in my local Deephaven instance?"
+- "Execute this Python code on my Deephaven session: `t = empty_table(10).update('x = i')`"
+- "How do I create a time-based table in Deephaven?"
+- "Get the schema for table 't1' in my Deephaven session"
+
+**Available MCP Tools via Copilot:**
+- **Session Management**: List and monitor Deephaven sessions
+- **Table Operations**: Retrieve table schemas and metadata
+- **Script Execution**: Run Python or Groovy scripts on Deephaven instances
+- **Package Management**: Query installed Python packages
+- **Documentation**: Access conversational Deephaven documentation
+
+#### VS Code-Specific Troubleshooting
+
+- **MCP servers not starting**: Check the VS Code Output panel for MCP server logs
+- **Configuration not detected**: Ensure `.vscode/mcp.json` exists in your project root
+- **Permission errors**: Verify all file paths are absolute and accessible
+- **GitHub Copilot not responding to MCP**: Restart VS Code and ensure the experimental MCP feature is enabled
+- **Deephaven connection issues**: Verify your Deephaven instance is running on the configured host:port
+- **Environment variable errors**: Check that `DH_MCP_CONFIG_FILE` points to a valid JSON file
+
+**Debug Mode:**
+To enable debug logging, change `"PYTHONLOGLEVEL": "INFO"` to `"PYTHONLOGLEVEL": "DEBUG"` in your MCP configuration.
+
 
 ### Windsurf Configuration
 
