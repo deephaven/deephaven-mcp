@@ -5,7 +5,7 @@ Always follow these instructions precisely when working in this repository. Only
 ## Working Effectively
 
 Bootstrap and build the repository:
-- `git clone https://github.com/deephaven/deephaven-mcp.git` -- takes 3 seconds
+- `git clone https://github.com/deephaven/deephaven-mcp.git` -- timing varies by network speed and repository size
 - `cd deephaven-mcp`
 - `pip install uv` -- if uv not installed
 - `uv venv .venv -p 3.12` -- takes 0.01 seconds  
@@ -87,8 +87,8 @@ python scripts/mcp_community_test_client.py \
 python scripts/mcp_docs_test_client.py \
   --transport stdio \
   --prompt "What is Deephaven?" \
-  --env INKEEP_API_KEY=dummy \
-  --env OPENAI_API_KEY=dummy
+  --env INKEEP_API_KEY=your-inkeep-api-key \
+  --env OPENAI_API_KEY=your-openai-api-key
 ```
 
 ## Validation Scenarios
@@ -137,7 +137,7 @@ After making changes, always validate with these complete scenarios:
 - Any `uv pip install` commands: Allow 60+ seconds
 
 **Expected timing:**
-- Git clone: ~3 seconds
+- Git clone: (network-dependent, may vary)
 - Virtual environment creation: ~0.01 seconds
 - Base package install: ~3 seconds
 - Test dependency install: ~1.5 seconds
