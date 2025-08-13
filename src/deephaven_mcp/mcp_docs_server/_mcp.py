@@ -163,7 +163,7 @@ def custom_http_exception_handler(request: Request, exc: HTTPException) -> JSONR
                      and helpful context information for debugging.
     """
     _LOGGER.warning(
-        f"[mcp_docs_server:exception_handler] HTTP {exc.status_code}: {exc.detail} for {request.method} {request.url.path}"
+        f"[mcp_docs_server:exception_handler] HTTP {exc.status_code}: {exc.detail or 'HTTP Error'} for {request.method} {request.url.path}"
     )
     return JSONResponse(
         status_code=exc.status_code,
