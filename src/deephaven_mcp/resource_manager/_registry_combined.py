@@ -240,6 +240,9 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
                 len(community_sessions),
             )
 
+            # Mark as initialized before updating enterprise sessions since they check initialization
+            self._initialized = True
+
             # Update enterprise sessions from controller clients
             await self._update_enterprise_sessions()
             _LOGGER.debug(
@@ -247,8 +250,6 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
                 self.__class__.__name__,
             )
 
-            # Mark as initialized only after all steps complete successfully
-            self._initialized = True
             _LOGGER.info("[%s] initialization complete", self.__class__.__name__)
 
     @override
