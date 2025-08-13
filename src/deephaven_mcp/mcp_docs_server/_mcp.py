@@ -92,6 +92,7 @@ from ..openai import OpenAIClient, OpenAIClientError
 _LOGGER = logging.getLogger(__name__)
 
 
+
 # The API key for authenticating with the Inkeep-powered LLM API
 try:
     _INKEEP_API_KEY: str = os.environ["INKEEP_API_KEY"]
