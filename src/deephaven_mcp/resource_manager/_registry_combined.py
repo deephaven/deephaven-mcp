@@ -232,7 +232,8 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
                 _LOGGER.debug(
                     "[%s] loading community session '%s'", self.__class__.__name__, name
                 )
-                self._items[name] = session
+                # Use the session's full_name (which is properly encoded) as the key
+                self._items[session.full_name] = session
 
             _LOGGER.debug(
                 "[%s] loaded %d community sessions",
