@@ -793,3 +793,37 @@ def test_custom_http_exception_handler_no_detail(monkeypatch):
         # Verify the response content uses HTTPException's default message
         content = result.body.decode()
         assert "Not Found" in content
+
+
+def test_custom_http_exception_handler_general_exception(monkeypatch):
+    """Test custom_http_exception_handler with a general (non-HTTP) exception."""
+    monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
+    sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
+    import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
+
+    mock_request = MagicMock(spec=Request)
+    mock_request.method = "GET"
+    mock_request.url.path = "/test"
+
+    # Create a general exception (not HTTPException)
+    general_exc = ValueError("Something went wrong")
+
+    with patch("deephaven_mcp.mcp_docs_server._mcp._LOGGER") as mock_logger:
+        # Call the exception handler with a general exception
+        result = mcp_mod.custom_http_exception_handler(mock_request, general_exc)
+
+        # Verify it returns a JSONResponse with 500 status
+        assert isinstance(result, JSONResponse)
+        assert result.status_code == 500
+
+        # Verify the response content for general exception
+        content = result.body.decode()
+        assert "Internal Server Error" in content
+        assert "GET" in content
+        assert "/test" in content
+        assert "Something went wrong" in content
+
+        # Verify logging occurred with error level
+        mock_logger.error.assert_called_once()
+        log_call = mock_logger.error.call_args[0][0]
+        assert "Unexpected error for GET /test: Something went wrong" in log_call
