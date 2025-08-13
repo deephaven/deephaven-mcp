@@ -118,7 +118,7 @@ class ErrorHandlingMiddleware(BaseHTTPMiddleware):
         except HTTPException as exc:
             # Handle HTTP exceptions gracefully (like 405 Method Not Allowed)
             _LOGGER.warning(
-                f"[mcp_docs_server:middleware] HTTP exception: {exc.status_code} {exc.detail} for {request.method} {request.url.path}"
+                f"[mcp_docs_server:middleware] HTTP exception: {exc.status_code} {exc.detail if exc.detail is not None else 'HTTP Error'} for {request.method} {request.url.path}"
             )
             return JSONResponse(
                 status_code=exc.status_code,
