@@ -75,19 +75,16 @@ import os
 import sys
 import threading
 import traceback
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
 import anyio
 from mcp.server.fastmcp import Context, FastMCP
-from typing import Awaitable, Callable
-
 from starlette.exceptions import HTTPException
 from starlette.middleware import Middleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
-from starlette.types import ASGIApp, Receive, Scope, Send
 
 from deephaven_mcp._logging import log_process_state
 
@@ -99,20 +96,22 @@ _LOGGER = logging.getLogger(__name__)
 class ErrorHandlingMiddleware(BaseHTTPMiddleware):
     """
     Middleware to handle HTTP errors gracefully and prevent server crashes.
-    
+
     This middleware catches exceptions that would otherwise crash the server,
     particularly for unsupported HTTP methods like HEAD requests on MCP endpoints.
     It ensures the server remains resilient and returns appropriate error responses.
-    
+
     The middleware intercepts both HTTPException instances (like 405 Method Not Allowed)
     and general exceptions, converting them into structured JSON error responses
     instead of allowing the server to crash.
-    
+
     Methods:
         dispatch: Async middleware handler that processes requests and catches exceptions.
     """
-    
-    async def dispatch(self, request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
+
+    async def dispatch(
+        self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
         try:
             response = await call_next(request)
             return response
@@ -127,8 +126,8 @@ class ErrorHandlingMiddleware(BaseHTTPMiddleware):
                     "error": exc.detail or "HTTP Error",
                     "status_code": exc.status_code,
                     "method": request.method,
-                    "path": request.url.path
-                }
+                    "path": request.url.path,
+                },
             )
         except Exception as exc:
             # Handle any other unexpected exceptions
@@ -142,23 +141,23 @@ class ErrorHandlingMiddleware(BaseHTTPMiddleware):
                     "status_code": 500,
                     "method": request.method,
                     "path": request.url.path,
-                    "detail": str(exc)
-                }
+                    "detail": str(exc),
+                },
             )
 
 
 def custom_http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
     """
-    Custom exception handler for HTTP exceptions.
-    
+    Handle HTTP exceptions with structured JSON error responses.
+
     This handler specifically addresses issues with unsupported HTTP methods
     and other HTTP-level errors that could crash the server. It provides
     structured JSON error responses with detailed context information.
-    
+
     Args:
         request (Request): The Starlette request object containing method and path info.
         exc (HTTPException): The HTTP exception that was raised.
-    
+
     Returns:
         JSONResponse: Structured error response with status code, error details,
                      and helpful context information for debugging.
@@ -173,9 +172,10 @@ def custom_http_exception_handler(request: Request, exc: HTTPException) -> JSONR
             "status_code": exc.status_code,
             "method": request.method,
             "path": request.url.path,
-            "message": "This endpoint may not support the requested HTTP method"
-        }
+            "message": "This endpoint may not support the requested HTTP method",
+        },
     )
+
 
 # The API key for authenticating with the Inkeep-powered LLM API
 try:
@@ -432,12 +432,8 @@ mcp_server = FastMCP(
     port=mcp_docs_port,
     lifespan=app_lifespan,
     stateless_http=True,
-    middleware=[
-        Middleware(ErrorHandlingMiddleware)
-    ],
-    exception_handlers={
-        HTTPException: custom_http_exception_handler
-    }
+    middleware=[Middleware(ErrorHandlingMiddleware)],
+    exception_handlers={HTTPException: custom_http_exception_handler},
 )
 """
 FastMCP: The primary server instance for the Deephaven MCP documentation tools.

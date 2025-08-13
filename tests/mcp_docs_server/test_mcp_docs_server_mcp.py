@@ -624,7 +624,7 @@ async def test_error_handling_middleware_success_path(monkeypatch):
     mock_request = MagicMock(spec=Request)
     mock_request.method = "GET"
     mock_request.url.path = "/health"
-    
+
     # Mock successful call_next
     mock_response = MagicMock()
     mock_call_next = AsyncMock(return_value=mock_response)
@@ -648,7 +648,7 @@ async def test_error_handling_middleware_http_exception(monkeypatch):
     mock_request = MagicMock(spec=Request)
     mock_request.method = "HEAD"
     mock_request.url.path = "/mcp"
-    
+
     # Mock call_next that raises HTTPException
     http_exc = HTTPException(status_code=405, detail="Method Not Allowed")
     mock_call_next = AsyncMock(side_effect=http_exc)
@@ -684,7 +684,7 @@ async def test_error_handling_middleware_http_exception_no_detail(monkeypatch):
     mock_request = MagicMock(spec=Request)
     mock_request.method = "HEAD"
     mock_request.url.path = "/mcp"
-    
+
     # Mock call_next that raises HTTPException with no detail
     http_exc = HTTPException(status_code=404, detail=None)
     mock_call_next = AsyncMock(side_effect=http_exc)
@@ -713,7 +713,7 @@ async def test_error_handling_middleware_general_exception(monkeypatch):
     mock_request = MagicMock(spec=Request)
     mock_request.method = "HEAD"
     mock_request.url.path = "/mcp"
-    
+
     # Mock call_next that raises a general exception
     general_exc = ValueError("Something went wrong")
     mock_call_next = AsyncMock(side_effect=general_exc)
