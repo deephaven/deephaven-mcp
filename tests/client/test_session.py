@@ -368,10 +368,181 @@ async def test_core_from_config_session_creation_error(monkeypatch):
         def __init__(self, *args, **kwargs):
             raise RuntimeError("session creation failed")
 
-    monkeypatch.setattr("pydeephaven.Session", FailingPDHSession)
+    monkeypatch.setattr("deephaven_mcp.client._session.Session", FailingPDHSession)
     with pytest.raises(SessionCreationError) as exc_info:
         await CoreSession.from_config({"host": "localhost"})
     assert "Failed to create Deephaven Community (Core) Session" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_core_session_error_logging_configuration_constants(monkeypatch, caplog):
+    """Test error logging for 'failed to get the configuration constants' error."""
+    class FailingPDHSession:
+        def __init__(self, *args, **kwargs):
+            raise RuntimeError("failed to get the configuration constants")
+
+    monkeypatch.setattr("deephaven_mcp.client._session.Session", FailingPDHSession)
+    
+    with pytest.raises(SessionCreationError):
+        await CoreSession.from_config({"host": "localhost"})
+    
+    # Check that specific error guidance was logged
+    assert "[Community] This error indicates a connection issue when trying to connect to the server." in caplog.text
+    assert "[Community] Verify that: 1) Server address and port are correct" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_core_session_error_logging_certificate_errors(monkeypatch, caplog):
+    """Test error logging for certificate/TLS related errors."""
+    test_cases = [
+        "SSL certificate error",
+        "TLS handshake failed", 
+        "certificate expired",
+        "PKIX path building failed",
+        "CERT_AUTHORITY_INVALID",
+        "CERT_COMMON_NAME_INVALID"
+    ]
+    
+    for error_msg in test_cases:
+        caplog.clear()
+        
+        class FailingPDHSession:
+            def __init__(self, *args, **kwargs):
+                raise RuntimeError(error_msg)
+
+        monkeypatch.setattr("deephaven_mcp.client._session.Session", FailingPDHSession)
+        
+        with pytest.raises(SessionCreationError):
+            await CoreSession.from_config({"host": "localhost"})
+        
+        # Check that TLS/SSL error guidance was logged
+        assert "[Community] This error indicates a TLS/SSL certificate issue." in caplog.text
+        assert "[Community] Verify that: 1) Server certificate is valid and not expired" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_core_session_error_logging_authentication_errors(monkeypatch, caplog):
+    """Test error logging for authentication related errors."""
+    test_cases = [
+        "authentication failed",
+        "unauthorized access",
+        "invalid credentials provided",
+        "invalid token supplied",
+        "token expired",
+        "access denied"
+    ]
+    
+    for error_msg in test_cases:
+        caplog.clear()
+        
+        class FailingPDHSession:
+            def __init__(self, *args, **kwargs):
+                raise RuntimeError(error_msg)
+
+        monkeypatch.setattr("deephaven_mcp.client._session.Session", FailingPDHSession)
+        
+        with pytest.raises(SessionCreationError):
+            await CoreSession.from_config({"host": "localhost"})
+        
+        # Check that authentication error guidance was logged
+        assert "[Community] This error indicates an authentication issue." in caplog.text
+        assert "[Community] Verify that: 1) Authentication credentials are correct" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_core_session_error_logging_network_errors(monkeypatch, caplog):
+    """Test error logging for network connectivity errors."""
+    test_cases = [
+        "connection timeout",
+        "connection refused",
+        "connection reset by peer",
+        "network unreachable"
+    ]
+    
+    for error_msg in test_cases:
+        caplog.clear()
+        
+        class FailingPDHSession:
+            def __init__(self, *args, **kwargs):
+                raise RuntimeError(error_msg)
+
+        monkeypatch.setattr("deephaven_mcp.client._session.Session", FailingPDHSession)
+        
+        with pytest.raises(SessionCreationError):
+            await CoreSession.from_config({"host": "localhost"})
+        
+        # Check that network connectivity error guidance was logged
+        assert "[Community] This error indicates a network connectivity issue." in caplog.text
+        assert "[Community] Verify that: 1) Server is running and accessible" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_core_session_error_logging_port_binding_errors(monkeypatch, caplog):
+    """Test error logging for port binding errors."""
+    test_cases = [
+        "address already in use",
+        "bind failed on port",
+        "port already in use"
+    ]
+    
+    for error_msg in test_cases:
+        caplog.clear()
+        
+        class FailingPDHSession:
+            def __init__(self, *args, **kwargs):
+                raise RuntimeError(error_msg)
+
+        monkeypatch.setattr("deephaven_mcp.client._session.Session", FailingPDHSession)
+        
+        with pytest.raises(SessionCreationError):
+            await CoreSession.from_config({"host": "localhost"})
+        
+        # Check that port binding error guidance was logged
+        assert "[Community] This error indicates a port binding issue." in caplog.text
+        assert "[Community] Verify that: 1) Port is not already in use by another process" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_core_session_error_logging_dns_errors(monkeypatch, caplog):
+    """Test error logging for DNS resolution errors."""
+    test_cases = [
+        "name resolution failed",
+        "host not found",
+        "nodename nor servname provided"
+    ]
+    
+    for error_msg in test_cases:
+        caplog.clear()
+        
+        class FailingPDHSession:
+            def __init__(self, *args, **kwargs):
+                raise RuntimeError(error_msg)
+
+        monkeypatch.setattr("deephaven_mcp.client._session.Session", FailingPDHSession)
+        
+        with pytest.raises(SessionCreationError):
+            await CoreSession.from_config({"host": "localhost"})
+        
+        # Check that DNS resolution error guidance was logged
+        assert "[Community] This error indicates a DNS resolution issue." in caplog.text
+        assert "[Community] Verify that: 1) Hostname is correct and resolvable" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_core_session_error_logging_unknown_error(monkeypatch, caplog):
+    """Test that unknown errors don't trigger specific guidance."""
+    class FailingPDHSession:
+        def __init__(self, *args, **kwargs):
+            raise RuntimeError("some unknown error message")
+
+    monkeypatch.setattr("deephaven_mcp.client._session.Session", FailingPDHSession)
+    
+    with pytest.raises(SessionCreationError):
+        await CoreSession.from_config({"host": "localhost"})
+    
+    # Check that no specific error guidance was logged for unknown errors
+    assert "[Community] This error indicates a" not in caplog.text
+    assert "[Community] Verify that:" not in caplog.text
 
 
 @pytest.mark.asyncio
@@ -412,7 +583,7 @@ async def test_core_from_config_invalid_type(monkeypatch):
 @pytest.mark.asyncio
 async def test_core_from_config_valid_minimal(monkeypatch):
     config = {"host": "localhost"}
-    monkeypatch.setattr("pydeephaven.Session", DummyPDHSession)
+    monkeypatch.setattr("deephaven_mcp.client._session.Session", DummyPDHSession)
     session = await CoreSession.from_config(config)
     assert isinstance(session, CoreSession)
 
@@ -432,7 +603,7 @@ async def test_core_from_config_success(monkeypatch):
         "client_cert_chain": "/no/such/file/chain.pem",
         "client_private_key": "/no/such/file/key.pem",
     }
-    monkeypatch.setattr("pydeephaven.Session", DummyPDHSession)
+    monkeypatch.setattr("deephaven_mcp.client._session.Session", DummyPDHSession)
     session = await CoreSession.from_config(config)
     assert isinstance(session, CoreSession)
     assert isinstance(session.wrapped, DummyPDHSession)
@@ -457,7 +628,7 @@ async def test_core_from_config_auth_token_from_env_var(monkeypatch):
     expected = "token_from_env"
     monkeypatch.setenv(env_var, expected)
     config = {"auth_token_env_var": env_var}
-    monkeypatch.setattr("pydeephaven.Session", DummyPDHSession)
+    monkeypatch.setattr("deephaven_mcp.client._session.Session", DummyPDHSession)
     session = await CoreSession.from_config(config)
     assert isinstance(session, CoreSession)
     monkeypatch.delenv(env_var)
@@ -468,7 +639,7 @@ async def test_core_from_config_auth_token_env_var_not_set(monkeypatch, caplog):
     env_var = "MY_MISSING_TOKEN_VAR"
     monkeypatch.delenv(env_var, raising=False)
     config = {"auth_token_env_var": env_var}
-    monkeypatch.setattr("pydeephaven.Session", DummyPDHSession)
+    monkeypatch.setattr("deephaven_mcp.client._session.Session", DummyPDHSession)
     session = await CoreSession.from_config(config)
     assert isinstance(session, CoreSession)
     assert (
@@ -481,7 +652,7 @@ async def test_core_from_config_auth_token_env_var_not_set(monkeypatch, caplog):
 async def test_core_from_config_auth_token_from_config(monkeypatch):
     expected = "token_from_config_direct"
     config = {"auth_token": expected}
-    monkeypatch.setattr("pydeephaven.Session", DummyPDHSession)
+    monkeypatch.setattr("deephaven_mcp.client._session.Session", DummyPDHSession)
     session = await CoreSession.from_config(config)
     assert isinstance(session, CoreSession)
 
@@ -489,7 +660,7 @@ async def test_core_from_config_auth_token_from_config(monkeypatch):
 @pytest.mark.asyncio
 async def test_core_from_config_no_auth_token(monkeypatch):
     config = {"host": "localhost"}
-    monkeypatch.setattr("pydeephaven.Session", DummyPDHSession)
+    monkeypatch.setattr("deephaven_mcp.client._session.Session", DummyPDHSession)
     session = await CoreSession.from_config(config)
     assert isinstance(session, CoreSession)
 
@@ -561,7 +732,7 @@ async def test_core_from_config_no_auth_token(monkeypatch):
     ],
 )
 async def test_core_from_config_defaults(monkeypatch, cfg, expected):
-    monkeypatch.setattr("pydeephaven.Session", DummyPDHSession)
+    monkeypatch.setattr("deephaven_mcp.client._session.Session", DummyPDHSession)
     session = await CoreSession.from_config(cfg)
     actual = (
         session.wrapped.__dict__
@@ -581,7 +752,7 @@ async def test_core_from_config_tls_and_client_keys(monkeypatch):
         "client_cert_chain": "/no/such/file/b",
         "client_private_key": "/no/such/file/c",
     }
-    monkeypatch.setattr("pydeephaven.Session", DummyPDHSession)
+    monkeypatch.setattr("deephaven_mcp.client._session.Session", DummyPDHSession)
     session = await CoreSession.from_config(config)
     assert isinstance(session, CoreSession)
 
@@ -705,7 +876,7 @@ def test_core_session_from_config_programming_language():
     from deephaven_mcp.client._session import CoreSession
 
     # Mock the PDHSession class
-    with patch("pydeephaven.Session", DummyPDHSession):
+    with patch("deephaven_mcp.client._session.Session", DummyPDHSession):
         # Create a config with a custom session_type
         config = {"host": "localhost", "port": 10000, "session_type": "groovy"}
 

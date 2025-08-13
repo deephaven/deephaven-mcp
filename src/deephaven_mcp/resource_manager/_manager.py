@@ -1000,10 +1000,10 @@ class BaseItemManager(Generic[T], ABC):
             # Distinguish between connection failures and actual configuration errors
             error_msg = str(e).lower()
             connection_failure_indicators = [
-                "failed to get the configuration constants",
                 "connection refused",
                 "connection timed out",
                 "connection failed",
+                "failed to connect",
                 "unable to connect",
                 "network is unreachable",
                 "host is unreachable",
@@ -1012,6 +1012,9 @@ class BaseItemManager(Generic[T], ABC):
                 "connection aborted",
                 "server not running",
                 "service unavailable",
+                "name or service not known",
+                "nodename nor servname provided",
+                "temporary failure in name resolution",
             ]
 
             # Check if this is a connection failure rather than a config issue
@@ -1711,6 +1714,11 @@ class CommunitySessionManager(BaseItemManager[CoreSession]):
             SessionCreationError: The exception type raised on creation failures
         """
         try:
+            _LOGGER.info(
+                "[%s] Creating community session for %s",
+                self.__class__.__name__,
+                self.full_name,
+            )
             return await CoreSession.from_config(self._config)
         except Exception as e:
             _LOGGER.error(
@@ -2137,6 +2145,11 @@ class EnterpriseSessionManager(BaseItemManager[CorePlusSession]):
             CorePlusSessionFactory: Common factory that can be used with this manager
         """
         try:
+            _LOGGER.info(
+                "[%s] Creating enterprise session for %s using creation function",
+                self.__class__.__name__,
+                self.full_name,
+            )
             return await self._creation_function(self._source, self._name)
         except Exception as e:
             _LOGGER.error(
