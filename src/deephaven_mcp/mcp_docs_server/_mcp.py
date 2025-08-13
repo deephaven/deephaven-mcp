@@ -80,7 +80,6 @@ from contextlib import asynccontextmanager
 
 import anyio
 from mcp.server.fastmcp import Context, FastMCP
-from starlette.exceptions import HTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
@@ -341,46 +340,53 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
         _LOGGER.info("[mcp_docs_server:app_lifespan] MCP docs server shutting down")
 
 
-class ErrorHandlingMiddleware(BaseHTTPMiddleware):
+class MCPMethodGuardMiddleware(BaseHTTPMiddleware):
     """
-    Middleware to handle HTTP errors gracefully and prevent server crashes.
+    Middleware to guard against unsupported HTTP methods on MCP endpoints.
 
-    This middleware catches exceptions that would otherwise crash the server,
-    particularly for unsupported HTTP methods like HEAD requests on MCP endpoints.
-    It ensures the server remains resilient and returns appropriate error responses.
+    This middleware specifically addresses a bug in FastMCP's streamable HTTP implementation
+    where unsupported HTTP methods (like HEAD, PUT, DELETE, etc.) cause the server to hang
+    indefinitely and eventually crash with anyio.ClosedResourceError.
 
-    The middleware intercepts both HTTPException instances (like 405 Method Not Allowed)
-    and general exceptions, converting them into structured JSON error responses
-    instead of allowing the server to crash.
+    According to the MCP specification, the /mcp endpoint MUST support POST and GET methods.
+    All other methods should return 405 Method Not Allowed. This middleware intercepts
+    unsupported methods BEFORE they reach FastMCP's buggy implementation.
 
     Methods:
-        dispatch: Async middleware handler that processes requests and catches exceptions.
+        dispatch: Async middleware handler that checks HTTP methods on MCP endpoints.
     """
 
     async def dispatch(
         self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
+        # Check if this is an MCP endpoint request
+        if request.url.path == "/mcp" or request.url.path.endswith("/mcp"):
+            # According to MCP spec, only POST and GET are supported on /mcp endpoint
+            if request.method not in ["POST", "GET"]:
+                _LOGGER.warning(
+                    f"[mcp_docs_server:method_guard] Blocking unsupported method {request.method} on {request.url.path}"
+                )
+                return JSONResponse(
+                    status_code=405,
+                    content={
+                        "error": "Method Not Allowed",
+                        "status_code": 405,
+                        "method": request.method,
+                        "path": request.url.path,
+                        "message": "MCP endpoint only supports POST and GET methods",
+                        "allowed_methods": ["POST", "GET"],
+                    },
+                    headers={"Allow": "POST, GET"},
+                )
+
+        # Continue with normal request processing
         try:
             response = await call_next(request)
             return response
-        except HTTPException as exc:
-            # Handle HTTP exceptions gracefully (like 405 Method Not Allowed)
-            _LOGGER.warning(
-                f"[mcp_docs_server:middleware] HTTP exception: {exc.status_code} {exc.detail} for {request.method} {request.url.path}"
-            )
-            return JSONResponse(
-                status_code=exc.status_code,
-                content={
-                    "error": exc.detail or "HTTP Error",
-                    "status_code": exc.status_code,
-                    "method": request.method,
-                    "path": request.url.path,
-                },
-            )
         except Exception as exc:
-            # Handle any other unexpected exceptions
+            # Fallback error handling for any other issues
             _LOGGER.exception(
-                f"[mcp_docs_server:middleware] Unexpected error for {request.method} {request.url.path}: {exc}"
+                f"[mcp_docs_server:method_guard] Unexpected error for {request.method} {request.url.path}: {exc}"
             )
             return JSONResponse(
                 status_code=500,
@@ -392,54 +398,6 @@ class ErrorHandlingMiddleware(BaseHTTPMiddleware):
                     "detail": str(exc),
                 },
             )
-
-
-def custom_http_exception_handler(request: Request, exc: Exception) -> Response:
-    """
-    Handle HTTP exceptions with structured JSON error responses.
-
-    This handler specifically addresses issues with unsupported HTTP methods
-    and other HTTP-level errors that could crash the server. It provides
-    structured JSON error responses with detailed context information.
-
-    Args:
-        request (Request): The Starlette request object containing method and path info.
-        exc (Exception): The exception that was raised (typically HTTPException).
-
-    Returns:
-        JSONResponse: Structured error response with status code, error details,
-                     and helpful context information for debugging.
-    """
-    # Handle HTTPException specifically
-    if isinstance(exc, HTTPException):
-        _LOGGER.warning(
-            f"[mcp_docs_server:exception_handler] HTTP {exc.status_code}: {exc.detail} for {request.method} {request.url.path}"
-        )
-        return JSONResponse(
-            status_code=exc.status_code,
-            content={
-                "error": exc.detail or "HTTP Error",
-                "status_code": exc.status_code,
-                "method": request.method,
-                "path": request.url.path,
-                "message": "This endpoint may not support the requested HTTP method",
-            },
-        )
-    else:
-        # Handle other exceptions as 500 Internal Server Error
-        _LOGGER.error(
-            f"[mcp_docs_server:exception_handler] Unexpected error for {request.method} {request.url.path}: {exc}"
-        )
-        return JSONResponse(
-            status_code=500,
-            content={
-                "error": "Internal Server Error",
-                "status_code": 500,
-                "method": request.method,
-                "path": request.url.path,
-                "detail": str(exc),
-            },
-        )
 
 
 mcp_server = FastMCP(
@@ -498,11 +456,10 @@ Discovery:
     and discoverable via the MCP protocol for AI agent consumption.
 """
 
-# Add error handling middleware to the underlying Starlette app
-# This ensures the server remains resilient to unsupported HTTP methods
+# Add method guard middleware to the underlying Starlette app
+# This prevents unsupported HTTP methods from reaching FastMCP's buggy streamable HTTP implementation
 streamable_app = mcp_server.streamable_http_app()
-streamable_app.add_middleware(ErrorHandlingMiddleware)
-streamable_app.add_exception_handler(HTTPException, custom_http_exception_handler)
+streamable_app.add_middleware(MCPMethodGuardMiddleware)
 
 
 @mcp_server.custom_route("/health", methods=["GET"])  # type: ignore[misc]

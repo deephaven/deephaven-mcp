@@ -613,51 +613,28 @@ async def test_docs_chat_session_id_exception(monkeypatch):
 
 
 # Error Handling Middleware Tests
+
+
 @pytest.mark.asyncio
-async def test_error_handling_middleware_success_path(monkeypatch):
-    """Test that successful requests pass through ErrorHandlingMiddleware without modification."""
+async def test_mcp_method_guard_middleware_blocks_head_request(monkeypatch):
+    """Test that MCPMethodGuardMiddleware blocks HEAD requests to /mcp endpoint."""
     monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
     sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
     import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
 
-    middleware = mcp_mod.ErrorHandlingMiddleware(app=MagicMock())
-    mock_request = MagicMock(spec=Request)
-    mock_request.method = "GET"
-    mock_request.url.path = "/health"
-
-    # Mock successful call_next
-    mock_response = MagicMock()
-    mock_call_next = AsyncMock(return_value=mock_response)
-
-    # Call the middleware
-    result = await middleware.dispatch(mock_request, mock_call_next)
-
-    # Verify the response is passed through unchanged
-    assert result is mock_response
-    mock_call_next.assert_called_once_with(mock_request)
-
-
-@pytest.mark.asyncio
-async def test_error_handling_middleware_http_exception(monkeypatch):
-    """Test that HTTPException is caught and converted to JSONResponse."""
-    monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
-    sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
-    import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
-
-    middleware = mcp_mod.ErrorHandlingMiddleware(app=MagicMock())
+    middleware = mcp_mod.MCPMethodGuardMiddleware(app=MagicMock())
     mock_request = MagicMock(spec=Request)
     mock_request.method = "HEAD"
     mock_request.url.path = "/mcp"
 
-    # Mock call_next that raises HTTPException
-    http_exc = HTTPException(status_code=405, detail="Method Not Allowed")
-    mock_call_next = AsyncMock(side_effect=http_exc)
+    # Mock call_next (should not be called for blocked methods)
+    mock_call_next = AsyncMock()
 
     with patch("deephaven_mcp.mcp_docs_server._mcp._LOGGER") as mock_logger:
         # Call the middleware
         result = await middleware.dispatch(mock_request, mock_call_next)
 
-        # Verify it returns a JSONResponse
+        # Verify it returns a JSONResponse with 405 status
         assert isinstance(result, JSONResponse)
         assert result.status_code == 405
 
@@ -666,164 +643,199 @@ async def test_error_handling_middleware_http_exception(monkeypatch):
         assert "Method Not Allowed" in content
         assert "HEAD" in content
         assert "/mcp" in content
+        assert "MCP endpoint only supports POST and GET methods" in content
+        assert "POST" in content
+        assert "GET" in content
+
+        # Verify Allow header is set
+        assert result.headers["Allow"] == "POST, GET"
 
         # Verify logging occurred
         mock_logger.warning.assert_called_once()
         log_call = mock_logger.warning.call_args[0][0]
-        assert "HTTP exception: 405 Method Not Allowed for HEAD /mcp" in log_call
+        assert "Blocking unsupported method HEAD on /mcp" in log_call
+
+        # Verify call_next was NOT called (request was blocked)
+        mock_call_next.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_error_handling_middleware_http_exception_no_detail(monkeypatch):
-    """Test HTTPException handling when detail is None."""
+async def test_mcp_method_guard_middleware_blocks_put_request(monkeypatch):
+    """Test that MCPMethodGuardMiddleware blocks PUT requests to /mcp endpoint."""
     monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
     sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
     import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
 
-    middleware = mcp_mod.ErrorHandlingMiddleware(app=MagicMock())
-    mock_request = MagicMock(spec=Request)
-    mock_request.method = "HEAD"
-    mock_request.url.path = "/mcp"
-
-    # Mock call_next that raises HTTPException with no detail
-    http_exc = HTTPException(status_code=404, detail=None)
-    mock_call_next = AsyncMock(side_effect=http_exc)
-
-    with patch("deephaven_mcp.mcp_docs_server._mcp._LOGGER"):
-        # Call the middleware
-        result = await middleware.dispatch(mock_request, mock_call_next)
-
-        # Verify it returns a JSONResponse with HTTPException's default message
-        assert isinstance(result, JSONResponse)
-        assert result.status_code == 404
-
-        # Verify the response content uses HTTPException's default message
-        content = result.body.decode()
-        assert "Not Found" in content
-
-
-@pytest.mark.asyncio
-async def test_error_handling_middleware_general_exception(monkeypatch):
-    """Test that general exceptions are caught and converted to 500 responses."""
-    monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
-    sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
-    import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
-
-    middleware = mcp_mod.ErrorHandlingMiddleware(app=MagicMock())
-    mock_request = MagicMock(spec=Request)
-    mock_request.method = "HEAD"
-    mock_request.url.path = "/mcp"
-
-    # Mock call_next that raises a general exception
-    general_exc = ValueError("Something went wrong")
-    mock_call_next = AsyncMock(side_effect=general_exc)
-
-    with patch("deephaven_mcp.mcp_docs_server._mcp._LOGGER") as mock_logger:
-        # Call the middleware
-        result = await middleware.dispatch(mock_request, mock_call_next)
-
-        # Verify it returns a JSONResponse with 500 status
-        assert isinstance(result, JSONResponse)
-        assert result.status_code == 500
-
-        # Verify the response content
-        content = result.body.decode()
-        assert "Internal Server Error" in content
-        assert "Something went wrong" in content
-        assert "HEAD" in content
-        assert "/mcp" in content
-
-        # Verify exception logging occurred
-        mock_logger.exception.assert_called_once()
-        log_call = mock_logger.exception.call_args[0][0]
-        assert "Unexpected error for HEAD /mcp" in log_call
-
-
-def test_custom_http_exception_handler_with_detail(monkeypatch):
-    """Test the custom exception handler with a detailed HTTPException."""
-    monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
-    sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
-    import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
-
+    middleware = mcp_mod.MCPMethodGuardMiddleware(app=MagicMock())
     mock_request = MagicMock(spec=Request)
     mock_request.method = "PUT"
-    mock_request.url.path = "/health"
-    exc = HTTPException(status_code=405, detail="Method Not Allowed")
+    mock_request.url.path = "/mcp"
+
+    mock_call_next = AsyncMock()
 
     with patch("deephaven_mcp.mcp_docs_server._mcp._LOGGER") as mock_logger:
-        # Call the exception handler
-        result = mcp_mod.custom_http_exception_handler(mock_request, exc)
+        result = await middleware.dispatch(mock_request, mock_call_next)
 
-        # Verify it returns a JSONResponse
         assert isinstance(result, JSONResponse)
         assert result.status_code == 405
+        assert result.headers["Allow"] == "POST, GET"
 
-        # Verify the response content
         content = result.body.decode()
         assert "Method Not Allowed" in content
         assert "PUT" in content
-        assert "/health" in content
-        assert "This endpoint may not support the requested HTTP method" in content
 
-        # Verify logging occurred
         mock_logger.warning.assert_called_once()
-        log_call = mock_logger.warning.call_args[0][0]
-        assert "HTTP 405: Method Not Allowed for PUT /health" in log_call
+        mock_call_next.assert_not_called()
 
 
-def test_custom_http_exception_handler_no_detail(monkeypatch):
-    """Test the custom exception handler with HTTPException without detail."""
+@pytest.mark.asyncio
+async def test_mcp_method_guard_middleware_allows_post_request(monkeypatch):
+    """Test that MCPMethodGuardMiddleware allows POST requests to /mcp endpoint."""
     monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
     sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
     import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
 
+    middleware = mcp_mod.MCPMethodGuardMiddleware(app=MagicMock())
     mock_request = MagicMock(spec=Request)
-    mock_request.method = "PUT"
-    mock_request.url.path = "/health"
-    exc = HTTPException(status_code=404, detail=None)
+    mock_request.method = "POST"
+    mock_request.url.path = "/mcp"
 
-    with patch("deephaven_mcp.mcp_docs_server._mcp._LOGGER"):
-        # Call the exception handler
-        result = mcp_mod.custom_http_exception_handler(mock_request, exc)
-
-        # Verify it returns a JSONResponse with HTTPException's default message
-        assert isinstance(result, JSONResponse)
-        assert result.status_code == 404
-
-        # Verify the response content uses HTTPException's default message
-        content = result.body.decode()
-        assert "Not Found" in content
-
-
-def test_custom_http_exception_handler_general_exception(monkeypatch):
-    """Test custom_http_exception_handler with a general (non-HTTP) exception."""
-    monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
-    sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
-    import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
-
-    mock_request = MagicMock(spec=Request)
-    mock_request.method = "GET"
-    mock_request.url.path = "/test"
-
-    # Create a general exception (not HTTPException)
-    general_exc = ValueError("Something went wrong")
+    # Mock successful response from call_next
+    mock_response = MagicMock()
+    mock_call_next = AsyncMock(return_value=mock_response)
 
     with patch("deephaven_mcp.mcp_docs_server._mcp._LOGGER") as mock_logger:
-        # Call the exception handler with a general exception
-        result = mcp_mod.custom_http_exception_handler(mock_request, general_exc)
+        result = await middleware.dispatch(mock_request, mock_call_next)
 
-        # Verify it returns a JSONResponse with 500 status
+        # Should return the response from call_next
+        assert result == mock_response
+
+        # Verify call_next was called (request was allowed)
+        mock_call_next.assert_called_once_with(mock_request)
+
+        # Verify no warning was logged for allowed method
+        mock_logger.warning.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_mcp_method_guard_middleware_allows_get_request(monkeypatch):
+    """Test that MCPMethodGuardMiddleware allows GET requests to /mcp endpoint."""
+    monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
+    sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
+    import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
+
+    middleware = mcp_mod.MCPMethodGuardMiddleware(app=MagicMock())
+    mock_request = MagicMock(spec=Request)
+    mock_request.method = "GET"
+    mock_request.url.path = "/mcp"
+
+    mock_response = MagicMock()
+    mock_call_next = AsyncMock(return_value=mock_response)
+
+    with patch("deephaven_mcp.mcp_docs_server._mcp._LOGGER") as mock_logger:
+        result = await middleware.dispatch(mock_request, mock_call_next)
+
+        assert result == mock_response
+        mock_call_next.assert_called_once_with(mock_request)
+        mock_logger.warning.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_mcp_method_guard_middleware_ignores_non_mcp_endpoints(monkeypatch):
+    """Test that MCPMethodGuardMiddleware ignores non-MCP endpoints."""
+    monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
+    sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
+    import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
+
+    middleware = mcp_mod.MCPMethodGuardMiddleware(app=MagicMock())
+    mock_request = MagicMock(spec=Request)
+    mock_request.method = "HEAD"  # Unsupported method
+    mock_request.url.path = "/health"  # Non-MCP endpoint
+
+    mock_response = MagicMock()
+    mock_call_next = AsyncMock(return_value=mock_response)
+
+    with patch("deephaven_mcp.mcp_docs_server._mcp._LOGGER") as mock_logger:
+        result = await middleware.dispatch(mock_request, mock_call_next)
+
+        # Should pass through to call_next for non-MCP endpoints
+        assert result == mock_response
+        mock_call_next.assert_called_once_with(mock_request)
+
+        # No method blocking should occur for non-MCP endpoints
+        mock_logger.warning.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_mcp_method_guard_middleware_handles_exceptions(monkeypatch):
+    """Test that MCPMethodGuardMiddleware handles exceptions during request processing."""
+    monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
+    sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
+    import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
+
+    middleware = mcp_mod.MCPMethodGuardMiddleware(app=MagicMock())
+    mock_request = MagicMock(spec=Request)
+    mock_request.method = "POST"  # Allowed method
+    mock_request.url.path = "/health"  # Non-MCP endpoint
+
+    # Mock call_next that raises an exception
+    test_exception = ValueError("Something went wrong")
+    mock_call_next = AsyncMock(side_effect=test_exception)
+
+    with patch("deephaven_mcp.mcp_docs_server._mcp._LOGGER") as mock_logger:
+        # Call the middleware
+        result = await middleware.dispatch(mock_request, mock_call_next)
+
+        # Should return a JSONResponse with 500 status
         assert isinstance(result, JSONResponse)
         assert result.status_code == 500
 
-        # Verify the response content for general exception
+        # Verify the response content
         content = result.body.decode()
         assert "Internal Server Error" in content
-        assert "GET" in content
-        assert "/test" in content
+        assert "POST" in content
+        assert "/health" in content
         assert "Something went wrong" in content
 
-        # Verify logging occurred with error level
-        mock_logger.error.assert_called_once()
-        log_call = mock_logger.error.call_args[0][0]
-        assert "Unexpected error for GET /test: Something went wrong" in log_call
+        # Verify exception was logged
+        mock_logger.exception.assert_called_once()
+        log_call = mock_logger.exception.call_args[0][0]
+        assert "Unexpected error for POST /health: Something went wrong" in log_call
+
+
+@pytest.mark.asyncio
+async def test_mcp_method_guard_middleware_handles_http_exception_from_call_next(
+    monkeypatch,
+):
+    """Test that MCPMethodGuardMiddleware handles HTTPException from call_next as general exception."""
+    monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
+    sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
+    import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
+
+    middleware = mcp_mod.MCPMethodGuardMiddleware(app=MagicMock())
+    mock_request = MagicMock(spec=Request)
+    mock_request.method = "POST"
+    mock_request.url.path = "/health"  # Non-MCP endpoint
+
+    # Mock call_next that raises HTTPException
+    http_exc = HTTPException(status_code=404, detail="Not Found")
+    mock_call_next = AsyncMock(side_effect=http_exc)
+
+    with patch("deephaven_mcp.mcp_docs_server._mcp._LOGGER") as mock_logger:
+        # Call the middleware
+        result = await middleware.dispatch(mock_request, mock_call_next)
+
+        # MCPMethodGuardMiddleware treats HTTPException as general exception, returns 500
+        assert isinstance(result, JSONResponse)
+        assert result.status_code == 500
+
+        # Verify the response content
+        content = result.body.decode()
+        assert "Internal Server Error" in content
+        assert "POST" in content
+        assert "/health" in content
+
+        # Verify exception logging occurred (not warning, since it's treated as general exception)
+        mock_logger.exception.assert_called_once()
+        log_call = mock_logger.exception.call_args[0][0]
+        assert "Unexpected error for POST /health" in log_call
