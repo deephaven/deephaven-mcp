@@ -250,13 +250,27 @@ async def test_liveness_status_unlocked_exceptions(monkeypatch):
     assert result[0] == ResourceLivenessStatus.MISCONFIGURED
     assert "cfgfail" in result[1]
 
-    # Patch _get_unlocked to raise SessionCreationError
+    # Patch _get_unlocked to raise SessionCreationError (configuration issue)
     monkeypatch.setattr(
         manager, "_get_unlocked", AsyncMock(side_effect=SessionCreationError("scfail"))
     )
     result = await manager._liveness_status_unlocked(ensure_item=True)
     assert result[0] == ResourceLivenessStatus.MISCONFIGURED
     assert "scfail" in result[1]
+
+    # Patch _get_unlocked to raise SessionCreationError (connection failure)
+    monkeypatch.setattr(
+        manager,
+        "_get_unlocked",
+        AsyncMock(
+            side_effect=SessionCreationError(
+                "failed to get the configuration constants"
+            )
+        ),
+    )
+    result = await manager._liveness_status_unlocked(ensure_item=True)
+    assert result[0] == ResourceLivenessStatus.OFFLINE
+    assert "failed to get the configuration constants" in result[1]
 
     # Patch _get_unlocked to raise generic Exception
     monkeypatch.setattr(

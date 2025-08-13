@@ -219,7 +219,26 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
                 self.__class__.__name__,
             )
 
-            self._initialized = True
+            # Load static community sessions into _items
+            _LOGGER.debug("[%s] loading community sessions", self.__class__.__name__)
+            community_sessions = await self._community_registry.get_all()
+            _LOGGER.debug(
+                "[%s] loading %d community sessions",
+                self.__class__.__name__,
+                len(community_sessions),
+            )
+
+            for name, session in community_sessions.items():
+                _LOGGER.debug(
+                    "[%s] loading community session '%s'", self.__class__.__name__, name
+                )
+                self._items[name] = session
+
+            _LOGGER.debug(
+                "[%s] loaded %d community sessions",
+                self.__class__.__name__,
+                len(community_sessions),
+            )
 
             # Update enterprise sessions from controller clients
             await self._update_enterprise_sessions()
@@ -228,6 +247,8 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
                 self.__class__.__name__,
             )
 
+            # Mark as initialized only after all steps complete successfully
+            self._initialized = True
             _LOGGER.info("[%s] initialization complete", self.__class__.__name__)
 
     @override
@@ -528,7 +549,22 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
         session_names_from_controller = [
             si.config.pb.name for si in session_info.values()
         ]
+        _LOGGER.debug(
+            "[%s] factory '%s' reports %d sessions: %s",
+            self.__class__.__name__,
+            factory_name,
+            len(session_names_from_controller),
+            session_names_from_controller,
+        )
+
         existing_keys = self._find_session_keys_for_factory(factory_name)
+        _LOGGER.debug(
+            "[%s] factory '%s' has %d existing sessions in registry",
+            self.__class__.__name__,
+            factory_name,
+            len(existing_keys),
+        )
+
         controller_keys = {
             BaseItemManager.make_full_name(SystemType.ENTERPRISE, factory_name, name)
             for name in session_names_from_controller
@@ -540,9 +576,25 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             if BaseItemManager.make_full_name(SystemType.ENTERPRISE, factory_name, name)
             not in existing_keys
         }
+        if new_session_names:
+            _LOGGER.debug(
+                "[%s] factory '%s' adding %d new sessions: %s",
+                self.__class__.__name__,
+                factory_name,
+                len(new_session_names),
+                list(new_session_names),
+            )
         self._add_new_enterprise_sessions(factory, factory_name, new_session_names)
 
         stale_keys = existing_keys - controller_keys
+        if stale_keys:
+            _LOGGER.debug(
+                "[%s] factory '%s' removing %d stale sessions: %s",
+                self.__class__.__name__,
+                factory_name,
+                len(stale_keys),
+                list(stale_keys),
+            )
         await self._close_stale_enterprise_sessions(stale_keys)
 
         _LOGGER.info(
@@ -562,14 +614,25 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             InternalError: If the registry has not been initialized.
             Exception: Any exception from factory session updates.
         """
+        _LOGGER.info("[%s] Updating enterprise sessions", self.__class__.__name__)
         self._check_initialized()
 
+        _LOGGER.debug("[%s] Getting all factories", self.__class__.__name__)
         # We know this is initialized at this point, so it's safe to cast
         factories = await cast(
             CorePlusSessionFactoryRegistry, self._enterprise_registry
         ).get_all()
+        _LOGGER.debug("[%s] Got %d factories", self.__class__.__name__, len(factories))
+
         for factory_name, factory in factories.items():
+            _LOGGER.debug(
+                "[%s] Updating sessions for factory '%s'",
+                self.__class__.__name__,
+                factory_name,
+            )
             await self._update_sessions_for_factory(factory, factory_name)
+
+        _LOGGER.info("[%s] Updated enterprise sessions", self.__class__.__name__)
 
     @override
     async def get(self, name: str) -> BaseItemManager:
@@ -601,13 +664,14 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             It acquires the registry lock to ensure thread safety.
         """
         async with self._lock:
-            # Update enterprise sessions before retrieving (lock is already held)
-            # This also checks initialization status
-            await self._update_enterprise_sessions()
 
             # Check initialization and raise KeyError if item not found
             # (avoid calling super().get() which would try to acquire the lock again)
             self._check_initialized()
+
+            # Update enterprise sessions before retrieving (lock is already held)
+            # This also checks initialization status
+            await self._update_enterprise_sessions()
 
             if name not in self._items:
                 raise KeyError(
@@ -641,10 +705,18 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             It acquires the registry lock to ensure thread safety.
         """
         async with self._lock:
+            # Check initialization first
+            self._check_initialized()
+
             # Update enterprise sessions before retrieving (lock is already held)
             # This also checks initialization status
+            _LOGGER.info(
+                "[%s] Updating enterprise sessions before retrieving",
+                self.__class__.__name__,
+            )
             await self._update_enterprise_sessions()
 
+            _LOGGER.info("[%s] Returning all sessions", self.__class__.__name__)
             return self._items.copy()
 
     @override

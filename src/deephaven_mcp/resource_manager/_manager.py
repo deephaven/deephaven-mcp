@@ -935,7 +935,7 @@ class BaseItemManager(Generic[T], ABC):
             error types into appropriate ResourceLivenessStatus values:
             - AuthenticationError → UNAUTHORIZED
             - ConfigurationError → MISCONFIGURED
-            - SessionCreationError → MISCONFIGURED
+            - SessionCreationError → OFFLINE (if connection failure) or MISCONFIGURED (if config issue)
             - Other exceptions → UNKNOWN (with warning log)
 
         Lock Safety:
@@ -997,7 +997,30 @@ class BaseItemManager(Generic[T], ABC):
         except ConfigurationError as e:
             return (ResourceLivenessStatus.MISCONFIGURED, str(e))
         except SessionCreationError as e:
-            return (ResourceLivenessStatus.MISCONFIGURED, str(e))
+            # Distinguish between connection failures and actual configuration errors
+            error_msg = str(e).lower()
+            connection_failure_indicators = [
+                "failed to get the configuration constants",
+                "connection refused",
+                "connection timed out",
+                "connection failed",
+                "unable to connect",
+                "network is unreachable",
+                "host is unreachable",
+                "no route to host",
+                "connection reset",
+                "connection aborted",
+                "server not running",
+                "service unavailable",
+            ]
+
+            # Check if this is a connection failure rather than a config issue
+            if any(
+                indicator in error_msg for indicator in connection_failure_indicators
+            ):
+                return (ResourceLivenessStatus.OFFLINE, str(e))
+            else:
+                return (ResourceLivenessStatus.MISCONFIGURED, str(e))
         except Exception as e:
             _LOGGER.warning(
                 "[%s] Liveness check failed for %s: %s",
