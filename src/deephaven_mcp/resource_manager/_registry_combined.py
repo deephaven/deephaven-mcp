@@ -232,13 +232,17 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
                 _LOGGER.debug(
                     "[%s] loading community session '%s'", self.__class__.__name__, name
                 )
-                self._items[name] = session
+                # Use the session's full_name (which is properly encoded) as the key
+                self._items[session.full_name] = session
 
             _LOGGER.debug(
                 "[%s] loaded %d community sessions",
                 self.__class__.__name__,
                 len(community_sessions),
             )
+
+            # Mark as initialized before updating enterprise sessions since they check initialization
+            self._initialized = True
 
             # Update enterprise sessions from controller clients
             await self._update_enterprise_sessions()
@@ -247,8 +251,6 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
                 self.__class__.__name__,
             )
 
-            # Mark as initialized only after all steps complete successfully
-            self._initialized = True
             _LOGGER.info("[%s] initialization complete", self.__class__.__name__)
 
     @override

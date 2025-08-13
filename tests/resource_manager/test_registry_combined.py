@@ -7,7 +7,6 @@ controller client caching, and lifecycle management.
 """
 
 import asyncio
-import logging
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
@@ -267,9 +266,11 @@ class TestCombinedSessionRegistryInitialization:
         self, combined_registry, mock_config_manager
     ):
         """Test initialization when community registry has sessions to load."""
-        # Create mock session managers
+        # Create mock session managers with proper full_name attributes
         mock_session1 = MagicMock()
+        mock_session1.full_name = "community:local:session1"
         mock_session2 = MagicMock()
+        mock_session2.full_name = "community:local:session2"
         community_sessions = {
             "community:local:session1": mock_session1,
             "community:local:session2": mock_session2,
@@ -414,9 +415,11 @@ class TestCombinedSessionRegistryInitialization:
         existing_session = MagicMock()
         combined_registry._items["community:local:session1"] = existing_session
 
-        # Create new mock session managers
+        # Create new mock session managers with proper full_name attributes
         new_mock_session1 = MagicMock()
+        new_mock_session1.full_name = "community:local:session1"
         new_mock_session2 = MagicMock()
+        new_mock_session2.full_name = "community:local:session2"
         community_sessions = {
             "community:local:session1": new_mock_session1,  # Should overwrite existing
             "community:local:session2": new_mock_session2,  # Should be new
