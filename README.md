@@ -15,7 +15,6 @@
 - [Contributing](#contributing)
 - [Advanced Usage & Further Information](#advanced-usage--further-information)
 - [Community & Support](#community--support)
-- [License](#license)
 
 ---
 
@@ -23,10 +22,15 @@
 
 Deephaven MCP, which implements the [Model Context Protocol (MCP) standard](https://spec.modelcontextprotocol.io/), provides tools to orchestrate, inspect, and interact with [Deephaven Community Core](https://deephaven.io/community/) servers, and to access conversational documentation via LLM-powered Docs Servers. It's designed for data scientists, engineers, and anyone looking to leverage Deephaven's capabilities through programmatic interfaces or integrated LLM tools.
 
+### What is Model Context Protocol (MCP)?
+
+MCP is a standard way of connecting to and interacting with AI-powered tools and services. It defines a common interface for clients to communicate with servers, allowing for a consistent experience across different tools and services. Think of MCP as a USB connector for AI tools, making it easy to connect them to other tools and services.
+
 ### Deephaven MCP Components
 
 #### Systems Server
-Manages and connects to multiple [Deephaven Community Core](https://deephaven.io/community/) worker nodes and [Deephaven Enterprise](https://deephaven.io/enterprise/) systems. This allows for unified control and interaction with your Deephaven instances from various client applications.
+
+Manages and connects to any configured [Deephaven Community Core](https://deephaven.io/community/) worker nodes and [Deephaven Enterprise](https://deephaven.io/enterprise/) systems. This allows for unified control and interaction with your Deephaven instances from various client applications.
 
 **Key Capabilities:**
 *   **Session Management**: List, monitor, and get detailed status of all configured Deephaven sessions
@@ -37,6 +41,7 @@ Manages and connects to multiple [Deephaven Community Core](https://deephaven.io
 *   **Configuration Management**: Dynamically reload and refresh session configurations
 
 #### Docs Server
+
 Provides access to an LLM-powered conversational Q&A interface for Deephaven documentation. Get answers to your Deephaven questions in natural language.
 
 ### Key Use Cases
@@ -82,10 +87,8 @@ graph TD
 ## Prerequisites
 
 *   **Python**: Version 3.11 or later. ([Download Python](https://www.python.org/downloads/))
-*   **Access to [Deephaven Community Core](https://deephaven.io/community/) instance(s):** To use the [MCP Systems Server](#systems-server-architecture) for interacting with Deephaven, you will need one or more [Deephaven Community Core](https://deephaven.io/community/) instances running and network-accessible.
-*   **Choose your Python environment setup method:**
-    *   **Option A: [`uv`](https://docs.astral.sh/uv/) (Recommended)**: A very fast Python package installer and resolver. If you don't have it, you can install it via `pip install uv` or see the [uv installation guide](https://github.com/astral-sh/uv#installation).
-    *   **Option B: Standard Python `venv` and `pip`**: Uses Python's built-in [virtual environment (`venv`)](https://docs.python.org/3/library/venv.html) tools and [`pip`](https://pip.pypa.io/en/stable/getting-started/).
+*   **Access to [Deephaven Community Core](https://deephaven.io/community/) or [Deephaven Enterprise](https://deephaven.io/enterprise/) instance(s):** To use the [MCP Systems Server](#systems-server-architecture) for interacting with Deephaven, you will need one or more instances running and network-accessible.
+*   **An AI-powered LLM tool that supports the Model Context Protocol (MCP):** Examples include [Claude Desktop](https://www.anthropic.com/claude) and [GitHub Copilot](https://github.com/features/copilot).
 
 ---
 
@@ -93,50 +96,63 @@ graph TD
 
 The recommended way to install `deephaven-mcp` is from PyPI. This provides the latest stable release and is suitable for most users.
 
-### Installing from PyPI (Recommended for Users)
-
 Choose one of the following Python environment and package management tools:
 
-#### Option A: Using `uv` (Fast, Recommended)
+### Option A: Using `uv` (Fast, Recommended)
 
 If you have [`uv`](docs/UV.md) installed (or install it via `pip install uv`):
 
 1.  **Create and activate a virtual environment with your desired Python version:**
-    [uv](docs/UV.md) works best when operating within a virtual environment. To create one (e.g., named `.venv`) using a specific Python interpreter (e.g., Python 3.9), run:
+    [uv](docs/UV.md) works best when operating within a virtual environment. To create one (e.g., named `.venv`) using a specific Python interpreter (e.g., Python 3.11), run:
+
     ```sh
-    uv venv .venv -p 3.9 
+    uv venv .venv -p 3.11 
     ```
-    Replace `3.9` with your target Python version (e.g., `3.10`, `3.11`) or the full path to a Python executable.
+
+    Replace `3.11` with your target Python version (e.g., `3.12`) or the full path to a Python executable.
+
     Then, activate it:
+
     *   On macOS/Linux: `source .venv/bin/activate`
     *   On Windows (PowerShell): `.venv\Scripts\Activate.ps1`
     *   On Windows (CMD): `.venv\Scripts\activate.bat`
 
 2.  **Install `deephaven-mcp`:**
+
     ```sh
     uv pip install deephaven-mcp
     ```
+
 This command installs `deephaven-mcp` and its dependencies into the active virtual environment. If you skipped the explicit virtual environment creation step above, [`uv`](docs/UV.md) might still create or use one automatically (typically `.venv` in your current directory if `UV_AUTO_CREATE_VENV` is not `false`, or a globally managed one). In any case where a virtual environment is used (either explicitly created or automatically by `uv`), ensure it remains active for manual command-line use of `dh-mcp-systems-server` or `dh-mcp-docs-server`, or if your LLM tool requires an active environment.
 
-#### Option B: Using Standard `pip` and `venv`
+### Option B: Using standard `pip` and `venv`
 
 1.  **Create a virtual environment** (e.g., named `.venv`):
+
     ```sh
     python -m venv .venv
     ```
+
 2.  **Activate the virtual environment:**
+
     *   On macOS/Linux:
+
         ```sh
         source .venv/bin/activate
         ```
+
     *   On Windows (Command Prompt/PowerShell):
+
         ```sh
         .venv\Scripts\activate
         ```
+
 3.  **Install `deephaven-mcp`** into the activated virtual environment:
+
     ```sh
     pip install deephaven-mcp
     ```
+
     Ensure this virtual environment is active in any terminal session where you intend to run `dh-mcp-systems-server` or `dh-mcp-docs-server` manually, or if your LLM tool requires an active environment when spawning these processes.
 
 ---
@@ -145,20 +161,23 @@ This command installs `deephaven-mcp` and its dependencies into the active virtu
 
 This section explains how to configure the [Deephaven MCP Systems Server](#systems-server) to connect to and manage your [Deephaven Community Core](https://deephaven.io/community/) instances and [Deephaven Enterprise](https://deephaven.io/enterprise/) systems. This involves creating a [systems session definition file](#the-deephaven_mcpjson-file-defining-your-community-sessions) and understanding how the server locates this file.
 
-### The `deephaven_mcp.json` File
+### The `deephaven_mcp.json` file
 
-#### Purpose and Structure
+#### Purpose and structure
 
 The [Deephaven MCP Systems Server](#systems-server) requires a JSON configuration file that describes the [Deephaven Community Core](https://deephaven.io/community/) worker instances and [Deephaven Enterprise](https://deephaven.io/enterprise/) systems it can connect to. 
 
-*   The file must be a JSON object. It can be an empty object `{}` if no community sessions are to be configured.
+*   The file must contain a valid JSON object. It can be an empty object `{}` if no Community sessions or Enterprise systems are to be configured.
 *   Optionally, it can contain a top-level key named `"community"` with a nested `"sessions"` key.
     *   If this key is present, its value must be an object (which can be empty, e.g., `{}`) where each key is a unique session name (e.g., `"local_session"`, `"prod_cluster_1_session"`) and the value is a configuration object for that session. An empty object signifies no sessions are configured under this key.
     *   If this key is absent from the JSON file, it is treated as a valid configuration with no community sessions defined.
+*   Optionally, it may also contain a top-level key named `"enterprise"` with a nested `"systems"` key.
+    *   If this key is present, its value must be an object (which can be empty, e.g., `{}`) where each key is a unique system name (e.g., `"prod_cluster_1"`, `"dev_cluster_1"`) and the value is a configuration object for that system. An empty object signifies no systems are configured under this key.
+    *   If this key is absent from the JSON file, it is treated as a valid configuration with no enterprise systems defined.
 
-In addition to `"community"`, the `deephaven_mcp.json` file can optionally include an `"enterprise"` key for configuring connections to Deephaven Enterprise instances. Within the `"enterprise"` object, you can define a `"systems"` key that maps system names to their configurations. The configuration details for both `community.sessions` and `enterprise.systems` are provided below.
+The configuration details for both `community.sessions` and `enterprise.systems` are provided below.
 
-#### Community Session Configuration Fields
+#### Community session configuration fields
 
 *The fields listed below pertain to **community sessions**. All community session fields are optional. Default values are applied by the server if a field is omitted. Configuration fields for **enterprise systems** are detailed in a subsequent section.*
 
@@ -178,7 +197,7 @@ In addition to `"community"`, the `deephaven_mcp.json` file can optionally inclu
 *   `client_cert_chain` (string): Absolute path to a PEM file containing the client's TLS certificate chain. Used for client-side certificate authentication (mTLS).
 *   `client_private_key` (string): Absolute path to a PEM file containing the client's private key. Used for client-side certificate authentication (mTLS).
 
-#### Enterprise System Configuration Fields
+#### Enterprise system configuration fields
 
 The `enterprise` key with nested `"systems"` in `deephaven_mcp.json` is a dictionary mapping custom system names (e.g., `"prod_cluster"`, `"data_science_env"`) to their specific configuration objects. Each configuration object supports the following fields:
 
@@ -232,13 +251,13 @@ The `enterprise` key with nested `"systems"` in `deephaven_mcp.json` is a dictio
   "enterprise": {
     "systems": {
       "prod_cluster": {
-        "connection_json_url": "https://prod.enterprise.example.com/iris/connection.json",
+        "connection_json_url": "https://prod.enterprise.example.com:8000/iris/connection.json",
         "auth_type": "password",
         "username": "your_username",
         "password_env_var": "ENTERPRISE_PASSWORD"
       },
       "data_science_env": {
-        "connection_json_url": "https://data-science.enterprise.example.com/iris/connection.json",
+        "connection_json_url": "https://data-science.enterprise.example.com:8123/iris/connection.json",
         "auth_type": "private_key",
         "private_key_path": "/path/to/your/private_key.pem"
       }
@@ -307,7 +326,7 @@ Consult your LLM tool's documentation for the precise file name and location. Be
       "command": "uv",
       "args": [
         "--directory",
-        "/full/path/to/deephaven-mcp",
+        "/full/path/to/deephaven-mcp", // This is the path to the cloned repo
         "run",
         "dh-mcp-systems-server"
       ],
@@ -320,7 +339,7 @@ Consult your LLM tool's documentation for the precise file name and location. Be
       "command": "uv",
       "args": [
         "--directory",
-        "/full/path/to/deephaven-mcp",
+        "/full/path/to/deephaven-mcp", // This is the path to the cloned repo
         "run",
         "mcp-proxy",
         "--transport=streamablehttp",
@@ -437,8 +456,3 @@ We warmly welcome contributions to Deephaven MCP! Whether it's bug reports, feat
 *   **Deephaven Community Slack:** Join the conversation and ask questions: [https://deephaven.io/slack](https://deephaven.io/slack)
 
 ---
-
-## License
-
-This project is licensed under the [Apache 2.0 License](./LICENSE). See the [LICENSE](./LICENSE) file for details.
-
