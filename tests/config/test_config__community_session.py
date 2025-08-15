@@ -1,7 +1,7 @@
 """Tests for Deephaven MCP community session specific configuration logic."""
 
-from unittest.mock import patch
 import logging
+from unittest.mock import patch
 
 import pytest
 
@@ -331,9 +331,11 @@ def test_validate_single_cs_auth_type_known_values_no_warning(caplog):
     """Test that known auth_type values don't generate warnings."""
     with caplog.at_level(logging.WARNING):
         # Test known values
-        validate_single_community_session_config("test_session", {"auth_type": "Anonymous"})
+        validate_single_community_session_config(
+            "test_session", {"auth_type": "Anonymous"}
+        )
         validate_single_community_session_config("test_session", {"auth_type": "Basic"})
-        
+
     # Should have no warnings
     assert len(caplog.records) == 0
 
@@ -342,8 +344,10 @@ def test_validate_single_cs_auth_type_unknown_value_warning(caplog):
     """Test that unknown auth_type values generate appropriate warnings."""
     with caplog.at_level(logging.WARNING):
         # Test unknown value (common typo)
-        validate_single_community_session_config("test_session", {"auth_type": "anonymous"})
-        
+        validate_single_community_session_config(
+            "test_session", {"auth_type": "anonymous"}
+        )
+
     # Should have exactly one warning
     assert len(caplog.records) == 1
     warning_message = caplog.records[0].message
@@ -357,10 +361,10 @@ def test_validate_single_cs_auth_type_custom_authenticator_warning(caplog):
     """Test that custom authenticator strings generate warnings but are still valid."""
     with caplog.at_level(logging.WARNING):
         # Test custom authenticator (should warn but not fail)
-        validate_single_community_session_config("test_session", {
-            "auth_type": "com.example.custom.AuthenticationHandler"
-        })
-        
+        validate_single_community_session_config(
+            "test_session", {"auth_type": "com.example.custom.AuthenticationHandler"}
+        )
+
     # Should have exactly one warning
     assert len(caplog.records) == 1
     warning_message = caplog.records[0].message
