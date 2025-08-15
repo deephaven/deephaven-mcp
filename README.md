@@ -164,12 +164,11 @@ In addition to `"community"`, the `deephaven_mcp.json` file can optionally inclu
 
 *   `host` (string): Hostname or IP address of the [Deephaven Community Core](https://deephaven.io/community/) worker (e.g., `"localhost"`).
 *   `port` (integer): Port number for the worker connection (e.g., `10000`).
-*   `auth_type` (string): Authentication type. Supported values include:
-    *   `"token"`: For token-based authentication.
-    *   `"basic"`: For username/password authentication (use `auth_token` for `username:password` or see server docs for separate fields if supported).
-    *   `"anonymous"`: For no authentication.
-    *   `"io.deephaven.authentication.psk.PskAuthenticationHandler"`: For Pre-Shared Key (PSK) authentication - see [PSK Authentication](#psk-pre-shared-key-authentication) section below.
-*   `auth_token` (string): The authentication token if `auth_type` is `"token"`. For `"basic"` auth, this is typically the password, or `username:password` if the server expects it combined. For PSK auth, this is the pre-shared key value. Consult your [Deephaven server's authentication documentation](https://deephaven.io/core/docs/how-to-guides/authentication/auth-uname-pw/) for specifics.
+*   `auth_type` (string): Authentication type. Common values include:
+    *   `"Anonymous"`: For no authentication (default if omitted).
+    *   `"Basic"`: For username/password authentication (requires `auth_token` in `"username:password"` format).
+    *   Custom authenticator strings (e.g., `"io.deephaven.authentication.psk.PskAuthenticationHandler"` for Pre-Shared Key authentication).
+*   `auth_token` (string): The authentication token. For `"Basic"` auth, this must be in `"username:password"` format. For custom authenticators, this should conform to the specific requirements of that authenticator. Ignored when `auth_type` is `"Anonymous"`. Consult your [Deephaven server's authentication documentation](https://deephaven.io/core/docs/how-to-guides/authentication/auth-uname-pw/) for specifics.
 *   `auth_token_env_var` (string): Alternative to `auth_token` - specifies the name of an environment variable containing the authentication token (e.g., `"MY_AUTH_TOKEN"`). Mutually exclusive with `auth_token`.
 *   `never_timeout` (boolean): If `true`, the MCP server will attempt to configure the session to this worker to never time out. Server-side configurations may still override this.
 *   `session_type` (string): Specifies the type of session to create. Common values are `"groovy"` or `"python"`.
@@ -219,11 +218,11 @@ The `enterprise` key with nested `"systems"` in `deephaven_mcp.json` is a dictio
         "auth_token": "your-shared-secret-key",
         "session_type": "python"
       },
-      "secure_community_worker": {
+      "basic_auth_session": {
         "host": "secure.deephaven.example.com",
         "port": 10002,
-        "auth_type": "token",
-        "auth_token": "your-community-secret-api-token-here",
+        "auth_type": "Basic",
+        "auth_token": "username:password",
         "use_tls": true,
         "tls_root_certs": "/path/to/community_root.crt"
       }
