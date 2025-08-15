@@ -296,12 +296,11 @@ All fields within a session's configuration object are optional. If a field is o
 
 *   `host` (string): Hostname or IP address of the Deephaven Community Core worker (e.g., `"localhost"`).
 *   `port` (integer): Port number for the worker connection (e.g., `10000`).
-*   `auth_type` (string): Authentication method. Supported values include:
-    *   `"token"`: For token-based authentication (e.g., bearer tokens). The actual token value is supplied via `auth_token` or `auth_token_env_var`.
-    *   `"basic"`: For username/password based HTTP Basic authentication. The password (or combined `username:password`) is supplied via `auth_token` or `auth_token_env_var`. Consult the Deephaven server's authentication guide for specifics.
-    *   `"anonymous"`: For connections requiring no authentication.
-    *   `"io.deephaven.authentication.psk.PskAuthenticationHandler"`: For Pre-Shared Key (PSK) authentication. Requires the full Java class name as shown. The pre-shared key value is supplied via `auth_token` or `auth_token_env_var`. See [PSK Authentication Configuration](#psk-authentication-configuration) below for detailed setup instructions.
-*   `auth_token` (string, optional): The direct authentication token or password. Use this OR `auth_token_env_var`, but not both. Required if `auth_type` is `"token"` or `"basic"` and `auth_token_env_var` is not specified.
+*   `auth_type` (string): Authentication method. Common values include:
+    *   `"Anonymous"`: For connections requiring no authentication (default if omitted).
+    *   `"Basic"`: For username/password authentication. The `auth_token` must be in `"username:password"` format.
+    *   Custom authenticator strings (e.g., `"io.deephaven.authentication.psk.PskAuthenticationHandler"` for Pre-Shared Key authentication). The full Java class name is required. See [PSK Authentication Configuration](#psk-authentication-configuration) below for detailed setup instructions.
+*   `auth_token` (string, optional): The authentication token. For `"Basic"` auth, this must be in `"username:password"` format. For custom authenticators, this should conform to the specific requirements of that authenticator. Ignored when `auth_type` is `"Anonymous"`. Use this OR `auth_token_env_var`, but not both.
 *   `auth_token_env_var` (string, optional): The name of an environment variable from which to read the authentication token. Use this OR `auth_token`, but not both. If specified, the token will be sourced from this environment variable.
 *   `never_timeout` (boolean): If `true`, the MCP server attempts to configure the session to this worker to prevent timeouts. Server-side settings might still enforce timeouts.
 *   `session_type` (string): Specifies the programming language for the session (e.g., `"python"`, `"groovy"`).
@@ -328,11 +327,11 @@ All fields within a session's configuration object are optional. If a field is o
         "auth_token": "your-shared-secret-key",
         "session_type": "python"
       },
-      "secure_remote_worker": {
+      "basic_auth_worker": {
         "host": "secure.deephaven.example.com",
         "port": 10002,
-        "auth_type": "token",
-        "auth_token_env_var": "MY_REMOTE_TOKEN_ENV_VAR",
+        "auth_type": "Basic",
+        "auth_token_env_var": "MY_BASIC_AUTH_ENV_VAR",
         "never_timeout": true,
         "session_type": "groovy",
         "use_tls": true,

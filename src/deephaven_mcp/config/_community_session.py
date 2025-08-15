@@ -23,6 +23,18 @@ from deephaven_mcp._exceptions import CommunitySessionConfigurationError
 _LOGGER = logging.getLogger(__name__)
 
 
+# Known auth_type values from Deephaven Python client documentation
+_KNOWN_AUTH_TYPES: set[str] = {
+    "Anonymous",  # Default, no authentication required
+    "Basic",      # Requires username:password format in auth_token
+    "io.deephaven.authentication.psk.PskAuthenticationHandler",  # Requires auth_token
+}
+"""
+Set of commonly known auth_type values for Deephaven Python client.
+Custom authenticator strings are also valid but not listed here.
+"""
+
+
 _ALLOWED_COMMUNITY_SESSION_FIELDS: dict[str, type | tuple[type, type]] = {
     "host": str,
     "port": int,
@@ -168,6 +180,18 @@ def validate_single_community_session_config(
             f"In community session config for '{session_name}', both 'auth_token' and 'auth_token_env_var' are set. "
             "Please use only one."
         )
+
+    # Check auth_type value and log if it's not a known value
+    if "auth_type" in config_item:
+        auth_type_value = config_item["auth_type"]
+        if auth_type_value not in _KNOWN_AUTH_TYPES:
+            _LOGGER.warning(
+                "Community session config for '%s' uses auth_type='%s' which is not a commonly known value. "
+                "Known values are: %s. Custom authenticators are also valid - if this is intentional, you can ignore this warning.",
+                session_name,
+                auth_type_value,
+                ", ".join(sorted(_KNOWN_AUTH_TYPES))
+            )
 
     for required_field in _REQUIRED_FIELDS:
         if required_field not in config_item:
