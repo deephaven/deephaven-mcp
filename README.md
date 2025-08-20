@@ -19,6 +19,7 @@
     - [Claude Desktop](#claude-desktop)
     - [Windsurf IDE](#windsurf-ide)
   - [Starting the MCP Servers](#starting-the-mcp-servers)
+- [Applying Configuration Changes](#applying-configuration-changes)
 - [Working with Deephaven MCP](#working-with-deephaven-mcp)
   - [Available Tools and Capabilities](#available-tools-and-capabilities)
 - [Troubleshooting](#troubleshooting)
@@ -921,9 +922,31 @@ Completely quit and restart Claude Desktop. Wait 30-60 seconds for initializatio
 
 
 
+## Applying Configuration Changes
+
+After creating or modifying your MCP configuration, you must restart your IDE or AI assistant for the changes to take effect.
+
+### Restart and Verify
+
+1. **Restart your tool** completely (Claude Desktop, VS Code, Cursor, etc.)
+2. **Check MCP server status** in your tool's interface - you should see `deephaven-systems` and `deephaven-docs` listed
+3. **Test the connection** by asking your AI assistant:
+   ```
+   Are the Deephaven MCP servers working? Can you list any available sessions?
+   ```
+   Your AI assistant should connect to both servers and respond with information about Deephaven capabilities and available sessions.
+
+If the servers don't appear or you encounter errors, see the [Troubleshooting](#troubleshooting) section.
+
+---
+
 ## Working with Deephaven MCP
 
 This section covers how to effectively use Deephaven MCP with any integrated IDE or AI assistant. Once you've completed the configuration for your specific environment, you can use these tools and prompts across all supported platforms.
+
+### Getting Started
+
+Once you've verified your MCP servers are working, you can start using Deephaven MCP tools and capabilities with your AI assistant.
 
 ### Available Tools and Capabilities
 
@@ -951,20 +974,20 @@ This section provides solutions for common issues you might encounter when setti
 
 | Error | Solution |
 |-------|----------|
-| `spawn uv ENOENT` | Use full path to uv from `which uv` |
+| `spawn uv ENOENT` | Use full path to [`uv`](docs/UV.md) from `which uv` |
 | Connection failed | Check internet connection and server URLs |
 | Config not found | Verify full path to `deephaven_mcp.json` |
-| Permission denied | Ensure uv executable has proper permissions |
-| Python version error | Verify Python 3.11+ is installed and accessible |
+| Permission denied | Ensure [`uv`](docs/UV.md) executable has proper permissions |
+| Python version error | Verify that a supported Python version is installed and accessible |
 
 ### Environment and Setup Issues
 
-* **Server startup issues:** Ensure your virtual environment is activated and dependencies are installed with `uv pip install ".[dev]"`
-* **Port conflicts:** If port 8000 is in use, either change the `PORT` environment variable or kill the conflicting process:
+* **Server startup issues:** Ensure your virtual environment is activated and dependencies are installed
+* **Module not found errors:** Ensure your virtual environment is activated and dependencies are installed
+* **Port conflicts:** If the http transport port (default 8000) is in use, either change the `PORT` environment variable or kill the conflicting process:
   ```bash
   lsof -ti:8000 | xargs kill -9
   ```
-* **Module not found errors:** Run `uv pip install ".[dev]"` in your project directory to install in editable mode
 * **Coroutine errors:** Restart the MCP server after making code changes to ensure the latest code is loaded
 * **Cache issues:** Clear Python cache files if experiencing persistent issues:
   ```bash
@@ -972,45 +995,20 @@ This section provides solutions for common issues you might encounter when setti
   ```
 * **uv-specific issues:** If `uv run` commands fail, ensure `uv` is installed and the project's `pyproject.toml` is properly configured
 
-### Testing Servers Manually
-```bash
-# Test systems server
-uv run dh-mcp-systems-server
-
-# Test docs server  
-uv run mcp-proxy --transport=streamablehttp https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp
-```
-
 ### Check Logs
-- **macOS:** `~/Library/Logs/Claude/`
-- **Windows:** `%APPDATA%\Claude\logs\`
 
-Look for files like `mcp-server-deephaven-systems.log` and `mcp-server-deephaven-docs.log`.
+Each AI agent and IDE maintains its own directory for MCP server logs. Check your specific tool's documentation for log file locations. Look for files related to `deephaven-systems` and `deephaven-docs` MCP servers.
 
-### IDE-Specific Troubleshooting
+### IDE and AI Assistant Troubleshooting
 
-For IDE-specific troubleshooting, refer to the troubleshooting sections in each IDE integration guide:
+For IDE and AI assistant troubleshooting, refer to the troubleshooting sections in each integration guide:
 
 * [GitHub Copilot in Visual Studio Code](#github-copilot-in-visual-studio-code)
 * [Cursor IDE](#cursor-ide) - See Cursor-Specific Troubleshooting
 * [Claude Desktop](#claude-desktop) - See Claude Desktop-Specific Troubleshooting
 
 
-### Restarting Your LLM Tool (Applying the Configuration)
 
-Once you have saved the `"mcpServers"` JSON object in the correct location for your LLM tool, **restart the tool** ([Claude Desktop](https://www.anthropic.com/claude), [VS Code](https://code.visualstudio.com/), [JetBrains IDEs](https://www.jetbrains.com/products/#type=ide), etc.). The configured servers (e.g., `deephaven-systems`, `deephaven-docs`) should then be available in its MCP interface.
-
-### Verifying Your Setup
-
-After restarting your LLM tool, the first step is to verify that the MCP servers are recognized:
-
-*   Open your LLM tool's interface where it lists available MCP servers or data sources.
-*   You should see `deephaven-systems` and `deephaven-docs` (or the names you configured in the `mcpServers` object) listed.
-*   Attempt to connect to or interact with one of them (e.g., by listing available [Deephaven Community Core](https://deephaven.io/community/) workers via the `deephaven-systems` server).
-
-If the servers are not listed or you encounter errors at this stage, please proceed to the [Troubleshooting](#troubleshooting) section for guidance.
-
----
 
 ## Troubleshooting
 
