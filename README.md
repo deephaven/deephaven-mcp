@@ -197,7 +197,7 @@ This file tells the MCP Systems Server how to connect to your Deephaven instance
 {}
 ```
 
-**Simple Community Core connection:**
+**Community Core with anonymous authentication:**
 ```json
 {
   "community": {
@@ -205,6 +205,22 @@ This file tells the MCP Systems Server how to connect to your Deephaven instance
       "my_local_server": {
         "host": "localhost",
         "port": 10000
+      }
+    }
+  }
+}
+```
+
+**Community Core with PSK authentication:**
+```json
+{
+  "community": {
+    "sessions": {
+      "psk_server": {
+        "host": "localhost",
+        "port": 10000,
+        "auth_type": "io.deephaven.authentication.psk.PskAuthenticationHandler",
+        "auth_token": "your-shared-secret-key"
       }
     }
   }
@@ -259,7 +275,7 @@ The `enterprise` key contains a `"systems"` dictionary mapping custom system nam
 | Field | Type | Description |
 |-------|------|-------------|
 | `connection_json_url` | string | URL to the Enterprise server's `connection.json` file (e.g., `"https://enterprise.example.com/iris/connection.json"`) |
-| `auth_type` | string | Authentication method: `"password"` or `"private_key"` |
+| `auth_type` | string | Authentication method: `"password"` for username/password auth, or `"private_key"` for private key-based auth (e.g., SAML) |
 
 **Conditional Fields (based on auth_type):**
 
@@ -338,7 +354,6 @@ The `enterprise` key contains a `"systems"` dictionary mapping custom system nam
   }
 }
 ```
-    *   `"private_key"`: For authentication using a private key (e.g., SAML or other private key-based auth).
 
 **Conditional Fields (based on `auth_type`):**
 
