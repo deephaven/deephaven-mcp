@@ -20,8 +20,6 @@
     - [Windsurf IDE](#windsurf-ide)
   - [Starting the MCP Servers](#starting-the-mcp-servers)
 - [Applying Configuration Changes](#applying-configuration-changes)
-- [Working with Deephaven MCP](#working-with-deephaven-mcp)
-  - [Available Tools and Capabilities](#available-tools-and-capabilities)
 - [Troubleshooting](#troubleshooting)
 - [Advanced Usage & Further Information](#advanced-usage--further-information)
 - [Contributing](#contributing)
@@ -941,34 +939,6 @@ After creating or modifying your MCP configuration, you must restart your IDE or
    Your AI assistant should connect to both servers and respond with information about Deephaven capabilities and available sessions.
 
 If the servers don't appear or you encounter errors, see the [Troubleshooting](#troubleshooting) section.
-
----
-
-## Working with Deephaven MCP
-
-This section covers how to effectively use Deephaven MCP with any integrated IDE or AI assistant. Once you've completed the configuration for your specific environment, you can use these tools and prompts across all supported platforms.
-
-### Getting Started
-
-Once you've verified your MCP servers are working, you can start using Deephaven MCP tools and capabilities with your AI assistant.
-
-### Available Tools and Capabilities
-
-All integrations provide access to these core MCP capabilities:
-
-- **Session Management**: List and monitor Deephaven sessions
-- **Table Operations**: Retrieve table schemas and metadata
-- **Script Execution**: Run Python or Groovy scripts on Deephaven instances
-- **Package Management**: Query installed Python packages
-- **Configuration Management**: Reload and refresh session configurations
-- **Enterprise Systems**: Monitor and manage Enterprise deployments
-- **Documentation Access**: Get answers to Deephaven questions
-
-#### Detailed MCP Tool Reference
-
-The Deephaven MCP provides various tools to interact with Deephaven sessions and Enterprise systems. For detailed documentation on these tools, please refer to the [Developer & Contributor Guide](docs/DEVELOPER_GUIDE.md).
-
-
 
 ---
 
