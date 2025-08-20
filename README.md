@@ -400,11 +400,6 @@ Here's a complete example showing both Community and Enterprise configurations:
 > chmod 600 /path/to/your/deephaven_mcp.json
 > ```
 
-#### Additional Notes for `deephaven_mcp.json`
-
-*   Ensure all file paths within the config (e.g., for TLS certificates if used) are absolute and accessible by the server process.
-*   The session names are arbitrary and used to identify sessions in client tools.
-
 ### Setting `DH_MCP_CONFIG_FILE` (Informing the MCP Server)
 
 The `DH_MCP_CONFIG_FILE` environment variable tells the [Deephaven MCP Systems Server](#systems-server) where to find your `deephaven_mcp.json` file (detailed in [The `deephaven_mcp.json` File (Defining Your Community Sessions)](#the-deephaven_mcp.json-file-defining-your-community-sessions)). You will set this environment variable as part of the server launch configuration within your LLM tool, as detailed in the [Configure Your LLM Tool to Use MCP Servers](#configure-your-llm-tool-to-use-mcp-servers) section. 
@@ -415,7 +410,10 @@ When launched by an LLM tool, the [MCP Systems Server](#systems-server-architect
 
 ## Environment Variables
 
-The following environment variables can be used to configure the behavior of Deephaven MCP servers:
+The following environment variables can be used to configure the behavior of the Deephaven MCP Systems Server.
+
+> **⚠️ Security Warning**: Environment variables containing sensitive information like API keys and authentication tokens should be handled securely and never committed to version control.
+
 
 ### Core Configuration
 
@@ -429,10 +427,6 @@ The following environment variables can be used to configure the behavior of Dee
 
 ### Authentication
 
-* **`INKEEP_API_KEY`**: API key for documentation services (required for docs server)
-  * Example: `INKEEP_API_KEY=your_api_key_here`
-  * Used by: Documentation server only
-
 * **Environment variables for `auth_token_env_var`**: Any environment variable specified in your `deephaven_mcp.json` configuration's `auth_token_env_var` field will be used to source authentication tokens
   * Example: If config specifies `"auth_token_env_var": "MY_AUTH_TOKEN"`, then `MY_AUTH_TOKEN=username:password`
   * Note: This is a more secure alternative to hardcoding tokens in configuration files
@@ -444,20 +438,6 @@ The following environment variables can be used to configure the behavior of Dee
   * Example: `PYTHONLOGLEVEL=DEBUG`
   * Default: `INFO`
 
-### Usage Examples
-
-```bash
-# Basic usage with all core environment variables
-DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json PORT=8000 PYTHONLOGLEVEL=INFO uv run dh-mcp-systems-server
-
-# Using auth token from environment variable (when configured in deephaven_mcp.json)
-DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json MY_AUTH_TOKEN=username:password uv run dh-mcp-systems-server
-
-# Running documentation server with required API key
-INKEEP_API_KEY=your_api_key_here uv run dh-mcp-docs-server
-```
-
-> **⚠️ Security Warning**: Environment variables containing sensitive information like API keys and authentication tokens should be handled securely and never committed to version control.
 
 ## Configure Your LLM Tool to Use MCP Servers
 
