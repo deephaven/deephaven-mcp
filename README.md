@@ -21,10 +21,9 @@
   - [Starting the MCP Servers](#starting-the-mcp-servers)
 - [Working with Deephaven MCP](#working-with-deephaven-mcp)
   - [Available Tools and Capabilities](#available-tools-and-capabilities)
-  - [Example Prompts](#example-prompts)
 - [Troubleshooting](#troubleshooting)
-- [Contributing](#contributing)
 - [Advanced Usage & Further Information](#advanced-usage--further-information)
+- [Contributing](#contributing)
 - [Community & Support](#community--support)
 - [License](#license)
 
@@ -198,6 +197,74 @@ The `enterprise` key with nested `"systems"` in `deephaven_mcp.json` is a dictio
 *   `connection_json_url` (string): URL to the Deephaven Enterprise server's `connection.json` file (e.g., `"https://enterprise.example.com/iris/connection.json"`). This file provides the necessary details for the client to connect to the server.
 *   `auth_type` (string): Specifies the authentication method. Must be one of:
     *   `"password"`: For username/password authentication.
+    
+
+#### Authentication Configuration Examples
+
+**Basic Authentication**
+```json
+{
+  "community": {
+    "sessions": {
+      "secure_session": {
+        "url": "http://localhost:10000",
+        "auth_type": "Basic",
+        "auth_token": "username:password"
+      }
+    }
+  }
+}
+```
+
+**Environment Variable Authentication (Recommended for Production)**
+```json
+{
+  "community": {
+    "sessions": {
+      "prod_session": {
+        "url": "https://deephaven-prod.example.com:10000",
+        "auth_type": "Basic",
+        "auth_token_env_var": "DH_AUTH_TOKEN"
+      }
+    }
+  }
+}
+```
+
+**TLS/SSL Configuration**
+```json
+{
+  "community": {
+    "sessions": {
+      "secure_tls_session": {
+        "host": "secure.deephaven.example.com",
+        "port": 443,
+        "use_tls": true,
+        "tls_root_certs": "/path/to/ca.pem",
+        "client_cert_chain": "/path/to/client-cert.pem",
+        "client_private_key": "/path/to/client-key.pem"
+      }
+    }
+  }
+}
+```
+
+**Enterprise System Configuration**
+```json
+{
+  "enterprise": {
+    "systems": {
+      "enterprise_prod": {
+        "connection_json_url": "https://enterprise.example.com/iris/connection.json",
+        "auth_type": "password",
+        "username": "admin",
+        "password_env_var": "DH_ENTERPRISE_PASSWORD",
+        "verify_ssl": true
+      }
+    }
+  }
+}
+```
     *   `"private_key"`: For authentication using a private key (e.g., SAML or other private key-based auth).
 
 **Conditional Fields (based on `auth_type`):**
@@ -418,7 +485,7 @@ Consult your LLM tool's documentation for the precise file name and location. Be
 
 This section covers how to integrate Deephaven MCP with various IDE environments and AI coding assistants. Each integration requires specific configuration steps and file locations.
 
-The following sections provide specific integration steps for each supported IDE and AI assistant platform. After configuration, see [Working with Deephaven MCP](#working-with-deephaven-mcp) for example prompts and available capabilities.
+The following sections provide specific integration steps for each supported IDE and AI assistant platform. After configuration, see the [Developer & Contributor Guide](docs/DEVELOPER_GUIDE.md) for detailed documentation on using MCP tools.
 
 ### GitHub Copilot in Visual Studio Code
 
@@ -479,45 +546,7 @@ For VS Code with GitHub Copilot, the MCP configuration should be placed at:
    - `/full/path/to/deephaven-mcp`: Replace with the absolute path to your deephaven-mcp project directory
    - `/full/path/to/your/deephaven_mcp.json`: Replace with the absolute path to your Deephaven configuration file
 
-#### Quick Setup Commands for VS Code
 
-```bash
-# 1. Navigate to your project directory
-cd /path/to/your/project
-
-# 2. Create .vscode directory if it doesn't exist
-mkdir -p .vscode
-
-# 3. Install deephaven-mcp if not already installed
-uv pip install deephaven-mcp
-
-# 4. Create basic Deephaven configuration file
-echo '{
-  "community": {
-    "sessions": {
-      "my_local_deephaven": {
-        "host": "localhost",
-        "port": 10000,
-        "session_type": "python",
-        "auth_type": "anonymous"
-      }
-    }
-  }
-}' > deephaven_mcp.json
-
-# 5. Create MCP configuration (update paths in the file!)
-# Edit .vscode/mcp.json with the configuration above
-
-# 6. Create VS Code settings to enable MCP
-echo '{
-  "github.copilot.enable": {
-    "*": true
-  },
-  "github.copilot.experimental.mcp.enabled": true
-}' > .vscode/settings.json
-
-# 7. Restart VS Code completely
-```
 
 #### Prerequisites for VS Code Setup
 
@@ -528,7 +557,7 @@ Additionally, ensure you meet all the requirements listed in the [Prerequisites]
 
 #### Using Deephaven MCP with GitHub Copilot
 
-Once configured, you can interact with Deephaven through GitHub Copilot Chat using the example prompts and capabilities described in the [Working with Deephaven MCP](#working-with-deephaven-mcp) section.
+Once configured, you can interact with Deephaven through GitHub Copilot Chat. For detailed documentation on MCP tools, refer to the [Developer & Contributor Guide](docs/DEVELOPER_GUIDE.md).
 
 #### VS Code-Specific Troubleshooting
 
@@ -545,7 +574,7 @@ To enable debug logging, change `"PYTHONLOGLEVEL": "INFO"` to `"PYTHONLOGLEVEL":
 
 ### Windsurf IDE
 
-[Windsurf](https://codeium.com/windsurf) is an AI-powered IDE that supports MCP servers for enhanced development workflows. Once configured, you can use all features described in the [Working with Deephaven MCP](#working-with-deephaven-mcp) section. Here's how to set up the integration:
+[Windsurf](https://codeium.com/windsurf) is an AI-powered IDE that supports MCP servers for enhanced development workflows. Here's how to set up the integration:
 
 #### Configuration File Location
 
@@ -647,12 +676,12 @@ For Cursor IDE, the MCP configuration should be placed at:
       "command": "uv",
       "args": [
         "--directory",
-        "/Users/yourname/path/to/deephaven-mcp-branch",
+        "/full/path/to/deephaven-mcp",
         "run",
         "dh-mcp-systems-server"
       ],
       "env": {
-        "DH_MCP_CONFIG_FILE": "/Users/yourname/path/to/deephaven-mcp-branch/deephaven_mcp.json",
+        "DH_MCP_CONFIG_FILE": "<PATH_TO_DEEPHAVEN_MCP>/deephaven_mcp.json",
         "PYTHONLOGLEVEL": "INFO"
       }
     },
@@ -660,7 +689,7 @@ For Cursor IDE, the MCP configuration should be placed at:
       "command": "uv",
       "args": [
         "--directory",
-        "/Users/yourname/path/to/deephaven-mcp-branch",
+        "/full/path/to/deephaven-mcp",
         "run",
         "mcp-proxy",
         "--transport=streamablehttp",
@@ -718,7 +747,7 @@ mkdir -p ~/.cursor
 
 ### Claude Desktop
 
-Claude Desktop supports MCP servers for enhanced development workflows with AI-assisted data exploration and Deephaven integration. Once configured, you can use all features described in the [Working with Deephaven MCP](#working-with-deephaven-mcp) section.
+Claude Desktop supports MCP servers for enhanced development workflows with AI-assisted data exploration and Deephaven integration.
 
 #### Configuration File Location
 
@@ -784,7 +813,7 @@ Completely quit and restart Claude Desktop. Wait 30-60 seconds for initializatio
         "dh-mcp-systems-server"
       ],
       "env": {
-        "DH_MCP_CONFIG_FILE": "/Users/johndoe/projects/deephaven-mcp/deephaven_mcp.json",
+        "DH_MCP_CONFIG_FILE": "/full/path/to/deephaven-mcp/deephaven_mcp.json",
         "PYTHONLOGLEVEL": "INFO"
       }
     },
@@ -858,31 +887,15 @@ All integrations provide access to these core MCP capabilities:
 - **Table Operations**: Retrieve table schemas and metadata
 - **Script Execution**: Run Python or Groovy scripts on Deephaven instances
 - **Package Management**: Query installed Python packages
-- **Documentation**: Access conversational Deephaven documentation
+- **Configuration Management**: Reload and refresh session configurations
+- **Enterprise Systems**: Monitor and manage Enterprise deployments
+- **Documentation Access**: Get answers to Deephaven questions
 
-### Example Prompts
+#### Detailed MCP Tool Reference
 
-Once configured, you can interact with Deephaven through any supported AI assistant using prompts like:
+The Deephaven MCP provides various tools to interact with Deephaven sessions and Enterprise systems. For detailed documentation on these tools, please refer to the [Developer & Contributor Guide](docs/DEVELOPER_GUIDE.md).
 
-#### Session Management Examples
-- "Show me the status of my Deephaven sessions"
-- "List all active Deephaven sessions"
-- "Get details for session 'python1'"
 
-#### Data Exploration Examples
-- "What tables are available in my local Deephaven instance?"
-- "Get the schema for table 't1' in my Deephaven session"
-- "Show me the structure of table 'stocks'"
-
-#### Script Execution Examples
-- "Execute this Python code on my Deephaven session: `t = empty_table(10).update('x = i')`"
-- "Run this Groovy script: `t = new Table(10).update("x = it")`"
-- "Create a new table with columns for date, price, and volume"
-
-#### Documentation Examples
-- "How do I create a time-based table in Deephaven?"
-- "Explain Deephaven's partitioning capabilities"
-- "What are the different join types in Deephaven?"
 
 ## Troubleshooting
 
@@ -900,12 +913,12 @@ This section provides solutions for common issues you might encounter when setti
 
 ### Environment and Setup Issues
 
-* **Server startup issues:** Ensure your virtual environment is activated and dependencies are installed with `uv pip install .[dev]`
+* **Server startup issues:** Ensure your virtual environment is activated and dependencies are installed with `uv pip install ".[dev]"`
 * **Port conflicts:** If port 8000 is in use, either change the `PORT` environment variable or kill the conflicting process:
   ```bash
   lsof -ti:8000 | xargs kill -9
   ```
-* **Module not found errors:** Run `uv pip install .[dev]` in your project directory to install in editable mode
+* **Module not found errors:** Run `uv pip install ".[dev]"` in your project directory to install in editable mode
 * **Coroutine errors:** Restart the MCP server after making code changes to ensure the latest code is loaded
 * **Cache issues:** Clear Python cache files if experiencing persistent issues:
   ```bash
@@ -935,19 +948,6 @@ For IDE-specific troubleshooting, refer to the troubleshooting sections in each 
 * [GitHub Copilot in Visual Studio Code](#github-copilot-in-visual-studio-code)
 * [Cursor IDE](#cursor-ide) - See Cursor-Specific Troubleshooting
 * [Claude Desktop](#claude-desktop) - See Claude Desktop-Specific Troubleshooting
-
-## Capabilities
-
-With these servers, Claude can:
-- **Systems:** Manage Deephaven sessions, execute scripts, retrieve table schemas, check system status
-- **Documentation:** Answer Deephaven questions, provide code examples, give version-specific guidance
-
-### Example Queries to Try
-Once connected, you can ask Claude:
-- "What Deephaven sessions are available?"
-- "Show me the schema for table X"
-- "How do I create a time table in Deephaven?"
-- "Execute this Python script on the local session"
 
 
 ### Restarting Your LLM Tool (Applying the Configuration)
@@ -993,19 +993,18 @@ If the servers are not listed or you encounter errors at this stage, please proc
 
 ---
 
+## Advanced Usage & Further Information
+
+*   **Detailed Server APIs and Tools:** For in-depth information about the tools exposed by the [Systems Server](#systems-server) (e.g., [`refresh`](docs/DEVELOPER_GUIDE.md#refresh), [`table_schemas`](docs/DEVELOPER_GUIDE.md#table_schemas)) and the [Docs Server](#docs-server) ([`docs_chat`](docs/DEVELOPER_GUIDE.md#docs_chat)), refer to the [Developer & Contributor Guide](docs/DEVELOPER_GUIDE.md).
+*   **`uv` Workflow:** For more details on using `uv` for project management, see [docs/UV.md](docs/UV.md).
+
+---
 ## Contributing
 
 We warmly welcome contributions to Deephaven MCP! Whether it's bug reports, feature suggestions, documentation improvements, or code contributions, your help is valued.
 
 *   **Reporting Issues:** Please use the [GitHub Issues](https://github.com/deephaven/deephaven-mcp/issues) tracker.
 *   **Development Guidelines:** For details on setting up your development environment, coding standards, running tests, and the pull request process, please see our [Developer & Contributor Guide](docs/DEVELOPER_GUIDE.md).
-
----
-## Advanced Usage & Further Information
-
-
-*   **Detailed Server APIs and Tools:** For in-depth information about the tools exposed by the [Systems Server](#systems-server) (e.g., [`refresh`](docs/DEVELOPER_GUIDE.md#refresh), [`table_schemas`](docs/DEVELOPER_GUIDE.md#table_schemas)) and the [Docs Server](#docs-server) ([`docs_chat`](docs/DEVELOPER_GUIDE.md#docs_chat)), refer to the [Developer & Contributor Guide](docs/DEVELOPER_GUIDE.md).
-*   **`uv` Workflow:** For more details on using `uv` for project management, see [docs/UV.md](docs/UV.md).
 
 ---
 
