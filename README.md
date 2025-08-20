@@ -10,7 +10,18 @@
 - [Prerequisites](#prerequisites)
 - [Installation & Initial Setup](#installation--initial-setup)
 - [Configuring `deephaven_mcp.json`](#configuring-deephaven_mcpjson)
+- [Environment Variables](#environment-variables)
 - [Configure Your LLM Tool to Use MCP Servers](#configure-your-llm-tool-to-use-mcp-servers)
+  - [Defining MCP Servers](#defining-mcp-servers-for-your-llm-tool-the-mcpservers-json-object)
+  - [IDE and AI Assistant Integrations](#ide-and-ai-assistant-integrations)
+    - [GitHub Copilot (VS Code)](#github-copilot-in-visual-studio-code)
+    - [Cursor IDE](#cursor-ide)
+    - [Claude Desktop](#claude-desktop)
+    - [Windsurf IDE](#windsurf-ide)
+  - [Starting the MCP Servers](#starting-the-mcp-servers)
+- [Working with Deephaven MCP](#working-with-deephaven-mcp)
+  - [Available Tools and Capabilities](#available-tools-and-capabilities)
+  - [Example Prompts](#example-prompts)
 - [Troubleshooting](#troubleshooting)
 - [Contributing](#contributing)
 - [Advanced Usage & Further Information](#advanced-usage--further-information)
@@ -86,6 +97,7 @@ graph TD
 *   **Choose your Python environment setup method:**
     *   **Option A: [`uv`](https://docs.astral.sh/uv/) (Recommended)**: A very fast Python package installer and resolver. If you don't have it, you can install it via `pip install uv` or see the [uv installation guide](https://github.com/astral-sh/uv#installation).
     *   **Option B: Standard Python `venv` and `pip`**: Uses Python's built-in [virtual environment (`venv`)](https://docs.python.org/3/library/venv.html) tools and [`pip`](https://pip.pypa.io/en/stable/getting-started/).
+*   **Configuration Files**: Each integration requires proper configuration files (specific locations detailed in each integration section)
 
 ---
 
@@ -169,7 +181,7 @@ In addition to `"community"`, the `deephaven_mcp.json` file can optionally inclu
     *   `"Basic"`: For username/password authentication (requires `auth_token` in `"username:password"` format).
     *   Custom authenticator strings (e.g., `"io.deephaven.authentication.psk.PskAuthenticationHandler"` for Pre-Shared Key authentication).
 *   `auth_token` (string): The authentication token. For `"Basic"` auth, this must be in `"username:password"` format. For custom authenticators, this should conform to the specific requirements of that authenticator. Ignored when `auth_type` is `"Anonymous"`. Consult your [Deephaven server's authentication documentation](https://deephaven.io/core/docs/how-to-guides/authentication/auth-uname-pw/) for specifics.
-*   `auth_token_env_var` (string): Alternative to `auth_token` - specifies the name of an environment variable containing the authentication token (e.g., `"MY_AUTH_TOKEN"`). Mutually exclusive with `auth_token`.
+*   `auth_token_env_var` (string): Alternative to `auth_token` - specifies the name of an environment variable containing the authentication token (e.g., `"MY_AUTH_TOKEN"`). If this variable is set in configuration but not found in the environment, a warning will be logged and an empty token will be used. This is a more secure alternative to hardcoding tokens in configuration files and is **mutually exclusive** with `auth_token`.
 *   `never_timeout` (boolean): If `true`, the MCP server will attempt to configure the session to this worker to never time out. Server-side configurations may still override this.
 *   `session_type` (string): Specifies the type of session to create. Common values are `"groovy"` or `"python"`.
 *   `use_tls` (boolean): Set to `true` if the connection to the worker requires TLS/SSL.
@@ -268,6 +280,52 @@ When launched by an LLM tool, the [MCP Systems Server](#systems-server-architect
 
 ---
 
+## Environment Variables
+
+The following environment variables can be used to configure the behavior of Deephaven MCP servers:
+
+### Core Configuration
+
+* **`DH_MCP_CONFIG_FILE`**: Path to your `deephaven_mcp.json` configuration file
+  * Example: `DH_MCP_CONFIG_FILE=/path/to/your/deephaven_mcp.json`
+  * Default: Looks for `deephaven_mcp.json` in the current directory
+
+* **`PORT`**: Port number for the MCP server
+  * Example: `PORT=8000`
+  * Default: `8000`
+
+### Authentication
+
+* **`INKEEP_API_KEY`**: API key for documentation services (required for docs server)
+  * Example: `INKEEP_API_KEY=your_api_key_here`
+  * Used by: Documentation server only
+
+* **Environment variables for `auth_token_env_var`**: Any environment variable specified in your `deephaven_mcp.json` configuration's `auth_token_env_var` field will be used to source authentication tokens
+  * Example: If config specifies `"auth_token_env_var": "MY_AUTH_TOKEN"`, then `MY_AUTH_TOKEN=username:password`
+  * Note: This is a more secure alternative to hardcoding tokens in configuration files
+
+### Debugging and Logging
+
+* **`PYTHONLOGLEVEL`**: Controls the verbosity of logging output
+  * Values: `DEBUG`, `INFO`, `WARNING`, `ERROR`
+  * Example: `PYTHONLOGLEVEL=DEBUG`
+  * Default: `INFO`
+
+### Usage Examples
+
+```bash
+# Basic usage with all core environment variables
+DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json PORT=8000 PYTHONLOGLEVEL=INFO uv run dh-mcp-systems-server
+
+# Using auth token from environment variable (when configured in deephaven_mcp.json)
+DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json MY_AUTH_TOKEN=username:password uv run dh-mcp-systems-server
+
+# Running documentation server with required API key
+INKEEP_API_KEY=your_api_key_here uv run dh-mcp-docs-server
+```
+
+> **Security Note**: Environment variables containing sensitive information like API keys and authentication tokens should be handled securely and never committed to version control.
+
 ## Configure Your LLM Tool to Use MCP Servers
 
 This section details how to configure your LLM tool (e.g., [Claude Desktop](https://www.anthropic.com/claude), [GitHub Copilot](https://github.com/features/copilot)) to launch and communicate with the [Deephaven MCP Systems Server](#systems-server) and the [Deephaven MCP Docs Server](#docs-server). This involves providing a JSON configuration, known as the [`"mcpServers"` object](#defining-mcp-servers-for-your-llm-tool-the-mcpservers-json-object), to your LLM tool.
@@ -356,24 +414,20 @@ Consult your LLM tool's documentation for the precise file name and location. Be
 ```
 *Note: You can change `"PYTHONLOGLEVEL": "INFO"` to `"PYTHONLOGLEVEL": "DEBUG"` for more detailed server logs, as further detailed in the [Troubleshooting section](#troubleshooting).*
 
-### Tool-Specific File Locations for the `mcpServers` Configuration
+### IDE and AI Assistant Integrations
 
-The `"mcpServers"` JSON object, whose structure is detailed in [Defining MCP Servers for Your LLM Tool (The `mcpServers` JSON Object)](#defining-mcp-servers-for-your-llm-tool-the-mcpservers-json-object), needs to be placed in a specific configuration file or setting area for your LLM tool. Here’s how to integrate it with common tools:
+This section covers how to integrate Deephaven MCP with various IDE environments and AI coding assistants. Each integration requires specific configuration steps and file locations.
 
-*   **[Claude Desktop](https://www.anthropic.com/claude):**
-    *   The `mcpServers` object should be added to the main JSON object within this file:
-    *   macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
-    *   Windows: `%APPDATA%\Claude\claude_desktop_config.json` (e.g., `C:\Users\<YourUsername>\AppData\Roaming\Claude\claude_desktop_config.json`)
-    *   Linux: `~/.config/Claude/claude_desktop_config.json`
-*   **[GitHub Copilot](https://github.com/features/copilot) ([Visual Studio Code](https://code.visualstudio.com/)):**
-    *   In your project's root directory, create or edit the file `.vscode/mcp.json`.
-    *   This file's content should be the `"mcpServers"` JSON object, as shown in the examples in [Defining MCP Servers for Your LLM Tool (The `mcpServers` JSON Object)](#defining-mcp-servers-for-your-llm-tool-the-mcpservers-json-object).
-*   **[GitHub Copilot](https://github.com/features/copilot) ([JetBrains IDEs](https://www.jetbrains.com/products/#type=ide) - [IntelliJ IDEA](https://www.jetbrains.com/idea/), [PyCharm](https://www.jetbrains.com/pycharm/), etc.):**
-    *   The method for configuring custom MCP servers may vary. Please consult the official [GitHub Copilot](https://github.com/features/copilot) extension documentation for your specific JetBrains IDE for the most current instructions. It might involve a specific settings panel or a designated configuration file.
+The following sections provide specific integration steps for each supported IDE and AI assistant platform. After configuration, see [Working with Deephaven MCP](#working-with-deephaven-mcp) for example prompts and available capabilities.
 
 ### GitHub Copilot in Visual Studio Code
 
 [GitHub Copilot](https://github.com/features/copilot) in [Visual Studio Code](https://code.visualstudio.com/) supports MCP servers for enhanced development workflows with AI-assisted data exploration and Deephaven integration.
+
+#### Configuration File Location
+
+For VS Code with GitHub Copilot, the MCP configuration should be placed at:
+- **File path**: `.vscode/mcp.json` in your project's root directory
 
 #### Setting up MCP Configuration for VS Code
 
@@ -469,26 +523,12 @@ echo '{
 
 - **VS Code Version**: Ensure you have the latest version of Visual Studio Code
 - **GitHub Copilot Extension**: Install and configure the GitHub Copilot extension
-- **Python**: Version 3.11 or later
-- **Deephaven Instance**: A running Deephaven Community Core instance (see setup instructions above)
+
+Additionally, ensure you meet all the requirements listed in the [Prerequisites](#prerequisites) section.
 
 #### Using Deephaven MCP with GitHub Copilot
 
-Once configured, you can interact with Deephaven through GitHub Copilot Chat:
-
-**Example Prompts:**
-- "Show me the status of my Deephaven sessions"
-- "What tables are available in my local Deephaven instance?"
-- "Execute this Python code on my Deephaven session: `t = empty_table(10).update('x = i')`"
-- "How do I create a time-based table in Deephaven?"
-- "Get the schema for table 't1' in my Deephaven session"
-
-**Available MCP Tools via Copilot:**
-- **Session Management**: List and monitor Deephaven sessions
-- **Table Operations**: Retrieve table schemas and metadata
-- **Script Execution**: Run Python or Groovy scripts on Deephaven instances
-- **Package Management**: Query installed Python packages
-- **Documentation**: Access conversational Deephaven documentation
+Once configured, you can interact with Deephaven through GitHub Copilot Chat using the example prompts and capabilities described in the [Working with Deephaven MCP](#working-with-deephaven-mcp) section.
 
 #### VS Code-Specific Troubleshooting
 
@@ -503,9 +543,14 @@ Once configured, you can interact with Deephaven through GitHub Copilot Chat:
 To enable debug logging, change `"PYTHONLOGLEVEL": "INFO"` to `"PYTHONLOGLEVEL": "DEBUG"` in your MCP configuration.
 
 
-### Windsurf Configuration
+### Windsurf IDE
 
-[Windsurf](https://codeium.com/windsurf) is an AI-powered IDE that supports MCP servers for enhanced development workflows. Here's how to configure and run the Deephaven MCP server with Windsurf:
+[Windsurf](https://codeium.com/windsurf) is an AI-powered IDE that supports MCP servers for enhanced development workflows. Once configured, you can use all features described in the [Working with Deephaven MCP](#working-with-deephaven-mcp) section. Here's how to set up the integration:
+
+#### Configuration File Location
+
+For Windsurf IDE, the MCP configuration should be placed at:
+- **File path**: `~/.codeium/windsurf/mcp_config.json`
 
 #### Setting up MCP Configuration for Windsurf
 
@@ -579,34 +624,21 @@ For development work on the Deephaven MCP server itself, follow these additional
    INKEEP_API_KEY=your_api_key_here DH_MCP_CONFIG_FILE=.vscode/deephaven_mcp.json PORT=8000 uv run python -m deephaven_mcp.mcp_systems_server.main --transport sse
    ```
 
-#### Environment Variables
 
-The following environment variables are supported:
-
-- `DH_MCP_CONFIG_FILE`: Path to your `deephaven_mcp.json` configuration file
-- `PORT`: Port number for the MCP server (default: 8000)
-- `INKEEP_API_KEY`: API key for documentation services (if using docs server)
-- `PYTHONLOGLEVEL`: Logging level (`INFO`, `DEBUG`, `WARNING`, `ERROR`)
-
-#### Windsurf-Specific Troubleshooting
-
-- **Server startup issues:** Ensure your virtual environment is activated and dependencies are installed with `uv pip install .[dev]`
-- **Port conflicts:** If port 8000 is in use, either change the `PORT` environment variable or kill the conflicting process:
-  ```bash
-  lsof -ti:8000 | xargs kill -9
-  ```
-- **Module not found errors:** Run `uv pip install .[dev]` in your project directory to install in editable mode
-- **Coroutine errors:** Restart the MCP server after making code changes to ensure the latest code is loaded
-- **Cache issues:** Clear Python cache files if experiencing persistent issues:
-  ```bash
-  find . -name "*.pyc" -delete
-  ```
-- **uv-specific issues:** If `uv run` commands fail, ensure `uv` is installed and the project's `pyproject.toml` is properly configured
 
 ### Cursor IDE
 
-* **Configuration File Location**: `~/.cursor/mcp.json` (create this file if it doesn't exist)
-* **Tested Working Configuration** (replace paths with your actual absolute paths):
+Cursor IDE supports MCP servers for enhanced development workflows with AI-assisted data exploration and Deephaven integration.
+
+#### Configuration File Location
+
+For Cursor IDE, the MCP configuration should be placed at:
+- **File path**: `~/.cursor/mcp.json` 
+
+#### Setting up MCP Configuration for Cursor IDE
+
+1. **Create the MCP configuration file:**
+   Create or edit `~/.cursor/mcp.json` (create this file if it doesn't exist):
 
 ```json
 {
@@ -641,10 +673,11 @@ The following environment variables are supported:
 
 #### Important Setup Notes for Cursor
 
-* **Python Version**: Requires Python 3.11 or later (Python 3.10 will not work)
 * **Virtual Environment**: Must use `uv venv .venv -p 3.11` or `python3.11 -m venv .venv`
 * **Configuration File**: Must exist at project root: `deephaven_mcp.json`
 * **Restart Required**: After creating/updating MCP configuration, completely restart Cursor
+
+Additionally, ensure you meet all the requirements listed in the [Prerequisites](#prerequisites) section.
 
 #### Quick Setup Commands for Cursor
 
@@ -685,12 +718,22 @@ mkdir -p ~/.cursor
 
 ### Claude Desktop
 
-Configure Deephaven MCP servers to enable Claude Desktop integration with Deephaven systems and documentation.
+Claude Desktop supports MCP servers for enhanced development workflows with AI-assisted data exploration and Deephaven integration. Once configured, you can use all features described in the [Working with Deephaven MCP](#working-with-deephaven-mcp) section.
 
-#### Configure Claude Desktop
-Open Claude Desktop → Settings → Developer → Edit Config
+#### Configuration File Location
 
-**Replace paths with your actual paths:**
+For Claude Desktop, the MCP configuration should be placed at:
+- **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Windows**: `%APPDATA%\Claude\claude_desktop_config.json` (e.g., `C:\Users\<YourUsername>\AppData\Roaming\Claude\claude_desktop_config.json`)
+- **Linux**: `~/.config/Claude/claude_desktop_config.json`
+
+#### Setting up MCP Configuration for Claude Desktop
+
+1. **Open Configuration:**
+   Open Claude Desktop → Settings → Developer → Edit Config
+
+2. **Add MCP Server Configuration:**
+   Replace the paths below with your actual absolute paths on your system:
 
 ```json
 {
@@ -760,48 +803,92 @@ Completely quit and restart Claude Desktop. Wait 30-60 seconds for initializatio
 }
 ```
 
-##### Windows
-```json
-{
-  "mcpServers": {
-    "deephaven-systems": {
-      "command": "C:\\Users\\johndoe\\.cargo\\bin\\uv.exe",
-      "args": [
-        "--directory",
-        "C:\\Users\\johndoe\\projects\\deephaven-mcp",
-        "run",
-        "dh-mcp-systems-server"
-      ],
-      "env": {
-        "DH_MCP_CONFIG_FILE": "C:\\Users\\johndoe\\projects\\deephaven-mcp\\deephaven_mcp.json",
-        "PYTHONLOGLEVEL": "INFO"
-      }
-    },
-    "deephaven-docs": {
-      "command": "C:\\Users\\johndoe\\.cargo\\bin\\uv.exe",
-      "args": [
-        "--directory",
-        "C:\\Users\\johndoe\\projects\\deephaven-mcp",
-        "run",
-        "mcp-proxy",
-        "--transport=streamablehttp",
-        "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"
-      ]
-    }
-  }
-}
-```
+   **For Windows Users:**
+   ```json
+   {
+     "mcpServers": {
+       "deephaven-systems": {
+         "command": "C:\\Users\\johndoe\\.cargo\\bin\\uv.exe",
+         "args": [
+           "--directory",
+           "C:\\Users\\johndoe\\projects\\deephaven-mcp",
+           "run",
+           "dh-mcp-systems-server"
+         ],
+         "env": {
+           "DH_MCP_CONFIG_FILE": "C:\\Users\\johndoe\\projects\\deephaven-mcp\\deephaven_mcp.json",
+           "PYTHONLOGLEVEL": "INFO"
+         }
+       },
+       "deephaven-docs": {
+         "command": "C:\\Users\\johndoe\\.cargo\\bin\\uv.exe",
+         "args": [
+           "--directory",
+           "C:\\Users\\johndoe\\projects\\deephaven-mcp",
+           "run",
+           "mcp-proxy",
+           "--transport=streamablehttp",
+           "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"
+         ]
+       }
+     }
+   }
+   ```
 
-#### Verification
+3. **Testing Your Setup:**
 
-Test by asking Claude:
-```
-Are the Deephaven MCP servers working? Can you list any available sessions?
-```
+   Test the configuration by asking Claude:
+   ```
+   Are the Deephaven MCP servers working? Can you list any available sessions?
+   ```
 
-Claude should connect to both servers and respond with Deephaven capabilities.
+   Claude should connect to both servers and respond with information about Deephaven capabilities and available sessions.
 
-#### Troubleshooting
+
+
+## Working with Deephaven MCP
+
+This section covers how to effectively use Deephaven MCP with any integrated IDE or AI assistant. Once you've completed the configuration for your specific environment, you can use these tools and prompts across all supported platforms.
+
+### Available Tools and Capabilities
+
+All integrations provide access to these core MCP capabilities:
+
+- **Session Management**: List and monitor Deephaven sessions
+- **Table Operations**: Retrieve table schemas and metadata
+- **Script Execution**: Run Python or Groovy scripts on Deephaven instances
+- **Package Management**: Query installed Python packages
+- **Documentation**: Access conversational Deephaven documentation
+
+### Example Prompts
+
+Once configured, you can interact with Deephaven through any supported AI assistant using prompts like:
+
+#### Session Management Examples
+- "Show me the status of my Deephaven sessions"
+- "List all active Deephaven sessions"
+- "Get details for session 'python1'"
+
+#### Data Exploration Examples
+- "What tables are available in my local Deephaven instance?"
+- "Get the schema for table 't1' in my Deephaven session"
+- "Show me the structure of table 'stocks'"
+
+#### Script Execution Examples
+- "Execute this Python code on my Deephaven session: `t = empty_table(10).update('x = i')`"
+- "Run this Groovy script: `t = new Table(10).update("x = it")`"
+- "Create a new table with columns for date, price, and volume"
+
+#### Documentation Examples
+- "How do I create a time-based table in Deephaven?"
+- "Explain Deephaven's partitioning capabilities"
+- "What are the different join types in Deephaven?"
+
+## Troubleshooting
+
+This section provides solutions for common issues you might encounter when setting up and running Deephaven MCP servers.
+
+### Common Error Messages
 
 | Error | Solution |
 |-------|----------|
@@ -811,7 +898,22 @@ Claude should connect to both servers and respond with Deephaven capabilities.
 | Permission denied | Ensure uv executable has proper permissions |
 | Python version error | Verify Python 3.11+ is installed and accessible |
 
-### Test Servers Manually
+### Environment and Setup Issues
+
+* **Server startup issues:** Ensure your virtual environment is activated and dependencies are installed with `uv pip install .[dev]`
+* **Port conflicts:** If port 8000 is in use, either change the `PORT` environment variable or kill the conflicting process:
+  ```bash
+  lsof -ti:8000 | xargs kill -9
+  ```
+* **Module not found errors:** Run `uv pip install .[dev]` in your project directory to install in editable mode
+* **Coroutine errors:** Restart the MCP server after making code changes to ensure the latest code is loaded
+* **Cache issues:** Clear Python cache files if experiencing persistent issues:
+  ```bash
+  find . -name "*.pyc" -delete
+  ```
+* **uv-specific issues:** If `uv run` commands fail, ensure `uv` is installed and the project's `pyproject.toml` is properly configured
+
+### Testing Servers Manually
 ```bash
 # Test systems server
 uv run dh-mcp-systems-server
@@ -825,6 +927,14 @@ uv run mcp-proxy --transport=streamablehttp https://deephaven-mcp-docs-prod.dhc-
 - **Windows:** `%APPDATA%\Claude\logs\`
 
 Look for files like `mcp-server-deephaven-systems.log` and `mcp-server-deephaven-docs.log`.
+
+### IDE-Specific Troubleshooting
+
+For IDE-specific troubleshooting, refer to the troubleshooting sections in each IDE integration guide:
+
+* [GitHub Copilot in Visual Studio Code](#github-copilot-in-visual-studio-code)
+* [Cursor IDE](#cursor-ide) - See Cursor-Specific Troubleshooting
+* [Claude Desktop](#claude-desktop) - See Claude Desktop-Specific Troubleshooting
 
 ## Capabilities
 
