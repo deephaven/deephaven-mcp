@@ -340,7 +340,7 @@ The `enterprise` key contains a `"systems"` dictionary mapping custom system nam
 | `password_env_var` | string | `auth_type` = `"password"` | Environment variable containing the password (recommended) |
 | `private_key_path` | string | `auth_type` = `"private_key"` | Absolute path to private key file |
 
-*Note: All file paths should be absolute and accessible by the MCP server process.*
+> **📝 Note**: All file paths should be absolute and accessible by the MCP server process.
 
 ### Combined Configuration Example
 
@@ -391,13 +391,14 @@ Here's a complete example showing both Community and Enterprise configurations:
 ```
 
 
-#### Security Note for `deephaven_mcp.json`
+### Security Note
 
-The `deephaven_mcp.json` file can contain sensitive information such as authentication tokens, usernames, and passwords. Ensure that this file is protected with appropriate filesystem permissions to prevent unauthorized access. For example, on Unix-like systems (Linux, macOS), you can restrict permissions to the owner only using the command: 
-
-```bash
-chmod 600 /path/to/your/deephaven_mcp.json
-```
+> **⚠️ Security Warning**: The `deephaven_mcp.json` file can contain sensitive information such as authentication tokens, usernames, and passwords. Ensure that this file is protected with appropriate filesystem permissions to prevent unauthorized access.
+>
+> For example, on Unix-like systems (Linux, macOS), you can restrict permissions to the owner only:
+> ```bash
+> chmod 600 /path/to/your/deephaven_mcp.json
+> ```
 
 #### Additional Notes for `deephaven_mcp.json`
 
@@ -456,7 +457,7 @@ DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json MY_AUTH_TOKEN=username:password u
 INKEEP_API_KEY=your_api_key_here uv run dh-mcp-docs-server
 ```
 
-> **Security Note**: Environment variables containing sensitive information like API keys and authentication tokens should be handled securely and never committed to version control.
+> **⚠️ Security Warning**: Environment variables containing sensitive information like API keys and authentication tokens should be handled securely and never committed to version control.
 
 ## Configure Your LLM Tool to Use MCP Servers
 
@@ -485,7 +486,7 @@ Depending on your LLM tool, this `"mcpServers"` object might be:
 
 Consult your LLM tool's documentation for the precise file name and location. Below are two examples of the `"mcpServers"` JSON structure. Choose the one that matches your Python environment setup (either [`uv`](docs/UV.md) or `pip + venv`).
 
-**Important: All paths in the JSON examples (e.g., `/full/path/to/...`) must be replaced with actual, absolute paths on your system.**
+> **⚙️ Important**: All paths in the JSON examples (e.g., `/full/path/to/...`) must be replaced with actual, absolute paths on your system.
 
 #### Example `"mcpServers"` object for `uv` users:
 
@@ -519,7 +520,7 @@ Consult your LLM tool's documentation for the precise file name and location. Be
   }
 }
 ```
-*Note: You can change `"PYTHONLOGLEVEL": "INFO"` to `"PYTHONLOGLEVEL": "DEBUG"` for more detailed server logs, as further detailed in the [Troubleshooting section](#troubleshooting).*
+> **📝 Note**: You can change `"PYTHONLOGLEVEL": "INFO"` to `"PYTHONLOGLEVEL": "DEBUG"` for more detailed server logs, as further detailed in the [Troubleshooting section](#troubleshooting).
 
 #### Example `"mcpServers"` object for `pip + venv` users:
 
@@ -544,7 +545,7 @@ Consult your LLM tool's documentation for the precise file name and location. Be
   }
 }
 ```
-*Note: You can change `"PYTHONLOGLEVEL": "INFO"` to `"PYTHONLOGLEVEL": "DEBUG"` for more detailed server logs, as further detailed in the [Troubleshooting section](#troubleshooting).*
+> **📝 Note**: You can change `"PYTHONLOGLEVEL": "INFO"` to `"PYTHONLOGLEVEL": "DEBUG"` for more detailed server logs, as further detailed in the [Troubleshooting section](#troubleshooting).
 
 ### IDE and AI Assistant Integrations
 
