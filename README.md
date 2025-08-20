@@ -112,9 +112,14 @@ Choose one of the following Python environment and package management tools:
 
 #### Option A: Using `uv` (Fast, Recommended)
 
-If you have [`uv`](docs/UV.md) installed (or install it via `pip install uv`):
+1.  **Install `uv` (if not already installed):**
+    You can install `uv` using `pip`:
+    ```sh
+    pip install uv
+    ```
+    For more information on `uv`, see the official [GitHub project](https://github.com/astral-sh/uv) or the local [`uv` documentation](docs/UV.md).
 
-1.  **Create and activate a virtual environment with your desired Python version:**
+2.  **Create and activate a virtual environment with your desired Python version:**
     [uv](docs/UV.md) works best when operating within a virtual environment. To create one (e.g., named `.venv`) using a specific Python interpreter (e.g., Python 3.11), run:
     ```sh
     uv venv .venv -p 3.11 
@@ -125,7 +130,7 @@ If you have [`uv`](docs/UV.md) installed (or install it via `pip install uv`):
     *   On Windows (PowerShell): `.venv\Scripts\Activate.ps1`
     *   On Windows (CMD): `.venv\Scripts\activate.bat`
 
-2.  **Install the CorePlus client wheel (Enterprise systems only):**
+3.  **Install the CorePlus client wheel (Enterprise systems only):**
     If you need Enterprise systems support, the `deephaven-coreplus-client` wheel must be installed first. This wheel is not available on PyPI and must be obtained from your Deephaven Enterprise administrator.
     
     Once you have the wheel file, install it using the provided script:
