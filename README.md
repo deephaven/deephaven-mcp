@@ -145,7 +145,7 @@ Choose one of the following Python environment and package management tools:
     # For Community Core only
     uv pip install deephaven-mcp
     
-    # For Enterprise systems (after completing step 2)
+    # For Enterprise systems
     uv pip install "deephaven-mcp[coreplus]"
     ```
 This command installs `deephaven-mcp` and its dependencies into the virtual environment. Ensure the virtual environment remains active for manual command-line use of `dh-mcp-systems-server` or `dh-mcp-docs-server`, or if your LLM tool requires an active environment.
@@ -180,7 +180,7 @@ This command installs `deephaven-mcp` and its dependencies into the virtual envi
     # For Community Core only
     pip install deephaven-mcp
     
-    # For Enterprise systems (after completing step 3)
+    # For Enterprise systems
     pip install "deephaven-mcp[coreplus]"
     ```
     Ensure this virtual environment is active in any terminal session where you intend to run `dh-mcp-systems-server` or `dh-mcp-docs-server` manually, or if your LLM tool requires an active environment when spawning these processes.
@@ -195,14 +195,22 @@ This section explains how to configure the [Deephaven MCP Systems Server](#syste
 
 This file tells the MCP Systems Server how to connect to your Deephaven instances. You'll create this file to define your connections to either Community Core workers or Enterprise systems (or both).
 
-#### Quick Start Examples
+The configuration file supports two main sections:
+- **`"community"`**: For connecting to Community Core worker instances
+- **`"enterprise"`**: For connecting to Enterprise systems
+
+You can include either section, both, or neither (empty file). Each section contains connection details specific to that type of Deephaven system.
+
+### Community Core Configuration
+
+#### Community Examples
 
 **Minimal configuration (no connections):**
 ```json
 {}
 ```
 
-**Community Core with anonymous authentication:**
+**Anonymous authentication (simplest):**
 ```json
 {
   "community": {
@@ -216,7 +224,7 @@ This file tells the MCP Systems Server how to connect to your Deephaven instance
 }
 ```
 
-**Community Core with PSK authentication:**
+**PSK authentication:**
 ```json
 {
   "community": {
@@ -232,84 +240,14 @@ This file tells the MCP Systems Server how to connect to your Deephaven instance
 }
 ```
 
-**Enterprise system connection:**
-```json
-{
-  "enterprise": {
-    "systems": {
-      "my_enterprise_system": {
-        "connection_url": "https://my-enterprise.example.com/iris/connection.json"
-      }
-    }
-  }
-}
-```
-
-#### File Structure Overview
-
-The configuration file supports two main sections:
-- **`"community"`**: For connecting to Community Core worker instances
-- **`"enterprise"`**: For connecting to Enterprise systems
-
-You can include either section, both, or neither (empty file). Each section contains connection details specific to that type of Deephaven system.
-
-#### Community Session Configuration Fields
-
-*All community session fields are optional. Default values are applied by the server if a field is omitted.*
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `host` | string | Hostname or IP address of the Deephaven Community Core worker (e.g., `"localhost"`) |
-| `port` | integer | Port number for the worker connection (e.g., `10000`) |
-| `auth_type` | string | Authentication type: `"Anonymous"` (default), `"Basic"`, or custom authenticator strings |
-| `auth_token` | string | Authentication token. For `"Basic"` auth: `"username:password"` format. Mutually exclusive with `auth_token_env_var` |
-| `auth_token_env_var` | string | Environment variable name containing the auth token (e.g., `"MY_AUTH_TOKEN"`). More secure than hardcoding tokens |
-| `never_timeout` | boolean | If `true`, attempts to configure the session to never time out |
-| `session_type` | string | Type of session to create: `"groovy"` or `"python"` |
-| `use_tls` | boolean | Set to `true` if the connection requires TLS/SSL |
-| `tls_root_certs` | string | Absolute path to PEM file with trusted root CA certificates for TLS verification |
-| `client_cert_chain` | string | Absolute path to PEM file with client's TLS certificate chain (for mTLS) |
-| `client_private_key` | string | Absolute path to PEM file with client's private key (for mTLS) |
-
-#### Enterprise System Configuration Fields
-
-The `enterprise` key contains a `"systems"` dictionary mapping custom system names to their configuration objects.
-
-| Field | Type | Required When | Description |
-|-------|------|---------------|-------------|
-| `connection_json_url` | string | Always | URL to the Enterprise server's `connection.json` file (e.g., `"https://enterprise.example.com/iris/connection.json"`) |
-| `auth_type` | string | Always | Authentication method: `"password"` for username/password auth, or `"private_key"` for private key-based auth (e.g., SAML) |
-| `username` | string | `auth_type` = `"password"` | Username for authentication |
-| `password` | string | `auth_type` = `"password"` | Password (use `password_env_var` instead for security) |
-| `password_env_var` | string | `auth_type` = `"password"` | Environment variable containing the password (recommended) |
-| `private_key_path` | string | `auth_type` = `"private_key"` | Absolute path to private key file |
-
-*Note: All file paths should be absolute and accessible by the MCP server process.*
-
-#### Authentication Configuration Examples
-
-**Basic Authentication**
-```json
-{
-  "community": {
-    "sessions": {
-      "secure_session": {
-        "url": "http://localhost:10000",
-        "auth_type": "Basic",
-        "auth_token": "username:password"
-      }
-    }
-  }
-}
-```
-
-**Environment Variable Authentication (Recommended for Production)**
+**Basic authentication with environment variable (recommended for production):**
 ```json
 {
   "community": {
     "sessions": {
       "prod_session": {
-        "url": "https://deephaven-prod.example.com:10000",
+        "host": "deephaven-prod.example.com",
+        "port": 10000,
         "auth_type": "Basic",
         "auth_token_env_var": "DH_AUTH_TOKEN"
       }
@@ -318,7 +256,7 @@ The `enterprise` key contains a `"systems"` dictionary mapping custom system nam
 }
 ```
 
-**TLS/SSL Configuration**
+**TLS/SSL configuration:**
 ```json
 {
   "community": {
@@ -336,25 +274,77 @@ The `enterprise` key contains a `"systems"` dictionary mapping custom system nam
 }
 ```
 
-**Enterprise System Configuration**
+#### Community Configuration Fields
+
+*All community session fields are optional. Default values are applied by the server if a field is omitted.*
+
+| Field | Type | Required When | Description |
+|-------|------|---------------|-------------|
+| `host` | string | Optional | Hostname or IP address of the Deephaven Community Core worker (e.g., `"localhost"`) |
+| `port` | integer | Optional | Port number for the worker connection (e.g., `10000`) |
+| `auth_type` | string | Optional | Authentication type: `"Anonymous"` (default), `"Basic"`, or custom authenticator strings |
+| `auth_token` | string | Optional | Authentication token. For `"Basic"` auth: `"username:password"` format. Mutually exclusive with `auth_token_env_var` |
+| `auth_token_env_var` | string | Optional | Environment variable name containing the auth token (e.g., `"MY_AUTH_TOKEN"`). More secure than hardcoding tokens |
+| `never_timeout` | boolean | Optional | If `true`, attempts to configure the session to never time out |
+| `session_type` | string | Optional | Type of session to create: `"groovy"` or `"python"` |
+| `use_tls` | boolean | Optional | Set to `true` if the connection requires TLS/SSL |
+| `tls_root_certs` | string | Optional | Absolute path to PEM file with trusted root CA certificates for TLS verification |
+| `client_cert_chain` | string | Optional | Absolute path to PEM file with client's TLS certificate chain (for mTLS) |
+| `client_private_key` | string | Optional | Absolute path to PEM file with client's private key (for mTLS) |
+
+### Enterprise System Configuration
+
+#### Enterprise Examples
+
+**Basic enterprise connection:**
 ```json
 {
   "enterprise": {
     "systems": {
-      "enterprise_prod": {
-        "connection_json_url": "https://enterprise.example.com/iris/connection.json",
+      "my_enterprise_system": {
+        "connection_json_url": "https://my-enterprise.example.com/iris/connection.json",
         "auth_type": "password",
         "username": "admin",
-        "password_env_var": "DH_ENTERPRISE_PASSWORD",
-        "verify_ssl": true
+        "password_env_var": "DH_ENTERPRISE_PASSWORD"
       }
     }
   }
 }
 ```
 
+**Private key authentication:**
+```json
+{
+  "enterprise": {
+    "systems": {
+      "saml_enterprise": {
+        "connection_json_url": "https://enterprise.example.com/iris/connection.json",
+        "auth_type": "private_key",
+        "private_key_path": "/path/to/your/private_key.pem"
+      }
+    }
+  }
+}
+```
 
-#### Example `deephaven_mcp.json`
+#### Enterprise Configuration Fields
+
+The `enterprise` key contains a `"systems"` dictionary mapping custom system names to their configuration objects.
+
+| Field | Type | Required When | Description |
+|-------|------|---------------|-------------|
+| `connection_json_url` | string | Always | URL to the Enterprise server's `connection.json` file (e.g., `"https://enterprise.example.com/iris/connection.json"`) |
+| `auth_type` | string | Always | Authentication method: `"password"` for username/password auth, or `"private_key"` for private key-based auth (e.g., SAML) |
+| `username` | string | `auth_type` = `"password"` | Username for authentication |
+| `password` | string | `auth_type` = `"password"` | Password (use `password_env_var` instead for security) |
+| `password_env_var` | string | `auth_type` = `"password"` | Environment variable containing the password (recommended) |
+| `private_key_path` | string | `auth_type` = `"private_key"` | Absolute path to private key file |
+
+*Note: All file paths should be absolute and accessible by the MCP server process.*
+
+### Combined Configuration Example
+
+Here's a complete example showing both Community and Enterprise configurations:
 
 ```json
 {
