@@ -270,17 +270,10 @@ You can include either section, both, or neither (empty file). Each section cont
 
 The `enterprise` key contains a `"systems"` dictionary mapping custom system names to their configuration objects.
 
-**Required Fields:**
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `connection_json_url` | string | URL to the Enterprise server's `connection.json` file (e.g., `"https://enterprise.example.com/iris/connection.json"`) |
-| `auth_type` | string | Authentication method: `"password"` for username/password auth, or `"private_key"` for private key-based auth (e.g., SAML) |
-
-**Conditional Fields (based on auth_type):**
-
 | Field | Type | Required When | Description |
 |-------|------|---------------|-------------|
+| `connection_json_url` | string | Always | URL to the Enterprise server's `connection.json` file (e.g., `"https://enterprise.example.com/iris/connection.json"`) |
+| `auth_type` | string | Always | Authentication method: `"password"` for username/password auth, or `"private_key"` for private key-based auth (e.g., SAML) |
 | `username` | string | `auth_type` = `"password"` | Username for authentication |
 | `password` | string | `auth_type` = `"password"` | Password (use `password_env_var` instead for security) |
 | `password_env_var` | string | `auth_type` = `"password"` | Environment variable containing the password (recommended) |
@@ -355,17 +348,6 @@ The `enterprise` key contains a `"systems"` dictionary mapping custom system nam
 }
 ```
 
-**Conditional Fields (based on `auth_type`):**
-
-*   **If `auth_type` is `"password"`:**
-    *   `username` (string): The username for authentication (required).
-    *   One of the following must be provided for the password:
-        *   `password` (string): The password itself.
-        *   `password_env_var` (string): The name of an environment variable that holds the password (e.g., `"MY_ENTERPRISE_PASSWORD"`).
-*   **If `auth_type` is `"private_key"`:**
-    *   `private_key_path` (string): The absolute path to the private key file (e.g., `"/path/to/your/private_key.pem"`) (required).
-
-*Note: All paths, like `private_key_path`, should be absolute and accessible by the MCP server process.*
 
 #### Example `deephaven_mcp.json`
 
