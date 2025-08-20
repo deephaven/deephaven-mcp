@@ -974,25 +974,59 @@ The Deephaven MCP provides various tools to interact with Deephaven sessions and
 
 ## Troubleshooting
 
+This section provides comprehensive guidance for diagnosing and resolving common issues with Deephaven MCP setup and operation. Issues are organized by category, starting with the most frequently encountered problems.
+
+### Quick Fixes
+
+Before diving into detailed troubleshooting, try these common solutions:
+
+1. **Restart your IDE/AI assistant** after any configuration changes
+2. **Check that all file paths are absolute** in your JSON configurations
+3. **Verify your virtual environment is activated** when running commands
+4. **Validate JSON syntax** using [jsonlint.com](https://jsonlint.com/) or your IDE's JSON validator
+
 ### Common Error Messages
 
-| Error | Solution |
-|-------|----------|
-| `spawn uv ENOENT` | Use full path to [`uv`](docs/UV.md) from `which uv` |
-| Connection failed | Check internet connection and server URLs |
-| Config not found | Verify full path to `deephaven_mcp.json` |
-| Permission denied | Ensure [`uv`](docs/UV.md) executable has proper permissions |
-| Python version error | Verify that a supported Python version is installed and accessible |
+| Error | Where You'll See This | Solution |
+|-------|----------------------|----------|
+| `spawn uv ENOENT` | IDE/AI assistant logs | Use full path to [`uv`](docs/UV.md) |
+| `Connection failed` | MCP server logs | Check internet connection and server URLs |
+| `Config not found` | MCP server startup | Verify full path to `deephaven_mcp.json` |
+| `Permission denied` | Command execution | Ensure [`uv`](docs/UV.md) executable has proper permissions |
+| `Python version error` | Virtual environment | Verify supported Python version is installed and accessible |
+| `JSON parse error` | IDE/AI assistant logs | Fix JSON syntax errors in configuration files |
+| `Module not found: deephaven_mcp` | MCP server logs | Ensure virtual environment is activated and dependencies installed |
+| `Port already in use` | Server startup logs | Change `PORT` environment variable or kill conflicting process |
+| `Invalid session_id format` | MCP tool responses | Use format: `{type}:{source}:{session_name}` |
+
+### JSON Configuration Issues
+
+**Most configuration problems stem from JSON syntax errors or incorrect paths:**
+
+* **Invalid JSON Syntax:**
+  * Missing or extra commas, brackets, or quotes
+  * Use [JSON validator](https://jsonlint.com/) to check syntax
+  * Common mistake: trailing comma in last object property
+
+* **Incorrect File Paths:**
+  * All paths in JSON configurations must be **absolute paths**
+  * Use forward slashes `/` even on Windows in JSON
+  * Verify files exist at the specified paths
+
+* **Environment Variable Issues:**
+  * `DH_MCP_CONFIG_FILE` must point to valid `deephaven_mcp.json` file
+  * Environment variables in `env` block must use correct names
+  * Sensitive values should use environment variables, not hardcoded strings
 
 ### LLM Tool Connection Issues
 
 * **LLM Tool Can't Connect / Server Not Found:**
-  * Verify all paths in your LLM tool's JSON configuration are **absolute and correct**.
-  * Ensure `DH_MCP_CONFIG_FILE` environment variable is correctly set in the JSON config and points to a valid worker file.
-  * Ensure any [Deephaven Community Core](https://deephaven.io/community/) workers you intend to use (as defined in `deephaven_mcp.json`) are running and accessible from the [MCP Systems Server](#systems-server-architecture)'s environment.
-  * Check for typos in server names, commands, or arguments in the JSON config.
-  * Validate the syntax of your JSON configurations (`mcpServers` object in the LLM tool, and `deephaven_mcp.json`). A misplaced comma or incorrect quote can prevent the configuration from being parsed correctly. Use a [JSON validator tool](https://jsonlint.com/) or your IDE's linting features.
-  * Set `PYTHONLOGLEVEL=DEBUG` in the `env` block of your JSON config to get more detailed logs from the MCP servers. For example, [Claude Desktop](https://www.anthropic.com/claude) often saves these to files like `~/Library/Logs/Claude/mcp-server-SERVERNAME.log`. Consult your LLM tool's documentation for specific log file locations.
+  * Verify all paths in your LLM tool's JSON configuration are **absolute and correct**
+  * Ensure `DH_MCP_CONFIG_FILE` environment variable is correctly set in the JSON config and points to a valid worker file
+  * Ensure any [Deephaven Community Core](https://deephaven.io/community/) workers you intend to use (as defined in `deephaven_mcp.json`) are running and accessible from the [MCP Systems Server](#systems-server-architecture)'s environment
+  * Check for typos in server names, commands, or arguments in the JSON config
+  * Validate the syntax of your JSON configurations (`mcpServers` object in the LLM tool, and `deephaven_mcp.json`) using a [JSON validator tool](https://jsonlint.com/) or your IDE's linting features
+  * Set `PYTHONLOGLEVEL=DEBUG` in the `env` block of your JSON config to get more detailed logs from the MCP servers
 
 ### Network and Firewall Issues
 
@@ -1009,29 +1043,134 @@ The Deephaven MCP provides various tools to interact with Deephaven sessions and
 * **`command not found` for `dh-mcp-systems-server` or [`mcp-proxy`](https://github.com/modelcontextprotocol/mcp-proxy) (venv option in LLM tool logs):**
   * Double-check that the `command` field in your JSON config uses the **correct absolute path** to the executable within your `.venv/bin/` (or `.venv\Scripts\`) directory.
 
+### Virtual Environment and Dependency Issues
+
+* **Virtual Environment Not Activated:**
+  * Symptoms: `Module not found` errors, `command not found` for installed packages
+  * Solution: Activate your virtual environment before running commands
+  * Verify: Check that your prompt shows the environment name in parentheses
+
+* **Dependency Installation Problems:**
+  * **Missing Dependencies:** Run `uv pip install -e ".[dev]"` in your virtual environment
+  * **Version Conflicts:** Check for conflicting package versions in your environment
+  * **Platform-Specific Issues:** Some packages may require platform-specific compilation
+
+* **Python Version Compatibility:**
+  * Deephaven MCP requires Python 3.8 or higher
+  * Check your Python version: `python --version`
+  * Ensure your virtual environment uses the correct Python version
+
 ### Server and Environment Issues
 
-* **Port Conflicts:** If a server fails to start (check logs), another process might be using the required port (e.g., port 8000 for default streamable-http/SSE).
-* **Python Errors in Server Logs:** Check the server logs for Python tracebacks. Ensure all dependencies were installed correctly (see [Installation & Initial Setup](#installation--initial-setup)).
-* **Server startup issues:** Ensure your virtual environment is activated and dependencies are installed
-* **Module not found errors:** Ensure your virtual environment is activated and dependencies are installed
-* **Coroutine errors:** Restart the MCP server after making code changes to ensure the latest code is loaded
-* **Cache issues:** Clear Python cache files if experiencing persistent issues:
-  ```bash
-  find . -name "*.pyc" -delete
-  ```
-* **uv-specific issues:** If `uv run` commands fail, ensure `uv` is installed and the project's `pyproject.toml` is properly configured
+* **Port Conflicts:**
+  * **Symptom:** Server fails to start with "port already in use" error
+  * **Solution:** Change `PORT` environment variable or kill conflicting process
+  * **Default ports:** 8000 (streamable-http), check your specific configuration
 
-### Configuration Issues
+* **Server Startup Failures:**
+  * **Python Errors:** Check server logs for Python tracebacks and ensure dependencies are installed correctly
+  * **Permission Issues:** Ensure the MCP server process has necessary file and network permissions
+  * **Path Issues:** Verify all executable paths in configuration are correct and accessible
 
-* **Worker Configuration Issues:**
-  * If the [Systems Server](#systems-server) starts but can't connect to [Deephaven Community Core](https://deephaven.io/community/) workers, verify your `deephaven_mcp.json` file (see [The `deephaven_mcp.json` File (Defining Your Community Sessions)](#the-deephaven_mcp.json-file-defining-your-community-sessions) for details on its structure and content).
-  * Ensure the target [Deephaven Community Core](https://deephaven.io/community/) instances are running and network-accessible.
-  * Confirm that the process running the [MCP Systems Server](#systems-server-architecture) has read permissions for the `deephaven_mcp.json` file itself.
+* **Runtime Issues:**
+  * **Coroutine errors:** Restart the MCP server after making code changes
+  * **Memory issues:** Monitor server resource usage, especially with large datasets
+  * **Cache issues:** Clear Python cache files if experiencing persistent issues:
+    ```bash
+    find . -name "*.pyc" -delete
+    ```
 
-### Check Logs
+* **uv-Specific Issues:**
+  * **Command failures:** Ensure `uv` is installed and `pyproject.toml` is properly configured
+  * **Path issues:** Verify `uv` is in your system's `PATH` environment variable
+  * **Project detection:** Run `uv` commands from the project root directory
 
-Each AI agent and IDE maintains its own directory for MCP server logs. Check your specific tool's documentation for log file locations. Look for files related to `deephaven-systems` and `deephaven-docs` MCP servers.
+### Deephaven Session Configuration Issues
+
+* **Session Connection Failures:**
+  * Verify your `deephaven_mcp.json` file syntax and content (see [configuration guide](#the-deephaven_mcpjson-file-defining-your-community-sessions))
+  * Ensure target [Deephaven Community Core](https://deephaven.io/community/) instances are running and network-accessible
+  * Check that the MCP Systems Server process has read permissions for the configuration file
+
+* **Session ID Format Issues:**
+  * Use the correct format: `{type}:{source}:{session_name}`
+  * Examples: `community:local_dev:my_session`, `enterprise:staging:analytics`
+  * Avoid special characters or spaces in session names
+
+* **Authentication Problems:**
+  * **Community sessions:** Verify connection URLs and any required authentication
+  * **Enterprise sessions:** Check authentication tokens and certificate paths
+  * **Environment variables:** Ensure sensitive credentials are properly set
+
+### Platform-Specific Issues
+
+* **Windows-Specific:**
+  * Use forward slashes `/` in JSON file paths, even on Windows
+  * Executable paths should point to `.venv\Scripts\` instead of `.venv/bin/`
+  * PowerShell execution policy may block script execution
+
+* **macOS-Specific:**
+  * Gatekeeper may block unsigned executables
+  * File permissions may need adjustment: `chmod +x /path/to/executable`
+  * Network security settings may block connections
+
+* **Linux-Specific:**
+  * Check firewall settings: `ufw status` or `iptables -L`
+  * Verify user permissions for network binding
+  * SELinux policies may restrict server operations
+
+### Log Analysis and Debugging
+
+**Log File Locations:**
+
+* **Claude Desktop (macOS):** `~/Library/Logs/Claude/mcp-server-*.log`
+* **VS Code/Copilot:** Check VS Code's Output panel and Developer Console
+* **Cursor IDE:** Check the IDE's log panel and developer tools
+* **Windsurf IDE:** Check the IDE's integrated terminal and log outputs
+
+**What to Look For in Logs:**
+
+* **Startup errors:** Python tracebacks, missing modules, permission denied
+* **Connection errors:** Network timeouts, refused connections, DNS resolution failures
+* **Configuration errors:** JSON parsing errors, invalid paths, missing environment variables
+* **Runtime errors:** Unexpected exceptions, resource exhaustion, timeout errors
+
+**Enabling Debug Logging:**
+
+Set `PYTHONLOGLEVEL=DEBUG` in your MCP server configuration's `env` block for detailed logging:
+
+```json
+{
+  "mcpServers": {
+    "deephaven-systems": {
+      "command": "/path/to/dh-mcp-systems-server",
+      "env": {
+        "DH_MCP_CONFIG_FILE": "/path/to/deephaven_mcp.json",
+        "PYTHONLOGLEVEL": "DEBUG"
+      }
+    }
+  }
+}
+```
+
+### When to Seek Help
+
+If you've tried the above solutions and are still experiencing issues:
+
+1. **Gather Information:**
+   * Error messages from logs
+   * Your configuration files (remove sensitive information)
+   * System information (OS, Python version, package versions)
+   * Steps to reproduce the issue
+
+2. **Check Documentation:**
+   * Review the [Developer Guide](docs/DEVELOPER_GUIDE.md) for advanced troubleshooting
+   * Check the [GitHub Issues](https://github.com/deephaven/deephaven-mcp/issues) for similar problems
+
+3. **Community Support:**
+   * Post in [Deephaven Community Slack](https://deephaven.io/slack)
+   * Create a GitHub issue with detailed information
+   * Check [Deephaven Community Forums](https://github.com/deephaven/deephaven-core/discussions)
 
 ### IDE and AI Assistant Troubleshooting
 
