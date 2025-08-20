@@ -92,7 +92,9 @@ graph TD
 ## Prerequisites
 
 *   **Python**: Version 3.11 or later. ([Download Python](https://www.python.org/downloads/))
-*   **Access to [Deephaven Community Core](https://deephaven.io/community/) instance(s):** To use the [MCP Systems Server](#systems-server-architecture) for interacting with Deephaven, you will need one or more [Deephaven Community Core](https://deephaven.io/community/) instances running and network-accessible.
+*   **Access to Deephaven systems:** To use the [MCP Systems Server](#systems-server-architecture), you will need one or more of the following:
+    *   **[Deephaven Community Core](https://deephaven.io/community/) instance(s):** For development and personal use.
+    *   **[Deephaven Enterprise](https://deephaven.io/enterprise/) system(s):** For enterprise-level features and capabilities.
 *   **Choose your Python environment setup method:**
     *   **Option A: [`uv`](https://docs.astral.sh/uv/) (Recommended)**: A very fast Python package installer and resolver. If you don't have it, you can install it via `pip install uv` or see the [uv installation guide](https://github.com/astral-sh/uv#installation).
     *   **Option B: Standard Python `venv` and `pip`**: Uses Python's built-in [virtual environment (`venv`)](https://docs.python.org/3/library/venv.html) tools and [`pip`](https://pip.pypa.io/en/stable/getting-started/).
@@ -113,11 +115,11 @@ Choose one of the following Python environment and package management tools:
 If you have [`uv`](docs/UV.md) installed (or install it via `pip install uv`):
 
 1.  **Create and activate a virtual environment with your desired Python version:**
-    [uv](docs/UV.md) works best when operating within a virtual environment. To create one (e.g., named `.venv`) using a specific Python interpreter (e.g., Python 3.9), run:
+    [uv](docs/UV.md) works best when operating within a virtual environment. To create one (e.g., named `.venv`) using a specific Python interpreter (e.g., Python 3.11), run:
     ```sh
-    uv venv .venv -p 3.9 
+    uv venv .venv -p 3.11 
     ```
-    Replace `3.9` with your target Python version (e.g., `3.10`, `3.11`) or the full path to a Python executable.
+    Replace `3.11` with your target Python version (e.g., `3.12`) or the full path to a Python executable.
     Then, activate it:
     *   On macOS/Linux: `source .venv/bin/activate`
     *   On Windows (PowerShell): `.venv\Scripts\Activate.ps1`
