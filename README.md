@@ -143,7 +143,7 @@ If you have [`uv`](docs/UV.md) installed (or install it via `pip install uv`):
     # For Enterprise systems (after completing step 2)
     uv pip install "deephaven-mcp[coreplus]"
     ```
-This command installs `deephaven-mcp` and its dependencies into the active virtual environment. If you skipped the explicit virtual environment creation step above, [`uv`](docs/UV.md) might still create or use one automatically (typically `.venv` in your current directory if `UV_AUTO_CREATE_VENV` is not `false`, or a globally managed one). In any case where a virtual environment is used (either explicitly created or automatically by `uv`), ensure it remains active for manual command-line use of `dh-mcp-systems-server` or `dh-mcp-docs-server`, or if your LLM tool requires an active environment.
+This command installs `deephaven-mcp` and its dependencies into the virtual environment. Ensure the virtual environment remains active for manual command-line use of `dh-mcp-systems-server` or `dh-mcp-docs-server`, or if your LLM tool requires an active environment.
 
 #### Option B: Using Standard `pip` and `venv`
 
