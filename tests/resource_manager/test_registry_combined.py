@@ -7,7 +7,6 @@ controller client caching, and lifecycle management.
 """
 
 import asyncio
-import logging
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
@@ -103,6 +102,7 @@ class TestCombinedSessionRegistryInitialization:
             # Set up mocks for initialize
             mock_community_registry = mock_community_cls.return_value
             mock_community_registry.initialize = AsyncMock()
+            mock_community_registry.get_all = AsyncMock(return_value={})
 
             mock_enterprise_registry = mock_enterprise_cls.return_value
             mock_enterprise_registry.initialize = AsyncMock()
@@ -239,6 +239,7 @@ class TestCombinedSessionRegistryInitialization:
 
             mock_community_registry = mock_community_cls.return_value
             mock_community_registry.initialize = AsyncMock()
+            mock_community_registry.get_all = AsyncMock(return_value={})
 
             mock_enterprise_registry = mock_enterprise_cls.return_value
             mock_enterprise_registry.initialize = AsyncMock()
@@ -259,6 +260,214 @@ class TestCombinedSessionRegistryInitialization:
 
                 # Verify enterprise sessions were not updated again
                 mock_update.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_initialize_with_community_sessions(
+        self, combined_registry, mock_config_manager
+    ):
+        """Test initialization when community registry has sessions to load."""
+        # Create mock session managers with proper full_name attributes
+        mock_session1 = MagicMock()
+        mock_session1.full_name = "community:local:session1"
+        mock_session2 = MagicMock()
+        mock_session2.full_name = "community:local:session2"
+        community_sessions = {
+            "community:local:session1": mock_session1,
+            "community:local:session2": mock_session2,
+        }
+
+        with (
+            patch.object(
+                CommunitySessionRegistry,
+                "__new__",
+                return_value=MagicMock(spec=CommunitySessionRegistry),
+            ) as mock_community_cls,
+            patch.object(
+                CorePlusSessionFactoryRegistry,
+                "__new__",
+                return_value=MagicMock(spec=CorePlusSessionFactoryRegistry),
+            ) as mock_enterprise_cls,
+            patch.object(
+                combined_registry, "_update_enterprise_sessions", AsyncMock()
+            ) as mock_update,
+        ):
+
+            # Set up mocks for initialize
+            mock_community_registry = mock_community_cls.return_value
+            mock_community_registry.initialize = AsyncMock()
+            mock_community_registry.get_all = AsyncMock(return_value=community_sessions)
+
+            mock_enterprise_registry = mock_enterprise_cls.return_value
+            mock_enterprise_registry.initialize = AsyncMock()
+
+            # Call initialize
+            await combined_registry.initialize(mock_config_manager)
+
+            # Verify community sessions were loaded into _items
+            assert len(combined_registry._items) == 2
+            assert combined_registry._items["community:local:session1"] == mock_session1
+            assert combined_registry._items["community:local:session2"] == mock_session2
+
+            # Verify correct calls were made
+            mock_community_registry.initialize.assert_called_once_with(
+                mock_config_manager
+            )
+            mock_community_registry.get_all.assert_called_once()
+            mock_enterprise_registry.initialize.assert_called_once_with(
+                mock_config_manager
+            )
+            mock_update.assert_awaited_once()
+
+            # Verify registry was marked as initialized
+            assert combined_registry._initialized is True
+
+    @pytest.mark.asyncio
+    async def test_initialize_community_get_all_failure(
+        self, combined_registry, mock_config_manager
+    ):
+        """Test initialization when community registry get_all() fails."""
+        with (
+            patch.object(
+                CommunitySessionRegistry,
+                "__new__",
+                return_value=MagicMock(spec=CommunitySessionRegistry),
+            ) as mock_community_cls,
+            patch.object(
+                CorePlusSessionFactoryRegistry,
+                "__new__",
+                return_value=MagicMock(spec=CorePlusSessionFactoryRegistry),
+            ) as mock_enterprise_cls,
+            patch.object(
+                combined_registry, "_update_enterprise_sessions", AsyncMock()
+            ) as mock_update,
+        ):
+
+            # Set up mocks for initialize
+            mock_community_registry = mock_community_cls.return_value
+            mock_community_registry.initialize = AsyncMock()
+            mock_community_registry.get_all = AsyncMock(
+                side_effect=Exception("Community get_all failed")
+            )
+
+            mock_enterprise_registry = mock_enterprise_cls.return_value
+            mock_enterprise_registry.initialize = AsyncMock()
+
+            # Call initialize should propagate the exception
+            with pytest.raises(Exception, match="Community get_all failed"):
+                await combined_registry.initialize(mock_config_manager)
+
+            # Verify registry was not marked as initialized due to failure
+            assert combined_registry._initialized is False
+
+    @pytest.mark.asyncio
+    async def test_initialize_with_empty_community_sessions(
+        self, combined_registry, mock_config_manager
+    ):
+        """Test initialization when community registry returns empty sessions dict."""
+        with (
+            patch.object(
+                CommunitySessionRegistry,
+                "__new__",
+                return_value=MagicMock(spec=CommunitySessionRegistry),
+            ) as mock_community_cls,
+            patch.object(
+                CorePlusSessionFactoryRegistry,
+                "__new__",
+                return_value=MagicMock(spec=CorePlusSessionFactoryRegistry),
+            ) as mock_enterprise_cls,
+            patch.object(
+                combined_registry, "_update_enterprise_sessions", AsyncMock()
+            ) as mock_update,
+        ):
+
+            # Set up mocks for initialize with empty community sessions
+            mock_community_registry = mock_community_cls.return_value
+            mock_community_registry.initialize = AsyncMock()
+            mock_community_registry.get_all = AsyncMock(return_value={})
+
+            mock_enterprise_registry = mock_enterprise_cls.return_value
+            mock_enterprise_registry.initialize = AsyncMock()
+
+            # Call initialize
+            await combined_registry.initialize(mock_config_manager)
+
+            # Verify no community sessions were loaded (empty _items initially)
+            # Note: _items may contain enterprise sessions after _update_enterprise_sessions
+            # but should not contain any community sessions
+            community_items = {
+                k: v
+                for k, v in combined_registry._items.items()
+                if k.startswith("community:")
+            }
+            assert len(community_items) == 0
+
+            # Verify correct calls were made
+            mock_community_registry.get_all.assert_called_once()
+            mock_update.assert_awaited_once()
+            assert combined_registry._initialized is True
+
+    @pytest.mark.asyncio
+    async def test_initialize_community_sessions_overwrite_behavior(
+        self, combined_registry, mock_config_manager
+    ):
+        """Test that community sessions properly overwrite any existing items with same keys."""
+        # Pre-populate _items with some existing data
+        existing_session = MagicMock()
+        combined_registry._items["community:local:session1"] = existing_session
+
+        # Create new mock session managers with proper full_name attributes
+        new_mock_session1 = MagicMock()
+        new_mock_session1.full_name = "community:local:session1"
+        new_mock_session2 = MagicMock()
+        new_mock_session2.full_name = "community:local:session2"
+        community_sessions = {
+            "community:local:session1": new_mock_session1,  # Should overwrite existing
+            "community:local:session2": new_mock_session2,  # Should be new
+        }
+
+        with (
+            patch.object(
+                CommunitySessionRegistry,
+                "__new__",
+                return_value=MagicMock(spec=CommunitySessionRegistry),
+            ) as mock_community_cls,
+            patch.object(
+                CorePlusSessionFactoryRegistry,
+                "__new__",
+                return_value=MagicMock(spec=CorePlusSessionFactoryRegistry),
+            ) as mock_enterprise_cls,
+            patch.object(
+                combined_registry, "_update_enterprise_sessions", AsyncMock()
+            ) as mock_update,
+        ):
+
+            # Set up mocks for initialize
+            mock_community_registry = mock_community_cls.return_value
+            mock_community_registry.initialize = AsyncMock()
+            mock_community_registry.get_all = AsyncMock(return_value=community_sessions)
+
+            mock_enterprise_registry = mock_enterprise_cls.return_value
+            mock_enterprise_registry.initialize = AsyncMock()
+
+            # Call initialize
+            await combined_registry.initialize(mock_config_manager)
+
+            # Verify community sessions were loaded and overwrote existing
+            assert (
+                combined_registry._items["community:local:session1"]
+                == new_mock_session1
+            )  # Overwritten
+            assert (
+                combined_registry._items["community:local:session1"] != existing_session
+            )  # Not the old one
+            assert (
+                combined_registry._items["community:local:session2"]
+                == new_mock_session2
+            )  # New
+
+            # Verify correct calls were made
+            mock_community_registry.get_all.assert_called_once()
+            assert combined_registry._initialized is True
 
 
 class TestCombinedSessionRegistryAccessors:

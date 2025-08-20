@@ -359,12 +359,27 @@ async def list_sessions(context: Context) -> dict:
     """
     _LOGGER.info("[mcp_systems_server:list_sessions] Invoked.")
     try:
+        _LOGGER.debug(
+            "[mcp_systems_server:list_sessions] Accessing session registry from context"
+        )
         session_registry: CombinedSessionRegistry = (
             context.request_context.lifespan_context["session_registry"]
         )
+        _LOGGER.debug(
+            "[mcp_systems_server:list_sessions] Retrieving all sessions from registry"
+        )
         sessions = await session_registry.get_all()
+
+        _LOGGER.info(
+            "[mcp_systems_server:list_sessions] Found %d sessions.", len(sessions)
+        )
+
         results = []
         for fq_name, mgr in sessions.items():
+            _LOGGER.debug(
+                "[mcp_systems_server:list_sessions] Processing session '%s'", fq_name
+            )
+
             try:
                 system_type = mgr.system_type
                 system_type_str = system_type.name
@@ -597,13 +612,22 @@ async def get_session_details(
         f"[mcp_systems_server:get_session_details] Invoked for session_id: {session_id}"
     )
     try:
+        _LOGGER.debug(
+            "[mcp_systems_server:get_session_details] Accessing session registry from context"
+        )
         session_registry: CombinedSessionRegistry = (
             context.request_context.lifespan_context["session_registry"]
         )
 
         # Get the specific session manager directly
+        _LOGGER.debug(
+            f"[mcp_systems_server:get_session_details] Retrieving session manager for '{session_id}'"
+        )
         try:
             mgr = await session_registry.get(session_id)
+            _LOGGER.debug(
+                f"[mcp_systems_server:get_session_details] Successfully retrieved session manager for '{session_id}'"
+            )
         except Exception as e:
             return {
                 "success": False,
@@ -613,16 +637,28 @@ async def get_session_details(
 
         try:
             # Get basic metadata
+            _LOGGER.debug(
+                f"[mcp_systems_server:get_session_details] Extracting metadata for session '{session_id}'"
+            )
             system_type_str = mgr.system_type.name
             source = mgr.source
             session_name = mgr.name
+            _LOGGER.debug(
+                f"[mcp_systems_server:get_session_details] Session '{session_id}' metadata: type={system_type_str}, source={source}, name={session_name}"
+            )
 
             # Get liveness status and availability
+            _LOGGER.debug(
+                f"[mcp_systems_server:get_session_details] Checking liveness for session '{session_id}' (attempt_to_connect={attempt_to_connect})"
+            )
             available, liveness_status, liveness_detail = (
                 await _get_session_liveness_info(mgr, session_id, attempt_to_connect)
             )
 
             # Get session properties using helper functions
+            _LOGGER.debug(
+                f"[mcp_systems_server:get_session_details] Retrieving session properties for '{session_id}' (available={available})"
+            )
             programming_language = await _get_session_programming_language(
                 mgr, session_id, available
             )
@@ -638,6 +674,9 @@ async def get_session_details(
 
             community_version, enterprise_version = await _get_session_versions(
                 mgr, session_id, available
+            )
+            _LOGGER.debug(
+                f"[mcp_systems_server:get_session_details] Completed property retrieval for session '{session_id}'"
             )
 
             # Build session info dictionary with all potential fields
@@ -659,6 +698,9 @@ async def get_session_details(
             session_info = {
                 k: v for k, v in session_info_with_nones.items() if v is not None
             }
+            _LOGGER.debug(
+                f"[mcp_systems_server:get_session_details] Built session info for '{session_id}' with {len(session_info)} fields"
+            )
 
             return {"success": True, "session": session_info}
 
@@ -726,10 +768,19 @@ async def table_schemas(
     )
     schemas = []
     try:
+        _LOGGER.debug(
+            "[mcp_systems_server:table_schemas] Accessing session registry from context"
+        )
         session_registry: CombinedSessionRegistry = (
             context.request_context.lifespan_context["session_registry"]
         )
+        _LOGGER.debug(
+            f"[mcp_systems_server:table_schemas] Retrieving session manager for '{session_id}'"
+        )
         session_manager = await session_registry.get(session_id)
+        _LOGGER.debug(
+            f"[mcp_systems_server:table_schemas] Establishing session connection for '{session_id}'"
+        )
         session = await session_manager.get()
         _LOGGER.info(
             f"[mcp_systems_server:table_schemas] Session established for session: '{session_id}'"
@@ -741,12 +792,18 @@ async def table_schemas(
                 f"[mcp_systems_server:table_schemas] Fetching schemas for specified tables: {selected_table_names!r}"
             )
         else:
+            _LOGGER.debug(
+                f"[mcp_systems_server:table_schemas] Discovering available tables in session '{session_id}'"
+            )
             selected_table_names = list(session.tables)
             _LOGGER.info(
                 f"[mcp_systems_server:table_schemas] Fetching schemas for all tables in worker: {selected_table_names!r}"
             )
 
         for table_name in selected_table_names:
+            _LOGGER.debug(
+                f"[mcp_systems_server:table_schemas] Processing table '{table_name}' in session '{session_id}'"
+            )
             try:
                 meta_table = await queries.get_meta_table(session, table_name)
                 # meta_table is a pyarrow.Table with columns: 'Name', 'DataType', etc.
@@ -825,6 +882,9 @@ async def run_script(
     )
     result = {"success": False, "error": ""}
     try:
+        _LOGGER.debug(
+            f"[mcp_systems_server:run_script] Validating script parameters for session '{session_id}'"
+        )
         if script is None and script_path is None:
             _LOGGER.warning(
                 "[mcp_systems_server:run_script] No script or script_path provided. Returning error."
@@ -835,19 +895,34 @@ async def run_script(
 
         if script is None:
             _LOGGER.info(
-                f"[mcp_systems_server:run_script] Loading script from file: {script_path!r}"
+                f"[mcp_systems_server:run_script] Reading script from file: {script_path!r}"
             )
             if script_path is None:
                 raise RuntimeError(
                     "Internal error: script_path is None after prior guard"
                 )  # pragma: no cover
+            _LOGGER.debug(
+                f"[mcp_systems_server:run_script] Opening script file '{script_path}' for reading"
+            )
             async with aiofiles.open(script_path) as f:
                 script = await f.read()
+            _LOGGER.debug(
+                f"[mcp_systems_server:run_script] Successfully read {len(script)} characters from script file"
+            )
 
+        _LOGGER.debug(
+            "[mcp_systems_server:run_script] Accessing session registry from context"
+        )
         session_registry: CombinedSessionRegistry = (
             context.request_context.lifespan_context["session_registry"]
         )
+        _LOGGER.debug(
+            f"[mcp_systems_server:run_script] Retrieving session manager for '{session_id}'"
+        )
         session_manager = await session_registry.get(session_id)
+        _LOGGER.debug(
+            f"[mcp_systems_server:run_script] Establishing session connection for '{session_id}'"
+        )
         session = await session_manager.get()
         _LOGGER.info(
             f"[mcp_systems_server:run_script] Session established for session: '{session_id}'"
@@ -855,6 +930,9 @@ async def run_script(
 
         _LOGGER.info(
             f"[mcp_systems_server:run_script] Executing script on session: '{session_id}'"
+        )
+        _LOGGER.debug(
+            f"[mcp_systems_server:run_script] Script length: {len(script)} characters"
         )
         await asyncio.to_thread(session.run_script, script)
         _LOGGER.info(
@@ -901,24 +979,35 @@ async def pip_packages(context: Context, session_id: str) -> dict:
         - Logs tool invocation, package retrieval operations, and error details at INFO/ERROR levels.
     """
     _LOGGER.info(
-        f"[mcp_systems_server:pip_packages] Invoked for session: {session_id!r}"
+        f"[mcp_systems_server:pip_packages] Invoked for session_id: {session_id!r}"
     )
     result: dict = {"success": False}
     try:
+        _LOGGER.debug(
+            "[mcp_systems_server:pip_packages] Accessing session registry from context"
+        )
         session_registry: CombinedSessionRegistry = (
             context.request_context.lifespan_context["session_registry"]
         )
+        _LOGGER.debug(
+            f"[mcp_systems_server:pip_packages] Retrieving session manager for '{session_id}'"
+        )
         session_manager = await session_registry.get(session_id)
+        _LOGGER.debug(
+            f"[mcp_systems_server:pip_packages] Establishing session connection for '{session_id}'"
+        )
         session = await session_manager.get()
         _LOGGER.info(
             f"[mcp_systems_server:pip_packages] Session established for session: '{session_id}'"
         )
 
-        # Run the pip packages query and get the table in one step
-        _LOGGER.info(
-            f"[mcp_systems_server:pip_packages] Getting pip packages table for session: '{session_id}'"
+        _LOGGER.debug(
+            f"[mcp_systems_server:pip_packages] Querying pip packages for session '{session_id}'"
         )
         arrow_table = await queries.get_pip_packages_table(session)
+        _LOGGER.debug(
+            f"[mcp_systems_server:pip_packages] Retrieved pip packages table for session '{session_id}'"
+        )
         _LOGGER.info(
             f"[mcp_systems_server:pip_packages] Pip packages table retrieved successfully for session: '{session_id}'"
         )

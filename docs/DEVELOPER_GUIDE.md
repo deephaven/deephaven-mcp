@@ -148,15 +148,15 @@ Both servers are designed for integration with MCP-compatible tools like the [MC
 
 ```mermaid
 graph TD
-    A[MCP Clients (Claude Desktop, etc.)] -- stdio (MCP) --> B(MCP Systems Server);
-    B -- Manages --> C(Deephaven Community Core Worker 1);
-    B -- Manages --> D(Deephaven Community Core Worker N);
-    B -- Manages --> E(Deephaven Enterprise System 1);
-    B -- Manages --> F(Deephaven Enterprise System N);
-    E -- Manages --> G(Enterprise Worker 1.1);
-    E -- Manages --> H(Enterprise Worker 1.N);
-    F -- Manages --> I(Enterprise Worker N.1);
-    F -- Manages --> J(Enterprise Worker N.N);
+    A["MCP Clients (Claude Desktop, etc.)"] --"stdio (MCP)"--> B("MCP Systems Server")
+    B --"Manages"--> C("Deephaven Community Core Worker 1")
+    B --"Manages"--> D("Deephaven Community Core Worker N")
+    B --"Manages"--> E("Deephaven Enterprise System 1")
+    B --"Manages"--> F("Deephaven Enterprise System N")
+    E --"Manages"--> G("Enterprise Worker 1.1")
+    E --"Manages"--> H("Enterprise Worker 1.N")
+    F --"Manages"--> I("Enterprise Worker N.1")
+    F --"Manages"--> J("Enterprise Worker N.N")
 ```
 
 **Typical Usage:**
@@ -166,10 +166,10 @@ Most users connect to the Systems Server via stdio transport (the default for to
 
 ```mermaid
 graph TD
-    A[MCP Clients with streamable-http support] -- streamable-http (direct) --> B(MCP Docs Server);
-    C[MCP Clients without streamable-http support] -- stdio --> D[mcp-proxy];
-    D -- streamable-http --> B;
-    B -- Accesses --> E[Deephaven Documentation Corpus via Inkeep API];
+    A["MCP Clients with streamable-http support"] --"streamable-http (direct)"--> B("MCP Docs Server")
+    C["MCP Clients without streamable-http support"] --"stdio"--> D["mcp-proxy"]
+    D --"streamable-http"--> B
+    B --"Accesses"--> E["Deephaven Documentation Corpus via Inkeep API"]
 ```
 
 **Transport Options:**
@@ -296,11 +296,11 @@ All fields within a session's configuration object are optional. If a field is o
 
 *   `host` (string): Hostname or IP address of the Deephaven Community Core worker (e.g., `"localhost"`).
 *   `port` (integer): Port number for the worker connection (e.g., `10000`).
-*   `auth_type` (string): Authentication method. Supported values include:
-    *   `"token"`: For token-based authentication (e.g., Deephaven's PSK). The actual token value (pre-shared key or bearer token) is supplied via `auth_token` or `auth_token_env_var`.
-    *   `"basic"`: For username/password based HTTP Basic authentication. The password (or combined `username:password`) is supplied via `auth_token` or `auth_token_env_var`. Consult the Deephaven server's authentication guide for specifics.
-    *   `"anonymous"`: For connections requiring no authentication.
-*   `auth_token` (string, optional): The direct authentication token or password. Use this OR `auth_token_env_var`, but not both. Required if `auth_type` is `"token"` or `"basic"` and `auth_token_env_var` is not specified.
+*   `auth_type` (string): Authentication method. Common values include:
+    *   `"Anonymous"`: For connections requiring no authentication (default if omitted).
+    *   `"Basic"`: For username/password authentication. The `auth_token` must be in `"username:password"` format.
+    *   Custom authenticator strings (e.g., `"io.deephaven.authentication.psk.PskAuthenticationHandler"` for Pre-Shared Key authentication). The full Java class name is required. See [PSK Authentication Configuration](#psk-authentication-configuration) below for detailed setup instructions.
+*   `auth_token` (string, optional): The authentication token. For `"Basic"` auth, this must be in `"username:password"` format. For custom authenticators, this should conform to the specific requirements of that authenticator. Ignored when `auth_type` is `"Anonymous"`. Use this OR `auth_token_env_var`, but not both.
 *   `auth_token_env_var` (string, optional): The name of an environment variable from which to read the authentication token. Use this OR `auth_token`, but not both. If specified, the token will be sourced from this environment variable.
 *   `never_timeout` (boolean): If `true`, the MCP server attempts to configure the session to this worker to prevent timeouts. Server-side settings might still enforce timeouts.
 *   `session_type` (string): Specifies the programming language for the session (e.g., `"python"`, `"groovy"`).
@@ -320,11 +320,18 @@ All fields within a session's configuration object are optional. If a field is o
         "port": 10000,
         "session_type": "python"
       },
-      "secure_remote_worker": {
-        "host": "secure.deephaven.example.com",
+      "psk_authenticated_session": {
+        "host": "localhost",
         "port": 10001,
-        "auth_type": "token",
-        "auth_token_env_var": "MY_REMOTE_TOKEN_ENV_VAR",
+        "auth_type": "io.deephaven.authentication.psk.PskAuthenticationHandler",
+        "auth_token": "your-shared-secret-key",
+        "session_type": "python"
+      },
+      "basic_auth_worker": {
+        "host": "secure.deephaven.example.com",
+        "port": 10002,
+        "auth_type": "Basic",
+        "auth_token_env_var": "MY_BASIC_AUTH_ENV_VAR",
         "never_timeout": true,
         "session_type": "groovy",
         "use_tls": true,
@@ -824,19 +831,12 @@ The server helps users learn and troubleshoot Deephaven through natural language
 
 The MCP Docs Server acts as a bridge between users (or client applications) and the Deephaven documentation.
 
-```
-+--------------------+
-|  User/Client/API   |
-+---------+----------+
-          |
-      HTTP/MCP
-          |
-+---------v----------+
-|   MCP Docs Server  |
-|   (FastAPI, LLM)   |
-+---------+----------+
-          |
-  [Deephaven Docs]
+```mermaid
+graph TD
+    A["MCP Clients with streamable-http support"] --"streamable-http (direct)"--> B("MCP Docs Server")
+    C["MCP Clients without streamable-http support"] --"stdio"--> D["mcp-proxy"]
+    D --"streamable-http"--> B
+    B --"Accesses"--> E["Deephaven Documentation Corpus via Inkeep API"]
 ```
 
 Users or API clients send natural language questions or documentation queries over HTTP using the Model Context Protocol (MCP). These requests are received by the server, which is built on FastAPI and powered by a large language model (LLM) via the Inkeep API.

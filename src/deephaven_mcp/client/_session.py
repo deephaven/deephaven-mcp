@@ -1135,12 +1135,10 @@ class CoreSession(BaseSession[Session]):
             f"[Community] Prepared Deephaven Community (Core) Session config: {log_cfg}"
         )
         try:
-            from pydeephaven import Session as PDHSession
-
             _LOGGER.info(
                 f"[Community] Creating new Deephaven Community (Core) Session with config: {log_cfg}"
             )
-            session = await asyncio.to_thread(PDHSession, **session_config)
+            session = await asyncio.to_thread(Session, **session_config)
             _LOGGER.info(
                 f"[Community] Successfully created Deephaven Community (Core) Session: {session}"
             )
@@ -1149,9 +1147,114 @@ class CoreSession(BaseSession[Session]):
             _LOGGER.warning(
                 f"[Community] Failed to create Deephaven Community (Core) Session with config: {log_cfg}: {e}"
             )
+            cls._log_session_creation_error_details(e)
             raise SessionCreationError(
                 f"Failed to create Deephaven Community (Core) Session with config: {log_cfg}: {e}"
             ) from e
+
+    @classmethod
+    def _log_session_creation_error_details(cls, exception: Exception) -> None:
+        """Log documented guidance for specific known session creation errors.
+
+        Analyzes the exception message and provides targeted troubleshooting guidance
+        based on documented Deephaven error patterns. This method can be extended
+        to handle additional error cases as they are identified and documented.
+
+        Args:
+            exception: The exception that occurred during session creation
+        """
+        error_msg = str(exception).lower()
+
+        # Handle "failed to get the configuration constants" - documented connection issue
+        if "failed to get the configuration constants" in error_msg:
+            _LOGGER.error(
+                "[Community] This error indicates a connection issue when trying to connect to the server."
+            )
+            _LOGGER.error(
+                "[Community] Verify that: 1) Server address and port are correct, 2) Deephaven server is running and accessible, 3) Network connectivity is available"
+            )
+
+        # Handle certificate/TLS related errors
+        elif any(
+            pattern in error_msg
+            for pattern in [
+                "certificate",
+                "ssl",
+                "tls",
+                "handshake",
+                "pkix path building failed",
+                "cert_authority_invalid",
+                "cert_common_name_invalid",
+            ]
+        ):
+            _LOGGER.error(
+                "[Community] This error indicates a TLS/SSL certificate issue."
+            )
+            _LOGGER.error(
+                "[Community] Verify that: 1) Server certificate is valid and not expired, 2) Certificate hostname matches connection URL, 3) CA certificate is trusted by the client"
+            )
+
+        # Handle authentication errors
+        elif any(
+            pattern in error_msg
+            for pattern in [
+                "authentication failed",
+                "unauthorized",
+                "invalid credentials",
+                "invalid token",
+                "token expired",
+                "access denied",
+            ]
+        ):
+            _LOGGER.error("[Community] This error indicates an authentication issue.")
+            _LOGGER.error(
+                "[Community] Verify that: 1) Authentication credentials are correct, 2) Token is valid and not expired, 3) User has proper permissions, 4) Authentication service is running"
+            )
+
+        # Handle connection timeout errors
+        elif any(
+            pattern in error_msg
+            for pattern in [
+                "timeout",
+                "connection refused",
+                "connection reset",
+                "network unreachable",
+            ]
+        ):
+            _LOGGER.error(
+                "[Community] This error indicates a network connectivity issue."
+            )
+            _LOGGER.error(
+                "[Community] Verify that: 1) Server is running and accessible, 2) Network connectivity is available, 3) Firewall is not blocking the connection, 4) Port is correct and open"
+            )
+
+        # Handle port/address binding errors
+        elif any(
+            pattern in error_msg
+            for pattern in [
+                "address already in use",
+                "bind failed",
+                "port already in use",
+            ]
+        ):
+            _LOGGER.error("[Community] This error indicates a port binding issue.")
+            _LOGGER.error(
+                "[Community] Verify that: 1) Port is not already in use by another process, 2) You have permission to bind to the port, 3) Try a different port number"
+            )
+
+        # Handle DNS resolution errors
+        elif any(
+            pattern in error_msg
+            for pattern in [
+                "name resolution failed",
+                "host not found",
+                "nodename nor servname provided",
+            ]
+        ):
+            _LOGGER.error("[Community] This error indicates a DNS resolution issue.")
+            _LOGGER.error(
+                "[Community] Verify that: 1) Hostname is correct and resolvable, 2) DNS server is accessible, 3) Network connectivity is available, 4) Try using IP address instead of hostname"
+            )
 
 
 class CorePlusSession(
