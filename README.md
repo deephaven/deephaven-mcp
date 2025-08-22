@@ -8,6 +8,9 @@
 
 - [Overview](#overview)
 - [🚀 Quick Start](#-quick-start)
+- [Key Use Cases](#key-use-cases)
+- [Deephaven MCP Components](#deephaven-mcp-components)
+- [Architecture Diagrams](#architecture-diagrams)
 - [Prerequisites](#prerequisites)
 - [Installation & Initial Setup](#installation--initial-setup)
 - [Configuring `deephaven_mcp.json`](#configuring-deephaven_mcpjson)
@@ -130,9 +133,22 @@ Restart your AI tool and try asking:
 
 **Need help?** Check the [Troubleshooting](#troubleshooting) section, ask the built-in docs server about Deephaven features, or join the [Deephaven Community Slack](https://deephaven.io/slack)!
 
-### Deephaven MCP Components
+---
 
-#### Systems Server
+## Key Use Cases
+
+*   **AI-Assisted Development**: Integrate Deephaven with LLM-powered development tools (e.g., [Claude Desktop](https://www.anthropic.com/claude), [GitHub Copilot](https://github.com/features/copilot)) for AI-assisted data exploration, code generation, and analysis.
+*   **Multi-Environment Management**: Programmatically manage and query multiple Deephaven Community and Enterprise deployments from a single interface.
+*   **Interactive Documentation**: Quickly find information and examples from Deephaven documentation using natural language queries.
+*   **Script Automation**: Execute Python or Groovy scripts across multiple Deephaven sessions for data processing workflows.
+*   **Schema Discovery**: Automatically retrieve and analyze table schemas from connected Deephaven instances.
+*   **Environment Monitoring**: Monitor session health, package versions, and system status across your Deephaven infrastructure.
+
+---
+
+## Deephaven MCP Components
+
+### Systems Server
 Manages and connects to multiple [Deephaven Community Core](https://deephaven.io/community/) worker nodes and [Deephaven Enterprise](https://deephaven.io/enterprise/) systems. This allows for unified control and interaction with your Deephaven instances from various client applications.
 
 **Key Capabilities:**
@@ -143,21 +159,14 @@ Manages and connects to multiple [Deephaven Community Core](https://deephaven.io
 *   **Package Management**: Query installed Python packages in session environments
 *   **Configuration Management**: Dynamically reload and refresh session configurations
 
-#### Docs Server
+### Docs Server
 Connects to Deephaven's documentation knowledge base via AI to answer questions about Deephaven features, APIs, and usage patterns. Ask questions in natural language and get specific answers with code examples and explanations.
 
-### Key Use Cases
+---
 
-*   **AI-Assisted Development**: Integrate Deephaven with LLM-powered development tools (e.g., [Claude Desktop](https://www.anthropic.com/claude), [GitHub Copilot](https://github.com/features/copilot)) for AI-assisted data exploration, code generation, and analysis.
-*   **Multi-Environment Management**: Programmatically manage and query multiple Deephaven Community and Enterprise deployments from a single interface.
-*   **Interactive Documentation**: Quickly find information and examples from Deephaven documentation using natural language queries.
-*   **Script Automation**: Execute Python or Groovy scripts across multiple Deephaven sessions for data processing workflows.
-*   **Schema Discovery**: Automatically retrieve and analyze table schemas from connected Deephaven instances.
-*   **Environment Monitoring**: Monitor session health, package versions, and system status across your Deephaven infrastructure.
+## Architecture Diagrams
 
-### Architecture Diagrams
-
-#### Systems Server Architecture
+### Systems Server Architecture
 
 ```mermaid
 graph TD
@@ -173,7 +182,7 @@ graph TD
 ```
 *Clients connect to the [MCP Systems Server](#systems-server-architecture), which in turn manages and communicates with [Deephaven Community Core](https://deephaven.io/community/) workers and [Deephaven Enterprise](https://deephaven.io/enterprise/) systems.*
 
-#### Docs Server Architecture
+### Docs Server Architecture
 
 ```mermaid
 graph TD
