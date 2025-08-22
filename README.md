@@ -545,8 +545,8 @@ Configure your servers:
 
 **Additional Resources:**
 - [VS Code MCP documentation](https://code.visualstudio.com/docs/copilot/chat/mcp-servers)
-- [Configuration format reference](https://code.visualstudio.com/docs/copilot/chat/mcp-servers#_configuration-format)
-- [Troubleshooting guide](https://code.visualstudio.com/docs/copilot/chat/mcp-servers#_troubleshoot-and-debug-mcp-servers)
+- [VS Code MCP Configuration format reference](https://code.visualstudio.com/docs/copilot/chat/mcp-servers#_configuration-format)
+- [VS Code MCP Troubleshooting guide](https://code.visualstudio.com/docs/copilot/chat/mcp-servers#_troubleshoot-and-debug-mcp-servers)
 
 ### Windsurf IDE
 
@@ -578,6 +578,7 @@ Configure the file with your Deephaven servers:
 
 **Additional Resources:**
 - [Windsurf MCP documentation](https://docs.windsurf.com/windsurf/cascade/mcp)
+- [Windsurf MCP Troubleshooting guide](https://docs.windsurf.com/troubleshooting/windsurf-common-issues)
 
 ### Cursor IDE
 
@@ -608,7 +609,7 @@ Create or edit an MCP configuration file:
 ```
 
 **Additional Resources:**
-- [Cursor MCP documentation](https://docs.cursor.com/context/model-context-protocol)
+- [Cursor MCP documentation](https://docs.cursor.com/en/context/mcp)
 
 ### Claude Desktop
 
@@ -637,7 +638,9 @@ Open **Claude Desktop** → **Settings** → **Developer** → **Edit Config** t
 ```
 
 **Additional Resources:**
-- [MCP user quickstart](https://modelcontextprotocol.io/quickstart/user)
+- [MCP User Quickstart Guide](https://modelcontextprotocol.io/quickstart/user)
+- [MCP Troubleshooting guide](https://modelcontextprotocol.io/docs/concepts/transports#troubleshooting)
+- [Claude Desktop MCP Troubleshooting guide](https://support.anthropic.com/en/articles/10949351-getting-started-with-local-mcp-servers-on-claude-desktop)
 
 ---
 
