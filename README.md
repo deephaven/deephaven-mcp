@@ -7,6 +7,7 @@
 ## Table of Contents
 
 - [Overview](#overview)
+- [🚀 Quick Start](#-quick-start)
 - [Prerequisites](#prerequisites)
 - [Installation & Initial Setup](#installation--initial-setup)
 - [Configuring `deephaven_mcp.json`](#configuring-deephaven_mcpjson)
@@ -32,7 +33,7 @@
 
 ## Overview
 
-**Supercharge your AI workflows with real-time data.** Deephaven MCP brings the power of [live dataframes](https://deephaven.io) directly to your favorite AI tools -— Claude, Cursor, VS Code Copilot, and more.
+**Supercharge your AI workflows with real-time data.** Deephaven MCP brings the power of [live dataframes](https://deephaven.io) directly to your favorite AI tools -— [Claude Desktop](https://claude.ai/download), [Cursor](https://cursor.sh/), [GitHub Copilot in VS Code](https://code.visualstudio.com/docs/copilot/overview), [Windsurf](https://codeium.com/windsurf), and more.
 
 ### Why Deephaven MCP?
 
@@ -45,6 +46,66 @@ Most data tools force you to choose: **fast** or **real-time**. With Deephaven's
 - **Zero Learning Curve**: Write queries as if working with static tables -— real-time updates happen automatically
 
 Deephaven MCP implements the [Model Context Protocol (MCP) standard](https://spec.modelcontextprotocol.io/) to provide seamless integration between [Deephaven Community Core](https://deephaven.io/community/) and [Deephaven Enterprise](https://deephaven.io/enterprise/) systems and your AI development workflow. Perfect for data scientists, engineers, analysts, business users, and anyone who wants to harness real-time data—regardless of programming experience. Let AI generate the code while you focus on insights.
+
+---
+
+## 🚀 Quick Start
+
+**Get up and running in 5 minutes!** This quickstart assumes you have a local Deephaven Community Core instance running on `localhost:10000`. If you don't have one, [download and start Deephaven Community Core](https://deephaven.io/community/) first.
+
+### 1. Install Deephaven MCP
+
+```bash
+pip install deephaven-mcp
+```
+
+### 2. Create Configuration File
+
+Create a file called `deephaven_mcp.json` anywhere on your system:
+
+```json
+{
+  "community": {
+    "sessions": {
+      "local": {
+        "host": "localhost",
+        "port": 10000
+      }
+    }
+  }
+}
+```
+
+### 3. Configure Your AI Tool
+
+**For Claude Desktop**, add this to your `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "deephaven-systems": {
+      "command": "dh-mcp-systems-server",
+      "env": {
+        "DH_MCP_CONFIG_FILE": "/absolute/path/to/your/deephaven_mcp.json"
+      }
+    }
+  }
+}
+```
+
+**For other tools**, see the [detailed setup instructions](#setup-instructions-by-tool) below.
+
+### 4. Try It Out!
+
+Restart your AI tool and try asking:
+
+> "List my Deephaven sessions and show me the tables in the local session"
+
+> "What Python packages are installed in my Deephaven environment?"
+
+> "Execute this Python code in my Deephaven session: `t = empty_table(100).update('x=i', 'y=i*2')`"
+
+**Need help?** Check the [Troubleshooting](#troubleshooting) section or ask the built-in docs server about Deephaven features!
 
 ### Deephaven MCP Components
 
