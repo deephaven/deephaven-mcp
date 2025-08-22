@@ -297,7 +297,23 @@ You can include either section, both, or neither (empty file). Each section cont
 
 #### Enterprise Examples
 
-**Basic enterprise connection:**
+**Password authentication (direct):**
+```json
+{
+  "enterprise": {
+    "systems": {
+      "dev_enterprise_system": {
+        "connection_json_url": "https://dev-enterprise.example.com/iris/connection.json",
+        "auth_type": "password",
+        "username": "admin",
+        "password": "your-password-here"
+      }
+    }
+  }
+}
+```
+
+**Password authentication (environment variable):**
 ```json
 {
   "enterprise": {
