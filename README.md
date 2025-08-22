@@ -440,13 +440,9 @@ The following environment variables can be used to configure the behavior of the
 
 ---
 
-## Configure Your LLM Tool to Use MCP Servers
+## Configure Your AI Agent / IDE to Use MCP Servers
 
-This section details how to configure your LLM tool (e.g., [Claude Desktop](https://www.anthropic.com/claude), [GitHub Copilot](https://github.com/features/copilot)) to launch and communicate with the [Deephaven MCP Systems Server](#systems-server) and the [Deephaven MCP Docs Server](#docs-server). This involves providing a JSON configuration, known as the [`"mcpServers"` object](#defining-mcp-servers-for-your-llm-tool-the-mcpservers-json-object), to your LLM tool.
-
-### How LLM Tools Launch MCP Servers (Overview)
-
-LLM tools that support the Model Context Protocol (MCP) can be configured to use the Deephaven MCP Community and Docs Servers. The LLM tool's configuration will typically define how to *start* the necessary MCP server processes.
+This section details how to configure your AI Agent / IDE to launch and communicate with the [Deephaven MCP Systems Server](#systems-server) and the [Deephaven MCP Docs Server](#docs-server).  Each AI Agent / IDE will have its own configuration method. 
 
 ### Understanding Deephaven Core Worker Status (via MCP)
 
