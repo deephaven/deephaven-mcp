@@ -464,7 +464,7 @@ Here's the standard `mcpServers` configuration for Deephaven (works for both `uv
 ```json
 "mcpServers": {
   "deephaven-systems": {
-    "command": "/full/path/to/your/.venv/bin/mcp-systems-server",
+    "command": "/full/path/to/your/.venv/bin/dh-mcp-systems-server",
     "args": [],
     "env": {
       "DH_MCP_CONFIG_FILE": "/full/path/to/deephaven-mcp/deephaven_mcp.json",
@@ -499,7 +499,7 @@ Configure your servers (see [VS Code MCP documentation](https://code.visualstudi
 {
   "servers": {
     "deephaven-systems": {
-      "command": "/full/path/to/your/.venv/bin/mcp-systems-server",
+      "command": "/full/path/to/your/.venv/bin/dh-mcp-systems-server",
       "args": [],
       "env": {
         "DH_MCP_CONFIG_FILE": "/full/path/to/your/deephaven_mcp.json",
@@ -521,85 +521,31 @@ For troubleshooting VS Code MCP issues, see [VS Code MCP troubleshooting documen
 
 ### Windsurf IDE
 
-[Windsurf](https://codeium.com/windsurf) is an AI-powered IDE that supports MCP servers for enhanced development workflows. Here's how to set up the integration:
+Go to **Windsurf Settings** > **Cascade** > **MCP Servers** > **Manage MCPs** > **View Raw Config** to open `~/.codeium/windsurf/mcp_config.json` for editing.
 
-#### Configuration File Location
+Configure the file with your Deephaven servers (see [Windsurf MCP documentation](https://docs.windsurf.com/windsurf/cascade/mcp)):
 
-For Windsurf IDE, the MCP configuration should be placed at:
-- **File path**: `~/.codeium/windsurf/mcp_config.json`
-
-#### Setting up MCP Configuration for Windsurf
-
-1. **Create the MCP configuration file:**
-   Create or edit `~/.codeium/windsurf/mcp_config.json` with the following structure:
-
-   ```json
-   {
-     "mcpServers": {
-       "deephaven-systems": {
-         "command": "uv",
-         "args": [
-           "--directory",
-           "/full/path/to/deephaven-mcp",
-           "run",
-           "dh-mcp-systems-server"
-         ],
-         "env": {
-           "DH_MCP_CONFIG_FILE": "/full/path/to/your/deephaven_mcp.json",
-           "PORT": "8000",
-           "PYTHONLOGLEVEL": "INFO"
-         }
-       },
-       "deephaven-docs": {
-         "command": "uv",
-         "args": [
-           "--directory",
-           "/full/path/to/deephaven-mcp",
-           "run",
-           "dh-mcp-docs-server"
-         ],
-         "env": {
-           "DH_MCP_CONFIG_FILE": "/full/path/to/your/deephaven_mcp.json",
-           "PORT": "8001"
-         }
-       }
-     }
-   }
-   ```
-
-2. **Replace the placeholder paths:**
-   - `/full/path/to/deephaven-mcp`: Replace with the absolute path to your deephaven-mcp project directory
-   - `/full/path/to/your/deephaven_mcp.json`: Replace with the absolute path to your Deephaven configuration file
-
-#### Development Mode Setup
-
-For development work on the Deephaven MCP server itself, follow these additional steps:
-
-1. **Create and activate virtual environment with uv:**
-   ```bash
-   cd /path/to/deephaven-mcp
-   uv venv .venv
-   source .venv/bin/activate  # On macOS/Linux
-   # or .venv\Scripts\activate on Windows
-   ```
-
-2. **Install dependencies and project in editable mode:**
-   ```bash
-   uv pip install .[dev]
-   ```
-   This ensures that code changes are immediately reflected without reinstalling the package.
-
-3. **Manual server startup for testing:**
-   ```bash
-   cd /path/to/deephaven-mcp
-   INKEEP_API_KEY=your_api_key_here DH_MCP_CONFIG_FILE=.vscode/deephaven_mcp.json PORT=8000 uv run dh-mcp-systems-server
-   ```
-
-   Or using the module directly:
-   ```bash
-   INKEEP_API_KEY=your_api_key_here DH_MCP_CONFIG_FILE=.vscode/deephaven_mcp.json PORT=8000 uv run python -m deephaven_mcp.mcp_systems_server.main --transport sse
-   ```
-
+```json
+{
+  "mcpServers": {
+    "deephaven-systems": {
+      "command": "/full/path/to/your/.venv/bin/dh-mcp-systems-server",
+      "args": [],
+      "env": {
+        "DH_MCP_CONFIG_FILE": "/full/path/to/your/deephaven_mcp.json",
+        "PYTHONLOGLEVEL": "INFO"
+      }
+    },
+    "deephaven-docs": {
+      "command": "/full/path/to/your/.venv/bin/mcp-proxy",
+      "args": [
+        "--transport=streamablehttp",
+        "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"
+      ]
+    }
+  }
+}
+```
 
 
 ### Cursor IDE
