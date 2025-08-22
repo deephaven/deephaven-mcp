@@ -489,7 +489,7 @@ Some AI agents support direct connection to remote streaming HTTP MCP servers wi
 
 > **⚠️ Note**: Each tool uses different configuration schemas for direct HTTP servers.
 
-**For Windsurf IDE** (see [Windsurf MCP HTTP configuration](https://docs.windsurf.com/windsurf/cascade/mcp)):
+**For Windsurf IDE:**
 ```json
 "deephaven-docs": {
   "serverUrl": "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp",
@@ -497,7 +497,7 @@ Some AI agents support direct connection to remote streaming HTTP MCP servers wi
 }
 ```
 
-**For VS Code** (see [VS Code HTTP and SSE servers](https://code.visualstudio.com/docs/copilot/chat/mcp-servers#_http-and-server-sent-events-sse-servers)):
+**For VS Code:**
 ```json
 "deephaven-docs": {
   "type": "http",
@@ -505,7 +505,9 @@ Some AI agents support direct connection to remote streaming HTTP MCP servers wi
 }
 ```
 
-**Note:** Claude Desktop and Cursor currently require the proxy-based approach shown in the standard configuration above.
+For more details on HTTP server configuration, see the [Windsurf MCP documentation](https://docs.windsurf.com/windsurf/cascade/mcp) and [VS Code HTTP servers guide](https://code.visualstudio.com/docs/copilot/chat/mcp-servers#_http-and-server-sent-events-sse-servers).
+
+> **📝 Note**: Claude Desktop and Cursor currently require the proxy-based approach shown in the standard configuration above.
 
 ### IDE and AI Assistant Integrations
 
@@ -517,7 +519,7 @@ The following sections provide specific integration steps for each supported IDE
 
 To add MCP servers to your workspace, run the **MCP: Add Server** command from the Command Palette, then select **Workspace Settings** to create the `.vscode/mcp.json` file. Alternatively, create `.vscode/mcp.json` manually in your project root.
 
-Configure your servers (see [VS Code MCP documentation](https://code.visualstudio.com/docs/copilot/chat/mcp-servers) and [VS Code MCP configuration format](https://code.visualstudio.com/docs/copilot/chat/mcp-servers#_configuration-format)):
+Configure your servers:
 
 ```json
 {
@@ -541,13 +543,16 @@ Configure your servers (see [VS Code MCP documentation](https://code.visualstudi
 }
 ```
 
-For troubleshooting VS Code MCP issues, see [VS Code MCP troubleshooting documentation](https://code.visualstudio.com/docs/copilot/chat/mcp-servers#_troubleshoot-and-debug-mcp-servers).
+**Additional Resources:**
+- [VS Code MCP documentation](https://code.visualstudio.com/docs/copilot/chat/mcp-servers)
+- [Configuration format reference](https://code.visualstudio.com/docs/copilot/chat/mcp-servers#_configuration-format)
+- [Troubleshooting guide](https://code.visualstudio.com/docs/copilot/chat/mcp-servers#_troubleshoot-and-debug-mcp-servers)
 
 ### Windsurf IDE
 
 Go to **Windsurf Settings** > **Cascade** > **MCP Servers** > **Manage MCPs** > **View Raw Config** to open `~/.codeium/windsurf/mcp_config.json` for editing.
 
-Configure the file with your Deephaven servers (see [Windsurf MCP documentation](https://docs.windsurf.com/windsurf/cascade/mcp)):
+Configure the file with your Deephaven servers:
 
 ```json
 {
@@ -571,10 +576,12 @@ Configure the file with your Deephaven servers (see [Windsurf MCP documentation]
 }
 ```
 
+**Additional Resources:**
+- [Windsurf MCP documentation](https://docs.windsurf.com/windsurf/cascade/mcp)
 
 ### Cursor IDE
 
-Create or edit an MCP configuration file (see [Cursor MCP documentation](https://docs.cursor.com/en/context/mcp)):
+Create or edit an MCP configuration file:
 - **Project-specific**: `.cursor/mcp.json` in your project root
 - **Global**: `~/.cursor/mcp.json` for all projects
 
@@ -600,10 +607,12 @@ Create or edit an MCP configuration file (see [Cursor MCP documentation](https:/
 }
 ```
 
+**Additional Resources:**
+- [Cursor MCP documentation](https://docs.cursor.com/context/model-context-protocol)
 
 ### Claude Desktop
 
-Open **Claude Desktop** → **Settings** → **Developer** → **Edit Config** to configure your MCP servers (see [MCP user quickstart](https://modelcontextprotocol.io/quickstart/user)):
+Open **Claude Desktop** → **Settings** → **Developer** → **Edit Config** to configure your MCP servers:
 
 ```json
 {
@@ -626,6 +635,9 @@ Open **Claude Desktop** → **Settings** → **Developer** → **Edit Config** t
   }
 }
 ```
+
+**Additional Resources:**
+- [MCP user quickstart](https://modelcontextprotocol.io/quickstart/user)
 
 ---
 
