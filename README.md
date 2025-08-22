@@ -11,7 +11,7 @@
 - [Installation & Initial Setup](#installation--initial-setup)
 - [Configuring `deephaven_mcp.json`](#configuring-deephaven_mcpjson)
 - [Environment Variables](#environment-variables)
-- [Configure Your LLM Tool to Use MCP Servers](#configure-your-llm-tool-to-use-mcp-servers)
+- [Configure Your AI Agent / IDE to Use MCP Servers](#configure-your-ai-agent--ide-to-use-mcp-servers)
   - [Defining MCP Servers](#defining-mcp-servers-for-your-llm-tool-the-mcpservers-json-object)
   - [IDE and AI Assistant Integrations](#ide-and-ai-assistant-integrations)
     - [GitHub Copilot (VS Code)](#github-copilot-in-visual-studio-code)
@@ -401,7 +401,7 @@ Here's a complete example showing both Community and Enterprise configurations:
 
 ### Setting `DH_MCP_CONFIG_FILE` (Informing the MCP Server)
 
-The `DH_MCP_CONFIG_FILE` environment variable tells the [Deephaven MCP Systems Server](#systems-server) where to find your `deephaven_mcp.json` file (detailed in [The `deephaven_mcp.json` File (Defining Your Community Sessions)](#the-deephaven_mcp.json-file-defining-your-community-sessions)). You will set this environment variable as part of the server launch configuration within your LLM tool, as detailed in the [Configure Your LLM Tool to Use MCP Servers](#configure-your-llm-tool-to-use-mcp-servers) section. 
+The `DH_MCP_CONFIG_FILE` environment variable tells the [Deephaven MCP Systems Server](#systems-server) where to find your `deephaven_mcp.json` file (detailed in [The `deephaven_mcp.json` File (Defining Your Community Sessions)](#the-deephaven_mcp.json-file-defining-your-community-sessions)). You will set this environment variable as part of the server launch configuration within your LLM tool, as detailed in the [Configure Your AI Agent / IDE to Use MCP Servers](#configure-your-ai-agent--ide-to-use-mcp-servers) section. 
 
 When launched by an LLM tool, the [MCP Systems Server](#systems-server-architecture) process reads this variable to load your session definitions. For general troubleshooting or if you need to set other environment variables like `PYTHONLOGLEVEL` (e.g., to `DEBUG` for verbose logs), these are also typically set within the LLM tool's MCP server configuration (see [Defining MCP Servers for Your LLM Tool (The `mcpServers` JSON Object)](#defining-mcp-servers-for-your-llm-tool-the-mcpservers-json-object)).
 
