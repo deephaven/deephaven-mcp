@@ -579,46 +579,22 @@ Create or edit an MCP configuration file (see [Cursor MCP documentation](https:/
 
 ### Claude Desktop
 
-Claude Desktop supports MCP servers for enhanced development workflows with AI-assisted data exploration and Deephaven integration.
-
-#### Configuration File Location
-
-For Claude Desktop, the MCP configuration should be placed at:
-- **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
-- **Windows**: `%APPDATA%\Claude\claude_desktop_config.json` (e.g., `C:\Users\<YourUsername>\AppData\Roaming\Claude\claude_desktop_config.json`)
-- **Linux**: `~/.config/Claude/claude_desktop_config.json`
-
-#### Setting up MCP Configuration for Claude Desktop
-
-1. **Open Configuration:**
-   Open Claude Desktop → Settings → Developer → Edit Config
-
-2. **Add MCP Server Configuration:**
-   Replace the paths below with your actual absolute paths on your system:
+Open **Claude Desktop** → **Settings** → **Developer** → **Edit Config** to configure your MCP servers (see [MCP user quickstart](https://modelcontextprotocol.io/quickstart/user)):
 
 ```json
 {
   "mcpServers": {
     "deephaven-systems": {
-      "command": "/FULL/PATH/TO/uv",
-      "args": [
-        "--directory",
-        "/FULL/PATH/TO/deephaven-mcp",
-        "run",
-        "dh-mcp-systems-server"
-      ],
+      "command": "/full/path/to/your/.venv/bin/dh-mcp-systems-server",
+      "args": [],
       "env": {
-        "DH_MCP_CONFIG_FILE": "/FULL/PATH/TO/deephaven_mcp.json",
+        "DH_MCP_CONFIG_FILE": "/full/path/to/your/deephaven_mcp.json",
         "PYTHONLOGLEVEL": "INFO"
       }
     },
     "deephaven-docs": {
-      "command": "/FULL/PATH/TO/uv",
+      "command": "/full/path/to/your/.venv/bin/mcp-proxy",
       "args": [
-        "--directory",
-        "/FULL/PATH/TO/deephaven-mcp",
-        "run",
-        "mcp-proxy",
         "--transport=streamablehttp",
         "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"
       ]
@@ -626,86 +602,6 @@ For Claude Desktop, the MCP configuration should be placed at:
   }
 }
 ```
-
-#### Restart Claude Desktop
-Completely quit and restart Claude Desktop. Wait 30-60 seconds for initialization.
-
-#### Example Configurations
-
-##### macOS
-```json
-{
-  "mcpServers": {
-    "deephaven-systems": {
-      "command": "/opt/homebrew/bin/uv",
-      "args": [
-        "--directory",
-        "/Users/johndoe/projects/deephaven-mcp",
-        "run",
-        "dh-mcp-systems-server"
-      ],
-      "env": {
-        "DH_MCP_CONFIG_FILE": "/full/path/to/deephaven-mcp/deephaven_mcp.json",
-        "PYTHONLOGLEVEL": "INFO"
-      }
-    },
-    "deephaven-docs": {
-      "command": "/opt/homebrew/bin/uv",
-      "args": [
-        "--directory",
-        "/Users/johndoe/projects/deephaven-mcp",
-        "run",
-        "mcp-proxy",
-        "--transport=streamablehttp",
-        "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"
-      ]
-    }
-  }
-}
-```
-
-   **For Windows Users:**
-   ```json
-   {
-     "mcpServers": {
-       "deephaven-systems": {
-         "command": "C:\\Users\\johndoe\\.cargo\\bin\\uv.exe",
-         "args": [
-           "--directory",
-           "C:\\Users\\johndoe\\projects\\deephaven-mcp",
-           "run",
-           "dh-mcp-systems-server"
-         ],
-         "env": {
-           "DH_MCP_CONFIG_FILE": "C:\\Users\\johndoe\\projects\\deephaven-mcp\\deephaven_mcp.json",
-           "PYTHONLOGLEVEL": "INFO"
-         }
-       },
-       "deephaven-docs": {
-         "command": "C:\\Users\\johndoe\\.cargo\\bin\\uv.exe",
-         "args": [
-           "--directory",
-           "C:\\Users\\johndoe\\projects\\deephaven-mcp",
-           "run",
-           "mcp-proxy",
-           "--transport=streamablehttp",
-           "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"
-         ]
-       }
-     }
-   }
-   ```
-
-3. **Testing Your Setup:**
-
-   Test the configuration by asking Claude:
-   ```
-   Are the Deephaven MCP servers working? Can you list any available sessions?
-   ```
-
-   Claude should connect to both servers and respond with information about Deephaven capabilities and available sessions.
-
-
 
 ---
 
