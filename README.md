@@ -444,7 +444,7 @@ The following environment variables can be used to configure the behavior of the
 
 This section details how to configure your AI Agent / IDE to launch and communicate with the [Deephaven MCP Systems Server](#systems-server) and the [Deephaven MCP Docs Server](#docs-server).  Each AI Agent / IDE will have its own configuration method. 
 
-### Understanding MCP Server Configuration
+### How Configuration Works
 
 All AI tools that support MCP use the same core configuration format: a JSON object called `"mcpServers"`. This object defines how to launch the Deephaven MCP servers.
 
@@ -455,7 +455,7 @@ All AI tools that support MCP use the same core configuration format: a JSON obj
 | **Windsurf, Cursor, Claude Desktop** | The `mcpServers` object is the entire file content |
 | **VS Code** | The `mcpServers` object goes inside a `"servers"` key |
 
-### Standard MCP Server Configuration
+### Basic Configuration
 
 Here's the standard `mcpServers` configuration for Deephaven (works for both `uv` and `pip` installations):
 
@@ -483,7 +483,7 @@ Here's the standard `mcpServers` configuration for Deephaven (works for both `uv
 
 > **📝 Note**: Change `"PYTHONLOGLEVEL": "INFO"` to `"PYTHONLOGLEVEL": "DEBUG"` for detailed server logs (see [Troubleshooting](#troubleshooting)).
 
-### Direct Streaming HTTP MCP Server Configuration (Alternative)
+### Advanced Configuration (Optional)
 
 Some AI agents support direct connection to remote streaming HTTP MCP servers without requiring the `mcp-proxy` tool. The proxy-based approach is used in all examples because it is universally supported, but more AI agents are adding native streaming HTTP support.
 
@@ -509,13 +509,13 @@ For more details on HTTP server configuration, see the [Windsurf MCP documentati
 
 > **📝 Note**: Claude Desktop and Cursor currently require the proxy-based approach shown in the standard configuration above.
 
-### IDE and AI Assistant Integrations
+### Setup Instructions by Tool
 
 This section covers how to integrate Deephaven MCP with various IDE environments and AI coding assistants. Each integration requires specific configuration steps and file locations.
 
 The following sections provide specific integration steps for each supported IDE and AI assistant platform. 
 
-### GitHub Copilot in Visual Studio Code
+### VS Code (GitHub Copilot)
 
 To add MCP servers to your workspace, run the **MCP: Add Server** command from the Command Palette, then select **Workspace Settings** to create the `.vscode/mcp.json` file. Alternatively, create `.vscode/mcp.json` manually in your project root.
 
@@ -548,7 +548,7 @@ Configure your servers:
 - [VS Code MCP Configuration format reference](https://code.visualstudio.com/docs/copilot/chat/mcp-servers#_configuration-format)
 - [VS Code MCP Troubleshooting guide](https://code.visualstudio.com/docs/copilot/chat/mcp-servers#_troubleshoot-and-debug-mcp-servers)
 
-### Windsurf IDE
+### Windsurf
 
 Go to **Windsurf Settings** > **Cascade** > **MCP Servers** > **Manage MCPs** > **View Raw Config** to open `~/.codeium/windsurf/mcp_config.json` for editing.
 
@@ -580,7 +580,7 @@ Configure the file with your Deephaven servers:
 - [Windsurf MCP documentation](https://docs.windsurf.com/windsurf/cascade/mcp)
 - [Windsurf MCP Troubleshooting guide](https://docs.windsurf.com/troubleshooting/windsurf-common-issues)
 
-### Cursor IDE
+### Cursor
 
 Create or edit an MCP configuration file:
 - **Project-specific**: `.cursor/mcp.json` in your project root
