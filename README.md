@@ -51,15 +51,22 @@ Deephaven MCP implements the [Model Context Protocol (MCP) standard](https://spe
 
 ## 🚀 Quick Start
 
-**Get up and running in 5 minutes!** This quickstart assumes you have a local Deephaven Community Core instance running on `localhost:10000`. If you don't have one, [download and start Deephaven Community Core](https://deephaven.io/community/) first.
+**Get up and running in 5 minutes!** This quickstart assumes you have a local Deephaven Community Core instance running on `localhost:10000`. If you don't have one, [download and start Deephaven Community Core](https://deephaven.io/core/docs/getting-started/quickstart/) first.
 
-### 1. Install Deephaven MCP
+### 1. Create Virtual Environment
+
+```bash
+python -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+```
+
+### 2. Install Deephaven MCP and Dependencies
 
 ```bash
 pip install deephaven-mcp
 ```
 
-### 2. Create Configuration File
+### 3. Create Configuration File
 
 Create a file called `deephaven_mcp.json` anywhere on your system:
 
@@ -69,25 +76,41 @@ Create a file called `deephaven_mcp.json` anywhere on your system:
     "sessions": {
       "local": {
         "host": "localhost",
-        "port": 10000
+        "port": 10000,
+        "auth_type": "io.deephaven.authentication.psk.PskAuthenticationHandler",
+        "auth_token": "YOUR_PASSWORD_HERE"
       }
     }
   }
 }
 ```
 
-### 3. Configure Your AI Tool
+> **⚠️ Security Note**: Since this file contains authentication credentials, set restrictive permissions:
+> ```bash
+> chmod 600 deephaven_mcp.json
+> ```
 
-**For Claude Desktop**, add this to your `claude_desktop_config.json`:
+### 4. Configure Your AI Tool
+
+**For Claude Desktop**, open **Claude Desktop** → **Settings** → **Developer** → **Edit Config** and add:
 
 ```json
 {
   "mcpServers": {
     "deephaven-systems": {
-      "command": "dh-mcp-systems-server",
+      "command": "/full/path/to/your/.venv/bin/dh-mcp-systems-server",
+      "args": [],
       "env": {
-        "DH_MCP_CONFIG_FILE": "/absolute/path/to/your/deephaven_mcp.json"
+        "DH_MCP_CONFIG_FILE": "/full/path/to/your/deephaven_mcp.json",
+        "PYTHONLOGLEVEL": "INFO"
       }
+    },
+    "deephaven-docs": {
+      "command": "/full/path/to/your/.venv/bin/mcp-proxy",
+      "args": [
+        "--transport=streamablehttp",
+        "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"
+      ]
     }
   }
 }
@@ -95,7 +118,7 @@ Create a file called `deephaven_mcp.json` anywhere on your system:
 
 **For other tools**, see the [detailed setup instructions](#setup-instructions-by-tool) below.
 
-### 4. Try It Out!
+### 5. Try It Out!
 
 Restart your AI tool and try asking:
 
@@ -105,7 +128,7 @@ Restart your AI tool and try asking:
 
 > "Execute this Python code in my Deephaven session: `t = empty_table(100).update('x=i', 'y=i*2')`"
 
-**Need help?** Check the [Troubleshooting](#troubleshooting) section or ask the built-in docs server about Deephaven features!
+**Need help?** Check the [Troubleshooting](#troubleshooting) section, ask the built-in docs server about Deephaven features, or join the [Deephaven Community Slack](https://deephaven.io/slack)!
 
 ### Deephaven MCP Components
 
