@@ -39,7 +39,7 @@ Manages and connects to multiple [Deephaven Community Core](https://deephaven.io
 
 **Key Capabilities:**
 *   **Session Management**: List, monitor, and get detailed status of all configured Deephaven sessions
-*   **Enterprise Systems**: Connect to and manage Deephaven Enterprise (CorePlus) deployments
+*   **Enterprise Systems**: Connect to and manage Deephaven Enterprise (Core+) deployments
 *   **Table Operations**: Retrieve table schemas and metadata from any connected session
 *   **Script Execution**: Run Python or Groovy scripts directly on Deephaven sessions
 *   **Package Management**: Query installed Python packages in session environments
