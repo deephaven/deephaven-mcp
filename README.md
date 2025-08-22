@@ -11,13 +11,15 @@
 - [Installation & Initial Setup](#installation--initial-setup)
 - [Configuring `deephaven_mcp.json`](#configuring-deephaven_mcpjson)
 - [Environment Variables](#environment-variables)
-- [Configure Your AI Agent / IDE to Use MCP Servers](#configure-your-ai-agent--ide-to-use-mcp-servers)
-  - [Defining MCP Servers](#defining-mcp-servers-for-your-llm-tool-the-mcpservers-json-object)
-  - [IDE and AI Assistant Integrations](#ide-and-ai-assistant-integrations)
-    - [GitHub Copilot (VS Code)](#github-copilot-in-visual-studio-code)
-    - [Cursor IDE](#cursor-ide)
+- [AI Tool Setup](#ai-tool-setup)
+  - [How Configuration Works](#how-configuration-works)
+  - [Basic Configuration](#basic-configuration)
+  - [Advanced Configuration (Optional)](#advanced-configuration-optional)
+  - [Setup Instructions by Tool](#setup-instructions-by-tool)
     - [Claude Desktop](#claude-desktop)
-    - [Windsurf IDE](#windsurf-ide)
+    - [Cursor](#cursor)
+    - [VS Code (GitHub Copilot)](#vs-code-github-copilot)
+    - [Windsurf](#windsurf)
   - [Starting the MCP Servers](#starting-the-mcp-servers)
 - [Applying Configuration Changes](#applying-configuration-changes)
 - [Troubleshooting](#troubleshooting)
@@ -440,7 +442,7 @@ The following environment variables can be used to configure the behavior of the
 
 ---
 
-## Configure Your AI Agent / IDE to Use MCP Servers
+## AI Tool Setup
 
 This section details how to configure your AI Agent / IDE to launch and communicate with the [Deephaven MCP Systems Server](#systems-server) and the [Deephaven MCP Docs Server](#docs-server).  Each AI Agent / IDE will have its own configuration method. 
 
