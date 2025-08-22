@@ -444,7 +444,7 @@ The following environment variables can be used to configure the behavior of the
 
 ## AI Tool Setup
 
-This section details how to configure your AI Agent / IDE to launch and communicate with the [Deephaven MCP Systems Server](#systems-server) and the [Deephaven MCP Docs Server](#docs-server).  Each AI Agent / IDE will have its own configuration method. 
+This section explains how to connect Deephaven to your AI assistant or IDE. While the goal is the same -— pointing your tool to the Deephaven MCP servers -— the specific configuration steps vary for each tool. 
 
 ### How Configuration Works
 
@@ -454,14 +454,14 @@ All AI tools that support MCP use the same core configuration format: a JSON obj
 
 | Tool | Configuration Structure |
 |------|------------------------|
-| **Windsurf, Cursor, Claude Desktop** | The `mcpServers` object is the entire file content |
+| **Windsurf, Cursor, Claude Desktop** | The `mcpServers` object is the root of the JSON file. |
 | **VS Code** | The `mcpServers` object goes inside a `"servers"` key |
 
 ### Basic Configuration
 
-Here's the standard `mcpServers` configuration for Deephaven (works for both `uv` and `pip` installations):
+Here's the standard `mcpServers` configuration for Deephaven. It works for both [`uv`](./docs/UV.md) and `pip` installations.
 
-> **⚙️ Important**: Replace `/full/path/to/your` with the actual absolute path to your configuration files or virtual environment.
+> **⚙️ Important**: All paths in the following examples must be **absolute paths**. Replace `/full/path/to/your/` with the correct absolute path to your project directory.
 
 ```json
 "mcpServers": {
@@ -513,9 +513,7 @@ For more details on HTTP server configuration, see the [Windsurf MCP documentati
 
 ### Setup Instructions by Tool
 
-This section covers how to integrate Deephaven MCP with various IDE environments and AI coding assistants. Each integration requires specific configuration steps and file locations.
-
-The following sections provide specific integration steps for each supported IDE and AI assistant platform. 
+The following sections provide specific integration steps for each supported IDE and AI assistant platform, covering the required configuration and file locations.
 
 ### Claude Desktop
 
