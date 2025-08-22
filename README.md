@@ -487,92 +487,37 @@ Here's the standard `mcpServers` configuration for Deephaven (works for both `uv
 
 This section covers how to integrate Deephaven MCP with various IDE environments and AI coding assistants. Each integration requires specific configuration steps and file locations.
 
-The following sections provide specific integration steps for each supported IDE and AI assistant platform. After configuration, see the [Developer & Contributor Guide](docs/DEVELOPER_GUIDE.md) for detailed documentation on using MCP tools.
+The following sections provide specific integration steps for each supported IDE and AI assistant platform. 
 
 ### GitHub Copilot in Visual Studio Code
 
-[GitHub Copilot](https://github.com/features/copilot) in [Visual Studio Code](https://code.visualstudio.com/) supports MCP servers for enhanced development workflows with AI-assisted data exploration and Deephaven integration.
+To add MCP servers to your workspace, run the **MCP: Add Server** command from the Command Palette, then select **Workspace Settings** to create the `.vscode/mcp.json` file. Alternatively, create `.vscode/mcp.json` manually in your project root.
 
-#### Configuration File Location
+Configure your servers (see [VS Code MCP documentation](https://code.visualstudio.com/docs/copilot/chat/mcp-servers) and [VS Code MCP configuration format](https://code.visualstudio.com/docs/copilot/chat/mcp-servers#_configuration-format)):
 
-For VS Code with GitHub Copilot, the MCP configuration should be placed at:
-- **File path**: `.vscode/mcp.json` in your project's root directory
+```json
+{
+  "servers": {
+    "deephaven-systems": {
+      "command": "/full/path/to/your/.venv/bin/mcp-systems-server",
+      "args": [],
+      "env": {
+        "DH_MCP_CONFIG_FILE": "/full/path/to/your/deephaven_mcp.json",
+        "PYTHONLOGLEVEL": "INFO"
+      }
+    },
+    "deephaven-docs": {
+      "command": "/full/path/to/your/.venv/bin/mcp-proxy",
+      "args": [
+        "--transport=streamablehttp",
+        "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"
+      ]
+    }
+  }
+}
+```
 
-#### Setting up MCP Configuration for VS Code
-
-1. **Create the MCP configuration file:**
-   In your project's root directory, create or edit `.vscode/mcp.json`:
-
-   ```json
-   {
-     "deephaven-systems": {
-       "command": "uv",
-       "args": [
-         "--directory",
-         "/full/path/to/deephaven-mcp",
-         "run",
-         "dh-mcp-systems-server"
-       ],
-       "env": {
-         "DH_MCP_CONFIG_FILE": "/full/path/to/your/deephaven_mcp.json",
-         "PYTHONLOGLEVEL": "INFO"
-       }
-     },
-     "deephaven-docs": {
-       "command": "uv",
-       "args": [
-         "--directory",
-         "/full/path/to/deephaven-mcp",
-         "run",
-         "mcp-proxy",
-         "--transport=streamablehttp",
-         "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"
-       ]
-     }
-   }
-   ```
-
-2. **Enable MCP in VS Code settings:**
-   Create or edit `.vscode/settings.json` in your project:
-
-   ```json
-   {
-     "github.copilot.enable": {
-       "*": true
-     },
-     "github.copilot.experimental.mcp.enabled": true
-   }
-   ```
-
-3. **Replace the placeholder paths:**
-   - `/full/path/to/deephaven-mcp`: Replace with the absolute path to your deephaven-mcp project directory
-   - `/full/path/to/your/deephaven_mcp.json`: Replace with the absolute path to your Deephaven configuration file
-
-
-
-#### Prerequisites for VS Code Setup
-
-- **VS Code Version**: Ensure you have the latest version of Visual Studio Code
-- **GitHub Copilot Extension**: Install and configure the GitHub Copilot extension
-
-Additionally, ensure you meet all the requirements listed in the [Prerequisites](#prerequisites) section.
-
-#### Using Deephaven MCP with GitHub Copilot
-
-Once configured, you can interact with Deephaven through GitHub Copilot Chat. For detailed documentation on MCP tools, refer to the [Developer & Contributor Guide](docs/DEVELOPER_GUIDE.md).
-
-#### VS Code-Specific Troubleshooting
-
-- **MCP servers not starting**: Check the VS Code Output panel for MCP server logs
-- **Configuration not detected**: Ensure `.vscode/mcp.json` exists in your project root
-- **Permission errors**: Verify all file paths are absolute and accessible
-- **GitHub Copilot not responding to MCP**: Restart VS Code and ensure the experimental MCP feature is enabled
-- **Deephaven connection issues**: Verify your Deephaven instance is running on the configured host:port
-- **Environment variable errors**: Check that `DH_MCP_CONFIG_FILE` points to a valid JSON file
-
-**Debug Mode:**
-To enable debug logging, change `"PYTHONLOGLEVEL": "INFO"` to `"PYTHONLOGLEVEL": "DEBUG"` in your MCP configuration.
-
+For troubleshooting VS Code MCP issues, see [VS Code MCP troubleshooting documentation](https://code.visualstudio.com/docs/copilot/chat/mcp-servers#_troubleshoot-and-debug-mcp-servers).
 
 ### Windsurf IDE
 
