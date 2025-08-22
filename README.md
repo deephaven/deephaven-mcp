@@ -444,76 +444,79 @@ The following environment variables can be used to configure the behavior of the
 
 This section details how to configure your AI Agent / IDE to launch and communicate with the [Deephaven MCP Systems Server](#systems-server) and the [Deephaven MCP Docs Server](#docs-server).  Each AI Agent / IDE will have its own configuration method. 
 
-### Defining MCP Servers for Your LLM Tool (The `mcpServers` JSON Object)
+### Understanding MCP Server Configuration
 
-Your LLM tool requires a specific JSON configuration to define how MCP servers are launched. This configuration is structured as a JSON object with a top-level key named `"mcpServers"`. This `"mcpServers"` object tells the tool how to start the [Deephaven MCP Systems Server](#systems-server) (for interacting with [Deephaven Community Core](https://deephaven.io/community/)) and the `mcp-proxy` (for interacting with the [Docs Server](#docs-server)).
+All AI tools that support MCP use the same core configuration format: a JSON object called `"mcpServers"`. This object defines how to launch the Deephaven MCP servers.
 
-Depending on your LLM tool, this `"mcpServers"` object might be:
-*   The entire content of a dedicated file (e.g., named `mcp.json` in VS Code).
-*   A part of a larger JSON configuration file used by the tool (e.g., for [Claude Desktop](https://www.anthropic.com/claude)).
+**The `mcpServers` object is always the same** - what differs between tools is only where this object goes in their configuration file:
 
-Consult your LLM tool's documentation for the precise file name and location. Below are two examples of the `"mcpServers"` JSON structure. Choose the one that matches your Python environment setup (either [`uv`](docs/UV.md) or `pip + venv`).
+| Tool | Configuration Structure |
+|------|------------------------|
+| **Windsurf, Cursor, Claude Desktop** | The `mcpServers` object is the entire file content |
+| **VS Code** | The `mcpServers` object goes inside a `"servers"` key |
+
+### Standard MCP Server Configuration
+
+Here's the standard `mcpServers` configuration for Deephaven. Choose the version that matches your Python setup:
 
 > **⚙️ Important**: All paths in the JSON examples (e.g., `/full/path/to/...`) must be replaced with actual, absolute paths on your system.
 
-#### Example `"mcpServers"` object for `uv` users:
+#### For `uv` users:
 
 ```json
-{
-  "mcpServers": {
-    "deephaven-systems": {
-      "command": "uv",
-      "args": [
-        "--directory",
-        "/full/path/to/deephaven-mcp",
-        "run",
-        "dh-mcp-systems-server"
-      ],
-      "env": {
-        "DH_MCP_CONFIG_FILE": "/full/path/to/your/deephaven_mcp.json",
-        "PYTHONLOGLEVEL": "INFO" 
-      }
-    },
-    "deephaven-docs": {
-      "command": "uv",
-      "args": [
-        "--directory",
-        "/full/path/to/deephaven-mcp",
-        "run",
-        "mcp-proxy",
-        "--transport=streamablehttp",
-        "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"
-      ]
+"mcpServers": {
+  "deephaven-systems": {
+    "command": "uv",
+    "args": [
+      "--directory",
+      "/full/path/to/deephaven-mcp",
+      "run",
+      "dh-mcp-systems-server"
+    ],
+    "env": {
+      "DH_MCP_CONFIG_FILE": "/full/path/to/your/deephaven_mcp.json",
+      "PYTHONLOGLEVEL": "INFO" 
     }
+  },
+  "deephaven-docs": {
+    "command": "uv",
+    "args": [
+      "--directory",
+      "/full/path/to/deephaven-mcp",
+      "run",
+      "mcp-proxy",
+      "--transport=streamablehttp",
+      "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"
+    ]
   }
 }
 ```
-> **📝 Note**: You can change `"PYTHONLOGLEVEL": "INFO"` to `"PYTHONLOGLEVEL": "DEBUG"` for more detailed server logs, as further detailed in the [Troubleshooting section](#troubleshooting).
 
-#### Example `"mcpServers"` object for `pip + venv` users:
+> **📝 Note**: Change `"PYTHONLOGLEVEL": "INFO"` to `"PYTHONLOGLEVEL": "DEBUG"` for detailed server logs (see [Troubleshooting](#troubleshooting)).
+
+#### For `pip + venv` users:
 
 ```json
-{
-  "mcpServers": {
-    "deephaven-systems": {
-      "command": "/full/path/to/your/deephaven-mcp/.venv/bin/dh-mcp-systems-server",
-      "args": [], 
-      "env": {
-        "DH_MCP_CONFIG_FILE": "/full/path/to/your/deephaven_mcp.json",
-        "PYTHONLOGLEVEL": "INFO"
-      }
-    },
-    "deephaven-docs": {
-      "command": "/full/path/to/your/deephaven-mcp/.venv/bin/mcp-proxy",
-      "args": [
-        "--transport=streamablehttp",
-        "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"
-      ]
+"mcpServers": {
+  "deephaven-systems": {
+    "command": "/full/path/to/your/deephaven-mcp/.venv/bin/dh-mcp-systems-server",
+    "args": [], 
+    "env": {
+      "DH_MCP_CONFIG_FILE": "/full/path/to/your/deephaven_mcp.json",
+      "PYTHONLOGLEVEL": "INFO"
     }
+  },
+  "deephaven-docs": {
+    "command": "/full/path/to/your/deephaven-mcp/.venv/bin/mcp-proxy",
+    "args": [
+      "--transport=streamablehttp",
+      "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"
+    ]
   }
 }
 ```
-> **📝 Note**: You can change `"PYTHONLOGLEVEL": "INFO"` to `"PYTHONLOGLEVEL": "DEBUG"` for more detailed server logs, as further detailed in the [Troubleshooting section](#troubleshooting).
+
+> **📝 Note**: Change `"PYTHONLOGLEVEL": "INFO"` to `"PYTHONLOGLEVEL": "DEBUG"` for detailed server logs (see [Troubleshooting](#troubleshooting)).
 
 ### IDE and AI Assistant Integrations
 
