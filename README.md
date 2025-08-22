@@ -746,7 +746,7 @@ Before diving into detailed troubleshooting, try these common solutions:
   * **Platform-Specific Issues:** Some packages may require platform-specific compilation
 
 * **Python Version Compatibility:**
-  * Deephaven MCP requires Python 3.8 or higher
+  * Deephaven MCP requires Python 3.11 or higher
   * Check your Python version: `python --version`
   * Ensure your virtual environment uses the correct Python version
 
@@ -864,11 +864,12 @@ If you've tried the above solutions and are still experiencing issues:
 
 ### IDE and AI Assistant Troubleshooting
 
-For IDE and AI assistant troubleshooting, refer to the troubleshooting sections in each integration guide:
+For IDE and AI assistant troubleshooting, refer to the official documentation for each tool:
 
-* [GitHub Copilot in Visual Studio Code](#github-copilot-in-visual-studio-code)
-* [Cursor IDE](#cursor-ide) - See Cursor-Specific Troubleshooting
-* [Claude Desktop](#claude-desktop) - See Claude Desktop-Specific Troubleshooting
+* **VS Code (GitHub Copilot)**: [VS Code MCP Troubleshooting guide](https://code.visualstudio.com/docs/copilot/chat/mcp-servers#_troubleshoot-and-debug-mcp-servers)
+* **Cursor**: [Cursor MCP documentation](https://docs.cursor.com/en/context/mcp)
+* **Claude Desktop**: [Claude Desktop MCP Troubleshooting guide](https://support.anthropic.com/en/articles/10949351-getting-started-with-local-mcp-servers-on-claude-desktop)
+* **Windsurf**: [Windsurf MCP Troubleshooting guide](https://docs.windsurf.com/troubleshooting/windsurf-common-issues)
 
 ---
 
