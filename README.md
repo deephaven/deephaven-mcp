@@ -457,57 +457,22 @@ All AI tools that support MCP use the same core configuration format: a JSON obj
 
 ### Standard MCP Server Configuration
 
-Here's the standard `mcpServers` configuration for Deephaven. Choose the version that matches your Python setup:
+Here's the standard `mcpServers` configuration for Deephaven (works for both `uv` and `pip` installations):
 
-> **⚙️ Important**: All paths in the JSON examples (e.g., `/full/path/to/...`) must be replaced with actual, absolute paths on your system.
-
-#### For `uv` users:
+> **⚙️ Important**: Replace `/full/path/to/your` with the actual absolute path to your configuration files or virtual environment.
 
 ```json
 "mcpServers": {
   "deephaven-systems": {
-    "command": "uv",
-    "args": [
-      "--directory",
-      "/full/path/to/deephaven-mcp",
-      "run",
-      "dh-mcp-systems-server"
-    ],
+    "command": "/full/path/to/your/.venv/bin/mcp-systems-server",
+    "args": [],
     "env": {
-      "DH_MCP_CONFIG_FILE": "/full/path/to/your/deephaven_mcp.json",
-      "PYTHONLOGLEVEL": "INFO" 
-    }
-  },
-  "deephaven-docs": {
-    "command": "uv",
-    "args": [
-      "--directory",
-      "/full/path/to/deephaven-mcp",
-      "run",
-      "mcp-proxy",
-      "--transport=streamablehttp",
-      "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"
-    ]
-  }
-}
-```
-
-> **📝 Note**: Change `"PYTHONLOGLEVEL": "INFO"` to `"PYTHONLOGLEVEL": "DEBUG"` for detailed server logs (see [Troubleshooting](#troubleshooting)).
-
-#### For `pip + venv` users:
-
-```json
-"mcpServers": {
-  "deephaven-systems": {
-    "command": "/full/path/to/your/deephaven-mcp/.venv/bin/dh-mcp-systems-server",
-    "args": [], 
-    "env": {
-      "DH_MCP_CONFIG_FILE": "/full/path/to/your/deephaven_mcp.json",
+      "DH_MCP_CONFIG_FILE": "/full/path/to/deephaven-mcp/deephaven_mcp.json",
       "PYTHONLOGLEVEL": "INFO"
     }
   },
   "deephaven-docs": {
-    "command": "/full/path/to/your/deephaven-mcp/.venv/bin/mcp-proxy",
+    "command": "/full/path/to/your/.venv/bin/mcp-proxy",
     "args": [
       "--transport=streamablehttp",
       "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"
