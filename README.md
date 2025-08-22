@@ -515,6 +515,68 @@ This section covers how to integrate Deephaven MCP with various IDE environments
 
 The following sections provide specific integration steps for each supported IDE and AI assistant platform. 
 
+### Claude Desktop
+
+Open **Claude Desktop** → **Settings** → **Developer** → **Edit Config** to configure your MCP servers:
+
+```json
+{
+  "mcpServers": {
+    "deephaven-systems": {
+      "command": "/full/path/to/your/.venv/bin/dh-mcp-systems-server",
+      "args": [],
+      "env": {
+        "DH_MCP_CONFIG_FILE": "/full/path/to/your/deephaven_mcp.json",
+        "PYTHONLOGLEVEL": "INFO"
+      }
+    },
+    "deephaven-docs": {
+      "command": "/full/path/to/your/.venv/bin/mcp-proxy",
+      "args": [
+        "--transport=streamablehttp",
+        "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"
+      ]
+    }
+  }
+}
+```
+
+**Additional Resources:**
+- [MCP User Quickstart Guide](https://modelcontextprotocol.io/quickstart/user)
+- [MCP Troubleshooting guide](https://modelcontextprotocol.io/docs/concepts/transports#troubleshooting)
+- [Claude Desktop MCP Troubleshooting guide](https://support.anthropic.com/en/articles/10949351-getting-started-with-local-mcp-servers-on-claude-desktop)
+
+### Cursor
+
+Create or edit an MCP configuration file:
+- **Project-specific**: `.cursor/mcp.json` in your project root
+- **Global**: `~/.cursor/mcp.json` for all projects
+
+```json
+{
+  "mcpServers": {
+    "deephaven-systems": {
+      "command": "/full/path/to/your/.venv/bin/dh-mcp-systems-server",
+      "args": [],
+      "env": {
+        "DH_MCP_CONFIG_FILE": "/full/path/to/your/deephaven_mcp.json",
+        "PYTHONLOGLEVEL": "INFO"
+      }
+    },
+    "deephaven-docs": {
+      "command": "/full/path/to/your/.venv/bin/mcp-proxy",
+      "args": [
+        "--transport=streamablehttp",
+        "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"
+      ]
+    }
+  }
+}
+```
+
+**Additional Resources:**
+- [Cursor MCP documentation](https://docs.cursor.com/en/context/mcp)
+
 ### VS Code (GitHub Copilot)
 
 To add MCP servers to your workspace, run the **MCP: Add Server** command from the Command Palette, then select **Workspace Settings** to create the `.vscode/mcp.json` file. Alternatively, create `.vscode/mcp.json` manually in your project root.
@@ -579,68 +641,6 @@ Configure the file with your Deephaven servers:
 **Additional Resources:**
 - [Windsurf MCP documentation](https://docs.windsurf.com/windsurf/cascade/mcp)
 - [Windsurf MCP Troubleshooting guide](https://docs.windsurf.com/troubleshooting/windsurf-common-issues)
-
-### Cursor
-
-Create or edit an MCP configuration file:
-- **Project-specific**: `.cursor/mcp.json` in your project root
-- **Global**: `~/.cursor/mcp.json` for all projects
-
-```json
-{
-  "mcpServers": {
-    "deephaven-systems": {
-      "command": "/full/path/to/your/.venv/bin/dh-mcp-systems-server",
-      "args": [],
-      "env": {
-        "DH_MCP_CONFIG_FILE": "/full/path/to/your/deephaven_mcp.json",
-        "PYTHONLOGLEVEL": "INFO"
-      }
-    },
-    "deephaven-docs": {
-      "command": "/full/path/to/your/.venv/bin/mcp-proxy",
-      "args": [
-        "--transport=streamablehttp",
-        "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"
-      ]
-    }
-  }
-}
-```
-
-**Additional Resources:**
-- [Cursor MCP documentation](https://docs.cursor.com/en/context/mcp)
-
-### Claude Desktop
-
-Open **Claude Desktop** → **Settings** → **Developer** → **Edit Config** to configure your MCP servers:
-
-```json
-{
-  "mcpServers": {
-    "deephaven-systems": {
-      "command": "/full/path/to/your/.venv/bin/dh-mcp-systems-server",
-      "args": [],
-      "env": {
-        "DH_MCP_CONFIG_FILE": "/full/path/to/your/deephaven_mcp.json",
-        "PYTHONLOGLEVEL": "INFO"
-      }
-    },
-    "deephaven-docs": {
-      "command": "/full/path/to/your/.venv/bin/mcp-proxy",
-      "args": [
-        "--transport=streamablehttp",
-        "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"
-      ]
-    }
-  }
-}
-```
-
-**Additional Resources:**
-- [MCP User Quickstart Guide](https://modelcontextprotocol.io/quickstart/user)
-- [MCP Troubleshooting guide](https://modelcontextprotocol.io/docs/concepts/transports#troubleshooting)
-- [Claude Desktop MCP Troubleshooting guide](https://support.anthropic.com/en/articles/10949351-getting-started-with-local-mcp-servers-on-claude-desktop)
 
 ---
 
