@@ -14,7 +14,7 @@
 - [AI Tool Setup](#ai-tool-setup)
   - [How Configuration Works](#how-configuration-works)
   - [Basic Configuration](#basic-configuration)
-  - [Advanced Configuration (Optional)](#advanced-configuration-optional)
+  - [Direct HTTP Server Configuration](#direct-http-server-configuration)
   - [Setup Instructions by Tool](#setup-instructions-by-tool)
     - [Claude Desktop](#claude-desktop)
     - [Cursor](#cursor)
@@ -23,7 +23,7 @@
   - [Starting the MCP Servers](#starting-the-mcp-servers)
 - [Applying Configuration Changes](#applying-configuration-changes)
 - [Troubleshooting](#troubleshooting)
-- [Advanced Usage & Further Information](#advanced-usage--further-information)
+- [Advanced Usage](#advanced-usage)
 - [Contributing](#contributing)
 - [Community & Support](#community--support)
 - [License](#license)
@@ -107,7 +107,7 @@ graph TD
 
 The recommended way to install `deephaven-mcp` is from PyPI. This provides the latest stable release and is suitable for most users.
 
-### Installing from PyPI (Recommended for Users)
+### Installing from PyPI
 
 Choose one of the following Python environment and package management tools:
 
@@ -417,7 +417,7 @@ Here's a complete example showing both Community and Enterprise configurations:
 > chmod 600 /path/to/your/deephaven_mcp.json
 > ```
 
-### Setting `DH_MCP_CONFIG_FILE` (Informing the MCP Server)
+### Setting `DH_MCP_CONFIG_FILE`
 
 The `DH_MCP_CONFIG_FILE` environment variable tells the [Deephaven MCP Systems Server](#systems-server) where to find your `deephaven_mcp.json` file (detailed in [The `deephaven_mcp.json` File (Defining Your Community Sessions)](#the-deephaven_mcp.json-file-defining-your-community-sessions)). You will set this environment variable as part of the server launch configuration within your LLM tool, as detailed in the [Configure Your AI Agent / IDE to Use MCP Servers](#configure-your-ai-agent--ide-to-use-mcp-servers) section. 
 
@@ -501,11 +501,27 @@ Here's the standard `mcpServers` configuration for Deephaven. It works for both 
 
 > **📝 Note**: Change `"PYTHONLOGLEVEL": "INFO"` to `"PYTHONLOGLEVEL": "DEBUG"` for detailed server logs (see [Troubleshooting](#troubleshooting)).
 
-### Advanced Configuration (Optional)
+### Direct HTTP Server Configuration
 
-Some AI agents support direct connection to remote streaming HTTP MCP servers without requiring the `mcp-proxy` tool. The proxy-based approach is used in all examples because it is universally supported, but more AI agents are adding native streaming HTTP support.
+The Deephaven MCP Docs Server natively supports streaming HTTP connections and can be accessed directly by AI agents without requiring the [`mcp-proxy`](https://github.com/modelcontextprotocol/mcp-proxy) tool. This provides optimal performance with lower latency and reduced overhead compared to the proxy-based approach.
 
-> **⚠️ Note**: Each tool uses different configuration schemas for direct HTTP servers.
+**How It Works:**
+- The docs server runs as a FastAPI web service with native MCP streaming HTTP support
+- It accepts direct HTTP connections on `https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp`
+- Modern AI agents can connect directly using their built-in streaming HTTP clients
+- This eliminates the need for a local proxy process, simplifying the setup
+
+**When to Use Direct HTTP:**
+- Your AI agent supports native streaming HTTP MCP connections
+- You want optimal performance and reduced resource usage
+- You prefer simpler configuration without local proxy processes
+
+**When to Use Proxy-Based Approach:**
+- Your AI agent only supports stdio MCP connections
+- You need universal compatibility across all MCP clients
+- You're troubleshooting connection issues
+
+> **⚠️ Note**: Each tool uses different configuration schemas for direct HTTP servers. The examples below show tool-specific formats.
 
 **For Windsurf IDE:**
 ```json
@@ -889,7 +905,7 @@ For IDE and AI assistant troubleshooting, refer to the official documentation fo
 
 ---
 
-## Advanced Usage & Further Information
+## Advanced Usage
 
 *   **Detailed Server APIs and Tools:** For in-depth information about the tools exposed by the [Systems Server](#systems-server) (e.g., [`refresh`](docs/DEVELOPER_GUIDE.md#refresh), [`table_schemas`](docs/DEVELOPER_GUIDE.md#table_schemas)) and the [Docs Server](#docs-server) ([`docs_chat`](docs/DEVELOPER_GUIDE.md#docs_chat)), refer to the [Developer & Contributor Guide](docs/DEVELOPER_GUIDE.md).
 *   **`uv` Workflow:** For more details on using `uv` for project management, see [docs/UV.md](docs/UV.md).
