@@ -239,7 +239,7 @@ You can include either section, both, or neither (empty file). Each section cont
 }
 ```
 
-**Basic authentication with environment variable (recommended for production):**
+**Basic authentication with environment variable:**
 ```json
 {
   "community": {
