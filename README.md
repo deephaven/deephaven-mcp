@@ -550,41 +550,24 @@ Configure the file with your Deephaven servers (see [Windsurf MCP documentation]
 
 ### Cursor IDE
 
-Cursor IDE supports MCP servers for enhanced development workflows with AI-assisted data exploration and Deephaven integration.
-
-#### Configuration File Location
-
-For Cursor IDE, the MCP configuration should be placed at:
-- **File path**: `~/.cursor/mcp.json` 
-
-#### Setting up MCP Configuration for Cursor IDE
-
-1. **Create the MCP configuration file:**
-   Create or edit `~/.cursor/mcp.json` (create this file if it doesn't exist):
+Create or edit an MCP configuration file (see [Cursor MCP documentation](https://docs.cursor.com/en/context/mcp)):
+- **Project-specific**: `.cursor/mcp.json` in your project root
+- **Global**: `~/.cursor/mcp.json` for all projects
 
 ```json
 {
   "mcpServers": {
     "deephaven-systems": {
-      "command": "uv",
-      "args": [
-        "--directory",
-        "/full/path/to/deephaven-mcp",
-        "run",
-        "dh-mcp-systems-server"
-      ],
+      "command": "/full/path/to/your/.venv/bin/dh-mcp-systems-server",
+      "args": [],
       "env": {
-        "DH_MCP_CONFIG_FILE": "<PATH_TO_DEEPHAVEN_MCP>/deephaven_mcp.json",
+        "DH_MCP_CONFIG_FILE": "/full/path/to/your/deephaven_mcp.json",
         "PYTHONLOGLEVEL": "INFO"
       }
     },
     "deephaven-docs": {
-      "command": "uv",
+      "command": "/full/path/to/your/.venv/bin/mcp-proxy",
       "args": [
-        "--directory",
-        "/full/path/to/deephaven-mcp",
-        "run",
-        "mcp-proxy",
         "--transport=streamablehttp",
         "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"
       ]
@@ -592,50 +575,6 @@ For Cursor IDE, the MCP configuration should be placed at:
   }
 }
 ```
-
-#### Important Setup Notes for Cursor
-
-* **Virtual Environment**: Must use `uv venv .venv -p 3.11` or `python3.11 -m venv .venv`
-* **Configuration File**: Must exist at project root: `deephaven_mcp.json`
-* **Restart Required**: After creating/updating MCP configuration, completely restart Cursor
-
-Additionally, ensure you meet all the requirements listed in the [Prerequisites](#prerequisites) section.
-
-#### Quick Setup Commands for Cursor
-
-```bash
-# 1. Create virtual environment with correct Python version
-cd /path/to/your/project
-uv venv .venv -p 3.11
-source .venv/bin/activate
-
-# 2. Install deephaven-mcp
-uv pip install deephaven-mcp
-
-# 3. Create basic configuration file
-echo '{"community": {"sessions": {}}}' > deephaven_mcp.json
-
-# 4. Create Cursor MCP config (update paths!)
-mkdir -p ~/.cursor
-# Then edit ~/.cursor/mcp.json with the configuration above
-
-# 5. Restart Cursor completely
-```
-
-#### Testing Your Setup
-
-* Both servers should show green dots in Cursor's MCP interface
-* Systems server should show "7 tools enabled"
-* Docs server should show available tools
-* If you see red dots, check the troubleshooting section below
-
-#### Cursor-Specific Troubleshooting
-
-* **Red dots/Loading tools**: Verify all paths are absolute and correct
-* **Python version errors**: Ensure you're using Python 3.11+ (not 3.10)
-* **Configuration file not found**: Check that `deephaven_mcp.json` exists at project root
-* **External docs server 404**: The external docs server URL may be down; consider using local docs server instead
-* **Permission errors**: Run `chmod 600 deephaven_mcp.json` to set proper permissions
 
 
 ### Claude Desktop
