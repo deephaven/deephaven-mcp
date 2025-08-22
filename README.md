@@ -483,6 +483,30 @@ Here's the standard `mcpServers` configuration for Deephaven (works for both `uv
 
 > **📝 Note**: Change `"PYTHONLOGLEVEL": "INFO"` to `"PYTHONLOGLEVEL": "DEBUG"` for detailed server logs (see [Troubleshooting](#troubleshooting)).
 
+### Direct Streaming HTTP MCP Server Configuration (Alternative)
+
+Some AI agents support direct connection to remote streaming HTTP MCP servers without requiring the `mcp-proxy` tool. The proxy-based approach is used in all examples because it is universally supported, but more AI agents are adding native streaming HTTP support.
+
+> **⚠️ Note**: Each tool uses different configuration schemas for direct HTTP servers.
+
+**For Windsurf IDE** (see [Windsurf MCP HTTP configuration](https://docs.windsurf.com/windsurf/cascade/mcp)):
+```json
+"deephaven-docs": {
+  "serverUrl": "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp",
+  "disabled": false
+}
+```
+
+**For VS Code** (see [VS Code HTTP and SSE servers](https://code.visualstudio.com/docs/copilot/chat/mcp-servers#_http-and-server-sent-events-sse-servers)):
+```json
+"deephaven-docs": {
+  "type": "http",
+  "url": "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"
+}
+```
+
+**Note:** Claude Desktop and Cursor currently require the proxy-based approach shown in the standard configuration above.
+
 ### IDE and AI Assistant Integrations
 
 This section covers how to integrate Deephaven MCP with various IDE environments and AI coding assistants. Each integration requires specific configuration steps and file locations.
