@@ -32,7 +32,19 @@
 
 ## Overview
 
-Deephaven MCP implements the [Model Context Protocol (MCP) standard](https://spec.modelcontextprotocol.io/) to provide tools for orchestrating, inspecting, and interacting with both [Deephaven Community Core](https://deephaven.io/community/) and [Deephaven Enterprise](https://deephaven.io/enterprise/) systems, plus access to conversational documentation via LLM-powered Docs Servers. It's designed for data scientists, engineers, and anyone looking to leverage Deephaven's capabilities through programmatic interfaces or integrated LLM tools.
+**Supercharge your AI workflows with real-time data.** Deephaven MCP brings the power of [live dataframes](https://deephaven.io) directly to your favorite AI tools -— Claude, Cursor, VS Code Copilot, and more.
+
+### Why Deephaven MCP?
+
+Most data tools force you to choose: **fast** or **real-time**. With Deephaven's revolutionary live dataframes, you get both. Process streaming data at millisecond speeds while your AI assistant helps you build, query, and analyze -— all through natural language.
+
+**🚀 What makes this different:**
+- **Live Data, Live Results**: Query streaming Kafka, real-time feeds, and batch data as easily as static CSV files
+- **AI-Native Integration**: Your AI assistant understands your data pipeline and can help optimize, debug, and extend it
+- **Enterprise Ready**: Battle-tested on Wall Street for over a decade, now available for your team
+- **Zero Learning Curve**: Write queries as if working with static tables -— real-time updates happen automatically
+
+Deephaven MCP implements the [Model Context Protocol (MCP) standard](https://spec.modelcontextprotocol.io/) to provide seamless integration between [Deephaven Community Core](https://deephaven.io/community/) and [Deephaven Enterprise](https://deephaven.io/enterprise/) systems and your AI development workflow. Perfect for data scientists, engineers, analysts, business users, and anyone who wants to harness real-time data—regardless of programming experience. Let AI generate the code while you focus on insights.
 
 ### Deephaven MCP Components
 
