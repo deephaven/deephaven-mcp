@@ -444,15 +444,6 @@ The following environment variables can be used to configure the behavior of the
 
 This section details how to configure your AI Agent / IDE to launch and communicate with the [Deephaven MCP Systems Server](#systems-server) and the [Deephaven MCP Docs Server](#docs-server).  Each AI Agent / IDE will have its own configuration method. 
 
-### Understanding Deephaven Core Worker Status (via MCP)
-
-The [MCP Systems Server](#systems-server-architecture), launched by your LLM tool, will attempt to connect to the [Deephaven Community Core](https://deephaven.io/community/) instances defined in your `deephaven_mcp.json` file (pointed to by `DH_MCP_CONFIG_FILE` as described in [Setting `DH_MCP_CONFIG_FILE` (Informing the MCP Server)](#setting-dh_mcp_config_file-informing-the-mcp-server)).
-
-It's important to understand the following:
-*   **MCP Server Independence**: The [MCP Systems Server](#systems-server-architecture) itself will start and be available to your LLM tool even if some or all configured [Deephaven Community Core](https://deephaven.io/community/) workers are not currently running or accessible. The LLM tool will be able to list the configured workers and see their status (e.g., unavailable, connected).
-*   **Worker Interaction**: To successfully perform operations on a specific [Deephaven Community Core](https://deephaven.io/community/) worker (e.g., list tables, execute scripts), that particular worker must be running and network-accessible from the environment where the [MCP Systems Server](#systems-server-architecture) process is executing.
-*   **Configuration is Key**: Ensure your `deephaven_mcp.json` file accurately lists the systems session configurations you intend to use. The MCP server uses this configuration to know which sessions to attempt to manage.
-
 ### Defining MCP Servers for Your LLM Tool (The `mcpServers` JSON Object)
 
 Your LLM tool requires a specific JSON configuration to define how MCP servers are launched. This configuration is structured as a JSON object with a top-level key named `"mcpServers"`. This `"mcpServers"` object tells the tool how to start the [Deephaven MCP Systems Server](#systems-server) (for interacting with [Deephaven Community Core](https://deephaven.io/community/)) and the `mcp-proxy` (for interacting with the [Docs Server](#docs-server)).
