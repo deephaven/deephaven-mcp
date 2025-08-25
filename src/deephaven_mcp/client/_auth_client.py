@@ -128,7 +128,7 @@ class CorePlusAuthClient(
             )
             return CorePlusToken(result)
         except ConnectionError as e:
-            _LOGGER.error(f"Failed to connect to authentication service: {e}")
+            _LOGGER.error("[CorePlusAuthClient:authenticate] Failed to connect to authentication service: %s", e)
             raise DeephavenConnectionError(
                 f"Unable to connect to authentication service: {e}"
             ) from e
@@ -174,7 +174,7 @@ class CorePlusAuthClient(
             _LOGGER.debug("[CorePlusAuthClient] Token authentication succeeded.")
             return CorePlusToken(result)
         except ConnectionError as e:
-            _LOGGER.error(f"Failed to connect to authentication service: {e}")
+            _LOGGER.error("[CorePlusAuthClient:authenticate_with_token] Failed to connect to authentication service: %s", e)
             raise DeephavenConnectionError(
                 f"Unable to connect to authentication service: {e}"
             ) from e
@@ -230,7 +230,7 @@ class CorePlusAuthClient(
             )
             return CorePlusToken(result)
         except ConnectionError as e:
-            _LOGGER.error(f"Failed to connect to authentication service: {e}")
+            _LOGGER.error("[CorePlusAuthClient:create_token] Failed to connect to authentication service: %s", e)
             raise DeephavenConnectionError(
                 f"Unable to connect to authentication service: {e}"
             ) from e
@@ -270,12 +270,12 @@ class CorePlusAuthClient(
                 "[CorePlusAuthClient] Authentication client connection closed."
             )
         except ConnectionError as e:
-            _LOGGER.error(f"Connection error while closing auth client: {e}")
+            _LOGGER.error("[CorePlusAuthClient:close] Connection error while closing auth client: %s", e)
             raise DeephavenConnectionError(
                 f"Connection error while closing authentication service: {e}"
             ) from e
         except Exception as e:
-            _LOGGER.error(f"Error closing auth client connection: {e}")
+            _LOGGER.error("[CorePlusAuthClient:close] Error closing auth client connection: %s", e)
             raise AuthenticationError(
                 f"Failed to close authentication connection: {e}"
             ) from e
