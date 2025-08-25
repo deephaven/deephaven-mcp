@@ -810,7 +810,7 @@ Before diving into detailed troubleshooting, try these common solutions:
 1. **Restart your IDE/AI assistant** after any configuration changes
 2. **Check that all file paths are absolute** in your JSON configurations
 3. **Verify your virtual environment is activated** when running commands
-4. **Validate JSON syntax** using [jsonlint.com](https://jsonlint.com/) or your IDE's JSON validator
+4. **Validate JSON syntax** using [https://jsonlint.com](https://jsonlint.com/) or your IDE's JSON validator
 
 ### Common Error Messages
 
