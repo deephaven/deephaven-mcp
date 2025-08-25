@@ -79,7 +79,7 @@ This repository houses the Python-based Model Context Protocol (MCP) servers for
       - [Docs Server Example](#docs-server-example)
   - [Development](#development)
     - [Development Workflow](#development-workflow)
-    - [Core Plus Client Development Setup](#core-plus-client-development-setup)
+    - [Core+ Client Development Setup](#core-client-development-setup)
     - [Advanced Development Techniques](#advanced-development-techniques)
     - [Development Commands](#development-commands)
       - [Code Quality \& Pre-commit Checks](#code-quality--pre-commit-checks)
@@ -545,7 +545,7 @@ On error:
 
 ##### `enterprise_systems_status`
 
-**Purpose**: List all enterprise (CorePlus) systems/factories with their status and configuration details (redacted).
+**Purpose**: List all enterprise (Core+) systems/factories with their status and configuration details (redacted).
 
 **Parameters**:
 - `attempt_to_connect` (optional, boolean): If True, actively attempts to connect to each system to verify its status. Default is False (only checks existing connections for faster response).
@@ -1280,37 +1280,37 @@ Both servers expose their tools through FastMCP, following the Model Context Pro
 4. **Use the MCP Inspector or test client** to validate your changes.
 
 
-### Core Plus Client Development Setup
+### Core+ Client Development Setup
 
-These steps outline how to set up a development environment specifically for working with the Deephaven Core Plus client wheel:
+These steps outline how to set up a development environment specifically for working with the Deephaven Core+ client wheel:
 
 1.  **Create a Python 3.12 virtual environment:**
     ```sh
     uv venv .venv -p 3.12
     ```
-    *Ensure Python 3.9 to 3.12 is used, as per potential Core Plus client requirements.*
+    *Ensure Python 3.9 to 3.12 is used, as per potential Core+ client requirements.*
 
-2.  **Install the Core Plus client wheel:**
+2.  **Install the Core+ client wheel:**
     Run the management script to download and install the client wheel into your venv.
     ```sh
     ./bin/dev_manage_coreplus_client.sh install
     ```
     *This script is used because the `deephaven-coreplus-client` wheel is not available on PyPI and needs to be fetched from a specific location. The script also, crucially, manages `grpcio` dependency versioning by ensuring that if `grpcio` is already installed, its version is pinned during the client installation to prevent conflicts, and it uses binary-only installs to avoid build issues.*
 
-3.  **Install project development and Core Plus dependencies:**
+3.  **Install project development and Core+ dependencies:**
     Install the main project's development dependencies along with the `coreplus` extra.
     ```sh
     uv pip install -e ".[dev,coreplus]"
     ```
     *This ensures your environment has all necessary tools for general `deephaven-mcp` development, plus the packages specified in the `coreplus` extra.*
 
-After these steps, your virtual environment will be configured for Core Plus client development.
+After these steps, your virtual environment will be configured for Core+ client development.
 
-> **Tip:** You can generate or regenerate the entire Core Plus development environment in one line:
+> **Tip:** You can generate or regenerate the entire Core+ development environment in one line:
 > ```sh
 > rm -rf .venv && uv venv -p 3.12 && ./bin/dev_manage_coreplus_client.sh install && uv pip install ".[dev,coreplus]"
 > ```
-> This will remove any existing virtual environment, create a new one, install the Core Plus client, and set up all project dependencies in a single command.
+> This will remove any existing virtual environment, create a new one, install the Core+ client, and set up all project dependencies in a single command.
 
 ### Advanced Development Techniques
 
@@ -1412,7 +1412,7 @@ The codebase is organized as follows:
 deephaven-mcp/
 ├── src/
 │   └── deephaven_mcp/      # Main Python package
-│       ├── client/             # Core Plus client components
+│       ├── client/             # Core+ client components
 │       ├── config/             # Configuration models and validators
 │       ├── mcp_docs_server/    # Source for the Docs MCP server
 │       ├── mcp_systems_server/ # Source for the Systems MCP server
@@ -1489,7 +1489,7 @@ deephaven-mcp/
 - Comprehensive validation with detailed error messages
 
 **Client (`client/`)**:
-- Core Plus client components for Enterprise Deephaven connections
+- Core+ client components for Enterprise Deephaven connections
 - Authentication handlers (API key, password, SAML private key)
 - Protocol buffer integration and session factory management
 - TLS/SSL support with custom certificate handling
