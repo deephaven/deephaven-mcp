@@ -15,7 +15,7 @@ Features:
     - Automatic caching and lifecycle management of controller clients
     - Smart controller client recreation if connections die
     - Efficient session tracking with separate storage for different registry types
-    - Enterprise session population via controller client integration
+    - Enterprise session discovery via controller clients
     - Graceful error handling and resource cleanup
 
 Architecture:
@@ -34,7 +34,7 @@ Usage:
     registry = CombinedSessionRegistry()
     await registry.initialize(config_manager)
     sessions = await registry.get_all()  # Gets all sessions across community and enterprise
-    await registry.close()  # Properly closes all resources including cached controller clients
+    await registry.close()  # Properly closes all resources and manages resource cleanup
     ```
 """
 
@@ -78,11 +78,11 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
         - A CorePlusSessionFactoryRegistry for enterprise session factories
         - A cache of controller clients for efficient enterprise session management
         - A unified sessions dictionary tracking all available sessions
-        - Intelligent enterprise session discovery via controller client integration
+        - Intelligent enterprise session discovery via controller clients
 
     Key Features:
         - Unified API for managing heterogeneous session resources
-        - Smart controller client caching with automatic health checking
+        - Controller client health monitoring and management
         - Efficient session resource reuse and cleanup
         - Thread-safe operations with proper asyncio locking
         - Graceful error handling and resource lifecycle management
@@ -332,7 +332,7 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
         2. If a cached client exists, verify its health by attempting a ping() call
         3. If the cached client is healthy, return it
         4. If the cached client is dead or no cached client exists, create a new one
-        5. Subscribe the new client to receive updates and cache it for future use
+        5. Cache the new client for future use
 
         This approach ensures efficient reuse of connections while maintaining reliability
         through automatic recreation of failed clients. The health check verifies that the
@@ -373,19 +373,12 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             except Exception as e:
                 # If there's any error, close the old client and create a new one
                 _LOGGER.warning(
-                    "[%s] controller client for factory '%s' is dead: %s. Creating a new one.",
+                    "[%s] controller client for factory '%s' is dead: %s. Releasing reference to dead controller client.",
                     self.__class__.__name__,
                     factory_name,
                     e,
                 )
-                try:
-                    await self._controller_clients[factory_name].close()
-                except Exception as close_e:
-                    _LOGGER.warning(
-                        "[%s] error closing dead controller client: %s",
-                        self.__class__.__name__,
-                        close_e,
-                    )
+
                 # Remove the dead client from cache
                 self._controller_clients.pop(factory_name, None)
 
@@ -446,7 +439,7 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
 
         This method handles cleanup of session managers that are no longer available
         on the enterprise controller. It removes them from the registry first to
-        prevent further access, then attempts to close them gracefully.
+        prevent further access, then attempts to close the session managers gracefully.
 
         Args:
             stale_keys: Set of fully qualified session keys to close and remove.
@@ -475,8 +468,8 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
     async def _remove_all_sessions_for_factory(self, factory_name: str) -> None:
         """Remove all sessions for a specific factory when the system is offline.
 
-        This method finds all session keys associated with the given factory and
-        closes/removes them from the registry.
+        This method finds all session keys associated with the given factory,
+        removes them from the registry, and properly cleans up the session resources.
 
         Args:
             factory_name: The name of the factory to remove sessions for.
@@ -510,7 +503,7 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
         - Removing stale sessions that are no longer present on the controller.
 
         If a DeephavenConnectionError occurs (e.g., the system is offline or unreachable),
-        all sessions for that factory will be removed from the registry and closed.
+        all sessions for that factory will be removed from the registry and their resources cleaned up.
         Only connection-related exceptions trigger this removal; all other exceptions
         are propagated to the caller for visibility and debugging.
 
@@ -723,7 +716,7 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
 
         1. Closes the community session registry and all its managed sessions
         2. Closes the enterprise session factory registry and all its managed factories
-        3. Closes all cached controller clients
+        3. Properly manages the shutdown of cached controller clients
 
         The method handles errors during closure gracefully, ensuring that all resources
         are attempted to be closed even if some failures occur. Each closure operation
@@ -774,23 +767,6 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
                     _LOGGER.error(
                         "[%s] error closing enterprise registry: %s",
                         self.__class__.__name__,
-                        e,
-                    )
-
-            # Close all controller clients
-            for factory_name, client in list(self._controller_clients.items()):
-                try:
-                    await client.close()
-                    _LOGGER.debug(
-                        "[%s] closed controller client for factory '%s'",
-                        self.__class__.__name__,
-                        factory_name,
-                    )
-                except Exception as e:
-                    _LOGGER.error(
-                        "[%s] error closing controller client for factory '%s': %s",
-                        self.__class__.__name__,
-                        factory_name,
                         e,
                     )
 
