@@ -396,7 +396,7 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             factory_name,
         )
         factory_instance = await factory.get()
-        client = await factory_instance.create_controller_client()
+        client = factory_instance.controller_client
         await client.subscribe()
         _LOGGER.debug(
             "[%s] subscribed to controller for factory '%s'",

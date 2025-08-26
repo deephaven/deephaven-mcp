@@ -354,7 +354,7 @@ def mock_factory_config_manager():
     manager = AsyncMock(spec=config.ConfigManager)
     manager.get_config.return_value = {
         "enterprise": {
-            "factories": {
+            "systems": {
                 "factory1": {"host": "localhost", "port": 8080},
                 "factory2": {"host": "remotehost", "port": 9090},
             }
@@ -388,8 +388,8 @@ async def test_factory_registry_get_nonexistent(mock_factory_config_manager):
 
 
 @pytest.mark.asyncio
-async def test_factory_registry_no_factories_key():
-    """Test that the registry handles a missing 'factories' key gracefully."""
+async def test_factory_registry_no_systems_key():
+    """Test that the registry handles a missing 'systems' key gracefully."""
     manager = AsyncMock(spec=config.ConfigManager)
     manager.get_config.return_value = {"enterprise": {}}
     registry = CorePlusSessionFactoryRegistry()
@@ -404,15 +404,16 @@ async def test_factory_registry_enterprise_not_available_raises_config_error():
     manager = AsyncMock(spec=config.ConfigManager)
     manager.get_config.return_value = {
         "enterprise": {
-            "factories": {
+            "systems": {
                 "factory1": {"host": "localhost", "port": 8080},
             }
         }
     }
 
-    # Mock is_enterprise_available to be False
+    # Mock is_enterprise_available as False
     with patch(
-        "deephaven_mcp.resource_manager._registry.is_enterprise_available", False
+        "deephaven_mcp.resource_manager._registry.is_enterprise_available",
+        False
     ):
         registry = CorePlusSessionFactoryRegistry()
 

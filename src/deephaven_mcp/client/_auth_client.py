@@ -20,7 +20,7 @@ Example:
 
     async def authenticate_example():
         manager = CorePlusSessionManager.from_url("https://myserver.example.com/connection.json")
-        auth_client = await manager.create_auth_client()
+        auth_client = manager.auth_client
         token = await auth_client.authenticate("username", "password")
         service_token = await auth_client.create_token("PersistentQueryController", duration_seconds=3600)
         controller = await manager.create_controller_client()
@@ -68,7 +68,7 @@ class CorePlusAuthClient(
 
         async def authenticate_example():
             manager = CorePlusSessionManager.from_url("https://myserver.example.com/connection.json")
-            auth_client = await manager.create_auth_client()
+            auth_client = manager.auth_client
             token = await auth_client.authenticate("username", "password")
             service_token = await auth_client.create_token("PersistentQueryController", duration_seconds=3600)
             controller = await manager.create_controller_client()

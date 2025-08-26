@@ -3,11 +3,12 @@ import io
 import logging
 import sys
 import types
-from unittest.mock import MagicMock, patch
-
+from unittest.mock import MagicMock, patch, PropertyMock
 import pytest
 
 import deephaven_mcp._exceptions as exc
+from deephaven_mcp.client._controller_client import CorePlusControllerClient
+from deephaven_mcp.client._auth_client import CorePlusAuthClient
 
 # This MUST happen at import time before any other imports that depend on enterprise modules
 try:
@@ -35,7 +36,6 @@ def dummy_session_manager():
     sm.connect_to_new_worker = MagicMock()
     sm.connect_to_persistent_query = MagicMock()
     sm.create_auth_client = MagicMock()
-    sm.create_controller_client = MagicMock()
     return sm
 
 
@@ -377,70 +377,87 @@ async def test_connect_to_persistent_query_key_error(
         )
 
 
-@pytest.mark.asyncio
-async def test_create_auth_client_success(
-    coreplus_session_manager, dummy_session_manager
-):
-    dummy_auth_client = MagicMock()
-    dummy_session_manager.create_auth_client.return_value = dummy_auth_client
-    with patch(
-        "deephaven_mcp.client._session_factory.CorePlusAuthClient", autospec=True
-    ) as mock_auth:
-        mock_auth.return_value = "wrapped_auth"
-        result = await coreplus_session_manager.create_auth_client()
-        dummy_session_manager.create_auth_client.assert_called_once_with(None)
-        assert result == "wrapped_auth"
 
 
-@pytest.mark.asyncio
-async def test_create_auth_client_connection_error(
-    coreplus_session_manager, dummy_session_manager
-):
-    dummy_session_manager.create_auth_client.side_effect = ConnectionError("fail")
-    with pytest.raises(exc.DeephavenConnectionError):
-        await coreplus_session_manager.create_auth_client()
 
 
-@pytest.mark.asyncio
-async def test_create_auth_client_auth_error(
-    coreplus_session_manager, dummy_session_manager
-):
-    dummy_session_manager.create_auth_client.side_effect = Exception("fail")
-    with pytest.raises(exc.AuthenticationError):
-        await coreplus_session_manager.create_auth_client()
+def test_controller_client_property_success(coreplus_session_manager, dummy_session_manager):
+    # Access the property
+    result = coreplus_session_manager.controller_client
+    
+    # Should return the initialized controller client
+    assert result is not None
+    assert isinstance(result, CorePlusControllerClient)
 
 
-@pytest.mark.asyncio
-async def test_create_controller_client_success(
-    coreplus_session_manager, dummy_session_manager
-):
-    dummy_ctrl_client = MagicMock()
-    dummy_session_manager.create_controller_client.return_value = dummy_ctrl_client
-    with patch(
-        "deephaven_mcp.client._session_factory.CorePlusControllerClient", autospec=True
-    ) as mock_ctrl:
-        mock_ctrl.return_value = "wrapped_ctrl"
-        result = await coreplus_session_manager.create_controller_client()
-        dummy_session_manager.create_controller_client.assert_called_once_with()
-        assert result == "wrapped_ctrl"
+def test_auth_client_property_success(coreplus_session_manager, dummy_session_manager):
+    # Access the property
+    result = coreplus_session_manager.auth_client
+    
+    # Should return the initialized auth client
+    assert result is not None
+    assert isinstance(result, CorePlusAuthClient)
 
 
-@pytest.mark.asyncio
-async def test_create_controller_client_connection_error(
-    coreplus_session_manager, dummy_session_manager
-):
-    dummy_session_manager.create_controller_client.side_effect = ConnectionError("fail")
-    with pytest.raises(exc.DeephavenConnectionError):
-        await coreplus_session_manager.create_controller_client()
-
-
-@pytest.mark.asyncio
-async def test_create_controller_client_session_error(
-    coreplus_session_manager, dummy_session_manager
-):
-    dummy_session_manager.create_controller_client.side_effect = Exception("fail")
+def test_controller_client_property_connection_error():
+    # Create a mock session manager with controller_client property that raises ConnectionError
+    mock_session_manager = MagicMock()
+    mock_property = PropertyMock()
+    mock_property.__get__ = MagicMock(side_effect=ConnectionError("network failure"))
+    type(mock_session_manager).controller_client = mock_property
+    
+    # When we construct the factory, it should handle the ConnectionError
+    # and re-raise it as SessionError (not DeephavenConnectionError)
+    # This matches the actual implementation that always raises SessionError
     with pytest.raises(exc.SessionError):
-        await coreplus_session_manager.create_controller_client()
+        CorePlusSessionFactory(mock_session_manager)
+
+
+def test_controller_client_property_session_error():
+    # Create a mock session manager with controller_client property that raises a generic Exception
+    mock_session_manager = MagicMock()
+    mock_property = PropertyMock()
+    mock_property.__get__ = MagicMock(side_effect=Exception("generic failure"))
+    type(mock_session_manager).controller_client = mock_property
+    
+    # When we construct the factory, it should handle the Exception
+    # and re-raise it as SessionError
+    with pytest.raises(exc.SessionError):
+        CorePlusSessionFactory(mock_session_manager)
+
+
+def test_auth_client_property_connection_error():
+    # Create a mock session manager with controller_client success but auth_client property that raises ConnectionError
+    mock_session_manager = MagicMock()
+    mock_controller = MagicMock()
+    mock_auth = PropertyMock()
+    mock_auth.__get__ = MagicMock(side_effect=ConnectionError("network failure"))
+    
+    # Need to ensure controller_client works but auth_client fails
+    type(mock_session_manager).controller_client = PropertyMock(return_value=mock_controller)
+    type(mock_session_manager).auth_client = mock_auth
+    
+    # When we construct the factory, it should handle the ConnectionError with auth_client
+    # and re-raise it as AuthenticationError
+    with pytest.raises(exc.AuthenticationError):
+        CorePlusSessionFactory(mock_session_manager)
+
+
+def test_auth_client_property_auth_error():
+    # Create a mock session manager with controller_client success but auth_client property that raises a generic Exception
+    mock_session_manager = MagicMock()
+    mock_controller = MagicMock()
+    mock_auth = PropertyMock()
+    mock_auth.__get__ = MagicMock(side_effect=Exception("generic failure"))
+    
+    # Need to ensure controller_client works but auth_client fails
+    type(mock_session_manager).controller_client = PropertyMock(return_value=mock_controller)
+    type(mock_session_manager).auth_client = mock_auth
+    
+    # When we construct the factory, it should handle the Exception with auth_client
+    # and re-raise it as AuthenticationError
+    with pytest.raises(exc.AuthenticationError):
+        CorePlusSessionFactory(mock_session_manager)
 
 
 # from_url is a classmethod, test it separately

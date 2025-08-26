@@ -186,8 +186,8 @@ class CorePlusControllerClient(
 
         Example:
             ```python
-            # Create a token for controller authentication
-            auth_client = await session_factory.create_auth_client()
+            # Get auth client and create a token for controller authentication
+            auth_client = session_factory.auth_client
             await auth_client.authenticate(username, password)
             controller_token = await auth_client.create_token("PersistentQueryController")
 

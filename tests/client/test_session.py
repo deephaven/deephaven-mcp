@@ -389,11 +389,11 @@ async def test_core_session_error_logging_configuration_constants(monkeypatch, c
 
     # Check that specific error guidance was logged
     assert (
-        "[Community] This error indicates a connection issue when trying to connect to the server."
+        "[CoreSession:from_config] This error indicates a connection issue when trying to connect to the server."
         in caplog.text
     )
     assert (
-        "[Community] Verify that: 1) Server address and port are correct" in caplog.text
+        "[CoreSession:from_config] Verify that: 1) Server address and port are correct" in caplog.text
     )
 
 
@@ -422,14 +422,8 @@ async def test_core_session_error_logging_certificate_errors(monkeypatch, caplog
             await CoreSession.from_config({"host": "localhost"})
 
         # Check that TLS/SSL error guidance was logged
-        assert (
-            "[Community] This error indicates a TLS/SSL certificate issue."
-            in caplog.text
-        )
-        assert (
-            "[Community] Verify that: 1) Server certificate is valid and not expired"
-            in caplog.text
-        )
+        assert "[CoreSession:from_config] This error indicates a TLS/SSL certificate issue." in caplog.text
+        assert "[CoreSession:from_config] Verify that: 1) Server certificate is valid and not expired" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -457,13 +451,8 @@ async def test_core_session_error_logging_authentication_errors(monkeypatch, cap
             await CoreSession.from_config({"host": "localhost"})
 
         # Check that authentication error guidance was logged
-        assert (
-            "[Community] This error indicates an authentication issue." in caplog.text
-        )
-        assert (
-            "[Community] Verify that: 1) Authentication credentials are correct"
-            in caplog.text
-        )
+        assert "[CoreSession:from_config] This error indicates an authentication issue." in caplog.text
+        assert "[CoreSession:from_config] Verify that: 1) Authentication credentials are correct" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -489,43 +478,8 @@ async def test_core_session_error_logging_network_errors(monkeypatch, caplog):
             await CoreSession.from_config({"host": "localhost"})
 
         # Check that network connectivity error guidance was logged
-        assert (
-            "[Community] This error indicates a network connectivity issue."
-            in caplog.text
-        )
-        assert (
-            "[Community] Verify that: 1) Server is running and accessible"
-            in caplog.text
-        )
-
-
-@pytest.mark.asyncio
-async def test_core_session_error_logging_port_binding_errors(monkeypatch, caplog):
-    """Test error logging for port binding errors."""
-    test_cases = [
-        "address already in use",
-        "bind failed on port",
-        "port already in use",
-    ]
-
-    for error_msg in test_cases:
-        caplog.clear()
-
-        class FailingPDHSession:
-            def __init__(self, *args, **kwargs):
-                raise RuntimeError(error_msg)
-
-        monkeypatch.setattr("deephaven_mcp.client._session.Session", FailingPDHSession)
-
-        with pytest.raises(SessionCreationError):
-            await CoreSession.from_config({"host": "localhost"})
-
-        # Check that port binding error guidance was logged
-        assert "[Community] This error indicates a port binding issue." in caplog.text
-        assert (
-            "[Community] Verify that: 1) Port is not already in use by another process"
-            in caplog.text
-        )
+        assert "[CoreSession:from_config] This error indicates a network connectivity issue." in caplog.text
+        assert "[CoreSession:from_config] Verify that: 1) Server is running and accessible" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -550,9 +504,38 @@ async def test_core_session_error_logging_dns_errors(monkeypatch, caplog):
             await CoreSession.from_config({"host": "localhost"})
 
         # Check that DNS resolution error guidance was logged
-        assert "[Community] This error indicates a DNS resolution issue." in caplog.text
+        assert "[CoreSession:from_config] This error indicates a DNS resolution issue." in caplog.text
         assert (
-            "[Community] Verify that: 1) Hostname is correct and resolvable"
+            "[CoreSession:from_config] Verify that: 1) Hostname is correct and resolvable"
+            in caplog.text
+        )
+
+
+@pytest.mark.asyncio
+async def test_core_session_error_logging_port_binding_errors(monkeypatch, caplog):
+    """Test error logging for port binding related errors."""
+    test_cases = [
+        "address already in use",
+        "bind failed",
+        "port already in use",
+    ]
+
+    for error_msg in test_cases:
+        caplog.clear()
+
+        class FailingPDHSession:
+            def __init__(self, *args, **kwargs):
+                raise RuntimeError(error_msg)
+
+        monkeypatch.setattr("deephaven_mcp.client._session.Session", FailingPDHSession)
+
+        with pytest.raises(SessionCreationError):
+            await CoreSession.from_config({"host": "localhost"})
+
+        # Check that port binding error guidance was logged
+        assert "[CoreSession:from_config] This error indicates a port binding issue." in caplog.text
+        assert (
+            "[CoreSession:from_config] Verify that: 1) Port is not already in use by another process, 2) You have permission to bind to the port, 3) Try a different port number"
             in caplog.text
         )
 
@@ -571,8 +554,8 @@ async def test_core_session_error_logging_unknown_error(monkeypatch, caplog):
         await CoreSession.from_config({"host": "localhost"})
 
     # Check that no specific error guidance was logged for unknown errors
-    assert "[Community] This error indicates a" not in caplog.text
-    assert "[Community] Verify that:" not in caplog.text
+    assert "[CoreSession:from_config] This error indicates a" not in caplog.text
+    assert "[CoreSession:from_config] Verify that:" not in caplog.text
 
 
 @pytest.mark.asyncio
@@ -966,6 +949,8 @@ class DummyDndSession:
         return Table()
 
     def catalog_table(self):
+        if getattr(self, "should_succeed", False):
+            return Table()
         raise Exception("fail")
 
 
@@ -1059,6 +1044,14 @@ async def test_live_table_key_error(core_plus_session):
 async def test_live_table_other_error(core_plus_session):
     with pytest.raises(QueryError):
         await core_plus_session.live_table("exc", "tbl")
+
+
+@pytest.mark.asyncio
+async def test_catalog_table_success(core_plus_session):
+    # Patch to return a Table for success case
+    core_plus_session.wrapped.should_succeed = True
+    table = await core_plus_session.catalog_table()
+    assert isinstance(table, Table)
 
 
 @pytest.mark.asyncio
