@@ -1,31 +1,40 @@
-"""
-Asynchronous Deephaven authentication client wrapper for MCP.
+"""Asynchronous Deephaven authentication client wrapper for MCP.
 
-This module provides an async interface to the Deephaven AuthClient, enabling non-blocking authentication
-and token management for Deephaven services. It is primarily used by the CorePlusSessionManager and related
+This module provides an async interface to the Deephaven AuthClient, enabling non-blocking token
+management for Deephaven services. It is primarily used by the CorePlusSessionManager and related
 components that require authentication with Deephaven Enterprise servers.
 
 Key Features:
-    - Converts all blocking AuthClient operations to async using asyncio.to_thread for event loop safety.
-    - Provides async methods for username/password and token-based authentication, as well as service token creation.
-    - Ensures sensitive information (passwords, tokens) is never logged; only usernames are logged at DEBUG/INFO levels.
+    - Converts blocking AuthClient operations to async using asyncio.to_thread for event loop safety.
+    - Provides async methods for service token creation.
+    - Ensures sensitive information is never logged; only usernames are logged at DEBUG/INFO levels.
     - Consistent and detailed logging for entry, success, and error events.
 
 Classes:
-    CorePlusAuthClient: Main async wrapper for deephaven_enterprise.client.auth.AuthClient.
+    CorePlusAuthClient: Main async wrapper for deephaven_enterprise.client.auth.AuthClient that provides
+        asynchronous token creation capabilities.
+
+Types:
+    CorePlusToken: A wrapper around Deephaven's native token objects with additional serialization 
+        and property access capabilities for MCP interoperability.
+
+Service Token Usage:
+    Service tokens are specialized authentication tokens with limited permissions scoped to specific
+    Deephaven service components. Common service types include:
+    - "PersistentQueryController": For query API operations
+    - "JavaScriptClient": For web client access
+    - "Console": For Deephaven console operations
 
 Example:
     import asyncio
     from deephaven_mcp.client import CorePlusSessionManager
 
-    async def authenticate_example():
+    async def token_example():
         manager = CorePlusSessionManager.from_url("https://myserver.example.com/connection.json")
         auth_client = manager.auth_client
-        token = await auth_client.authenticate("username", "password")
         service_token = await auth_client.create_token("PersistentQueryController", duration_seconds=3600)
         controller = await manager.create_controller_client()
-        await controller.authenticate(service_token)
-        await auth_client.close()
+        # Use the token with the controller
 """
 
 import asyncio
@@ -47,42 +56,47 @@ class CorePlusAuthClient(
     ClientObjectWrapper["deephaven_enterprise.client.auth.AuthClient"]
 ):
     """
-    Asynchronous wrapper for the Deephaven AuthClient, providing non-blocking authentication and token management.
+    Asynchronous wrapper for the Deephaven AuthClient, providing non-blocking token management.
 
-    This class wraps a synchronous Deephaven AuthClient and exposes async methods for authentication
-    and token creation. All blocking operations are executed in threads to preserve event loop responsiveness.
+    This class wraps a synchronous Deephaven AuthClient and exposes async methods for token creation.
+    All blocking operations are executed in threads using asyncio.to_thread to preserve event loop
+    responsiveness and prevent I/O operations from blocking the main asyncio event loop.
 
     Typical Usage:
         - Instantiate via CorePlusSessionManager (not directly).
-        - Authenticate using username/password or an existing token.
         - Create service-specific tokens for downstream authentication.
-        - Close the client when finished.
+        - Pass tokens to other client components that need authentication.
+        - Set appropriate token duration based on expected usage lifetime.
+    
+    Event Loop Safety:
+        - All network and I/O operations are offloaded to threads using asyncio.to_thread.
+        - Error handling preserves the original stack trace while converting to MCP-specific exceptions.
+        - No synchronous blocking calls are made directly from async contexts.
 
     Logging:
-        - Logs entry, success, and error for all authentication operations at DEBUG or ERROR level.
-        - Usernames may be logged; passwords and tokens are never logged.
+        - Logs entry, success, and error for all token operations at DEBUG or ERROR level.
+        - Usernames may be logged; sensitive information is never logged.
+        - Error paths include detailed context to aid troubleshooting.
 
     Example:
         import asyncio
         from deephaven_mcp.client import CorePlusSessionManager
 
-        async def authenticate_example():
+        async def token_example():
             manager = CorePlusSessionManager.from_url("https://myserver.example.com/connection.json")
             auth_client = manager.auth_client
-            token = await auth_client.authenticate("username", "password")
             service_token = await auth_client.create_token("PersistentQueryController", duration_seconds=3600)
             controller = await manager.create_controller_client()
-            await controller.authenticate(service_token)
-            await auth_client.close()
+            # Use the token with the controller
     """
 
     def __init__(
         self, auth_client: "deephaven_enterprise.client.auth.AuthClient"  # noqa: F821
-    ):
+    ) -> None:
         """Initialize CorePlusAuthClient with a synchronous AuthClient instance.
 
         Args:
-            auth_client: The synchronous Deephaven AuthClient instance to wrap.
+            auth_client (deephaven_enterprise.client.auth.AuthClient): The synchronous Deephaven AuthClient instance to wrap.
 
         Note:
             This constructor is intended for use by CorePlusSessionManager. Users should not instantiate
@@ -91,96 +105,6 @@ class CorePlusAuthClient(
         super().__init__(auth_client, is_enterprise=True)
         _LOGGER.info("[CorePlusAuthClient] initialized")
 
-    async def authenticate(
-        self, username: str, password: str, timeout: float | None = None
-    ) -> CorePlusToken:
-        """Authenticate asynchronously using username and password.
-
-        This method is typically the first authentication step when connecting to a Deephaven server.
-        It performs authentication in a background thread for event loop safety.
-
-        Args:
-            username (str): Deephaven username. Must be registered with the authentication service. Usernames are logged at DEBUG level.
-            password (str): Password for authentication. Never logged.
-            timeout (float | None): Optional timeout in seconds. If None, uses the client's default. Prevents indefinite blocking.
-
-        Returns:
-            CorePlusToken: Token for the authenticated user. Can be used for subsequent service authentication.
-
-        Raises:
-            DeephavenConnectionError: If unable to connect to the authentication service (network/server issues).
-            AuthenticationError: If authentication fails (invalid credentials, expired account, permissions, etc).
-
-        Logging:
-            - Logs entry, success, and errors at DEBUG or ERROR.
-            - Passwords are never logged.
-
-        Note:
-            Uses asyncio.to_thread to avoid blocking the event loop.
-        """
-        _LOGGER.debug("[CorePlusAuthClient] Authenticating user '%s'...", username)
-        try:
-            result = await asyncio.to_thread(
-                self.wrapped.authenticate, username, password, timeout
-            )
-            _LOGGER.debug(
-                "[CorePlusAuthClient] User '%s' authenticated successfully.", username
-            )
-            return CorePlusToken(result)
-        except ConnectionError as e:
-            _LOGGER.error("[CorePlusAuthClient:authenticate] Failed to connect to authentication service: %s", e)
-            raise DeephavenConnectionError(
-                f"Unable to connect to authentication service: {e}"
-            ) from e
-        except Exception as e:
-            _LOGGER.error(
-                "[CorePlusAuthClient] Authentication failed for user '%s': %s",
-                username,
-                e,
-            )
-            raise AuthenticationError(f"Authentication failed: {e}") from e
-
-    async def authenticate_with_token(
-        self, token: str, timeout: float | None = None
-    ) -> CorePlusToken:
-        """Authenticate asynchronously using an existing token string.
-
-        This method allows authentication using a previously issued token, which is never logged.
-        Useful for token refresh or external token management scenarios.
-
-        Args:
-            token (str): Valid, non-expired Deephaven authentication token. Never logged.
-            timeout (float | None): Optional timeout in seconds. If None, uses the client's default.
-
-        Returns:
-            CorePlusToken: Token for the authenticated user.
-
-        Raises:
-            DeephavenConnectionError: If unable to connect to the authentication service (network/server issues).
-            AuthenticationError: If the token is invalid, expired, revoked, or authentication fails for any reason.
-
-        Logging:
-            - Entry, success, and error events at DEBUG or ERROR level.
-            - Token values are never logged.
-
-        Note:
-            Uses asyncio.to_thread to avoid blocking the event loop.
-        """
-        _LOGGER.debug("[CorePlusAuthClient] Authenticating with token (not logged)...")
-        try:
-            result = await asyncio.to_thread(
-                self.wrapped.authenticate_with_token, token, timeout
-            )
-            _LOGGER.debug("[CorePlusAuthClient] Token authentication succeeded.")
-            return CorePlusToken(result)
-        except ConnectionError as e:
-            _LOGGER.error("[CorePlusAuthClient:authenticate_with_token] Failed to connect to authentication service: %s", e)
-            raise DeephavenConnectionError(
-                f"Unable to connect to authentication service: {e}"
-            ) from e
-        except Exception as e:
-            _LOGGER.error("[CorePlusAuthClient] Token authentication failed: %s", e)
-            raise AuthenticationError(f"Authentication with token failed: {e}") from e
 
     async def create_token(
         self,
@@ -196,23 +120,47 @@ class CorePlusAuthClient(
 
         Args:
             service (str): Name of the target service. Must be recognized by the Deephaven authentication service.
+                Valid service types include: "PersistentQueryController", "JavaScriptClient", "Console", "ApiGateway".
             username (str, optional): Username for whom to create the token. If empty, uses the currently authenticated user.
+                Default is "" (empty string).
             duration_seconds (int, optional): Token validity period in seconds. Default is 3600 (1 hour).
-            timeout (float | None, optional): Timeout in seconds. If None, uses the client's default.
+                Consider shorter durations for security-sensitive operations and longer durations for
+                long-running background processes.
+            timeout (float | None, optional): Timeout in seconds for the token creation request. If None, 
+                uses the client's default timeout. The timeout applies to the entire operation including
+                network communication.
 
         Returns:
-            CorePlusToken: Token scoped to the requested service.
+            CorePlusToken: Token scoped to the requested service. This is a wrapper around the native
+                Deephaven token object with additional properties and serialization capabilities
+                for use with other Deephaven Enterprise clients. The token contains the encoded JWT,
+                expiration information, and scope details.
 
         Raises:
-            DeephavenConnectionError: If unable to connect to the authentication service (network/server issues).
-            AuthenticationError: If token creation fails (auth errors, permissions, invalid service, etc).
+            DeephavenConnectionError: If unable to connect to the authentication service due to network issues, 
+                server unavailability, TLS/certificate errors, or connection timeouts.
+            AuthenticationError: If token creation fails due to authorization issues (invalid credentials),
+                insufficient permissions, invalid service name, rate limiting, or internal auth server errors.
 
         Logging:
-            - Logs entry, success, and errors at DEBUG or ERROR.
-            - Sensitive information is never logged.
+            - Logs entry at DEBUG level with service name, username (or [current user]), and duration.
+            - Logs success at DEBUG level with service name.
+            - Logs errors at ERROR level with service name and error details.
+            - Sensitive information like tokens and passwords is never logged.
 
         Note:
-            Uses asyncio.to_thread for non-blocking operation.
+            Uses asyncio.to_thread for non-blocking operation to ensure the main event loop
+            remains responsive even during authentication operations.
+
+        Example:
+            # Create a token for PersistentQueryController with 24-hour validity
+            token = await auth_client.create_token(
+                service="PersistentQueryController", 
+                duration_seconds=86400
+            )
+            # Use token with a controller
+            controller = await session_manager.create_controller_client()
+            await controller.set_auth_token(token)
         """
         _LOGGER.debug(
             "[CorePlusAuthClient] Creating service token for service '%s' (username='%s', duration=%ds)...",
@@ -242,40 +190,3 @@ class CorePlusAuthClient(
             )
             raise AuthenticationError(f"Token creation failed: {e}") from e
 
-    async def close(self) -> None:
-        """Close the authentication client asynchronously.
-
-        This method gracefully closes the connection to the authentication service and releases associated resources.
-        After calling this method, the client should not be used for further operations.
-
-        It's important to close the client to prevent resource leaks, especially in long-running applications.
-
-        Raises:
-            DeephavenConnectionError: If a network or connection error occurs during close.
-            AuthenticationError: If an authentication-related error occurs during close (e.g., invalid or expired session).
-
-        Logging:
-            - Logs entry, success, and errors at DEBUG or ERROR.
-
-        Note:
-            Even if an exception is raised, the client is considered closed and should not be reused.
-            Uses asyncio.to_thread for non-blocking operation.
-        """
-        _LOGGER.debug(
-            "[CorePlusAuthClient] Closing authentication client connection..."
-        )
-        try:
-            await asyncio.to_thread(self.wrapped.close)
-            _LOGGER.debug(
-                "[CorePlusAuthClient] Authentication client connection closed."
-            )
-        except ConnectionError as e:
-            _LOGGER.error("[CorePlusAuthClient:close] Connection error while closing auth client: %s", e)
-            raise DeephavenConnectionError(
-                f"Connection error while closing authentication service: {e}"
-            ) from e
-        except Exception as e:
-            _LOGGER.error("[CorePlusAuthClient:close] Error closing auth client connection: %s", e)
-            raise AuthenticationError(
-                f"Failed to close authentication connection: {e}"
-            ) from e
