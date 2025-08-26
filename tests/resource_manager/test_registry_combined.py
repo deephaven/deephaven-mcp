@@ -512,8 +512,6 @@ class TestControllerClientCaching:
         # Mock successful client creation
         mock_factory.get = AsyncMock(return_value=mock_factory_instance)
         type(mock_factory_instance).controller_client = PropertyMock(return_value=mock_client)
-        mock_client.subscribe = AsyncMock()
-
         # Call the method
         client = await combined_registry._get_or_create_controller_client(
             mock_factory, "test_factory"
@@ -522,7 +520,6 @@ class TestControllerClientCaching:
         # Verify client was created and cached
         mock_factory.get.assert_awaited_once()
         assert mock_factory_instance.controller_client == mock_client
-        mock_client.subscribe.assert_awaited_once()
         assert client == mock_client
         assert combined_registry._controller_clients["test_factory"] == mock_client
         assert client == mock_client
@@ -574,7 +571,6 @@ class TestControllerClientCaching:
 
         mock_factory.get = AsyncMock(return_value=mock_factory_instance)
         type(mock_factory_instance).controller_client = PropertyMock(return_value=mock_new_client)
-        mock_new_client.subscribe = AsyncMock()
 
         # Call the method
         client = await combined_registry._get_or_create_controller_client(
@@ -585,7 +581,6 @@ class TestControllerClientCaching:
         mock_old_client.close.assert_awaited_once()
         mock_factory.get.assert_awaited_once()
         # Access the controller_client property
-        mock_new_client.subscribe.assert_awaited_once()
         assert client == mock_new_client
         assert combined_registry._controller_clients["test_factory"] == mock_new_client
         assert client == mock_new_client
@@ -613,7 +608,6 @@ class TestControllerClientCaching:
         mock_factory.get = AsyncMock(return_value=mock_factory_instance)
         # Mock property instead of method
         type(mock_factory_instance).controller_client = PropertyMock(return_value=mock_new_client)
-        mock_new_client.subscribe = AsyncMock()
 
         # Call the method
         client = await combined_registry._get_or_create_controller_client(
@@ -623,8 +617,6 @@ class TestControllerClientCaching:
         # Verify old client was closed and new client was created
         mock_old_client.close.assert_awaited_once()
         mock_factory.get.assert_awaited_once()
-        # Property was accessed
-        mock_new_client.subscribe.assert_awaited_once()
 
         # Verify cache was updated
         assert combined_registry._controller_clients["test_factory"] == mock_new_client

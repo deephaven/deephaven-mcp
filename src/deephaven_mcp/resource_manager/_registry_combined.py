@@ -397,12 +397,6 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
         )
         factory_instance = await factory.get()
         client = factory_instance.controller_client
-        await client.subscribe()
-        _LOGGER.debug(
-            "[%s] subscribed to controller for factory '%s'",
-            self.__class__.__name__,
-            factory_name,
-        )
 
         # Cache the client
         self._controller_clients[factory_name] = client
