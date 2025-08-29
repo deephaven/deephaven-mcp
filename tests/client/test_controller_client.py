@@ -67,8 +67,6 @@ def coreplus_controller_client(dummy_controller_client, controller_client_mod):
     return controller_client_mod.CorePlusControllerClient(dummy_controller_client)
 
 
-
-
 @pytest.mark.asyncio
 async def test_map_success(coreplus_controller_client, dummy_controller_client):
     dummy_controller_client.map.return_value = {"serial": "info"}
@@ -178,7 +176,6 @@ async def test_delete_query_other_error(
         await coreplus_controller_client.delete_query("serial")
 
 
-
 # --- Additional Coverage Tests ---
 import builtins
 
@@ -204,7 +201,6 @@ async def test_ping_other_error(coreplus_controller_client, dummy_controller_cli
     dummy_controller_client.ping.side_effect = Exception("fail")
     with pytest.raises(DeephavenConnectionError):
         await coreplus_controller_client.ping()
-
 
 
 @pytest.mark.asyncio

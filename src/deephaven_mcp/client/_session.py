@@ -248,12 +248,16 @@ class BaseSession(ClientObjectWrapper[T], Generic[T]):
         try:
             return await asyncio.to_thread(self.wrapped.empty_table, size)
         except ConnectionError as e:
-            _LOGGER.error(f"[CoreSession:empty_table] Connection error creating empty table: {e}")
+            _LOGGER.error(
+                f"[CoreSession:empty_table] Connection error creating empty table: {e}"
+            )
             raise DeephavenConnectionError(
                 f"Connection error creating empty table: {e}"
             ) from e
         except Exception as e:
-            _LOGGER.error(f"[CoreSession:empty_table] Failed to create empty table: {e}")
+            _LOGGER.error(
+                f"[CoreSession:empty_table] Failed to create empty table: {e}"
+            )
             raise QueryError(f"Failed to create empty table: {e}") from e
 
     async def time_table(
@@ -301,7 +305,9 @@ class BaseSession(ClientObjectWrapper[T], Generic[T]):
                 self.wrapped.time_table, period, start_time, blink_table  # type: ignore[arg-type]
             )
         except ConnectionError as e:
-            _LOGGER.error(f"[CoreSession:time_table] Connection error creating time table: {e}")
+            _LOGGER.error(
+                f"[CoreSession:time_table] Connection error creating time table: {e}"
+            )
             raise DeephavenConnectionError(
                 f"Connection error creating time table: {e}"
             ) from e
@@ -363,7 +369,9 @@ class BaseSession(ClientObjectWrapper[T], Generic[T]):
         try:
             return await asyncio.to_thread(self.wrapped.import_table, data)
         except ConnectionError as e:
-            _LOGGER.error(f"[CoreSession:import_table] Connection error importing table: {e}")
+            _LOGGER.error(
+                f"[CoreSession:import_table] Connection error importing table: {e}"
+            )
             raise DeephavenConnectionError(
                 f"Connection error importing table: {e}"
             ) from e
@@ -393,7 +401,9 @@ class BaseSession(ClientObjectWrapper[T], Generic[T]):
             # TODO: remove type: ignore after pydeephaven is updated.  See https://deephaven.atlassian.net/browse/DH-19874
             return await asyncio.to_thread(self.wrapped.merge_tables, tables, order_by)  # type: ignore[arg-type]
         except ConnectionError as e:
-            _LOGGER.error(f"[CoreSession:merge_tables] Connection error merging tables: {e}")
+            _LOGGER.error(
+                f"[CoreSession:merge_tables] Connection error merging tables: {e}"
+            )
             raise DeephavenConnectionError(
                 f"Connection error merging tables: {e}"
             ) from e
@@ -568,12 +578,16 @@ class BaseSession(ClientObjectWrapper[T], Generic[T]):
             # Re-raise ValueError directly for invalid inputs
             raise
         except ConnectionError as e:
-            _LOGGER.error(f"[CoreSession:input_table] Connection error creating input table: {e}")
+            _LOGGER.error(
+                f"[CoreSession:input_table] Connection error creating input table: {e}"
+            )
             raise DeephavenConnectionError(
                 f"Connection error creating input table: {e}"
             ) from e
         except Exception as e:
-            _LOGGER.error(f"[CoreSession:input_table] Failed to create input table: {e}")
+            _LOGGER.error(
+                f"[CoreSession:input_table] Failed to create input table: {e}"
+            )
             raise QueryError(f"Failed to create input table: {e}") from e
 
     # ===== Table Management =====
@@ -602,7 +616,9 @@ class BaseSession(ClientObjectWrapper[T], Generic[T]):
         try:
             return await asyncio.to_thread(self.wrapped.open_table, name)
         except ConnectionError as e:
-            _LOGGER.error(f"[CoreSession:open_table] Connection error opening table: {e}")
+            _LOGGER.error(
+                f"[CoreSession:open_table] Connection error opening table: {e}"
+            )
             raise DeephavenConnectionError(
                 f"Connection error opening table: {e}"
             ) from e
@@ -676,7 +692,9 @@ class BaseSession(ClientObjectWrapper[T], Generic[T]):
         try:
             await asyncio.to_thread(self.wrapped.bind_table, name, table)
         except ConnectionError as e:
-            _LOGGER.error(f"[CoreSession:bind_table] Connection error binding table: {e}")
+            _LOGGER.error(
+                f"[CoreSession:bind_table] Connection error binding table: {e}"
+            )
             raise DeephavenConnectionError(
                 f"Connection error binding table: {e}"
             ) from e
@@ -863,7 +881,9 @@ class BaseSession(ClientObjectWrapper[T], Generic[T]):
         try:
             await asyncio.to_thread(self.wrapped.run_script, script, systemic)
         except ConnectionError as e:
-            _LOGGER.error(f"[CoreSession:run_script] Connection error running script: {e}")
+            _LOGGER.error(
+                f"[CoreSession:run_script] Connection error running script: {e}"
+            )
             raise DeephavenConnectionError(
                 f"Connection error running script: {e}"
             ) from e
@@ -966,7 +986,9 @@ class BaseSession(ClientObjectWrapper[T], Generic[T]):
         try:
             return await asyncio.to_thread(lambda: self.wrapped.is_alive)
         except ConnectionError as e:
-            _LOGGER.error(f"[CoreSession:is_alive] Connection error checking session status: {e}")
+            _LOGGER.error(
+                f"[CoreSession:is_alive] Connection error checking session status: {e}"
+            )
             raise DeephavenConnectionError(
                 f"Connection error checking session status: {e}"
             ) from e
@@ -1046,7 +1068,9 @@ class CoreSession(BaseSession[Session]):
         try:
             validate_single_community_session_config("from_config", worker_cfg)
         except CommunitySessionConfigurationError as e:
-            _LOGGER.error(f"[CoreSession:from_config] Invalid community session config: {e}")
+            _LOGGER.error(
+                f"[CoreSession:from_config] Invalid community session config: {e}"
+            )
             raise
 
         def redact(cfg: dict[str, Any]) -> dict[str, Any]:
@@ -1058,7 +1082,9 @@ class CoreSession(BaseSession[Session]):
 
         # Prepare session parameters
         log_cfg = redact(worker_cfg)
-        _LOGGER.info(f"[CoreSession:from_config] Community session configuration: {log_cfg}")
+        _LOGGER.info(
+            f"[CoreSession:from_config] Community session configuration: {log_cfg}"
+        )
         host = worker_cfg.get("host", None)
         port = worker_cfg.get("port", None)
         auth_type = worker_cfg.get("auth_type", "Anonymous")
@@ -1093,7 +1119,9 @@ class CoreSession(BaseSession[Session]):
                 f"[CoreSession:from_config] Loading TLS root certs from: {worker_cfg.get('tls_root_certs')}"
             )
             tls_root_certs = await load_bytes(tls_root_certs)
-            _LOGGER.info(f"[CoreSession:from_config] Loaded TLS root certs successfully.")
+            _LOGGER.info(
+                f"[CoreSession:from_config] Loaded TLS root certs successfully."
+            )
         else:
             _LOGGER.debug(
                 f"[CoreSession:from_config] No TLS root certs provided for community session."
@@ -1103,7 +1131,9 @@ class CoreSession(BaseSession[Session]):
                 f"[CoreSession:from_config] Loading client cert chain from: {worker_cfg.get('client_cert_chain')}"
             )
             client_cert_chain = await load_bytes(client_cert_chain)
-            _LOGGER.info(f"[CoreSession:from_config] Loaded client cert chain successfully.")
+            _LOGGER.info(
+                f"[CoreSession:from_config] Loaded client cert chain successfully."
+            )
         else:
             _LOGGER.debug(
                 f"[CoreSession:from_config] No client cert chain provided for community session."
@@ -1113,7 +1143,9 @@ class CoreSession(BaseSession[Session]):
                 f"[CoreSession:from_config] Loading client private key from: {worker_cfg.get('client_private_key')}"
             )
             client_private_key = await load_bytes(client_private_key)
-            _LOGGER.info(f"[CoreSession:from_config] Loaded client private key successfully.")
+            _LOGGER.info(
+                f"[CoreSession:from_config] Loaded client private key successfully."
+            )
         else:
             _LOGGER.debug(
                 f"[CoreSession:from_config] No client private key provided for community session."
@@ -1206,7 +1238,9 @@ class CoreSession(BaseSession[Session]):
                 "access denied",
             ]
         ):
-            _LOGGER.error(f"[CoreSession:from_config] This error indicates an authentication issue.")
+            _LOGGER.error(
+                f"[CoreSession:from_config] This error indicates an authentication issue."
+            )
             _LOGGER.error(
                 f"[CoreSession:from_config] Verify that: 1) Authentication credentials are correct, 2) Token is valid and not expired, 3) User has proper permissions, 4) Authentication service is running"
             )
@@ -1237,7 +1271,9 @@ class CoreSession(BaseSession[Session]):
                 "port already in use",
             ]
         ):
-            _LOGGER.error(f"[CoreSession:from_config] This error indicates a port binding issue.")
+            _LOGGER.error(
+                f"[CoreSession:from_config] This error indicates a port binding issue."
+            )
             _LOGGER.error(
                 f"[CoreSession:from_config] Verify that: 1) Port is not already in use by another process, 2) You have permission to bind to the port, 3) Try a different port number"
             )
@@ -1251,7 +1287,9 @@ class CoreSession(BaseSession[Session]):
                 "nodename nor servname provided",
             ]
         ):
-            _LOGGER.error(f"[CoreSession:from_config] This error indicates a DNS resolution issue.")
+            _LOGGER.error(
+                f"[CoreSession:from_config] This error indicates a DNS resolution issue."
+            )
             _LOGGER.error(
                 f"[CoreSession:from_config] Verify that: 1) Hostname is correct and resolvable, 2) DNS server is accessible, 3) Network connectivity is available, 4) Try using IP address instead of hostname"
             )
@@ -1438,7 +1476,9 @@ class CorePlusSession(
                 f"Connection error retrieving persistent query information: {e}"
             ) from e
         except Exception as e:
-            _LOGGER.error(f"[CorePlusSession:pqinfo] Failed to retrieve persistent query information: {e}")
+            _LOGGER.error(
+                f"[CorePlusSession:pqinfo] Failed to retrieve persistent query information: {e}"
+            )
             raise QueryError(
                 f"Failed to retrieve persistent query information: {e}"
             ) from e
@@ -1522,17 +1562,23 @@ class CorePlusSession(
                 self.wrapped.historical_table, namespace, table_name
             )
         except ConnectionError as e:
-            _LOGGER.error(f"[CorePlusSession:historical_table] Connection error fetching historical table: {e}")
+            _LOGGER.error(
+                f"[CorePlusSession:historical_table] Connection error fetching historical table: {e}"
+            )
             raise DeephavenConnectionError(
                 f"Connection error fetching historical table: {e}"
             ) from e
         except KeyError as e:
-            _LOGGER.error(f"[CorePlusSession:historical_table] Historical table not found: {e}")
+            _LOGGER.error(
+                f"[CorePlusSession:historical_table] Historical table not found: {e}"
+            )
             raise ResourceError(
                 f"Historical table not found: {namespace}.{table_name}"
             ) from e
         except Exception as e:
-            _LOGGER.error(f"[CorePlusSession:historical_table] Failed to fetch historical table: {e}")
+            _LOGGER.error(
+                f"[CorePlusSession:historical_table] Failed to fetch historical table: {e}"
+            )
             raise QueryError(f"Failed to fetch historical table: {e}") from e
 
     async def live_table(self, namespace: str, table_name: str) -> Table:
@@ -1622,7 +1668,9 @@ class CorePlusSession(
                 self.wrapped.live_table, namespace, table_name
             )
         except ConnectionError as e:
-            _LOGGER.error(f"[CorePlusSession:live_table] Connection error fetching live table: {e}")
+            _LOGGER.error(
+                f"[CorePlusSession:live_table] Connection error fetching live table: {e}"
+            )
             raise DeephavenConnectionError(
                 f"Connection error fetching live table: {e}"
             ) from e
@@ -1632,7 +1680,9 @@ class CorePlusSession(
                 f"Live table not found: {namespace}.{table_name}"
             ) from e
         except Exception as e:
-            _LOGGER.error(f"[CorePlusSession:live_table] Failed to fetch live table: {e}")
+            _LOGGER.error(
+                f"[CorePlusSession:live_table] Failed to fetch live table: {e}"
+            )
             raise QueryError(f"Failed to fetch live table: {e}") from e
 
     async def catalog_table(self) -> Table:
@@ -1713,10 +1763,14 @@ class CorePlusSession(
         try:
             return await asyncio.to_thread(self.wrapped.catalog_table)
         except ConnectionError as e:
-            _LOGGER.error(f"[CorePlusSession:catalog_table] Connection error fetching catalog table: {e}")
+            _LOGGER.error(
+                f"[CorePlusSession:catalog_table] Connection error fetching catalog table: {e}"
+            )
             raise DeephavenConnectionError(
                 f"Connection error fetching catalog table: {e}"
             ) from e
         except Exception as e:
-            _LOGGER.error(f"[CorePlusSession:catalog_table] Failed to fetch catalog table: {e}")
+            _LOGGER.error(
+                f"[CorePlusSession:catalog_table] Failed to fetch catalog table: {e}"
+            )
             raise QueryError(f"Failed to fetch catalog table: {e}") from e

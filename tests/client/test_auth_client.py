@@ -45,8 +45,6 @@ def coreplus_auth_client(dummy_auth_client):
     return _auth_client.CorePlusAuthClient(dummy_auth_client)
 
 
-
-
 @pytest.mark.asyncio
 async def test_create_token_success(coreplus_auth_client, dummy_auth_client):
     dummy_auth_client.create_token.return_value = "tok3"
@@ -71,5 +69,3 @@ async def test_create_token_other_error(coreplus_auth_client, dummy_auth_client)
     dummy_auth_client.create_token.side_effect = Exception("fail")
     with pytest.raises(AuthenticationError):
         await coreplus_auth_client.create_token("svc")
-
-

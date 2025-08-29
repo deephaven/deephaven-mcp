@@ -15,7 +15,7 @@ Classes:
         asynchronous token creation capabilities.
 
 Types:
-    CorePlusToken: A wrapper around Deephaven's native token objects with additional serialization 
+    CorePlusToken: A wrapper around Deephaven's native token objects with additional serialization
         and property access capabilities for MCP interoperability.
 
 Service Token Usage:
@@ -67,7 +67,7 @@ class CorePlusAuthClient(
         - Create service-specific tokens for downstream authentication.
         - Pass tokens to other client components that need authentication.
         - Set appropriate token duration based on expected usage lifetime.
-    
+
     Event Loop Safety:
         - All network and I/O operations are offloaded to threads using asyncio.to_thread.
         - Error handling preserves the original stack trace while converting to MCP-specific exceptions.
@@ -105,7 +105,6 @@ class CorePlusAuthClient(
         super().__init__(auth_client, is_enterprise=True)
         _LOGGER.info("[CorePlusAuthClient] initialized")
 
-
     async def create_token(
         self,
         service: str,
@@ -126,7 +125,7 @@ class CorePlusAuthClient(
             duration_seconds (int, optional): Token validity period in seconds. Default is 3600 (1 hour).
                 Consider shorter durations for security-sensitive operations and longer durations for
                 long-running background processes.
-            timeout (float | None, optional): Timeout in seconds for the token creation request. If None, 
+            timeout (float | None, optional): Timeout in seconds for the token creation request. If None,
                 uses the client's default timeout. The timeout applies to the entire operation including
                 network communication.
 
@@ -137,7 +136,7 @@ class CorePlusAuthClient(
                 expiration information, and scope details.
 
         Raises:
-            DeephavenConnectionError: If unable to connect to the authentication service due to network issues, 
+            DeephavenConnectionError: If unable to connect to the authentication service due to network issues,
                 server unavailability, TLS/certificate errors, or connection timeouts.
             AuthenticationError: If token creation fails due to authorization issues (invalid credentials),
                 insufficient permissions, invalid service name, rate limiting, or internal auth server errors.
@@ -155,7 +154,7 @@ class CorePlusAuthClient(
         Example:
             # Create a token for PersistentQueryController with 24-hour validity
             token = await auth_client.create_token(
-                service="PersistentQueryController", 
+                service="PersistentQueryController",
                 duration_seconds=86400
             )
             # Use token with a controller
@@ -178,7 +177,10 @@ class CorePlusAuthClient(
             )
             return CorePlusToken(result)
         except ConnectionError as e:
-            _LOGGER.error("[CorePlusAuthClient:create_token] Failed to connect to authentication service: %s", e)
+            _LOGGER.error(
+                "[CorePlusAuthClient:create_token] Failed to connect to authentication service: %s",
+                e,
+            )
             raise DeephavenConnectionError(
                 f"Unable to connect to authentication service: {e}"
             ) from e
@@ -189,4 +191,3 @@ class CorePlusAuthClient(
                 e,
             )
             raise AuthenticationError(f"Token creation failed: {e}") from e
-

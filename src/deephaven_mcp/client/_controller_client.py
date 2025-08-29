@@ -138,9 +138,6 @@ class CorePlusControllerClient(
     # Initialization & Connection Management
     # ===========================================================================
 
-
-
-
     async def ping(self) -> bool:
         """Ping the controller and refresh the cookie asynchronously.
 
@@ -220,12 +217,18 @@ class CorePlusControllerClient(
                 for k, v in raw_map.items()
             }
         except ConnectionError as e:
-            _LOGGER.error("[CorePlusControllerClient:get_query_map] Connection error while retrieving query map: %s", e)
+            _LOGGER.error(
+                "[CorePlusControllerClient:get_query_map] Connection error while retrieving query map: %s",
+                e,
+            )
             raise DeephavenConnectionError(
                 f"Unable to connect to controller service: {e}"
             ) from e
         except Exception as e:
-            _LOGGER.error("[CorePlusControllerClient:get_query_map] Failed to retrieve query map: %s", e)
+            _LOGGER.error(
+                "[CorePlusControllerClient:get_query_map] Failed to retrieve query map: %s",
+                e,
+            )
             raise QueryError(f"Failed to retrieve query state: {e}") from e
 
     async def get_serial_for_name(
@@ -267,7 +270,7 @@ class CorePlusControllerClient(
         """
         _LOGGER.debug(
             "[CorePlusControllerClient:get_serial_for_name] Looking up serial for query name='%s'",
-            name
+            name,
         )
         try:
             return cast(
@@ -282,13 +285,18 @@ class CorePlusControllerClient(
         except ConnectionError as e:
             _LOGGER.error(
                 "[CorePlusControllerClient:get_serial_for_name] Connection error while retrieving serial for query '%s': %s",
-                name, e
+                name,
+                e,
             )
             raise DeephavenConnectionError(
                 f"Unable to connect to controller service: {e}"
             ) from e
         except Exception as e:
-            _LOGGER.error("[CorePlusControllerClient:get_serial_for_name] Failed to get serial for query name '%s': %s", name, e)
+            _LOGGER.error(
+                "[CorePlusControllerClient:get_serial_for_name] Failed to get serial for query name '%s': %s",
+                name,
+                e,
+            )
             raise QueryError(f"Failed to find query with name '{name}': {e}") from e
 
     async def wait_for_change(self, timeout_seconds: float) -> None:
@@ -324,7 +332,7 @@ class CorePlusControllerClient(
         """
         _LOGGER.debug(
             "[CorePlusControllerClient:wait_for_change] Waiting for query state change, timeout=%s",
-            timeout_seconds
+            timeout_seconds,
         )
         try:
             await asyncio.to_thread(self.wrapped.wait_for_change, timeout_seconds)
@@ -332,12 +340,18 @@ class CorePlusControllerClient(
             # Re-raise TimeoutError unchanged
             raise
         except ConnectionError as e:
-            _LOGGER.error("[CorePlusControllerClient:wait_for_change] Connection error while waiting for query state change: %s", e)
+            _LOGGER.error(
+                "[CorePlusControllerClient:wait_for_change] Connection error while waiting for query state change: %s",
+                e,
+            )
             raise DeephavenConnectionError(
                 f"Unable to connect to controller service: {e}"
             ) from e
         except Exception as e:
-            _LOGGER.error("[CorePlusControllerClient:wait_for_change] Failed to wait for change: %s", e)
+            _LOGGER.error(
+                "[CorePlusControllerClient:wait_for_change] Failed to wait for change: %s",
+                e,
+            )
             raise QueryError(f"Failed to wait for query state change: {e}") from e
 
     async def get(
@@ -382,24 +396,32 @@ class CorePlusControllerClient(
         _LOGGER.debug(
             "[CorePlusControllerClient:get] Retrieving query info for serial=%s, timeout=%s",
             serial,
-            timeout_seconds
+            timeout_seconds,
         )
         try:
             result = await asyncio.to_thread(self.wrapped.get, serial, timeout_seconds)
             return CorePlusQueryInfo(result)
         except KeyError as e:
-            _LOGGER.error("[CorePlusControllerClient:get] Query %s does not exist: %s", serial, e)
+            _LOGGER.error(
+                "[CorePlusControllerClient:get] Query %s does not exist: %s", serial, e
+            )
             raise QueryError(f"Query with serial {serial} does not exist") from e
         except (TimeoutError, ValueError):
             # Re-raise native exceptions unchanged
             raise
         except ConnectionError as e:
-            _LOGGER.error("[CorePlusControllerClient:get] Connection error while retrieving query %s: %s", serial, e)
+            _LOGGER.error(
+                "[CorePlusControllerClient:get] Connection error while retrieving query %s: %s",
+                serial,
+                e,
+            )
             raise DeephavenConnectionError(
                 f"Unable to connect to controller service: {e}"
             ) from e
         except Exception as e:
-            _LOGGER.error("[CorePlusControllerClient:get] Failed to get query %s: %s", serial, e)
+            _LOGGER.error(
+                "[CorePlusControllerClient:get] Failed to get query %s: %s", serial, e
+            )
             raise QueryError(f"Failed to retrieve query {serial}: {e}") from e
 
     # ===========================================================================
@@ -448,14 +470,15 @@ class CorePlusControllerClient(
         """
         _LOGGER.debug(
             "[CorePlusControllerClient:add_query] Adding query with name='%s'",
-            query_config.name
+            query_config.name,
         )
         try:
             result = await asyncio.to_thread(self.wrapped.add_query, query_config)
             return cast(CorePlusQuerySerial, result)
         except ConnectionError as e:
             _LOGGER.error(
-                "[CorePlusControllerClient:add_query] Failed to connect to controller when adding query: %s", e
+                "[CorePlusControllerClient:add_query] Failed to connect to controller when adding query: %s",
+                e,
             )
             raise DeephavenConnectionError(
                 f"Unable to connect to controller: {e}"
@@ -512,7 +535,7 @@ class CorePlusControllerClient(
         _LOGGER.debug(
             "[CorePlusControllerClient:make_temporary_config] Creating temporary config for name='%s', heap_size_gb=%s",
             name,
-            heap_size_gb
+            heap_size_gb,
         )
         config = await asyncio.to_thread(
             self.wrapped.make_temporary_config,
@@ -563,13 +586,20 @@ class CorePlusControllerClient(
         """
         _LOGGER.debug(
             "[CorePlusControllerClient:delete_query] Starting query deletion for serial=%s",
-            serial
+            serial,
         )
         try:
             await asyncio.to_thread(self.wrapped.delete_query, serial)
-            _LOGGER.debug("[CorePlusControllerClient:delete_query] Query %s deleted successfully", serial)
+            _LOGGER.debug(
+                "[CorePlusControllerClient:delete_query] Query %s deleted successfully",
+                serial,
+            )
         except ConnectionError as e:
-            _LOGGER.error("[CorePlusControllerClient:delete_query] Connection error while deleting query %s: %s", serial, e)
+            _LOGGER.error(
+                "[CorePlusControllerClient:delete_query] Connection error while deleting query %s: %s",
+                serial,
+                e,
+            )
             raise DeephavenConnectionError(
                 f"Unable to connect to controller service: {e}"
             ) from e
@@ -577,7 +607,11 @@ class CorePlusControllerClient(
             # Re-raise native exceptions unchanged
             raise
         except Exception as e:
-            _LOGGER.error("[CorePlusControllerClient:delete_query] Failed to delete query %s: %s", serial, e)
+            _LOGGER.error(
+                "[CorePlusControllerClient:delete_query] Failed to delete query %s: %s",
+                serial,
+                e,
+            )
             raise QueryError(f"Failed to delete query {serial}: {e}") from e
 
     async def restart_query(
@@ -620,9 +654,14 @@ class CorePlusControllerClient(
             await asyncio.to_thread(
                 self.wrapped.restart_query, serials, timeout_seconds
             )
-            _LOGGER.debug("[CorePlusControllerClient:restart_query] Query restart completed successfully")
+            _LOGGER.debug(
+                "[CorePlusControllerClient:restart_query] Query restart completed successfully"
+            )
         except ConnectionError as e:
-            _LOGGER.error("[CorePlusControllerClient:restart_query] Connection error while restarting query(s): %s", e)
+            _LOGGER.error(
+                "[CorePlusControllerClient:restart_query] Connection error while restarting query(s): %s",
+                e,
+            )
             raise DeephavenConnectionError(
                 f"Unable to connect to controller service: {e}"
             ) from e
@@ -630,7 +669,10 @@ class CorePlusControllerClient(
             # Re-raise native exceptions unchanged
             raise
         except Exception as e:
-            _LOGGER.error("[CorePlusControllerClient:restart_query] Failed to restart query(s): %s", e)
+            _LOGGER.error(
+                "[CorePlusControllerClient:restart_query] Failed to restart query(s): %s",
+                e,
+            )
             raise QueryError(f"Failed to restart query(s): {e}") from e
 
     async def start_and_wait(
@@ -662,15 +704,22 @@ class CorePlusControllerClient(
         """
         _LOGGER.debug(
             "[CorePlusControllerClient:start_and_wait] Starting query and waiting for serial=%s",
-            serial
+            serial,
         )
         try:
             await asyncio.to_thread(
                 self.wrapped.start_and_wait, serial, timeout_seconds
             )
-            _LOGGER.debug("[CorePlusControllerClient:start_and_wait] Query %s started successfully", serial)
+            _LOGGER.debug(
+                "[CorePlusControllerClient:start_and_wait] Query %s started successfully",
+                serial,
+            )
         except ConnectionError as e:
-            _LOGGER.error("[CorePlusControllerClient:start_and_wait] Connection error while starting query %s: %s", serial, e)
+            _LOGGER.error(
+                "[CorePlusControllerClient:start_and_wait] Connection error while starting query %s: %s",
+                serial,
+                e,
+            )
             raise DeephavenConnectionError(
                 f"Unable to connect to controller service: {e}"
             ) from e
@@ -678,7 +727,11 @@ class CorePlusControllerClient(
             # Re-raise native exceptions unchanged
             raise
         except Exception as e:
-            _LOGGER.error("[CorePlusControllerClient:start_and_wait] Query %s failed to start: %s", serial, e)
+            _LOGGER.error(
+                "[CorePlusControllerClient:start_and_wait] Query %s failed to start: %s",
+                serial,
+                e,
+            )
             raise QueryError(f"Failed to start query {serial}: {e}") from e
 
     async def stop_query(
@@ -720,9 +773,14 @@ class CorePlusControllerClient(
         _LOGGER.debug("[CorePlusControllerClient:stop_query] Starting query stop")
         try:
             await asyncio.to_thread(self.wrapped.stop_query, serials, timeout_seconds)
-            _LOGGER.debug("[CorePlusControllerClient:stop_query] Query stop completed successfully")
+            _LOGGER.debug(
+                "[CorePlusControllerClient:stop_query] Query stop completed successfully"
+            )
         except ConnectionError as e:
-            _LOGGER.error("[CorePlusControllerClient:stop_query] Connection error when stopping query: %s", e)
+            _LOGGER.error(
+                "[CorePlusControllerClient:stop_query] Connection error when stopping query: %s",
+                e,
+            )
             raise DeephavenConnectionError(
                 f"Connection error when stopping query: {e}"
             ) from e
@@ -730,7 +788,9 @@ class CorePlusControllerClient(
             # Re-raise native exceptions unchanged
             raise
         except Exception as e:
-            _LOGGER.error("[CorePlusControllerClient:stop_query] Failed to stop query(s): %s", e)
+            _LOGGER.error(
+                "[CorePlusControllerClient:stop_query] Failed to stop query(s): %s", e
+            )
             raise QueryError(f"Failed to stop query(s): {e}") from e
 
     async def stop_and_wait(
@@ -753,13 +813,20 @@ class CorePlusControllerClient(
         """
         _LOGGER.debug(
             "[CorePlusControllerClient:stop_and_wait] Stopping query and waiting for serial=%s",
-            serial
+            serial,
         )
         try:
             await asyncio.to_thread(self.wrapped.stop_and_wait, serial, timeout_seconds)
-            _LOGGER.debug("[CorePlusControllerClient:stop_and_wait] Query %s stopped successfully", serial)
+            _LOGGER.debug(
+                "[CorePlusControllerClient:stop_and_wait] Query %s stopped successfully",
+                serial,
+            )
         except ConnectionError as e:
-            _LOGGER.error("[CorePlusControllerClient:stop_and_wait] Connection error while stopping query %s: %s", serial, e)
+            _LOGGER.error(
+                "[CorePlusControllerClient:stop_and_wait] Connection error while stopping query %s: %s",
+                serial,
+                e,
+            )
             raise DeephavenConnectionError(
                 f"Unable to connect to controller service: {e}"
             ) from e
@@ -767,5 +834,9 @@ class CorePlusControllerClient(
             # Re-raise native exceptions unchanged
             raise
         except Exception as e:
-            _LOGGER.error("[CorePlusControllerClient:stop_and_wait] Failed to stop query %s: %s", serial, e)
+            _LOGGER.error(
+                "[CorePlusControllerClient:stop_and_wait] Failed to stop query %s: %s",
+                serial,
+                e,
+            )
             raise QueryError(f"Failed to stop query {serial}: {e}") from e

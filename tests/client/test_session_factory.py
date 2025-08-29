@@ -3,12 +3,13 @@ import io
 import logging
 import sys
 import types
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, PropertyMock, patch
+
 import pytest
 
 import deephaven_mcp._exceptions as exc
-from deephaven_mcp.client._controller_client import CorePlusControllerClient
 from deephaven_mcp.client._auth_client import CorePlusAuthClient
+from deephaven_mcp.client._controller_client import CorePlusControllerClient
 
 # This MUST happen at import time before any other imports that depend on enterprise modules
 try:
@@ -377,14 +378,12 @@ async def test_connect_to_persistent_query_key_error(
         )
 
 
-
-
-
-
-def test_controller_client_property_success(coreplus_session_manager, dummy_session_manager):
+def test_controller_client_property_success(
+    coreplus_session_manager, dummy_session_manager
+):
     # Access the property
     result = coreplus_session_manager.controller_client
-    
+
     # Should return the initialized controller client
     assert result is not None
     assert isinstance(result, CorePlusControllerClient)
@@ -393,7 +392,7 @@ def test_controller_client_property_success(coreplus_session_manager, dummy_sess
 def test_auth_client_property_success(coreplus_session_manager, dummy_session_manager):
     # Access the property
     result = coreplus_session_manager.auth_client
-    
+
     # Should return the initialized auth client
     assert result is not None
     assert isinstance(result, CorePlusAuthClient)
@@ -405,7 +404,7 @@ def test_controller_client_property_connection_error():
     mock_property = PropertyMock()
     mock_property.__get__ = MagicMock(side_effect=ConnectionError("network failure"))
     type(mock_session_manager).controller_client = mock_property
-    
+
     # When we construct the factory, it should handle the ConnectionError
     # and re-raise it as SessionError (not DeephavenConnectionError)
     # This matches the actual implementation that always raises SessionError
@@ -419,7 +418,7 @@ def test_controller_client_property_session_error():
     mock_property = PropertyMock()
     mock_property.__get__ = MagicMock(side_effect=Exception("generic failure"))
     type(mock_session_manager).controller_client = mock_property
-    
+
     # When we construct the factory, it should handle the Exception
     # and re-raise it as SessionError
     with pytest.raises(exc.SessionError):
@@ -432,11 +431,13 @@ def test_auth_client_property_connection_error():
     mock_controller = MagicMock()
     mock_auth = PropertyMock()
     mock_auth.__get__ = MagicMock(side_effect=ConnectionError("network failure"))
-    
+
     # Need to ensure controller_client works but auth_client fails
-    type(mock_session_manager).controller_client = PropertyMock(return_value=mock_controller)
+    type(mock_session_manager).controller_client = PropertyMock(
+        return_value=mock_controller
+    )
     type(mock_session_manager).auth_client = mock_auth
-    
+
     # When we construct the factory, it should handle the ConnectionError with auth_client
     # and re-raise it as AuthenticationError
     with pytest.raises(exc.AuthenticationError):
@@ -449,11 +450,13 @@ def test_auth_client_property_auth_error():
     mock_controller = MagicMock()
     mock_auth = PropertyMock()
     mock_auth.__get__ = MagicMock(side_effect=Exception("generic failure"))
-    
+
     # Need to ensure controller_client works but auth_client fails
-    type(mock_session_manager).controller_client = PropertyMock(return_value=mock_controller)
+    type(mock_session_manager).controller_client = PropertyMock(
+        return_value=mock_controller
+    )
     type(mock_session_manager).auth_client = mock_auth
-    
+
     # When we construct the factory, it should handle the Exception with auth_client
     # and re-raise it as AuthenticationError
     with pytest.raises(exc.AuthenticationError):

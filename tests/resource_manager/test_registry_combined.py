@@ -7,7 +7,7 @@ controller client caching, and lifecycle management.
 """
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, Mock, patch, PropertyMock
+from unittest.mock import AsyncMock, MagicMock, Mock, PropertyMock, patch
 
 import pytest
 
@@ -511,7 +511,9 @@ class TestControllerClientCaching:
 
         # Mock successful client creation
         mock_factory.get = AsyncMock(return_value=mock_factory_instance)
-        type(mock_factory_instance).controller_client = PropertyMock(return_value=mock_client)
+        type(mock_factory_instance).controller_client = PropertyMock(
+            return_value=mock_client
+        )
         # Call the method
         client = await combined_registry._get_or_create_controller_client(
             mock_factory, "test_factory"
@@ -560,7 +562,9 @@ class TestControllerClientCaching:
         mock_factory = MagicMock(spec=CorePlusSessionFactoryManager)
         mock_factory_instance = MagicMock()
         mock_old_client = MagicMock(spec=CorePlusControllerClient)
-        mock_old_client.ping = AsyncMock(side_effect=DeephavenConnectionError("Dead client"))
+        mock_old_client.ping = AsyncMock(
+            side_effect=DeephavenConnectionError("Dead client")
+        )
         mock_factory_instance = MagicMock()
         mock_new_client = MagicMock(spec=CorePlusControllerClient)
 
@@ -568,7 +572,9 @@ class TestControllerClientCaching:
         combined_registry._controller_clients["test_factory"] = mock_old_client
 
         mock_factory.get = AsyncMock(return_value=mock_factory_instance)
-        type(mock_factory_instance).controller_client = PropertyMock(return_value=mock_new_client)
+        type(mock_factory_instance).controller_client = PropertyMock(
+            return_value=mock_new_client
+        )
 
         # Call the method
         client = await combined_registry._get_or_create_controller_client(
@@ -601,7 +607,9 @@ class TestControllerClientCaching:
 
         mock_factory.get = AsyncMock(return_value=mock_factory_instance)
         # Mock property instead of method
-        type(mock_factory_instance).controller_client = PropertyMock(return_value=mock_new_client)
+        type(mock_factory_instance).controller_client = PropertyMock(
+            return_value=mock_new_client
+        )
 
         # Call the method
         client = await combined_registry._get_or_create_controller_client(

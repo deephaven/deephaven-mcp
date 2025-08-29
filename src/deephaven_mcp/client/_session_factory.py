@@ -146,7 +146,7 @@ class CorePlusSessionFactory(
         object, providing an asynchronous interface to its methods while preserving all functionality.
         This class serves as the primary entry point for interacting with Deephaven Enterprise servers,
         handling authentication, worker management, and session establishment.
-        
+
         The constructor automatically initializes both the controller_client and auth_client properties
         by accessing the corresponding properties from the wrapped session manager.
 
@@ -197,24 +197,34 @@ class CorePlusSessionFactory(
         _LOGGER.info(
             "[CorePlusSessionFactory:__init__] Successfully initialized CorePlusSessionFactory"
         )
-        
+
         # Initialize controller client in constructor
         try:
             controller_client = self.wrapped.controller_client
             self._controller_client = CorePlusControllerClient(controller_client)
-            _LOGGER.debug("[CorePlusSessionFactory:__init__] Successfully initialized controller client")
+            _LOGGER.debug(
+                "[CorePlusSessionFactory:__init__] Successfully initialized controller client"
+            )
         except Exception as e:
-            _LOGGER.error(f"[CorePlusSessionFactory:__init__] Failed to initialize controller client: {e}")
+            _LOGGER.error(
+                f"[CorePlusSessionFactory:__init__] Failed to initialize controller client: {e}"
+            )
             raise SessionError(f"Failed to initialize controller client: {e}") from e
-            
+
         # Initialize auth client in constructor
         try:
             auth_client = self.wrapped.auth_client
             self._auth_client = CorePlusAuthClient(auth_client)
-            _LOGGER.debug("[CorePlusSessionFactory:__init__] Successfully initialized auth client")
+            _LOGGER.debug(
+                "[CorePlusSessionFactory:__init__] Successfully initialized auth client"
+            )
         except Exception as e:
-            _LOGGER.error(f"[CorePlusSessionFactory:__init__] Failed to initialize auth client: {e}")
-            raise AuthenticationError(f"Failed to initialize authentication client: {e}") from e
+            _LOGGER.error(
+                f"[CorePlusSessionFactory:__init__] Failed to initialize auth client: {e}"
+            )
+            raise AuthenticationError(
+                f"Failed to initialize authentication client: {e}"
+            ) from e
 
     @classmethod
     def from_url(cls, url: str) -> "CorePlusSessionFactory":
@@ -494,7 +504,7 @@ class CorePlusSessionFactory(
         capabilities for user authentication, key management, and token operations. The auth client
         provides methods for working with authentication tokens, SSH keys, and other authentication
         related operations.
-        
+
         Key capabilities of the auth client include:
         - Managing SSH public keys for authentication
         - Working with authentication tokens
@@ -1017,7 +1027,6 @@ class CorePlusSessionFactory(
             raise SessionCreationError(
                 f"Failed to establish connection to persistent query: {e}"
             ) from e
-
 
     async def delete_key(self, public_key_text: str) -> None:
         """Delete a previously uploaded public key from the Deephaven server's authentication system.

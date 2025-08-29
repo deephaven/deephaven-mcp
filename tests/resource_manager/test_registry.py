@@ -412,8 +412,7 @@ async def test_factory_registry_enterprise_not_available_raises_config_error():
 
     # Mock is_enterprise_available as False
     with patch(
-        "deephaven_mcp.resource_manager._registry.is_enterprise_available",
-        False
+        "deephaven_mcp.resource_manager._registry.is_enterprise_available", False
     ):
         registry = CorePlusSessionFactoryRegistry()
 
