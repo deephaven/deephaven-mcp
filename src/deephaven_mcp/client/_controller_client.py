@@ -43,19 +43,16 @@ if TYPE_CHECKING:
     import deephaven_enterprise.client.controller  # pragma: no cover
 
 from deephaven_mcp._exceptions import (
-    AuthenticationError,
     DeephavenConnectionError,
     QueryError,
     ResourceError,
 )
 
-from ._auth_client import CorePlusAuthClient
 from ._base import ClientObjectWrapper
 from ._protobuf import (
     CorePlusQueryConfig,
     CorePlusQueryInfo,
     CorePlusQuerySerial,
-    CorePlusToken,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -470,7 +467,7 @@ class CorePlusControllerClient(
         """
         _LOGGER.debug(
             "[CorePlusControllerClient:add_query] Adding query with name='%s'",
-            query_config.name,
+            query_config.pb.name,
         )
         try:
             result = await asyncio.to_thread(self.wrapped.add_query, query_config)

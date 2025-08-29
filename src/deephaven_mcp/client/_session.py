@@ -298,7 +298,7 @@ class BaseSession(ClientObjectWrapper[T], Generic[T]):
             blink_table = await session.time_table("PT0.1S", blink_table=True)
             ```
         """
-        _LOGGER.debug(f"[CoreSession:time_table] Called")
+        _LOGGER.debug("[CoreSession:time_table] Called")
         try:
             # TODO: remove type: ignore after pydeephaven is updated.  See https://deephaven.atlassian.net/browse/DH-19874
             return await asyncio.to_thread(
@@ -365,7 +365,7 @@ class BaseSession(ClientObjectWrapper[T], Generic[T]):
             dh_table = await session.import_table(arrow_table)
             ```
         """
-        _LOGGER.debug(f"[CoreSession:import_table] Called")
+        _LOGGER.debug("[CoreSession:import_table] Called")
         try:
             return await asyncio.to_thread(self.wrapped.import_table, data)
         except ConnectionError as e:
@@ -511,7 +511,7 @@ class BaseSession(ClientObjectWrapper[T], Generic[T]):
             - For tables with many rows, use limit operations like head() when appropriate
             - Live tables produce live results that update automatically
         """
-        _LOGGER.debug(f"[CoreSession:query] Called")
+        _LOGGER.debug("[CoreSession:query] Called")
         try:
             return await asyncio.to_thread(self.wrapped.query, table)
         except ConnectionError as e:
@@ -568,7 +568,7 @@ class BaseSession(ClientObjectWrapper[T], Generic[T]):
             blink_table = await session.input_table(schema=schema, blink_table=True)
             ```
         """
-        _LOGGER.debug(f"[CoreSession:input_table] Called")
+        _LOGGER.debug("[CoreSession:input_table] Called")
         try:
             # TODO: remove type: ignore after pydeephaven is updated.  See https://deephaven.atlassian.net/browse/DH-19874
             return await asyncio.to_thread(
@@ -759,10 +759,10 @@ class BaseSession(ClientObjectWrapper[T], Generic[T]):
             # Session is now closed
             ```
         """
-        _LOGGER.debug(f"[CoreSession:close] Called")
+        _LOGGER.debug("[CoreSession:close] Called")
         try:
             await asyncio.to_thread(self.wrapped.close)
-            _LOGGER.debug(f"[CoreSession:close] Session closed successfully")
+            _LOGGER.debug("[CoreSession:close] Session closed successfully")
         except ConnectionError as e:
             _LOGGER.error(f"[CoreSession:close] Connection error closing session: {e}")
             raise DeephavenConnectionError(
@@ -877,7 +877,7 @@ class BaseSession(ClientObjectWrapper[T], Generic[T]):
             - For security reasons, some server configurations may restrict certain imports or operations
             - Large result sets should be bound to tables rather than returned directly
         """
-        _LOGGER.debug(f"[CoreSession:run_script] Called")
+        _LOGGER.debug("[CoreSession:run_script] Called")
         try:
             await asyncio.to_thread(self.wrapped.run_script, script, systemic)
         except ConnectionError as e:
@@ -956,7 +956,7 @@ class BaseSession(ClientObjectWrapper[T], Generic[T]):
                     await session.bind_table(f"{name}_processed", processed)
             ```
         """
-        _LOGGER.debug(f"[CoreSession:tables] Called")
+        _LOGGER.debug("[CoreSession:tables] Called")
         try:
             return await asyncio.to_thread(self.wrapped.tables)
         except ConnectionError as e:
@@ -982,7 +982,7 @@ class BaseSession(ClientObjectWrapper[T], Generic[T]):
             DeephavenConnectionError: If there is a network or connection error
             SessionError: If there's an error checking session status
         """
-        _LOGGER.debug(f"[CoreSession:is_alive] Called")
+        _LOGGER.debug("[CoreSession:is_alive] Called")
         try:
             return await asyncio.to_thread(lambda: self.wrapped.is_alive)
         except ConnectionError as e:
@@ -1120,11 +1120,11 @@ class CoreSession(BaseSession[Session]):
             )
             tls_root_certs = await load_bytes(tls_root_certs)
             _LOGGER.info(
-                f"[CoreSession:from_config] Loaded TLS root certs successfully."
+                "[CoreSession:from_config] Loaded TLS root certs successfully."
             )
         else:
             _LOGGER.debug(
-                f"[CoreSession:from_config] No TLS root certs provided for community session."
+                "[CoreSession:from_config] No TLS root certs provided for community session."
             )
         if client_cert_chain:
             _LOGGER.info(
@@ -1132,11 +1132,11 @@ class CoreSession(BaseSession[Session]):
             )
             client_cert_chain = await load_bytes(client_cert_chain)
             _LOGGER.info(
-                f"[CoreSession:from_config] Loaded client cert chain successfully."
+                "[CoreSession:from_config] Loaded client cert chain successfully."
             )
         else:
             _LOGGER.debug(
-                f"[CoreSession:from_config] No client cert chain provided for community session."
+                "[CoreSession:from_config] No client cert chain provided for community session."
             )
         if client_private_key:
             _LOGGER.info(
@@ -1144,11 +1144,11 @@ class CoreSession(BaseSession[Session]):
             )
             client_private_key = await load_bytes(client_private_key)
             _LOGGER.info(
-                f"[CoreSession:from_config] Loaded client private key successfully."
+                "[CoreSession:from_config] Loaded client private key successfully."
             )
         else:
             _LOGGER.debug(
-                f"[CoreSession:from_config] No client private key provided for community session."
+                "[CoreSession:from_config] No client private key provided for community session."
             )
         session_config = {
             "host": host,
@@ -1200,10 +1200,10 @@ class CoreSession(BaseSession[Session]):
         # Handle "failed to get the configuration constants" - documented connection issue
         if "failed to get the configuration constants" in error_msg:
             _LOGGER.error(
-                f"[CoreSession:from_config] This error indicates a connection issue when trying to connect to the server."
+                "[CoreSession:from_config] This error indicates a connection issue when trying to connect to the server."
             )
             _LOGGER.error(
-                f"[CoreSession:from_config] Verify that: 1) Server address and port are correct, 2) Deephaven server is running and accessible, 3) Network connectivity is available"
+                "[CoreSession:from_config] Verify that: 1) Server address and port are correct, 2) Deephaven server is running and accessible, 3) Network connectivity is available"
             )
 
         # Handle certificate/TLS related errors
@@ -1220,10 +1220,10 @@ class CoreSession(BaseSession[Session]):
             ]
         ):
             _LOGGER.error(
-                f"[CoreSession:from_config] This error indicates a TLS/SSL certificate issue."
+                "[CoreSession:from_config] This error indicates a TLS/SSL certificate issue."
             )
             _LOGGER.error(
-                f"[CoreSession:from_config] Verify that: 1) Server certificate is valid and not expired, 2) Certificate hostname matches connection URL, 3) CA certificate is trusted by the client"
+                "[CoreSession:from_config] Verify that: 1) Server certificate is valid and not expired, 2) Certificate hostname matches connection URL, 3) CA certificate is trusted by the client"
             )
 
         # Handle authentication errors
@@ -1239,10 +1239,10 @@ class CoreSession(BaseSession[Session]):
             ]
         ):
             _LOGGER.error(
-                f"[CoreSession:from_config] This error indicates an authentication issue."
+                "[CoreSession:from_config] This error indicates an authentication issue."
             )
             _LOGGER.error(
-                f"[CoreSession:from_config] Verify that: 1) Authentication credentials are correct, 2) Token is valid and not expired, 3) User has proper permissions, 4) Authentication service is running"
+                "[CoreSession:from_config] Verify that: 1) Authentication credentials are correct, 2) Token is valid and not expired, 3) User has proper permissions, 4) Authentication service is running"
             )
 
         # Handle connection timeout errors
@@ -1256,10 +1256,10 @@ class CoreSession(BaseSession[Session]):
             ]
         ):
             _LOGGER.error(
-                f"[CoreSession:from_config] This error indicates a network connectivity issue."
+                "[CoreSession:from_config] This error indicates a network connectivity issue."
             )
             _LOGGER.error(
-                f"[CoreSession:from_config] Verify that: 1) Server is running and accessible, 2) Network connectivity is available, 3) Firewall is not blocking the connection, 4) Port is correct and open"
+                "[CoreSession:from_config] Verify that: 1) Server is running and accessible, 2) Network connectivity is available, 3) Firewall is not blocking the connection, 4) Port is correct and open"
             )
 
         # Handle port/address binding errors
@@ -1272,10 +1272,10 @@ class CoreSession(BaseSession[Session]):
             ]
         ):
             _LOGGER.error(
-                f"[CoreSession:from_config] This error indicates a port binding issue."
+                "[CoreSession:from_config] This error indicates a port binding issue."
             )
             _LOGGER.error(
-                f"[CoreSession:from_config] Verify that: 1) Port is not already in use by another process, 2) You have permission to bind to the port, 3) Try a different port number"
+                "[CoreSession:from_config] Verify that: 1) Port is not already in use by another process, 2) You have permission to bind to the port, 3) Try a different port number"
             )
 
         # Handle DNS resolution errors
@@ -1288,10 +1288,10 @@ class CoreSession(BaseSession[Session]):
             ]
         ):
             _LOGGER.error(
-                f"[CoreSession:from_config] This error indicates a DNS resolution issue."
+                "[CoreSession:from_config] This error indicates a DNS resolution issue."
             )
             _LOGGER.error(
-                f"[CoreSession:from_config] Verify that: 1) Hostname is correct and resolvable, 2) DNS server is accessible, 3) Network connectivity is available, 4) Try using IP address instead of hostname"
+                "[CoreSession:from_config] Verify that: 1) Hostname is correct and resolvable, 2) DNS server is accessible, 3) Network connectivity is available, 4) Try using IP address instead of hostname"
             )
 
 
@@ -1464,7 +1464,7 @@ class CorePlusSession(
                 print(f"Production query {query_info.name} has been running since {query_info.created_time}")
             ```
         """
-        _LOGGER.debug(f"[CorePlusSession:pqinfo] Called")
+        _LOGGER.debug("[CorePlusSession:pqinfo] Called")
         try:
             protobuf_obj = await asyncio.to_thread(self.wrapped.pqinfo)
             return CorePlusQueryInfo(protobuf_obj)
@@ -1759,7 +1759,7 @@ class CorePlusSession(
             - Performance: For large deployments with many tables, consider using more specific
               filters when querying the catalog table
         """
-        _LOGGER.debug(f"[CorePlusSession:catalog_table] Called")
+        _LOGGER.debug("[CorePlusSession:catalog_table] Called")
         try:
             return await asyncio.to_thread(self.wrapped.catalog_table)
         except ConnectionError as e:

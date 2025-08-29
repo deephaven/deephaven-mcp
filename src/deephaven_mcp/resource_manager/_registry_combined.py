@@ -770,6 +770,15 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
                         e,
                     )
 
+            # Log that we're releasing controller clients
+            # (Note: CorePlusControllerClient doesn't have a close() method; clients are managed by the CorePlus system)
+            for factory_name, _ in list(self._controller_clients.items()):
+                _LOGGER.debug(
+                    "[%s] releasing controller client for factory '%s'",
+                    self.__class__.__name__,
+                    factory_name,
+                )
+
             # Clear the controller clients dictionary
             self._controller_clients.clear()
 
