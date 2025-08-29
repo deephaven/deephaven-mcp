@@ -350,8 +350,7 @@ The `deephaven_mcp.json` file can also optionally include a top-level key named 
 
 If the `"enterprise"` key is present, it must be a dictionary. Each individual enterprise system configuration within this dictionary supports the following fields:
 
-*   `connection_json_url` (string, **required**): The URL pointing to the `connection.json` file of the Deephaven Enterprise server. This file provides necessary connection details for the client.
-    *   Example: `"https://enterprise.example.com/iris/connection.json"`
+*   `connection_json_url` (string, **required**): The URL pointing to the `connection.json` file of the Deephaven Enterprise server. This file provides necessary connection details for the client. For standard HTTPS port 443, no port is needed (e.g., `"https://enterprise.example.com/iris/connection.json"`). For non-standard ports, include the port number explicitly (e.g., `"https://enterprise.example.com:8123/iris/connection.json"`)
 *   `auth_type` (string, **required**): Specifies the authentication method to use. Must be one of the following values:
     *   `"password"`: Authenticate using a username and password.
     *   `"private_key"`: Authenticate using a private key (e.g., for service accounts or specific SAML/OAuth setups requiring a private key).

@@ -11,7 +11,6 @@ instance and wraps returned sessions in CorePlusSession objects for consistent b
 It provides methods for:
   - Authentication (password, private_key, saml)
   - Worker management (connect_to_new_worker, connect_to_persistent_query)
-  - Client creation (create_auth_client, create_controller_client)
   - Connection verification (ping)
   - Key management (upload_key, delete_key)
 
@@ -148,6 +147,9 @@ class CorePlusSessionFactory(
         This class serves as the primary entry point for interacting with Deephaven Enterprise servers,
         handling authentication, worker management, and session establishment.
 
+        The constructor automatically initializes both the controller_client and auth_client properties
+        by accessing the corresponding properties from the wrapped session manager.
+
         The CorePlusSessionFactory is designed to provide a convenient async/await interface around
         the synchronous Enterprise SessionManager, running operations in separate threads to avoid
         blocking the event loop. This makes it ideal for integration into async applications, web
@@ -165,6 +167,8 @@ class CorePlusSessionFactory(
                        SessionManager class from deephaven_enterprise.client.session_manager.
             ValueError: If the session_manager is not properly initialized or is missing
                        required configuration.
+            SessionError: If there was an error initializing the controller_client property.
+            AuthenticationError: If there was an error initializing the auth_client property.
 
         Note:
             In most cases, you should use the class factory methods instead of this constructor:
@@ -193,6 +197,34 @@ class CorePlusSessionFactory(
         _LOGGER.info(
             "[CorePlusSessionFactory:__init__] Successfully initialized CorePlusSessionFactory"
         )
+
+        # Initialize controller client in constructor
+        try:
+            controller_client = self.wrapped.controller_client
+            self._controller_client = CorePlusControllerClient(controller_client)
+            _LOGGER.debug(
+                "[CorePlusSessionFactory:__init__] Successfully initialized controller client"
+            )
+        except Exception as e:
+            _LOGGER.error(
+                f"[CorePlusSessionFactory:__init__] Failed to initialize controller client: {e}"
+            )
+            raise SessionError(f"Failed to initialize controller client: {e}") from e
+
+        # Initialize auth client in constructor
+        try:
+            auth_client = self.wrapped.auth_client
+            self._auth_client = CorePlusAuthClient(auth_client)
+            _LOGGER.debug(
+                "[CorePlusSessionFactory:__init__] Successfully initialized auth client"
+            )
+        except Exception as e:
+            _LOGGER.error(
+                f"[CorePlusSessionFactory:__init__] Failed to initialize auth client: {e}"
+            )
+            raise AuthenticationError(
+                f"Failed to initialize authentication client: {e}"
+            ) from e
 
     @classmethod
     def from_url(cls, url: str) -> "CorePlusSessionFactory":
@@ -464,6 +496,100 @@ class CorePlusSessionFactory(
         )
         return instance
 
+    @property
+    def auth_client(self) -> CorePlusAuthClient:
+        """Authentication client for direct interaction with the Deephaven authentication service.
+
+        This property provides access to the Deephaven server's authentication service API, which offers
+        capabilities for user authentication, key management, and token operations. The auth client
+        provides methods for working with authentication tokens, SSH keys, and other authentication
+        related operations.
+
+        Key capabilities of the auth client include:
+        - Managing SSH public keys for authentication
+        - Working with authentication tokens
+        - User information and authentication verification
+
+        Returns:
+            CorePlusAuthClient: A client for interacting with the Deephaven authentication service.
+                This client provides methods for operations such as token validation, key management,
+                and other authentication-related functionality.
+
+        Raises:
+            AuthenticationError: If accessing the auth client fails for any reason. This should
+                not normally happen as the client is initialized during factory creation.
+                If this occurs, it typically indicates a connection issue or authentication problem.
+
+        Note:
+            The auth client is initialized when the CorePlusSessionFactory is created, so
+            this property access is non-blocking and does not perform network operations.
+
+        Example:
+            ```python
+            from deephaven_mcp.client import CorePlusSessionFactory
+
+            # Create a session factory
+            factory = CorePlusSessionFactory.from_url("https://example.com/iris/connection.json")
+            # Authenticate
+            factory.password("username", "password")
+
+            # Access the auth client property
+            auth = factory.auth_client
+
+            # Use the auth client for direct operations
+            token_info = auth.validate_token(token)
+            ```
+        """
+        # Auth client initialization is guaranteed to succeed in the constructor
+        # or an exception would have been raised
+        return self._auth_client
+
+    @property
+    def controller_client(self) -> CorePlusControllerClient:
+        """Controller client for direct management of server-side resources and workers.
+
+        This property provides access to the Deephaven server's controller service API, which offers
+        advanced capabilities for managing server-side resources including persistent queries (workers),
+        tables, users, and system information. The controller client is particularly useful for
+        administrative operations, monitoring, and programmatic management of server resources.
+
+        Key capabilities of the controller client include:
+        - Listing, filtering, and searching for persistent queries/workers across the server
+        - Retrieving detailed information about any worker (memory usage, uptime, tables, etc.)
+        Returns:
+            CorePlusControllerClient: A client for interacting with the Deephaven controller service.
+                This client provides methods for administrative operations such as listing
+                workers, creating and managing persistent queries, and monitoring server resources.
+
+        Raises:
+            SessionError: If accessing the controller client fails for any reason. This should
+                not normally happen as the client is initialized during factory creation.
+                If this occurs, it typically indicates a connection issue or server problem.
+
+        Note:
+            The controller client is initialized when the CorePlusSessionFactory is created, so
+            this property access is non-blocking and does not perform network operations.
+
+        Example:
+            ```python
+            from deephaven_mcp.client import CorePlusSessionFactory
+
+            # Create a session factory
+            factory = CorePlusSessionFactory.from_url("https://example.com/iris/connection.json")
+            # Authenticate
+            factory.password("username", "password")
+
+            # Access the controller client property
+            controller = factory.controller_client
+
+            # List all persistent queries (workers)
+            workers = controller.list_persistent_queries()
+            ```
+        """
+        # Controller client initialization is guaranteed to succeed in the constructor
+        # or an exception would have been raised
+        return self._controller_client
+
     async def close(self) -> None:
         """Terminate this factory's connections to the authentication server and controller.
 
@@ -706,7 +832,7 @@ class CorePlusSessionFactory(
 
         See Also:
             - connect_to_persistent_query: Connect to an existing worker by name or serial
-            - create_controller_client: Create a client for managing workers directly
+            - controller_client: Property for accessing a client to manage workers directly
             - CorePlusSession.close: Method to disconnect from a worker and release resources
         """
         try:
@@ -901,191 +1027,6 @@ class CorePlusSessionFactory(
             raise SessionCreationError(
                 f"Failed to establish connection to persistent query: {e}"
             ) from e
-
-    async def create_auth_client(
-        self, auth_host: str | None = None
-    ) -> CorePlusAuthClient:
-        """Create an authentication client for interacting with the auth service directly.
-
-        This method creates a specialized client that provides low-level access to the
-        authentication service API. The auth client can be used for advanced authentication
-        operations that aren't directly supported by the higher-level methods in this class,
-        such as token management, user information retrieval, and custom authentication flows.
-
-        This method asynchronously delegates to the underlying session manager's create_auth_client method,
-        running it in a separate thread to avoid blocking the event loop. The returned client is wrapped
-        in a CorePlusAuthClient for consistent behavior with other MCP client interfaces.
-
-        Args:
-            auth_host: The authentication host to connect to. Defaults to None, which means
-                the first host in the JSON config's auth_host list will be used. Only specify
-                this if you need to connect to a specific authentication service instance in
-                a multi-node deployment.
-
-        Returns:
-            CorePlusAuthClient: The wrapped authentication client instance that provides methods
-                for token management, user information, and other auth-related operations.
-
-        Raises:
-            DeephavenConnectionError: If a connection cannot be established with the authentication
-                service due to network issues or service unavailability.
-            AuthenticationError: If there are authentication-related issues creating the client,
-                such as invalid configuration or authorization problems.
-
-        Note:
-            For most common authentication scenarios, you should use the higher-level methods
-            like password(), private_key(), or saml() instead of creating an auth client directly.
-            This method is primarily intended for advanced use cases.
-        """
-        try:
-            _LOGGER.debug(
-                f"[CorePlusSessionFactory:create_auth_client] Creating authentication client for host: {auth_host or 'default'}"
-            )
-            auth_client = await asyncio.to_thread(
-                self.wrapped.create_auth_client, auth_host
-            )
-            _LOGGER.debug(
-                "[CorePlusSessionFactory:create_auth_client] Successfully created authentication client"
-            )
-            return CorePlusAuthClient(auth_client)
-        except ConnectionError as e:
-            _LOGGER.error(
-                f"[CorePlusSessionFactory:create_auth_client] Failed to connect to authentication service: {e}"
-            )
-            raise DeephavenConnectionError(
-                f"Failed to connect to authentication service: {e}"
-            ) from e
-        except Exception as e:
-            _LOGGER.error(
-                f"[CorePlusSessionFactory:create_auth_client] Failed to create authentication client: {e}"
-            )
-            raise AuthenticationError(
-                f"Failed to create authentication client: {e}"
-            ) from e
-
-    async def create_controller_client(self) -> CorePlusControllerClient:
-        """Create a controller client for direct management of server-side resources and workers.
-
-        This method provides access to the Deephaven server's controller service API, which offers
-        advanced capabilities for managing server-side resources including persistent queries (workers),
-        tables, users, and system information. The controller client is particularly useful for
-        administrative operations, monitoring, and programmatic management of server resources.
-
-        Key capabilities of the controller client include:
-        - Listing, filtering, and searching for persistent queries/workers across the server
-        - Retrieving detailed information about any worker (memory usage, uptime, tables, etc.)
-        - Starting, stopping, and modifying existing workers
-        - Managing resource quotas and allocation
-        - Retrieving system diagnostic information
-        - Administrative operations like user management and permissions
-
-        This method asynchronously creates an instance of the underlying enterprise controller client
-        and wraps it in a CorePlusControllerClient that provides a fully asynchronous interface
-        consistent with other MCP client interfaces. All controller client operations are executed
-        in separate threads to avoid blocking the event loop.
-
-        Returns:
-            CorePlusControllerClient: A fully initialized controller client instance that provides
-                methods for advanced management of server resources. This client gives you direct
-                access to the controller API with an async interface, allowing operations that go
-                beyond what the standard factory methods provide.
-
-        Raises:
-            DeephavenConnectionError: If a connection cannot be established with the controller
-                service due to network issues, service unavailability, or connectivity problems.
-            AuthenticationError: If the current authentication is invalid, expired, or has
-                insufficient permissions to access the controller service.
-            SessionError: If there is an error creating the controller client for reasons other
-                than connectivity, such as service misconfiguration or internal server errors.
-
-        Example - Listing and filtering workers:
-            ```python
-            import asyncio
-            from deephaven_mcp.client import CorePlusSessionFactory
-
-            async def list_all_workers():
-                # Create and authenticate the factory
-                factory = CorePlusSessionFactory.from_url("https://server.example.com/iris/connection.json")
-                await factory.password("username", "password")
-
-                # Get a controller client
-                controller = await factory.create_controller_client()
-
-                # List all persistent queries (workers)
-                queries = await controller.list_persistent_queries()
-                for query in queries:
-                    print(f"Query: {query.name}, Status: {query.status}, Created: {query.create_time}")
-
-                # Get workers owned by a specific user
-                user_queries = await controller.list_persistent_queries(owner="specific_username")
-
-                # Get high-memory workers (using filter)
-                high_mem_queries = [q for q in queries if q.heap_size_gb > 8.0]
-
-                # Close when done
-                await factory.close()
-            ```
-
-        Example - Managing worker lifecycle:
-            ```python
-            async def manage_worker_lifecycle():
-                factory = CorePlusSessionFactory.from_url("https://server.example.com/iris/connection.json")
-                await factory.password("username", "password")
-
-                controller = await factory.create_controller_client()
-
-                # Find a worker by name
-                workers = await controller.list_persistent_queries(name="analytics_worker")
-                if workers:
-                    worker = workers[0]
-
-                    # Get detailed information about the worker
-                    details = await controller.get_persistent_query(worker.id)
-
-                    # Stop the worker if it's running
-                    if details.status == "RUNNING":
-                        await controller.stop_persistent_query(worker.id)
-                        print(f"Stopped worker: {worker.name}")
-
-                    # Delete the worker if needed
-                    # await controller.delete_persistent_query(worker.id)
-
-                await factory.close()
-            ```
-
-        Note:
-            - The controller client provides administrative capabilities that may be restricted
-              based on the authenticated user's permissions
-            - For basic worker and session operations, the higher-level factory methods like
-              connect_to_new_worker() are generally easier to use
-            - The controller client is useful when you need more detailed information or
-              management capabilities than what the standard factory methods provide
-            - Remember to close the factory when finished to release resources
-
-        """
-        try:
-            _LOGGER.debug(
-                "[CorePlusSessionFactory:create_controller_client] Creating controller client"
-            )
-            controller_client = await asyncio.to_thread(
-                self.wrapped.create_controller_client
-            )
-            _LOGGER.debug(
-                "[CorePlusSessionFactory:create_controller_client] Successfully created controller client"
-            )
-            return CorePlusControllerClient(controller_client)
-        except ConnectionError as e:
-            _LOGGER.error(
-                f"[CorePlusSessionFactory:create_controller_client] Failed to connect to controller service: {e}"
-            )
-            raise DeephavenConnectionError(
-                f"Failed to connect to controller service: {e}"
-            ) from e
-        except Exception as e:
-            _LOGGER.error(
-                f"[CorePlusSessionFactory:create_controller_client] Failed to create controller client: {e}"
-            )
-            raise SessionError(f"Failed to create controller client: {e}") from e
 
     async def delete_key(self, public_key_text: str) -> None:
         """Delete a previously uploaded public key from the Deephaven server's authentication system.

@@ -455,7 +455,7 @@ The `enterprise` key contains a `"systems"` dictionary mapping custom system nam
 
 | Field | Type | Required When | Description |
 |-------|------|---------------|-------------|
-| `connection_json_url` | string | Always | URL to the Enterprise server's `connection.json` file (e.g., `"https://enterprise.example.com/iris/connection.json"`) |
+| `connection_json_url` | string | Always | URL to the Enterprise server's `connection.json` file. For standard HTTPS port 443, no port is needed (e.g., `"https://enterprise.example.com/iris/connection.json"`). For non-standard ports, include the port number explicitly (e.g., `"https://enterprise.example.com:8123/iris/connection.json"`) |
 | `auth_type` | string | Always | Authentication method: `"password"` for username/password auth, or `"private_key"` for private key-based auth (e.g., SAML) |
 | `username` | string | `auth_type` = `"password"` | Username for authentication |
 | `password` | string | `auth_type` = `"password"` | Password (use `password_env_var` instead for security) |
@@ -810,7 +810,7 @@ Before diving into detailed troubleshooting, try these common solutions:
 1. **Restart your IDE/AI assistant** after any configuration changes
 2. **Check that all file paths are absolute** in your JSON configurations
 3. **Verify your virtual environment is activated** when running commands
-4. **Validate JSON syntax** using [jsonlint.com](https://jsonlint.com/) or your IDE's JSON validator
+4. **Validate JSON syntax** using [https://jsonlint.com](https://jsonlint.com/) or your IDE's JSON validator
 
 ### Common Error Messages
 

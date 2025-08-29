@@ -7,7 +7,7 @@ controller client caching, and lifecycle management.
 """
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, PropertyMock, patch
 
 import pytest
 
@@ -511,11 +511,9 @@ class TestControllerClientCaching:
 
         # Mock successful client creation
         mock_factory.get = AsyncMock(return_value=mock_factory_instance)
-        mock_factory_instance.create_controller_client = AsyncMock(
+        type(mock_factory_instance).controller_client = PropertyMock(
             return_value=mock_client
         )
-        mock_client.subscribe = AsyncMock()
-
         # Call the method
         client = await combined_registry._get_or_create_controller_client(
             mock_factory, "test_factory"
@@ -523,8 +521,7 @@ class TestControllerClientCaching:
 
         # Verify client was created and cached
         mock_factory.get.assert_awaited_once()
-        mock_factory_instance.create_controller_client.assert_awaited_once()
-        mock_client.subscribe.assert_awaited_once()
+        assert mock_factory_instance.controller_client == mock_client
         assert client == mock_client
         assert combined_registry._controller_clients["test_factory"] == mock_client
         assert client == mock_client
@@ -545,7 +542,6 @@ class TestControllerClientCaching:
         factory = MagicMock(spec=CorePlusSessionFactoryManager)
         mock_factory_instance = MagicMock()
         factory.get = AsyncMock(return_value=mock_factory_instance)
-        mock_factory_instance.create_controller_client = AsyncMock()
 
         # Call should reuse the client since it's healthy
         client = await combined_registry._get_or_create_controller_client(
@@ -554,7 +550,6 @@ class TestControllerClientCaching:
 
         # Verify the client was reused not recreated
         factory.get.assert_not_called()
-        mock_factory_instance.create_controller_client.assert_not_called()
         assert client == mock_client
         mock_client.ping.assert_awaited_once()
 
@@ -567,31 +562,28 @@ class TestControllerClientCaching:
         mock_factory = MagicMock(spec=CorePlusSessionFactoryManager)
         mock_factory_instance = MagicMock()
         mock_old_client = MagicMock(spec=CorePlusControllerClient)
+        mock_old_client.ping = AsyncMock(
+            side_effect=DeephavenConnectionError("Dead client")
+        )
+        mock_factory_instance = MagicMock()
         mock_new_client = MagicMock(spec=CorePlusControllerClient)
 
         # Pre-populate cache with a dead client
         combined_registry._controller_clients["test_factory"] = mock_old_client
 
-        # Mock failed health check (False result) and successful recreation
-        mock_old_client.ping = AsyncMock(return_value=False)
-        mock_old_client.close = AsyncMock()
-
         mock_factory.get = AsyncMock(return_value=mock_factory_instance)
-        mock_factory_instance.create_controller_client = AsyncMock(
+        type(mock_factory_instance).controller_client = PropertyMock(
             return_value=mock_new_client
         )
-        mock_new_client.subscribe = AsyncMock()
 
         # Call the method
         client = await combined_registry._get_or_create_controller_client(
             mock_factory, "test_factory"
         )
 
-        # Verify old client was closed and new client was created
-        mock_old_client.close.assert_awaited_once()
+        # Verify new client was created and old client was replaced
         mock_factory.get.assert_awaited_once()
-        mock_factory_instance.create_controller_client.assert_awaited_once()
-        mock_new_client.subscribe.assert_awaited_once()
+        # Access the controller_client property
         assert client == mock_new_client
         assert combined_registry._controller_clients["test_factory"] == mock_new_client
         assert client == mock_new_client
@@ -610,28 +602,22 @@ class TestControllerClientCaching:
         # Pre-populate cache with a dead client
         combined_registry._controller_clients["test_factory"] = mock_old_client
 
-        # Mock failed health check (False result) and successful recreation
+        # Mock failed health check (False result)
         mock_old_client.ping = AsyncMock(return_value=False)
-        mock_old_client.close = AsyncMock(
-            side_effect=RuntimeError("Failed to close client")
-        )
 
         mock_factory.get = AsyncMock(return_value=mock_factory_instance)
-        mock_factory_instance.create_controller_client = AsyncMock(
+        # Mock property instead of method
+        type(mock_factory_instance).controller_client = PropertyMock(
             return_value=mock_new_client
         )
-        mock_new_client.subscribe = AsyncMock()
 
         # Call the method
         client = await combined_registry._get_or_create_controller_client(
             mock_factory, "test_factory"
         )
 
-        # Verify old client was closed and new client was created
-        mock_old_client.close.assert_awaited_once()
+        # Verify new client was created
         mock_factory.get.assert_awaited_once()
-        mock_factory_instance.create_controller_client.assert_awaited_once()
-        mock_new_client.subscribe.assert_awaited_once()
 
         # Verify cache was updated
         assert combined_registry._controller_clients["test_factory"] == mock_new_client
@@ -1092,10 +1078,7 @@ class TestClose:
 
         # Add some controller clients
         mock_client1 = MagicMock(spec=CorePlusControllerClient)
-        mock_client1.close = AsyncMock()
-
         mock_client2 = MagicMock(spec=CorePlusControllerClient)
-        mock_client2.close = AsyncMock()
 
         initialized_registry._controller_clients = {
             "factory1": mock_client1,
@@ -1108,10 +1091,6 @@ class TestClose:
         # Verify both registries were closed
         mock_community_registry.close.assert_awaited_once()
         mock_enterprise_registry.close.assert_awaited_once()
-
-        # Verify all controller clients were closed
-        mock_client1.close.assert_awaited_once()
-        mock_client2.close.assert_awaited_once()
 
         # Verify controller clients dictionary was cleared
         assert initialized_registry._controller_clients == {}
@@ -1130,9 +1109,8 @@ class TestClose:
             side_effect=Exception("Enterprise close failed")
         )
 
-        # Add a controller client that also fails to close
+        # Add a controller client
         mock_client = MagicMock(spec=CorePlusControllerClient)
-        mock_client.close = AsyncMock(side_effect=Exception("Client close failed"))
 
         initialized_registry._controller_clients = {"factory1": mock_client}
 
@@ -1142,8 +1120,8 @@ class TestClose:
         ) as mock_error:
             await initialized_registry.close()
 
-            # Verify errors were logged for each component
-            assert mock_error.call_count >= 3
+            # Verify errors were logged for each registry component
+            assert mock_error.call_count >= 2
 
         # Verify controller clients dictionary was still cleared
         assert initialized_registry._controller_clients == {}

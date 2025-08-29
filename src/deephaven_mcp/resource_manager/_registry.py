@@ -250,7 +250,7 @@ class CorePlusSessionFactoryRegistry(BaseRegistry[CorePlusSessionFactoryManager]
             config_manager: The configuration manager to use for loading factory configurations.
         """
         config_data = await config_manager.get_config()
-        factories_config = config_data.get("enterprise", {}).get("factories", {})
+        factories_config = config_data.get("enterprise", {}).get("systems", {})
 
         if not is_enterprise_available and factories_config:
             raise ConfigurationError(
