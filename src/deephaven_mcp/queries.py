@@ -142,7 +142,8 @@ async def get_programming_language_version_table(session: BaseSession) -> pyarro
 
     script = textwrap.dedent(
         """
-        from deephaven import new_table, string_col, int_col
+        from deephaven import new_table
+        from deephaven.column import string_col, int_col
         import sys
         import platform
 
@@ -245,7 +246,8 @@ async def get_pip_packages_table(session: BaseSession) -> pyarrow.Table:
 
     script = textwrap.dedent(
         """
-        from deephaven import new_table, string_col
+        from deephaven import new_table
+        from deephaven.column import string_col
         import importlib.metadata as importlib_metadata
 
         def _make_pip_packages_table():
