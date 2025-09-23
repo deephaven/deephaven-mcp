@@ -212,11 +212,17 @@ if table_group == "financial" or table_group == "all":
     def pick_random(arr) -> str:
         return arr[int(random.random() * len(arr))]
 
+    def pick_random_news_type() -> str:
+        return pick_random(news_types)
+
+    def pick_random_news_headline() -> str:
+        return pick_random(news_headlines)
+
     news = time_table("PT30s").update(
         [
             "Symbol = (String) SYMBOLS[i % 4]",
-            f"ActionType = pick_random(news_types)",
-            f"Headline = pick_random(news_headlines) + ` for ` + Symbol",
+            f"ActionType = pick_random_news_type()",
+            f"Headline = pick_random_news_headline() + ` for ` + Symbol",
         ]
     )
 
