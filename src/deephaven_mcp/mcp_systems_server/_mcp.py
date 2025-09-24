@@ -934,7 +934,9 @@ async def run_script(
         _LOGGER.debug(
             f"[mcp_systems_server:run_script] Script length: {len(script)} characters"
         )
-        await asyncio.to_thread(session.run_script, script)
+
+        await session.run_script(script)
+
         _LOGGER.info(
             f"[mcp_systems_server:run_script] Script executed successfully on session: '{session_id}'"
         )
