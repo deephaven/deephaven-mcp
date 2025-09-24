@@ -883,7 +883,7 @@ async def run_script(
     _LOGGER.info(
         f"[mcp_systems_server:run_script] Invoked: session_id={session_id!r}, script={'<provided>' if script else None}, script_path={script_path!r}"
     )
-    result = {"success": False}
+    result: dict[str, object] = {"success": False}
     try:
         _LOGGER.debug(
             f"[mcp_systems_server:run_script] Validating script parameters for session '{session_id}'"

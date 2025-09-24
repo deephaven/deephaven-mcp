@@ -78,19 +78,19 @@ jvm_args = ["-Xmx8g"]  # Allocate 8GB heap memory
 
 if auth_token:
     # Use PSK authentication with provided token
-    jvm_args.extend([
-        "-DAuthHandlers=io.deephaven.authentication.psk.PskAuthenticationHandler",
-        f"-Dauthentication.psk={auth_token}",
-    ])
+    jvm_args.extend(
+        [
+            "-DAuthHandlers=io.deephaven.authentication.psk.PskAuthenticationHandler",
+            f"-Dauthentication.psk={auth_token}",
+        ]
+    )
     auth_mode = f"PSK authentication (token: {auth_token})"
 else:
     # Use anonymous authentication
     jvm_args.append("-DAuthHandlers=io.deephaven.auth.AnonymousAuthenticationHandler")
     auth_mode = "anonymous authentication"
 
-print(
-    f"Starting Deephaven server on {host}:{port} with 8GB RAM and {auth_mode} ..."
-)
+print(f"Starting Deephaven server on {host}:{port} with 8GB RAM and {auth_mode} ...")
 
 # Initialize and start the Deephaven server
 server = Server(

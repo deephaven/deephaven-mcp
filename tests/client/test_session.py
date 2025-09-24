@@ -203,7 +203,9 @@ async def test_tables_success(core_session):
 
 @pytest.mark.asyncio
 async def test_tables_connection_error(core_session):
-    with patch.object(type(core_session.wrapped), 'tables', new_callable=PropertyMock) as mock_tables:
+    with patch.object(
+        type(core_session.wrapped), "tables", new_callable=PropertyMock
+    ) as mock_tables:
         mock_tables.side_effect = ConnectionError("fail")
         with pytest.raises(DeephavenConnectionError):
             await core_session.tables()
@@ -211,7 +213,9 @@ async def test_tables_connection_error(core_session):
 
 @pytest.mark.asyncio
 async def test_tables_other_error(core_session):
-    with patch.object(type(core_session.wrapped), 'tables', new_callable=PropertyMock) as mock_tables:
+    with patch.object(
+        type(core_session.wrapped), "tables", new_callable=PropertyMock
+    ) as mock_tables:
         mock_tables.side_effect = Exception("fail")
         with pytest.raises(QueryError):
             await core_session.tables()
