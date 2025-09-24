@@ -47,6 +47,8 @@ This repository houses the Python-based Model Context Protocol (MCP) servers for
         - [`table_schemas`](#table_schemas)
         - [`run_script`](#run_script)
         - [`pip_packages`](#pip_packages)
+        - [`get_table_data`](#get_table_data)
+        - [`get_table_meta`](#get_table_meta)
       - [Systems Server Test Components](#systems-server-test-components)
         - [Test Server](#test-server)
         - [Test Client](#test-client)
@@ -765,6 +767,87 @@ On error:
 ```
 
 **Description**: This tool queries the specified Deephaven session for information about installed pip packages using importlib.metadata. It executes a query on the session to retrieve package names and versions for all installed Python packages available in that session's environment.
+
+##### `get_table_data`
+
+**Purpose**: Retrieve table data from a specified Deephaven session with flexible formatting options.
+
+**Parameters**:
+- `session_id` (required, string): ID of the Deephaven session to query.
+- `table_name` (required, string): Name of the table to retrieve data from.
+- `max_rows` (optional, int): Maximum number of rows to retrieve. Defaults to 1000. Set to None for entire table.
+- `head` (optional, boolean): If True (default), retrieve from beginning. If False, retrieve from end.
+- `format` (optional, string): Output format. Options: "auto" (default), "json-row", "json-column", "csv".
+
+**Returns**:
+```json
+{
+  "success": true,
+  "table_name": "my_table",
+  "format": "json-column",
+  "schema": [
+    {"name": "col1", "type": "int64"},
+    {"name": "col2", "type": "string"}
+  ],
+  "row_count": 100,
+  "is_complete": true,
+  "data": {
+    "col1": [1, 2, 3],
+    "col2": ["a", "b", "c"]
+  }
+}
+```
+
+On error:
+```json
+{
+  "success": false,
+  "error": "Error message",
+  "isError": true
+}
+```
+
+**Description**: This tool retrieves actual table data with flexible output formatting and safety limits. It supports multiple formats optimized for different use cases: json-row for iteration, json-column for analysis, and csv for large datasets. The tool includes automatic format selection and enforces a 50MB response limit to prevent memory issues. The `is_complete` field indicates whether the entire table was retrieved or truncated by `max_rows`.
+
+##### `get_table_meta`
+
+**Purpose**: Retrieve metadata (schema) information for a specified table.
+
+**Parameters**:
+- `session_id` (required, string): ID of the Deephaven session to query.
+- `table_name` (required, string): Name of the table to retrieve metadata for.
+
+**Returns**:
+```json
+{
+  "success": true,
+  "table_name": "my_table",
+  "format": "json-row",
+  "meta_columns": [
+    {"name": "Name", "type": "string"},
+    {"name": "DataType", "type": "string"},
+    {"name": "IsPartitioning", "type": "bool"}
+  ],
+  "row_count": 3,
+  "is_complete": true,
+  "data": [
+    {"Name": "col1", "DataType": "int", "IsPartitioning": false},
+    {"Name": "col2", "DataType": "java.lang.String", "IsPartitioning": false},
+    {"Name": "col3", "DataType": "double", "IsPartitioning": true}
+  ]
+}
+```
+
+On error:
+```json
+{
+  "success": false,
+  "error": "Error message",
+  "isError": true
+}
+```
+
+**Description**: This tool retrieves comprehensive table metadata including column names, data types, and properties like partitioning information. Unlike `get_table_data`, this tool focuses on table structure rather than actual data, making it ideal for schema discovery and validation. The metadata is always returned in json-row format and includes detailed type information specific to Deephaven's type system.
 
 #### Systems Server Test Components
 

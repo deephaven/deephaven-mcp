@@ -1776,3 +1776,429 @@ async def test_get_session_details_success_without_programming_language():
     assert result["session"]["liveness_status"] == "ONLINE"
     assert "programming_language" not in result["session"]
     assert result["session"]["liveness_detail"] == "All systems operational"
+
+
+# === Helper Functions ===
+
+
+def test_check_response_size_acceptable():
+    """Test _check_response_size with acceptable size."""
+    result = mcp_mod._check_response_size("test_table", 1000000)  # 1MB
+    assert result is None
+
+
+def test_check_response_size_warning_threshold():
+    """Test _check_response_size with size above warning threshold."""
+    with patch('deephaven_mcp.mcp_systems_server._mcp._LOGGER') as mock_logger:
+        result = mcp_mod._check_response_size("test_table", 10000000)  # 10MB
+        assert result is None
+        mock_logger.warning.assert_called_once()
+        assert "Large response (~10.0MB)" in mock_logger.warning.call_args[0][0]
+
+
+def test_check_response_size_over_limit():
+    """Test _check_response_size with size over maximum limit."""
+    result = mcp_mod._check_response_size("test_table", 60000000)  # 60MB
+    assert result == {
+        "success": False,
+        "error": "Response would be ~60.0MB (max 50MB). Please reduce max_rows.",
+        "isError": True
+    }
+
+
+def test_format_table_data_auto_small():
+    """Test _format_table_data with auto format for small table."""
+    mock_table = MagicMock()
+    mock_table.to_pydict.return_value = {"col1": [1, 2], "col2": ["a", "b"]}
+    
+    format_type, data = mcp_mod._format_table_data(mock_table, "auto", 50)
+    
+    assert format_type == "json-column"
+    assert data == {"col1": [1, 2], "col2": ["a", "b"]}
+    mock_table.to_pydict.assert_called_once()
+
+
+def test_format_table_data_auto_large():
+    """Test _format_table_data with auto format for large table."""
+    mock_table = MagicMock()
+    
+    # Mock CSV writing
+    with patch('deephaven_mcp.mcp_systems_server._mcp.io.BytesIO') as mock_bytesio, \
+         patch('deephaven_mcp.mcp_systems_server._mcp.csv.write_csv') as mock_write_csv:
+        
+        mock_output = MagicMock()
+        mock_output.getvalue.return_value = b"col1,col2\n1,a\n2,b"
+        mock_bytesio.return_value = mock_output
+        
+        format_type, data = mcp_mod._format_table_data(mock_table, "auto", 200)
+        
+        assert format_type == "csv"
+        assert data == "col1,col2\n1,a\n2,b"
+        mock_write_csv.assert_called_once_with(mock_table, mock_output)
+
+
+def test_format_table_data_json_row():
+    """Test _format_table_data with json-row format."""
+    mock_table = MagicMock()
+    mock_table.to_pylist.return_value = [{"col1": 1, "col2": "a"}, {"col1": 2, "col2": "b"}]
+    
+    format_type, data = mcp_mod._format_table_data(mock_table, "json-row", 100)
+    
+    assert format_type == "json-row"
+    assert data == [{"col1": 1, "col2": "a"}, {"col1": 2, "col2": "b"}]
+    mock_table.to_pylist.assert_called_once()
+
+
+def test_format_table_data_json_column():
+    """Test _format_table_data with json-column format."""
+    mock_table = MagicMock()
+    mock_table.to_pydict.return_value = {"col1": [1, 2], "col2": ["a", "b"]}
+    
+    format_type, data = mcp_mod._format_table_data(mock_table, "json-column", 100)
+    
+    assert format_type == "json-column"
+    assert data == {"col1": [1, 2], "col2": ["a", "b"]}
+    mock_table.to_pydict.assert_called_once()
+
+
+def test_format_table_data_csv():
+    """Test _format_table_data with csv format."""
+    mock_table = MagicMock()
+    
+    with patch('deephaven_mcp.mcp_systems_server._mcp.io.BytesIO') as mock_bytesio, \
+         patch('deephaven_mcp.mcp_systems_server._mcp.csv.write_csv') as mock_write_csv:
+        
+        mock_output = MagicMock()
+        mock_output.getvalue.return_value = b"col1,col2\n1,a\n2,b"
+        mock_bytesio.return_value = mock_output
+        
+        format_type, data = mcp_mod._format_table_data(mock_table, "csv", 100)
+        
+        assert format_type == "csv"
+        assert data == "col1,col2\n1,a\n2,b"
+        mock_write_csv.assert_called_once_with(mock_table, mock_output)
+
+
+def test_format_table_data_invalid_format():
+    """Test _format_table_data with invalid format."""
+    mock_table = MagicMock()
+    
+    with pytest.raises(ValueError, match="Unsupported format: invalid"):
+        mcp_mod._format_table_data(mock_table, "invalid", 100)
+
+
+# === get_table_data ===
+
+
+@pytest.mark.asyncio
+async def test_get_table_data_success_default_params():
+    """Test get_table_data with default parameters."""
+    # Mock context and session registry
+    mock_registry = MagicMock()
+    mock_session_manager = MagicMock()
+    mock_session = MagicMock()
+    
+    mock_registry.get = AsyncMock(return_value=mock_session_manager)
+    mock_session_manager.get = AsyncMock(return_value=mock_session)
+    
+    context = MockContext({"session_registry": mock_registry})
+    
+    # Mock arrow table (small size to trigger json-column format)
+    mock_arrow_table = MagicMock()
+    mock_arrow_table.__len__ = MagicMock(return_value=50)  # Small size -> json-column
+    mock_field1 = MagicMock()
+    mock_field1.name = "col1"
+    mock_field1.type = "int64"
+    mock_field2 = MagicMock()
+    mock_field2.name = "col2"
+    mock_field2.type = "string"
+    mock_arrow_table.schema = [mock_field1, mock_field2]
+    mock_arrow_table.to_pydict.return_value = {"col1": [1, 2, 3], "col2": ["a", "b", "c"]}
+    
+    with patch('deephaven_mcp.mcp_systems_server._mcp.queries.get_table') as mock_get_table:
+        mock_get_table.return_value = (mock_arrow_table, True)
+        
+        result = await mcp_mod.get_table_data(context, "session1", "table1")
+        
+        assert result["success"] is True
+        assert result["table_name"] == "table1"
+        assert result["format"] == "json-column"  # Auto format for small table (≤100)
+        assert result["row_count"] == 50
+        assert result["is_complete"] is True
+        assert "schema" in result
+        assert "data" in result
+        
+        # Verify queries.get_table was called with correct parameters
+        mock_get_table.assert_called_once_with(mock_session, "table1", max_rows=1000, head=True)
+
+
+@pytest.mark.asyncio
+async def test_get_table_data_success_custom_params():
+    """Test get_table_data with custom parameters."""
+    mock_registry = MagicMock()
+    mock_session_manager = MagicMock()
+    mock_session = MagicMock()
+    
+    mock_registry.get = AsyncMock(return_value=mock_session_manager)
+    mock_session_manager.get = AsyncMock(return_value=mock_session)
+    
+    context = MockContext({"session_registry": mock_registry})
+    
+    # Mock arrow table
+    mock_arrow_table = MagicMock()
+    mock_arrow_table.__len__ = MagicMock(return_value=50)
+    mock_field = MagicMock()
+    mock_field.name = "col1"
+    mock_field.type = "int64"
+    mock_arrow_table.schema = [mock_field]
+    mock_arrow_table.to_pylist.return_value = [{"col1": 1}, {"col1": 2}]
+    
+    with patch('deephaven_mcp.mcp_systems_server._mcp.queries.get_table') as mock_get_table:
+        mock_get_table.return_value = (mock_arrow_table, False)
+        
+        result = await mcp_mod.get_table_data(
+            context, "session1", "table1", 
+            max_rows=50, head=False, format="json-row"
+        )
+        
+        assert result["success"] is True
+        assert result["format"] == "json-row"
+        assert result["is_complete"] is False
+        
+        mock_get_table.assert_called_once_with(mock_session, "table1", max_rows=50, head=False)
+
+
+@pytest.mark.asyncio
+async def test_get_table_data_success_full_table():
+    """Test get_table_data with max_rows=None for full table."""
+    mock_registry = MagicMock()
+    mock_session_manager = MagicMock()
+    mock_session = MagicMock()
+    
+    mock_registry.get = AsyncMock(return_value=mock_session_manager)
+    mock_session_manager.get = AsyncMock(return_value=mock_session)
+    
+    context = MockContext({"session_registry": mock_registry})
+    
+    # Mock arrow table
+    mock_arrow_table = MagicMock()
+    mock_arrow_table.__len__ = MagicMock(return_value=10000)
+    mock_field = MagicMock()
+    mock_field.name = "col1"
+    mock_field.type = "int64"
+    mock_arrow_table.schema = [mock_field]
+    
+    # Mock CSV output for large table
+    with patch('deephaven_mcp.mcp_systems_server._mcp.io.BytesIO') as mock_bytesio, \
+         patch('deephaven_mcp.mcp_systems_server._mcp.csv.write_csv') as mock_write_csv, \
+         patch('deephaven_mcp.mcp_systems_server._mcp.queries.get_table') as mock_get_table:
+        
+        mock_output = MagicMock()
+        mock_output.getvalue.return_value = b"col1\n1\n2\n3"
+        mock_bytesio.return_value = mock_output
+        
+        mock_get_table.return_value = (mock_arrow_table, True)
+        
+        result = await mcp_mod.get_table_data(context, "session1", "table1", max_rows=None)
+        
+        assert result["success"] is True
+        assert result["format"] == "csv"  # Auto format for large table
+        assert result["is_complete"] is True
+        
+        mock_get_table.assert_called_once_with(mock_session, "table1", max_rows=None, head=True)
+
+
+@pytest.mark.asyncio
+async def test_get_table_data_invalid_format():
+    """Test get_table_data with invalid format parameter."""
+    context = MockContext({"session_registry": MagicMock()})
+    
+    result = await mcp_mod.get_table_data(context, "session1", "table1", format="invalid")
+    
+    assert result["success"] is False
+    assert "Invalid format 'invalid'" in result["error"]
+    assert result["isError"] is True
+
+
+@pytest.mark.asyncio
+async def test_get_table_data_size_limit_exceeded():
+    """Test get_table_data when response size exceeds limit."""
+    mock_registry = MagicMock()
+    mock_session_manager = MagicMock()
+    mock_session = MagicMock()
+    
+    mock_registry.get = AsyncMock(return_value=mock_session_manager)
+    mock_session_manager.get = AsyncMock(return_value=mock_session)
+    
+    context = MockContext({"session_registry": mock_registry})
+    
+    # Mock arrow table with large estimated size
+    mock_arrow_table = MagicMock()
+    mock_arrow_table.__len__ = MagicMock(return_value=1000000)  # Large table
+    mock_arrow_table.schema = [MagicMock() for _ in range(100)]  # Many columns
+    
+    with patch('deephaven_mcp.mcp_systems_server._mcp.queries.get_table') as mock_get_table:
+        mock_get_table.return_value = (mock_arrow_table, True)
+        
+        result = await mcp_mod.get_table_data(context, "session1", "table1")
+        
+        assert result["success"] is False
+        assert "max 50MB" in result["error"]
+        assert result["isError"] is True
+
+
+@pytest.mark.asyncio
+async def test_get_table_data_session_not_found():
+    """Test get_table_data when session is not found."""
+    mock_registry = MagicMock()
+    mock_registry.get = AsyncMock(side_effect=Exception("Session not found"))
+    
+    context = MockContext({"session_registry": mock_registry})
+    
+    result = await mcp_mod.get_table_data(context, "invalid_session", "table1")
+    
+    assert result["success"] is False
+    assert "Session not found" in result["error"]
+    assert result["isError"] is True
+
+
+@pytest.mark.asyncio
+async def test_get_table_data_table_not_found():
+    """Test get_table_data when table is not found."""
+    mock_registry = MagicMock()
+    mock_session_manager = MagicMock()
+    mock_session = MagicMock()
+    
+    mock_registry.get = AsyncMock(return_value=mock_session_manager)
+    mock_session_manager.get = AsyncMock(return_value=mock_session)
+    
+    context = MockContext({"session_registry": mock_registry})
+    
+    with patch('deephaven_mcp.mcp_systems_server._mcp.queries.get_table') as mock_get_table:
+        mock_get_table.side_effect = Exception("Table 'invalid_table' not found")
+        
+        result = await mcp_mod.get_table_data(context, "session1", "invalid_table")
+        
+        assert result["success"] is False
+        assert "Table 'invalid_table' not found" in result["error"]
+        assert result["isError"] is True
+
+
+# === get_table_meta ===
+
+
+@pytest.mark.asyncio
+async def test_get_table_meta_success():
+    """Test get_table_meta successful metadata retrieval."""
+    mock_registry = MagicMock()
+    mock_session_manager = MagicMock()
+    mock_session = MagicMock()
+    
+    mock_registry.get = AsyncMock(return_value=mock_session_manager)
+    mock_session_manager.get = AsyncMock(return_value=mock_session)
+    
+    context = MockContext({"session_registry": mock_registry})
+    
+    # Mock meta arrow table
+    mock_meta_table = MagicMock()
+    mock_meta_table.__len__ = MagicMock(return_value=3)
+    mock_field1 = MagicMock()
+    mock_field1.name = "Name"
+    mock_field1.type = "string"
+    mock_field2 = MagicMock()
+    mock_field2.name = "DataType"
+    mock_field2.type = "string"
+    mock_field3 = MagicMock()
+    mock_field3.name = "IsPartitioning"
+    mock_field3.type = "bool"
+    mock_meta_table.schema = [mock_field1, mock_field2, mock_field3]
+    mock_meta_table.to_pylist.return_value = [
+        {"Name": "col1", "DataType": "int64", "IsPartitioning": False},
+        {"Name": "col2", "DataType": "string", "IsPartitioning": False},
+        {"Name": "col3", "DataType": "double", "IsPartitioning": True}
+    ]
+    
+    with patch('deephaven_mcp.mcp_systems_server._mcp.queries.get_meta_table') as mock_get_meta:
+        mock_get_meta.return_value = mock_meta_table
+        
+        result = await mcp_mod.get_table_meta(context, "session1", "table1")
+        
+        assert result["success"] is True
+        assert result["table_name"] == "table1"
+        assert result["format"] == "json-row"
+        assert result["row_count"] == 3
+        assert result["is_complete"] is True
+        assert len(result["meta_columns"]) == 3
+        assert result["data"] == [
+            {"Name": "col1", "DataType": "int64", "IsPartitioning": False},
+            {"Name": "col2", "DataType": "string", "IsPartitioning": False},
+            {"Name": "col3", "DataType": "double", "IsPartitioning": True}
+        ]
+        
+        mock_get_meta.assert_called_once_with(mock_session, "table1")
+
+
+@pytest.mark.asyncio
+async def test_get_table_meta_session_not_found():
+    """Test get_table_meta when session is not found."""
+    mock_registry = MagicMock()
+    mock_registry.get = AsyncMock(side_effect=Exception("Session not found"))
+    
+    context = MockContext({"session_registry": mock_registry})
+    
+    result = await mcp_mod.get_table_meta(context, "invalid_session", "table1")
+    
+    assert result["success"] is False
+    assert "Session not found" in result["error"]
+    assert result["isError"] is True
+
+
+@pytest.mark.asyncio
+async def test_get_table_meta_table_not_found():
+    """Test get_table_meta when table is not found."""
+    mock_registry = MagicMock()
+    mock_session_manager = MagicMock()
+    mock_session = MagicMock()
+    
+    mock_registry.get = AsyncMock(return_value=mock_session_manager)
+    mock_session_manager.get = AsyncMock(return_value=mock_session)
+    
+    context = MockContext({"session_registry": mock_registry})
+    
+    with patch('deephaven_mcp.mcp_systems_server._mcp.queries.get_meta_table') as mock_get_meta:
+        mock_get_meta.side_effect = Exception("Table 'invalid_table' not found")
+        
+        result = await mcp_mod.get_table_meta(context, "session1", "invalid_table")
+        
+        assert result["success"] is False
+        assert "Table 'invalid_table' not found" in result["error"]
+        assert result["isError"] is True
+
+
+@pytest.mark.asyncio
+async def test_get_table_meta_empty_schema():
+    """Test get_table_meta with empty schema (edge case)."""
+    mock_registry = MagicMock()
+    mock_session_manager = MagicMock()
+    mock_session = MagicMock()
+    
+    mock_registry.get = AsyncMock(return_value=mock_session_manager)
+    mock_session_manager.get = AsyncMock(return_value=mock_session)
+    
+    context = MockContext({"session_registry": mock_registry})
+    
+    # Mock empty meta table
+    mock_meta_table = MagicMock()
+    mock_meta_table.__len__ = MagicMock(return_value=0)
+    mock_meta_table.schema = []
+    mock_meta_table.to_pylist.return_value = []
+    
+    with patch('deephaven_mcp.mcp_systems_server._mcp.queries.get_meta_table') as mock_get_meta:
+        mock_get_meta.return_value = mock_meta_table
+        
+        result = await mcp_mod.get_table_meta(context, "session1", "empty_table")
+        
+        assert result["success"] is True
+        assert result["row_count"] == 0
+        assert result["meta_columns"] == []
+        assert result["data"] == []
