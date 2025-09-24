@@ -34,7 +34,7 @@ Requirements:
 import argparse
 import datetime
 import random
-import time
+from time import sleep
 
 from deephaven_server import Server
 
@@ -271,7 +271,7 @@ else:
 print("Press Ctrl+C to exit")
 try:
     while True:
-        time.sleep(1)
+        sleep(1)
 except KeyboardInterrupt:
     print("Exiting Deephaven...")
     server.stop()

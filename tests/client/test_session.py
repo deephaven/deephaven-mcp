@@ -2,7 +2,7 @@ import asyncio
 import os
 import sys
 import types
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
 
@@ -89,6 +89,7 @@ class DummySession:
     def is_alive(self):
         return True
 
+    @property
     def tables(self):
         return ["foo", "bar"]
 
@@ -202,16 +203,18 @@ async def test_tables_success(core_session):
 
 @pytest.mark.asyncio
 async def test_tables_connection_error(core_session):
-    core_session.wrapped.tables = MagicMock(side_effect=ConnectionError("fail"))
-    with pytest.raises(DeephavenConnectionError):
-        await core_session.tables()
+    with patch.object(type(core_session.wrapped), 'tables', new_callable=PropertyMock) as mock_tables:
+        mock_tables.side_effect = ConnectionError("fail")
+        with pytest.raises(DeephavenConnectionError):
+            await core_session.tables()
 
 
 @pytest.mark.asyncio
 async def test_tables_other_error(core_session):
-    core_session.wrapped.tables = MagicMock(side_effect=Exception("fail"))
-    with pytest.raises(QueryError):
-        await core_session.tables()
+    with patch.object(type(core_session.wrapped), 'tables', new_callable=PropertyMock) as mock_tables:
+        mock_tables.side_effect = Exception("fail")
+        with pytest.raises(QueryError):
+            await core_session.tables()
 
 
 @pytest.mark.asyncio

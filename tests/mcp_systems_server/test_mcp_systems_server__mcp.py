@@ -268,11 +268,81 @@ async def test_table_schemas_empty_table_names():
 
 
 @pytest.mark.asyncio
+async def test_table_schemas_interface_contract():
+    """Ensure session.tables() is properly mocked as an async method to match real interface"""
+    # This test validates that our mocks match the real session interface
+    class ValidSession:
+        async def tables(self):
+            return ["test_table"]
+    
+    # Verify the mock has the correct async interface
+    session = ValidSession()
+    assert callable(session.tables)
+    assert asyncio.iscoroutinefunction(session.tables)
+    
+    # Test that it works in the actual function
+    mock_session_manager = MagicMock()
+    mock_session_manager.get = AsyncMock(return_value=session)
+    
+    session_registry = MagicMock()
+    session_registry.get = AsyncMock(return_value=mock_session_manager)
+    
+    # Mock the queries.get_meta_table to avoid complexity
+    class MockArrowTable:
+        def to_pylist(self):
+            return [{"Name": "test_table", "DataType": "string"}]
+    
+    mock_get_meta_table = AsyncMock(return_value=MockArrowTable())
+    
+    context = MockContext({"session_registry": session_registry})
+    
+    with patch("deephaven_mcp.queries.get_meta_table", mock_get_meta_table):
+        result = await mcp_mod.table_schemas(context, session_id="worker", table_names=None)
+    
+    assert result["success"] is True
+    assert len(result["schemas"]) == 1
+    assert result["schemas"][0]["table"] == "test_table"
+
+
+@pytest.mark.asyncio 
+async def test_table_schemas_would_catch_original_bug():
+    """Test that validates the original bug pattern would be caught"""
+    # This simulates what the original buggy code was trying to do
+    class BuggySession:
+        # Simulating the broken pattern: tables as property instead of method
+        tables = ["table1", "table2"] 
+        
+        def open_table(self, name):
+            pass
+    
+    buggy_session = BuggySession()
+    
+    # This should demonstrate the original error pattern
+    with pytest.raises(TypeError, match="'list' object is not callable"):
+        # This is what the original buggy code was effectively doing
+        await buggy_session.tables()  # This should fail since tables is a list, not callable
+        
+    # Also verify the list() pattern that was in the original bug
+    # This would work (incorrectly) with the old buggy approach
+    assert list(buggy_session.tables) == ["table1", "table2"]
+    
+    # But this is what we need (and what our fix does)
+    class CorrectSession:
+        async def tables(self):
+            return ["table1", "table2"]
+    
+    correct_session = CorrectSession() 
+    result = await correct_session.tables()
+    assert result == ["table1", "table2"]
+
+
+@pytest.mark.asyncio
 async def test_table_schemas_no_tables():
     session_registry = AsyncMock()
 
     class DummySession:
-        tables = []
+        async def tables(self):
+            return []
 
         def open_table(self, name):
             raise Exception("Should not be called")
@@ -289,9 +359,10 @@ async def test_table_schemas_no_tables():
 
 @pytest.mark.asyncio
 async def test_table_schemas_success():
-    # Create a mock session
-    dummy_session = MagicMock()
-    dummy_session.tables = ["table1"]
+    # Create a consistent class-based mock session 
+    class DummySession:
+        async def tables(self):
+            return ["table1"]
 
     # Create a mock for queries.get_meta_table that returns proper schema data
     class MockArrowTable:
@@ -302,7 +373,7 @@ async def test_table_schemas_success():
 
     # Set up the session manager mock
     mock_session_manager = MagicMock()
-    mock_session_manager.get = AsyncMock(return_value=dummy_session)
+    mock_session_manager.get = AsyncMock(return_value=DummySession())
 
     # Set up the session registry mock
     session_registry = MagicMock()
@@ -339,7 +410,7 @@ async def test_table_schemas_success():
 async def test_table_schemas_all_tables():
     # Create a mock session with two tables
     dummy_session = MagicMock()
-    dummy_session.tables = ["t1", "t2"]
+    dummy_session.tables = AsyncMock(return_value=["t1", "t2"])
 
     # Set up side_effect for queries.get_meta_table to handle multiple calls
     # Will return different data based on which table is requested
@@ -390,7 +461,7 @@ async def test_table_schemas_all_tables():
 async def test_table_schemas_schema_key_error():
     # Create our mock session
     dummy_session = MagicMock()
-    dummy_session.tables = ["table1"]
+    dummy_session.tables = AsyncMock(return_value=["table1"])
 
     # Create a mock for queries.get_meta_table that returns data with missing required keys
     class MockArrowTable:

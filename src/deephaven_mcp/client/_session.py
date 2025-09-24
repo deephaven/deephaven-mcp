@@ -958,7 +958,7 @@ class BaseSession(ClientObjectWrapper[T], Generic[T]):
         """
         _LOGGER.debug("[CoreSession:tables] Called")
         try:
-            return await asyncio.to_thread(self.wrapped.tables)
+            return await asyncio.to_thread(lambda: self.wrapped.tables)
         except ConnectionError as e:
             _LOGGER.error(f"[CoreSession:tables] Connection error listing tables: {e}")
             raise DeephavenConnectionError(

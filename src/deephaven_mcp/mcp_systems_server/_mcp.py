@@ -191,6 +191,9 @@ async def refresh(context: Context) -> dict:
         async with refresh_lock:
             await config_manager.clear_config_cache()
             await session_registry.close()
+            # Reset the initialized flag to allow reinitialization
+            session_registry._initialized = False
+            await session_registry.initialize(config_manager)
         _LOGGER.info(
             "[mcp_systems_server:refresh] Success: Worker configuration and session cache have been reloaded."
         )
@@ -795,7 +798,7 @@ async def table_schemas(
             _LOGGER.debug(
                 f"[mcp_systems_server:table_schemas] Discovering available tables in session '{session_id}'"
             )
-            selected_table_names = list(session.tables)
+            selected_table_names = await session.tables()
             _LOGGER.info(
                 f"[mcp_systems_server:table_schemas] Fetching schemas for all tables in worker: {selected_table_names!r}"
             )
