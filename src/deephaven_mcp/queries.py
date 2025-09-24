@@ -30,33 +30,109 @@ from deephaven_mcp.client._session import BaseSession
 _LOGGER = logging.getLogger(__name__)
 
 
-async def get_table(session: BaseSession, table_name: str) -> pyarrow.Table:
+async def get_table(
+    session: BaseSession, table_name: str, *, max_rows: int | None, head: bool = True
+) -> tuple[pyarrow.Table, bool]:
     """
     Asynchronously retrieve a Deephaven table as a pyarrow.Table snapshot from a live session.
 
-    This helper uses the async methods of BaseSession to open the specified table and convert it to a pyarrow.Table, suitable for further processing or inspection.
+    This helper uses the async methods of BaseSession to open the specified table and convert it to a pyarrow.Table,
+    suitable for further processing or inspection. For safety with large tables, the max_rows parameter is required
+    to force intentional usage.
 
     Args:
         session (BaseSession): An active Deephaven session. Must not be closed.
         table_name (str): The name of the table to retrieve.
+        max_rows (int | None): Maximum number of rows to retrieve. Must be specified as keyword argument.
+                               Set to None to retrieve the entire table (use with extreme caution for large tables).
+                               Set to a positive integer to limit rows (recommended for production use).
+        head (bool): If True and max_rows is not None, retrieve rows from the beginning using head().
+                    If False and max_rows is not None, retrieve rows from the end using tail().
+                    This parameter is ignored when max_rows=None (full table retrieval). Default is True.
 
     Returns:
-        pyarrow.Table: The requested table as a pyarrow.Table snapshot.
+        tuple[pyarrow.Table, bool]: A tuple containing:
+            - pyarrow.Table: The requested table (or subset) as a pyarrow.Table snapshot
+            - bool: True if the entire table was retrieved, False if only a subset was returned
 
     Raises:
         Exception: If the table does not exist, the session is closed, or if conversion to Arrow fails.
 
+    Warning:
+        Setting max_rows=None on large tables (millions/billions of rows) can cause memory exhaustion and system crashes.
+        Always use a reasonable row limit in production environments.
+
+    Examples:
+        # Safe usage with row limit from beginning
+        table, is_complete = await get_table(session, "my_table", max_rows=1000)
+
+        # Get last 1000 rows
+        table, is_complete = await get_table(session, "my_table", max_rows=1000, head=False)
+
+        # Full table retrieval (dangerous for large tables)
+        table, is_complete = await get_table(session, "small_table", max_rows=None)  # is_complete will be True
+
     Note:
-        - Logging is performed at DEBUG level for entry, exit, and error tracing.
-        - This function is intended for internal use only.
+        - max_rows must be specified as a keyword argument to force intentional usage
+        - head parameter is ignored when max_rows=None
+        - Logging is performed at DEBUG level for entry, exit, and error tracing
+        - This function is intended for internal use only
     """
     _LOGGER.debug(
-        "[queries:get_table] Retrieving table '%s' from session...", table_name
+        "[queries:get_table] Retrieving table '%s' from session (max_rows=%s, head=%s)...",
+        table_name,
+        max_rows,
+        head,
     )
-    table = await session.open_table(table_name)
+
+    # Open the table
+    original_table = await session.open_table(table_name)
+    is_complete = False
+
+    # Apply row limiting if specified
+    if max_rows is not None:
+        # Get original table size before applying limits
+        original_size = await asyncio.to_thread(lambda: original_table.size)
+
+        if head:
+            table = await asyncio.to_thread(lambda: original_table.head(max_rows))
+            _LOGGER.debug(
+                "[queries:get_table] Limited to first %d rows of table '%s'",
+                max_rows,
+                table_name,
+            )
+        else:
+            table = await asyncio.to_thread(lambda: original_table.tail(max_rows))
+            _LOGGER.debug(
+                "[queries:get_table] Limited to last %d rows of table '%s'",
+                max_rows,
+                table_name,
+            )
+
+        # Determine if we got the complete table
+        is_complete = original_size <= max_rows
+        _LOGGER.debug(
+            "[queries:get_table] Original table '%s' has %d total rows",
+            table_name,
+            original_size,
+        )
+    else:
+        # Full table requested - log warning for safety
+        table = original_table
+        _LOGGER.warning(
+            "[queries:get_table] Retrieving ENTIRE table '%s' - this may cause memory issues for large tables!",
+            table_name,
+        )
+        is_complete = True
+
+    # Convert to Arrow format (single conversion point)
     arrow_table = await asyncio.to_thread(table.to_arrow)
-    _LOGGER.debug("[queries:get_table] Table '%s' retrieved successfully.", table_name)
-    return arrow_table
+
+    _LOGGER.debug(
+        "[queries:get_table] Table '%s' converted to Arrow format successfully.",
+        table_name,
+    )
+    return arrow_table, is_complete
 
 
 async def get_meta_table(session: BaseSession, table_name: str) -> pyarrow.Table:
@@ -171,7 +247,7 @@ async def get_programming_language_version_table(session: BaseSession) -> pyarro
     _LOGGER.debug(
         "[queries:get_programming_language_version_table] Script executed successfully."
     )
-    arrow_table = await get_table(session, "_python_version_table")
+    arrow_table, _ = await get_table(session, "_python_version_table", max_rows=None)
     _LOGGER.debug(
         "[queries:get_programming_language_version_table] Table '_python_version_table' retrieved successfully."
     )
@@ -269,7 +345,7 @@ async def get_pip_packages_table(session: BaseSession) -> pyarrow.Table:
     )
     await session.run_script(script)
     _LOGGER.debug("[queries:get_pip_packages_table] Script executed successfully.")
-    arrow_table = await get_table(session, "_pip_packages_table")
+    arrow_table, _ = await get_table(session, "_pip_packages_table", max_rows=None)
     _LOGGER.debug(
         "[queries:get_pip_packages_table] Table '_pip_packages_table' retrieved successfully."
     )

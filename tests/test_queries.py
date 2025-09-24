@@ -17,15 +17,22 @@ from deephaven_mcp.queries import (
 
 
 @pytest.mark.asyncio
-async def test_get_table_success():
+async def test_get_table_success_full_table():
+    """Test get_table with max_rows=None (full table)"""
     table_mock = MagicMock()
     arrow_mock = MagicMock(spec=pyarrow.Table)
     table_mock.to_arrow = lambda: arrow_mock
     session_mock = MagicMock()
     session_mock.open_table = AsyncMock(return_value=table_mock)
-    result = await get_table(session_mock, "foo")
-    assert result is arrow_mock
-    session_mock.open_table.assert_awaited_once_with("foo")
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with patch("deephaven_mcp.queries.asyncio.to_thread", new=fake_to_thread):
+        result_table, is_complete = await get_table(session_mock, "foo", max_rows=None)
+        assert result_table is arrow_mock
+        assert is_complete is True
+        session_mock.open_table.assert_awaited_once_with("foo")
 
 
 @pytest.mark.asyncio
@@ -33,7 +40,7 @@ async def test_get_table_open_table_error():
     session_mock = MagicMock()
     session_mock.open_table = AsyncMock(side_effect=RuntimeError("fail open"))
     with pytest.raises(RuntimeError, match="fail open"):
-        await get_table(session_mock, "foo")
+        await get_table(session_mock, "foo", max_rows=None)
 
 
 @pytest.mark.asyncio
@@ -42,8 +49,175 @@ async def test_get_table_to_arrow_error():
     table_mock.to_arrow = MagicMock(side_effect=RuntimeError("fail arrow"))
     session_mock = MagicMock()
     session_mock.open_table = AsyncMock(return_value=table_mock)
-    with pytest.raises(RuntimeError, match="fail arrow"):
-        await get_table(session_mock, "foo")
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with patch("deephaven_mcp.queries.asyncio.to_thread", new=fake_to_thread):
+        with pytest.raises(RuntimeError, match="fail arrow"):
+            await get_table(session_mock, "foo", max_rows=None)
+
+
+@pytest.mark.asyncio
+async def test_get_table_head_complete_table():
+    """Test get_table with head=True when table is smaller than max_rows"""
+    original_table_mock = MagicMock()
+    original_table_mock.size = 500  # Table has 500 rows
+    head_table_mock = MagicMock()
+    arrow_mock = MagicMock(spec=pyarrow.Table)
+    arrow_mock.__len__ = lambda: 500  # Arrow table also has 500 rows
+    head_table_mock.to_arrow = lambda: arrow_mock
+    original_table_mock.head = lambda n: head_table_mock
+
+    session_mock = MagicMock()
+    session_mock.open_table = AsyncMock(return_value=original_table_mock)
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with patch("deephaven_mcp.queries.asyncio.to_thread", new=fake_to_thread):
+        result_table, is_complete = await get_table(
+            session_mock, "foo", max_rows=1000, head=True
+        )
+        assert result_table is arrow_mock
+        assert is_complete is True  # 500 <= 1000, so complete
+
+
+@pytest.mark.asyncio
+async def test_get_table_head_incomplete_table():
+    """Test get_table with head=True when table is larger than max_rows"""
+    original_table_mock = MagicMock()
+    original_table_mock.size = 2000  # Table has 2000 rows
+    head_table_mock = MagicMock()
+    arrow_mock = MagicMock(spec=pyarrow.Table)
+    arrow_mock.__len__ = lambda: 1000  # Arrow table has 1000 rows (limited)
+    head_table_mock.to_arrow = lambda: arrow_mock
+    original_table_mock.head = lambda n: head_table_mock
+
+    session_mock = MagicMock()
+    session_mock.open_table = AsyncMock(return_value=original_table_mock)
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with patch("deephaven_mcp.queries.asyncio.to_thread", new=fake_to_thread):
+        result_table, is_complete = await get_table(
+            session_mock, "foo", max_rows=1000, head=True
+        )
+        assert result_table is arrow_mock
+        assert is_complete is False  # 2000 > 1000, so incomplete
+
+
+@pytest.mark.asyncio
+async def test_get_table_tail_complete_table():
+    """Test get_table with head=False (tail) when table is smaller than max_rows"""
+    original_table_mock = MagicMock()
+    original_table_mock.size = 300  # Table has 300 rows
+    tail_table_mock = MagicMock()
+    arrow_mock = MagicMock(spec=pyarrow.Table)
+    arrow_mock.__len__ = lambda: 300  # Arrow table has 300 rows
+    tail_table_mock.to_arrow = lambda: arrow_mock
+    original_table_mock.tail = lambda n: tail_table_mock
+
+    session_mock = MagicMock()
+    session_mock.open_table = AsyncMock(return_value=original_table_mock)
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with patch("deephaven_mcp.queries.asyncio.to_thread", new=fake_to_thread):
+        result_table, is_complete = await get_table(
+            session_mock, "foo", max_rows=500, head=False
+        )
+        assert result_table is arrow_mock
+        assert is_complete is True  # 300 <= 500, so complete
+
+
+@pytest.mark.asyncio
+async def test_get_table_tail_incomplete_table():
+    """Test get_table with head=False (tail) when table is larger than max_rows"""
+    original_table_mock = MagicMock()
+    original_table_mock.size = 1500  # Table has 1500 rows
+    tail_table_mock = MagicMock()
+    arrow_mock = MagicMock(spec=pyarrow.Table)
+    arrow_mock.__len__ = lambda: 800  # Arrow table has 800 rows (limited)
+    tail_table_mock.to_arrow = lambda: arrow_mock
+    original_table_mock.tail = lambda n: tail_table_mock
+
+    session_mock = MagicMock()
+    session_mock.open_table = AsyncMock(return_value=original_table_mock)
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with patch("deephaven_mcp.queries.asyncio.to_thread", new=fake_to_thread):
+        result_table, is_complete = await get_table(
+            session_mock, "foo", max_rows=800, head=False
+        )
+        assert result_table is arrow_mock
+        assert is_complete is False  # 1500 > 800, so incomplete
+
+
+@pytest.mark.asyncio
+async def test_get_table_exact_size_match():
+    """Test get_table when original table size exactly matches max_rows"""
+    original_table_mock = MagicMock()
+    original_table_mock.size = 1000  # Table has exactly 1000 rows
+    head_table_mock = MagicMock()
+    arrow_mock = MagicMock(spec=pyarrow.Table)
+    arrow_mock.__len__ = lambda: 1000  # Arrow table has 1000 rows
+    head_table_mock.to_arrow = lambda: arrow_mock
+    original_table_mock.head = lambda n: head_table_mock
+
+    session_mock = MagicMock()
+    session_mock.open_table = AsyncMock(return_value=original_table_mock)
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with patch("deephaven_mcp.queries.asyncio.to_thread", new=fake_to_thread):
+        result_table, is_complete = await get_table(
+            session_mock, "foo", max_rows=1000, head=True
+        )
+        assert result_table is arrow_mock
+        assert is_complete is True  # 1000 <= 1000, so complete
+
+
+@pytest.mark.asyncio
+async def test_get_table_keyword_only_max_rows():
+    """Test that max_rows must be specified as keyword argument"""
+    session_mock = MagicMock()
+
+    # This should raise TypeError because max_rows is keyword-only
+    with pytest.raises(TypeError):
+        await get_table(session_mock, "foo", 1000)  # Positional argument should fail
+
+
+@pytest.mark.asyncio
+async def test_get_table_head_parameter_ignored_with_full_table():
+    """Test that head parameter is ignored when max_rows=None"""
+    table_mock = MagicMock()
+    arrow_mock = MagicMock(spec=pyarrow.Table)
+    table_mock.to_arrow = lambda: arrow_mock
+    session_mock = MagicMock()
+    session_mock.open_table = AsyncMock(return_value=table_mock)
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with patch("deephaven_mcp.queries.asyncio.to_thread", new=fake_to_thread):
+        # Both head=True and head=False should behave identically with max_rows=None
+        result1, complete1 = await get_table(
+            session_mock, "foo", max_rows=None, head=True
+        )
+        result2, complete2 = await get_table(
+            session_mock, "foo", max_rows=None, head=False
+        )
+
+        assert result1 is arrow_mock
+        assert result2 is arrow_mock
+        assert complete1 is True
+        assert complete2 is True
 
 
 @pytest.mark.asyncio
@@ -115,7 +289,7 @@ async def test_get_pip_packages_table_success(caplog):
         arrow_mock = MagicMock()
         with patch(
             "deephaven_mcp.queries.get_table",
-            AsyncMock(return_value=arrow_mock),
+            AsyncMock(return_value=(arrow_mock, True)),
         ) as mock_get_table:
             with caplog.at_level("DEBUG"):
                 result = await get_pip_packages_table(session_mock)
@@ -124,7 +298,9 @@ async def test_get_pip_packages_table_success(caplog):
             assert "Script executed successfully." in caplog.text
             assert "Table '_pip_packages_table' retrieved successfully." in caplog.text
             session_mock.run_script.assert_awaited_once()
-            mock_get_table.assert_awaited_once_with(session_mock, "_pip_packages_table")
+            mock_get_table.assert_awaited_once_with(
+                session_mock, "_pip_packages_table", max_rows=None
+            )
 
 
 @pytest.mark.asyncio
@@ -304,7 +480,7 @@ async def test_get_programming_language_version_table_success(caplog):
         arrow_mock = MagicMock()
         with patch(
             "deephaven_mcp.queries.get_table",
-            AsyncMock(return_value=arrow_mock),
+            AsyncMock(return_value=(arrow_mock, True)),
         ) as mock_get_table:
             with caplog.at_level("DEBUG"):
                 result = await get_programming_language_version_table(session_mock)
@@ -316,7 +492,7 @@ async def test_get_programming_language_version_table_success(caplog):
             )
             session_mock.run_script.assert_awaited_once()
             mock_get_table.assert_awaited_once_with(
-                session_mock, "_python_version_table"
+                session_mock, "_python_version_table", max_rows=None
             )
 
 

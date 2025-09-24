@@ -17,6 +17,8 @@ Tools Provided:
     - table_schemas: Retrieve schemas for one or more tables from a session (requires session_id).
     - run_script: Execute a script on a specified Deephaven session (requires session_id).
     - pip_packages: Retrieve all installed pip packages (name and version) from a specified Deephaven session using importlib.metadata, returned as a list of dicts.
+    - get_table_data: Retrieve table data with flexible formatting (json-row, json-column, csv) and optional row limiting for safe access to large tables.
+    - get_table_meta: Retrieve table metadata/schema information as structured data describing column types and properties.
 
 Return Types:
     - All tools return structured dict objects, never raise exceptions to the MCP layer.
@@ -27,12 +29,15 @@ See individual tool docstrings for full argument, return, and error details.
 """
 
 import asyncio
+import io
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import TypeVar
 
 import aiofiles
+import pyarrow as pa
+import pyarrow.csv as csv
 from mcp.server.fastmcp import Context, FastMCP
 
 from deephaven_mcp import queries
@@ -49,6 +54,24 @@ from deephaven_mcp.resource_manager._manager import (
 from deephaven_mcp.resource_manager._registry_combined import CombinedSessionRegistry
 
 T = TypeVar("T")
+
+# Response size estimation constants
+# Conservative estimate: ~20 chars + 8 bytes numeric + JSON overhead + safety margin
+ESTIMATED_BYTES_PER_CELL = 50
+"""
+Estimated bytes per table cell for response size calculation.
+
+This rough estimate is used to prevent memory issues when retrieving large tables.
+The estimation assumes:
+- Average string length: ~20 characters (20 bytes)
+- Numeric values: ~8 bytes (int64/double)
+- Null values and metadata: ~5 bytes overhead
+- JSON formatting overhead: ~15-20 bytes per cell
+- Safety margin: 50 bytes total per cell
+
+This conservative estimate helps catch potentially problematic responses before
+expensive formatting operations. Can be tuned based on actual data patterns.
+"""
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -1046,4 +1069,368 @@ async def pip_packages(context: Context, session_id: str) -> dict:
         )
         result["error"] = str(e)
         result["isError"] = True
+    return result
+
+
+# Size limits for table data responses
+MAX_RESPONSE_SIZE = 50_000_000  # 50MB hard limit
+WARNING_SIZE = 5_000_000  # 5MB warning threshold
+
+
+def _check_response_size(table_name: str, estimated_size: int) -> dict | None:
+    """
+    Check if estimated response size is within acceptable limits.
+
+    Evaluates the estimated response size against predefined limits to prevent memory
+    issues and excessive network traffic. Logs warnings for large responses and
+    returns structured error responses for oversized requests.
+
+    Args:
+        table_name (str): Name of the table being processed, used for logging context.
+        estimated_size (int): Estimated response size in bytes.
+
+    Returns:
+        dict | None: Returns None if size is acceptable, or a structured error dict
+                     with 'success': False, 'error': str, 'isError': True if the
+                     response would exceed MAX_RESPONSE_SIZE (50MB).
+
+    Side Effects:
+        - Logs warning message if size exceeds WARNING_SIZE (5MB).
+        - No side effects if size is within acceptable limits.
+    """
+    if estimated_size > WARNING_SIZE:
+        _LOGGER.warning(
+            f"Large response (~{estimated_size/1_000_000:.1f}MB) for table '{table_name}'. "
+            f"Consider reducing max_rows for better performance."
+        )
+
+    if estimated_size > MAX_RESPONSE_SIZE:
+        return {
+            "success": False,
+            "error": f"Response would be ~{estimated_size/1_000_000:.1f}MB (max 50MB). Please reduce max_rows.",
+            "isError": True,
+        }
+
+    return None  # Size is acceptable
+
+
+def _format_table_data(
+    arrow_table: pa.Table, format_type: str, row_count: int
+) -> tuple[str, object]:
+    """
+    Convert Arrow table to specified output format with automatic format selection.
+
+    Transforms PyArrow table data into one of several supported output formats. Supports
+    automatic format selection based on row count to balance performance and usability.
+    Handles memory-efficient CSV conversion and proper JSON serialization.
+
+    Args:
+        arrow_table: PyArrow Table object containing the source data.
+        format_type (str): Desired output format. Must be one of:
+                          - "auto": Automatically selects "json-column" for ≤100 rows, "csv" for >100 rows
+                          - "json-row": Array of objects, each representing a row
+                          - "json-column": Object with column names as keys, arrays as values
+                          - "csv": Comma-separated values as a string
+        row_count (int): Number of rows in the table, used for auto format selection.
+
+    Returns:
+        tuple[str, object]: A 2-tuple containing:
+                           - str: The actual format used ("json-row", "json-column", or "csv")
+                           - object: The formatted data (list, dict, or str depending on format)
+
+    Raises:
+        ValueError: If format_type is not one of the supported formats.
+
+    Performance Notes:
+        - CSV format uses direct Arrow→CSV conversion for memory efficiency
+        - JSON formats create Python object copies, unavoidable for JSON serialization
+        - Auto selection optimizes for small tables (JSON) vs large tables (CSV)
+    """
+    if format_type == "auto":
+        actual_format = "json-column" if row_count <= 100 else "csv"
+    else:
+        actual_format = format_type
+
+    if actual_format == "json-row":
+        return actual_format, arrow_table.to_pylist()
+    elif actual_format == "json-column":
+        return actual_format, arrow_table.to_pydict()
+    elif actual_format == "csv":
+        # Direct Arrow → CSV conversion (most memory efficient)
+        output = io.BytesIO()
+        csv.write_csv(arrow_table, output)
+        # Note: decode() creates a copy, but necessary for JSON serialization
+        return actual_format, output.getvalue().decode("utf-8")
+    else:
+        raise ValueError(f"Unsupported format: {actual_format}")
+
+
+@mcp_server.tool()
+async def get_table_data(
+    context: Context,
+    session_id: str,
+    table_name: str,
+    max_rows: int | None = 1000,
+    head: bool = True,
+    format: str = "auto",
+) -> dict:
+    """
+    MCP Tool: Retrieve table data from a specified Deephaven session with flexible formatting options.
+
+    This tool queries the specified Deephaven session for table data and returns it in the requested format
+    with optional row limiting. Supports multiple output formats and provides completion status to indicate
+    if the entire table was retrieved. Includes safety limits (50MB max response size) to prevent memory issues.
+
+    Args:
+        context (Context): The MCP context object, required by MCP protocol but not actively used.
+        session_id (str): ID of the Deephaven session to query. Must match an existing active session.
+        table_name (str): Name of the table to retrieve data from. Must exist in the specified session.
+        max_rows (int | None, optional): Maximum number of rows to retrieve. Defaults to 1000 for safety.
+                                        Set to None to retrieve entire table (use with caution for large tables).
+        head (bool, optional): Direction of row retrieval. If True (default), retrieve from beginning.
+                              If False, retrieve from end (most recent rows for time-series data).
+        format (str, optional): Output format selection. Defaults to "auto". Options:
+                               - "auto": Selects json-column for ≤100 rows, csv for >100 rows (recommended)
+                               - "json-row": Array of objects [{col1: val1, col2: val2}, ...] (best for iteration)
+                               - "json-column": Object {col1: [val1, val2], col2: [val3, val4]} (best for analysis)
+                               - "csv": Comma-separated string (most memory efficient for large datasets)
+
+    Returns:
+        dict: Structured result object with the following keys:
+            - 'success' (bool): Always present. True if table data was retrieved successfully, False on any error.
+            - 'table_name' (str, optional): Name of the retrieved table if successful. Echoes input for confirmation.
+            - 'format' (str, optional): Actual format used for the data if successful. May differ from request when "auto".
+            - 'schema' (list[dict], optional): Array of column definitions if successful. Each dict contains:
+                                              {'name': str, 'type': str} describing column name and Arrow type.
+            - 'row_count' (int, optional): Number of rows in the returned data if successful. May be less than max_rows.
+            - 'is_complete' (bool, optional): True if entire table was retrieved if successful. False if truncated by max_rows.
+            - 'data' (list | dict | str, optional): The actual table data if successful. Type depends on format:
+                                                   list for json-row, dict for json-column, str for csv.
+            - 'error' (str, optional): Human-readable error message if retrieval failed. Omitted on success.
+            - 'isError' (bool, optional): Present and True only when success=False. Explicit error flag for frameworks.
+
+    Error Scenarios:
+        - Invalid session_id: Returns error if session doesn't exist or is not accessible
+        - Invalid table_name: Returns error if table doesn't exist in the session
+        - Invalid format: Returns error if format is not one of the supported options
+        - Response too large: Returns error if estimated response would exceed 50MB limit
+        - Session connection issues: Returns error if unable to communicate with Deephaven server
+        - Query execution errors: Returns error if table query fails (permissions, syntax, etc.)
+
+    Performance Considerations:
+        - Large tables: Use csv format or limit max_rows to avoid memory issues
+        - Time-series data: Use head=False to get most recent data first
+        - Column analysis: Use json-column format for efficient column-wise operations
+        - Row processing: Use json-row format for record-by-record iteration
+        - Auto format: Recommended for general use, optimizes based on data size
+
+    AI Agent Usage Tips:
+        - Always check 'success' field before accessing data fields
+        - Use 'is_complete' to determine if more data exists beyond max_rows
+        - Monitor 'row_count' vs requested max_rows to detect truncation
+        - Parse 'schema' to understand column types before processing 'data'
+        - Handle both list and dict data types when using auto format
+    """
+    _LOGGER.info(
+        f"[mcp_systems_server:get_table_data] Invoked: session_id={session_id!r}, "
+        f"table_name={table_name!r}, max_rows={max_rows}, head={head}, format={format!r}"
+    )
+
+    result: dict[str, object] = {"success": False}
+
+    try:
+        # Validate format parameter
+        valid_formats = {"auto", "json-row", "json-column", "csv"}
+        if format not in valid_formats:
+            result["error"] = (
+                f"Invalid format '{format}'. Valid options: {', '.join(valid_formats)}"
+            )
+            result["isError"] = True
+            return result
+
+        # Get session registry and session
+        session_registry: CombinedSessionRegistry = (
+            context.request_context.lifespan_context["session_registry"]
+        )
+
+        _LOGGER.debug(
+            f"[mcp_systems_server:get_table_data] Retrieving session '{session_id}'"
+        )
+        session_manager = await session_registry.get(session_id)
+        session = await session_manager.get()
+
+        # Get table data using queries module
+        _LOGGER.debug(
+            f"[mcp_systems_server:get_table_data] Retrieving table data for '{table_name}'"
+        )
+        arrow_table, is_complete = await queries.get_table(
+            session, table_name, max_rows=max_rows, head=head
+        )
+
+        # Check response size before formatting (rough estimation to avoid memory overhead)
+        row_count = len(arrow_table)
+        col_count = len(arrow_table.schema)
+        estimated_size = row_count * col_count * ESTIMATED_BYTES_PER_CELL
+        size_error = _check_response_size(table_name, estimated_size)
+        if size_error:
+            return size_error
+
+        # Format the data
+        actual_format, formatted_data = _format_table_data(
+            arrow_table, format, row_count
+        )
+
+        # Extract schema information
+        schema = [
+            {"name": field.name, "type": str(field.type)}
+            for field in arrow_table.schema
+        ]
+
+        result.update(
+            {
+                "success": True,
+                "table_name": table_name,
+                "format": actual_format,
+                "schema": schema,
+                "row_count": len(arrow_table),
+                "is_complete": is_complete,
+                "data": formatted_data,
+            }
+        )
+
+        _LOGGER.info(
+            f"[mcp_systems_server:get_table_data] Success: Retrieved {len(arrow_table)} rows "
+            f"from table '{table_name}' in format '{actual_format}' (complete: {is_complete})"
+        )
+
+    except Exception as e:
+        _LOGGER.error(
+            f"[mcp_systems_server:get_table_data] Failed for session '{session_id}', "
+            f"table '{table_name}': {e!r}",
+            exc_info=True,
+        )
+        result["error"] = str(e)
+        result["isError"] = True
+
+    return result
+
+
+@mcp_server.tool()
+async def get_table_meta(context: Context, session_id: str, table_name: str) -> dict:
+    """
+    MCP Tool: Retrieve metadata (schema) information for a specified table.
+
+    This tool queries the specified Deephaven session for comprehensive table metadata and returns detailed
+    schema information including column names, data types, and properties. Unlike get_table_data, this tool
+    focuses on table structure rather than actual data, making it ideal for understanding table schemas
+    before data retrieval. Meta tables are always retrieved completely with no size limits.
+
+    Args:
+        context (Context): The MCP context object, required by MCP protocol but not actively used.
+        session_id (str): ID of the Deephaven session to query. Must match an existing active session.
+        table_name (str): Name of the table to retrieve metadata for. Must exist in the specified session.
+
+    Returns:
+        dict: Structured result object with the following keys:
+            - 'success' (bool): Always present. True if metadata was retrieved successfully, False on any error.
+            - 'table_name' (str, optional): Name of the table the metadata describes if successful. Echoes input for confirmation.
+            - 'format' (str, optional): Always "json-row" for meta tables if successful. Consistent format for metadata.
+            - 'meta_columns' (list[dict], optional): Schema of the meta table itself if successful. Each dict contains:
+                                                    {'name': str, 'type': str} describing the metadata table structure.
+            - 'row_count' (int, optional): Number of metadata rows (columns in original table) if successful.
+            - 'is_complete' (bool, optional): Always True for meta tables if successful. Metadata is never truncated.
+            - 'data' (list[dict], optional): Array of metadata objects if successful. Each dict describes one column with:
+                                            - 'Name': Column name in the original table
+                                            - 'DataType': Deephaven data type (e.g., 'int', 'double', 'java.lang.String')
+                                            - Additional properties like 'IsPartitioning', 'ComponentType', etc.
+            - 'error' (str, optional): Human-readable error message if metadata retrieval failed. Omitted on success.
+            - 'isError' (bool, optional): Present and True only when success=False. Explicit error flag for frameworks.
+
+    Error Scenarios:
+        - Invalid session_id: Returns error if session doesn't exist or is not accessible
+        - Invalid table_name: Returns error if table doesn't exist in the session
+        - Session connection issues: Returns error if unable to communicate with Deephaven server
+        - Permission errors: Returns error if session lacks permission to access table metadata
+        - Server errors: Returns error if Deephaven server fails to generate metadata
+
+    Use Cases:
+        - Schema discovery: Understanding table structure before data operations
+        - Type validation: Verifying column types before data processing
+        - Query planning: Determining appropriate operations based on column types
+        - Documentation: Generating table documentation and data dictionaries
+        - Data lineage: Understanding table relationships and column dependencies
+
+    AI Agent Usage Tips:
+        - Always check 'success' field before accessing metadata fields
+        - Use 'data' array to iterate through column definitions
+        - Parse 'DataType' field to understand Deephaven-specific type system
+        - Check 'IsPartitioning' property to identify partitioning columns
+        - Use metadata to validate column names before calling get_table_data
+        - Combine with get_table_data for complete table understanding
+
+    Performance Notes:
+        - Metadata retrieval is typically fast regardless of table size
+        - No size limits apply to metadata (unlike table data)
+        - Safe to call repeatedly as metadata is cached by Deephaven
+        - Minimal memory usage compared to actual data retrieval
+    """
+    _LOGGER.info(
+        f"[mcp_systems_server:get_table_meta] Invoked: session_id={session_id!r}, table_name={table_name!r}"
+    )
+
+    result: dict[str, object] = {"success": False}
+
+    try:
+        # Get session registry and session
+        session_registry: CombinedSessionRegistry = (
+            context.request_context.lifespan_context["session_registry"]
+        )
+
+        _LOGGER.debug(
+            f"[mcp_systems_server:get_table_meta] Retrieving session '{session_id}'"
+        )
+        session_manager = await session_registry.get(session_id)
+        session = await session_manager.get()
+
+        # Get table metadata using queries module
+        _LOGGER.debug(
+            f"[mcp_systems_server:get_table_meta] Retrieving metadata for table '{table_name}'"
+        )
+        meta_arrow_table = await queries.get_meta_table(session, table_name)
+
+        # Convert to row-oriented JSON (meta tables are small)
+        meta_data = meta_arrow_table.to_pylist()
+
+        # Extract schema of the meta table itself
+        meta_schema = [
+            {"name": field.name, "type": str(field.type)}
+            for field in meta_arrow_table.schema
+        ]
+
+        result.update(
+            {
+                "success": True,
+                "table_name": table_name,
+                "format": "json-row",
+                "meta_columns": meta_schema,
+                "row_count": len(meta_arrow_table),
+                "is_complete": True,  # Meta tables are always complete
+                "data": meta_data,
+            }
+        )
+
+        _LOGGER.info(
+            f"[mcp_systems_server:get_table_meta] Success: Retrieved metadata for table '{table_name}' "
+            f"({len(meta_arrow_table)} columns)"
+        )
+
+    except Exception as e:
+        _LOGGER.error(
+            f"[mcp_systems_server:get_table_meta] Failed for session '{session_id}', "
+            f"table '{table_name}': {e!r}",
+            exc_info=True,
+        )
+        result["error"] = str(e)
+        result["isError"] = True
+
     return result
