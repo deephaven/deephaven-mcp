@@ -8,7 +8,7 @@ This is a test server for use with the MCP community tools. It is not intended f
 Features:
 - Starts the server on a user-specified host and port (defaults: localhost:10000)
 - Allocates 8GB RAM to the JVM
-- Disables authentication using AnonymousAuthenticationHandler
+- Conditional authentication: PSK with provided token, or anonymous if no token provided
 - Creates example tables for demonstration or testing, with three groups: simple, financial, or all
     - simple: Demo tables for general data (t1, t2, t3, people, products, time_series, mixed_demo)
     - financial: Market/finance tables (quotes, trades, ohlcv, news, reference_data)
@@ -17,12 +17,13 @@ Features:
 - Keeps the server running until interrupted (Ctrl+C)
 
 Usage:
-    uv run run_deephaven_test_server.py --table-group {simple|financial|all} [--host HOST] [--port PORT]
+    uv run run_deephaven_test_server.py --table-group {simple|financial|all} [--host HOST] [--port PORT] [--auth-token TOKEN]
 
 Arguments:
     --table-group {simple|financial|all}   REQUIRED. Which group of tables to create.
-    --host HOST   Hostname or IP address to bind the server (default: localhost)
-    --port PORT   Port number for the Deephaven server (default: 10000)
+    --host HOST       Hostname or IP address to bind the server (default: localhost)
+    --port PORT       Port number for the Deephaven server (default: 10000)
+    --auth-token TOKEN   Authentication token for PSK auth. If omitted, uses anonymous auth.
 
 Requirements:
     - deephaven-server Python package installed
@@ -33,7 +34,7 @@ Requirements:
 import argparse
 import datetime
 import random
-import time
+from time import sleep
 
 from deephaven_server import Server
 
@@ -60,21 +61,36 @@ parser.add_argument(
     choices=["simple", "financial", "all"],
     help="Which group of tables to create: simple, financial, or all (required)",
 )
+parser.add_argument(
+    "--auth-token",
+    type=str,
+    help="Authentication token for PSK authentication. If not provided, uses anonymous authentication.",
+)
 args = parser.parse_args()
 
 host = args.host
 port = args.port
 table_group = args.table_group
+auth_token = args.auth_token
 
-# Set JVM args for 8GB RAM and disable authentication
-jvm_args = [
-    "-Xmx8g",  # Allocate 8GB heap memory
-    "-DAuthHandlers=io.deephaven.auth.AnonymousAuthenticationHandler",  # Disable authentication
-]
+# Set JVM args for 8GB RAM and conditional authentication
+jvm_args = ["-Xmx8g"]  # Allocate 8GB heap memory
 
-print(
-    f"Starting Deephaven server on {host}:{port} with 8GB RAM and no authentication ..."
-)
+if auth_token:
+    # Use PSK authentication with provided token
+    jvm_args.extend(
+        [
+            "-DAuthHandlers=io.deephaven.authentication.psk.PskAuthenticationHandler",
+            f"-Dauthentication.psk={auth_token}",
+        ]
+    )
+    auth_mode = f"PSK authentication (token: {auth_token})"
+else:
+    # Use anonymous authentication
+    jvm_args.append("-DAuthHandlers=io.deephaven.auth.AnonymousAuthenticationHandler")
+    auth_mode = "anonymous authentication"
+
+print(f"Starting Deephaven server on {host}:{port} with 8GB RAM and {auth_mode} ...")
 
 # Initialize and start the Deephaven server
 server = Server(
@@ -212,11 +228,17 @@ if table_group == "financial" or table_group == "all":
     def pick_random(arr) -> str:
         return arr[int(random.random() * len(arr))]
 
+    def pick_random_news_type() -> str:
+        return pick_random(news_types)
+
+    def pick_random_news_headline() -> str:
+        return pick_random(news_headlines)
+
     news = time_table("PT30s").update(
         [
             "Symbol = (String) SYMBOLS[i % 4]",
-            f"ActionType = pick_random(news_types)",
-            f"Headline = pick_random(news_headlines) + ` for ` + Symbol",
+            f"ActionType = pick_random_news_type()",
+            f"Headline = pick_random_news_headline() + ` for ` + Symbol",
         ]
     )
 
@@ -249,7 +271,7 @@ else:
 print("Press Ctrl+C to exit")
 try:
     while True:
-        time.sleep(1)
+        sleep(1)
 except KeyboardInterrupt:
     print("Exiting Deephaven...")
     server.stop()

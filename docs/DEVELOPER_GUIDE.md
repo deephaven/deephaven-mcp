@@ -200,10 +200,14 @@ The MCP Docs Server processes natural language questions about Deephaven documen
 
 2. **Start a test Deephaven server in one terminal:**
    ```bash
+   # For anonymous authentication (no MCP auth needed)
    uv run scripts/run_deephaven_test_server.py --table-group simple
+   
+   # OR for PSK authentication (if your MCP config uses auth tokens)
+   uv run scripts/run_deephaven_test_server.py --table-group simple --auth-token Deephaven123
    ```
    
-   > This script is located at [`../scripts/run_deephaven_test_server.py`](../scripts/run_deephaven_test_server.py) and creates a local Deephaven server with test data.
+   > This script is located at [`../scripts/run_deephaven_test_server.py`](../scripts/run_deephaven_test_server.py) and creates a local Deephaven server with test data. Use the `--auth-token` parameter if your MCP configuration requires PSK authentication.
 
 3. **Run the Systems Server:**
    ```sh
@@ -411,7 +415,11 @@ Follow these steps to start the Systems Server:
 
 1. **Start a Deephaven Core worker**:
       ```sh
+      # For anonymous authentication (no MCP auth needed)
       uv run scripts/run_deephaven_test_server.py --table-group simple
+      
+      # OR for PSK authentication (if your MCP config uses auth tokens)
+      uv run scripts/run_deephaven_test_server.py --table-group simple --auth-token Deephaven123
       ```
       This script is located at [`../scripts/run_deephaven_test_server.py`](../scripts/run_deephaven_test_server.py).
 
@@ -765,13 +773,14 @@ On error:
 For development and testing the MCP Community server, you often need a running Deephaven Community Core server. A script is provided for this:
 
 ```sh
-uv run scripts/run_deephaven_test_server.py --table-group {simple|financial|all}
+uv run scripts/run_deephaven_test_server.py --table-group {simple|financial|all} [--auth-token TOKEN]
 ```
 
 **Arguments:**
-* `--table-group {simple|financial|all}` (**required**): Which demo tables to create
-* `--host HOST` (default: `localhost`): Host to bind to
-* `--port PORT` (default: `10000`): Port to listen on
+- `--table-group {simple|financial|all}` (**required**): Which demo tables to create
+- `--host HOST` (default: `localhost`): Host to bind to
+- `--port PORT` (default: `10000`): Port to listen on
+- `--auth-token TOKEN` (optional): Authentication token for PSK auth. If omitted, uses anonymous auth.
 
 ##### Test Client
 
@@ -1037,7 +1046,11 @@ The [MCP Inspector](https://github.com/modelcontextprotocol/inspector) is a web-
 
 1. **Start a Deephaven Community Core worker** (in one terminal):
    ```sh
+   # For anonymous authentication (no MCP auth needed)
    uv run scripts/run_deephaven_test_server.py --table-group simple
+   
+   # OR for PSK authentication (if your MCP config uses auth tokens)
+   uv run scripts/run_deephaven_test_server.py --table-group simple --auth-token Deephaven123
    ```
 
 2. **Start the MCP Systems server** (in another terminal):
@@ -1268,7 +1281,11 @@ Both servers expose their tools through FastMCP, following the Model Context Pro
 
 2. **Run the test server** (in one terminal):
    ```sh
+   # For anonymous authentication (no MCP auth needed)
    uv run scripts/run_deephaven_test_server.py --table-group simple
+   
+   # OR for PSK authentication (if your MCP config uses auth tokens)
+   uv run scripts/run_deephaven_test_server.py --table-group simple --auth-token Deephaven123
    ```
 
 3. **Run the MCP Community server** (in another terminal):
@@ -1506,7 +1523,7 @@ The project includes several utility scripts to help with development and testin
 
 | Script | Purpose | Usage |
 |--------|---------|-------|
-| [`../scripts/run_deephaven_test_server.py`](../scripts/run_deephaven_test_server.py) | Starts a local Deephaven server for testing | `uv run scripts/run_deephaven_test_server.py --table-group simple` |
+| [`../scripts/run_deephaven_test_server.py`](../scripts/run_deephaven_test_server.py) | Starts a local Deephaven server for testing | `uv run scripts/run_deephaven_test_server.py --table-group simple [--auth-token TOKEN]` |
 | [`../scripts/mcp_community_test_client.py`](../scripts/mcp_community_test_client.py) | Tests the Systems Server tools | `uv run scripts/mcp_community_test_client.py --transport sse` |
 | [`../scripts/mcp_docs_test_client.py`](../scripts/mcp_docs_test_client.py) | Tests the Docs Server chat functionality | `uv run scripts/mcp_docs_test_client.py --prompt "What is Deephaven?"` |
 | [`../scripts/mcp_docs_stress_test.py`](../scripts/mcp_docs_stress_test.py) | Comprehensive stress test for docs server (validates timeout fixes) | `uv run scripts/mcp_docs_stress_test.py` |
