@@ -2059,10 +2059,14 @@ async def test_get_table_data_size_limit_exceeded():
 
     context = MockContext({"session_registry": mock_registry})
 
+    # Test values to trigger size limit (large table * many columns = large estimated size)
+    large_row_count = 1_000_000  # Large number of rows to trigger size limit
+    many_columns = 100  # Large number of columns to trigger size limit
+
     # Mock arrow table with large estimated size
     mock_arrow_table = MagicMock()
-    mock_arrow_table.__len__ = MagicMock(return_value=1000000)  # Large table
-    mock_arrow_table.schema = [MagicMock() for _ in range(100)]  # Many columns
+    mock_arrow_table.__len__ = MagicMock(return_value=large_row_count)
+    mock_arrow_table.schema = [MagicMock() for _ in range(many_columns)]
 
     with patch(
         "deephaven_mcp.mcp_systems_server._mcp.queries.get_table"
