@@ -29,7 +29,7 @@ class MockContext:
 
 def test_run_script_reads_script_from_file():
     mock_session = MagicMock()
-    mock_session.run_script = MagicMock()
+    mock_session.run_script = AsyncMock()
     mock_session_manager = AsyncMock()
     mock_session_manager.get = AsyncMock(return_value=mock_session)
     mock_registry = AsyncMock()
@@ -475,7 +475,7 @@ async def test_run_script_both_script_and_path():
 
     # Create a session mock with run_script method
     session = MagicMock()
-    session.run_script = MagicMock(return_value=None)
+    session.run_script = AsyncMock(return_value=None)
 
     # Set up session manager to return the session
     mock_session_manager = AsyncMock()
@@ -598,7 +598,7 @@ async def test_run_script_success():
         called = None
 
         @staticmethod
-        def run_script(script):
+        async def run_script(script):
             DummySession.called = script
             return None
 
@@ -716,7 +716,7 @@ async def test_run_script_script_path():
         called = None
 
         @staticmethod
-        def run_script(script):
+        async def run_script(script):
             DummySession.called = script
             return None
 
