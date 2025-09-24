@@ -55,6 +55,23 @@ from deephaven_mcp.resource_manager._registry_combined import CombinedSessionReg
 
 T = TypeVar("T")
 
+# Response size estimation constants
+ESTIMATED_BYTES_PER_CELL = 50
+"""
+Estimated bytes per table cell for response size calculation.
+
+This rough estimate is used to prevent memory issues when retrieving large tables.
+The estimation assumes:
+- Average string length: ~20 characters (20 bytes)
+- Numeric values: ~8 bytes (int64/double)
+- Null values and metadata: ~5 bytes overhead
+- JSON formatting overhead: ~15-20 bytes per cell
+- Safety margin: 50 bytes total per cell
+
+This conservative estimate helps catch potentially problematic responses before
+expensive formatting operations. Can be tuned based on actual data patterns.
+"""
+
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -1252,16 +1269,14 @@ async def get_table_data(
         # Check response size before formatting (rough estimation to avoid memory overhead)
         row_count = len(arrow_table)
         col_count = len(arrow_table.schema)
-        estimated_size = (
-            row_count * col_count * 50
-        )  # Rough estimate: ~50 bytes per cell
+        estimated_size = row_count * col_count * ESTIMATED_BYTES_PER_CELL
         size_error = _check_response_size(table_name, estimated_size)
         if size_error:
             return size_error
 
         # Format the data
         actual_format, formatted_data = _format_table_data(
-            arrow_table, format, len(arrow_table)
+            arrow_table, format, row_count
         )
 
         # Extract schema information
