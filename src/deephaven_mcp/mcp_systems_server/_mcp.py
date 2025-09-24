@@ -56,6 +56,7 @@ from deephaven_mcp.resource_manager._registry_combined import CombinedSessionReg
 T = TypeVar("T")
 
 # Response size estimation constants
+# Conservative estimate: ~20 chars + 8 bytes numeric + JSON overhead + safety margin
 ESTIMATED_BYTES_PER_CELL = 50
 """
 Estimated bytes per table cell for response size calculation.
