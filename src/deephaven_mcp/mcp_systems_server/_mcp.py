@@ -35,9 +35,9 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import TypeVar
 
-import pyarrow.csv as csv
-
 import aiofiles
+import pyarrow as pa
+import pyarrow.csv as csv
 from mcp.server.fastmcp import Context, FastMCP
 
 from deephaven_mcp import queries
@@ -1056,26 +1056,26 @@ async def pip_packages(context: Context, session_id: str) -> dict:
 
 # Size limits for table data responses
 MAX_RESPONSE_SIZE = 50_000_000  # 50MB hard limit
-WARNING_SIZE = 5_000_000        # 5MB warning threshold
+WARNING_SIZE = 5_000_000  # 5MB warning threshold
 
 
 def _check_response_size(table_name: str, estimated_size: int) -> dict | None:
     """
     Check if estimated response size is within acceptable limits.
-    
+
     Evaluates the estimated response size against predefined limits to prevent memory
     issues and excessive network traffic. Logs warnings for large responses and
     returns structured error responses for oversized requests.
-    
+
     Args:
         table_name (str): Name of the table being processed, used for logging context.
         estimated_size (int): Estimated response size in bytes.
-        
+
     Returns:
         dict | None: Returns None if size is acceptable, or a structured error dict
                      with 'success': False, 'error': str, 'isError': True if the
                      response would exceed MAX_RESPONSE_SIZE (50MB).
-                     
+
     Side Effects:
         - Logs warning message if size exceeds WARNING_SIZE (5MB).
         - No side effects if size is within acceptable limits.
@@ -1085,25 +1085,27 @@ def _check_response_size(table_name: str, estimated_size: int) -> dict | None:
             f"Large response (~{estimated_size/1_000_000:.1f}MB) for table '{table_name}'. "
             f"Consider reducing max_rows for better performance."
         )
-    
+
     if estimated_size > MAX_RESPONSE_SIZE:
         return {
-            "success": False, 
+            "success": False,
             "error": f"Response would be ~{estimated_size/1_000_000:.1f}MB (max 50MB). Please reduce max_rows.",
-            "isError": True
+            "isError": True,
         }
-    
+
     return None  # Size is acceptable
 
 
-def _format_table_data(arrow_table, format_type: str, row_count: int) -> tuple[str, object]:
+def _format_table_data(
+    arrow_table: pa.Table, format_type: str, row_count: int
+) -> tuple[str, object]:
     """
     Convert Arrow table to specified output format with automatic format selection.
-    
+
     Transforms PyArrow table data into one of several supported output formats. Supports
     automatic format selection based on row count to balance performance and usability.
     Handles memory-efficient CSV conversion and proper JSON serialization.
-    
+
     Args:
         arrow_table: PyArrow Table object containing the source data.
         format_type (str): Desired output format. Must be one of:
@@ -1112,15 +1114,15 @@ def _format_table_data(arrow_table, format_type: str, row_count: int) -> tuple[s
                           - "json-column": Object with column names as keys, arrays as values
                           - "csv": Comma-separated values as a string
         row_count (int): Number of rows in the table, used for auto format selection.
-        
+
     Returns:
         tuple[str, object]: A 2-tuple containing:
                            - str: The actual format used ("json-row", "json-column", or "csv")
                            - object: The formatted data (list, dict, or str depending on format)
-                           
+
     Raises:
         ValueError: If format_type is not one of the supported formats.
-        
+
     Performance Notes:
         - CSV format uses direct Arrow→CSV conversion for memory efficiency
         - JSON formats create Python object copies, unavoidable for JSON serialization
@@ -1130,29 +1132,29 @@ def _format_table_data(arrow_table, format_type: str, row_count: int) -> tuple[s
         actual_format = "json-column" if row_count <= 100 else "csv"
     else:
         actual_format = format_type
-    
+
     if actual_format == "json-row":
         return actual_format, arrow_table.to_pylist()
-    elif actual_format == "json-column": 
+    elif actual_format == "json-column":
         return actual_format, arrow_table.to_pydict()
     elif actual_format == "csv":
         # Direct Arrow → CSV conversion (most memory efficient)
         output = io.BytesIO()
         csv.write_csv(arrow_table, output)
         # Note: decode() creates a copy, but necessary for JSON serialization
-        return actual_format, output.getvalue().decode('utf-8')
+        return actual_format, output.getvalue().decode("utf-8")
     else:
         raise ValueError(f"Unsupported format: {actual_format}")
 
 
 @mcp_server.tool()
 async def get_table_data(
-    context: Context, 
-    session_id: str, 
-    table_name: str, 
-    max_rows: int | None = 1000, 
+    context: Context,
+    session_id: str,
+    table_name: str,
+    max_rows: int | None = 1000,
     head: bool = True,
-    format: str = "auto"
+    format: str = "auto",
 ) -> dict:
     """
     MCP Tool: Retrieve table data from a specified Deephaven session with flexible formatting options.
@@ -1203,7 +1205,7 @@ async def get_table_data(
         - Column analysis: Use json-column format for efficient column-wise operations
         - Row processing: Use json-row format for record-by-record iteration
         - Auto format: Recommended for general use, optimizes based on data size
-        
+
     AI Agent Usage Tips:
         - Always check 'success' field before accessing data fields
         - Use 'is_complete' to determine if more data exists beyond max_rows
@@ -1215,66 +1217,76 @@ async def get_table_data(
         f"[mcp_systems_server:get_table_data] Invoked: session_id={session_id!r}, "
         f"table_name={table_name!r}, max_rows={max_rows}, head={head}, format={format!r}"
     )
-    
+
     result: dict[str, object] = {"success": False}
-    
+
     try:
         # Validate format parameter
         valid_formats = {"auto", "json-row", "json-column", "csv"}
         if format not in valid_formats:
-            result["error"] = f"Invalid format '{format}'. Valid options: {', '.join(valid_formats)}"
+            result["error"] = (
+                f"Invalid format '{format}'. Valid options: {', '.join(valid_formats)}"
+            )
             result["isError"] = True
             return result
-        
+
         # Get session registry and session
         session_registry: CombinedSessionRegistry = (
             context.request_context.lifespan_context["session_registry"]
         )
-        
+
         _LOGGER.debug(
             f"[mcp_systems_server:get_table_data] Retrieving session '{session_id}'"
         )
         session_manager = await session_registry.get(session_id)
         session = await session_manager.get()
-        
+
         # Get table data using queries module
         _LOGGER.debug(
             f"[mcp_systems_server:get_table_data] Retrieving table data for '{table_name}'"
         )
-        arrow_table, is_complete = await queries.get_table(session, table_name, max_rows=max_rows, head=head)
-        
+        arrow_table, is_complete = await queries.get_table(
+            session, table_name, max_rows=max_rows, head=head
+        )
+
         # Check response size before formatting (rough estimation to avoid memory overhead)
         row_count = len(arrow_table)
         col_count = len(arrow_table.schema)
-        estimated_size = row_count * col_count * 50  # Rough estimate: ~50 bytes per cell
+        estimated_size = (
+            row_count * col_count * 50
+        )  # Rough estimate: ~50 bytes per cell
         size_error = _check_response_size(table_name, estimated_size)
         if size_error:
             return size_error
-        
+
         # Format the data
-        actual_format, formatted_data = _format_table_data(arrow_table, format, len(arrow_table))
-        
+        actual_format, formatted_data = _format_table_data(
+            arrow_table, format, len(arrow_table)
+        )
+
         # Extract schema information
         schema = [
             {"name": field.name, "type": str(field.type)}
             for field in arrow_table.schema
         ]
-        
-        result.update({
-            "success": True,
-            "table_name": table_name,
-            "format": actual_format,
-            "schema": schema,
-            "row_count": len(arrow_table),
-            "is_complete": is_complete,
-            "data": formatted_data
-        })
-        
+
+        result.update(
+            {
+                "success": True,
+                "table_name": table_name,
+                "format": actual_format,
+                "schema": schema,
+                "row_count": len(arrow_table),
+                "is_complete": is_complete,
+                "data": formatted_data,
+            }
+        )
+
         _LOGGER.info(
             f"[mcp_systems_server:get_table_data] Success: Retrieved {len(arrow_table)} rows "
             f"from table '{table_name}' in format '{actual_format}' (complete: {is_complete})"
         )
-        
+
     except Exception as e:
         _LOGGER.error(
             f"[mcp_systems_server:get_table_data] Failed for session '{session_id}', "
@@ -1283,20 +1295,16 @@ async def get_table_data(
         )
         result["error"] = str(e)
         result["isError"] = True
-    
+
     return result
 
 
 @mcp_server.tool()
-async def get_table_meta(
-    context: Context,
-    session_id: str, 
-    table_name: str
-) -> dict:
+async def get_table_meta(context: Context, session_id: str, table_name: str) -> dict:
     """
     MCP Tool: Retrieve metadata (schema) information for a specified table.
 
-    This tool queries the specified Deephaven session for comprehensive table metadata and returns detailed 
+    This tool queries the specified Deephaven session for comprehensive table metadata and returns detailed
     schema information including column names, data types, and properties. Unlike get_table_data, this tool
     focuses on table structure rather than actual data, making it ideal for understanding table schemas
     before data retrieval. Meta tables are always retrieved completely with no size limits.
@@ -1343,7 +1351,7 @@ async def get_table_meta(
         - Check 'IsPartitioning' property to identify partitioning columns
         - Use metadata to validate column names before calling get_table_data
         - Combine with get_table_data for complete table understanding
-        
+
     Performance Notes:
         - Metadata retrieval is typically fast regardless of table size
         - No size limits apply to metadata (unlike table data)
@@ -1353,51 +1361,53 @@ async def get_table_meta(
     _LOGGER.info(
         f"[mcp_systems_server:get_table_meta] Invoked: session_id={session_id!r}, table_name={table_name!r}"
     )
-    
+
     result: dict[str, object] = {"success": False}
-    
+
     try:
         # Get session registry and session
         session_registry: CombinedSessionRegistry = (
             context.request_context.lifespan_context["session_registry"]
         )
-        
+
         _LOGGER.debug(
             f"[mcp_systems_server:get_table_meta] Retrieving session '{session_id}'"
         )
         session_manager = await session_registry.get(session_id)
         session = await session_manager.get()
-        
+
         # Get table metadata using queries module
         _LOGGER.debug(
             f"[mcp_systems_server:get_table_meta] Retrieving metadata for table '{table_name}'"
         )
         meta_arrow_table = await queries.get_meta_table(session, table_name)
-        
+
         # Convert to row-oriented JSON (meta tables are small)
         meta_data = meta_arrow_table.to_pylist()
-        
+
         # Extract schema of the meta table itself
         meta_schema = [
             {"name": field.name, "type": str(field.type)}
             for field in meta_arrow_table.schema
         ]
-        
-        result.update({
-            "success": True,
-            "table_name": table_name,
-            "format": "json-row",
-            "meta_columns": meta_schema,
-            "row_count": len(meta_arrow_table),
-            "is_complete": True,  # Meta tables are always complete
-            "data": meta_data
-        })
-        
+
+        result.update(
+            {
+                "success": True,
+                "table_name": table_name,
+                "format": "json-row",
+                "meta_columns": meta_schema,
+                "row_count": len(meta_arrow_table),
+                "is_complete": True,  # Meta tables are always complete
+                "data": meta_data,
+            }
+        )
+
         _LOGGER.info(
             f"[mcp_systems_server:get_table_meta] Success: Retrieved metadata for table '{table_name}' "
             f"({len(meta_arrow_table)} columns)"
         )
-        
+
     except Exception as e:
         _LOGGER.error(
             f"[mcp_systems_server:get_table_meta] Failed for session '{session_id}', "
@@ -1406,5 +1416,5 @@ async def get_table_meta(
         )
         result["error"] = str(e)
         result["isError"] = True
-    
+
     return result

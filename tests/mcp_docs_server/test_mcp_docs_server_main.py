@@ -234,18 +234,22 @@ def test_main_invocation():
         patch.dict(os.environ, {"INKEEP_API_KEY": "dummy-key"}),
         patch("sys.argv", ["deephaven-mcp-docs-server"]),  # Mock clean argv
         patch("deephaven_mcp._logging.setup_logging"),  # Mock logging setup
-        patch("deephaven_mcp._logging.setup_global_exception_logging"),  # Mock exception logging
-        patch("deephaven_mcp._monkeypatch.monkeypatch_uvicorn_exception_handling"),  # Mock uvicorn patch
+        patch(
+            "deephaven_mcp._logging.setup_global_exception_logging"
+        ),  # Mock exception logging
+        patch(
+            "deephaven_mcp._monkeypatch.monkeypatch_uvicorn_exception_handling"
+        ),  # Mock uvicorn patch
     ):
         # Remove module from cache if it was previously imported and failed
         if "deephaven_mcp.mcp_docs_server.main" in sys.modules:
             del sys.modules["deephaven_mcp.mcp_docs_server.main"]
         if "deephaven_mcp.mcp_docs_server._mcp" in sys.modules:
             del sys.modules["deephaven_mcp.mcp_docs_server._mcp"]
-            
+
         # Import after environment is patched and modules cleared
         from deephaven_mcp.mcp_docs_server.main import main
-        
+
         # We patch run_server to prevent the server from actually starting.
         with patch("deephaven_mcp.mcp_docs_server.main.run_server") as mock_run_server:
             # Directly call the main function, which is the entry point.
