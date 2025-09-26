@@ -30,6 +30,4 @@ jobs:
           remote-repository-name:  cla
           branch: 'main'
           path-to-signatures: 'signatures/version1/cla.json'
-          allowlist: |
-            github-copilot[bot]
-            github-actions[bot]
+          allowlist: github-copilot[bot],github-actions[bot]

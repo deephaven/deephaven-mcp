@@ -399,9 +399,9 @@ async def test_app_lifespan_anyio_closed_resource_error(monkeypatch):
         assert len(exc_info.value.exceptions) == 1
         assert isinstance(exc_info.value.exceptions[0], anyio.ClosedResourceError)
 
-        # Verify specific error message for ClosedResourceError (line 372-374)
-        mock_logger.error.assert_any_call(
-            "[mcp_docs_server:app_lifespan] This indicates a stream/connection was closed unexpectedly during server operation"
+        # Verify ClosedResourceError is logged at DEBUG level (client disconnect)
+        mock_logger.debug.assert_any_call(
+            "[mcp_docs_server:app_lifespan] This indicates a client disconnected early (expected behavior)"
         )
 
 

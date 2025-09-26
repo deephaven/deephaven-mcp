@@ -286,12 +286,17 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
         # Log details for each exception in the group
         for exc in eg.exceptions:
             exc_type = type(exc).__name__
-            _LOGGER.error(f"[mcp_docs_server:app_lifespan] {exc_type}: {exc}")
+
+            # Log ClosedResourceError at DEBUG level (client disconnect), others at ERROR level
+            if isinstance(exc, anyio.ClosedResourceError):
+                _LOGGER.debug(f"[mcp_docs_server:app_lifespan] {exc_type}: {exc}")
+            else:
+                _LOGGER.error(f"[mcp_docs_server:app_lifespan] {exc_type}: {exc}")
 
             # Provide specific context based on exception type
             if isinstance(exc, anyio.ClosedResourceError):
-                _LOGGER.error(
-                    "[mcp_docs_server:app_lifespan] This indicates a stream/connection was closed unexpectedly during server operation"
+                _LOGGER.debug(
+                    "[mcp_docs_server:app_lifespan] This indicates a client disconnected early (expected behavior)"
                 )
             elif isinstance(exc, asyncio.CancelledError):
                 _LOGGER.error(
