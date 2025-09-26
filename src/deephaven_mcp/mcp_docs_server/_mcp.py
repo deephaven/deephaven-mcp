@@ -78,12 +78,12 @@ import traceback
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-import anyio
 from mcp.server.fastmcp import Context, FastMCP
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from deephaven_mcp._logging import log_process_state
+from deephaven_mcp._monkeypatch import _is_client_disconnect_error
 
 from ..openai import OpenAIClient, OpenAIClientError
 
@@ -286,46 +286,66 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
         # Log details for each exception in the group
         for exc in eg.exceptions:
             exc_type = type(exc).__name__
-            _LOGGER.error(f"[mcp_docs_server:app_lifespan] {exc_type}: {exc}")
 
-            # Provide specific context based on exception type
-            if isinstance(exc, anyio.ClosedResourceError):
-                _LOGGER.error(
-                    "[mcp_docs_server:app_lifespan] This indicates a stream/connection was closed unexpectedly during server operation"
-                )
-            elif isinstance(exc, asyncio.CancelledError):
-                _LOGGER.error(
-                    "[mcp_docs_server:app_lifespan] This indicates the server task was cancelled during operation"
-                )
-            elif isinstance(exc, TimeoutError):
-                _LOGGER.error(
-                    "[mcp_docs_server:app_lifespan] This indicates an operation timed out during server operation"
-                )
-            elif isinstance(exc, ConnectionError | OSError):
-                _LOGGER.error(
-                    "[mcp_docs_server:app_lifespan] This indicates a connection or system-level error during server operation"
+            # Check if this is a client disconnect (expected behavior)
+            if _is_client_disconnect_error(exc):
+                # Log client disconnects at DEBUG level to reduce noise in production logs
+                _LOGGER.debug(f"[mcp_docs_server:app_lifespan] {exc_type}: {exc}")
+                _LOGGER.debug(
+                    "[mcp_docs_server:app_lifespan] This indicates a client disconnected early (expected behavior)"
                 )
             else:
-                _LOGGER.error(
-                    f"[mcp_docs_server:app_lifespan] Unexpected exception type: {exc_type}"
-                )
+                # Log server errors at ERROR level
+                _LOGGER.error(f"[mcp_docs_server:app_lifespan] {exc_type}: {exc}")
 
-        _LOGGER.error(
-            f"[mcp_docs_server:app_lifespan] Full traceback: {traceback.format_exc()}"
+                # Provide specific context based on exception type
+                if isinstance(exc, asyncio.CancelledError):
+                    _LOGGER.error(
+                        "[mcp_docs_server:app_lifespan] This indicates the server task was cancelled during operation"
+                    )
+                elif isinstance(exc, TimeoutError):
+                    _LOGGER.error(
+                        "[mcp_docs_server:app_lifespan] This indicates an operation timed out during server operation"
+                    )
+                elif isinstance(exc, ConnectionError | OSError):
+                    _LOGGER.error(
+                        "[mcp_docs_server:app_lifespan] This indicates a connection or system-level error during server operation"
+                    )
+                else:
+                    _LOGGER.error(
+                        f"[mcp_docs_server:app_lifespan] Unexpected exception type: {exc_type}"
+                    )
+
+        # Check if any exceptions are actual server errors (not just client disconnects)
+        has_server_error = any(
+            not _is_client_disconnect_error(exc) for exc in eg.exceptions
         )
 
-        # Log diagnostic state when critical errors occur
-        try:
+        if has_server_error:
+            # Only log full traceback and diagnostic state for server errors
             _LOGGER.error(
-                "[mcp_docs_server:app_lifespan] Diagnostic state at time of exception group:"
+                f"[mcp_docs_server:app_lifespan] Full traceback: {traceback.format_exc()}"
             )
-            log_process_state("mcp_docs_server:app_lifespan", "exception_group_time")
-            _log_asyncio_and_thread_state(
-                "exception_group_time", warn_on_running_tasks=True
-            )
-        except Exception as diag_error:
-            _LOGGER.error(
-                f"[mcp_docs_server:app_lifespan] Failed to log diagnostic state: {diag_error}"
+
+            # Log diagnostic state when critical errors occur
+            try:
+                _LOGGER.error(
+                    "[mcp_docs_server:app_lifespan] Diagnostic state at time of exception group:"
+                )
+                log_process_state(
+                    "mcp_docs_server:app_lifespan", "exception_group_time"
+                )
+                _log_asyncio_and_thread_state(
+                    "exception_group_time", warn_on_running_tasks=True
+                )
+            except Exception as diag_error:
+                _LOGGER.error(
+                    f"[mcp_docs_server:app_lifespan] Failed to log diagnostic state: {diag_error}"
+                )
+        else:
+            # All exceptions were client disconnects - log at DEBUG level
+            _LOGGER.debug(
+                f"[mcp_docs_server:app_lifespan] All exceptions were client disconnects, traceback available at DEBUG level: {traceback.format_exc()}"
             )
 
         # Re-raise to maintain proper error propagation
