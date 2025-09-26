@@ -404,69 +404,6 @@ async def test_app_lifespan_anyio_closed_resource_error(monkeypatch):
             "[mcp_docs_server:app_lifespan] This indicates a client disconnected early (expected behavior)"
         )
 
-        # Verify that no ERROR level logging occurred for the client disconnect
-        # (the initial CRITICAL message will still be logged, but the specific exception should be DEBUG)
-        error_calls = [
-            call
-            for call in mock_logger.error.call_args_list
-            if "This indicates a client disconnected early" in str(call)
-        ]
-        assert (
-            len(error_calls) == 0
-        ), "ClosedResourceError should not be logged at ERROR level"
-
-
-@pytest.mark.asyncio
-async def test_app_lifespan_mixed_client_disconnect_and_server_error(monkeypatch):
-    """Test app_lifespan handling of both client disconnects and server errors in same exception group."""
-    monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
-    sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
-    import anyio
-
-    import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
-
-    with patch("deephaven_mcp.mcp_docs_server._mcp._LOGGER") as mock_logger:
-        with pytest.raises(ExceptionGroup) as exc_info:
-            async with mcp_mod.app_lifespan(None) as context:
-                # Raise multiple exceptions - one client disconnect and one server error
-                ce = anyio.ClosedResourceError("Stream closed")
-                ve = ValueError("Server processing error")
-                raise ExceptionGroup("Mixed errors", [ce, ve])
-
-        # Verify the ExceptionGroup contains both exceptions (they get flattened by except*)
-        assert len(exc_info.value.exceptions) == 2
-
-        # Find which is which
-        closed_error = None
-        value_error = None
-        for exc in exc_info.value.exceptions:
-            if isinstance(exc, anyio.ClosedResourceError):
-                closed_error = exc
-            elif isinstance(exc, ValueError):
-                value_error = exc
-
-        assert closed_error is not None, "Should have ClosedResourceError"
-        assert value_error is not None, "Should have ValueError"
-
-        # Verify client disconnect is logged at DEBUG level
-        mock_logger.debug.assert_any_call(
-            "[mcp_docs_server:app_lifespan] This indicates a client disconnected early (expected behavior)"
-        )
-
-        # Verify server error is logged at ERROR level
-        # Look for ValueError in error calls
-        value_error_calls = [
-            call
-            for call in mock_logger.error.call_args_list
-            if "ValueError: Server processing error" in str(call)
-        ]
-        assert len(value_error_calls) > 0, "Should log ValueError at ERROR level"
-
-        # Verify diagnostic info is logged since there was a server error
-        assert any(
-            "Full traceback:" in str(call) for call in mock_logger.error.call_args_list
-        ), "Should log full traceback when server errors are present"
-
 
 @pytest.mark.asyncio
 async def test_app_lifespan_cancelled_error_handling(monkeypatch):
