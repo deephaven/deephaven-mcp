@@ -149,15 +149,17 @@ Restart your AI tool and try asking:
 ## Deephaven MCP Components
 
 ### Systems Server
-Manages and connects to multiple [Deephaven Community Core](https://deephaven.io/community/) worker nodes and [Deephaven Enterprise](https://deephaven.io/enterprise/) systems. This allows for unified control and interaction with your Deephaven instances from various client applications.
+Manages and connects to multiple [Deephaven Community Core](https://deephaven.io/community/) sessions and [Deephaven Enterprise](https://deephaven.io/enterprise/) systems. This allows for unified control and interaction with your Deephaven instances from various client applications.
 
 **Key Capabilities:**
-*   **Session Management**: List, monitor, and get detailed status of all configured Deephaven sessions
-*   **Enterprise Systems**: Connect to and manage Deephaven Enterprise (Core+) deployments
-*   **Table Operations**: Retrieve table schemas, metadata, and actual data with flexible formatting options
-*   **Script Execution**: Run Python or Groovy scripts directly on Deephaven sessions
-*   **Package Management**: Query installed Python packages in session environments
-*   **Configuration Management**: Dynamically reload and refresh session configurations
+
+- **Session Management**: List, monitor, and get detailed status of all configured Deephaven sessions
+- **Enterprise Systems**: Connect to and manage Deephaven Enterprise (Core+) deployments
+- **Enterprise Session Creation**: Create and delete enterprise sessions with configurable resources and limits
+- **Table Operations**: Retrieve table schemas, metadata, and actual data with flexible formatting options
+- **Script Execution**: Run Python or Groovy scripts directly on Deephaven sessions
+- **Package Management**: Query installed Python packages in session environments
+- **Configuration Management**: Dynamically reload and refresh session configurations
 
 ### Docs Server
 Connects to Deephaven's documentation knowledge base via AI to answer questions about Deephaven features, APIs, and usage patterns. Ask questions in natural language and get specific answers with code examples and explanations.
@@ -180,7 +182,7 @@ graph TD
     F --"Manages"--> I("Enterprise Worker N.1")
     F --"Manages"--> J("Enterprise Worker N.N")
 ```
-*Clients connect to the [MCP Systems Server](#systems-server-architecture), which in turn manages and communicates with [Deephaven Community Core](https://deephaven.io/community/) workers and [Deephaven Enterprise](https://deephaven.io/enterprise/) systems.*
+*Clients connect to the [MCP Systems Server](#systems-server-architecture), which in turn manages and communicates with [Deephaven Community Core](https://deephaven.io/community/) sessions and [Deephaven Enterprise](https://deephaven.io/enterprise/) systems.*
 
 ### Docs Server Architecture
 
@@ -299,10 +301,10 @@ This section explains how to configure the [Deephaven MCP Systems Server](#syste
 
 ### The `deephaven_mcp.json` File
 
-This file tells the MCP Systems Server how to connect to your Deephaven instances. You'll create this file to define your connections to either Community Core workers or Enterprise systems (or both).
+This file tells the MCP Systems Server how to connect to your Deephaven instances. You'll create this file to define your connections to either Community Core sessions or Enterprise systems (or both).
 
 The configuration file supports two main sections:
-- **`"community"`**: For connecting to Community Core worker instances
+- **`"community"`**: For connecting to Community Core session instances
 - **`"enterprise"`**: For connecting to Enterprise systems
 
 You can include either section, both, or neither (empty file). Each section contains connection details specific to that type of Deephaven system.
@@ -386,8 +388,8 @@ You can include either section, both, or neither (empty file). Each section cont
 
 | Field | Type | Required When | Description |
 |-------|------|---------------|-------------|
-| `host` | string | Optional | Hostname or IP address of the Deephaven Community Core worker (e.g., `"localhost"`) |
-| `port` | integer | Optional | Port number for the worker connection (e.g., `10000`) |
+| `host` | string | Optional | Hostname or IP address of the Deephaven Community Core session (e.g., `"localhost"`) |
+| `port` | integer | Optional | Port number for the session connection (e.g., `10000`) |
 | `auth_type` | string | Optional | Authentication type: `"Anonymous"` (default), `"Basic"`, or custom authenticator strings |
 | `auth_token` | string | Optional | Authentication token. For `"Basic"` auth: `"username:password"` format. Mutually exclusive with `auth_token_env_var` |
 | `auth_token_env_var` | string | Optional | Environment variable name containing the auth token (e.g., `"MY_AUTH_TOKEN"`). More secure than hardcoding tokens |
@@ -461,6 +463,25 @@ The `enterprise` key contains a `"systems"` dictionary mapping custom system nam
 | `password` | string | `auth_type` = `"password"` | Password (use `password_env_var` instead for security) |
 | `password_env_var` | string | `auth_type` = `"password"` | Environment variable containing the password (recommended) |
 | `private_key_path` | string | `auth_type` = `"private_key"` | Absolute path to private key file |
+| `use_tls` | boolean | Optional | Enable TLS encryption for connections (default: false) |
+| `tls_root_certs` | string | Optional | Absolute path to custom TLS root certificate bundle file |
+| `tls_verify_server_cert` | boolean | Optional | Verify server TLS certificate (default: true when TLS enabled) |
+| `client_cert_chain` | string | Optional | Absolute path to client certificate chain file for mutual TLS |
+| `client_private_key` | string | Optional | Absolute path to client private key file for mutual TLS |
+| `session_creation` | object | Optional | Configuration for creating enterprise sessions. If omitted, session creation tools are unavailable |
+| `session_creation.max_concurrent_sessions` | integer | Optional | Maximum concurrent sessions (default: 5). Set to 0 to disable session creation |
+| `session_creation.defaults` | object | Optional | Default parameters for new sessions |
+| `session_creation.defaults.heap_size_gb` | float | Optional | Default JVM heap size in gigabytes for new sessions |
+| `session_creation.defaults.programming_language` | string | Optional | Default programming language for new sessions ("Python" or "Groovy", default: "Python") |
+| `session_creation.defaults.auto_delete_timeout` | integer | Optional | Default auto-deletion timeout in seconds for idle sessions (API default: 600) |
+| `session_creation.defaults.server` | string | Optional | Default target server/environment name where sessions will be created |
+| `session_creation.defaults.engine` | string | Optional | Default engine type for new sessions (e.g., "DeephavenCommunity") |
+| `session_creation.defaults.extra_jvm_args` | array | Optional | Default additional JVM arguments for new sessions (e.g., ["-XX:+UseG1GC"]) |
+| `session_creation.defaults.extra_environment_vars` | array | Optional | Default environment variables for new sessions (format: ["NAME=value"]) |
+| `session_creation.defaults.admin_groups` | array | Optional | Default user groups with administrative permissions for new sessions |
+| `session_creation.defaults.viewer_groups` | array | Optional | Default user groups with read-only access to new sessions |
+| `session_creation.defaults.timeout_seconds` | float | Optional | Default session startup timeout in seconds (API default: 60) |
+| `session_creation.defaults.session_arguments` | object | Optional | Default arguments for pydeephaven.Session constructor (passed as-is, no validation of contents) |
 
 > **📝 Note**: All file paths should be absolute and accessible by the MCP server process.
 
@@ -500,7 +521,23 @@ Here's a complete example showing both Community and Enterprise configurations:
         "connection_json_url": "https://prod.enterprise.example.com/iris/connection.json",
         "auth_type": "password",
         "username": "your_username",
-        "password_env_var": "ENTERPRISE_PASSWORD"
+        "password_env_var": "ENTERPRISE_PASSWORD",
+        "session_creation": {
+          "max_concurrent_workers": 3,
+          "defaults": {
+            "heap_size_gb": 8.0,
+            "programming_language": "Groovy",
+            "auto_delete_timeout": 3600,
+            "server": "gpu-server-1",
+            "engine": "DeephavenCommunity",
+            "extra_jvm_args": ["-XX:+UseG1GC", "-XX:MaxGCPauseMillis=200"],
+            "extra_environment_vars": ["PYTHONPATH=/custom/libs", "LOG_LEVEL=DEBUG"],
+            "admin_groups": ["deephaven-admins", "data-team-leads"],
+            "viewer_groups": ["analysts", "data-scientists"],
+            "timeout_seconds": 120.0,
+            "session_arguments": {"custom_setting": "example_value"}
+          }
+        }
       },
       "data_science_env": {
         "connection_json_url": "https://data-science.enterprise.example.com/iris/connection.json",
@@ -850,7 +887,7 @@ Before diving into detailed troubleshooting, try these common solutions:
 * **LLM Tool Can't Connect / Server Not Found:**
   * Verify all paths in your LLM tool's JSON configuration are **absolute and correct**
   * Ensure `DH_MCP_CONFIG_FILE` environment variable is correctly set in the JSON config and points to a valid worker file
-  * Ensure any [Deephaven Community Core](https://deephaven.io/community/) workers you intend to use (as defined in `deephaven_mcp.json`) are running and accessible from the [MCP Systems Server](#systems-server-architecture)'s environment
+  * Ensure any [Deephaven Community Core](https://deephaven.io/community/) sessions you intend to use (as defined in `deephaven_mcp.json`) are running and accessible from the [MCP Systems Server](#systems-server-architecture)'s environment
   * Check for typos in server names, commands, or arguments in the JSON config
   * Validate the syntax of your JSON configurations (`mcpServers` object in the LLM tool, and `deephaven_mcp.json`) using a [JSON validator tool](https://jsonlint.com/) or your IDE's linting features
   * Set `PYTHONLOGLEVEL=DEBUG` in the `env` block of your JSON config to get more detailed logs from the MCP servers

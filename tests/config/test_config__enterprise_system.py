@@ -6,6 +6,9 @@ from deephaven_mcp.config._enterprise_system import (
     _AUTH_SPECIFIC_FIELDS,
     _BASE_ENTERPRISE_SYSTEM_FIELDS,
     EnterpriseSystemConfigurationError,
+    _validate_field_type,
+    _validate_optional_fields,
+    _validate_required_fields,
     redact_enterprise_system_config,
     redact_enterprise_systems_map,
     validate_enterprise_systems_config,
@@ -538,3 +541,563 @@ def test_tuple_type_validation_error_message_auth_specific():
         _BASE_ENTERPRISE_SYSTEM_FIELDS.update(original_base_fields)
         _AUTH_SPECIFIC_FIELDS.clear()
         _AUTH_SPECIFIC_FIELDS.update(original_auth_fields)
+
+
+# === Session Creation Validation Tests ===
+
+
+def test_session_creation_valid_minimal():
+    """Test session_creation with minimal valid config (empty dict uses defaults)."""
+    config = {
+        "test_system": {
+            "connection_json_url": "https://test.example.com/iris/connection.json",
+            "auth_type": "password",
+            "username": "user",
+            "password": "pass",
+            "session_creation": {},  # Empty - should use defaults
+        }
+    }
+    # Should not raise any exceptions
+    validate_enterprise_systems_config(config)
+
+
+def test_session_creation_valid_with_max_workers():
+    """Test session_creation with custom max_concurrent_sessions."""
+    config = {
+        "test_system": {
+            "connection_json_url": "https://test.example.com/iris/connection.json",
+            "auth_type": "password",
+            "username": "user",
+            "password": "pass",
+            "session_creation": {"max_concurrent_sessions": 10},
+        }
+    }
+    # Should not raise any exceptions
+    validate_enterprise_systems_config(config)
+
+
+def test_session_creation_valid_with_all_defaults():
+    """Test session_creation with all default parameters."""
+    config = {
+        "test_system": {
+            "connection_json_url": "https://test.example.com/iris/connection.json",
+            "auth_type": "password",
+            "username": "user",
+            "password": "pass",
+            "session_creation": {
+                "max_concurrent_sessions": 3,
+                "defaults": {
+                    "heap_size_gb": 8.0,
+                    "auto_delete_timeout": 600,
+                    "server": "gpu-server-1",
+                    "engine": "DeephavenCommunity",
+                    "extra_jvm_args": ["-XX:+UseG1GC", "-Xmx8g"],
+                    "extra_environment_vars": [
+                        "PYTHONPATH=/custom/libs",
+                        "LOG_LEVEL=DEBUG",
+                    ],
+                    "admin_groups": ["deephaven-admins", "data-team-leads"],
+                    "viewer_groups": ["analysts", "data-scientists"],
+                    "timeout_seconds": 120.0,
+                    "session_arguments": {"custom_setting": "example_value"},
+                    "programming_language": "Groovy",
+                },
+            },
+        }
+    }
+    # Should not raise any exceptions
+    validate_enterprise_systems_config(config)
+
+
+def test_session_creation_valid_partial_defaults():
+    """Test session_creation with partial defaults."""
+    config = {
+        "test_system": {
+            "connection_json_url": "https://test.example.com/iris/connection.json",
+            "auth_type": "password",
+            "username": "user",
+            "password": "pass",
+            "session_creation": {
+                "defaults": {
+                    "heap_size_gb": 4.5,  # float is valid
+                    "server": "worker-node-east",
+                }
+                # max_concurrent_sessions omitted - should default to 5
+            },
+        }
+    }
+    # Should not raise any exceptions
+    validate_enterprise_systems_config(config)
+
+
+# === Additional edge case tests ===
+
+
+def test_validate_enterprise_systems_config_tuple_type_validation_error():
+    """Test tuple type validation error in _validate_optional_fields (lines 240-247)."""
+    from unittest.mock import patch
+
+    # Temporarily patch the optional fields to include a tuple type for testing
+    original_optional_fields = None
+
+    def setup_tuple_field():
+        nonlocal original_optional_fields
+        from deephaven_mcp.config import _enterprise_system
+
+        original_optional_fields = (
+            _enterprise_system._OPTIONAL_ENTERPRISE_SYSTEM_FIELDS.copy()
+        )
+        # Add a field that accepts multiple types (tuple validation)
+        _enterprise_system._OPTIONAL_ENTERPRISE_SYSTEM_FIELDS["test_tuple_field"] = (
+            str,
+            int,
+        )
+
+    def cleanup_tuple_field():
+        from deephaven_mcp.config import _enterprise_system
+
+        _enterprise_system._OPTIONAL_ENTERPRISE_SYSTEM_FIELDS.clear()
+        _enterprise_system._OPTIONAL_ENTERPRISE_SYSTEM_FIELDS.update(
+            original_optional_fields
+        )
+
+    config = {
+        "test-system": {
+            "connection_json_url": "https://test.example.com/iris/connection.json",
+            "auth_type": "password",
+            "username": "testuser",
+            "password": "testpass",
+            "test_tuple_field": [],  # Should be str or int, but providing list
+        }
+    }
+
+    setup_tuple_field()
+    try:
+        with pytest.raises(EnterpriseSystemConfigurationError) as exc_info:
+            validate_enterprise_systems_config(config)
+        assert "must be one of types" in str(exc_info.value)
+    finally:
+        cleanup_tuple_field()
+
+
+def test_validate_enterprise_systems_config_optional_field_simple_type_validation():
+    """Test simple type validation error in _validate_optional_fields (lines 249-254)."""
+    config = {
+        "test-system": {
+            "connection_json_url": "https://test.example.com/iris/connection.json",
+            "auth_type": "password",
+            "username": "testuser",
+            "password": "testpass",
+            "session_creation": "not-a-dict",  # Should be dict, will trigger single type validation
+        }
+    }
+
+    with pytest.raises(EnterpriseSystemConfigurationError) as exc_info:
+        validate_enterprise_systems_config(config)
+    assert (
+        "Optional field 'session_creation' for enterprise system 'test-system' must be of type dict"
+        in str(exc_info.value)
+    )
+
+
+def test_validate_enterprise_systems_config_session_creation_not_dict():
+    """Test session_creation validation when it's not a dict (lines 418-420)."""
+    # This function is called directly, so let's bypass the optional field validation
+    # by using session_creation instead and calling the function directly
+    from deephaven_mcp.config._enterprise_system import (
+        _validate_enterprise_system_session_creation,
+    )
+
+    config = {"session_creation": "not-a-dict"}  # Should be dict
+
+    with pytest.raises(EnterpriseSystemConfigurationError) as exc_info:
+        _validate_enterprise_system_session_creation("test-system", config)
+    assert (
+        "'session_creation' for enterprise system 'test-system' must be a dictionary"
+        in str(exc_info.value)
+    )
+
+
+def test_session_creation_invalid_max_workers_negative():
+    """Test session_creation validation with negative max_concurrent_sessions."""
+    config = {
+        "test_system": {
+            "connection_json_url": "https://test.example.com/iris/connection.json",
+            "auth_type": "password",
+            "username": "user",
+            "password": "pass",
+            "session_creation": {"max_concurrent_sessions": -1},
+        }
+    }
+    with pytest.raises(
+        EnterpriseSystemConfigurationError,
+        match=r"'max_concurrent_sessions' for enterprise system 'test_system' must be a non-negative integer, but got -1\.",
+    ):
+        validate_enterprise_systems_config(config)
+
+
+def test_session_creation_valid_max_workers_zero():
+    """Test session_creation validation with zero max_concurrent_sessions (disables session creation)."""
+    config = {
+        "test_system": {
+            "connection_json_url": "https://test.example.com/iris/connection.json",
+            "auth_type": "password",
+            "username": "user",
+            "password": "pass",
+            "session_creation": {"max_concurrent_sessions": 0},
+        }
+    }
+    # Should not raise any exceptions - 0 means "disable session creation"
+    validate_enterprise_systems_config(config)
+
+
+def test_session_creation_invalid_defaults_not_dict():
+    """Test session_creation validation when defaults is not a dictionary."""
+    config = {
+        "test_system": {
+            "connection_json_url": "https://test.example.com/iris/connection.json",
+            "auth_type": "password",
+            "username": "user",
+            "password": "pass",
+            "session_creation": {
+                "max_concurrent_sessions": 5,
+                "defaults": "invalid",  # Should be dict
+            },
+        }
+    }
+    with pytest.raises(
+        EnterpriseSystemConfigurationError,
+        match=r"'defaults' in session_creation for enterprise system 'test_system' must be a dictionary, but got str\.",
+    ):
+        validate_enterprise_systems_config(config)
+
+
+def test_session_creation_invalid_heap_size_wrong_type():
+    """Test session_creation validation with invalid heap_size_gb type."""
+    config = {
+        "test_system": {
+            "connection_json_url": "https://test.example.com/iris/connection.json",
+            "auth_type": "password",
+            "username": "user",
+            "password": "pass",
+            "session_creation": {
+                "defaults": {"heap_size_gb": "invalid"}  # Should be int or float
+            },
+        }
+    }
+    with pytest.raises(
+        EnterpriseSystemConfigurationError,
+        match=r"Field 'heap_size_gb' in session_creation defaults for enterprise system 'test_system' must be one of types \(int, float\), but got str\.",
+    ):
+        validate_enterprise_systems_config(config)
+
+
+def test_session_creation_invalid_extra_jvm_args_wrong_type():
+    """Test session_creation validation with invalid extra_jvm_args type."""
+    config = {
+        "test_system": {
+            "connection_json_url": "https://test.example.com/iris/connection.json",
+            "auth_type": "password",
+            "username": "user",
+            "password": "pass",
+            "session_creation": {
+                "defaults": {"extra_jvm_args": "should-be-list"}  # Should be list
+            },
+        }
+    }
+    with pytest.raises(
+        EnterpriseSystemConfigurationError,
+        match=r"Field 'extra_jvm_args' in session_creation defaults for enterprise system 'test_system' must be of type list, but got str\.",
+    ):
+        validate_enterprise_systems_config(config)
+
+
+def test_session_creation_invalid_admin_groups_wrong_type():
+    """Test session_creation validation with invalid admin_groups type."""
+    config = {
+        "test_system": {
+            "connection_json_url": "https://test.example.com/iris/connection.json",
+            "auth_type": "password",
+            "username": "user",
+            "password": "pass",
+            "session_creation": {
+                "defaults": {"admin_groups": "should-be-list"}  # Should be list
+            },
+        }
+    }
+    with pytest.raises(
+        EnterpriseSystemConfigurationError,
+        match=r"Field 'admin_groups' in session_creation defaults for enterprise system 'test_system' must be of type list, but got str\.",
+    ):
+        validate_enterprise_systems_config(config)
+
+
+def test_session_creation_invalid_timeout_seconds_wrong_type():
+    """Test session_creation validation with invalid timeout_seconds type."""
+    config = {
+        "test_system": {
+            "connection_json_url": "https://test.example.com/iris/connection.json",
+            "auth_type": "password",
+            "username": "user",
+            "password": "pass",
+            "session_creation": {
+                "defaults": {
+                    "timeout_seconds": "should-be-number"  # Should be int or float
+                }
+            },
+        }
+    }
+    with pytest.raises(
+        EnterpriseSystemConfigurationError,
+        match=r"Field 'timeout_seconds' in session_creation defaults for enterprise system 'test_system' must be one of types \(int, float\), but got str\.",
+    ):
+        validate_enterprise_systems_config(config)
+
+
+def test_session_creation_valid_session_arguments_basic():
+    """Test session_creation with session_arguments (no content validation, just dict type)."""
+    config = {
+        "test_system": {
+            "connection_json_url": "https://test.example.com/iris/connection.json",
+            "auth_type": "password",
+            "username": "user",
+            "password": "pass",
+            "session_creation": {
+                "defaults": {
+                    "session_arguments": {"any_key": "any_value", "numeric_key": 123}
+                }
+            },
+        }
+    }
+    # Should not raise any exceptions (content is not validated)
+    validate_enterprise_systems_config(config)
+
+
+def test_session_creation_valid_new_fields_only():
+    """Test session_creation with only new fields configured."""
+    config = {
+        "test_system": {
+            "connection_json_url": "https://test.example.com/iris/connection.json",
+            "auth_type": "password",
+            "username": "user",
+            "password": "pass",
+            "session_creation": {
+                "defaults": {
+                    "extra_jvm_args": ["-XX:+UseG1GC"],
+                    "extra_environment_vars": ["DEBUG=true"],
+                    "admin_groups": ["admins"],
+                    "viewer_groups": ["viewers"],
+                    "timeout_seconds": 90,
+                    "session_arguments": {"chunk_size": 50000},
+                }
+            },
+        }
+    }
+    # Should not raise any exceptions
+    validate_enterprise_systems_config(config)
+
+
+def test_session_creation_invalid_session_arguments_wrong_type():
+    """Test session_creation validation with invalid session_arguments type."""
+    config = {
+        "test_system": {
+            "connection_json_url": "https://test.example.com/iris/connection.json",
+            "auth_type": "password",
+            "username": "user",
+            "password": "pass",
+            "session_creation": {
+                "defaults": {"session_arguments": "should-be-dict"}  # Should be dict
+            },
+        }
+    }
+    with pytest.raises(
+        EnterpriseSystemConfigurationError,
+        match=r"Field 'session_arguments' in session_creation defaults for enterprise system 'test_system' must be of type dict, but got str\.",
+    ):
+        validate_enterprise_systems_config(config)
+
+
+def test_session_creation_invalid_extra_environment_vars_wrong_type():
+    """Test session_creation validation with invalid extra_environment_vars type."""
+    config = {
+        "test_system": {
+            "connection_json_url": "https://test.example.com/iris/connection.json",
+            "auth_type": "password",
+            "username": "user",
+            "password": "pass",
+            "session_creation": {
+                "defaults": {
+                    "extra_environment_vars": "should-be-list"  # Should be list
+                }
+            },
+        }
+    }
+    with pytest.raises(
+        EnterpriseSystemConfigurationError,
+        match=r"Field 'extra_environment_vars' in session_creation defaults for enterprise system 'test_system' must be of type list, but got str\.",
+    ):
+        validate_enterprise_systems_config(config)
+
+
+def test_session_creation_invalid_viewer_groups_wrong_type():
+    """Test session_creation validation with invalid viewer_groups type."""
+    config = {
+        "test_system": {
+            "connection_json_url": "https://test.example.com/iris/connection.json",
+            "auth_type": "password",
+            "username": "user",
+            "password": "pass",
+            "session_creation": {
+                "defaults": {"viewer_groups": "should-be-list"}  # Should be list
+            },
+        }
+    }
+    with pytest.raises(
+        EnterpriseSystemConfigurationError,
+        match=r"Field 'viewer_groups' in session_creation defaults for enterprise system 'test_system' must be of type list, but got str\.",
+    ):
+        validate_enterprise_systems_config(config)
+
+
+def test_session_creation_invalid_programming_language_wrong_type():
+    """Test session_creation validation with invalid programming_language type."""
+    config = {
+        "test_system": {
+            "connection_json_url": "https://test.example.com/iris/connection.json",
+            "auth_type": "password",
+            "username": "user",
+            "password": "pass",
+            "session_creation": {
+                "defaults": {"programming_language": 123}  # Should be str
+            },
+        }
+    }
+    with pytest.raises(
+        EnterpriseSystemConfigurationError,
+        match=r"Field 'programming_language' in session_creation defaults for enterprise system 'test_system' must be of type str, but got int\.",
+    ):
+        validate_enterprise_systems_config(config)
+
+
+# --- Tests for Helper Functions --- #
+
+
+def test_validate_field_type_valid_string():
+    """Test _validate_field_type with valid string type."""
+    # Should not raise exception
+    _validate_field_type("test_system", "test_field", "value", str)
+
+
+def test_validate_field_type_valid_int():
+    """Test _validate_field_type with valid int type."""
+    # Should not raise exception
+    _validate_field_type("test_system", "test_field", 42, int)
+
+
+def test_validate_field_type_valid_list():
+    """Test _validate_field_type with valid list type."""
+    # Should not raise exception
+    _validate_field_type("test_system", "test_field", ["a", "b"], list)
+
+
+def test_validate_field_type_valid_union():
+    """Test _validate_field_type with valid union type (str or list)."""
+    # Should not raise exception for string
+    _validate_field_type("test_system", "test_field", "value", (str, list))
+    # Should not raise exception for list
+    _validate_field_type("test_system", "test_field", ["a", "b"], (str, list))
+
+
+def test_validate_field_type_invalid_type():
+    """Test _validate_field_type with invalid type."""
+    with pytest.raises(
+        EnterpriseSystemConfigurationError,
+        match=r"Field 'test_field' for enterprise system 'test_system' must be of type str, but got int\.",
+    ):
+        _validate_field_type("test_system", "test_field", 42, str)
+
+
+def test_validate_field_type_invalid_union():
+    """Test _validate_field_type with invalid union type."""
+    with pytest.raises(
+        EnterpriseSystemConfigurationError,
+        match=r"Field 'test_field' for enterprise system 'test_system' must be one of types \(str, list\), but got int\.",
+    ):
+        _validate_field_type("test_system", "test_field", 42, (str, list))
+
+
+def test_validate_required_fields_valid():
+    """Test _validate_required_fields with all required fields present."""
+    config = {
+        "connection_json_url": "https://test.com",
+        "auth_type": "password",
+        "username": "user",
+    }
+    # Should not raise exception
+    _validate_required_fields("test_system", config)
+
+
+def test_validate_required_fields_missing_field():
+    """Test _validate_required_fields with missing required field."""
+    config = {
+        "connection_json_url": "https://test.com",
+        # Missing "auth_type"
+    }
+    with pytest.raises(
+        EnterpriseSystemConfigurationError,
+        match=r"Required field 'auth_type' missing in enterprise system 'test_system'\.",
+    ):
+        _validate_required_fields("test_system", config)
+
+
+def test_validate_required_fields_wrong_type():
+    """Test _validate_required_fields with wrong field type."""
+    config = {
+        "connection_json_url": "https://test.com",
+        "auth_type": 123,  # Should be string
+    }
+    with pytest.raises(
+        EnterpriseSystemConfigurationError,
+        match=r"Field 'auth_type' for enterprise system 'test_system' must be of type str, but got int\.",
+    ):
+        _validate_required_fields("test_system", config)
+
+
+def test_validate_optional_fields_valid():
+    """Test _validate_optional_fields with valid optional fields."""
+    config = {
+        "connection_json_url": "https://test.com",
+        "auth_type": "password",
+        "username": "user",
+        "password": "secret",  # Optional field
+        "session_creation": {"max_concurrent_sessions": 5},  # Optional field
+    }
+    # Should not raise exception
+    _validate_optional_fields("test_system", config)
+
+
+def test_validate_optional_fields_wrong_type():
+    """Test _validate_optional_fields with wrong optional field type."""
+    config = {
+        "connection_json_url": "https://test.com",
+        "auth_type": "password",
+        "username": "user",
+        "session_creation": "not_a_dict",  # Should be dict
+    }
+    with pytest.raises(
+        EnterpriseSystemConfigurationError,
+        match=r"Optional field 'session_creation' for enterprise system 'test_system' must be of type dict, but got str\.",
+    ):
+        _validate_optional_fields("test_system", config)
+
+
+def test_validate_optional_fields_ignores_missing():
+    """Test _validate_optional_fields ignores missing optional fields."""
+    config = {
+        "connection_json_url": "https://test.com",
+        "auth_type": "password",
+        "username": "user",
+        # Missing optional "password" field - should be fine
+    }
+    # Should not raise exception
+    _validate_optional_fields("test_system", config)
