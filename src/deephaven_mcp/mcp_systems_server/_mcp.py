@@ -89,7 +89,6 @@ expensive formatting operations. Can be tuned based on actual data patterns.
 _LOGGER = logging.getLogger(__name__)
 
 
-
 @asynccontextmanager
 async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
     """
@@ -1850,7 +1849,7 @@ async def create_enterprise_session(
         )
         session_id = enterprise_session_manager.full_name
 
-        # Add to session registry  
+        # Add to session registry
         await session_registry.add_session(enterprise_session_manager)
 
         _LOGGER.info(

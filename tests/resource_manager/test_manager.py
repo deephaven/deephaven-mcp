@@ -441,7 +441,9 @@ def test_parse_full_name_static():
     from deephaven_mcp.resource_manager import BaseItemManager
 
     # Test valid enterprise session ID
-    system_type, source, name = BaseItemManager.parse_full_name("enterprise:factoryA:sess42")
+    system_type, source, name = BaseItemManager.parse_full_name(
+        "enterprise:factoryA:sess42"
+    )
     assert system_type == "enterprise"
     assert source == "factoryA"
     assert name == "sess42"
@@ -453,13 +455,17 @@ def test_parse_full_name_static():
     assert name == "foo"
 
     # Test session ID with colons in the name (should be handled correctly)
-    system_type, source, name = BaseItemManager.parse_full_name("enterprise:prod:session:with:colons")
+    system_type, source, name = BaseItemManager.parse_full_name(
+        "enterprise:prod:session:with:colons"
+    )
     assert system_type == "enterprise"
     assert source == "prod"
     assert name == "session:with:colons"
 
     # Test session ID with special characters
-    system_type, source, name = BaseItemManager.parse_full_name("community:config-file.yaml:worker-1")
+    system_type, source, name = BaseItemManager.parse_full_name(
+        "community:config-file.yaml:worker-1"
+    )
     assert system_type == "community"
     assert source == "config-file.yaml"
     assert name == "worker-1"
@@ -532,7 +538,7 @@ def test_split_name_property():
     manager = ConcreteItemManager(SystemType.COMMUNITY, "config.yaml", "worker-1")
     system_type, source, name = manager.split_name
     assert system_type == "community"
-    assert source == "config.yaml" 
+    assert source == "config.yaml"
     assert name == "worker-1"
 
     # Test that split_name matches full_name parsing

@@ -422,19 +422,19 @@ class BaseItemManager(Generic[T], ABC):
     @staticmethod
     def parse_full_name(full_name: str) -> tuple[str, str, str]:
         """Parse a full name identifier into its components.
-        
+
         This method is the inverse of make_full_name() and parses identifiers
         created by that method back into their constituent parts.
-        
+
         Args:
             full_name: Full name in format "system_type:source:name"
-            
+
         Returns:
             tuple[str, str, str]: (system_type, source, name)
-            
+
         Raises:
             ValueError: If full_name is not in the expected format
-            
+
         Example:
             ```python
             system_type, source, name = BaseItemManager.parse_full_name(
@@ -784,28 +784,28 @@ class BaseItemManager(Generic[T], ABC):
     @property
     def split_name(self) -> tuple[str, str, str]:
         """Split this manager's full name into its constituent components.
-        
+
         This property provides convenient access to the individual components
         that make up this manager's full_name identifier.
-        
+
         Returns:
             tuple[str, str, str]: (system_type, source, name) components
-            
+
         Example:
             ```python
             def creation_func(source: str, name: str):
                 # Session creation logic
                 pass
-                
+
             manager = EnterpriseSessionManager(
-                source="prod-env", 
-                name="session-1", 
+                source="prod-env",
+                name="session-1",
                 creation_function=creation_func
             )
             system_type, source, name = manager.split_name
             # Result: ("enterprise", "prod-env", "session-1")
             ```
-            
+
         See Also:
             full_name: The combined identifier string
             parse_full_name(): Static method for parsing arbitrary full names
