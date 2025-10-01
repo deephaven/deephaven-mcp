@@ -3595,7 +3595,6 @@ async def test_delete_enterprise_session_success():
     assert result["session_name"] == "test-session"
 
     # Verify session was removed from registry
-    # Verify session was removed from registry
     mock_session_registry.remove_session.assert_called_once_with(
         "enterprise:test-system:test-session"
     )
