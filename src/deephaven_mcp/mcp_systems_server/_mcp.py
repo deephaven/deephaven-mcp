@@ -189,6 +189,11 @@ async def refresh(context: Context) -> dict:
     Configuration changes (adding, removing, or updating systems) are applied immediately.
     All sessions will be reopened with the new configuration on next access.
 
+    Terminology Note:
+    - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
+    - 'Deephaven Community' and 'Deephaven Core' are interchangeable names for the same product
+    - 'Deephaven Enterprise', 'Deephaven Core+', and 'Deephaven CorePlus' are interchangeable names for the same product
+
     AI Agent Usage:
     - Use this tool after making configuration file changes
     - Check 'success' field to verify reload completed
@@ -260,6 +265,11 @@ async def enterprise_systems_status(
     This tool provides comprehensive status information about all configured enterprise systems in the MCP
     environment. It returns detailed health status using the ResourceLivenessStatus classification system,
     along with explanatory details and configuration information (with sensitive fields redacted for security).
+
+    Terminology Note:
+    - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
+    - 'Deephaven Community' and 'Deephaven Core' are interchangeable names for the same product
+    - 'Deephaven Enterprise', 'Deephaven Core+', and 'Deephaven CorePlus' are interchangeable names for the same product
 
     The tool supports two operational modes:
     1. Default mode (attempt_to_connect=False): Quick status check of existing connections
@@ -387,6 +397,11 @@ async def list_sessions(context: Context) -> dict:
 
     Returns basic information about all available sessions (community and enterprise).
     This is a lightweight operation that doesn't connect to sessions or check their status.
+
+    Terminology Note:
+    - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
+    - 'Deephaven Community' and 'Deephaven Core' are interchangeable names for the same product
+    - 'Deephaven Enterprise', 'Deephaven Core+', and 'Deephaven CorePlus' are interchangeable names for the same product
 
     AI Agent Usage:
     - Use this to discover available sessions before calling other session-based tools
@@ -641,6 +656,11 @@ async def get_session_details(
 
     Returns comprehensive status and configuration information for a specific session,
     including availability status, programming language, and version information.
+
+    Terminology Note:
+    - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
+    - 'Deephaven Community' and 'Deephaven Core' are interchangeable names for the same product
+    - 'Deephaven Enterprise', 'Deephaven Core+', and 'Deephaven CorePlus' are interchangeable names for the same product
 
     AI Agent Usage:
     - Use attempt_to_connect=False (default) for quick status checks
@@ -1639,6 +1659,11 @@ async def create_enterprise_session(
     session registry for future use. The session is configured using provided parameters or defaults
     from the enterprise system configuration.
 
+    Terminology Note:
+    - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
+    - 'Deephaven Community' and 'Deephaven Core' are interchangeable names for the same product
+    - 'Deephaven Enterprise', 'Deephaven Core+', and 'Deephaven CorePlus' are interchangeable names for the same product
+
     Parameter Resolution Priority (highest to lowest):
     1. Tool parameters provided in this function call
     2. Enterprise system session_creation defaults from configuration
@@ -1953,6 +1978,11 @@ async def delete_enterprise_session(
 
     Removes an enterprise session from the specified enterprise system and removes it from the
     session registry. The session becomes inaccessible for future operations.
+
+    Terminology Note:
+    - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
+    - 'Deephaven Community' and 'Deephaven Core' are interchangeable names for the same product
+    - 'Deephaven Enterprise', 'Deephaven Core+', and 'Deephaven CorePlus' are interchangeable names for the same product
 
     AI Agent Usage:
     - Use this tool to clean up sessions when no longer needed
