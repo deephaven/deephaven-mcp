@@ -622,7 +622,7 @@ def test_session_creation_valid_partial_defaults():
                     "heap_size_gb": 4.5,  # float is valid
                     "server": "worker-node-east",
                 }
-                # max_concurrent_sessions omitted - should default to 5
+                # max_concurrent_sessions omitted - validator allows omission
             },
         }
     }
