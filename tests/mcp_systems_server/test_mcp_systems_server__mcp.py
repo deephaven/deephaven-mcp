@@ -2990,9 +2990,9 @@ async def test_delete_enterprise_session_success():
         # Verify session was closed and removed
         mock_session_manager.close.assert_called_once()
         # Verify remove_session was called
-    mock_registry.remove_session.assert_called_once_with(
-        "enterprise:test-system:test-worker"
-    )
+        mock_registry.remove_session.assert_called_once_with(
+            "enterprise:test-system:test-worker"
+        )
 
 
 @pytest.mark.asyncio
@@ -3136,9 +3136,9 @@ async def test_delete_enterprise_session_close_failure_continues():
 
         # Verify session was still removed from registry
         # Verify remove_session was called even after close failure
-    mock_registry.remove_session.assert_called_once_with(
-        "enterprise:test-system:failing-close-worker"
-    )
+        mock_registry.remove_session.assert_called_once_with(
+            "enterprise:test-system:failing-close-worker"
+        )
 
 
 # === Helper function tests ===
