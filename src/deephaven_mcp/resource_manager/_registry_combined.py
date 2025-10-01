@@ -896,10 +896,8 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             ```
         """
         async with self._lock:
-            if not self._initialized:
-                raise InternalError(
-                    f"{self.__class__.__name__} not initialized. Call 'await initialize()' after construction."
-                )
+            # Check initialization first
+            self._check_initialized()
 
             session_id = manager.full_name
             if session_id in self._items:
@@ -960,10 +958,8 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             ```
         """
         async with self._lock:
-            if not self._initialized:
-                raise InternalError(
-                    f"{self.__class__.__name__} not initialized. Call 'await initialize()' after construction."
-                )
+            # Check initialization first
+            self._check_initialized()
 
             removed_manager = self._items.pop(session_id, None)
             if removed_manager is not None:
@@ -994,6 +990,9 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
         Returns:
             int: Number of sessions we have added that still exist in the registry.
             
+        Raises:
+            InternalError: If the registry has not been initialized via initialize().
+            
         Thread Safety:
             This method is thread-safe and acquires the registry lock.
             
@@ -1017,6 +1016,9 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
         
         # Use lock to ensure consistent state during counting
         async with self._lock:
+            # Check initialization first
+            self._check_initialized()
+            
             # Filter sessions that match the system type and name
             for session_id in self._added_sessions:
                 try:
@@ -1057,6 +1059,9 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             bool: True if the session was explicitly added via add_session(), 
                 False if it was never added or has been removed.
             
+        Raises:
+            InternalError: If the registry has not been initialized via initialize().
+            
         Thread Safety:
             This method is thread-safe and acquires the registry lock to ensure
             consistent reads from the tracking set.
@@ -1071,6 +1076,8 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             ```
         """
         async with self._lock:
+            # Check initialization first
+            self._check_initialized()
             return session_id in self._added_sessions
 
     @override
