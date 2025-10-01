@@ -18,7 +18,7 @@ from deephaven_mcp.mcp_systems_server._mcp import (
     _get_system_config,
     _resolve_session_parameters,
 )
-from deephaven_mcp.resource_manager._manager import ResourceLivenessStatus
+from deephaven_mcp.resource_manager import ResourceLivenessStatus
 
 
 class MockRequestContext:

@@ -25,7 +25,7 @@ import textwrap
 import pyarrow
 
 from deephaven_mcp._exceptions import UnsupportedOperationError
-from deephaven_mcp.client._session import BaseSession
+from deephaven_mcp.client import BaseSession
 
 _LOGGER = logging.getLogger(__name__)
 

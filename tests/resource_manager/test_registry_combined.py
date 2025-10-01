@@ -15,16 +15,14 @@ from deephaven_mcp._exceptions import DeephavenConnectionError, InternalError
 from deephaven_mcp.client import CorePlusControllerClient
 from deephaven_mcp.config import ConfigManager
 from deephaven_mcp.resource_manager import (
+    BaseItemManager,
+    CombinedSessionRegistry,
     CommunitySessionRegistry,
+    CorePlusSessionFactoryManager,
     CorePlusSessionFactoryRegistry,
+    EnterpriseSessionManager,
     SystemType,
 )
-from deephaven_mcp.resource_manager._manager import (
-    BaseItemManager,
-    CorePlusSessionFactoryManager,
-    EnterpriseSessionManager,
-)
-from deephaven_mcp.resource_manager._registry_combined import CombinedSessionRegistry
 
 
 @pytest.fixture
