@@ -788,7 +788,6 @@ class TestEnterpriseSessionUpdate:
             "_get_or_create_controller_client",
             AsyncMock(return_value=mock_client),
         ):
-            # Mock session map from controller that doesn't include the stale session
             # Call the method under test
             await initialized_registry._update_enterprise_sessions()
 
