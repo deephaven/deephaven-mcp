@@ -436,6 +436,112 @@ def test_make_full_name_static():
     )
 
 
+def test_parse_full_name_static():
+    """Directly test BaseItemManager.parse_full_name static method."""
+    from deephaven_mcp.resource_manager import BaseItemManager
+
+    # Test valid enterprise session ID
+    system_type, source, name = BaseItemManager.parse_full_name("enterprise:factoryA:sess42")
+    assert system_type == "enterprise"
+    assert source == "factoryA"
+    assert name == "sess42"
+
+    # Test valid community session ID
+    system_type, source, name = BaseItemManager.parse_full_name("community:sourceX:foo")
+    assert system_type == "community"
+    assert source == "sourceX"
+    assert name == "foo"
+
+    # Test session ID with colons in the name (should be handled correctly)
+    system_type, source, name = BaseItemManager.parse_full_name("enterprise:prod:session:with:colons")
+    assert system_type == "enterprise"
+    assert source == "prod"
+    assert name == "session:with:colons"
+
+    # Test session ID with special characters
+    system_type, source, name = BaseItemManager.parse_full_name("community:config-file.yaml:worker-1")
+    assert system_type == "community"
+    assert source == "config-file.yaml"
+    assert name == "worker-1"
+
+
+def test_parse_full_name_invalid_formats():
+    """Test BaseItemManager.parse_full_name with invalid formats."""
+    from deephaven_mcp.resource_manager import BaseItemManager
+
+    # Test empty string
+    with pytest.raises(ValueError, match="Invalid full_name format"):
+        BaseItemManager.parse_full_name("")
+
+    # Test single component
+    with pytest.raises(ValueError, match="Invalid full_name format"):
+        BaseItemManager.parse_full_name("enterprise")
+
+    # Test two components (missing name)
+    with pytest.raises(ValueError, match="Invalid full_name format"):
+        BaseItemManager.parse_full_name("enterprise:system")
+
+    # Test no colons
+    with pytest.raises(ValueError, match="Invalid full_name format"):
+        BaseItemManager.parse_full_name("invalid-format")
+
+    # Test starts with colon
+    with pytest.raises(ValueError, match="Invalid full_name format"):
+        BaseItemManager.parse_full_name(":enterprise:system")
+
+    # Test ends with colon but missing components
+    with pytest.raises(ValueError, match="Invalid full_name format"):
+        BaseItemManager.parse_full_name("enterprise:")
+
+
+def test_make_and_parse_full_name_roundtrip():
+    """Test that make_full_name and parse_full_name are perfect inverses."""
+    from deephaven_mcp.resource_manager import BaseItemManager, SystemType
+
+    # Test enterprise roundtrip
+    original_enterprise = (SystemType.ENTERPRISE, "prod-system", "analytics-session")
+    full_name = BaseItemManager.make_full_name(*original_enterprise)
+    parsed = BaseItemManager.parse_full_name(full_name)
+    assert parsed == ("enterprise", "prod-system", "analytics-session")
+
+    # Test community roundtrip
+    original_community = (SystemType.COMMUNITY, "local-config.yaml", "worker-1")
+    full_name = BaseItemManager.make_full_name(*original_community)
+    parsed = BaseItemManager.parse_full_name(full_name)
+    assert parsed == ("community", "local-config.yaml", "worker-1")
+
+    # Test with special characters
+    original_special = (SystemType.ENTERPRISE, "test-env_v2", "session-name_123")
+    full_name = BaseItemManager.make_full_name(*original_special)
+    parsed = BaseItemManager.parse_full_name(full_name)
+    assert parsed == ("enterprise", "test-env_v2", "session-name_123")
+
+
+def test_split_name_property():
+    """Test BaseItemManager.split_name property."""
+    from deephaven_mcp.resource_manager import SystemType
+
+    # Test enterprise manager split_name
+    manager = ConcreteItemManager(SystemType.ENTERPRISE, "prod-env", "session-1")
+    system_type, source, name = manager.split_name
+    assert system_type == "enterprise"
+    assert source == "prod-env"
+    assert name == "session-1"
+
+    # Test community manager split_name
+    manager = ConcreteItemManager(SystemType.COMMUNITY, "config.yaml", "worker-1")
+    system_type, source, name = manager.split_name
+    assert system_type == "community"
+    assert source == "config.yaml" 
+    assert name == "worker-1"
+
+    # Test that split_name matches full_name parsing
+    manager = ConcreteItemManager(SystemType.ENTERPRISE, "test-system", "analytics")
+    split_components = manager.split_name
+    parsed_components = manager.parse_full_name(manager.full_name)
+    assert split_components == parsed_components
+
+
 def test_enterprise_session_manager_constructor():
     """Explicitly test the constructor for coverage (lines 519-520)."""
     from deephaven_mcp.resource_manager import EnterpriseSessionManager

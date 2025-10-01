@@ -44,19 +44,18 @@ import pyarrow.csv as csv
 from mcp.server.fastmcp import Context, FastMCP
 
 from deephaven_mcp import queries
-from deephaven_mcp.client._session import BaseSession, CorePlusSession
+from deephaven_mcp.client import BaseSession, CorePlusSession
 from deephaven_mcp.config import (
     ConfigManager,
     get_config_section,
     redact_enterprise_system_config,
 )
-from deephaven_mcp.resource_manager._manager import (
+from deephaven_mcp.resource_manager import (
     BaseItemManager,
-    CorePlusSessionFactoryManager,
+    CombinedSessionRegistry,
     EnterpriseSessionManager,
     SystemType,
 )
-from deephaven_mcp.resource_manager._registry_combined import CombinedSessionRegistry
 
 T = TypeVar("T")
 
@@ -89,9 +88,6 @@ expensive formatting operations. Can be tuned based on actual data patterns.
 
 _LOGGER = logging.getLogger(__name__)
 
-# Track sessions created by this MCP instance
-# Format: {system_name: {session_name1, session_name2, ...}}
-_created_sessions: dict[str, set[str]] = {}
 
 
 @asynccontextmanager
@@ -242,8 +238,6 @@ async def refresh(context: Context) -> dict:
         async with refresh_lock:
             await config_manager.clear_config_cache()
             await session_registry.close()
-            # Reset the initialized flag to allow reinitialization
-            session_registry._initialized = False
             await session_registry.initialize(config_manager)
         _LOGGER.info(
             "[mcp_systems_server:refresh] Success: Session configuration and session cache have been reloaded."
@@ -342,11 +336,8 @@ async def enterprise_systems_status(
             "config_manager"
         ]
         # Get all factories (enterprise systems)
-        enterprise_registry = session_registry._enterprise_registry
-        if enterprise_registry is None:
-            factories: dict[str, CorePlusSessionFactoryManager] = {}
-        else:
-            factories = await enterprise_registry.get_all()
+        enterprise_registry = await session_registry.enterprise_registry()
+        factories = await enterprise_registry.get_all()
         config = await config_manager.get_config()
 
         try:
@@ -1533,8 +1524,8 @@ async def _check_session_limits(
         return {"error": error_msg, "isError": True}
 
     # Check if current session count would exceed the limit
-    current_session_count = await _count_existing_sessions(
-        session_registry, system_name
+    current_session_count = await session_registry.count_added_sessions(
+        SystemType.ENTERPRISE, system_name
     )
     if current_session_count >= max_sessions:
         error_msg = f"Max concurrent sessions ({max_sessions}) reached for system '{system_name}'"
@@ -1575,7 +1566,10 @@ def _generate_session_name_if_none(
 async def _check_session_id_available(
     session_registry: CombinedSessionRegistry, session_id: str
 ) -> dict | None:
-    """Check if session ID is available.
+    """Check if session ID is available (not already in use).
+
+    Called during session creation to prevent duplicate session IDs.
+    This ensures each session has a unique identifier in the registry.
 
     Args:
         session_registry: The session registry to check
@@ -1597,7 +1591,10 @@ async def _check_session_id_available(
 def _get_system_config(
     function_name: str, config_manager: ConfigManager, system_name: str
 ) -> tuple[dict, dict | None]:
-    """Get system config from configuration.
+    """Get system config from configuration and validate system exists.
+
+    Retrieves the configuration for the specified enterprise system. Returns both
+    the system configuration and any error that occurred during retrieval.
 
     Args:
         function_name: Name of the calling function for logging
@@ -1605,7 +1602,9 @@ def _get_system_config(
         system_name: Name of the enterprise system
 
     Returns:
-        tuple: (system_config, error_dict) - error_dict is None if successful
+        tuple[dict, dict | None]: (system_config, error_dict)
+            - system_config: The enterprise system configuration dict
+            - error_dict: Error response if system not found, None if successful
     """
     enterprise_systems_config = get_config_section(config_manager, "enterprise_sessions")  # type: ignore[arg-type]
 
@@ -1849,14 +1848,10 @@ async def create_enterprise_session(
             name=session_name,
             creation_function=creation_function,
         )
+        session_id = enterprise_session_manager.full_name
 
-        # Add to session registry (direct assignment to _items)
-        session_registry._items[session_id] = enterprise_session_manager
-
-        # Track this session in our created sessions set
-        if system_name not in _created_sessions:
-            _created_sessions[system_name] = set()
-        _created_sessions[system_name].add(session_name)
+        # Add to session registry  
+        await session_registry.add_session(enterprise_session_manager)
 
         _LOGGER.info(
             f"[mcp_systems_server:create_enterprise_session] Successfully created session "
@@ -1888,45 +1883,6 @@ async def create_enterprise_session(
         result["isError"] = True
 
     return result
-
-
-async def _count_existing_sessions(
-    session_registry: CombinedSessionRegistry, system_name: str
-) -> int:
-    """Count sessions created by this MCP instance that still exist in the registry.
-
-    Validates our tracking against the actual session registry and cleans up
-    any stale entries for sessions that no longer exist.
-
-    Args:
-        session_registry (CombinedSessionRegistry): The combined session registry.
-        system_name (str): Name of the enterprise system.
-
-    Returns:
-        int: Number of MCP-created sessions that actually exist for the system.
-    """
-    if system_name not in _created_sessions:
-        return 0
-
-    # Get list of session names we think we created
-    tracked_sessions = _created_sessions[system_name].copy()
-    existing_count = 0
-
-    for session_name in tracked_sessions:
-        session_id = f"enterprise:{system_name}:{session_name}"
-        try:
-            # Check if session actually exists in registry
-            await session_registry.get(session_id)
-            existing_count += 1
-        except KeyError:
-            # Session no longer exists, remove from our tracking
-            _created_sessions[system_name].discard(session_name)
-
-    # Clean up empty sets
-    if not _created_sessions[system_name]:
-        del _created_sessions[system_name]
-
-    return existing_count
 
 
 def _resolve_session_parameters(
@@ -2124,9 +2080,9 @@ async def delete_enterprise_session(
             )
             # Continue with removal even if close failed
 
-        # Remove from session registry (direct removal from _items)
+        # Remove from session registry
         try:
-            removed_manager = session_registry._items.pop(session_id, None)
+            removed_manager = await session_registry.remove_session(session_id)
             if removed_manager is None:
                 error_msg = (
                     f"Session '{session_id}' was not found in registry during removal"
@@ -2139,12 +2095,6 @@ async def delete_enterprise_session(
                     f"[mcp_systems_server:delete_enterprise_session] Removed session '{session_id}' from registry"
                 )
 
-                # Remove from our created sessions tracking
-                if system_name in _created_sessions:
-                    _created_sessions[system_name].discard(session_name)
-                    # Clean up empty sets
-                    if not _created_sessions[system_name]:
-                        del _created_sessions[system_name]
         except Exception as e:
             error_msg = f"Failed to remove session '{session_id}' from registry: {e}"
             _LOGGER.error(f"[mcp_systems_server:delete_enterprise_session] {error_msg}")

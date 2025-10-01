@@ -41,6 +41,7 @@ from ._manager import (
     SystemType,
 )
 from ._registry import CommunitySessionRegistry, CorePlusSessionFactoryRegistry
+from ._registry_combined import CombinedSessionRegistry
 
 __all__ = [
     "SystemType",
@@ -51,4 +52,5 @@ __all__ = [
     "CorePlusSessionFactoryManager",
     "CommunitySessionRegistry",
     "CorePlusSessionFactoryRegistry",
+    "CombinedSessionRegistry",
 ]

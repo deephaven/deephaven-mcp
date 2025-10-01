@@ -277,8 +277,8 @@ async def test_create_enterprise_session_auto_name_no_username_and_language_tran
 
         # Mock the session registry operations
         mock_registry.get = AsyncMock(side_effect=KeyError("Session not found"))
-        mock_registry._items = {}
-        mock_registry.add = AsyncMock()
+        mock_registry.add_session = AsyncMock()
+        mock_registry.count_added_sessions = AsyncMock(return_value=0)
 
         context = MockContext(
             {"config_manager": mock_config_manager, "session_registry": mock_registry}
@@ -306,10 +306,12 @@ async def test_create_enterprise_session_auto_name_no_username_and_language_tran
         assert result_config is mock_config
         assert mock_config.scriptLanguage == "Groovy"
 
-        # The function directly assigns to _items dict rather than using add()
+        # Verify session was added using add_session method - check the call was made
         session_id = f"enterprise:no-user-system:mcp-session-20241126-1500"
-        assert session_id in mock_registry._items
-        session_manager = mock_registry._items[session_id]
+        mock_registry.add_session.assert_called_once()
+        call_args = mock_registry.add_session.call_args
+        session_manager = call_args[0][0]  # First (and only) argument is the manager
+        assert session_manager.full_name == session_id
         returned_session = await session_manager._creation_function(
             "no-user-system", "mcp-session-20241126-1500"
         )
@@ -327,8 +329,8 @@ async def test_delete_enterprise_session_removal_missing_in_registry():
     enterprise_config = {"sys": {"session_creation": {"max_concurrent_sessions": 5}}}
 
     mock_registry.get = AsyncMock(return_value=mock_session_manager)
-    # _items missing the key to force pop -> None
-    mock_registry._items = {}
+    # Mock remove_session to return None (simulating session not found in registry)
+    mock_registry.remove_session = AsyncMock(return_value=None)
 
     context = MockContext(
         {"config_manager": mock_config_manager, "session_registry": mock_registry}
@@ -345,20 +347,17 @@ async def test_delete_enterprise_session_removal_missing_in_registry():
 
 @pytest.mark.asyncio
 async def test_delete_enterprise_session_cleanup_created_sessions_empty():
-    """Covers cleanup path deleting empty tracking set (line 1971)."""
+    """Test session removal - session tracking now handled by registry automatically."""
     mock_registry = MagicMock()
     mock_config_manager = MagicMock()
     mock_session_manager = MagicMock(spec=mcp_mod.EnterpriseSessionManager)
     mock_session_manager.close = AsyncMock()
 
-    # Track only this session to make the set empty after discard
-    mcp_mod._created_sessions = {"sys2": {"solo"}}
-
     enterprise_config = {"sys2": {"session_creation": {"max_concurrent_sessions": 5}}}
 
-    # Ensure item is present so pop returns the manager
+    # Mock remove_session to return the manager (simulating successful removal)
     full_id = "enterprise:sys2:solo"
-    mock_registry._items = {full_id: mock_session_manager}
+    mock_registry.remove_session = AsyncMock(return_value=mock_session_manager)
     mock_registry.get = AsyncMock(return_value=mock_session_manager)
 
     context = MockContext(
@@ -372,8 +371,7 @@ async def test_delete_enterprise_session_cleanup_created_sessions_empty():
         result = await mcp_mod.delete_enterprise_session(context, "sys2", "solo")
 
     assert result["success"] is True
-    # System key should be removed after cleanup
-    assert "sys2" not in mcp_mod._created_sessions
+    # Session tracking is now handled internally by the registry
 
 
 @pytest.mark.asyncio
@@ -391,7 +389,9 @@ async def test_delete_enterprise_session_registry_pop_raises_error():
 
     enterprise_config = {"sys3": {"session_creation": {"max_concurrent_sessions": 5}}}
     mock_registry.get = AsyncMock(return_value=mock_session_manager)
-    mock_registry._items = BadItems()
+    mock_registry.remove_session = AsyncMock(
+        side_effect=Exception("Simulated registry error")
+    )
 
     context = MockContext(
         {"config_manager": mock_config_manager, "session_registry": mock_registry}
@@ -418,7 +418,7 @@ async def test_delete_enterprise_session_outer_exception_logger_info_raises():
 
     enterprise_config = {"sys4": {"session_creation": {"max_concurrent_sessions": 5}}}
     full_id = "enterprise:sys4:s4"
-    mock_registry._items = {full_id: mock_session_manager}
+    mock_registry.remove_session = AsyncMock(return_value=mock_session_manager)
     mock_registry.get = AsyncMock(return_value=mock_session_manager)
 
     context = MockContext(
@@ -1317,7 +1317,9 @@ async def test_enterprise_systems_status_success():
 
     # Mock session registry
     mock_session_registry = MagicMock()
-    mock_session_registry._enterprise_registry = mock_enterprise_registry
+    mock_session_registry.enterprise_registry = AsyncMock(
+        return_value=mock_enterprise_registry
+    )
 
     # Mock config manager
     mock_config_manager = AsyncMock()
@@ -1399,7 +1401,9 @@ async def test_enterprise_systems_status_with_attempt_to_connect():
 
     # Mock session registry
     mock_session_registry = MagicMock()
-    mock_session_registry._enterprise_registry = mock_enterprise_registry
+    mock_session_registry.enterprise_registry = AsyncMock(
+        return_value=mock_enterprise_registry
+    )
 
     # Mock config manager
     mock_config_manager = AsyncMock()
@@ -1449,7 +1453,9 @@ async def test_enterprise_systems_status_no_systems():
 
     # Mock session registry
     mock_session_registry = MagicMock()
-    mock_session_registry._enterprise_registry = mock_enterprise_registry
+    mock_session_registry.enterprise_registry = AsyncMock(
+        return_value=mock_enterprise_registry
+    )
 
     # Mock config manager
     mock_config_manager = AsyncMock()
@@ -1506,7 +1512,9 @@ async def test_enterprise_systems_status_all_status_types():
 
     # Mock session registry
     mock_session_registry = MagicMock()
-    mock_session_registry._enterprise_registry = mock_enterprise_registry
+    mock_session_registry.enterprise_registry = AsyncMock(
+        return_value=mock_enterprise_registry
+    )
 
     # Mock config manager with empty configs
     mock_config_manager = AsyncMock()
@@ -1548,7 +1556,9 @@ async def test_enterprise_systems_status_config_error():
     # Mock session registry
     mock_session_registry = MagicMock()
     mock_enterprise_registry = AsyncMock()
-    mock_session_registry._enterprise_registry = mock_enterprise_registry
+    mock_session_registry.enterprise_registry = AsyncMock(
+        return_value=mock_enterprise_registry
+    )
 
     # Mock config manager that raises an exception
     mock_config_manager = AsyncMock()
@@ -1580,7 +1590,9 @@ async def test_enterprise_systems_status_registry_error():
 
     # Mock session registry
     mock_session_registry = MagicMock()
-    mock_session_registry._enterprise_registry = mock_enterprise_registry
+    mock_session_registry.enterprise_registry = AsyncMock(
+        return_value=mock_enterprise_registry
+    )
 
     # Mock config manager
     mock_config_manager = AsyncMock()
@@ -1619,7 +1631,9 @@ async def test_enterprise_systems_status_liveness_error():
 
     # Mock session registry
     mock_session_registry = MagicMock()
-    mock_session_registry._enterprise_registry = mock_enterprise_registry
+    mock_session_registry.enterprise_registry = AsyncMock(
+        return_value=mock_enterprise_registry
+    )
 
     # Mock config manager
     mock_config_manager = AsyncMock()
@@ -1654,7 +1668,10 @@ async def test_enterprise_systems_status_no_enterprise_registry():
     """Test enterprise systems status when enterprise_registry is None."""
     # Mock session registry with None enterprise registry
     mock_session_registry = MagicMock()
-    mock_session_registry._enterprise_registry = None
+    mock_session_registry.enterprise_registry = AsyncMock(return_value=AsyncMock())
+    mock_session_registry.enterprise_registry.return_value.get_all = AsyncMock(
+        return_value={}
+    )
 
     # Mock config manager
     mock_config_manager = AsyncMock()
@@ -2536,7 +2553,8 @@ async def test_create_enterprise_session_success_with_defaults():
         mock_registry.get = AsyncMock(
             side_effect=KeyError("Session not found")
         )  # No conflict
-        mock_registry._items = {}
+        mock_registry.add_session = AsyncMock()
+        mock_registry.count_added_sessions = AsyncMock(return_value=0)
 
         context = MockContext(
             {"config_manager": mock_config_manager, "session_registry": mock_registry}
@@ -2572,7 +2590,11 @@ async def test_create_enterprise_session_success_with_defaults():
         )
 
         # Verify session was added to registry
-        assert "enterprise:prod-system:test-worker" in mock_registry._items
+        # Verify add_session was called with manager only
+        mock_registry.add_session.assert_called_once()
+        call_args = mock_registry.add_session.call_args
+        session_manager = call_args[0][0]  # Manager is the only argument
+        assert session_manager.full_name == "enterprise:prod-system:test-worker"
 
 
 @pytest.mark.asyncio
@@ -2617,7 +2639,8 @@ async def test_create_enterprise_session_success_with_overrides():
         mock_registry.get = AsyncMock(
             side_effect=KeyError("Session not found")
         )  # No conflict
-        mock_registry._items = {}
+        mock_registry.add_session = AsyncMock()
+        mock_registry.count_added_sessions = AsyncMock(return_value=0)
 
         context = MockContext(
             {"config_manager": mock_config_manager, "session_registry": mock_registry}
@@ -2698,7 +2721,8 @@ async def test_create_enterprise_session_auto_generate_name():
         mock_registry.get = AsyncMock(
             side_effect=KeyError("Session not found")
         )  # No conflict
-        mock_registry._items = {}
+        mock_registry.add_session = AsyncMock()
+        mock_registry.count_added_sessions = AsyncMock(return_value=0)
 
         context = MockContext(
             {"config_manager": mock_config_manager, "session_registry": mock_registry}
@@ -2756,8 +2780,8 @@ async def test_create_enterprise_session_max_workers_exceeded():
     ) as mock_get_config:
         mock_get_config.return_value = enterprise_config
 
-        # Mock the tracking - simulate existing sessions that are at the limit
-        mcp_mod._created_sessions = {"limited-system": {"worker1", "worker2"}}
+        # Mock registry to return 2 existing sessions (at limit)
+        mock_registry.count_added_sessions = AsyncMock(return_value=2)
 
         # Mock session registry get to simulate existing sessions for counting
         async def mock_session_get(session_id):
@@ -2785,8 +2809,7 @@ async def test_create_enterprise_session_max_workers_exceeded():
         assert "Max concurrent sessions (2) reached" in result["error"]
         assert result["isError"] is True
 
-        # Clean up
-        mcp_mod._created_sessions = {}
+        # No cleanup needed - session tracking handled by registry
 
 
 @pytest.mark.asyncio
@@ -2814,6 +2837,7 @@ async def test_create_enterprise_session_session_conflict():
         mock_existing_session = MagicMock()
         mock_registry.get = AsyncMock(return_value=mock_existing_session)
         mock_registry.get_all = AsyncMock(return_value={})
+        mock_registry.count_added_sessions = AsyncMock(return_value=0)
 
         context = MockContext(
             {"config_manager": mock_config_manager, "session_registry": mock_registry}
@@ -2855,6 +2879,7 @@ async def test_create_enterprise_session_factory_creation_failure():
         # Mock session registry - no conflict
         mock_registry.get = AsyncMock(side_effect=KeyError("No session found"))
         mock_registry.get_all = AsyncMock(return_value={})
+        mock_registry.count_added_sessions = AsyncMock(return_value=0)
 
         # Mock factory that fails during worker creation
         mock_enterprise_registry = MagicMock()
@@ -2964,7 +2989,10 @@ async def test_delete_enterprise_session_success():
 
         # Verify session was closed and removed
         mock_session_manager.close.assert_called_once()
-        assert "enterprise:test-system:test-worker" not in mock_registry._items
+        # Verify remove_session was called
+    mock_registry.remove_session.assert_called_once_with(
+        "enterprise:test-system:test-worker"
+    )
 
 
 @pytest.mark.asyncio
@@ -3092,9 +3120,7 @@ async def test_delete_enterprise_session_close_failure_continues():
         mock_get_config.return_value = enterprise_config
 
         mock_registry.get = AsyncMock(return_value=mock_session_manager)
-        mock_registry._items = {
-            "enterprise:test-system:failing-close-worker": mock_session_manager
-        }
+        mock_registry.remove_session = AsyncMock(return_value=mock_session_manager)
 
         context = MockContext(
             {"config_manager": mock_config_manager, "session_registry": mock_registry}
@@ -3109,49 +3135,13 @@ async def test_delete_enterprise_session_close_failure_continues():
         assert result["session_id"] == "enterprise:test-system:failing-close-worker"
 
         # Verify session was still removed from registry
-        assert "enterprise:test-system:failing-close-worker" not in mock_registry._items
+        # Verify remove_session was called even after close failure
+    mock_registry.remove_session.assert_called_once_with(
+        "enterprise:test-system:failing-close-worker"
+    )
 
 
 # === Helper function tests ===
-
-
-@pytest.mark.asyncio
-async def test_count_existing_sessions():
-    """Test _count_existing_sessions helper function."""
-    mock_registry = MagicMock()
-
-    # Set up tracking for this test - simulate _created_sessions state
-    mcp_mod._created_sessions = {
-        "system1": {"session1", "session2"},
-        "system2": {"session1"},
-    }
-
-    # Test that sessions actually exist in registry
-    async def mock_get(session_id):
-        if session_id in [
-            "enterprise:system1:session1",
-            "enterprise:system1:session2",
-            "enterprise:system2:session1",
-        ]:
-            return MagicMock()
-        raise KeyError(f"Session {session_id} not found")
-
-    mock_registry.get = AsyncMock(side_effect=mock_get)
-
-    # Test counting sessions for system1
-    count = await mcp_mod._count_existing_sessions(mock_registry, "system1")
-    assert count == 2
-
-    # Test counting sessions for system2
-    count = await mcp_mod._count_existing_sessions(mock_registry, "system2")
-    assert count == 1
-
-    # Test counting sessions for nonexistent system
-    count = await mcp_mod._count_existing_sessions(mock_registry, "nonexistent")
-    assert count == 0
-
-    # Clean up
-    mcp_mod._created_sessions = {}
 
 
 def test_resolve_session_parameters():
@@ -3296,8 +3286,8 @@ async def test_create_enterprise_session_success():
     mock_enterprise_factory_registry.get = AsyncMock(return_value=mock_factory_manager)
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.connect_to_new_worker = AsyncMock(return_value=mock_session)
-    mock_session_registry._items = {}
-
+    mock_session_registry.add_session = AsyncMock()
+    mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
     # Mock session registry get to raise KeyError for non-existent sessions (indicates session doesn't exist yet)
     mock_session_registry.get = AsyncMock(side_effect=KeyError("Session not found"))
 
@@ -3348,14 +3338,13 @@ async def test_create_enterprise_session_success():
     assert result["session_name"] == "test-session"
 
     # Verify session was added to registry
-    assert "enterprise:test-system:test-session" in mock_session_registry._items
+    mock_session_registry.add_session.assert_called_once()
+    call_args = mock_session_registry.add_session.call_args
+    session_manager = call_args[0][0]  # Manager is the only argument
+    assert session_manager.full_name == "enterprise:test-system:test-session"
 
-    # Verify session was tracked
-    assert "test-system" in mcp_mod._created_sessions
-    assert "test-session" in mcp_mod._created_sessions["test-system"]
-
-    # Clean up
-    mcp_mod._created_sessions = {}
+    # Session tracking is now verified through registry methods
+    # Verify session was added (tracked automatically by add_session)
 
 
 @pytest.mark.asyncio
@@ -3375,8 +3364,8 @@ async def test_create_enterprise_session_auto_generated_name():
     mock_enterprise_factory_registry.get = AsyncMock(return_value=mock_factory_manager)
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.connect_to_new_worker = AsyncMock(return_value=mock_session)
-    mock_session_registry._items = {}
-
+    mock_session_registry.add_session = AsyncMock()
+    mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
     # Mock session registry get to raise KeyError for non-existent sessions (indicates session doesn't exist yet)
     mock_session_registry.get = AsyncMock(side_effect=KeyError("Session not found"))
 
@@ -3452,8 +3441,8 @@ async def test_create_enterprise_session_max_sessions_reached():
         }
     )
 
-    # Set up tracking to simulate 2 existing sessions
-    mcp_mod._created_sessions = {"test-system": {"session1", "session2"}}
+    # Mock registry to return 2 existing sessions (at limit)
+    mock_session_registry.count_added_sessions = AsyncMock(return_value=2)
 
     # Mock the session registry to return sessions for count validation
     async def mock_get(session_id):
@@ -3580,9 +3569,7 @@ async def test_delete_enterprise_session_success():
     # Mock session registry
     mock_session_registry.get = AsyncMock(return_value=mock_session_manager)
     mock_session_manager.close = AsyncMock()
-    mock_session_registry._items = {
-        "enterprise:test-system:test-session": mock_session_manager
-    }
+    mock_session_registry.remove_session = AsyncMock(return_value=mock_session_manager)
 
     context = MockContext(
         {
@@ -3591,8 +3578,7 @@ async def test_delete_enterprise_session_success():
         }
     )
 
-    # Set up tracking
-    mcp_mod._created_sessions = {"test-system": {"test-session", "other-session"}}
+    # Session tracking is now handled by registry - no manual setup needed
 
     with patch(
         "deephaven_mcp.mcp_systems_server._mcp.get_config_section",
@@ -3609,16 +3595,12 @@ async def test_delete_enterprise_session_success():
     assert result["session_name"] == "test-session"
 
     # Verify session was removed from registry
-    assert "enterprise:test-system:test-session" not in mock_session_registry._items
+    # Verify session was removed from registry
+    mock_session_registry.remove_session.assert_called_once_with(
+        "enterprise:test-system:test-session"
+    )
 
-    # Verify session was removed from tracking
-    assert "test-session" not in mcp_mod._created_sessions["test-system"]
-    assert (
-        "other-session" in mcp_mod._created_sessions["test-system"]
-    )  # Other session should remain
-
-    # Clean up
-    mcp_mod._created_sessions = {}
+    # Session tracking cleanup is now handled automatically by remove_session()
 
 
 @pytest.mark.asyncio
@@ -3718,26 +3700,21 @@ async def test_check_session_limits_disabled():
 async def test_check_session_limits_under_limit():
     """Test _check_session_limits when under the session limit."""
     mock_session_registry = MagicMock()
+    mock_session_registry.count_added_sessions = AsyncMock(return_value=2)
 
-    # Mock _count_existing_sessions to return 2 sessions
-    with patch(
-        "deephaven_mcp.mcp_systems_server._mcp._count_existing_sessions", return_value=2
-    ):
-        result = await _check_session_limits(mock_session_registry, "test-system", 5)
+    result = await _check_session_limits(mock_session_registry, "test-system", 5)
 
     assert result is None  # No error when under limit
+    mock_session_registry.count_added_sessions.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_check_session_limits_at_limit():
     """Test _check_session_limits when at the session limit."""
     mock_session_registry = MagicMock()
+    mock_session_registry.count_added_sessions = AsyncMock(return_value=5)
 
-    # Mock _count_existing_sessions to return 5 sessions (at limit)
-    with patch(
-        "deephaven_mcp.mcp_systems_server._mcp._count_existing_sessions", return_value=5
-    ):
-        result = await _check_session_limits(mock_session_registry, "test-system", 5)
+    result = await _check_session_limits(mock_session_registry, "test-system", 5)
 
     assert result is not None
     assert (
@@ -3745,6 +3722,7 @@ async def test_check_session_limits_at_limit():
         == "Max concurrent sessions (5) reached for system 'test-system'"
     )
     assert result["isError"] is True
+    mock_session_registry.count_added_sessions.assert_awaited_once()
 
 
 def test_generate_session_name_if_none_with_name():

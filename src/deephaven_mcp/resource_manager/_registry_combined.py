@@ -14,9 +14,10 @@ Features:
     - Thread-safe operations with asyncio locking for concurrent access
     - Automatic caching and lifecycle management of controller clients
     - Smart controller client recreation if connections die
-    - Efficient session tracking with separate storage for different registry types
+    - Session tracking for MCP-created sessions with counting capabilities
     - Enterprise session discovery via controller clients
     - Graceful error handling and resource cleanup
+    - Public API methods for adding/removing sessions with proper validation
 
 Architecture:
     The combined registry maintains:
@@ -82,11 +83,13 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
 
     Key Features:
         - Unified API for managing heterogeneous session resources
+        - Session tracking with counting capabilities for MCP-created sessions
         - Controller client health monitoring and management
         - Efficient session resource reuse and cleanup
         - Thread-safe operations with proper asyncio locking
         - Graceful error handling and resource lifecycle management
         - Support for dynamic session discovery from enterprise controllers
+        - Public API for adding/removing sessions with validation
 
     Usage:
         The registry must be initialized before use and properly closed when no longer needed:
@@ -154,14 +157,49 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
         """
         Initialize the combined session registry.
 
-        Creates a new registry instance with separate storage for community and enterprise
-        registries, and initializes the controller client cache. This constructor does not
-        perform any I/O operations or connect to any resources - the registry must be
-        explicitly initialized with the `initialize()` method before use.
+        Creates a new registry that provides unified management of both community
+        and enterprise session resources. The registry establishes the foundational
+        architecture for handling heterogeneous session types with a single, 
+        consistent interface.
+
+        Architecture Initialized:
+            - Community session registry (None until initialize() is called)
+            - Enterprise session factory registry (None until initialize() is called)  
+            - Controller client cache for efficient enterprise session management
+            - Session tracking set for MCP-created session counting
+            - Thread-safe locking mechanism for concurrent access
+
+        State After Construction:
+            The registry is created but not functional until initialize() is called
+            with a ConfigManager. All internal registries are None and no sessions
+            are available until proper initialization occurs.
+
+        Initialization Required:
+            After construction, you MUST call initialize(config_manager) before
+            using any registry methods. Attempting to use the registry before
+            initialization will raise InternalError exceptions.
+
+        Session Tracking:
+            The registry maintains a tracking set (_added_sessions) that records
+            sessions explicitly added via add_session(). This enables counting
+            of MCP-created sessions separate from discovered sessions.
 
         Thread Safety:
-            The constructor itself is thread-safe, and the resulting registry provides
-            thread safety through asyncio locks for all operations.
+            The constructor initializes thread-safe components including an asyncio
+            lock that ensures all registry operations can be safely called from
+            multiple concurrent tasks.
+
+        Example:
+            ```python
+            # Create registry (not yet functional)
+            registry = CombinedSessionRegistry()
+            
+            # Initialize with configuration (now functional)
+            await registry.initialize(config_manager)
+            
+            # Now ready for use
+            sessions = await registry.get_all()
+            ```
         """
         super().__init__()
         # Separate storage for different registry types
@@ -169,6 +207,9 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
         self._enterprise_registry: CorePlusSessionFactoryRegistry | None = None
         # Dictionary to store controller clients for each factory
         self._controller_clients: dict[str, CorePlusControllerClient] = {}
+        # Track sessions added to this registry instance
+        # Format: {session_id1, session_id2, ...}
+        self._added_sessions: set[str] = set()
 
     async def initialize(self, config_manager: ConfigManager) -> None:
         """
@@ -180,7 +221,8 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
 
         1. Creates and initializes the community session registry
         2. Creates and initializes the enterprise session factory registry
-        3. Updates enterprise sessions by querying all available factories
+        3. Loads static community sessions into the registry
+        4. Updates enterprise sessions by querying all available factories
 
         The initialization process is thread-safe and idempotent - calling this method
         multiple times will only perform the initialization once.
@@ -255,32 +297,55 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
 
     @override
     async def _load_items(self, config_manager: ConfigManager) -> None:
-        """Raise an error as this method should not be called directly."""
+        """Raise an error as this method should not be called directly.
+        
+        Args:
+            config_manager: The configuration manager (unused in this implementation).
+            
+        Raises:
+            InternalError: Always raised to indicate this method should not be used.
+        """
         raise InternalError(
             "CombinedSessionRegistry does not support _load_items; use initialize() to set up sub-registries."
         )
 
     async def community_registry(self) -> CommunitySessionRegistry:
-        """Get access to the community session registry.
+        """Get direct access to the community session registry.
 
-        This method provides direct access to the underlying CommunitySessionRegistry
-        instance, allowing specialized operations on community sessions that might not
-        be available through the combined registry interface.
+        This method provides access to the underlying CommunitySessionRegistry instance,
+        allowing specialized operations on community sessions that might not be available
+        through the combined registry's unified interface.
 
         The community registry manages session connections to local Deephaven Community
-        Edition instances. It handles session creation, tracking, and lifecycle management
-        for these connections.
+        Edition instances, handling session creation, configuration-based initialization,
+        and lifecycle management for local or containerized Deephaven deployments.
+
+        Use this method when you need community-specific functionality such as:
+        - Direct access to community session configuration
+        - Community-specific health checking or diagnostics
+        - Advanced community session management operations
 
         Returns:
-            CommunitySessionRegistry: The community session registry instance for
-                direct manipulation of community sessions.
+            CommunitySessionRegistry: The community session registry instance that
+                manages all community sessions loaded from configuration.
 
         Raises:
-            InternalError: If the combined registry has not been initialized.
+            InternalError: If the combined registry has not been initialized via initialize().
 
         Thread Safety:
             This method is coroutine-safe and can be called concurrently.
             It acquires the registry lock to ensure thread safety.
+            
+        Example:
+            ```python
+            # Get direct access to community registry
+            community_reg = await combined_registry.community_registry()
+            
+            # Perform community-specific operations
+            community_sessions = await community_reg.get_all()
+            for session_id, manager in community_sessions.items():
+                print(f"Community session: {session_id}")
+            ```
         """
         async with self._lock:
             if not self._initialized:
@@ -291,26 +356,49 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             return cast(CommunitySessionRegistry, self._community_registry)
 
     async def enterprise_registry(self) -> CorePlusSessionFactoryRegistry:
-        """Get access to the enterprise session factory registry.
+        """Get direct access to the enterprise session factory registry.
 
-        This method provides direct access to the underlying CorePlusSessionFactoryRegistry
-        instance, allowing specialized operations on enterprise session factories that might
-        not be available through the combined registry interface.
+        This method provides access to the underlying CorePlusSessionFactoryRegistry
+        instance, allowing specialized operations on enterprise session factories that
+        might not be available through the combined registry's unified interface.
 
-        The enterprise registry manages connections to Deephaven Enterprise Edition CorePlus
-        session factories. These factories create and manage enterprise sessions through
-        controller clients that are cached by this combined registry.
+        The enterprise registry manages CorePlusSessionFactory instances that connect
+        to Deephaven Enterprise Edition deployments. These factories are responsible
+        for creating enterprise sessions through controller clients, handling advanced
+        authentication, and managing enterprise-specific features.
+
+        Use this method when you need enterprise-specific functionality such as:
+        - Direct factory management and configuration
+        - Enterprise-specific authentication handling
+        - Advanced controller client operations
+        - Factory-level health monitoring and diagnostics
 
         Returns:
-            CorePlusSessionFactoryRegistry: The enterprise session factory registry instance
-                for direct manipulation of enterprise session factories.
+            CorePlusSessionFactoryRegistry: The enterprise session factory registry
+                instance that manages all enterprise factories loaded from configuration.
 
         Raises:
-            InternalError: If the combined registry has not been initialized.
+            InternalError: If the combined registry has not been initialized via initialize().
 
         Thread Safety:
             This method is coroutine-safe and can be called concurrently.
             It acquires the registry lock to ensure thread safety.
+            
+        Example:
+            ```python
+            # Get direct access to enterprise registry
+            enterprise_reg = await combined_registry.enterprise_registry()
+            
+            # Perform enterprise-specific operations
+            factories = await enterprise_reg.get_all()
+            for factory_name, factory_manager in factories.items():
+                print(f"Enterprise factory: {factory_name}")
+                # Get the actual factory instance
+                factory = await factory_manager.get()
+                # Check factory health
+                health = await factory.ping()
+                print(f"  Health: {'OK' if health else 'FAILED'}")
+            ```
         """
         async with self._lock:
             if not self._initialized:
@@ -499,17 +587,26 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
 
         This method attempts to connect to the factory's controller client to retrieve
         the current list of available sessions. It then synchronizes the registry by:
-        - Adding new sessions that are present on the controller but not in the registry.
-        - Removing stale sessions that are no longer present on the controller.
+        - Adding new sessions that are present on the controller but not in the registry
+        - Removing stale sessions that are no longer present on the controller
+
+        The synchronization process ensures the registry accurately reflects the current
+        state of sessions available on the enterprise controller, providing a consistent
+        view for clients accessing the registry.
 
         If a DeephavenConnectionError occurs (e.g., the system is offline or unreachable),
-        all sessions for that factory will be removed from the registry and their resources cleaned up.
-        Only connection-related exceptions trigger this removal; all other exceptions
-        are propagated to the caller for visibility and debugging.
+        all sessions for that factory will be removed from the registry and their resources 
+        cleaned up. Only connection-related exceptions trigger this removal; all other 
+        exceptions are propagated to the caller for visibility and debugging.
 
         Args:
-            factory: The CorePlusSessionFactoryManager to update sessions for.
-            factory_name: The name of the factory being updated.
+            factory (CorePlusSessionFactoryManager): The factory manager to update sessions for.
+            factory_name (str): The name of the factory being updated, used for logging and
+                session identification.
+                
+        Raises:
+            Exception: Any non-connection exceptions during session discovery are propagated
+                to allow proper error handling by the caller.
         """
         _LOGGER.info(
             "[%s] updating enterprise sessions for factory '%s'",
@@ -630,27 +727,47 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
         This method provides access to any session manager (community or enterprise)
         by its fully qualified name. Before retrieving the item, it updates the enterprise
         sessions to ensure that the registry has the latest information about available
-        enterprise sessions.
+        enterprise sessions from all controller clients.
 
-        The name must be a fully qualified name in the format:
-        - For community sessions: "community:<source>:<name>"
-        - For enterprise sessions: "enterprise:<factory_name>:<session_name>"
+        The registry will automatically discover and add new enterprise sessions if they
+        have been created since the last update, ensuring you get access to the most
+        current session state.
+
+        Name Format:
+            The name must be a fully qualified identifier following the format:
+                "<system_type>:<source>:<name>"
+            
+            Examples:
+            - Community sessions: "community:local_config:worker-1"
+            - Enterprise sessions: "enterprise:prod-factory:analytics-session"
 
         Args:
-            name: The fully qualified name of the session manager to retrieve.
+            name (str): The fully qualified name of the session manager to retrieve.
+                Must follow the format "<system_type>:<source>:<name>".
 
         Returns:
             BaseItemManager: The session manager corresponding to the given name.
-                This could be either a CommunitySessionManager or an EnterpriseSessionManager.
+                This will be either a CommunitySessionManager or EnterpriseSessionManager
+                depending on the session type.
 
         Raises:
-            InternalError: If the registry has not been initialized.
-            KeyError: If no session manager with the given name is found in the registry.
-            Exception: If any error occurs while updating enterprise sessions.
+            InternalError: If the registry has not been initialized via initialize().
+            KeyError: If no session manager with the given name is found in the registry
+                after updating enterprise sessions.
+            Exception: If any error occurs while updating enterprise sessions from controllers.
 
         Thread Safety:
             This method is coroutine-safe and can be called concurrently.
             It acquires the registry lock to ensure thread safety.
+            
+        Example:
+            ```python
+            # Get a community session
+            community_mgr = await registry.get("community:local_config:worker-1")
+            
+            # Get an enterprise session  
+            enterprise_mgr = await registry.get("enterprise:prod-factory:analytics-session")
+            ```
         """
         async with self._lock:
 
@@ -675,23 +792,54 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
 
         This method returns a unified view of all available sessions across both
         community and enterprise registries. Before returning the results, it updates
-        the enterprise sessions to ensure that the most current state is available.
+        the enterprise sessions by querying all controller clients to ensure that
+        the most current session state is available, including any newly created
+        sessions that may have been added since the last update.
+
+        The returned dictionary includes:
+        - All community sessions loaded from configuration during initialization
+        - All enterprise sessions discovered from controller clients
+        - Both tracked sessions (added via add_session) and discovered sessions
 
         The returned dictionary is a copy, so modifications to it will not affect
-        the registry's internal state. The keys in the dictionary are fully qualified
-        names, and the values are the corresponding session manager instances.
+        the registry's internal state. This ensures safe iteration and manipulation
+        without affecting the registry's consistency.
 
         Returns:
-            dict[str, BaseItemManager]: A dictionary containing all registered session managers,
-                with fully qualified names as keys and manager instances as values.
+            dict[str, BaseItemManager]: A dictionary mapping fully qualified session
+                names to their corresponding session manager instances. Keys follow
+                the format "<system_type>:<source>:<name>" and values are either
+                CommunitySessionManager or EnterpriseSessionManager instances.
 
         Raises:
-            InternalError: If the registry has not been initialized.
-            Exception: If any error occurs while updating enterprise sessions.
+            InternalError: If the registry has not been initialized via initialize().
+            Exception: If any error occurs while updating enterprise sessions from
+                controller clients (network errors, authentication failures, etc.).
 
         Thread Safety:
             This method is coroutine-safe and can be called concurrently.
-            It acquires the registry lock to ensure thread safety.
+            It acquires the registry lock to ensure thread safety during both
+            enterprise session updates and registry access.
+            
+        Example:
+            ```python
+            # Get all available sessions
+            all_sessions = await registry.get_all()
+            
+            # Iterate through all sessions
+            for session_id, manager in all_sessions.items():
+                print(f"Found session: {session_id}")
+                if session_id.startswith("enterprise:"):
+                    print("  Type: Enterprise session")
+                elif session_id.startswith("community:"):
+                    print("  Type: Community session")
+                    
+            # Filter for specific system
+            prod_sessions = {
+                k: v for k, v in all_sessions.items() 
+                if ":prod-factory:" in k
+            }
+            ```
         """
         async with self._lock:
             # Check initialization first
@@ -708,6 +856,223 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             _LOGGER.info("[%s] Returning all sessions", self.__class__.__name__)
             return self._items.copy()
 
+    async def add_session(self, manager: BaseItemManager) -> None:
+        """Add a session manager to the registry with tracking.
+
+        This method adds a session manager to the registry and marks it as tracked for
+        counting purposes. This is typically used by the MCP server to register sessions
+        that it has created, allowing for proper session lifecycle management and counting.
+
+        The operation is not idempotent - attempting to add a session that already exists
+        will raise a ValueError to catch programming errors early. This fail-fast behavior
+        helps identify duplicate session creation attempts.
+
+        The session will be tracked in the registry's internal session tracking set,
+        which is used by count_added_sessions() to determine how many sessions were
+        created by the MCP server that still exist.
+
+        Args:
+            manager (BaseItemManager): The session manager to add to the registry.
+                Must have a unique full_name that doesn't already exist in the registry.
+
+        Raises:
+            ValueError: If a session with the same full_name already exists in the registry.
+                The error message will include the conflicting session ID.
+            InternalError: If the registry has not been initialized via initialize().
+
+        Thread Safety:
+            This method is coroutine-safe and can be called concurrently.
+            It acquires the registry lock to ensure thread safety.
+            
+        Example:
+            ```python
+            # Add a newly created session to the registry
+            session_manager = EnterpriseSessionManager(
+                source="prod-factory", 
+                name="analytics-session",
+                creation_function=creation_func
+            )
+            await registry.add_session(session_manager)
+            ```
+        """
+        async with self._lock:
+            if not self._initialized:
+                raise InternalError(
+                    f"{self.__class__.__name__} not initialized. Call 'await initialize()' after construction."
+                )
+
+            session_id = manager.full_name
+            if session_id in self._items:
+                raise ValueError(f"Session '{session_id}' already exists in registry")
+
+            self._items[session_id] = manager
+            self._added_sessions.add(session_id)
+            
+            _LOGGER.debug(
+                "[%s] added session '%s' to registry",
+                self.__class__.__name__,
+                session_id,
+            )
+
+    async def remove_session(self, session_id: str) -> BaseItemManager | None:
+        """Remove and return a session manager from the registry with tracking cleanup.
+
+        This method removes a session manager from the registry and also removes it
+        from the internal tracking set used by count_added_sessions(). This ensures
+        proper cleanup of sessions that were previously added via add_session().
+
+        The operation is idempotent - calling it multiple times with the same
+        session_id is safe and will return None for subsequent calls. This design
+        makes it safe to use in cleanup code that might be called multiple times.
+
+        Args:
+            session_id (str): The fully qualified session identifier to remove, in the
+                format "<system_type>:<source>:<name>" (e.g., "enterprise:factory1:session1").
+
+        Returns:
+            BaseItemManager | None: The removed session manager if it existed in the
+                registry, or None if no session with the given ID was found.
+
+        Note:
+            This method does not raise an exception if the session is not found,
+            as sessions may be removed by external systems, timeout naturally, or
+            be removed by automatic cleanup processes. Callers should check the
+            return value if they need to know whether the session existed.
+
+        Raises:
+            InternalError: If the registry has not been initialized via initialize().
+
+        Thread Safety:
+            This method is coroutine-safe and can be called concurrently.
+            It acquires the registry lock to ensure thread safety during both
+            registry and tracking cleanup.
+            
+        Example:
+            ```python
+            # Remove a session and check if it existed
+            removed = await registry.remove_session("enterprise:factory1:session1")
+            if removed is not None:
+                print(f"Removed session: {removed.full_name}")
+                # Optionally close the removed session
+                await removed.close()
+            else:
+                print("Session was not found in registry")
+            ```
+        """
+        async with self._lock:
+            if not self._initialized:
+                raise InternalError(
+                    f"{self.__class__.__name__} not initialized. Call 'await initialize()' after construction."
+                )
+
+            removed_manager = self._items.pop(session_id, None)
+            if removed_manager is not None:
+                # Update tracking for all added sessions
+                self._added_sessions.discard(session_id)
+                
+                _LOGGER.debug(
+                    "[%s] removed session '%s' from registry",
+                    self.__class__.__name__,
+                    session_id,
+                )
+            return removed_manager
+
+    async def count_added_sessions(self, system_type: str | SystemType, system_name: str) -> int:
+        """Count sessions added to this registry for a specific system that still exist.
+        
+        This method provides the functionality previously handled by the global
+        _created_sessions tracking in the MCP server. It counts only sessions that
+        were explicitly added via add_session() and filters for the specified system.
+        
+        Args:
+            system_type (str | SystemType): The system type to filter by. Can be either
+                a string ("enterprise", "community") or a SystemType enum value
+                (SystemType.ENTERPRISE, SystemType.COMMUNITY). Enum values are converted
+                to their string representation automatically.
+            system_name (str): The system name to check (e.g., "prod-system", "dev-env").
+            
+        Returns:
+            int: Number of sessions we have added that still exist in the registry.
+            
+        Thread Safety:
+            This method is thread-safe and acquires the registry lock.
+            
+        Example:
+            ```python
+            # Count enterprise sessions using string
+            count = await registry.count_added_sessions("enterprise", "prod-system")
+            
+            # Count enterprise sessions using enum
+            count = await registry.count_added_sessions(SystemType.ENTERPRISE, "prod-system")
+            
+            # Count community sessions
+            count = await registry.count_added_sessions(SystemType.COMMUNITY, "local-dev")
+            ```
+        """
+        # Convert SystemType enum to string if needed
+        type_str = system_type.value if isinstance(system_type, SystemType) else system_type
+        
+        existing_count = 0
+        stale_sessions = []
+        
+        # Use lock to ensure consistent state during counting
+        async with self._lock:
+            # Filter sessions that match the system type and name
+            for session_id in self._added_sessions:
+                try:
+                    s_type, s_source, s_name = BaseItemManager.parse_full_name(session_id)
+                    if s_type == type_str and s_source == system_name:
+                        if session_id in self._items:
+                            existing_count += 1
+                        else:
+                            # Session no longer exists, mark for cleanup
+                            stale_sessions.append(session_id)
+                except ValueError:
+                    # Invalid session ID format, mark for cleanup
+                    stale_sessions.append(session_id)
+            
+            # Clean up stale sessions
+            for session_id in stale_sessions:
+                self._added_sessions.discard(session_id)
+        
+        return existing_count
+
+    async def is_added_session(self, session_id: str) -> bool:
+        """Check if a session is tracked as added to this registry.
+        
+        This method determines whether a session was explicitly added to this registry
+        via the add_session() method. This is different from checking if a session
+        exists in the registry, as sessions can exist through discovery (enterprise)
+        or initialization (community) without being explicitly added.
+        
+        Sessions tracked by this method are counted by count_added_sessions() and
+        represent sessions that were created through the MCP server's session
+        creation process.
+        
+        Args:
+            session_id (str): The fully qualified session ID to check, in the format
+                "<system_type>:<source>:<name>" (e.g., "enterprise:factory1:session1").
+            
+        Returns:
+            bool: True if the session was explicitly added via add_session(), 
+                False if it was never added or has been removed.
+            
+        Thread Safety:
+            This method is thread-safe and acquires the registry lock to ensure
+            consistent reads from the tracking set.
+            
+        Example:
+            ```python
+            # Check if a session was added by the MCP server
+            if await registry.is_added_session("enterprise:factory1:session1"):
+                print("Session was created by MCP server")
+            else:
+                print("Session was discovered or doesn't exist")
+            ```
+        """
+        async with self._lock:
+            return session_id in self._added_sessions
+
     @override
     async def close(self) -> None:
         """Close the registry and release all resources managed by it.
@@ -717,18 +1082,23 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
         1. Closes the community session registry and all its managed sessions
         2. Closes the enterprise session factory registry and all its managed factories
         3. Properly manages the shutdown of cached controller clients
+        4. Resets the initialization flag to allow reinitialization
+        5. Clears session tracking state
 
         The method handles errors during closure gracefully, ensuring that all resources
         are attempted to be closed even if some failures occur. Each closure operation
         is performed independently, and errors in one will not prevent attempts to close
         other resources.
 
-        After this method completes successfully, the registry should not be used again.
-        A new registry should be created and initialized if needed.
+        After this method completes successfully, the registry can be reinitialized
+        by calling initialize() again with a new configuration.
 
         Raises:
             InternalError: If the registry has not been initialized.
-            Exception: Any exceptions from closing operations are logged but not propagated.
+            
+        Note:
+            Exceptions from closing sub-registries are logged but not propagated to
+            ensure all cleanup operations are attempted.
 
         Thread Safety:
             This method is coroutine-safe and can be called concurrently.
@@ -781,5 +1151,17 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
 
             # Clear the controller clients dictionary
             self._controller_clients.clear()
+
+            # Reset initialization flag to allow reinitialization
+            self._initialized = False
+
+            # Clear our session tracking
+            session_count = len(self._added_sessions)
+            self._added_sessions.clear()
+            _LOGGER.debug(
+                "[%s] cleared session tracking (%d sessions)",
+                self.__class__.__name__,
+                session_count,
+            )
 
             _LOGGER.info("[%s] closed", self.__class__.__name__)

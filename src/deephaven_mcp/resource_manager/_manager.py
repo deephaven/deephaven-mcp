@@ -419,6 +419,38 @@ class BaseItemManager(Generic[T], ABC):
         """
         return f"{system_type.value}:{source}:{name}"
 
+    @staticmethod
+    def parse_full_name(full_name: str) -> tuple[str, str, str]:
+        """Parse a full name identifier into its components.
+        
+        This method is the inverse of make_full_name() and parses identifiers
+        created by that method back into their constituent parts.
+        
+        Args:
+            full_name: Full name in format "system_type:source:name"
+            
+        Returns:
+            tuple[str, str, str]: (system_type, source, name)
+            
+        Raises:
+            ValueError: If full_name is not in the expected format
+            
+        Example:
+            ```python
+            system_type, source, name = BaseItemManager.parse_full_name(
+                "enterprise:prod-env:session-1"
+            )
+            # Result: ("enterprise", "prod-env", "session-1")
+            ```
+        """
+        parts = full_name.split(":", 2)
+        if len(parts) != 3 or not all(part for part in parts):
+            raise ValueError(
+                f"Invalid full_name format: '{full_name}'. "
+                f"Expected format: 'system_type:source:name'"
+            )
+        return parts[0], parts[1], parts[2]
+
     def __init__(self, system_type: SystemType, source: str, name: str):
         """Initialize the resource manager with identification metadata and internal state.
 
@@ -705,7 +737,7 @@ class BaseItemManager(Generic[T], ABC):
 
         This property provides a canonical identifier that uniquely identifies this
         manager instance across the entire system by combining the system type,
-        source, and name into a standardized format. This identifier is used
+        source, and name into a colon-separated string. These identifiers are used
         extensively for logging, debugging, registry keys, and system-wide identification.
 
         Identifier Format:
@@ -748,6 +780,37 @@ class BaseItemManager(Generic[T], ABC):
             make_full_name(): The static method that implements the identifier format
         """
         return self.make_full_name(self.system_type, self.source, self.name)
+
+    @property
+    def split_name(self) -> tuple[str, str, str]:
+        """Split this manager's full name into its constituent components.
+        
+        This property provides convenient access to the individual components
+        that make up this manager's full_name identifier.
+        
+        Returns:
+            tuple[str, str, str]: (system_type, source, name) components
+            
+        Example:
+            ```python
+            def creation_func(source: str, name: str):
+                # Session creation logic
+                pass
+                
+            manager = EnterpriseSessionManager(
+                source="prod-env", 
+                name="session-1", 
+                creation_function=creation_func
+            )
+            system_type, source, name = manager.split_name
+            # Result: ("enterprise", "prod-env", "session-1")
+            ```
+            
+        See Also:
+            full_name: The combined identifier string
+            parse_full_name(): Static method for parsing arbitrary full names
+        """
+        return self.system_type.value, self.source, self.name
 
     async def _get_unlocked(self) -> T:
         """Get the managed resource without acquiring the synchronization lock.
