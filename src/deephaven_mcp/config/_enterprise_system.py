@@ -43,7 +43,7 @@ _BASE_ENTERPRISE_SYSTEM_FIELDS: dict[str, type | tuple[type, ...]] = {
 """Defines the base fields and their expected types for any enterprise system configuration."""
 
 _OPTIONAL_ENTERPRISE_SYSTEM_FIELDS: dict[str, type | tuple[type, ...]] = {
-    "session_creation": dict,  # Optional session creation configuration
+    "session_creation": dict,  # Optional session creation configuration (max_concurrent_sessions, defaults)
 }
 """Defines optional fields that can be included in enterprise system configurations."""
 
