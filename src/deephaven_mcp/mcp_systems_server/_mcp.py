@@ -1607,7 +1607,7 @@ async def _check_session_id_available(
         return None  # Good - session doesn't exist yet
 
 
-def _get_system_config(
+async def _get_system_config(
     function_name: str, config_manager: ConfigManager, system_name: str
 ) -> tuple[dict, dict | None]:
     """Get system config from configuration and validate system exists.
@@ -1625,7 +1625,14 @@ def _get_system_config(
             - system_config: The enterprise system configuration dict
             - error_dict: Error response if system not found, None if successful
     """
-    enterprise_systems_config = get_config_section(config_manager, "enterprise_sessions")  # type: ignore[arg-type]
+    config = await config_manager.get_config()
+
+    try:
+        enterprise_systems_config = get_config_section(
+            config, ["enterprise", "systems"]
+        )
+    except KeyError:
+        enterprise_systems_config = {}
 
     if not enterprise_systems_config or system_name not in enterprise_systems_config:
         error_msg = f"Enterprise system '{system_name}' not found in configuration"
@@ -1771,7 +1778,7 @@ async def create_enterprise_session(
         )
 
         # Get enterprise system configuration
-        system_config, error_response = _get_system_config(
+        system_config, error_response = await _get_system_config(
             "create_enterprise_session", config_manager, system_name
         )
         if error_response:
@@ -2056,7 +2063,7 @@ async def delete_enterprise_session(
         )
 
         # Verify enterprise system exists in configuration
-        _, error_response = _get_system_config(
+        _, error_response = await _get_system_config(
             "delete_enterprise_session", config_manager, system_name
         )
         if error_response:
