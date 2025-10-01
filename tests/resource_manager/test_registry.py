@@ -19,12 +19,11 @@ from deephaven_mcp._exceptions import (
     InternalError,
     SessionCreationError,
 )
-from deephaven_mcp.resource_manager import _registry  # noqa: F401
 from deephaven_mcp.resource_manager import (
+    CommunitySessionManager,
     CommunitySessionRegistry,
     CorePlusSessionFactoryRegistry,
 )
-from deephaven_mcp.resource_manager._manager import CommunitySessionManager
 from deephaven_mcp.resource_manager._registry import BaseRegistry
 
 # --- Base Registry Tests ---

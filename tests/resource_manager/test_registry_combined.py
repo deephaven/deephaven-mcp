@@ -15,16 +15,14 @@ from deephaven_mcp._exceptions import DeephavenConnectionError, InternalError
 from deephaven_mcp.client import CorePlusControllerClient
 from deephaven_mcp.config import ConfigManager
 from deephaven_mcp.resource_manager import (
+    BaseItemManager,
+    CombinedSessionRegistry,
     CommunitySessionRegistry,
+    CorePlusSessionFactoryManager,
     CorePlusSessionFactoryRegistry,
+    EnterpriseSessionManager,
     SystemType,
 )
-from deephaven_mcp.resource_manager._manager import (
-    BaseItemManager,
-    CorePlusSessionFactoryManager,
-    EnterpriseSessionManager,
-)
-from deephaven_mcp.resource_manager._registry_combined import CombinedSessionRegistry
 
 
 @pytest.fixture
@@ -782,78 +780,25 @@ class TestEnterpriseSessionUpdate:
         mock_session_info = MagicMock()
         mock_session_info.config.pb.name = "session1"
 
-        # Mock controller client
+        # Mock controller client with properly mocked map() method
+        mock_client.map = AsyncMock(return_value={"session1": mock_session_info})
+
         with patch.object(
             initialized_registry,
             "_get_or_create_controller_client",
             AsyncMock(return_value=mock_client),
         ):
-            # Mock session map from controller that doesn't include the stale session
-            mock_client.map = AsyncMock(return_value={"session1": mock_session_info})
-
             # Call the method under test
             await initialized_registry._update_enterprise_sessions()
 
-            # Assert stale session was removed and closed
+            # Verify stale session was closed and removed
             mock_old_session.close.assert_awaited_once()
             assert stale_key not in initialized_registry._items
 
-            # Assert new session was added
-            new_key = BaseItemManager.make_full_name(
-                SystemType.ENTERPRISE, "factory1", "session1"
-            )
-            assert new_key in initialized_registry._items
 
-    @pytest.mark.asyncio
-    async def test_update_sessions_for_factory_removes_all_when_offline(
-        self, initialized_registry
-    ):
-        """Test that _update_sessions_for_factory removes all sessions when the system is offline."""
-        # Setup mocks
-        mock_factory = MagicMock(spec=CorePlusSessionFactoryManager)
-        mock_factory.name = "factory1"
-
-        # Add existing sessions for the factory
-        session1_key = BaseItemManager.make_full_name(
-            SystemType.ENTERPRISE, "factory1", "session1"
-        )
-        session2_key = BaseItemManager.make_full_name(
-            SystemType.ENTERPRISE, "factory1", "session2"
-        )
-
-        # Create mock session managers
-        mock_session1 = MagicMock(spec=EnterpriseSessionManager)
-        mock_session1.close = AsyncMock()
-        mock_session1.full_name = session1_key
-
-        mock_session2 = MagicMock(spec=EnterpriseSessionManager)
-        mock_session2.close = AsyncMock()
-        mock_session2.full_name = session2_key
-
-        # Add sessions to registry
-        initialized_registry._items = {
-            session1_key: mock_session1,
-            session2_key: mock_session2,
-        }
-
-        # Mock _get_or_create_controller_client to raise an exception (system offline)
-        with patch.object(
-            initialized_registry,
-            "_get_or_create_controller_client",
-            AsyncMock(side_effect=DeephavenConnectionError("Connection failed")),
-        ):
-            # Call the method under test
-            await initialized_registry._update_sessions_for_factory(
-                mock_factory, "factory1"
-            )
-
-            # Assert all sessions for the factory were removed
-            assert session1_key not in initialized_registry._items
-            assert session2_key not in initialized_registry._items
-
-            # Assert close was called on both sessions
-            mock_session1.close.assert_awaited_once()
-            mock_session2.close.assert_awaited_once()
+# ============================================================================
+# Additional Enterprise Session Tests
+# ============================================================================
 
 
 def test_add_new_enterprise_sessions(initialized_registry):
@@ -1168,3 +1113,273 @@ class TestMakeEnterpriseSessionManager:
         mock_factory_instance.connect_to_persistent_query.assert_awaited_once_with(
             "session1"
         )
+
+
+class TestPublicAPIMethods:
+    """Tests for public API methods (add_session, remove_session, count_added_sessions, is_added_session)."""
+
+    @pytest.mark.asyncio
+    async def test_add_session_success(self, initialized_registry):
+        """Test successfully adding a session to the registry."""
+        # Create a mock session manager
+        mock_manager = MagicMock(spec=EnterpriseSessionManager)
+        mock_manager.full_name = "enterprise:factory1:session1"
+
+        # Add the session
+        await initialized_registry.add_session(mock_manager)
+
+        # Verify it was added to both _items and _added_sessions
+        assert "enterprise:factory1:session1" in initialized_registry._items
+        assert "enterprise:factory1:session1" in initialized_registry._added_sessions
+        assert (
+            initialized_registry._items["enterprise:factory1:session1"] == mock_manager
+        )
+
+    @pytest.mark.asyncio
+    async def test_add_session_duplicate_raises_error(self, initialized_registry):
+        """Test that adding a duplicate session raises ValueError."""
+        # Create a mock session manager
+        mock_manager = MagicMock(spec=EnterpriseSessionManager)
+        mock_manager.full_name = "enterprise:factory1:session1"
+
+        # Add the session once
+        await initialized_registry.add_session(mock_manager)
+
+        # Try to add it again - should raise ValueError
+        with pytest.raises(ValueError, match="Session.*already exists"):
+            await initialized_registry.add_session(mock_manager)
+
+    @pytest.mark.asyncio
+    async def test_add_session_not_initialized_raises_error(self):
+        """Test that add_session raises InternalError if not initialized."""
+        registry = CombinedSessionRegistry()
+        mock_manager = MagicMock(spec=EnterpriseSessionManager)
+        mock_manager.full_name = "enterprise:factory1:session1"
+
+        with pytest.raises(InternalError, match="not initialized"):
+            await registry.add_session(mock_manager)
+
+    @pytest.mark.asyncio
+    async def test_remove_session_exists(self, initialized_registry):
+        """Test removing a session that exists."""
+        # Add a session first
+        mock_manager = MagicMock(spec=EnterpriseSessionManager)
+        mock_manager.full_name = "enterprise:factory1:session1"
+        initialized_registry._items["enterprise:factory1:session1"] = mock_manager
+        initialized_registry._added_sessions.add("enterprise:factory1:session1")
+
+        # Remove it
+        removed = await initialized_registry.remove_session(
+            "enterprise:factory1:session1"
+        )
+
+        # Verify it was removed and returned
+        assert removed == mock_manager
+        assert "enterprise:factory1:session1" not in initialized_registry._items
+        assert (
+            "enterprise:factory1:session1" not in initialized_registry._added_sessions
+        )
+
+    @pytest.mark.asyncio
+    async def test_remove_session_not_exists(self, initialized_registry):
+        """Test removing a session that doesn't exist returns None."""
+        removed = await initialized_registry.remove_session(
+            "enterprise:factory1:nonexistent"
+        )
+        assert removed is None
+
+    @pytest.mark.asyncio
+    async def test_remove_session_not_initialized_raises_error(self):
+        """Test that remove_session raises InternalError if not initialized."""
+        registry = CombinedSessionRegistry()
+
+        with pytest.raises(InternalError, match="not initialized"):
+            await registry.remove_session("enterprise:factory1:session1")
+
+    @pytest.mark.asyncio
+    async def test_count_added_sessions_with_string(self, initialized_registry):
+        """Test count_added_sessions with string system_type."""
+        # Add some sessions
+        mock_manager1 = MagicMock(spec=EnterpriseSessionManager)
+        mock_manager1.full_name = "enterprise:factory1:session1"
+        mock_manager2 = MagicMock(spec=EnterpriseSessionManager)
+        mock_manager2.full_name = "enterprise:factory1:session2"
+        mock_manager3 = MagicMock(spec=EnterpriseSessionManager)
+        mock_manager3.full_name = "enterprise:factory2:session3"
+
+        initialized_registry._items["enterprise:factory1:session1"] = mock_manager1
+        initialized_registry._items["enterprise:factory1:session2"] = mock_manager2
+        initialized_registry._items["enterprise:factory2:session3"] = mock_manager3
+        initialized_registry._added_sessions.add("enterprise:factory1:session1")
+        initialized_registry._added_sessions.add("enterprise:factory1:session2")
+        initialized_registry._added_sessions.add("enterprise:factory2:session3")
+
+        # Count for factory1
+        count = await initialized_registry.count_added_sessions(
+            "enterprise", "factory1"
+        )
+        assert count == 2
+
+        # Count for factory2
+        count = await initialized_registry.count_added_sessions(
+            "enterprise", "factory2"
+        )
+        assert count == 1
+
+    @pytest.mark.asyncio
+    async def test_count_added_sessions_with_enum(self, initialized_registry):
+        """Test count_added_sessions with SystemType enum."""
+        # Add some sessions
+        mock_manager = MagicMock(spec=EnterpriseSessionManager)
+        mock_manager.full_name = "enterprise:factory1:session1"
+
+        initialized_registry._items["enterprise:factory1:session1"] = mock_manager
+        initialized_registry._added_sessions.add("enterprise:factory1:session1")
+
+        # Count using enum
+        count = await initialized_registry.count_added_sessions(
+            SystemType.ENTERPRISE, "factory1"
+        )
+        assert count == 1
+
+    @pytest.mark.asyncio
+    async def test_count_added_sessions_with_stale_sessions(self, initialized_registry):
+        """Test count_added_sessions removes stale sessions."""
+        # Add a session to _added_sessions but not to _items (stale)
+        initialized_registry._added_sessions.add("enterprise:factory1:stale_session")
+
+        # Also add a valid session
+        mock_manager = MagicMock(spec=EnterpriseSessionManager)
+        mock_manager.full_name = "enterprise:factory1:valid_session"
+        initialized_registry._items["enterprise:factory1:valid_session"] = mock_manager
+        initialized_registry._added_sessions.add("enterprise:factory1:valid_session")
+
+        # Count - should be 1 and stale session should be removed
+        count = await initialized_registry.count_added_sessions(
+            "enterprise", "factory1"
+        )
+        assert count == 1
+        assert (
+            "enterprise:factory1:stale_session"
+            not in initialized_registry._added_sessions
+        )
+        assert (
+            "enterprise:factory1:valid_session" in initialized_registry._added_sessions
+        )
+
+    @pytest.mark.asyncio
+    async def test_count_added_sessions_with_invalid_format(self, initialized_registry):
+        """Test count_added_sessions handles invalid session ID format."""
+        # Add a session with invalid format
+        initialized_registry._added_sessions.add("invalid_session_id")
+
+        # Count - should handle the error and remove invalid session
+        count = await initialized_registry.count_added_sessions(
+            "enterprise", "factory1"
+        )
+        assert count == 0
+        assert "invalid_session_id" not in initialized_registry._added_sessions
+
+    @pytest.mark.asyncio
+    async def test_is_added_session_true(self, initialized_registry):
+        """Test is_added_session returns True for added sessions."""
+        initialized_registry._added_sessions.add("enterprise:factory1:session1")
+
+        result = await initialized_registry.is_added_session(
+            "enterprise:factory1:session1"
+        )
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_is_added_session_false(self, initialized_registry):
+        """Test is_added_session returns False for non-added sessions."""
+        result = await initialized_registry.is_added_session(
+            "enterprise:factory1:nonexistent"
+        )
+        assert result is False
+
+
+class TestConnectionErrorHandling:
+    """Tests for connection error handling in enterprise session updates."""
+
+    @pytest.mark.asyncio
+    async def test_update_sessions_for_factory_connection_error(
+        self, initialized_registry
+    ):
+        """Test that connection errors trigger session removal."""
+        mock_factory = MagicMock(spec=CorePlusSessionFactoryManager)
+        factory_name = "factory1"
+
+        # Add some sessions for this factory
+        mock_session1 = MagicMock(spec=EnterpriseSessionManager)
+        mock_session1.close = AsyncMock()
+        mock_session2 = MagicMock(spec=EnterpriseSessionManager)
+        mock_session2.close = AsyncMock()
+
+        key1 = BaseItemManager.make_full_name(
+            SystemType.ENTERPRISE, factory_name, "session1"
+        )
+        key2 = BaseItemManager.make_full_name(
+            SystemType.ENTERPRISE, factory_name, "session2"
+        )
+
+        initialized_registry._items[key1] = mock_session1
+        initialized_registry._items[key2] = mock_session2
+
+        # Mock _get_or_create_controller_client to raise DeephavenConnectionError
+        with patch.object(
+            initialized_registry,
+            "_get_or_create_controller_client",
+            AsyncMock(side_effect=DeephavenConnectionError("Connection failed")),
+        ):
+            # Call the method - should handle error and remove sessions
+            await initialized_registry._update_sessions_for_factory(
+                mock_factory, factory_name
+            )
+
+            # Verify sessions were closed and removed
+            mock_session1.close.assert_awaited_once()
+            mock_session2.close.assert_awaited_once()
+            assert key1 not in initialized_registry._items
+            assert key2 not in initialized_registry._items
+
+    @pytest.mark.asyncio
+    async def test_remove_all_sessions_for_factory(self, initialized_registry):
+        """Test _remove_all_sessions_for_factory removes all sessions for a factory."""
+        factory_name = "factory1"
+
+        # Add sessions for this factory
+        mock_session1 = MagicMock(spec=EnterpriseSessionManager)
+        mock_session1.close = AsyncMock()
+        mock_session2 = MagicMock(spec=EnterpriseSessionManager)
+        mock_session2.close = AsyncMock()
+
+        # Also add a session for a different factory
+        mock_session3 = MagicMock(spec=EnterpriseSessionManager)
+        mock_session3.close = AsyncMock()
+
+        key1 = BaseItemManager.make_full_name(
+            SystemType.ENTERPRISE, factory_name, "session1"
+        )
+        key2 = BaseItemManager.make_full_name(
+            SystemType.ENTERPRISE, factory_name, "session2"
+        )
+        key3 = BaseItemManager.make_full_name(
+            SystemType.ENTERPRISE, "factory2", "session3"
+        )
+
+        initialized_registry._items[key1] = mock_session1
+        initialized_registry._items[key2] = mock_session2
+        initialized_registry._items[key3] = mock_session3
+
+        # Remove all sessions for factory1
+        await initialized_registry._remove_all_sessions_for_factory(factory_name)
+
+        # Verify only factory1 sessions were removed
+        mock_session1.close.assert_awaited_once()
+        mock_session2.close.assert_awaited_once()
+        mock_session3.close.assert_not_awaited()
+
+        assert key1 not in initialized_registry._items
+        assert key2 not in initialized_registry._items
+        assert key3 in initialized_registry._items

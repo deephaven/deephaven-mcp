@@ -20,6 +20,7 @@ def test_imports_and_all():
 
     expected_all = [
         "BaseItemManager",
+        "CombinedSessionRegistry",
         "CommunitySessionManager",
         "EnterpriseSessionManager",
         "CorePlusSessionFactoryManager",

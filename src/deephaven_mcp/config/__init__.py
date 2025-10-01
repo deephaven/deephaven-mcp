@@ -27,22 +27,23 @@ The configuration file must be a JSON object. It may contain the following top-l
             If this key is absent, it implies no community sessions are configured.
             Each community session configuration dict may contain any of the following fields (all are optional):
 
-              - `host` (str): Hostname or IP address of the community worker.
-              - `port` (int): Port number for the community worker connection.
-              - `auth_type` (str): Authentication type. Allowed values include:
-                  * "token": Use a bearer token for authentication.
-                  * "basic": Use HTTP Basic authentication.
-                  * "anonymous": No authentication required.
-              - `auth_token` (str, optional): The direct authentication token or password. May be empty if `auth_type` is "anonymous". Use this OR `auth_token_env_var`, but not both.
+              - `host` (str): Hostname or IP address of the community server.
+              - `port` (int): Port number for the community server connection.
+              - `auth_type` (str): Authentication type. Common values include:
+                  * "Anonymous": Default, no authentication required.
+                  * "Basic": HTTP Basic authentication (requires username:password format in auth_token).
+                  * "io.deephaven.authentication.psk.PskAuthenticationHandler": Pre-shared key authentication.
+                  * Custom authenticator strings are also valid.
+              - `auth_token` (str, optional): The direct authentication token or password. May be empty if `auth_type` is "Anonymous". Use this OR `auth_token_env_var`, but not both.
               - `auth_token_env_var` (str, optional): The name of an environment variable from which to read the authentication token. Use this OR `auth_token`, but not both.
-              - `never_timeout` (bool): If True, sessions to this community worker never time out.
+              - `never_timeout` (bool): If True, sessions to this community server never time out.
               - `session_type` (str): Programming language for the session. Common values include:
                   * "python": For Python-based Deephaven instances.
                   * "groovy": For Groovy-based Deephaven instances.
               - `use_tls` (bool): Whether to use TLS/SSL for the connection.
-              - `tls_root_certs` (str, optional): Path to a PEM file containing root certificates to trust for TLS.
-              - `client_cert_chain` (str, optional): Path to a PEM file containing the client certificate chain for mutual TLS.
-              - `client_private_key` (str, optional): Path to a PEM file containing the client private key for mutual TLS.
+              - `tls_root_certs` (str | None, optional): Path to a PEM file containing root certificates to trust for TLS.
+              - `client_cert_chain` (str | None, optional): Path to a PEM file containing the client certificate chain for mutual TLS.
+              - `client_private_key` (str | None, optional): Path to a PEM file containing the client private key for mutual TLS.
 
       Notes:
         - All fields are optional; if a field is omitted, the consuming code may use an internal default value for that field, or the feature may be disabled.
@@ -55,7 +56,7 @@ The configuration file must be a JSON object. It may contain the following top-l
       A dictionary mapping enterprise configuration.
       If this key is present, its value must be a dictionary (which can be empty).
       Each enterprise configuration dict is validated according to the schema defined in
-      `src/deephaven_mcp/config/enterprise_system.py`. Key fields typically include:
+      `src/deephaven_mcp/config/_enterprise_system.py`. Key fields typically include:
 
         - `systems` (dict, optional):
             A dictionary mapping enterprise system names (str) to system configuration dicts.
@@ -70,10 +71,24 @@ The configuration file must be a JSON object. It may contain the following top-l
                           (Note: `password` and `password_env_var` are mutually exclusive.)
                     * "private_key":
                         - `private_key_path` (str, required): The path to the private key file.
+                - `session_creation` (dict, optional): Configuration for creating enterprise sessions.
+                    * `max_concurrent_sessions` (int, optional): Maximum concurrent sessions (default: 5). Set to 0 to disable session creation.
+                    * `defaults` (dict, optional): Default parameters for session creation:
+                        - `heap_size_gb` (float, optional): Default JVM heap size in GB.
+                        - `auto_delete_timeout` (int, optional): Session auto-delete timeout in seconds (API default: 600).
+                        - `server` (str, optional): Default server for sessions.
+                        - `engine` (str, optional): Default engine type (API default: "DeephavenCommunity").
+                        - `extra_jvm_args` (list, optional): Default additional JVM arguments.
+                        - `extra_environment_vars` (list, optional): Default environment variables (format: ["NAME=value"]).
+                        - `admin_groups` (list, optional): Default user groups with administrative permissions.
+                        - `viewer_groups` (list, optional): Default user groups with read-only access.
+                        - `timeout_seconds` (float, optional): Default session startup timeout in seconds (API default: 60).
+                        - `session_arguments` (dict, optional): Default arguments for pydeephaven.Session constructor (passed through as-is).
+                        - `programming_language` (str, optional): Default programming language for sessions ("Python" or "Groovy", default: "Python"). Note: This creates a configuration_transformer internally.
 
       Notes:
         - For the detailed schema of individual enterprise system configurations, please refer to the
-          `src/deephaven_mcp/config/enterprise_system.py` module and the DEVELOPER_GUIDE.md.
+          `src/deephaven_mcp/config/_enterprise_system.py` module and the DEVELOPER_GUIDE.md.
         - Sensitive fields are redacted from logs.
         - Unknown fields at any level will cause validation to fail.
 
@@ -475,28 +490,28 @@ async def _load_config_from_file(config_path: str) -> dict[str, Any]:
         return cast(dict[str, Any], json.loads(content))
     except FileNotFoundError:
         _LOGGER.error(
-            f"[load_and_validate_config] Configuration file not found: {config_path}"
+            f"[_load_config_from_file] Configuration file not found: {config_path}"
         )
         raise ConfigurationError(
             f"Configuration file not found: {config_path}"
         ) from None
     except PermissionError:
         _LOGGER.error(
-            f"[load_and_validate_config] Permission denied when trying to read configuration file: {config_path}"
+            f"[_load_config_from_file] Permission denied when trying to read configuration file: {config_path}"
         )
         raise ConfigurationError(
             f"Permission denied when trying to read configuration file: {config_path}"
         ) from None
     except json.JSONDecodeError as e:
         _LOGGER.error(
-            f"[load_and_validate_config] Invalid JSON in configuration file {config_path}: {e}"
+            f"[_load_config_from_file] Invalid JSON in configuration file {config_path}: {e}"
         )
         raise ConfigurationError(
             f"Invalid JSON in configuration file {config_path}: {e}"
         ) from e
     except Exception as e:
         _LOGGER.error(
-            f"[load_and_validate_config] Unexpected error reading configuration file {config_path}: {e}"
+            f"[_load_config_from_file] Unexpected error reading configuration file {config_path}: {e}"
         )
         raise ConfigurationError(
             f"Unexpected error loading or parsing config file {config_path}: {e}"
@@ -551,7 +566,7 @@ async def load_and_validate_config(config_path: str) -> dict[str, Any]:
         ConfigurationError: If the file cannot be read, is not valid JSON, or fails validation.
 
     Example:
-        >>> config = await _load_and_validate_config('/path/to/config.json')
+        >>> config = await load_and_validate_config('/path/to/config.json')
         >>> print(config['enterprise'])
     """
     try:
@@ -819,28 +834,29 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
                       If this key is absent, it implies no community sessions are configured.
                       Each community session configuration dict may contain any of the following fields (all are optional):
 
-                        - 'host' (str): Hostname or IP address of the community worker.
-                        - 'port' (int): Port number for the community worker connection.
-                        - 'auth_type' (str): Authentication type. Allowed values include:
-                            * "token": Use a bearer token for authentication.
-                            * "basic": Use HTTP Basic authentication.
-                            * "anonymous": No authentication required.
-                        - 'auth_token' (str, optional): The direct authentication token or password. May be empty if `auth_type` is "anonymous". Use this OR `auth_token_env_var`, but not both.
+                        - 'host' (str): Hostname or IP address of the community server.
+                        - 'port' (int): Port number for the community server connection.
+                        - 'auth_type' (str): Authentication type. Common values include:
+                            * "Anonymous": Default, no authentication required.
+                            * "Basic": HTTP Basic authentication (requires username:password format in auth_token).
+                            * "io.deephaven.authentication.psk.PskAuthenticationHandler": Pre-shared key authentication.
+                            * Custom authenticator strings are also valid.
+                        - 'auth_token' (str, optional): The direct authentication token or password. May be empty if `auth_type` is "Anonymous". Use this OR `auth_token_env_var`, but not both.
                         - 'auth_token_env_var' (str, optional): The name of an environment variable from which to read the authentication token. Use this OR `auth_token`, but not both.
-                        - 'never_timeout' (bool): If True, sessions to this community worker never time out.
+                        - 'never_timeout' (bool): If True, sessions to this community server never time out.
                         - 'session_type' (str): Programming language for the session. Common values include:
                             * "python": For Python-based Deephaven instances.
                             * "groovy": For Groovy-based Deephaven instances.
                         - 'use_tls' (bool): Whether to use TLS/SSL for the connection.
-                        - 'tls_root_certs' (str, optional): Path to a PEM file containing root certificates to trust for TLS.
-                        - 'client_cert_chain' (str, optional): Path to a PEM file containing the client certificate chain for mutual TLS.
-                        - 'client_private_key' (str, optional): Path to a PEM file containing the client private key for mutual TLS.
+                        - 'tls_root_certs' (str | None, optional): Path to a PEM file containing root certificates to trust for TLS.
+                        - 'client_cert_chain' (str | None, optional): Path to a PEM file containing the client certificate chain for mutual TLS.
+                        - 'client_private_key' (str | None, optional): Path to a PEM file containing the client private key for mutual TLS.
 
           - 'enterprise' (dict, optional):
                 A dictionary mapping enterprise configuration.
                 If this key is present, its value must be a dictionary (which can be empty).
                 Each enterprise configuration dict is validated according to the schema defined in
-                `src/deephaven_mcp/config/enterprise_system.py`. Key fields typically include:
+                `src/deephaven_mcp/config/_enterprise_system.py`. Key fields typically include:
 
                   - 'systems' (dict, optional):
                       A dictionary mapping enterprise system names (str) to system configuration dicts.

@@ -7,7 +7,7 @@
 > **Note:** This document contains low-level technical details for contributors working on the [deephaven-mcp](https://github.com/deephaven/deephaven-mcp) project. **End users seeking high-level usage and onboarding information should refer to the main documentation in the [`../README.md`](../README.md).**
 
 This repository houses the Python-based Model Context Protocol (MCP) servers for Deephaven:
-1. **Deephaven MCP Systems Server**: Orchestrates Deephaven Community Core worker nodes.
+1. **Deephaven MCP Systems Server**: Orchestrates Deephaven Community Core sessions and Enterprise systems.
 2. **Deephaven MCP Docs Server**: Provides conversational Q&A about Deephaven documentation.
 
 > **Requirements**: [Python](https://www.python.org/) 3.11 or later is required to run these servers.
@@ -37,11 +37,14 @@ This repository houses the Python-based Model Context Protocol (MCP) servers for
       - [Running the Systems Server](#running-the-systems-server)
         - [CLI Arguments](#cli-arguments)
       - [Using the Systems Server](#using-the-systems-server)
+      - [Session ID Format and Terminology](#session-id-format-and-terminology)
       - [Systems Server Tools](#systems-server-tools)
       - [Error Handling](#error-handling)
       - [MCP Tools](#mcp-tools)
         - [`refresh`](#refresh)
         - [`enterprise_systems_status`](#enterprise_systems_status)
+        - [`create_enterprise_session`](#create_enterprise_session)
+        - [`delete_enterprise_session`](#delete_enterprise_session)
         - [`list_sessions`](#list_sessions)
         - [`get_session_details`](#get_session_details)
         - [`table_schemas`](#table_schemas)
@@ -59,6 +62,7 @@ This repository houses the Python-based Model Context Protocol (MCP) servers for
         - [Example Configuration](#example-configuration)
       - [Running the Docs Server](#running-the-docs-server)
         - [CLI Arguments](#cli-arguments-1)
+        - [Streamable-HTTP Transport Mode (Default)](#streamable-http-transport-mode-default)
         - [SSE Transport Mode](#sse-transport-mode)
         - [stdio Transport Mode](#stdio-transport-mode)
       - [Docs Server Tools](#docs-server-tools)
@@ -85,12 +89,12 @@ This repository houses the Python-based Model Context Protocol (MCP) servers for
     - [Advanced Development Techniques](#advanced-development-techniques)
     - [Development Commands](#development-commands)
       - [Code Quality \& Pre-commit Checks](#code-quality--pre-commit-checks)
-    - [Project Structure](#project-structure)
-      - [Script References](#script-references)
-    - [Dependencies](#dependencies)
-    - [Versioning](#versioning)
-    - [Docker Compose](#docker-compose)
+- [Format code (fixes in place)](#format-code-fixes-in-place)
+- [Check formatting only (no changes)](#check-formatting-only-no-changes)
+- [Run pylint](#run-pylint)
     - [Performance Testing](#performance-testing)
+      - [MCP Docs Server Stress Testing](#mcp-docs-server-stress-testing)
+      - [HTTP Transport Stress Testing](#http-transport-stress-testing)
       - [Usage Example](#usage-example)
       - [Arguments](#arguments)
   - [Troubleshooting](#troubleshooting)
@@ -370,7 +374,23 @@ If the `"enterprise"` key is present, it must be a dictionary. Each individual e
     *   If `auth_type` is `"private_key"`:
         *   `private_key_path` (string, **required**): The absolute file system path to the private key file (e.g., a `.pem` file).
 
-**Example `deephaven_mcp.json` with Enterprise Systems:**
+- Optional Worker Creation Configuration:
+  - `session_creation` (object, **optional**): Configuration for creating enterprise workers on this system. If omitted, worker creation tools will not be available for this system.
+    - `max_concurrent_workers` (integer, **optional, default: 5**): Maximum number of concurrent workers that can be created on this system. Set to 0 to disable worker creation. Used for resource management and safety.
+    - `defaults` (object, **optional**): Default values for worker creation parameters. All fields are optional - if omitted, Deephaven server defaults are used.
+      - `heap_size_gb` (float, **optional**): Default JVM heap size in gigabytes for new workers.
+      - `programming_language` (string, **optional**): Default programming language for new workers ("Python" or "Groovy", default: "Python"). Creates configuration_transformer internally.
+      - `auto_delete_timeout` (integer, **optional**): Default auto-deletion timeout in seconds for idle workers (API default: 600).
+      - `server` (string, **optional**): Default target server/environment name where workers will be created.
+      - `engine` (string, **optional**): Default engine type for new workers (API default: "DeephavenCommunity").
+      - `extra_jvm_args` (array, **optional**): Default additional JVM arguments for new workers (e.g., ["-XX:+UseG1GC"]).
+      - `extra_environment_vars` (array, **optional**): Default environment variables for new workers (format: ["NAME=value"]).
+      - `admin_groups` (array, **optional**): Default user groups with administrative permissions for new workers.
+      - `viewer_groups` (array, **optional**): Default user groups with read-only access to new workers.
+      - `timeout_seconds` (float, **optional**): Default worker startup timeout in seconds (API default: 60).
+      - `session_arguments` (object, **optional**): Default arguments for pydeephaven.Session constructor (passed as-is, no validation of contents).
+
+**Example `deephaven_mcp.json` with Enterprise Systems and Worker Creation:**
 
 ```json
 {
@@ -388,12 +408,36 @@ If the `"enterprise"` key is present, it must be a dictionary. Each individual e
         "connection_json_url": "https://staging.internal/iris/connection.json",
         "auth_type": "password",
         "username": "test_user",
-        "password_env_var": "STAGING_PASSWORD"
+        "password_env_var": "STAGING_PASSWORD",
+        "session_creation": {
+          "max_concurrent_workers": 3,
+          "defaults": {
+            "heap_size_gb": 4.0,
+            "programming_language": "Python",
+            "auto_delete_timeout": 1800,
+          }
+        }
       },
       "analytics_private_key_auth": {
         "connection_json_url": "https://analytics.dept.com/iris/connection.json",
         "auth_type": "private_key",
-        "private_key_path": "/secure/keys/analytics_service_account.pem"
+        "private_key_path": "/secure/keys/analytics_service_account.pem",
+        "session_creation": {
+          "max_concurrent_workers": 5,
+          "defaults": {
+            "heap_size_gb": 8.0,
+            "programming_language": "Groovy",
+            "auto_delete_timeout": 3600,
+            "server": "gpu-server-1",
+            "engine": "DeephavenCommunity",
+            "extra_jvm_args": ["-XX:+UseG1GC", "-XX:MaxGCPauseMillis=200"],
+            "extra_environment_vars": ["PYTHONPATH=/custom/libs", "LOG_LEVEL=DEBUG"],
+            "admin_groups": ["deephaven-admins", "data-team-leads"],
+            "viewer_groups": ["analysts", "data-scientists"],
+            "timeout_seconds": 120.0,
+            "session_arguments": {"custom_setting": "example_value"}
+          }
+        }
       }
     }
   }
@@ -500,7 +544,7 @@ Where:
 - **Session**: A specific connection/session within a worker or system
 - **Session ID**: The fully qualified identifier used by MCP tools to reference a specific session
 
-All MCP tools that interact with Deephaven instances use the `session_id` parameter with this format, replacing the older `worker_name` parameter from previous versions.
+All MCP tools that interact with Deephaven instances use the `session_id` parameter with this format, replacing the older `session_name` parameter from previous versions.
 
 #### Systems Server Tools
 
@@ -534,7 +578,8 @@ The Systems Server provides the following MCP tools:
 
 **Parameters**: None
 
-**Returns**: 
+**Returns**:
+
 ```json
 {
   "success": true
@@ -542,6 +587,7 @@ The Systems Server provides the following MCP tools:
 ```
 
 On error:
+
 ```json
 {
   "success": false,
@@ -550,16 +596,18 @@ On error:
 }
 ```
 
-**Description**: This tool reloads the Deephaven worker configuration from the file specified in `DH_MCP_CONFIG_FILE` and clears all active session objects for all workers. It uses dependency injection via the Context to access the config manager, session registry, and a coroutine-safe refresh lock. The operation is protected by the provided lock to prevent concurrent refreshes.
+**Description**: This tool reloads the Deephaven session configuration from the file specified in `DH_MCP_CONFIG_FILE` and clears all active session objects. It uses dependency injection via the Context to access the config manager, session registry, and a coroutine-safe refresh lock. The operation is protected by the provided lock to prevent concurrent refreshes. All sessions will be automatically recreated with the new configuration on next access.
 
 ##### `enterprise_systems_status`
 
 **Purpose**: List all enterprise (Core+) systems/factories with their status and configuration details (redacted).
 
 **Parameters**:
+
 - `attempt_to_connect` (optional, boolean): If True, actively attempts to connect to each system to verify its status. Default is False (only checks existing connections for faster response).
 
 **Returns**:
+
 ```json
 {
   "success": true,
@@ -580,6 +628,7 @@ On error:
 ```
 
 On error:
+
 ```json
 {
   "success": false,
@@ -590,6 +639,82 @@ On error:
 
 **Description**: This tool provides comprehensive status information about all configured enterprise systems. Status values include "ONLINE", "OFFLINE", "UNAUTHORIZED", "MISCONFIGURED", or "UNKNOWN". Sensitive configuration fields are redacted for security.
 
+##### `create_enterprise_session`
+
+**Purpose**: Create a new enterprise session on a specified enterprise system.
+
+**Parameters**:
+
+- `system_name` (required, string): Name of the enterprise system to create the session on
+- `session_name` (optional, string): Custom name for the session. If not provided, an auto-generated name will be used
+- `heap_size_gb` (optional, float): JVM heap size in gigabytes for the session
+- `programming_language` (optional, string): Programming language for the session ("Python" or "Groovy")
+- `auto_delete_timeout` (optional, integer): Auto-deletion timeout in seconds for idle sessions
+- `server` (optional, string): Target server/environment name where the session will be created
+- `engine` (optional, string): Engine type for the session (e.g., "DeephavenCommunity")
+- `extra_jvm_args` (optional, array): Additional JVM arguments for the session
+- `extra_environment_vars` (optional, array): Environment variables for the session in format ["NAME=value"]
+- `admin_groups` (optional, array): User groups with administrative permissions for the session
+- `viewer_groups` (optional, array): User groups with read-only access to the session
+- `timeout_seconds` (optional, float): Session startup timeout in seconds
+- `session_arguments` (optional, object): Additional arguments for pydeephaven.Session constructor
+
+**Returns**:
+
+```json
+{
+  "success": true,
+  "session_id": "enterprise:prod-system:analytics-worker-001",
+  "system_name": "prod-system",
+  "session_name": "analytics-worker-001",
+  "programming_language": "Python"
+}
+```
+
+On error:
+
+```json
+{
+  "success": false,
+  "error": "Error message",
+  "isError": true
+}
+```
+
+**Description**: This tool creates a new enterprise session on the specified enterprise system and registers it in the session registry for future use. The session is configured with either provided parameters or defaults from the enterprise system configuration. Parameter resolution follows the priority: tool parameter → config default → API default.
+
+##### `delete_enterprise_session`
+
+**Purpose**: Delete an enterprise session by terminating it and removing it from the session registry.
+
+**Parameters**:
+
+- `system_name` (required, string): Name of the enterprise system containing the session
+- `session_name` (required, string): Name of the session to delete
+
+**Returns**:
+
+```json
+{
+  "success": true,
+  "system_name": "prod-system", 
+  "session_name": "analytics-worker-001",
+  "message": "Session deleted successfully"
+}
+```
+
+On error:
+
+```json
+{
+  "success": false,
+  "error": "Error message",
+  "isError": true
+}
+```
+
+**Description**: This tool permanently terminates an enterprise session and removes it from the session registry. The session cannot be recovered after deletion. Use with caution as any unsaved work in the session will be lost.
+
 ##### `list_sessions`
 
 **Purpose**: List all sessions (community and enterprise) with basic metadata.
@@ -597,6 +722,7 @@ On error:
 **Parameters**: None
 
 **Returns**:
+
 ```json
 {
   "success": true,
@@ -618,6 +744,7 @@ On error:
 ```
 
 On error:
+
 ```json
 {
   "success": false,
@@ -633,10 +760,12 @@ On error:
 **Purpose**: Get detailed information about a specific session.
 
 **Parameters**:
+
 - `session_id` (required, string): The session identifier (fully qualified name) to get details for.
 - `attempt_to_connect` (optional, boolean): Whether to attempt connecting to the session to verify its status. Defaults to False for faster response.
 
 **Returns**:
+
 ```json
 {
   "success": true,
@@ -654,6 +783,7 @@ On error:
 ```
 
 On error:
+
 ```json
 {
   "success": false,
@@ -669,10 +799,12 @@ On error:
 **Purpose**: Retrieve schemas for one or more tables from a Deephaven session.
 
 **Parameters**:
+
 - `session_id` (required, string): ID of the Deephaven session to query.
 - `table_names` (optional, list[string]): List of table names to retrieve schemas for. If None, all available tables will be queried.
 
 **Returns**:
+
 ```json
 {
   "success": true,
@@ -699,6 +831,7 @@ On error:
 ```
 
 On complete failure (e.g., session not available):
+
 ```json
 {
   "success": false,
@@ -714,6 +847,7 @@ On complete failure (e.g., session not available):
 **Purpose**: Execute a script on a specified Deephaven session.
 
 **Parameters**:
+
 - `session_id` (required, string): ID of the Deephaven session on which to execute the script.
 - `script` (optional, string): The Python script to execute.
 - `script_path` (optional, string): Path to a Python script file to execute.
@@ -721,6 +855,7 @@ On complete failure (e.g., session not available):
 **Note**: Exactly one of `script` or `script_path` must be provided.
 
 **Returns**:
+
 ```json
 {
   "success": true
@@ -728,6 +863,7 @@ On complete failure (e.g., session not available):
 ```
 
 On error:
+
 ```json
 {
   "success": false,
@@ -743,9 +879,11 @@ On error:
 **Purpose**: Retrieve installed pip packages from a specified Deephaven session.
 
 **Parameters**:
+
 - `session_id` (required, string): ID of the Deephaven session to query.
 
 **Returns**:
+
 ```json
 {
   "success": true,
@@ -758,6 +896,7 @@ On error:
 ```
 
 On error:
+
 ```json
 {
   "success": false,
@@ -773,6 +912,7 @@ On error:
 **Purpose**: Retrieve table data from a specified Deephaven session with flexible formatting options.
 
 **Parameters**:
+
 - `session_id` (required, string): ID of the Deephaven session to query.
 - `table_name` (required, string): Name of the table to retrieve data from.
 - `max_rows` (optional, int): Maximum number of rows to retrieve. Defaults to 1000. Set to None for entire table.
@@ -780,6 +920,7 @@ On error:
 - `format` (optional, string): Output format. Options: "auto" (default), "json-row", "json-column", "csv".
 
 **Returns**:
+
 ```json
 {
   "success": true,
@@ -799,6 +940,7 @@ On error:
 ```
 
 On error:
+
 ```json
 {
   "success": false,
@@ -814,10 +956,12 @@ On error:
 **Purpose**: Retrieve metadata (schema) information for a specified table.
 
 **Parameters**:
+
 - `session_id` (required, string): ID of the Deephaven session to query.
 - `table_name` (required, string): Name of the table to retrieve metadata for.
 
 **Returns**:
+
 ```json
 {
   "success": true,
@@ -839,6 +983,7 @@ On error:
 ```
 
 On error:
+
 ```json
 {
   "success": false,
@@ -860,6 +1005,7 @@ uv run scripts/run_deephaven_test_server.py --table-group {simple|financial|all}
 ```
 
 **Arguments:**
+
 - `--table-group {simple|financial|all}` (**required**): Which demo tables to create
 - `--host HOST` (default: `localhost`): Host to bind to
 - `--port PORT` (default: `10000`): Port to listen on
@@ -874,12 +1020,14 @@ uv run scripts/mcp_community_test_client.py --transport {sse|stdio|streamable-ht
 ```
 
 **Key Arguments:**
+
 * `--transport`: Choose `streamable-http` (default), `sse`, or `stdio`
 * `--env`: Pass environment variables as `KEY=VALUE` (e.g., `DH_MCP_CONFIG_FILE=/path/to/config.json`). Can be repeated for multiple variables
 * `--url`: URL for HTTP server (default: `http://localhost:8000/mcp` for streamable-http, `http://localhost:8000/sse` for SSE)
 * `--stdio-cmd`: Command to launch stdio server (default: `uv run dh-mcp-systems-server --transport stdio`)
 
 **Example Usage:**
+
 ```sh
 # Connect to running streamable-http server (default)
 uv run scripts/mcp_community_test_client.py --transport streamable-http --url http://localhost:8000/mcp
@@ -891,7 +1039,7 @@ uv run scripts/mcp_community_test_client.py --transport sse --url http://localho
 uv run scripts/mcp_community_test_client.py --transport stdio --env DH_MCP_CONFIG_FILE=/absolute/path/to/config.json
 ```
 
-> ⚠️ **Prerequisites:** 
+> ⚠️ **Prerequisites:**
 > - You must have a test Deephaven server running (see [Running the Systems Server](#running-the-systems-server))
 > - The MCP Community server must be running (or use `--stdio-cmd` for the client to launch it)
 > - For troubleshooting connection issues, see [Common Errors & Solutions](#common-errors--solutions)
@@ -1021,13 +1169,31 @@ The Deephaven MCP Docs Server exposes a single MCP-compatible tool:
   - `deephaven_core_version` (optional): The version of Deephaven Community Core installed for the relevant worker. Providing this enables the documentation assistant to tailor its answers for greater accuracy.
   - `deephaven_enterprise_version` (optional): The version of Deephaven Core+ (Enterprise) installed for the relevant worker. Providing this enables the documentation assistant to tailor its answers for greater accuracy.
   - `programming_language` (optional): Programming language context for the user's question (e.g., "python", "groovy"). If provided, the assistant tailors its answer for this language.
-- **Returns**: String containing the assistant's response message
-- **Error Handling**: If the underlying LLM API call fails, an `OpenAIClientError` is raised with a descriptive error message. Common errors include:
-    - Invalid or missing API keys
-    - Network connectivity issues
-    - Rate limiting from the LLM provider
-    - Invalid message format in history
-  All errors are logged and propagated with meaningful context
+- **Returns**:
+  
+  ```json
+  {
+    "success": true,
+    "response": "Assistant's response message"
+  }
+  ```
+
+  On error:
+
+  ```json
+  {
+    "success": false,
+    "error": "Error message",
+    "isError": true
+  }
+  ```
+
+- **Error Handling**: If the underlying LLM API call fails, a structured error response is returned. Common errors include:
+  - Invalid or missing API keys
+  - Network connectivity issues
+  - Rate limiting from the LLM provider
+  - Invalid message format in history
+  All errors are logged and returned in the structured format for consistent error handling
 - **Usage Notes**:
   - This tool is asynchronous and should be awaited when used programmatically
   - For multi-turn conversations, providing conversation history improves contextual understanding
@@ -1036,6 +1202,7 @@ The Deephaven MCP Docs Server exposes a single MCP-compatible tool:
   - Powered by Inkeep's LLM API service for retrieving documentation-specific responses
 
 **Example (programmatic use):**
+
 ```python
 from deephaven_mcp.mcp_docs_server._mcp import docs_chat
 
@@ -1056,12 +1223,14 @@ async def get_docs_answer():
 #### Docs Server HTTP Endpoints
 
 **Example Usage:**
+
 ```bash
 curl http://localhost:8001/health
 # Response: {"status": "ok"}
 ```
 
 **`/health` (GET)**
+
 - **Purpose**: Health check endpoint for liveness and readiness probes in deployment environments
 - **Parameters**: None
 - **Returns**: JSON response `{"status": "ok"}` with HTTP 200 status code
@@ -1081,6 +1250,7 @@ A Python script is provided for testing the MCP Docs tool and validating server 
 **Script Location**: [`../scripts/mcp_docs_test_client.py`](../scripts/mcp_docs_test_client.py)
 
 **Arguments:**
+
 - `--transport`: Choose `streamable-http`, `sse`, or `stdio` (default: `streamable-http`)
 - `--env`: Pass environment variables as `KEY=VALUE` (can be repeated; for stdio mode)
 - `--url`: URL for HTTP server (default: `http://localhost:8001/mcp` for streamable-http, `http://localhost:8001/sse` for SSE)
@@ -1089,6 +1259,7 @@ A Python script is provided for testing the MCP Docs tool and validating server 
 - `--history`: Optional chat history (JSON string) for multi-turn conversations
 
 **Example Usage:**
+
 ```sh
 # Connect to a running streamable-http server (default)
 uv run scripts/mcp_docs_test_client.py --prompt "What is Deephaven?"
@@ -1107,12 +1278,12 @@ uv run scripts/mcp_docs_test_client.py --prompt "How do I filter this table?" \
   --history '[{"role":"user","content":"How do I create a table?"},{"role":"assistant","content":"To create a table in Deephaven..."}]'
 ```
 
-> ⚠️ **Prerequisites:** 
+> ⚠️ **Prerequisites:**
 > - For the Docs Server test client, you need a valid [Inkeep API key](https://inkeep.com/) (required)
 > - An [OpenAI API key](https://openai.com/) is optional but recommended as a fallback
 > - For troubleshooting API issues, see [Common Errors & Solutions](#common-errors--solutions)
 
-> 💡 **Tips:** 
+> 💡 **Tips:**
 > - Replace placeholder API keys with your actual keys
 > - For multi-turn conversations, the history parameter accepts properly formatted JSON
 > - Use `jq` to format complex history objects: `echo '$HISTORY' | jq -c .`
