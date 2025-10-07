@@ -38,7 +38,6 @@ from datetime import datetime
 from typing import Any, TypeVar
 
 import aiofiles
-import pyarrow as pa
 from mcp.server.fastmcp import Context, FastMCP
 
 from deephaven_mcp import queries
@@ -48,7 +47,7 @@ from deephaven_mcp.config import (
     get_config_section,
     redact_enterprise_system_config,
 )
-from deephaven_mcp.formatters import format_table_data, VALID_FORMATS
+from deephaven_mcp.formatters import format_table_data
 from deephaven_mcp.resource_manager import (
     BaseItemManager,
     CombinedSessionRegistry,
@@ -1213,7 +1212,7 @@ async def get_table_data(
     head: bool = True,
     format: str = "auto",
 ) -> dict:
-    """
+    r"""
     MCP Tool: Retrieve table data from a specified Deephaven session with flexible formatting options.
 
     This tool queries the specified Deephaven session for table data and returns it in the requested format

@@ -1,7 +1,7 @@
 """YAML formatter for PyArrow tables."""
 
 import pyarrow as pa
-import yaml
+import yaml  # type: ignore[import-untyped]
 
 
 def format_yaml(arrow_table: pa.Table) -> str:
@@ -30,6 +30,7 @@ def format_yaml(arrow_table: pa.Table) -> str:
     records = []
     for batch in arrow_table.to_batches():
         records.extend(batch.to_pylist())
-    
+
     data = {"records": records}
-    return yaml.dump(data, default_flow_style=False, allow_unicode=True)
+    result: str = yaml.dump(data, default_flow_style=False, allow_unicode=True)
+    return result

@@ -1,6 +1,7 @@
 """XML formatter for PyArrow tables."""
 
 import xml.etree.ElementTree as ET
+
 import pyarrow as pa
 
 

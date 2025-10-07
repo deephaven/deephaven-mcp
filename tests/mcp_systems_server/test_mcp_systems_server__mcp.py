@@ -2077,7 +2077,7 @@ async def test_get_table_data_success_default_params():
     mock_field2.type = "string"
     mock_arrow_table.schema = [mock_field1, mock_field2]
     mock_arrow_table.column_names = ["col1", "col2"]
-    
+
     # Mock batch for formatters
     mock_batch = MagicMock()
     mock_batch.to_pylist.return_value = [
@@ -2203,12 +2203,12 @@ async def test_get_table_data_invalid_format():
     mock_registry = MagicMock()
     mock_session_manager = MagicMock()
     mock_session = MagicMock()
-    
+
     mock_registry.get = AsyncMock(return_value=mock_session_manager)
     mock_session_manager.get = AsyncMock(return_value=mock_session)
-    
+
     context = MockContext({"session_registry": mock_registry})
-    
+
     # Mock arrow table
     mock_arrow_table = MagicMock()
     mock_arrow_table.__len__ = MagicMock(return_value=10)
@@ -2216,12 +2216,12 @@ async def test_get_table_data_invalid_format():
     mock_field.name = "col1"
     mock_field.type = "int64"
     mock_arrow_table.schema = [mock_field]
-    
+
     with patch(
         "deephaven_mcp.mcp_systems_server._mcp.queries.get_table"
     ) as mock_get_table:
         mock_get_table.return_value = (mock_arrow_table, True)
-        
+
         result = await mcp_mod.get_table_data(
             context, "session1", "table1", format="invalid"
         )

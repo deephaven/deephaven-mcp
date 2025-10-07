@@ -1,4 +1,4 @@
-"""
+r"""
 Table formatting for MCP responses.
 
 This module provides table data formatting optimized for AI agent consumption, with format
@@ -29,25 +29,25 @@ Supported Formats:
     Explicit Formats (7 total):
         json-row: Array of row objects (returns list[dict])
             Example: [{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}]
-        
+
         json-column: Column-oriented object (returns dict)
             Example: {"id": [1, 2], "name": ["Alice", "Bob"]}
-        
+
         csv: Comma-separated values with header (returns str)
             Example: "id,name\\n1,Alice\\n2,Bob\\n"
-        
+
         markdown-table: Pipe-delimited table with alignment (returns str)
             Example: "| id | name |\\n| --- | --- |\\n| 1 | Alice |"
-        
+
         markdown-kv: Key-value pairs per record (returns str, 60.7% AI accuracy)
             Example: "## Record 1\\nid: 1\\nname: Alice\\n\\n## Record 2\\nid: 2\\nname: Bob"
-        
+
         yaml: YAML records list (returns str)
             Example: "records:\\n  - id: 1\\n    name: Alice\\n  - id: 2\\n    name: Bob"
-        
+
         xml: XML with records/record structure (returns str)
             Example: "<records><record id=\\"1\\"><name>Alice</name></record></records>"
-    
+
     Optimization Strategies (4 total):
         auto: Smart selection based on table size (default, recommended)
         optimize-accuracy: Always use markdown-kv (highest accuracy)
@@ -57,7 +57,7 @@ Supported Formats:
 Usage:
     >>> from deephaven_mcp.formatters import format_table_data
     >>> import pyarrow as pa
-    >>> 
+    >>>
     >>> table = pa.table({"id": [1, 2], "name": ["Alice", "Bob"]})
     >>> format_used, data = format_table_data(table, "auto")
     >>> # Returns: ("markdown-kv", "## Record 1\\nid: 1\\nname: Alice\\n...")
@@ -181,14 +181,12 @@ def format_table_data(
             f"[formatters:format_table_data] Invalid format '{format_type}'. "
             f"Valid options: {valid_list}"
         )
-        raise ValueError(
-            f"Invalid format '{format_type}'. Valid options: {valid_list}"
-        )
+        raise ValueError(f"Invalid format '{format_type}'. Valid options: {valid_list}")
 
     # Get row count from table
     row_count = len(arrow_table)
     col_count = len(arrow_table.schema)
-    
+
     _LOGGER.debug(
         f"[formatters:format_table_data] Formatting table: {row_count} rows, "
         f"{col_count} columns, requested format='{format_type}'"
@@ -201,7 +199,7 @@ def format_table_data(
     # Get formatter and apply
     formatter = _FORMATTERS[actual_format]
     data = formatter(arrow_table)
-    
+
     _LOGGER.debug(
         f"[formatters:format_table_data] Successfully formatted {row_count} rows "
         f"as '{actual_format}'"
@@ -233,7 +231,10 @@ def _resolve_format(format_type: str, row_count: int) -> tuple[str, str]:
         if row_count <= 1000:
             return "markdown-kv", "≤1000 rows, optimizing for accuracy"
         elif row_count <= 10000:
-            return "markdown-table", "1001-10000 rows, balancing accuracy and scalability"
+            return (
+                "markdown-table",
+                "1001-10000 rows, balancing accuracy and scalability",
+            )
         else:
             return "csv", ">10000 rows, optimizing for token efficiency"
 

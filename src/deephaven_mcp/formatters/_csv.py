@@ -1,12 +1,13 @@
 """CSV formatter for PyArrow tables."""
 
 import io
+
 import pyarrow as pa
 import pyarrow.csv as csv
 
 
 def format_csv(arrow_table: pa.Table) -> str:
-    """
+    r"""
     Format Arrow table as CSV string.
 
     Uses PyArrow's native CSV writer for memory efficiency and proper escaping.
