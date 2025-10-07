@@ -31,7 +31,6 @@ See individual tool docstrings for full argument, return, and error details.
 """
 
 import asyncio
-import io
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -39,8 +38,6 @@ from datetime import datetime
 from typing import Any, TypeVar
 
 import aiofiles
-import pyarrow as pa
-import pyarrow.csv as csv
 from mcp.server.fastmcp import Context, FastMCP
 
 from deephaven_mcp import queries
@@ -50,6 +47,7 @@ from deephaven_mcp.config import (
     get_config_section,
     redact_enterprise_system_config,
 )
+from deephaven_mcp.formatters import format_table_data
 from deephaven_mcp.resource_manager import (
     BaseItemManager,
     CombinedSessionRegistry,
@@ -1205,57 +1203,6 @@ def _check_response_size(table_name: str, estimated_size: int) -> dict | None:
     return None  # Size is acceptable
 
 
-def _format_table_data(
-    arrow_table: pa.Table, format_type: str, row_count: int
-) -> tuple[str, object]:
-    """
-    Convert Arrow table to specified output format with automatic format selection.
-
-    Transforms PyArrow table data into one of several supported output formats. Supports
-    automatic format selection based on row count to balance performance and usability.
-    Handles memory-efficient CSV conversion and proper JSON serialization.
-
-    Args:
-        arrow_table: PyArrow Table object containing the source data.
-        format_type (str): Desired output format. Must be one of:
-                          - "auto": Automatically selects "json-column" for ≤100 rows, "csv" for >100 rows
-                          - "json-row": Array of objects, each representing a row
-                          - "json-column": Object with column names as keys, arrays as values
-                          - "csv": Comma-separated values as a string
-        row_count (int): Number of rows in the table, used for auto format selection.
-
-    Returns:
-        tuple[str, object]: A 2-tuple containing:
-                           - str: The actual format used ("json-row", "json-column", or "csv")
-                           - object: The formatted data (list, dict, or str depending on format)
-
-    Raises:
-        ValueError: If format_type is not one of the supported formats.
-
-    Performance Notes:
-        - CSV format uses direct Arrow→CSV conversion for memory efficiency
-        - JSON formats create Python object copies, unavoidable for JSON serialization
-        - Auto selection optimizes for small tables (JSON) vs large tables (CSV)
-    """
-    if format_type == "auto":
-        actual_format = "json-column" if row_count <= 100 else "csv"
-    else:
-        actual_format = format_type
-
-    if actual_format == "json-row":
-        return actual_format, arrow_table.to_pylist()
-    elif actual_format == "json-column":
-        return actual_format, arrow_table.to_pydict()
-    elif actual_format == "csv":
-        # Direct Arrow → CSV conversion (most memory efficient)
-        output = io.BytesIO()
-        csv.write_csv(arrow_table, output)
-        # Note: decode() creates a copy, but necessary for JSON serialization
-        return actual_format, output.getvalue().decode("utf-8")
-    else:
-        raise ValueError(f"Unsupported format: {actual_format}")
-
-
 @mcp_server.tool()
 async def get_table_data(
     context: Context,
@@ -1265,12 +1212,18 @@ async def get_table_data(
     head: bool = True,
     format: str = "auto",
 ) -> dict:
-    """
+    r"""
     MCP Tool: Retrieve table data from a specified Deephaven session with flexible formatting options.
 
     This tool queries the specified Deephaven session for table data and returns it in the requested format
-    with optional row limiting. Supports multiple output formats and provides completion status to indicate
-    if the entire table was retrieved. Includes safety limits (50MB max response size) to prevent memory issues.
+    with optional row limiting. Supports multiple output formats optimized for AI agent consumption.
+    Format selection based on empirical research showing significant accuracy differences between formats.
+    Includes safety limits (50MB max response size) to prevent memory issues.
+
+    Terminology Note:
+    - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
+    - 'Deephaven Community' and 'Deephaven Core' are interchangeable names for the same product
+    - 'Deephaven Enterprise', 'Deephaven Core+', and 'Deephaven CorePlus' are interchangeable names for the same product
 
     Args:
         context (Context): The MCP context object, required by MCP protocol but not actively used.
@@ -1281,29 +1234,36 @@ async def get_table_data(
         head (bool, optional): Direction of row retrieval. If True (default), retrieve from beginning.
                               If False, retrieve from end (most recent rows for time-series data).
         format (str, optional): Output format selection. Defaults to "auto". Options:
-                               - "auto": Selects json-column for ≤100 rows, csv for >100 rows (recommended)
-                               - "json-row": Array of objects [{col1: val1, col2: val2}, ...] (best for iteration)
-                               - "json-column": Object {col1: [val1, val2], col2: [val3, val4]} (best for analysis)
-                               - "csv": Comma-separated string (most memory efficient for large datasets)
+                               - "auto": Smart selection (≤1000: markdown-kv, 1001-10000: markdown-table, >10000: csv)
+                               - "optimize-accuracy": Always use markdown-kv (typically better comprehension, more tokens)
+                               - "optimize-cost": Always use csv (fewer tokens, may be harder to parse)
+                               - "optimize-speed": Always use json-column (fastest conversion)
+                               - "json-row": List of dicts, one per row: [{col1: val1, col2: val2}, ...]
+                               - "json-column": Dict with column names as keys, value arrays: {col1: [val1, val2], col2: [val3, val4]}
+                               - "csv": String with comma-separated values, includes header row
+                               - "markdown-table": String with pipe-delimited table (| col1 | col2 |\n| --- | --- |\n| val1 | val2 |)
+                               - "markdown-kv": String with record headers and key-value pairs (## Record 1\ncol1: val1\ncol2: val2)
+                               - "yaml": String with YAML-formatted records list
+                               - "xml": String with XML records structure
 
     Returns:
         dict: Structured result object with the following keys:
             - 'success' (bool): Always present. True if table data was retrieved successfully, False on any error.
-            - 'table_name' (str, optional): Name of the retrieved table if successful. Echoes input for confirmation.
+            - 'table_name' (str, optional): Name of the retrieved table if successful.
             - 'format' (str, optional): Actual format used for the data if successful. May differ from request when "auto".
             - 'schema' (list[dict], optional): Array of column definitions if successful. Each dict contains:
-                                              {'name': str, 'type': str} describing column name and Arrow type.
+                                              {'name': str, 'type': str} describing column name and PyArrow data type
+                                              (e.g., 'int64', 'string', 'double', 'timestamp[ns]').
             - 'row_count' (int, optional): Number of rows in the returned data if successful. May be less than max_rows.
             - 'is_complete' (bool, optional): True if entire table was retrieved if successful. False if truncated by max_rows.
-            - 'data' (list | dict | str, optional): The actual table data if successful. Type depends on format:
-                                                   list for json-row, dict for json-column, str for csv.
+            - 'data' (list | dict | str, optional): The actual table data if successful. Type depends on format.
             - 'error' (str, optional): Human-readable error message if retrieval failed. Omitted on success.
             - 'isError' (bool, optional): Present and True only when success=False. Explicit error flag for frameworks.
 
     Error Scenarios:
         - Invalid session_id: Returns error if session doesn't exist or is not accessible
         - Invalid table_name: Returns error if table doesn't exist in the session
-        - Invalid format: Returns error if format is not one of the supported options
+        - Invalid format: Returns error if format is not one of the supported options listed above
         - Response too large: Returns error if estimated response would exceed 50MB limit
         - Session connection issues: Returns error if unable to communicate with Deephaven server
         - Query execution errors: Returns error if table query fails (permissions, syntax, etc.)
@@ -1312,18 +1272,21 @@ async def get_table_data(
         - Large tables: Use csv format or limit max_rows to avoid memory issues
         - Column analysis: Use json-column format for efficient column-wise operations
         - Row processing: Use json-row format for record-by-record iteration
-        - Auto format: Recommended for general use, optimizes based on data size
+        - AI agent comprehension: markdown-kv format typically provides best understanding (but uses more tokens)
+        - Auto format: Recommended for general use, optimizes based on data size balancing comprehension and cost
         - Response size limit: 50MB maximum to prevent memory issues
 
     AI Agent Usage:
         - Always check 'success' field before accessing data fields
         - Use 'is_complete' to determine if more data exists beyond max_rows limit
         - Parse 'schema' array to understand column types before processing 'data'
-        - Handle variable data types when using auto format (list/dict/string)
+        - Handle variable data types when using auto format (list/dict/string depending on row count)
         - Use head=True (default) to get rows from table start, head=False to get from table end
         - Start with small max_rows values for large tables to avoid memory issues
-        - Use csv format for memory efficiency with large datasets
-        - Check 'format' field in response to know actual format used (may differ from auto request)
+        - Use 'auto' for automatic format selection based on data size (balances comprehension and tokens)
+        - Use 'optimize-accuracy' to always get markdown-kv format (better comprehension, more tokens)
+        - Use 'optimize-cost' to always get csv format (fewer tokens, may be harder to parse)
+        - Check 'format' field in response to know actual format used (especially important with 'auto')
     """
     _LOGGER.info(
         f"[mcp_systems_server:get_table_data] Invoked: session_id={session_id!r}, "
@@ -1333,15 +1296,6 @@ async def get_table_data(
     result: dict[str, object] = {"success": False}
 
     try:
-        # Validate format parameter
-        valid_formats = {"auto", "json-row", "json-column", "csv"}
-        if format not in valid_formats:
-            result["error"] = (
-                f"Invalid format '{format}'. Valid options: {', '.join(valid_formats)}"
-            )
-            result["isError"] = True
-            return result
-
         # Get session registry and session
         session_registry: CombinedSessionRegistry = (
             context.request_context.lifespan_context["session_registry"]
@@ -1369,9 +1323,13 @@ async def get_table_data(
         if size_error:
             return size_error
 
-        # Format the data
-        actual_format, formatted_data = _format_table_data(
-            arrow_table, format, row_count
+        # Format data - all format logic handled by formatters package
+        _LOGGER.debug(
+            f"[mcp_systems_server:get_table_data] Formatting data with format='{format}'"
+        )
+        actual_format, formatted_data = format_table_data(arrow_table, format)
+        _LOGGER.debug(
+            f"[mcp_systems_server:get_table_data] Data formatted as '{actual_format}'"
         )
 
         # Extract schema information
@@ -1393,9 +1351,17 @@ async def get_table_data(
         )
 
         _LOGGER.info(
-            f"[mcp_systems_server:get_table_data] Success: Retrieved {len(arrow_table)} rows "
-            f"from table '{table_name}' in format '{actual_format}' (complete: {is_complete})"
+            f"[mcp_systems_server:get_table_data] Successfully retrieved {row_count} rows "
+            f"from '{table_name}' in '{actual_format}' format"
         )
+
+    except ValueError as e:
+        # Format validation error from formatters package
+        _LOGGER.error(
+            f"[mcp_systems_server:get_table_data] Invalid format parameter: {e!r}"
+        )
+        result["error"] = str(e)
+        result["isError"] = True
 
     except Exception as e:
         _LOGGER.error(

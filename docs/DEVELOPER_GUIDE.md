@@ -113,7 +113,7 @@ This repository houses the Python-based Model Context Protocol (MCP) servers for
 
 ### About This Project
 
-The [deephaven-mcp](https://github.com/deephaven/deephaven-mcp) project provides Python implementations of two Model Context Protocol (MCP) servers:
+The [deephaven-mcp](https://github.com/deephaven/deephaven-mcp) project provides Python implementations of two [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) servers:
 
 1. **Deephaven MCP Systems Server**:
    * Enables orchestration, inspection, and management of Deephaven Community Core worker nodes via the MCP protocol
@@ -909,7 +909,7 @@ On error:
 
 ##### `get_table_data`
 
-**Purpose**: Retrieve table data from a specified Deephaven session with flexible formatting options.
+**Purpose**: Retrieve table data from a specified Deephaven session with flexible formatting options optimized for AI agent consumption.
 
 **Parameters**:
 
@@ -917,7 +917,37 @@ On error:
 - `table_name` (required, string): Name of the table to retrieve data from.
 - `max_rows` (optional, int): Maximum number of rows to retrieve. Defaults to 1000. Set to None for entire table.
 - `head` (optional, boolean): If True (default), retrieve from beginning. If False, retrieve from end.
-- `format` (optional, string): Output format. Options: "auto" (default), "json-row", "json-column", "csv".
+- `format` (optional, string): Output format. See [Format Options](#format-options) below. Defaults to "auto".
+
+**Format Options**:
+
+Different formats have different tradeoffs for AI agent comprehension and token usage:
+
+**Optimization Strategies:**
+- `"auto"` (default): Smart selection balancing comprehension and cost
+  - ≤1000 rows: markdown-kv (typically better comprehension)
+  - 1001-10000 rows: markdown-table (good balance)
+  - >10000 rows: csv (most token-efficient)
+- `"optimize-accuracy"`: Always use markdown-kv (typically better comprehension, more tokens)
+- `"optimize-cost"`: Always use csv (fewer tokens, may be harder to parse)
+- `"optimize-speed"`: Always use json-column (fastest conversion)
+
+**Explicit Formats:**
+- `"json-row"`: Array of row objects `[{col1: val1}, ...]`
+- `"json-column"`: Column-oriented object `{col1: [val1, val2], ...}`
+- `"csv"`: Comma-separated values string
+- `"markdown-table"`: Markdown table format
+- `"markdown-kv"`: Markdown key-value pairs
+- `"yaml"`: YAML format
+- `"xml"`: XML format
+
+**When to Use Each Format:**
+- **Better Comprehension**: Use `optimize-accuracy` or explicit `markdown-kv` (uses more tokens)
+- **General Purpose**: Use `auto` (default, balances comprehension and cost)
+- **Large Tables**: Use `optimize-cost` or explicit `csv` (fewer tokens)
+- **Fastest Response**: Use `optimize-speed` or explicit `json-column`
+- **Legacy Systems**: Use `xml` for enterprise integrations
+- **Structured Data**: Use `yaml` for configuration-like tables
 
 **Returns**:
 
@@ -925,17 +955,14 @@ On error:
 {
   "success": true,
   "table_name": "my_table",
-  "format": "json-column",
+  "format": "markdown-kv",
   "schema": [
     {"name": "col1", "type": "int64"},
     {"name": "col2", "type": "string"}
   ],
   "row_count": 100,
   "is_complete": true,
-  "data": {
-    "col1": [1, 2, 3],
-    "col2": ["a", "b", "c"]
-  }
+  "data": "## Record 1\ncol1: 1\ncol2: a\n\n## Record 2\ncol1: 2\ncol2: b\n..."
 }
 ```
 
@@ -949,7 +976,7 @@ On error:
 }
 ```
 
-**Description**: This tool retrieves actual table data with flexible output formatting and safety limits. It supports multiple formats optimized for different use cases: json-row for iteration, json-column for analysis, and csv for large datasets. The tool includes automatic format selection and enforces a 50MB response limit to prevent memory issues. The `is_complete` field indicates whether the entire table was retrieved or truncated by `max_rows`.
+**Description**: This tool retrieves actual table data with flexible output formatting. Different formats have different tradeoffs between AI agent comprehension and token usage. The tool includes intelligent automatic format selection based on table size and enforces a 50MB response limit to prevent memory issues. The `is_complete` field indicates whether the entire table was retrieved or truncated by `max_rows`. The `format` field in the response shows the actual format used (important when using "auto").
 
 ##### `get_table_meta`
 
@@ -2003,8 +2030,10 @@ The script will create multiple concurrent connections and send requests to the 
 - [MCP Proxy](https://github.com/modelcontextprotocol/mcp-proxy) - Bridge from HTTP transports to stdio transport
 - [FastMCP](https://github.com/jlowin/fastmcp) - Python library for building MCP servers
 - [FastMCP Tutorial](https://www.firecrawl.dev/blog/fastmcp-tutorial-building-mcp-servers-python) - Guide to building MCP servers with Python
+- [Claude Desktop](https://claude.ai/download) - Anthropic's desktop app with MCP support
 - [autogen-ext](https://github.com/jlowin/autogen-ext) - Extensions for AutoGen including MCP support
 - [Model Context Protocol (MCP)](https://github.com/modelcontextprotocol) - Main MCP organization with specs and tools
+- [PyArrow](https://arrow.apache.org/docs/python/) - Python library for Apache Arrow (used for table data formatting)
 
 ### Contributing
 

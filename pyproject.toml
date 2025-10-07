@@ -47,6 +47,8 @@ dependencies = [
     "google-cloud-logging>=3.8.0",  # Google Cloud Logging
     # Process monitoring for debugging
     "psutil>=5.9.0",               # Process and system monitoring
+    # Table formatting for AI agents
+    "pyyaml>=6.0",                 # YAML formatting support
 ]
 
 [project.optional-dependencies]

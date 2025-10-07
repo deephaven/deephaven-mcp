@@ -2050,94 +2050,6 @@ def test_check_response_size_over_limit():
     }
 
 
-def test_format_table_data_auto_small():
-    """Test _format_table_data with auto format for small table."""
-    mock_table = MagicMock()
-    mock_table.to_pydict.return_value = {"col1": [1, 2], "col2": ["a", "b"]}
-
-    format_type, data = mcp_mod._format_table_data(mock_table, "auto", 50)
-
-    assert format_type == "json-column"
-    assert data == {"col1": [1, 2], "col2": ["a", "b"]}
-    mock_table.to_pydict.assert_called_once()
-
-
-def test_format_table_data_auto_large():
-    """Test _format_table_data with auto format for large table."""
-    mock_table = MagicMock()
-
-    # Mock CSV writing
-    with (
-        patch("deephaven_mcp.mcp_systems_server._mcp.io.BytesIO") as mock_bytesio,
-        patch("deephaven_mcp.mcp_systems_server._mcp.csv.write_csv") as mock_write_csv,
-    ):
-
-        mock_output = MagicMock()
-        mock_output.getvalue.return_value = b"col1,col2\n1,a\n2,b"
-        mock_bytesio.return_value = mock_output
-
-        format_type, data = mcp_mod._format_table_data(mock_table, "auto", 200)
-
-        assert format_type == "csv"
-        assert data == "col1,col2\n1,a\n2,b"
-        mock_write_csv.assert_called_once_with(mock_table, mock_output)
-
-
-def test_format_table_data_json_row():
-    """Test _format_table_data with json-row format."""
-    mock_table = MagicMock()
-    mock_table.to_pylist.return_value = [
-        {"col1": 1, "col2": "a"},
-        {"col1": 2, "col2": "b"},
-    ]
-
-    format_type, data = mcp_mod._format_table_data(mock_table, "json-row", 100)
-
-    assert format_type == "json-row"
-    assert data == [{"col1": 1, "col2": "a"}, {"col1": 2, "col2": "b"}]
-    mock_table.to_pylist.assert_called_once()
-
-
-def test_format_table_data_json_column():
-    """Test _format_table_data with json-column format."""
-    mock_table = MagicMock()
-    mock_table.to_pydict.return_value = {"col1": [1, 2], "col2": ["a", "b"]}
-
-    format_type, data = mcp_mod._format_table_data(mock_table, "json-column", 100)
-
-    assert format_type == "json-column"
-    assert data == {"col1": [1, 2], "col2": ["a", "b"]}
-    mock_table.to_pydict.assert_called_once()
-
-
-def test_format_table_data_csv():
-    """Test _format_table_data with csv format."""
-    mock_table = MagicMock()
-
-    with (
-        patch("deephaven_mcp.mcp_systems_server._mcp.io.BytesIO") as mock_bytesio,
-        patch("deephaven_mcp.mcp_systems_server._mcp.csv.write_csv") as mock_write_csv,
-    ):
-
-        mock_output = MagicMock()
-        mock_output.getvalue.return_value = b"col1,col2\n1,a\n2,b"
-        mock_bytesio.return_value = mock_output
-
-        format_type, data = mcp_mod._format_table_data(mock_table, "csv", 100)
-
-        assert format_type == "csv"
-        assert data == "col1,col2\n1,a\n2,b"
-        mock_write_csv.assert_called_once_with(mock_table, mock_output)
-
-
-def test_format_table_data_invalid_format():
-    """Test _format_table_data with invalid format."""
-    mock_table = MagicMock()
-
-    with pytest.raises(ValueError, match="Unsupported format: invalid"):
-        mcp_mod._format_table_data(mock_table, "invalid", 100)
-
-
 # === get_table_data ===
 
 
@@ -2154,9 +2066,9 @@ async def test_get_table_data_success_default_params():
 
     context = MockContext({"session_registry": mock_registry})
 
-    # Mock arrow table (small size to trigger json-column format)
+    # Mock arrow table (small size to trigger markdown-kv format)
     mock_arrow_table = MagicMock()
-    mock_arrow_table.__len__ = MagicMock(return_value=50)  # Small size -> json-column
+    mock_arrow_table.__len__ = MagicMock(return_value=50)  # Small size -> markdown-kv
     mock_field1 = MagicMock()
     mock_field1.name = "col1"
     mock_field1.type = "int64"
@@ -2164,10 +2076,16 @@ async def test_get_table_data_success_default_params():
     mock_field2.name = "col2"
     mock_field2.type = "string"
     mock_arrow_table.schema = [mock_field1, mock_field2]
-    mock_arrow_table.to_pydict.return_value = {
-        "col1": [1, 2, 3],
-        "col2": ["a", "b", "c"],
-    }
+    mock_arrow_table.column_names = ["col1", "col2"]
+
+    # Mock batch for formatters
+    mock_batch = MagicMock()
+    mock_batch.to_pylist.return_value = [
+        {"col1": 1, "col2": "a"},
+        {"col1": 2, "col2": "b"},
+        {"col1": 3, "col2": "c"},
+    ]
+    mock_arrow_table.to_batches.return_value = [mock_batch]
 
     with patch(
         "deephaven_mcp.mcp_systems_server._mcp.queries.get_table"
@@ -2178,11 +2096,13 @@ async def test_get_table_data_success_default_params():
 
         assert result["success"] is True
         assert result["table_name"] == "table1"
-        assert result["format"] == "json-column"  # Auto format for small table (≤100)
+        assert result["format"] == "markdown-kv"  # Auto format for small table (≤1000)
         assert result["row_count"] == 50
         assert result["is_complete"] is True
         assert "schema" in result
         assert "data" in result
+        assert isinstance(result["data"], str)  # markdown-kv returns string
+        assert "## Record 1" in result["data"]
 
         # Verify queries.get_table was called with correct parameters
         mock_get_table.assert_called_once_with(
@@ -2241,9 +2161,9 @@ async def test_get_table_data_success_full_table():
 
     context = MockContext({"session_registry": mock_registry})
 
-    # Mock arrow table
+    # Mock arrow table (large size to trigger CSV format)
     mock_arrow_table = MagicMock()
-    mock_arrow_table.__len__ = MagicMock(return_value=10000)
+    mock_arrow_table.__len__ = MagicMock(return_value=15000)  # >10000 rows -> csv
     mock_field = MagicMock()
     mock_field.name = "col1"
     mock_field.type = "int64"
@@ -2251,8 +2171,8 @@ async def test_get_table_data_success_full_table():
 
     # Mock CSV output for large table
     with (
-        patch("deephaven_mcp.mcp_systems_server._mcp.io.BytesIO") as mock_bytesio,
-        patch("deephaven_mcp.mcp_systems_server._mcp.csv.write_csv") as mock_write_csv,
+        patch("deephaven_mcp.formatters._csv.io.BytesIO") as mock_bytesio,
+        patch("deephaven_mcp.formatters._csv.csv.write_csv") as mock_write_csv,
         patch(
             "deephaven_mcp.mcp_systems_server._mcp.queries.get_table"
         ) as mock_get_table,
@@ -2269,7 +2189,7 @@ async def test_get_table_data_success_full_table():
         )
 
         assert result["success"] is True
-        assert result["format"] == "csv"  # Auto format for large table
+        assert result["format"] == "csv"  # Auto format for large table (>10000 rows)
         assert result["is_complete"] is True
 
         mock_get_table.assert_called_once_with(
@@ -2280,15 +2200,35 @@ async def test_get_table_data_success_full_table():
 @pytest.mark.asyncio
 async def test_get_table_data_invalid_format():
     """Test get_table_data with invalid format parameter."""
-    context = MockContext({"session_registry": MagicMock()})
+    mock_registry = MagicMock()
+    mock_session_manager = MagicMock()
+    mock_session = MagicMock()
 
-    result = await mcp_mod.get_table_data(
-        context, "session1", "table1", format="invalid"
-    )
+    mock_registry.get = AsyncMock(return_value=mock_session_manager)
+    mock_session_manager.get = AsyncMock(return_value=mock_session)
 
-    assert result["success"] is False
-    assert "Invalid format 'invalid'" in result["error"]
-    assert result["isError"] is True
+    context = MockContext({"session_registry": mock_registry})
+
+    # Mock arrow table
+    mock_arrow_table = MagicMock()
+    mock_arrow_table.__len__ = MagicMock(return_value=10)
+    mock_field = MagicMock()
+    mock_field.name = "col1"
+    mock_field.type = "int64"
+    mock_arrow_table.schema = [mock_field]
+
+    with patch(
+        "deephaven_mcp.mcp_systems_server._mcp.queries.get_table"
+    ) as mock_get_table:
+        mock_get_table.return_value = (mock_arrow_table, True)
+
+        result = await mcp_mod.get_table_data(
+            context, "session1", "table1", format="invalid"
+        )
+
+        assert result["success"] is False
+        assert "Invalid format 'invalid'" in result["error"]
+        assert result["isError"] is True
 
 
 @pytest.mark.asyncio
