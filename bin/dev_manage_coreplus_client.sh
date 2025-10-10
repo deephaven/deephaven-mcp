@@ -207,9 +207,8 @@ parse_args() {
   parsed_wheel_file=""
   # Defaults
   default_channel="prod"
-  default_ev="$(list_enterprise_versions_for_channel prod | tail -n 1)"
-  default_pr="$(list_point_releases_for_channel_and_ev prod "$default_ev" | tail -n 1)"
-  default_cv=""
+  # Note: ev, pr, cv defaults are not set here to avoid expensive GCS calls
+  # They will be computed by resolve_install_versions if needed by the install command
   # Parse
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -243,9 +242,9 @@ parse_args() {
   fi
   # Fill from positional if not set
   : "${parsed_channel:=${1:-$default_channel}}"
-  : "${parsed_ev:=${2:-$default_ev}}"
-  : "${parsed_pr:=${3:-$default_pr}}"
-  : "${parsed_cv:=${4:-$default_cv}}"
+  : "${parsed_ev:=$2}"
+  : "${parsed_pr:=$3}"
+  : "${parsed_cv:=$4}"
   # Export resolved vars in lowercase
   channel="$parsed_channel"
   ev="$parsed_ev"
