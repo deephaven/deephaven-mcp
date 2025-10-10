@@ -1596,7 +1596,7 @@ These steps outline how to set up a development environment specifically for wor
     ```
     *This script is used because the `deephaven-coreplus-client` wheel is not available on PyPI and needs to be fetched from a specific location. The script also, crucially, manages `grpcio` dependency versioning by ensuring that if `grpcio` is already installed, its version is pinned during the client installation to prevent conflicts, and it uses binary-only installs to avoid build issues.*
 
-3.  **Install project development and Core+ dependencies:
+3.  **Install project development and Core+ dependencies:**
     Install the main project's development dependencies along with the `coreplus` extra.
     ```sh
     uv pip install -e ".[dev,coreplus]"
