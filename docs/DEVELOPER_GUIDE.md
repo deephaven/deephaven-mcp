@@ -1541,26 +1541,28 @@ Both servers expose their tools through FastMCP, following the Model Context Pro
 ### Development Workflow
 
 1. **Set up your environment**:
+
    ```sh
    # Clone the repository
    git clone https://github.com/deephaven/deephaven-mcp.git
    cd deephaven-mcp/mcp-community
-   
-   # Create a virtual environment
-   uv venv .venv -p 3.9 # Or your desired Python version e.g., 3.10, 3.11
-   
-   # Activate the virtual environment
-   # On macOS/Linux: source .venv/bin/activate
-   # On Windows (PowerShell): .venv\Scripts\Activate.ps1
-   # On Windows (CMD): .venv\Scripts\activate.bat
-   
-   # Install dependencies with uv (editable mode for development)
+   ```
+
+2. **Create a virtual environment**:
+
+   ```sh
+   uv venv .venv -p 3.11 # Or your desired Python version e.g., 3.12, 3.13
+   ```
+
+3. **Install dependencies with uv (editable mode for development)**:
+
+   ```sh
    uv pip install -e ".[dev]"
    ```
    
    > [`uv`](https://github.com/astral-sh/uv) is a fast Python package installer and resolver, but you can also use regular `pip install -e .` if preferred.
 
-2. **Run the test server** (in one terminal):
+4. **Run the test server** (in one terminal):
    ```sh
    # For anonymous authentication (no MCP auth needed)
    uv run scripts/run_deephaven_test_server.py --table-group simple
@@ -1569,12 +1571,12 @@ Both servers expose their tools through FastMCP, following the Model Context Pro
    uv run scripts/run_deephaven_test_server.py --table-group simple --auth-token Deephaven123
    ```
 
-3. **Run the MCP Community server** (in another terminal):
+5. **Run the MCP Community server** (in another terminal):
    ```sh
    DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json uv run dh-mcp-systems-server --transport sse
    ```
 
-4. **Use the MCP Inspector or test client** to validate your changes.
+6. **Use the MCP Inspector or test client** to validate your changes.
 
 
 ### Core+ Client Development Setup
@@ -1585,12 +1587,12 @@ These steps outline how to set up a development environment specifically for wor
     ```sh
     uv venv .venv -p 3.12
     ```
-    *Ensure Python 3.9 to 3.12 is used, as per potential Core+ client requirements.*
+    *Ensure Python 3.11 to 3.13 is used, as per project requirements.*
 
 2.  **Install the Core+ client wheel:**
     Run the management script to download and install the client wheel into your venv.
     ```sh
-    ./bin/dev_manage_coreplus_client.sh install
+    ./bin/dev_manage_coreplus_client.sh --venv .venv install
     ```
     *This script is used because the `deephaven-coreplus-client` wheel is not available on PyPI and needs to be fetched from a specific location. The script also, crucially, manages `grpcio` dependency versioning by ensuring that if `grpcio` is already installed, its version is pinned during the client installation to prevent conflicts, and it uses binary-only installs to avoid build issues.*
 
@@ -1605,7 +1607,7 @@ After these steps, your virtual environment will be configured for Core+ client 
 
 > **Tip:** You can generate or regenerate the entire Core+ development environment in one line:
 > ```sh
-> rm -rf .venv && uv venv -p 3.12 && ./bin/dev_manage_coreplus_client.sh install && uv pip install ".[dev,coreplus]"
+> rm -rf .venv && uv venv -p 3.12 && ./bin/dev_manage_coreplus_client.sh --venv .venv install && uv pip install ".[dev,coreplus]"
 > ```
 > This will remove any existing virtual environment, create a new one, install the Core+ client, and set up all project dependencies in a single command.
 

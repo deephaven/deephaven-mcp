@@ -87,11 +87,14 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pip-
 
+      - name: Create virtual environment
+        run: python -m venv .venv
+
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install pytest pytest-cov coverage
-          pip install .[test]
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/pip install pytest pytest-cov coverage
+          .venv/bin/pip install .[test]
 
       - name: Install Core Plus wheel
         run: |
@@ -103,10 +106,14 @@ jobs:
             exit 1
           fi
           echo "Wheel file SHA256: $(sha256sum "$wheel_file" | cut -d' ' -f1)"
-          ./bin/dev_manage_coreplus_client.sh install-wheel --file "$wheel_file"
+          echo "DEBUG: Current directory: $(pwd)"
+          echo "DEBUG: Venv exists: $([ -d .venv ] && echo 'yes' || echo 'no')"
+          echo "DEBUG: Script exists: $([ -f ./bin/dev_manage_coreplus_client.sh ] && echo 'yes' || echo 'no')"
+          echo "DEBUG: Running command: ./bin/dev_manage_coreplus_client.sh install-wheel --venv .venv --wheel-file $wheel_file"
+          ./bin/dev_manage_coreplus_client.sh install-wheel --venv .venv --wheel-file "$wheel_file"
 
       - name: Run tests with coverage
-        run: pytest
+        run: .venv/bin/pytest
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v4
@@ -116,7 +123,7 @@ jobs:
 
       - name: Fail if any file has <90% coverage (except _version.py)
         run: |
-          coverage report -m | tee coverage.txt
+          .venv/bin/coverage report -m | tee coverage.txt
           awk '
             NR > 2 && $1 !~ /_version\.py/ && $1 ~ /\.py/ {
               cov = $4
@@ -128,4 +135,3 @@ jobs:
             }
             END { exit fail }
           ' coverage.txt
-

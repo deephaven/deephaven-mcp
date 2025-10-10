@@ -9,9 +9,8 @@ Bootstrap and build the repository:
 - `cd deephaven-mcp`
 - `pip install uv` -- if uv not installed
 - `uv venv .venv -p 3.12` -- takes 0.01 seconds  
-- `source .venv/bin/activate` (Linux/macOS) or `.venv\Scripts\activate` (Windows)
 - `uv pip install ".[dev]"` -- installs all dependencies including dev tools, takes 3 seconds. NEVER CANCEL. Set timeout to 60+ seconds.
-- `./bin/dev_manage_coreplus_client.sh install-wheel --file ops/artifacts/deephaven_coreplus_client-*-py3-none-any.whl` -- install enterprise Core Plus wheel for enterprise features
+- `./bin/dev_manage_coreplus_client.sh --venv .venv install-wheel --wheel-file ops/artifacts/deephaven_coreplus_client-*-py3-none-any.whl` -- install enterprise Core Plus wheel for enterprise features
 
 Run tests:
 - `uv run pytest tests/test_init.py -v` -- basic smoke test, takes 0.5 seconds

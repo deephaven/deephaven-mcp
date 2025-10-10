@@ -4,11 +4,11 @@
 #
 # Key features:
 # - Installs a specific or the latest available deephaven_coreplus_client:
-#   Downloads the CorePlus tarball, extracts it, and installs the client wheel using pip (or uv if available).
+#   Downloads the CorePlus tarball, extracts it, and installs the client wheel using pip from a specified virtual environment.
 # - Lists available Enterprise Versions, Point Releases, and Community Versions from GCS.
 # - Determines and displays the latest consistent set of EV, PR, and CV.
 #
-# For detailed command usage, run: ./dev_manage_coreplus_client.sh help
+# For detailed command usage, run: ./dev_manage_coreplus_client.sh --help
 
 # Strict mode
 set -euo pipefail
@@ -69,11 +69,22 @@ _register_temp_file() { GLOBAL_TEMP_FILES+=("$1"); }
 
 # Function to print usage
 usage() {
-  echo "Usage: $0 <command> [options]"
+  echo "Usage: $0 <command> [--venv <path>] [options]"
   echo
-  echo "All arguments are optional and may be specified as flags or positionally. Defaults are used if not provided."
+  echo "Commands:"
+  echo "  list-release-channels                      List all release channels (RC codenames + prod)."
+  echo "  list-enterprise-versions                   List enterprise versions (optionally for a channel)."
+  echo "  list-point-releases                        List point releases (optionally for a channel and EV)."
+  echo "  list-community-versions                    List community versions (optionally for a channel, EV, PR)."
+  echo "  resolve-install-versions                   Resolve install versions (optionally for channel, EV, PR, CV)."
+  echo "  install                                    Install the client wheel for the resolved versions (requires --venv)."
+  echo "  install-wheel                              Install directly from a provided wheel file (requires --venv)."
+  echo "  uninstall                                  Uninstall deephaven-coreplus-client (requires --venv)."
+  echo "  patch                                      Patch deephaven_enterprise proto package (requires --venv)."
   echo
   echo "Options:"
+  echo "  --venv <path>            Path to Python virtual environment (required for install/install-wheel/uninstall/patch commands)"
+  echo "  --wheel-file <path>      Wheel file path (required for install-wheel)"
   echo "  --channel <channel>      Release channel (e.g., prod, gplus, etc)"
   echo "  --ev <enterprise_ver>    Enterprise version (e.g., 20240517)"
   echo "  --pr <point_release>     Point release (e.g., 483 or 250506093038c2cba50b47)"
@@ -82,27 +93,60 @@ usage() {
   echo "Environment Variables:"
   echo "  SAVE_WHLS               Set to 'true' to save wheel files to current directory during install (default: false)"
   echo
-  echo "Commands:"
-  echo "  list-release-channels                      List all release channels (RC codenames + prod)."
-  echo "  list-enterprise-versions                   List enterprise versions (optionally for a channel)."
-  echo "  list-point-releases                        List point releases (optionally for a channel and EV)."
-  echo "  list-community-versions                    List community versions (optionally for a channel, EV, PR)."
-  echo "  resolve-install-versions                   Resolve install versions (optionally for channel, EV, PR, CV)."
-  echo "  install                                    Install the client wheel for the resolved versions."
-  echo "  install-wheel --file <path>                Install directly from a provided wheel file (for CI)."
-  echo "  uninstall                                  Uninstall deephaven-coreplus-client from the current environment."
-  echo
   echo "Examples:"
-  echo "  $0 list-point-releases"
+  echo "  $0 list-release-channels"
   echo "  $0 list-point-releases --ev 20240517"
-  echo "  $0 list-point-releases --channel gplus --ev 20250219"
-  echo "  $0 list-community-versions --pr 250506093038c2cba50b47"
-  echo "  $0 uninstall"
+  echo "  $0 install --venv .venv"
+  echo "  $0 install-wheel --venv .venv --wheel-file /path/to/wheel.whl"
+  echo "  $0 uninstall --venv .venv"
   exit 1
 }
 
-# Centralized pip/uv installer function with grpcio constraint support
+# Get the Python executable from the virtual environment
+get_venv_python() {
+  local venv_path="$1"
+  
+  # Check Unix-style path first
+  if [[ -f "$venv_path/bin/python3" ]]; then
+    echo "$venv_path/bin/python3"
+  elif [[ -f "$venv_path/bin/python" ]]; then
+    echo "$venv_path/bin/python"
+  # Check Windows-style path
+  elif [[ -f "$venv_path/Scripts/python.exe" ]]; then
+    echo "$venv_path/Scripts/python.exe"
+  elif [[ -f "$venv_path/Scripts/python" ]]; then
+    echo "$venv_path/Scripts/python"
+  else
+    die "Could not find python in virtual environment at: $venv_path"
+  fi
+}
+
+# Get the pip executable from the virtual environment
+get_venv_pip() {
+  local venv_path="$1"
+  
+  # Check Unix-style path first
+  if [[ -f "$venv_path/bin/pip" ]]; then
+    echo "$venv_path/bin/pip"
+  # Check Windows-style path
+  elif [[ -f "$venv_path/Scripts/pip.exe" ]]; then
+    echo "$venv_path/Scripts/pip.exe"
+  elif [[ -f "$venv_path/Scripts/pip" ]]; then
+    echo "$venv_path/Scripts/pip"
+  else
+    die "Could not find pip in virtual environment at: $venv_path"
+  fi
+}
+
+# Centralized pip installer function with grpcio constraint support
+# Usage: run_pip_install <venv_path> [--grpcio-constraint <version>] <pip_install_args...>
 run_pip_install() {
+  local venv_path="$1"
+  shift
+  
+  local pip_exe
+  pip_exe=$(get_venv_pip "$venv_path")
+  
   local args=()
   local grpcio_constraint=""
   
@@ -120,50 +164,35 @@ run_pip_install() {
     esac
   done
   
-  if command -v uv >/dev/null 2>&1; then
-    if [[ -n "$grpcio_constraint" ]]; then
-      # Create temp constraint file for uv --override
-      local temp_file
-      temp_file=$(mktemp)
-      echo "$grpcio_constraint" > "$temp_file"
-      echo "Using uv with grpcio constraint: uv pip install --override $temp_file ${args[*]}" >&2
-      uv pip install --override "$temp_file" "${args[@]}"
-      local exit_code=$?
-      rm -f "$temp_file"
-      return $exit_code
-    else
-      echo "Using uv: uv pip install ${args[*]}" >&2
-      uv pip install "${args[@]}"
+  if [[ -n "$grpcio_constraint" ]]; then
+    # pip doesn't have --override like uv, so use --force-reinstall --no-deps to bypass conflicts
+    echo "Using pip with forced grpcio override: $pip_exe install --force-reinstall --no-deps ${args[*]}" >&2
+    "$pip_exe" install --force-reinstall --no-deps "${args[@]}"
+    local exit_code=$?
+    if [[ $exit_code -eq 0 ]]; then
+      # Now ensure grpcio is at the forced version
+      echo "Ensuring grpcio version: $pip_exe install --force-reinstall $grpcio_constraint" >&2
+      "$pip_exe" install --force-reinstall "$grpcio_constraint"
+      exit_code=$?
     fi
+    return $exit_code
   else
-    if [[ -n "$grpcio_constraint" ]]; then
-      # pip doesn't have --override like uv, so use --force-reinstall --no-deps to bypass conflicts
-      echo "Using pip with forced grpcio override: pip install --force-reinstall --no-deps ${args[*]}" >&2
-      command pip install --force-reinstall --no-deps "${args[@]}"
-      local exit_code=$?
-      if [[ $exit_code -eq 0 ]]; then
-        # Now ensure grpcio is at the forced version
-        echo "Ensuring grpcio version: pip install --force-reinstall $grpcio_constraint" >&2
-        command pip install --force-reinstall "$grpcio_constraint"
-        exit_code=$?
-      fi
-      return $exit_code
-    else
-      echo "Using pip: pip install ${args[*]}" >&2
-      command pip install "${args[@]}"
-    fi
+    echo "Using pip: $pip_exe install ${args[*]}" >&2
+    "$pip_exe" install "${args[@]}"
   fi
 }
 
-# Simple pip show/uninstall router
+# Simple pip show/uninstall wrapper
+# Usage: run_pip <venv_path> <pip_args...>
 run_pip() {
-  if command -v uv >/dev/null 2>&1; then
-    echo "Using uv: uv pip $*" >&2
-    uv pip "$@"
-  else
-    echo "uv not found, falling back to pip: pip $*" >&2
-    command pip "$@"
-  fi
+  local venv_path="$1"
+  shift
+  
+  local pip_exe
+  pip_exe=$(get_venv_pip "$venv_path")
+  
+  echo "Using pip: $pip_exe $*" >&2
+  "$pip_exe" "$@"
 }
 
 # Parse optional CLI arguments as flags or positionally
@@ -174,11 +203,12 @@ parse_args() {
   parsed_ev=""
   parsed_pr=""
   parsed_cv=""
+  parsed_venv=""
+  parsed_wheel_file=""
   # Defaults
   default_channel="prod"
-  default_ev="$(list_enterprise_versions_for_channel prod | tail -n 1)"
-  default_pr="$(list_point_releases_for_channel_and_ev prod "$default_ev" | tail -n 1)"
-  default_cv=""
+  # Note: ev, pr, cv defaults are not set here to avoid expensive GCS calls
+  # They will be computed by resolve_install_versions if needed by the install command
   # Parse
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -190,6 +220,10 @@ parse_args() {
         parsed_pr="$2"; shift 2;;
       --cv)
         parsed_cv="$2"; shift 2;;
+      --venv)
+        parsed_venv="$2"; shift 2;;
+      --wheel-file)
+        parsed_wheel_file="$2"; shift 2;;
       -h|--help)
         usage; exit 0;;
       --*)
@@ -208,15 +242,17 @@ parse_args() {
   fi
   # Fill from positional if not set
   : "${parsed_channel:=${1:-$default_channel}}"
-  : "${parsed_ev:=${2:-$default_ev}}"
-  : "${parsed_pr:=${3:-$default_pr}}"
-  : "${parsed_cv:=${4:-$default_cv}}"
+  : "${parsed_ev:=${2:-}}"
+  : "${parsed_pr:=${3:-}}"
+  : "${parsed_cv:=${4:-}}"
   # Export resolved vars in lowercase
   channel="$parsed_channel"
   ev="$parsed_ev"
   pr="$parsed_pr"
   cv="$parsed_cv"
-  export channel ev pr cv
+  venv_path="$parsed_venv"
+  wheel_file_path="$parsed_wheel_file"
+  export channel ev pr cv venv_path wheel_file_path
 }
 
 
@@ -516,7 +552,7 @@ fn_install_wheel() {
 
   # Try to determine the currently installed grpcio version and clean it
   echo "Checking for existing grpcio installation..." >&2
-  current_grpcio_version=$( (run_pip show grpcio || true) 2>/dev/null | awk '/^Version:/ {print $2}' | tr -d '[:space:]' )
+  current_grpcio_version=$( (run_pip "$venv_path" show grpcio || true) 2>/dev/null | awk '/^Version:/ {print $2}' | tr -d '[:space:]' )
 
   if [[ -n "$current_grpcio_version" ]]; then
     echo "Found existing grpcio version: '${current_grpcio_version}'. Will attempt to override grpcio to this version." >&2
@@ -536,7 +572,7 @@ fn_install_wheel() {
   cmd_args+=(--no-cache-dir --only-binary :all: "${client_wheel_path}")
 
   # Install using centralized helper function
-  if ! run_pip_install "${cmd_args[@]}"; then # --only-binary :all: ensures only wheels; --no-cache-dir: avoid cache; override for grpcio if found
+  if ! run_pip_install "$venv_path" "${cmd_args[@]}"; then # --only-binary :all: ensures only wheels; --no-cache-dir: avoid cache; override for grpcio if found
     echo "ERROR: Failed to install ${client_wheel_path}." >&2
     cd "${original_dir}"; exit 1 # Return to original directory and exit function due to install failure
   fi
@@ -577,7 +613,7 @@ install_wheel_file() {
   local current_grpcio_version
   local cmd_args=()
   echo "Checking for existing grpcio installation..." >&2
-  current_grpcio_version=$( (run_pip show grpcio || true) 2>/dev/null | awk '/^Version:/ {print $2}' | tr -d '[:space:]' )
+  current_grpcio_version=$( (run_pip "$venv_path" show grpcio || true) 2>/dev/null | awk '/^Version:/ {print $2}' | tr -d '[:space:]' )
   if [[ -n "$current_grpcio_version" ]]; then
     echo "Found existing grpcio version: '$current_grpcio_version'. Will attempt to override grpcio to this version." >&2
     cmd_args+=(--grpcio-constraint "grpcio==${current_grpcio_version}")
@@ -590,7 +626,7 @@ install_wheel_file() {
   
   # Install using centralized helper function
   # shellcheck disable=SC2290 # process substitution is intentional
-  if ! run_pip_install "${cmd_args[@]}"; then
+  if ! run_pip_install "$venv_path" "${cmd_args[@]}"; then
     die "Failed to install $whl_file."
   fi
   echo "Successfully installed $whl_file" >&2
@@ -658,10 +694,13 @@ install_from_tgz_archive() {
 # --- install_coreplus_client (existing function should be above this) ---
 
 # TODO: Remove this function after the proto package is fixed in the wheel (see https://deephaven.atlassian.net/browse/DH-19813)
+# Usage: patch_deephaven_enterprise_proto_package <venv_path>
 patch_deephaven_enterprise_proto_package() {
-  # Dynamically find the site-packages dir for the active Python interpreter
-  local python_bin="${VIRTUAL_ENV:+$VIRTUAL_ENV/bin/python3}"
-  python_bin="${python_bin:-python3}"
+  local venv_path="$1"
+  
+  # Get the Python executable from the venv
+  local python_bin
+  python_bin=$(get_venv_python "$venv_path")
 
   local proto_dir base_dir
   proto_dir=$("$python_bin" -c 'import site, os; d=[p for p in site.getsitepackages() if os.path.exists(os.path.join(p, "deephaven_enterprise", "proto"))]; print(os.path.join(d[0], "deephaven_enterprise", "proto") if d else "")')
@@ -720,64 +759,82 @@ EOF
 # --- Main Script Logic ---
 
 if [ $# -lt 1 ]; then usage; fi
+
 COMMAND="$1"; shift
+
+echo "DEBUG: COMMAND='$COMMAND'" >&2
+echo "DEBUG: Remaining args: $@" >&2
+
+# Parse arguments
+parse_args "$@"
+
+# Commands that require venv
+case "$COMMAND" in
+  install|install-wheel|uninstall|patch)
+    # These commands modify the venv, so it's required
+    if [[ -z "$venv_path" ]]; then
+      die "--venv <path> is required for command '$COMMAND'"
+    fi
+
+    # Validate virtual environment exists
+    if [[ ! -d "$venv_path" ]]; then
+      die "Virtual environment not found at: $venv_path"
+    fi
+
+    # Validate it's actually a venv by checking for pyvenv.cfg
+    if [[ ! -f "$venv_path/pyvenv.cfg" ]]; then
+      die "$venv_path does not appear to be a valid Python virtual environment (missing pyvenv.cfg)"
+    fi
+
+    echo "Using virtual environment at: $venv_path" >&2
+    ;;
+esac
+
+# Validate --wheel-file is only used with install-wheel
+if [[ -n "$wheel_file_path" && "$COMMAND" != "install-wheel" ]]; then
+  die "--wheel-file option is only valid for the 'install-wheel' command"
+fi
 
 case "$COMMAND" in
   list-release-channels)
     list_release_channels
     ;;
   list-enterprise-versions)
-    parse_args "$@"
     list_enterprise_versions_for_channel "$channel"
     ;;
   list-point-releases)
-    parse_args "$@"
     list_point_releases_for_channel_and_ev "$channel" "$ev"
     ;;
   list-community-versions)
-    parse_args "$@"
     list_community_versions_for_channel_ev_pr "$channel" "$ev" "$pr"
     ;;
   resolve-install-versions)
-    parse_args "$@"
     resolve_install_versions "$channel" "$ev" "$pr" "$cv"
     ;;
   install)
-    parse_args "$@"
     set -- $(resolve_install_versions "$channel" "$ev" "$pr" "$cv")
     channel="$1"; ev="$2"; pr="$3"; cv="$4"
     install_from_tgz_archive "$channel" "$ev" "$pr" "$cv"
-    patch_deephaven_enterprise_proto_package
+    patch_deephaven_enterprise_proto_package "$venv_path"
     ;;
   install-wheel)
-    # Parse for --file argument
-    wheel_file=""
-    while [[ $# -gt 0 ]]; do
-      case $1 in
-        --file)
-          wheel_file="$2"
-          shift 2
-          ;;
-        *)
-          die "Unknown option for install-wheel: $1. Use --file <path>"
-          ;;
-      esac
-    done
-    
-    if [ -z "$wheel_file" ]; then
-      die "install-wheel requires --file <path> argument"
+    echo "DEBUG: install-wheel command detected" >&2
+    echo "DEBUG: wheel_file_path='$wheel_file_path'" >&2
+    echo "DEBUG: venv_path='$venv_path'" >&2
+    if [ -z "$wheel_file_path" ]; then
+      die "install-wheel requires --wheel-file <path> argument"
     fi
     
-    install_from_wheel_file "$wheel_file"
-    patch_deephaven_enterprise_proto_package
+    install_from_wheel_file "$wheel_file_path"
+    patch_deephaven_enterprise_proto_package "$venv_path"
     ;;
   uninstall)
     echo "Uninstalling deephaven-coreplus-client from the current environment..." >&2
-    run_pip uninstall -y deephaven-coreplus-client || die "Failed to uninstall deephaven-coreplus-client"
+    run_pip "$venv_path" uninstall -y deephaven-coreplus-client || die "Failed to uninstall deephaven-coreplus-client"
     echo "deephaven-coreplus-client has been uninstalled." >&2
     ;;
   patch)
-    patch_deephaven_enterprise_proto_package
+    patch_deephaven_enterprise_proto_package "$venv_path"
     ;;
   *)
     usage

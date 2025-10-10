@@ -59,17 +59,39 @@ Deephaven MCP implements the [Model Context Protocol (MCP) standard](https://spe
 ### 1. Create Virtual Environment
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+python3.11 -m venv .venv
 ```
 
-### 2. Install Deephaven MCP and Dependencies
+> **Note:** Replace `python3.11` with any supported Python version (3.11, 3.12, or 3.13).
+
+### 2. Install CorePlus Client Wheel (optional, Enterprise only)
+
+**Skip this step if you only need Community Core support.**
+
+If you need Enterprise systems support, first download the installation script, then install the `deephaven-coreplus-client` wheel (obtain from your Deephaven Enterprise administrator):
 
 ```bash
-pip install deephaven-mcp
+# Download the installation script
+curl -O https://raw.githubusercontent.com/deephaven/deephaven-mcp/main/bin/dev_manage_coreplus_client.sh
+chmod +x dev_manage_coreplus_client.sh
+
+# Install the CorePlus wheel
+./dev_manage_coreplus_client.sh install-wheel --venv .venv --wheel-file /path/to/deephaven_coreplus_client-X.Y.Z-py3-none-any.whl
 ```
 
-### 3. Create Configuration File
+### 3. Install Deephaven MCP and Dependencies
+
+**For Community Core only (most users):**
+```bash
+.venv/bin/pip install deephaven-mcp
+```
+
+**For Enterprise systems (if you completed step 2):**
+```bash
+.venv/bin/pip install "deephaven-mcp[coreplus]"
+```
+
+### 4. Create Configuration File
 
 Create a file called `deephaven_mcp.json` anywhere on your system:
 
@@ -93,7 +115,7 @@ Create a file called `deephaven_mcp.json` anywhere on your system:
 > chmod 600 deephaven_mcp.json
 > ```
 
-### 4. Configure Your AI Tool
+### 5. Configure Your AI Tool
 
 **For Claude Desktop**, open **Claude Desktop** → **Settings** → **Developer** → **Edit Config** and add:
 
@@ -121,7 +143,7 @@ Create a file called `deephaven_mcp.json` anywhere on your system:
 
 **For other tools**, see the [detailed setup instructions](#setup-instructions-by-tool) below.
 
-### 5. Try It Out!
+### 6. Try It Out!
 
 Restart your AI tool and try asking:
 
@@ -227,36 +249,39 @@ Choose one of the following Python environment and package management tools:
     ```
     For more information on `uv`, see the official [GitHub project](https://github.com/astral-sh/uv) or the local [`uv` documentation](docs/UV.md).
 
-2.  **Create and activate a virtual environment with your desired Python version:**
+2.  **Create a virtual environment with your desired Python version:**
+    
     [uv](docs/UV.md) works best when operating within a virtual environment. To create one (e.g., named `.venv`) using a specific Python interpreter (e.g., Python 3.11), run:
     ```sh
     uv venv .venv -p 3.11 
     ```
     Replace `3.11` with your target Python version (e.g., `3.12`) or the full path to a Python executable.
-    Then, activate it:
-    *   On macOS/Linux: `source .venv/bin/activate`
-    *   On Windows (PowerShell): `.venv\Scripts\Activate.ps1`
-    *   On Windows (CMD): `.venv\Scripts\activate.bat`
 
-3.  **Install the CorePlus client wheel (Enterprise systems only):**
+3.  **Install the CorePlus client wheel (optional, Enterprise systems only):**
+
+    **Skip this step if you only need Community Core support.**
+
     If you need Enterprise systems support, the `deephaven-coreplus-client` wheel must be installed first. This wheel is not available on PyPI and must be obtained from your Deephaven Enterprise administrator.
-    
-    Once you have the wheel file, install it using the provided script:
-    ```sh
-    ./bin/dev_manage_coreplus_client.sh install-wheel --file /path/to/deephaven_coreplus_client-X.Y.Z-py3-none-any.whl
-    ```
-    
-    Replace `/path/to/deephaven_coreplus_client-X.Y.Z-py3-none-any.whl` with the actual path to the wheel file provided by your administrator. The script handles dependency version conflicts automatically. Skip this step if you only need Community Core support.
 
-3.  **Install `deephaven-mcp`:**
+    Once you have the wheel file, install it using the provided script:
+
     ```sh
-    # For Community Core only
+    ./bin/dev_manage_coreplus_client.sh install-wheel --venv .venv --wheel-file /path/to/deephaven_coreplus_client-X.Y.Z-py3-none-any.whl
+    ```
+
+    Replace `/path/to/deephaven_coreplus_client-X.Y.Z-py3-none-any.whl` with the actual path to the wheel file provided by your administrator. The script handles dependency version conflicts automatically.
+
+4.  **Install `deephaven-mcp`:**
+
+    This command installs `deephaven-mcp` and its dependencies into the virtual environment.
+
+    ```sh
+    # For Community Core only (most users)
     uv pip install deephaven-mcp
     
-    # For Enterprise systems
+    # For Enterprise systems (if you completed step 3)
     uv pip install "deephaven-mcp[coreplus]"
     ```
-This command installs `deephaven-mcp` and its dependencies into the virtual environment. Ensure the virtual environment remains active for manual command-line use of `dh-mcp-systems-server` or `dh-mcp-docs-server`, or if your LLM tool requires an active environment.
 
 #### Option B: Using Standard `pip` and `venv`
 
@@ -264,34 +289,33 @@ This command installs `deephaven-mcp` and its dependencies into the virtual envi
     ```sh
     python -m venv .venv
     ```
-2.  **Activate the virtual environment:**
-    *   On macOS/Linux:
-        ```sh
-        source .venv/bin/activate
-        ```
-    *   On Windows (Command Prompt/PowerShell):
-        ```sh
-        .venv\Scripts\activate
-        ```
-3.  **Install the CorePlus client wheel (Enterprise systems only):**
+
+2.  **Install the CorePlus client wheel (optional, Enterprise systems only):**
+    
+    **Skip this step if you only need Community Core support.**
+    
     If you need Enterprise systems support, the `deephaven-coreplus-client` wheel must be installed first. This wheel is not available on PyPI and must be obtained from your Deephaven Enterprise administrator.
     
     Once you have the wheel file, install it using the provided script:
     ```sh
-    ./bin/dev_manage_coreplus_client.sh install-wheel --file /path/to/deephaven_coreplus_client-X.Y.Z-py3-none-any.whl
+    ./bin/dev_manage_coreplus_client.sh --venv .venv install-wheel --wheel-file /path/to/deephaven_coreplus_client-X.Y.Z-py3-none-any.whl
     ```
     
-    Replace `/path/to/deephaven_coreplus_client-X.Y.Z-py3-none-any.whl` with the actual path to the wheel file provided by your administrator. The script handles dependency version conflicts automatically. Skip this step if you only need Community Core support.
+    Replace `/path/to/deephaven_coreplus_client-X.Y.Z-py3-none-any.whl` with the actual path to the wheel file provided by your administrator. The script handles dependency version conflicts automatically.
 
-4.  **Install `deephaven-mcp`** into the activated virtual environment:
+3.  **Install `deephaven-mcp`**:
+
+    This command installs `deephaven-mcp` and its dependencies into the virtual environment.
+
+    **For Community Core only (most users):**
     ```sh
-    # For Community Core only
-    pip install deephaven-mcp
-    
-    # For Enterprise systems
-    pip install "deephaven-mcp[coreplus]"
+    .venv/bin/pip install deephaven-mcp
     ```
-    Ensure this virtual environment is active in any terminal session where you intend to run `dh-mcp-systems-server` or `dh-mcp-docs-server` manually, or if your LLM tool requires an active environment when spawning these processes.
+
+    **For Enterprise systems (if you completed step 2):**
+    ```sh
+    .venv/bin/pip install "deephaven-mcp[coreplus]"
+    ```
 
 ---
 
