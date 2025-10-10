@@ -242,9 +242,9 @@ parse_args() {
   fi
   # Fill from positional if not set
   : "${parsed_channel:=${1:-$default_channel}}"
-  : "${parsed_ev:=$2}"
-  : "${parsed_pr:=$3}"
-  : "${parsed_cv:=$4}"
+  : "${parsed_ev:=${2:-}}"
+  : "${parsed_pr:=${3:-}}"
+  : "${parsed_cv:=${4:-}}"
   # Export resolved vars in lowercase
   channel="$parsed_channel"
   ev="$parsed_ev"
