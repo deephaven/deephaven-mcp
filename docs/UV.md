@@ -8,18 +8,25 @@
 
 ## Table of Contents
 
-- [Why use uv?](#why-use-uv)
-- [Installing uv](#installing-uv)
-- [Typical Workflows](#typical-workflows-with-uv)
-- [How uv Lock Files Work](#how-uv-lock-files-work)
-- [Upgrading Dependencies](#upgrading-dependencies)
-- [Environment Variables](#environment-variables-with-uv)
-- [.env Example](#env-example)
-- [Code Quality & Testing](#code-quality-testing-and-linting)
-- [CI/CD Usage](#cicd-usage)
-- [Common Pitfalls & FAQ](#common-pitfalls--faq)
-- [Troubleshooting](#troubleshooting)
-- [Further Reading](#further-reading)
+- [Using `uv` in deephaven-mcp](#using-uv-in-deephaven-mcp)
+  - [Table of Contents](#table-of-contents)
+  - [Why use `uv`?](#why-use-uv)
+  - [Installing `uv`](#installing-uv)
+    - [Creating a Virtual Environment with `uv`](#creating-a-virtual-environment-with-uv)
+  - [Typical Workflows with `uv`](#typical-workflows-with-uv)
+    - [1. Installing Dependencies](#1-installing-dependencies)
+    - [2. Synchronizing Dependencies](#2-synchronizing-dependencies)
+    - [3. Running Servers and Scripts](#3-running-servers-and-scripts)
+  - [How uv Lock Files Work](#how-uv-lock-files-work)
+  - [Upgrading Dependencies](#upgrading-dependencies)
+  - [Environment Variables with uv](#environment-variables-with-uv)
+  - [.env Example](#env-example)
+  - [Code Quality \& Testing](#code-quality--testing)
+  - [CI/CD Usage](#cicd-usage)
+  - [Common Pitfalls \& FAQ](#common-pitfalls--faq)
+  - [Troubleshooting](#troubleshooting)
+  - [Tips \& Troubleshooting](#tips--troubleshooting)
+  - [Further Reading](#further-reading)
 
 ---
 
@@ -44,18 +51,22 @@ Or see the [uv installation guide](https://github.com/astral-sh/uv#installation)
 Once [`uv`](https://github.com/astral-sh/uv) is installed, it's highly recommended to create and use a virtual environment for your project. This isolates dependencies and ensures consistency.
 
 1.  **Create a virtual environment (e.g., named `.venv`) with a specific Python version:**
-    Use the `-p` option to specify your desired Python interpreter (e.g., Python 3.9, 3.10, or a full path to an executable):
+    
+    Use the `-p` option to specify your desired Python interpreter (e.g., Python 3.11, 3.12, 3.13, or a full path to an executable):
     ```sh
-    uv venv .venv -p 3.9
+    uv venv .venv -p 3.11
     ```
-    Replace `3.9` with your target Python version or path.
+    Replace `3.11` with your target Python version or path.
 
-2.  **(Optional) Activate the virtual environment:**
-    *   On macOS/Linux: `source .venv/bin/activate`
-    *   On Windows (PowerShell): `.venv\Scripts\Activate.ps1`
-    *   On Windows (CMD): `.venv\Scripts\activate.bat`
-
-After activating, any [`uv`](https://github.com/astral-sh/uv) commands (like `uv pip install ...` or `uv run ...`) will operate within this environment.
+2.  **Activate the virtual environment (optional):**
+    
+    [`uv`](https://github.com/astral-sh/uv) commands (like `uv pip install ...` or `uv run ...`) automatically detect and use the `.venv` directory without requiring activation. However, if you prefer to use commands directly without the `uv` prefix, you can activate the environment:
+    ```sh
+    source .venv/bin/activate  # On Unix/macOS
+    # or
+    .venv\Scripts\activate  # On Windows
+    ```
+    After activation, you can use `python`, `pip`, `pytest`, etc. directly.
 
 ---
 
