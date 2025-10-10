@@ -763,6 +763,9 @@ if [ $# -lt 1 ]; then usage; fi
 
 COMMAND="$1"; shift
 
+echo "DEBUG: COMMAND='$COMMAND'" >&2
+echo "DEBUG: Remaining args: $@" >&2
+
 # Parse arguments
 parse_args "$@"
 
@@ -816,6 +819,9 @@ case "$COMMAND" in
     patch_deephaven_enterprise_proto_package "$venv_path"
     ;;
   install-wheel)
+    echo "DEBUG: install-wheel command detected" >&2
+    echo "DEBUG: wheel_file_path='$wheel_file_path'" >&2
+    echo "DEBUG: venv_path='$venv_path'" >&2
     if [ -z "$wheel_file_path" ]; then
       die "install-wheel requires --wheel-file <path> argument"
     fi

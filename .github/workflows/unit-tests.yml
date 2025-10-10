@@ -106,7 +106,11 @@ jobs:
             exit 1
           fi
           echo "Wheel file SHA256: $(sha256sum "$wheel_file" | cut -d' ' -f1)"
-          ./bin/dev_manage_coreplus_client.sh --venv .venv install-wheel --wheel-file "$wheel_file"
+          echo "DEBUG: Current directory: $(pwd)"
+          echo "DEBUG: Venv exists: $([ -d .venv ] && echo 'yes' || echo 'no')"
+          echo "DEBUG: Script exists: $([ -f ./bin/dev_manage_coreplus_client.sh ] && echo 'yes' || echo 'no')"
+          echo "DEBUG: Running command: ./bin/dev_manage_coreplus_client.sh install-wheel --venv .venv --wheel-file $wheel_file"
+          ./bin/dev_manage_coreplus_client.sh install-wheel --venv .venv --wheel-file "$wheel_file"
 
       - name: Run tests with coverage
         run: .venv/bin/pytest
