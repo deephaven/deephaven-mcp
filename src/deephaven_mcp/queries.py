@@ -532,7 +532,7 @@ async def get_catalog_table(
     using methods like `db.live_table(namespace, table_name)` or `db.historical_table(namespace, table_name)`.
     The catalog includes table names, namespaces, schemas, and other descriptive information. This
     function is only available for enterprise sessions (CorePlusSession).
-    
+
     For more information, see:
     - https://deephaven.io
     - https://docs.deephaven.io/pycoreplus/latest/worker/code/deephaven_enterprise.database.html
@@ -639,16 +639,18 @@ async def get_catalog_table(
             lambda: catalog_table.select_distinct("Namespace")
         )
         # Step 2: Sort namespaces
-        catalog_table = await asyncio.to_thread(
-            lambda: catalog_table.sort("Namespace")
+        catalog_table = await asyncio.to_thread(lambda: catalog_table.sort("Namespace"))
+        _LOGGER.debug(
+            "[queries:get_catalog_table] Distinct namespaces extracted and sorted."
         )
-        _LOGGER.debug("[queries:get_catalog_table] Distinct namespaces extracted and sorted.")
 
     # Determine table type for logging
     table_type = "namespace table" if distinct_namespaces else "catalog table"
 
     # Apply filters if provided (works for both full catalog and distinct namespaces)
-    catalog_table = await _apply_filters(catalog_table, filters, context_name=table_type)
+    catalog_table = await _apply_filters(
+        catalog_table, filters, context_name=table_type
+    )
 
     # Apply row limiting using helper function (always from head for catalog tables)
     catalog_table, is_complete = await _apply_row_limit(

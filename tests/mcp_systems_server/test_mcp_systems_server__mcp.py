@@ -3870,7 +3870,10 @@ async def test_catalog_tables_success_no_filters():
         with patch(
             "deephaven_mcp.mcp_systems_server._mcp.format_table_data"
         ) as mock_format:
-            mock_format.return_value = ("json-row", [{"Namespace": "ns1", "TableName": "t1"}])
+            mock_format.return_value = (
+                "json-row",
+                [{"Namespace": "ns1", "TableName": "t1"}],
+            )
 
             result = await mcp_mod.catalog_tables(context, "enterprise:prod:analytics")
 
@@ -4182,7 +4185,9 @@ async def test_catalog_namespaces_success_no_filters():
         ) as mock_format:
             mock_format.return_value = ("json-row", [{"Namespace": "market_data"}])
 
-            result = await mcp_mod.catalog_namespaces(context, "enterprise:prod:analytics")
+            result = await mcp_mod.catalog_namespaces(
+                context, "enterprise:prod:analytics"
+            )
 
             assert result["success"] is True
             assert result["session_id"] == "enterprise:prod:analytics"

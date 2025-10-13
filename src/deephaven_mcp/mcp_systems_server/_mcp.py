@@ -974,7 +974,7 @@ async def run_script(
     script: str | None = None,
     script_path: str | None = None,
 ) -> dict:
-    """
+    r"""
     MCP Tool: Execute a script on a specified Deephaven session.
 
     Executes a script on the specified Deephaven session and returns execution status. The script
@@ -1592,7 +1592,7 @@ async def _get_catalog_data(
     tool_name: str,
 ) -> dict:
     """
-    Internal helper to retrieve catalog data (tables or namespaces) from an enterprise session.
+    Retrieve catalog data (tables or namespaces) from an enterprise session.
 
     This consolidates the common logic between catalog_tables and catalog_namespaces tools.
 
@@ -1608,7 +1608,7 @@ async def _get_catalog_data(
     Returns:
         dict: Result dictionary with success/error information and data.
     """
-    result = {"success": False}
+    result: dict[str, object] = {"success": False}
     data_type = "namespaces" if distinct_namespaces else "catalog entries"
 
     try:
@@ -1617,7 +1617,9 @@ async def _get_catalog_data(
             context.request_context.lifespan_context["session_registry"]
         )
 
-        _LOGGER.debug(f"[mcp_systems_server:{tool_name}] Retrieving session '{session_id}'")
+        _LOGGER.debug(
+            f"[mcp_systems_server:{tool_name}] Retrieving session '{session_id}'"
+        )
         session_manager = await session_registry.get(session_id)
         session = await session_manager.get()
 
@@ -1626,7 +1628,10 @@ async def _get_catalog_data(
             f"[mcp_systems_server:{tool_name}] Retrieving {data_type} with filters: {filters}"
         )
         arrow_table, is_complete = await queries.get_catalog_table(
-            session, max_rows=max_rows, filters=filters, distinct_namespaces=distinct_namespaces
+            session,
+            max_rows=max_rows,
+            filters=filters,
+            distinct_namespaces=distinct_namespaces,
         )
 
         row_count = len(arrow_table)
@@ -1682,7 +1687,9 @@ async def _get_catalog_data(
 
     except ValueError as e:
         # Format validation error from formatters package
-        _LOGGER.error(f"[mcp_systems_server:{tool_name}] Invalid format parameter: {e!r}")
+        _LOGGER.error(
+            f"[mcp_systems_server:{tool_name}] Invalid format parameter: {e!r}"
+        )
         result["error"] = str(e)
         result["isError"] = True
 
@@ -1713,7 +1720,7 @@ async def catalog_tables(
     using methods like `db.live_table(namespace, table_name)` or `db.historical_table(namespace, table_name)`.
     The catalog includes table names, namespaces, schemas, and other descriptive information. This tool
     enables discovery of available tables and their properties. Only works with enterprise sessions.
-    
+
     For more information, see:
     - https://deephaven.io
     - https://docs.deephaven.io/pycoreplus/latest/worker/code/deephaven_enterprise.database.html
@@ -1905,7 +1912,7 @@ async def catalog_namespaces(
     `db.historical_table(namespace, table_name)`. This enables efficient discovery of data domains
     before drilling down into specific tables. This is typically the first step in exploring an
     enterprise data catalog. Only works with enterprise sessions.
-    
+
     For more information, see:
     - https://deephaven.io
     - https://docs.deephaven.io/pycoreplus/latest/worker/code/deephaven_enterprise.database.html

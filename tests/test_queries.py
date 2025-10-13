@@ -19,7 +19,6 @@ from deephaven_mcp.queries import (
     get_table,
 )
 
-
 # ===== Helper function tests =====
 
 
@@ -983,7 +982,9 @@ async def test_get_catalog_table_filter_error():
 
     # Create mock catalog table with where method that raises error
     catalog_table_mock = MagicMock()
-    catalog_table_mock.where = MagicMock(side_effect=RuntimeError("Invalid filter syntax"))
+    catalog_table_mock.where = MagicMock(
+        side_effect=RuntimeError("Invalid filter syntax")
+    )
 
     # Create mock session
     session_mock = MagicMock(spec=CorePlusSession)
@@ -995,7 +996,10 @@ async def test_get_catalog_table_filter_error():
     with patch("deephaven_mcp.queries.asyncio.to_thread", new=fake_to_thread):
         with pytest.raises(RuntimeError, match="Invalid filter syntax"):
             await get_catalog_table(
-                session_mock, max_rows=1000, filters=["InvalidFilter!!!"], distinct_namespaces=False
+                session_mock,
+                max_rows=1000,
+                filters=["InvalidFilter!!!"],
+                distinct_namespaces=False,
             )
 
 
