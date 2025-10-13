@@ -3833,3 +3833,605 @@ def test_resolve_session_parameters_zero_values():
 
     assert result["auto_delete_timeout"] == 0  # Should use explicit 0, not default
     assert result["timeout_seconds"] == 0.0  # Should use explicit 0.0, not default
+
+
+# ===== catalog_tables tests =====
+
+
+@pytest.mark.asyncio
+async def test_catalog_tables_success_no_filters():
+    """Test catalog_tables with no filters and default max_rows."""
+    mock_registry = MagicMock()
+    mock_session_manager = MagicMock()
+    mock_session = MagicMock()
+
+    mock_registry.get = AsyncMock(return_value=mock_session_manager)
+    mock_session_manager.get = AsyncMock(return_value=mock_session)
+
+    context = MockContext({"session_registry": mock_registry})
+
+    # Mock catalog arrow table
+    mock_catalog_table = MagicMock()
+    mock_catalog_table.__len__ = MagicMock(return_value=100)
+    mock_catalog_table.nbytes = 5000  # Small size, under limit
+    mock_field1 = MagicMock()
+    mock_field1.name = "Namespace"
+    mock_field1.type = "string"
+    mock_field2 = MagicMock()
+    mock_field2.name = "TableName"
+    mock_field2.type = "string"
+    mock_catalog_table.schema = [mock_field1, mock_field2]
+
+    with patch(
+        "deephaven_mcp.mcp_systems_server._mcp.queries.get_catalog_table"
+    ) as mock_get_catalog:
+        mock_get_catalog.return_value = (mock_catalog_table, True)
+
+        with patch(
+            "deephaven_mcp.mcp_systems_server._mcp.format_table_data"
+        ) as mock_format:
+            mock_format.return_value = (
+                "json-row",
+                [{"Namespace": "ns1", "TableName": "t1"}],
+            )
+
+            result = await mcp_mod.catalog_tables(context, "enterprise:prod:analytics")
+
+            assert result["success"] is True
+            assert result["session_id"] == "enterprise:prod:analytics"
+            assert result["format"] == "json-row"
+            assert result["row_count"] == 100
+            assert result["is_complete"] is True
+            assert len(result["columns"]) == 2
+            assert result["data"] == [{"Namespace": "ns1", "TableName": "t1"}]
+
+            mock_get_catalog.assert_called_once_with(
+                mock_session, max_rows=10000, filters=None, distinct_namespaces=False
+            )
+
+
+@pytest.mark.asyncio
+async def test_catalog_tables_success_with_filters():
+    """Test catalog with filters applied."""
+    mock_registry = MagicMock()
+    mock_session_manager = MagicMock()
+    mock_session = MagicMock()
+
+    mock_registry.get = AsyncMock(return_value=mock_session_manager)
+    mock_session_manager.get = AsyncMock(return_value=mock_session)
+
+    context = MockContext({"session_registry": mock_registry})
+
+    # Mock catalog arrow table
+    mock_catalog_table = MagicMock()
+    mock_catalog_table.__len__ = MagicMock(return_value=50)
+    mock_catalog_table.nbytes = 2500
+    mock_field1 = MagicMock()
+    mock_field1.name = "Namespace"
+    mock_field1.type = "string"
+    mock_catalog_table.schema = [mock_field1]
+
+    with patch(
+        "deephaven_mcp.mcp_systems_server._mcp.queries.get_catalog_table"
+    ) as mock_get_catalog:
+        mock_get_catalog.return_value = (mock_catalog_table, True)
+
+        with patch(
+            "deephaven_mcp.mcp_systems_server._mcp.format_table_data"
+        ) as mock_format:
+            mock_format.return_value = ("json-row", [{"Namespace": "market_data"}])
+
+            filters = ["Namespace = `market_data`", "TableName.contains(`price`)"]
+            result = await mcp_mod.catalog_tables(
+                context, "enterprise:prod:analytics", filters=filters
+            )
+
+            assert result["success"] is True
+            assert result["row_count"] == 50
+            assert result["is_complete"] is True
+
+            mock_get_catalog.assert_called_once_with(
+                mock_session, max_rows=10000, filters=filters, distinct_namespaces=False
+            )
+
+
+@pytest.mark.asyncio
+async def test_catalog_tables_success_csv_format():
+    """Test catalog with CSV format."""
+    mock_registry = MagicMock()
+    mock_session_manager = MagicMock()
+    mock_session = MagicMock()
+
+    mock_registry.get = AsyncMock(return_value=mock_session_manager)
+    mock_session_manager.get = AsyncMock(return_value=mock_session)
+
+    context = MockContext({"session_registry": mock_registry})
+
+    # Mock catalog arrow table
+    mock_catalog_table = MagicMock()
+    mock_catalog_table.__len__ = MagicMock(return_value=10)
+    mock_catalog_table.nbytes = 500
+    mock_field1 = MagicMock()
+    mock_field1.name = "Namespace"
+    mock_field1.type = "string"
+    mock_catalog_table.schema = [mock_field1]
+
+    with patch(
+        "deephaven_mcp.mcp_systems_server._mcp.queries.get_catalog_table"
+    ) as mock_get_catalog:
+        mock_get_catalog.return_value = (mock_catalog_table, True)
+
+        with patch(
+            "deephaven_mcp.mcp_systems_server._mcp.format_table_data"
+        ) as mock_format:
+            mock_format.return_value = ("csv", "Namespace\nmarket_data\n")
+
+            result = await mcp_mod.catalog_tables(
+                context, "enterprise:prod:analytics", format="csv"
+            )
+
+            assert result["success"] is True
+            assert result["format"] == "csv"
+            assert isinstance(result["data"], str)
+
+            mock_format.assert_called_once_with(mock_catalog_table, "csv")
+
+
+@pytest.mark.asyncio
+async def test_catalog_tables_incomplete_results():
+    """Test catalog when results are incomplete (truncated by max_rows)."""
+    mock_registry = MagicMock()
+    mock_session_manager = MagicMock()
+    mock_session = MagicMock()
+
+    mock_registry.get = AsyncMock(return_value=mock_session_manager)
+    mock_session_manager.get = AsyncMock(return_value=mock_session)
+
+    context = MockContext({"session_registry": mock_registry})
+
+    # Mock catalog arrow table
+    mock_catalog_table = MagicMock()
+    mock_catalog_table.__len__ = MagicMock(return_value=1000)
+    mock_catalog_table.nbytes = 50000
+    mock_field1 = MagicMock()
+    mock_field1.name = "Namespace"
+    mock_field1.type = "string"
+    mock_catalog_table.schema = [mock_field1]
+
+    with patch(
+        "deephaven_mcp.mcp_systems_server._mcp.queries.get_catalog_table"
+    ) as mock_get_catalog:
+        mock_get_catalog.return_value = (mock_catalog_table, False)  # Incomplete
+
+        with patch(
+            "deephaven_mcp.mcp_systems_server._mcp.format_table_data"
+        ) as mock_format:
+            mock_format.return_value = ("json-row", [])
+
+            result = await mcp_mod.catalog_tables(
+                context, "enterprise:prod:analytics", max_rows=1000
+            )
+
+            assert result["success"] is True
+            assert result["is_complete"] is False  # Truncated
+            assert result["row_count"] == 1000
+
+
+@pytest.mark.asyncio
+async def test_catalog_tables_not_enterprise_session():
+    """Test catalog with non-enterprise session (should fail)."""
+    from deephaven_mcp._exceptions import UnsupportedOperationError
+
+    mock_registry = MagicMock()
+    mock_session_manager = MagicMock()
+    mock_session = MagicMock()
+
+    mock_registry.get = AsyncMock(return_value=mock_session_manager)
+    mock_session_manager.get = AsyncMock(return_value=mock_session)
+
+    context = MockContext({"session_registry": mock_registry})
+
+    with patch(
+        "deephaven_mcp.mcp_systems_server._mcp.queries.get_catalog_table"
+    ) as mock_get_catalog:
+        mock_get_catalog.side_effect = UnsupportedOperationError(
+            "get_catalog_table only supports enterprise (Core+) sessions"
+        )
+
+        result = await mcp_mod.catalog_tables(context, "community:local:test")
+
+        assert result["success"] is False
+        assert "enterprise" in result["error"].lower()
+        assert result["isError"] is True
+
+
+@pytest.mark.asyncio
+async def test_catalog_tables_session_not_found():
+    """Test catalog when session is not found."""
+    mock_registry = MagicMock()
+    mock_registry.get = AsyncMock(side_effect=Exception("Session not found"))
+
+    context = MockContext({"session_registry": mock_registry})
+
+    result = await mcp_mod.catalog_tables(context, "invalid_session")
+
+    assert result["success"] is False
+    assert "Session not found" in result["error"]
+    assert result["isError"] is True
+
+
+@pytest.mark.asyncio
+async def test_catalog_tables_invalid_filter():
+    """Test catalog with invalid filter syntax."""
+    mock_registry = MagicMock()
+    mock_session_manager = MagicMock()
+    mock_session = MagicMock()
+
+    mock_registry.get = AsyncMock(return_value=mock_session_manager)
+    mock_session_manager.get = AsyncMock(return_value=mock_session)
+
+    context = MockContext({"session_registry": mock_registry})
+
+    with patch(
+        "deephaven_mcp.mcp_systems_server._mcp.queries.get_catalog_table"
+    ) as mock_get_catalog:
+        mock_get_catalog.side_effect = RuntimeError("Invalid filter syntax")
+
+        result = await mcp_mod.catalog_tables(
+            context, "enterprise:prod:analytics", filters=["InvalidFilter!!!"]
+        )
+
+        assert result["success"] is False
+        assert "Invalid filter syntax" in result["error"]
+        assert result["isError"] is True
+
+
+@pytest.mark.asyncio
+async def test_catalog_tables_invalid_format():
+    """Test catalog with invalid format parameter."""
+    mock_registry = MagicMock()
+    mock_session_manager = MagicMock()
+    mock_session = MagicMock()
+
+    mock_registry.get = AsyncMock(return_value=mock_session_manager)
+    mock_session_manager.get = AsyncMock(return_value=mock_session)
+
+    context = MockContext({"session_registry": mock_registry})
+
+    # Mock catalog arrow table
+    mock_catalog_table = MagicMock()
+    mock_catalog_table.__len__ = MagicMock(return_value=10)
+    mock_catalog_table.nbytes = 500
+
+    with patch(
+        "deephaven_mcp.mcp_systems_server._mcp.queries.get_catalog_table"
+    ) as mock_get_catalog:
+        mock_get_catalog.return_value = (mock_catalog_table, True)
+
+        with patch(
+            "deephaven_mcp.mcp_systems_server._mcp.format_table_data"
+        ) as mock_format:
+            mock_format.side_effect = ValueError("Unsupported format: invalid")
+
+            result = await mcp_mod.catalog_tables(
+                context, "enterprise:prod:analytics", format="invalid"
+            )
+
+            assert result["success"] is False
+            assert "Unsupported format" in result["error"]
+            assert result["isError"] is True
+
+
+@pytest.mark.asyncio
+async def test_catalog_tables_size_limit_exceeded():
+    """Test catalog when response size exceeds limit."""
+    mock_registry = MagicMock()
+    mock_session_manager = MagicMock()
+    mock_session = MagicMock()
+
+    mock_registry.get = AsyncMock(return_value=mock_session_manager)
+    mock_session_manager.get = AsyncMock(return_value=mock_session)
+
+    context = MockContext({"session_registry": mock_registry})
+
+    # Mock catalog arrow table with size exceeding limit
+    mock_catalog_table = MagicMock()
+    mock_catalog_table.__len__ = MagicMock(return_value=1000000)
+    mock_catalog_table.nbytes = 60_000_000  # 60MB, exceeds 50MB limit
+
+    with patch(
+        "deephaven_mcp.mcp_systems_server._mcp.queries.get_catalog_table"
+    ) as mock_get_catalog:
+        mock_get_catalog.return_value = (mock_catalog_table, False)
+
+        result = await mcp_mod.catalog_tables(context, "enterprise:prod:analytics")
+
+        assert result["success"] is False
+        assert "50MB" in result["error"] or "max" in result["error"].lower()
+        assert result["isError"] is True
+
+
+# ===== catalog_namespaces tests =====
+
+
+@pytest.mark.asyncio
+async def test_catalog_namespaces_success_no_filters():
+    """Test catalog_namespaces with no filters and default max_rows."""
+    mock_registry = MagicMock()
+    mock_session_manager = MagicMock()
+    mock_session = MagicMock()
+
+    mock_registry.get = AsyncMock(return_value=mock_session_manager)
+    mock_session_manager.get = AsyncMock(return_value=mock_session)
+
+    context = MockContext({"session_registry": mock_registry})
+
+    # Mock namespaces arrow table
+    namespaces_table_mock = MagicMock()
+    namespaces_table_mock.__len__ = MagicMock(return_value=25)
+    namespaces_table_mock.nbytes = 1000  # Small size, under limit
+    mock_field = MagicMock()
+    mock_field.name = "Namespace"
+    mock_field.type = "string"
+    namespaces_table_mock.schema = [mock_field]
+
+    with patch(
+        "deephaven_mcp.mcp_systems_server._mcp.queries.get_catalog_table"
+    ) as mock_get_namespaces:
+        mock_get_namespaces.return_value = (namespaces_table_mock, True)
+
+        with patch(
+            "deephaven_mcp.mcp_systems_server._mcp.format_table_data"
+        ) as mock_format:
+            mock_format.return_value = ("json-row", [{"Namespace": "market_data"}])
+
+            result = await mcp_mod.catalog_namespaces(
+                context, "enterprise:prod:analytics"
+            )
+
+            assert result["success"] is True
+            assert result["session_id"] == "enterprise:prod:analytics"
+            assert result["format"] == "json-row"
+            assert result["row_count"] == 25
+            assert result["is_complete"] is True
+            assert len(result["columns"]) == 1
+            assert result["data"] == [{"Namespace": "market_data"}]
+
+            mock_get_namespaces.assert_called_once_with(
+                mock_session, max_rows=1000, filters=None, distinct_namespaces=True
+            )
+
+
+@pytest.mark.asyncio
+async def test_catalog_namespaces_success_with_filters():
+    """Test catalog_namespaces with filters applied."""
+    mock_registry = MagicMock()
+    mock_session_manager = MagicMock()
+    mock_session = MagicMock()
+
+    mock_registry.get = AsyncMock(return_value=mock_session_manager)
+    mock_session_manager.get = AsyncMock(return_value=mock_session)
+
+    context = MockContext({"session_registry": mock_registry})
+
+    # Mock namespaces arrow table
+    namespaces_table_mock = MagicMock()
+    namespaces_table_mock.__len__ = MagicMock(return_value=5)
+    namespaces_table_mock.nbytes = 500
+    mock_field = MagicMock()
+    mock_field.name = "Namespace"
+    mock_field.type = "string"
+    namespaces_table_mock.schema = [mock_field]
+
+    with patch(
+        "deephaven_mcp.mcp_systems_server._mcp.queries.get_catalog_table"
+    ) as mock_get_namespaces:
+        mock_get_namespaces.return_value = (namespaces_table_mock, True)
+
+        with patch(
+            "deephaven_mcp.mcp_systems_server._mcp.format_table_data"
+        ) as mock_format:
+            mock_format.return_value = ("json-row", [{"Namespace": "market_data"}])
+
+            filters = ["TableName.contains(`daily`)"]
+            result = await mcp_mod.catalog_namespaces(
+                context, "enterprise:prod:analytics", filters=filters
+            )
+
+            assert result["success"] is True
+            assert result["row_count"] == 5
+            assert result["is_complete"] is True
+
+            mock_get_namespaces.assert_called_once_with(
+                mock_session, max_rows=1000, filters=filters, distinct_namespaces=True
+            )
+
+
+@pytest.mark.asyncio
+async def test_catalog_namespaces_success_csv_format():
+    """Test catalog_namespaces with CSV format."""
+    mock_registry = MagicMock()
+    mock_session_manager = MagicMock()
+    mock_session = MagicMock()
+
+    mock_registry.get = AsyncMock(return_value=mock_session_manager)
+    mock_session_manager.get = AsyncMock(return_value=mock_session)
+
+    context = MockContext({"session_registry": mock_registry})
+
+    # Mock namespaces arrow table
+    namespaces_table_mock = MagicMock()
+    namespaces_table_mock.__len__ = MagicMock(return_value=10)
+    namespaces_table_mock.nbytes = 500
+    mock_field = MagicMock()
+    mock_field.name = "Namespace"
+    mock_field.type = "string"
+    namespaces_table_mock.schema = [mock_field]
+
+    with patch(
+        "deephaven_mcp.mcp_systems_server._mcp.queries.get_catalog_table"
+    ) as mock_get_namespaces:
+        mock_get_namespaces.return_value = (namespaces_table_mock, True)
+
+        with patch(
+            "deephaven_mcp.mcp_systems_server._mcp.format_table_data"
+        ) as mock_format:
+            mock_format.return_value = ("csv", "Namespace\nmarket_data\n")
+
+            result = await mcp_mod.catalog_namespaces(
+                context, "enterprise:prod:analytics", format="csv"
+            )
+
+            assert result["success"] is True
+            assert result["format"] == "csv"
+            assert isinstance(result["data"], str)
+
+            mock_format.assert_called_once_with(namespaces_table_mock, "csv")
+
+
+@pytest.mark.asyncio
+async def test_catalog_namespaces_incomplete_results():
+    """Test catalog_namespaces when results are incomplete (truncated by max_rows)."""
+    mock_registry = MagicMock()
+    mock_session_manager = MagicMock()
+    mock_session = MagicMock()
+
+    mock_registry.get = AsyncMock(return_value=mock_session_manager)
+    mock_session_manager.get = AsyncMock(return_value=mock_session)
+
+    context = MockContext({"session_registry": mock_registry})
+
+    # Mock namespaces arrow table
+    namespaces_table_mock = MagicMock()
+    namespaces_table_mock.__len__ = MagicMock(return_value=500)
+    namespaces_table_mock.nbytes = 25000
+    mock_field = MagicMock()
+    mock_field.name = "Namespace"
+    mock_field.type = "string"
+    namespaces_table_mock.schema = [mock_field]
+
+    with patch(
+        "deephaven_mcp.mcp_systems_server._mcp.queries.get_catalog_table"
+    ) as mock_get_namespaces:
+        mock_get_namespaces.return_value = (namespaces_table_mock, False)  # Incomplete
+
+        with patch(
+            "deephaven_mcp.mcp_systems_server._mcp.format_table_data"
+        ) as mock_format:
+            mock_format.return_value = ("json-row", [])
+
+            result = await mcp_mod.catalog_namespaces(
+                context, "enterprise:prod:analytics", max_rows=500
+            )
+
+            assert result["success"] is True
+            assert result["is_complete"] is False  # Truncated
+            assert result["row_count"] == 500
+
+
+@pytest.mark.asyncio
+async def test_catalog_namespaces_not_enterprise_session():
+    """Test catalog_namespaces with non-enterprise session (should fail)."""
+    from deephaven_mcp._exceptions import UnsupportedOperationError
+
+    mock_registry = MagicMock()
+    mock_session_manager = MagicMock()
+    mock_session = MagicMock()
+
+    mock_registry.get = AsyncMock(return_value=mock_session_manager)
+    mock_session_manager.get = AsyncMock(return_value=mock_session)
+
+    context = MockContext({"session_registry": mock_registry})
+
+    with patch(
+        "deephaven_mcp.mcp_systems_server._mcp.queries.get_catalog_table"
+    ) as mock_get_namespaces:
+        mock_get_namespaces.side_effect = UnsupportedOperationError(
+            "get_catalog_namespaces only supports enterprise (Core+) sessions"
+        )
+
+        result = await mcp_mod.catalog_namespaces(context, "community:local:test")
+
+        assert result["success"] is False
+        assert "enterprise" in result["error"].lower()
+        assert result["isError"] is True
+
+
+@pytest.mark.asyncio
+async def test_catalog_namespaces_session_not_found():
+    """Test catalog_namespaces when session is not found."""
+    mock_registry = MagicMock()
+    mock_registry.get = AsyncMock(side_effect=Exception("Session not found"))
+
+    context = MockContext({"session_registry": mock_registry})
+
+    result = await mcp_mod.catalog_namespaces(context, "invalid_session")
+
+    assert result["success"] is False
+    assert "Session not found" in result["error"]
+    assert result["isError"] is True
+
+
+@pytest.mark.asyncio
+async def test_catalog_namespaces_invalid_format():
+    """Test catalog_namespaces with invalid format parameter."""
+    mock_registry = MagicMock()
+    mock_session_manager = MagicMock()
+    mock_session = MagicMock()
+
+    mock_registry.get = AsyncMock(return_value=mock_session_manager)
+    mock_session_manager.get = AsyncMock(return_value=mock_session)
+
+    context = MockContext({"session_registry": mock_registry})
+
+    # Mock namespaces arrow table
+    namespaces_table_mock = MagicMock()
+    namespaces_table_mock.__len__ = MagicMock(return_value=10)
+    namespaces_table_mock.nbytes = 500
+
+    with patch(
+        "deephaven_mcp.mcp_systems_server._mcp.queries.get_catalog_table"
+    ) as mock_get_namespaces:
+        mock_get_namespaces.return_value = (namespaces_table_mock, True)
+
+        with patch(
+            "deephaven_mcp.mcp_systems_server._mcp.format_table_data"
+        ) as mock_format:
+            mock_format.side_effect = ValueError("Unsupported format: invalid")
+
+            result = await mcp_mod.catalog_namespaces(
+                context, "enterprise:prod:analytics", format="invalid"
+            )
+
+            assert result["success"] is False
+            assert "Unsupported format" in result["error"]
+            assert result["isError"] is True
+
+
+@pytest.mark.asyncio
+async def test_catalog_namespaces_size_limit_exceeded():
+    """Test catalog_namespaces when response size exceeds limit."""
+    mock_registry = MagicMock()
+    mock_session_manager = MagicMock()
+    mock_session = MagicMock()
+
+    mock_registry.get = AsyncMock(return_value=mock_session_manager)
+    mock_session_manager.get = AsyncMock(return_value=mock_session)
+
+    context = MockContext({"session_registry": mock_registry})
+
+    # Mock namespaces arrow table with size exceeding limit
+    namespaces_table_mock = MagicMock()
+    namespaces_table_mock.__len__ = MagicMock(return_value=100000)
+    namespaces_table_mock.nbytes = 60_000_000  # 60MB, exceeds 50MB limit
+
+    with patch(
+        "deephaven_mcp.mcp_systems_server._mcp.queries.get_catalog_table"
+    ) as mock_get_namespaces:
+        mock_get_namespaces.return_value = (namespaces_table_mock, False)
+
+        result = await mcp_mod.catalog_namespaces(context, "enterprise:prod:analytics")
+
+        assert result["success"] is False
+        assert "50MB" in result["error"] or "max" in result["error"].lower()
+        assert result["isError"] is True

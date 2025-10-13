@@ -47,6 +47,8 @@ This repository houses the Python-based Model Context Protocol (MCP) servers for
         - [`delete_enterprise_session`](#delete_enterprise_session)
         - [`list_sessions`](#list_sessions)
         - [`get_session_details`](#get_session_details)
+        - [`catalog_tables`](#catalog_tables)
+        - [`catalog_namespaces`](#catalog_namespaces)
         - [`table_schemas`](#table_schemas)
         - [`run_script`](#run_script)
         - [`pip_packages`](#pip_packages)
@@ -793,6 +795,117 @@ On error:
 ```
 
 **Description**: This tool provides comprehensive status information about a specific session. It supports two operational modes: quick status check (default) or active connection verification.
+
+##### `catalog_tables`
+
+**Purpose**: Retrieve catalog table entries from a Deephaven Enterprise (Core+) session with optional filtering.
+
+**Parameters**:
+
+- `session_id` (required, string): ID of the Deephaven enterprise session to query.
+- `max_rows` (optional, integer): Maximum number of catalog entries to return. Defaults to 10000. Set to null to retrieve entire catalog (use with caution for large deployments).
+- `filters` (optional, list[string]): List of Deephaven where clause expressions to filter catalog results. Multiple filters are combined with AND logic. Use backticks (`) for string literals.
+- `format` (optional, string): Output format for catalog data. Options: "auto" (default), "json-row", "json-column", "csv".
+
+**Returns**:
+
+```json
+{
+  "success": true,
+  "session_id": "enterprise:prod:analytics",
+  "format": "json-row",
+  "row_count": 150,
+  "is_complete": true,
+  "columns": [
+    {"name": "Namespace", "type": "string"},
+    {"name": "TableName", "type": "string"},
+    {"name": "Size", "type": "int64"}
+  ],
+  "data": [
+    {"Namespace": "market_data", "TableName": "daily_prices", "Size": 1000000},
+    {"Namespace": "market_data", "TableName": "live_trades", "Size": 5000000}
+  ]
+}
+```
+
+On error:
+
+```json
+{
+  "success": false,
+  "error": "Error message",
+  "isError": true
+}
+```
+
+**Filter Examples**:
+
+```python
+# Exact namespace match
+filters=["Namespace = `market_data`"]
+
+# Table name contains (case-sensitive)
+filters=["TableName.contains(`price`)"]
+
+# Table name contains (case-insensitive)
+filters=["TableName.toLowerCase().contains(`price`)"]
+
+# Multiple filters (AND logic)
+filters=["Namespace = `market_data`", "TableName.contains(`daily`)"]
+
+# Exclude test tables
+filters=["Namespace not in `test`, `staging`"]
+
+# Regex pattern matching
+filters=["TableName.matches(`.*_daily_.*`)"]
+```
+
+**Description**: This tool retrieves catalog table entries from an enterprise session, which contains metadata about all accessible tables including names, namespaces, and other descriptive information. Only works with Deephaven Enterprise (Core+) sessions. The catalog enables discovery of available data sources before querying specific tables.
+
+**Important Notes**:
+- String literals in filters MUST use backticks (`), not single (') or double (") quotes
+- Filters are case-sensitive by default; use `.toLowerCase()` for case-insensitive matching
+- Multiple filters in the list are combined with AND logic
+- For complete filter syntax, see: https://deephaven.io/core/docs/how-to-guides/use-filters/
+
+##### `catalog_namespaces`
+
+**Purpose**: Retrieve distinct namespaces from a Deephaven Enterprise (Core+) catalog for efficient data domain discovery.
+
+**Parameters**:
+
+- `session_id` (required, string): ID of the Deephaven enterprise session to query.
+- `max_rows` (optional, integer): Maximum number of namespaces to return. Defaults to 1000. Set to null to retrieve all namespaces (use with caution).
+- `filters` (optional, list[string]): List of Deephaven where clause expressions to filter the catalog before extracting namespaces. Use backticks (`) for string literals.
+- `format` (optional, string): Output format for namespace data. Options: "auto" (default), "json-row", "json-column", "csv".
+
+**Returns**:
+
+- `success` (boolean): True if namespaces were retrieved successfully
+- `session_id` (string): The session ID (on success)
+- `format` (string): Actual format used (on success)
+- `row_count` (integer): Number of namespaces returned (on success)
+- `is_complete` (boolean): True if all namespaces returned, False if truncated (on success)
+- `columns` (list): Schema information with single column: `{"name": "Namespace", "type": "string"}`
+- `data` (list/dict/string): Namespace data in requested format (on success)
+- `error` (string): Error message (on failure)
+- `isError` (boolean): True (on failure only)
+
+**Example Usage**:
+
+```json
+{
+  "session_id": "enterprise:prod:analytics"
+}
+```
+
+**Description**: This tool retrieves the distinct list of namespaces from an enterprise catalog, enabling efficient discovery of data domains before drilling down into specific tables. This is typically the first step in exploring an enterprise data catalog. Much faster than retrieving the full catalog when you just need to know what data domains exist.
+
+**Important Notes**:
+- Returns only distinct namespace values (one column: "Namespace")
+- Filters are applied to the full catalog before extracting namespaces
+- Default max_rows of 1000 is lighter than catalog_tables (10000)
+- Ideal for top-down data exploration: namespaces → tables → schemas → data
 
 ##### `table_schemas`
 

@@ -11,7 +11,7 @@ Key Features:
 
 Tools Provided:
     - refresh: Reload configuration and clear all sessions atomically.
-    - enterprise_systems_status: List all enterprise (CorePlus) systems with their status and configuration details.
+    - enterprise_systems_status: List all enterprise (Core+) systems with their status and configuration details.
     - list_sessions: List all sessions (community and enterprise) with basic metadata.
     - get_session_details: Get detailed information about a specific session.
     - table_schemas: Retrieve schemas for one or more tables from a session (requires session_id).
@@ -19,6 +19,8 @@ Tools Provided:
     - pip_packages: Retrieve all installed pip packages (name and version) from a specified Deephaven session using importlib.metadata, returned as a list of dicts.
     - get_table_data: Retrieve table data with flexible formatting (json-row, json-column, csv) and optional row limiting for safe access to large tables.
     - get_table_meta: Retrieve table metadata/schema information as structured data describing column types and properties.
+    - catalog_tables: Retrieve catalog table entries from enterprise (Core+) sessions with optional filtering by namespace or table name patterns.
+    - catalog_namespaces: Retrieve distinct namespaces from enterprise (Core+) catalog for efficient discovery of data domains.
     - create_enterprise_session: Create a new enterprise session with configurable parameters and resource limits.
     - delete_enterprise_session: Delete an existing enterprise session and remove it from the session registry.
 
@@ -41,6 +43,7 @@ import aiofiles
 from mcp.server.fastmcp import Context, FastMCP
 
 from deephaven_mcp import queries
+from deephaven_mcp._exceptions import UnsupportedOperationError
 from deephaven_mcp.client import BaseSession, CorePlusSession
 from deephaven_mcp.config import (
     ConfigManager,
@@ -862,6 +865,27 @@ async def table_schemas(
     Example Error Response (total failure):
         {'success': False, 'error': 'Failed to connect to session: ...', 'isError': True}
 
+    Example Usage:
+        # Get schemas for all tables in the session
+        Tool: table_schemas
+        Parameters: {
+            "session_id": "community:localhost:10000"
+        }
+
+        # Get schemas for specific tables
+        Tool: table_schemas
+        Parameters: {
+            "session_id": "community:localhost:10000",
+            "table_names": ["trades", "quotes", "orders"]
+        }
+
+        # Get schema for a single table
+        Tool: table_schemas
+        Parameters: {
+            "session_id": "enterprise:prod:analytics",
+            "table_names": ["market_data"]
+        }
+
     Logging:
         - Logs tool invocation, per-table results, and error details at INFO/ERROR levels.
     """
@@ -950,7 +974,7 @@ async def run_script(
     script: str | None = None,
     script_path: str | None = None,
 ) -> dict:
-    """
+    r"""
     MCP Tool: Execute a script on a specified Deephaven session.
 
     Executes a script on the specified Deephaven session and returns execution status. The script
@@ -983,6 +1007,21 @@ async def run_script(
     Example Error Responses:
         {'success': False, 'error': 'Must provide either script or script_path.', 'isError': True}
         {'success': False, 'error': 'Script execution failed: ...', 'isError': True}
+
+    Example Usage:
+        # Execute inline Python script
+        Tool: run_script
+        Parameters: {
+            "session_id": "community:localhost:10000",
+            "script": "from deephaven import new_table\nfrom deephaven.column import int_col\nmy_table = new_table([int_col('ID', [1, 2, 3])])"
+        }
+
+        # Execute script from file
+        Tool: run_script
+        Parameters: {
+            "session_id": "community:localhost:10000",
+            "script_path": "/path/to/analysis_script.py"
+        }
 
     Logging:
         - Logs tool invocation, script source/path, execution status, and error details at INFO/WARNING/ERROR levels.
@@ -1287,6 +1326,59 @@ async def get_table_data(
         - Use 'optimize-accuracy' to always get markdown-kv format (better comprehension, more tokens)
         - Use 'optimize-cost' to always get csv format (fewer tokens, may be harder to parse)
         - Check 'format' field in response to know actual format used (especially important with 'auto')
+
+    Example Usage:
+        # Get first 1000 rows with auto format selection
+        Tool: get_table_data
+        Parameters: {
+            "session_id": "community:localhost:10000",
+            "table_name": "my_table"
+        }
+
+        # Get last 500 rows (most recent for time-series)
+        Tool: get_table_data
+        Parameters: {
+            "session_id": "community:localhost:10000",
+            "table_name": "trades",
+            "max_rows": 500,
+            "head": false
+        }
+
+        # Get data in CSV format for efficient parsing
+        Tool: get_table_data
+        Parameters: {
+            "session_id": "enterprise:prod:analytics",
+            "table_name": "market_data",
+            "max_rows": 10000,
+            "format": "csv"
+        }
+
+        # Get data optimized for AI comprehension
+        Tool: get_table_data
+        Parameters: {
+            "session_id": "community:localhost:10000",
+            "table_name": "customer_records",
+            "max_rows": 100,
+            "format": "optimize-accuracy"
+        }
+
+        # Get entire small table in JSON row format
+        Tool: get_table_data
+        Parameters: {
+            "session_id": "community:localhost:10000",
+            "table_name": "config_settings",
+            "max_rows": null,
+            "format": "json-row"
+        }
+
+        # Get data in markdown table format
+        Tool: get_table_data
+        Parameters: {
+            "session_id": "enterprise:prod:analytics",
+            "table_name": "summary_stats",
+            "max_rows": 50,
+            "format": "markdown-table"
+        }
     """
     _LOGGER.info(
         f"[mcp_systems_server:get_table_data] Invoked: session_id={session_id!r}, "
@@ -1489,6 +1581,439 @@ async def get_table_meta(context: Context, session_id: str, table_name: str) -> 
     return result
 
 
+async def _get_catalog_data(
+    context: Context,
+    session_id: str,
+    *,
+    distinct_namespaces: bool,
+    max_rows: int | None,
+    filters: list[str] | None,
+    format: str,
+    tool_name: str,
+) -> dict:
+    """
+    Retrieve catalog data (tables or namespaces) from an enterprise session.
+
+    This consolidates the common logic between catalog_tables and catalog_namespaces tools.
+
+    Args:
+        context (Context): The MCP context object.
+        session_id (str): ID of the Deephaven enterprise session to query.
+        distinct_namespaces (bool): If True, retrieve distinct namespaces; if False, retrieve full catalog.
+        max_rows (int | None): Maximum number of rows to return.
+        filters (list[str] | None): Optional filters to apply.
+        format (str): Output format for data.
+        tool_name (str): Name of the calling tool for logging (e.g., "catalog_tables").
+
+    Returns:
+        dict: Result dictionary with success/error information and data.
+    """
+    result: dict[str, object] = {"success": False}
+    data_type = "namespaces" if distinct_namespaces else "catalog entries"
+
+    try:
+        # Get session registry from context
+        session_registry: CombinedSessionRegistry = (
+            context.request_context.lifespan_context["session_registry"]
+        )
+
+        _LOGGER.debug(
+            f"[mcp_systems_server:{tool_name}] Retrieving session '{session_id}'"
+        )
+        session_manager = await session_registry.get(session_id)
+        session = await session_manager.get()
+
+        # Get catalog data using queries module (includes enterprise check and filtering)
+        _LOGGER.debug(
+            f"[mcp_systems_server:{tool_name}] Retrieving {data_type} with filters: {filters}"
+        )
+        arrow_table, is_complete = await queries.get_catalog_table(
+            session,
+            max_rows=max_rows,
+            filters=filters,
+            distinct_namespaces=distinct_namespaces,
+        )
+
+        row_count = len(arrow_table)
+        _LOGGER.debug(
+            f"[mcp_systems_server:{tool_name}] Retrieved {row_count} {data_type} (complete={is_complete})"
+        )
+
+        # Estimate response size for safety
+        estimated_size = arrow_table.nbytes
+        size_check_result = _check_response_size(tool_name, estimated_size)
+        if size_check_result:
+            return size_check_result
+
+        # Format the data using the formatters package
+        _LOGGER.debug(
+            f"[mcp_systems_server:{tool_name}] Formatting data with format='{format}'"
+        )
+        actual_format, formatted_data = format_table_data(arrow_table, format)
+        _LOGGER.debug(
+            f"[mcp_systems_server:{tool_name}] Data formatted as '{actual_format}'"
+        )
+
+        # Extract schema information
+        columns = [
+            {"name": field.name, "type": str(field.type)}
+            for field in arrow_table.schema
+        ]
+
+        result.update(
+            {
+                "success": True,
+                "session_id": session_id,
+                "format": actual_format,
+                "row_count": row_count,
+                "is_complete": is_complete,
+                "columns": columns,
+                "data": formatted_data,
+            }
+        )
+
+        _LOGGER.info(
+            f"[mcp_systems_server:{tool_name}] Successfully retrieved {row_count} {data_type} "
+            f"in '{actual_format}' format (complete={is_complete})"
+        )
+
+    except UnsupportedOperationError as e:
+        # Enterprise-only operation attempted on community session
+        _LOGGER.error(
+            f"[mcp_systems_server:{tool_name}] Session '{session_id}' is not an enterprise session: {e!r}"
+        )
+        result["error"] = str(e)
+        result["isError"] = True
+
+    except ValueError as e:
+        # Format validation error from formatters package
+        _LOGGER.error(
+            f"[mcp_systems_server:{tool_name}] Invalid format parameter: {e!r}"
+        )
+        result["error"] = str(e)
+        result["isError"] = True
+
+    except Exception as e:
+        _LOGGER.error(
+            f"[mcp_systems_server:{tool_name}] Failed for session '{session_id}': {e!r}",
+            exc_info=True,
+        )
+        result["error"] = str(e)
+        result["isError"] = True
+
+    return result
+
+
+@mcp_server.tool()
+async def catalog_tables(
+    context: Context,
+    session_id: str,
+    max_rows: int | None = 10000,
+    filters: list[str] | None = None,
+    format: str = "auto",
+) -> dict:
+    """
+    MCP Tool: Retrieve catalog table entries from a Deephaven Enterprise (Core+) session.
+
+    The catalog table contains metadata about tables accessible via the `deephaven_enterprise.database`
+    package (the `db` variable) in an enterprise session. This includes tables that can be accessed
+    using methods like `db.live_table(namespace, table_name)` or `db.historical_table(namespace, table_name)`.
+    The catalog includes table names, namespaces, schemas, and other descriptive information. This tool
+    enables discovery of available tables and their properties. Only works with enterprise sessions.
+
+    For more information, see:
+    - https://deephaven.io
+    - https://docs.deephaven.io/pycoreplus/latest/worker/code/deephaven_enterprise.database.html
+
+    Terminology Note:
+    - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
+    - 'ENTERPRISE' sessions run Deephaven Enterprise (also called 'Core+' or 'CorePlus')
+    - This tool only works with enterprise sessions; community sessions do not have catalog tables
+
+    AI Agent Usage:
+    - Use this to discover what tables are available via the `db` variable in an enterprise session
+    - Tables in the catalog can be accessed using `db.live_table(namespace, table_name)` or `db.historical_table(namespace, table_name)`
+    - Filter by namespace to find tables in specific data domains
+    - Filter by table name patterns to locate specific tables
+    - Check 'is_complete' to know if all catalog entries were returned
+    - Combine with table_schemas to get full metadata for discovered tables
+    - Essential first step before querying enterprise data sources
+    - Use filters to narrow down large catalogs efficiently
+
+    Filter Syntax Reference:
+    Filters use Deephaven query language with backticks (`) for string literals.
+    Multiple filters are combined with AND logic.
+
+    Common Filter Patterns:
+        Exact Match:
+            - Namespace exact: "Namespace = `market_data`"
+            - Table name exact: "TableName = `daily_prices`"
+
+        String Contains (case-sensitive):
+            - Namespace contains: "Namespace.contains(`market`)"
+            - Table name contains: "TableName.contains(`price`)"
+
+        String Contains (case-insensitive):
+            - Namespace: "Namespace.toLowerCase().contains(`market`)"
+            - Table name: "TableName.toLowerCase().contains(`price`)"
+
+        String Starts/Ends With:
+            - Starts with: "TableName.startsWith(`daily_`)"
+            - Ends with: "TableName.endsWith(`_prices`)"
+
+        Multiple Values (IN):
+            - Namespace in list: "Namespace in `market_data`, `reference_data`"
+            - Case-insensitive: "Namespace icase in `market_data`, `reference_data`"
+
+        NOT IN:
+            - Exclude namespaces: "Namespace not in `test`, `staging`"
+            - Case-insensitive: "Namespace icase not in `test`, `staging`"
+
+        Regex Matching:
+            - Pattern match: "TableName.matches(`.*_daily_.*`)"
+
+        Comparison Operators:
+            - Not equal: "Namespace != `test`"
+            - Greater than: "Size > 1000000"
+            - Less than: "RowCount < 100"
+            - Range: "inRange(RowCount, 100, 10000)"
+
+        Combining Filters (AND logic):
+            filters=["Namespace = `market_data`", "TableName.contains(`price`)"]
+
+    Important Notes About Filters:
+        - String literals MUST use backticks (`), not single (') or double (") quotes
+        - Filters are case-sensitive by default; use .toLowerCase() for case-insensitive matching
+        - Multiple filters in the list are combined with AND (all must match)
+        - For OR logic, use a single filter with boolean operators
+        - Invalid filter syntax will cause the tool to return an error
+        - See https://deephaven.io/core/docs/how-to-guides/use-filters/ for complete syntax
+
+    Args:
+        context (Context): The MCP context object.
+        session_id (str): ID of the Deephaven enterprise session to query.
+        max_rows (int | None): Maximum number of catalog entries to return. Default is 10000.
+                               Set to None to retrieve entire catalog (use with caution for large deployments).
+        filters (list[str] | None): Optional list of Deephaven where clause expressions to filter catalog.
+                                    Multiple filters are combined with AND logic. Use backticks (`) for string literals.
+        format (str): Output format for catalog data. Options: "auto", "json-row", "json-column", "csv",
+                     "markdown-table", "markdown-kv", "yaml", "xml". Default is "auto" which intelligently
+                     selects format based on row count (≤1000: markdown-kv, 1001-10000: markdown-table, >10000: csv).
+
+    Returns:
+        dict: Structured result object with keys:
+            - 'success' (bool): True if catalog was retrieved successfully, False on error.
+            - 'session_id' (str, optional): The session ID if successful.
+            - 'format' (str, optional): Actual format used for data if successful (e.g., "json-row").
+            - 'row_count' (int, optional): Number of catalog entries returned if successful.
+            - 'is_complete' (bool, optional): True if all catalog entries returned, False if truncated by max_rows.
+            - 'columns' (list[dict], optional): Schema of catalog table if successful. Each dict contains:
+                {'name': str, 'type': str} describing catalog columns like Namespace, TableName, etc.
+            - 'data' (list[dict] | dict | str, optional): Catalog data in requested format if successful:
+                - json-row: List of dicts, one per catalog entry
+                - json-column: Dict mapping column names to arrays of values
+                - csv: String with CSV-formatted catalog data
+                - markdown-table: String with pipe-delimited table format
+                - markdown-kv: String with record headers and key-value pairs (default for ≤1000 rows)
+                - yaml: String with YAML-formatted catalog entries
+                - xml: String with XML catalog structure
+            - 'error' (str, optional): Human-readable error message if retrieval failed. Omitted on success.
+            - 'isError' (bool, optional): Present and True only when success=False. Explicit error flag.
+
+    Error Scenarios:
+        - Invalid session_id: Returns error if session doesn't exist or is not accessible
+        - Community session: Returns error if session is not an enterprise (Core+) session
+        - Invalid filters: Returns error if filter syntax is invalid or references non-existent columns
+        - Invalid format: Returns error if format is not one of the supported options
+        - Response too large: Returns error if estimated response would exceed 50MB limit
+        - Session connection issues: Returns error if unable to communicate with Deephaven server
+        - Permission errors: Returns error if session lacks permission to access catalog
+
+    Performance Considerations:
+        - Default max_rows of 10000 is safe for most enterprise deployments
+        - Use filters to reduce result set size for better performance
+        - Catalog retrieval is typically fast but scales with number of tables
+        - Large catalogs (10000+ tables) may benefit from more specific filters
+        - Response size is validated to prevent memory issues (50MB limit)
+
+    Example Usage:
+        # Get first 10000 catalog entries
+        Tool: catalog_tables
+        Parameters: {
+            "session_id": "enterprise:prod:analytics"
+        }
+
+        # Filter by namespace
+        Tool: catalog_tables
+        Parameters: {
+            "session_id": "enterprise:prod:analytics",
+            "filters": ["Namespace = `market_data`"]
+        }
+
+        # Filter by table name pattern
+        Tool: catalog_tables
+        Parameters: {
+            "session_id": "enterprise:prod:analytics",
+            "filters": ["TableName.contains(`price`)"]
+        }
+
+        # Multiple filters (AND logic)
+        Tool: catalog_tables
+        Parameters: {
+            "session_id": "enterprise:prod:analytics",
+            "filters": ["Namespace = `market_data`", "TableName.toLowerCase().contains(`daily`)"]
+        }
+
+        # Get all catalog entries (use with caution)
+        Tool: catalog_tables
+        Parameters: {
+            "session_id": "enterprise:prod:analytics",
+            "max_rows": null
+        }
+
+        # CSV format for easy parsing
+        Tool: catalog_tables
+        Parameters: {
+            "session_id": "enterprise:prod:analytics",
+            "filters": ["Namespace = `reference_data`"],
+            "format": "csv"
+        }
+    """
+    _LOGGER.info(
+        f"[mcp_systems_server:catalog_tables] Invoked: session_id={session_id!r}, "
+        f"max_rows={max_rows}, filters={filters!r}, format={format!r}"
+    )
+
+    return await _get_catalog_data(
+        context,
+        session_id,
+        distinct_namespaces=False,
+        max_rows=max_rows,
+        filters=filters,
+        format=format,
+        tool_name="catalog_tables",
+    )
+
+
+@mcp_server.tool()
+async def catalog_namespaces(
+    context: Context,
+    session_id: str,
+    max_rows: int | None = 1000,
+    filters: list[str] | None = None,
+    format: str = "auto",
+) -> dict:
+    """
+    MCP Tool: Retrieve distinct namespaces from a Deephaven Enterprise (Core+) catalog.
+
+    This tool retrieves the list of distinct namespaces available via the `deephaven_enterprise.database`
+    package (the `db` variable) in an enterprise session. These namespaces represent data domains that
+    contain tables accessible using methods like `db.live_table(namespace, table_name)` or
+    `db.historical_table(namespace, table_name)`. This enables efficient discovery of data domains
+    before drilling down into specific tables. This is typically the first step in exploring an
+    enterprise data catalog. Only works with enterprise sessions.
+
+    For more information, see:
+    - https://deephaven.io
+    - https://docs.deephaven.io/pycoreplus/latest/worker/code/deephaven_enterprise.database.html
+
+    Terminology Note:
+    - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
+    - 'ENTERPRISE' sessions run Deephaven Enterprise (also called 'Core+' or 'CorePlus')
+    - This tool only works with enterprise sessions; community sessions do not have catalog tables
+    - 'Namespace' refers to a data domain or organizational grouping of tables
+
+    AI Agent Usage:
+    - Use this as the first step to discover available data domains in an enterprise system
+    - Namespaces represent data domains accessible via `db.live_table(namespace, table_name)` or `db.historical_table(namespace, table_name)`
+    - Much faster than retrieving full catalog when you just need to know what domains exist
+    - Filter catalog first if you want namespaces from a specific subset of tables
+    - Combine with catalog_tables to drill down into specific namespaces
+    - Essential for top-down data exploration workflow
+    - Returns lightweight data (just namespace names) for quick discovery
+
+    Args:
+        context (Context): The MCP context object.
+        session_id (str): ID of the Deephaven enterprise session to query.
+        max_rows (int | None): Maximum number of namespaces to return. Default is 1000.
+                               Set to None to retrieve all namespaces (use with caution).
+        filters (list[str] | None): Optional list of Deephaven where clause expressions to filter
+                                    the catalog before extracting namespaces. Use backticks (`) for string literals.
+        format (str): Output format for namespace data. Options: "auto", "json-row", "json-column", "csv",
+                     "markdown-table", "markdown-kv", "yaml", "xml". Default is "auto" which intelligently
+                     selects format based on row count (≤1000: markdown-kv, 1001-10000: markdown-table, >10000: csv).
+
+    Returns:
+        dict: Structured result object with keys:
+            - 'success' (bool): True if namespaces were retrieved successfully, False on error.
+            - 'session_id' (str, optional): The session ID if successful.
+            - 'format' (str, optional): Actual format used for data if successful (e.g., "json-row").
+            - 'row_count' (int, optional): Number of namespaces returned if successful.
+            - 'is_complete' (bool, optional): True if all namespaces returned, False if truncated by max_rows.
+            - 'columns' (list[dict], optional): Schema of namespace table if successful. Contains:
+                {'name': 'Namespace', 'type': 'string'}
+            - 'data' (list[dict] | dict | str, optional): Namespace data in requested format if successful:
+                - json-row: List of dicts, one per namespace: [{"Namespace": "market_data"}, ...]
+                - json-column: Dict mapping column name to array: {"Namespace": ["market_data", ...]}
+                - csv: String with CSV-formatted namespace data
+                - markdown-table: String with pipe-delimited table format
+                - markdown-kv: String with record headers and key-value pairs (default for ≤1000 rows)
+                - yaml: String with YAML-formatted namespace list
+                - xml: String with XML namespace structure
+            - 'error' (str, optional): Human-readable error message if retrieval failed. Omitted on success.
+            - 'isError' (bool, optional): Present and True only when success=False. Explicit error flag.
+
+    Error Scenarios:
+        - Non-enterprise session: Returns error if session is not an enterprise (Core+) session
+        - Session not found: Returns error if session_id does not exist or is not accessible
+        - Invalid filter: Returns error if filter syntax is invalid
+        - Invalid format: Returns error if format is not one of the supported options
+        - Response too large: Returns error if estimated response would exceed 50MB limit
+        - Session connection issues: Returns error if unable to communicate with Deephaven server
+
+    Performance Considerations:
+        - Default max_rows of 1000 is safe for most enterprise deployments
+        - Namespace retrieval is very fast (typically < 1 second)
+        - Much more efficient than retrieving full catalog for initial discovery
+        - Filters are applied to catalog before extracting namespaces for efficiency
+
+    Example Usage:
+        # Get all namespaces (up to 1000)
+        Tool: catalog_namespaces
+        Parameters: {
+            "session_id": "enterprise:prod:analytics"
+        }
+
+        # Get namespaces from filtered catalog
+        Tool: catalog_namespaces
+        Parameters: {
+            "session_id": "enterprise:prod:analytics",
+            "filters": ["TableName.contains(`daily`)"]
+        }
+
+        # CSV format
+        Tool: catalog_namespaces
+        Parameters: {
+            "session_id": "enterprise:prod:analytics",
+            "format": "csv"
+        }
+    """
+    _LOGGER.info(
+        f"[mcp_systems_server:catalog_namespaces] Invoked: session_id={session_id!r}, "
+        f"max_rows={max_rows}, filters={filters!r}, format={format!r}"
+    )
+
+    return await _get_catalog_data(
+        context,
+        session_id,
+        distinct_namespaces=True,
+        max_rows=max_rows,
+        filters=filters,
+        format=format,
+        tool_name="catalog_namespaces",
+    )
+
+
 async def _check_session_limits(
     session_registry: CombinedSessionRegistry, system_name: str, max_sessions: int
 ) -> dict | None:
@@ -1588,8 +2113,11 @@ async def _get_system_config(
 
     Returns:
         tuple[dict, dict | None]: (system_config, error_dict)
-            - system_config: The enterprise system configuration dict
-            - error_dict: Error response if system not found, None if successful
+            - system_config: The enterprise system configuration dict if successful, or an empty dict {} if the system is not found.
+            - error_dict: Error response dict with 'error' and 'isError' keys if the system is not found, or None if successful.
+
+    Raises:
+        Exceptions may be raised for unexpected errors (e.g., issues reading configuration).
     """
     config = await config_manager.get_config()
 
@@ -1715,6 +2243,53 @@ async def create_enterprise_session(
         - Authentication failure: "Failed to authenticate with enterprise system"
         - Resource exhaustion: "Insufficient resources to create session"
         - Network issues: "Failed to connect to enterprise system"
+
+    Example Usage:
+        # Create session with auto-generated name and all defaults
+        Tool: create_enterprise_session
+        Parameters: {
+            "system_name": "prod-analytics"
+        }
+
+        # Create session with custom name
+        Tool: create_enterprise_session
+        Parameters: {
+            "system_name": "prod-analytics",
+            "session_name": "my-analysis-session"
+        }
+
+        # Create session with custom heap size and timeout
+        Tool: create_enterprise_session
+        Parameters: {
+            "system_name": "prod-analytics",
+            "session_name": "large-data-session",
+            "heap_size_gb": 16.0,
+            "auto_delete_timeout": 3600
+        }
+
+        # Create Groovy session with custom JVM args
+        Tool: create_enterprise_session
+        Parameters: {
+            "system_name": "prod-analytics",
+            "programming_language": "Groovy",
+            "extra_jvm_args": ["-Xmx8g", "-XX:+UseG1GC"]
+        }
+
+        # Create session with environment variables
+        Tool: create_enterprise_session
+        Parameters: {
+            "system_name": "prod-analytics",
+            "extra_environment_vars": ["VAR1=/mnt/data", "VAR2=DEBUG"]
+        }
+
+        # Create session with specific server and permissions
+        Tool: create_enterprise_session
+        Parameters: {
+            "system_name": "prod-analytics",
+            "server": "server-east-1",
+            "admin_groups": ["data-engineers"],
+            "viewer_groups": ["analysts", "data-scientists"]
+        }
 
     Logging:
         - Info: Tool invocation, successful creation, parameter resolution

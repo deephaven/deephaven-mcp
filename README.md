@@ -178,6 +178,7 @@ Manages and connects to multiple [Deephaven Community Core](https://deephaven.io
 - **Session Management**: List, monitor, and get detailed status of all configured Deephaven sessions
 - **Enterprise Systems**: Connect to and manage Deephaven Enterprise (Core+) deployments
 - **Enterprise Session Creation**: Create and delete enterprise sessions with configurable resources and limits
+- **Catalog Discovery**: Browse enterprise catalog at table and namespace levels to discover available data sources
 - **Table Operations**: Retrieve table schemas, metadata, and actual data with flexible formatting options
 - **Script Execution**: Run Python or Groovy scripts directly on Deephaven sessions
 - **Package Management**: Query installed Python packages in session environments
