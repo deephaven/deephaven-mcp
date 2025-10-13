@@ -6,6 +6,7 @@ This module provides coroutine-compatible utility functions for querying Deephav
 **Functions Provided:**
     - `get_table(session, table_name)`: Retrieve a Deephaven table as a pyarrow.Table snapshot.
     - `get_meta_table(session, table_name)`: Retrieve a table's schema/meta table as a pyarrow.Table snapshot.
+    - `get_catalog_table(session)`: Retrieve the catalog table from an enterprise session with optional filtering and namespace extraction.
     - `get_pip_packages_table(session)`: Get a table of installed pip packages as a pyarrow.Table.
     - `get_programming_language_version_table(session)`: Get a table with Python version information as a pyarrow.Table.
     - `get_programming_language_version(session)`: Get the programming language version string from a Deephaven session.
@@ -23,11 +24,151 @@ import logging
 import textwrap
 
 import pyarrow
+from pydeephaven.table import Table
 
 from deephaven_mcp._exceptions import UnsupportedOperationError
 from deephaven_mcp.client import BaseSession
 
 _LOGGER = logging.getLogger(__name__)
+
+
+# ===== Private Helper Functions =====
+
+
+def _validate_python_session(function_name: str, session: BaseSession) -> None:
+    """
+    Validate that a session is a Python session.
+
+    Args:
+        function_name (str): Name of the calling function for error messages.
+        session (BaseSession): The session to validate.
+
+    Raises:
+        UnsupportedOperationError: If the session is not a Python session.
+
+    Note:
+        This is a private helper function for internal use only.
+    """
+    if session.programming_language.lower() != "python":
+        _LOGGER.warning(
+            "[queries:%s] Unsupported programming language: %s",
+            function_name,
+            session.programming_language,
+        )
+        raise UnsupportedOperationError(
+            f"{function_name} only supports Python sessions, "
+            f"but session uses {session.programming_language}."
+        )
+
+
+async def _apply_filters(
+    table: Table,
+    filters: list[str] | None,
+    *,
+    context_name: str,
+) -> Table:
+    """
+    Apply where clause filters to a Deephaven table.
+
+    This helper consolidates the common pattern of applying filters with appropriate logging.
+
+    Args:
+        table (Table): The Deephaven table to filter (must have .where() method).
+        filters (list[str] | None): List of Deephaven where clause expressions to apply.
+                                    Multiple filters are combined with AND logic.
+                                    None or empty list means no filtering.
+        context_name (str): Context description for logging (e.g., "catalog table", "namespace table").
+
+    Returns:
+        Table: The filtered table (or original if no filters provided).
+
+    Note:
+        This is a private helper function for internal use only.
+    """
+    if filters:
+        _LOGGER.debug(
+            "[queries:_apply_filters] Applying %d filter(s) to %s: %s",
+            len(filters),
+            context_name,
+            filters,
+        )
+        table = await asyncio.to_thread(table.where, filters)
+        _LOGGER.debug("[queries:_apply_filters] Filters applied successfully.")
+    else:
+        _LOGGER.debug("[queries:_apply_filters] No filters to apply.")
+
+    return table
+
+
+async def _apply_row_limit(
+    table: Table,
+    max_rows: int | None,
+    *,
+    head: bool = True,
+    context_name: str,
+) -> tuple[Table, bool]:
+    """
+    Apply row limiting to a Deephaven table and determine if result is complete.
+
+    This helper consolidates the common pattern of limiting table rows using head() or tail(),
+    checking if the full table was retrieved, and logging appropriate warnings.
+
+    Args:
+        table (Table): The Deephaven table to limit (must have .size, .head(), .tail() methods).
+        max_rows (int | None): Maximum number of rows to retrieve.
+                               None means retrieve entire table (logs warning).
+        head (bool): If True, use head() to get first rows. If False, use tail() for last rows.
+                    Ignored when max_rows=None. Default is True.
+        context_name (str): Context description for logging (e.g., "table 'my_table'", "catalog table").
+
+    Returns:
+        tuple[Table, bool]: A tuple containing:
+            - Table: The limited table (or original if max_rows=None)
+            - bool: True if entire table was retrieved, False if truncated
+
+    Note:
+        This is a private helper function for internal use only.
+        The returned table is NOT converted to Arrow format - caller must do that.
+    """
+    is_complete = False
+
+    if max_rows is not None:
+        # Get original table size before applying limits
+        original_size = await asyncio.to_thread(lambda: table.size)
+
+        if head:
+            limited_table = await asyncio.to_thread(lambda: table.head(max_rows))
+            _LOGGER.debug(
+                "[queries:_apply_row_limit] Limited to first %d rows of %s",
+                max_rows,
+                context_name,
+            )
+        else:
+            limited_table = await asyncio.to_thread(lambda: table.tail(max_rows))
+            _LOGGER.debug(
+                "[queries:_apply_row_limit] Limited to last %d rows of %s",
+                max_rows,
+                context_name,
+            )
+
+        # Determine if we got the complete table
+        is_complete = original_size <= max_rows
+        _LOGGER.debug(
+            "[queries:_apply_row_limit] %s has %d total rows",
+            context_name.capitalize(),
+            original_size,
+        )
+        return limited_table, is_complete
+    else:
+        # Full table requested - log warning for safety
+        _LOGGER.warning(
+            "[queries:_apply_row_limit] Retrieving ENTIRE %s - this may cause memory issues for large tables!",
+            context_name,
+        )
+        return table, True
+
+
+# ===== Public API Functions =====
 
 
 async def get_table(
@@ -87,43 +228,14 @@ async def get_table(
 
     # Open the table
     original_table = await session.open_table(table_name)
-    is_complete = False
 
-    # Apply row limiting if specified
-    if max_rows is not None:
-        # Get original table size before applying limits
-        original_size = await asyncio.to_thread(lambda: original_table.size)
-
-        if head:
-            table = await asyncio.to_thread(lambda: original_table.head(max_rows))
-            _LOGGER.debug(
-                "[queries:get_table] Limited to first %d rows of table '%s'",
-                max_rows,
-                table_name,
-            )
-        else:
-            table = await asyncio.to_thread(lambda: original_table.tail(max_rows))
-            _LOGGER.debug(
-                "[queries:get_table] Limited to last %d rows of table '%s'",
-                max_rows,
-                table_name,
-            )
-
-        # Determine if we got the complete table
-        is_complete = original_size <= max_rows
-        _LOGGER.debug(
-            "[queries:get_table] Original table '%s' has %d total rows",
-            table_name,
-            original_size,
-        )
-    else:
-        # Full table requested - log warning for safety
-        table = original_table
-        _LOGGER.warning(
-            "[queries:get_table] Retrieving ENTIRE table '%s' - this may cause memory issues for large tables!",
-            table_name,
-        )
-        is_complete = True
+    # Apply row limiting using helper function
+    table, is_complete = await _apply_row_limit(
+        original_table,
+        max_rows,
+        head=head,
+        context_name=f"table '{table_name}'",
+    )
 
     # Convert to Arrow format (single conversion point)
     arrow_table = await asyncio.to_thread(table.to_arrow)
@@ -205,16 +317,8 @@ async def get_programming_language_version_table(session: BaseSession) -> pyarro
     )
 
     # Check if the session is a Python session
-    if session.programming_language.lower() != "python":
-        # TODO: Add support for other programming languages.
-        _LOGGER.warning(
-            "[queries:get_programming_language_version_table] Unsupported programming language: %s",
-            session.programming_language,
-        )
-        raise UnsupportedOperationError(
-            f"get_programming_language_version_table only supports Python sessions, "
-            f"but session uses {session.programming_language}."
-        )
+    # TODO: Add support for other programming languages.
+    _validate_python_session("get_programming_language_version_table", session)
 
     script = textwrap.dedent(
         """
@@ -280,7 +384,8 @@ async def get_programming_language_version(session: BaseSession) -> str:
     version_str = str(version_column[0].as_py())
 
     _LOGGER.debug(
-        f"[queries:get_programming_language_version] Retrieved version: {version_str}"
+        "[queries:get_programming_language_version] Retrieved version: %s",
+        version_str,
     )
     return version_str
 
@@ -309,16 +414,13 @@ async def get_pip_packages_table(session: BaseSession) -> pyarrow.Table:
         - Logging is performed at DEBUG level for script execution and table retrieval.
         - Currently only supports Python sessions. Support for other programming languages may be added in the future.
     """
+    _LOGGER.debug(
+        "[queries:get_pip_packages_table] Retrieving pip packages from session..."
+    )
+
     # Check if the session is a Python session
-    if session.programming_language.lower() != "python":
-        _LOGGER.warning(
-            "[queries:get_pip_packages_table] Unsupported programming language: %s",
-            session.programming_language,
-        )
-        raise UnsupportedOperationError(
-            f"get_pip_packages_table only supports Python sessions, "
-            f"but session uses {session.programming_language}."
-        )
+    # TODO: Add support for other programming languages.
+    _validate_python_session("get_pip_packages_table", session)
 
     script = textwrap.dedent(
         """
@@ -376,16 +478,8 @@ async def get_dh_versions(session: BaseSession) -> tuple[str | None, str | None]
         - Currently only supports Python sessions. Support for other programming languages may be added in the future.
     """
     # Check if the session is a Python session
-    if session.programming_language.lower() != "python":
-        # TODO: Add support for other programming languages.
-        _LOGGER.warning(
-            "[queries:get_dh_versions] Unsupported programming language: %s",
-            session.programming_language,
-        )
-        raise UnsupportedOperationError(
-            f"get_dh_versions only supports Python sessions, "
-            f"but session uses {session.programming_language}."
-        )
+    # TODO: Add support for other programming languages.
+    _validate_python_session("get_dh_versions", session)
 
     _LOGGER.debug(
         "[queries:get_dh_versions] Retrieving Deephaven Core and Core+ versions from session..."
@@ -421,3 +515,153 @@ async def get_dh_versions(session: BaseSession) -> tuple[str | None, str | None]
         dh_coreplus_version,
     )
     return dh_core_version, dh_coreplus_version
+
+
+async def get_catalog_table(
+    session: BaseSession,
+    *,
+    max_rows: int | None,
+    filters: list[str] | None = None,
+    distinct_namespaces: bool,
+) -> tuple[pyarrow.Table, bool]:
+    """
+    Asynchronously retrieve the catalog table from a Deephaven Enterprise (Core+) session.
+
+    The catalog table contains metadata about tables accessible via the `deephaven_enterprise.database`
+    package (the `db` variable) in an enterprise session. This includes tables that can be accessed
+    using methods like `db.live_table(namespace, table_name)` or `db.historical_table(namespace, table_name)`.
+    The catalog includes table names, namespaces, schemas, and other descriptive information. This
+    function is only available for enterprise sessions (CorePlusSession).
+    
+    For more information, see:
+    - https://deephaven.io
+    - https://docs.deephaven.io/pycoreplus/latest/worker/code/deephaven_enterprise.database.html
+
+    Args:
+        session (BaseSession): An active Deephaven enterprise session. Must be a CorePlusSession.
+        max_rows (int | None): Maximum number of rows to retrieve. Must be specified as keyword argument.
+                               Set to None to retrieve the entire catalog (use with caution for large catalogs).
+                               Set to a positive integer to limit rows (recommended for production use).
+        filters (list[str] | None): Optional list of Deephaven where clause expressions to filter catalog results.
+                                    Multiple filters are combined with AND logic. Filters use Deephaven query
+                                    language syntax with backticks (`) for string literals.
+        distinct_namespaces (bool): Required. If True, returns only distinct namespaces (sorted) instead of full catalog.
+                                   Filters are applied after selecting distinct namespaces. Must be explicitly specified.
+
+    Returns:
+        tuple[pyarrow.Table, bool]: A tuple containing:
+            - pyarrow.Table: The catalog table (or filtered subset) as a pyarrow.Table snapshot
+            - bool: True if the entire catalog was retrieved, False if only a subset was returned
+
+    Raises:
+        UnsupportedOperationError: If the session is not an enterprise (Core+) session.
+        Exception: If the catalog cannot be retrieved, filters are invalid, or conversion to Arrow fails.
+
+    Warning:
+        Setting max_rows=None on large enterprise deployments with thousands of tables can cause
+        memory exhaustion. Always use a reasonable row limit in production environments.
+
+    Examples:
+        # Get first 1000 catalog entries
+        catalog, is_complete = await get_catalog_table(
+            session, max_rows=1000, distinct_namespaces=False
+        )
+
+        # Filter by namespace
+        catalog, is_complete = await get_catalog_table(
+            session,
+            max_rows=1000,
+            filters=["Namespace = `market_data`"],
+            distinct_namespaces=False,
+        )
+
+        # Filter by table name pattern (case-sensitive contains)
+        catalog, is_complete = await get_catalog_table(
+            session,
+            max_rows=1000,
+            filters=["TableName.contains(`price`)"],
+            distinct_namespaces=False,
+        )
+
+        # Multiple filters (AND logic)
+        catalog, is_complete = await get_catalog_table(
+            session,
+            max_rows=1000,
+            filters=["Namespace = `market_data`", "TableName.contains(`daily`)"],
+            distinct_namespaces=False,
+        )
+
+        # Get distinct namespaces only
+        namespaces, is_complete = await get_catalog_table(
+            session, max_rows=1000, distinct_namespaces=True
+        )
+
+        # Full catalog retrieval (dangerous for large deployments)
+        catalog, is_complete = await get_catalog_table(
+            session, max_rows=None, distinct_namespaces=False
+        )
+
+    Note:
+        - max_rows must be specified as a keyword argument to force intentional usage
+        - Filters use Deephaven query language syntax (see https://deephaven.io/core/docs/how-to-guides/use-filters/)
+        - String literals in filters must use backticks (`), not single or double quotes
+        - This function is intended for internal use by MCP tools
+        - Only works with enterprise (Core+) sessions that have catalog_table() method
+    """
+    from deephaven_mcp.client import CorePlusSession
+
+    _LOGGER.debug(
+        "[queries:get_catalog_table] Retrieving catalog table from enterprise session (max_rows=%s, filters=%s)...",
+        max_rows,
+        filters,
+    )
+
+    # Check if the session is an enterprise session
+    if not isinstance(session, CorePlusSession):
+        _LOGGER.error(
+            "[queries:get_catalog_table] Session is not an enterprise (Core+) session: %s",
+            type(session).__name__,
+        )
+        raise UnsupportedOperationError(
+            f"get_catalog_table only supports enterprise (Core+) sessions, "
+            f"but session is {type(session).__name__}."
+        )
+
+    # Get the catalog table
+    catalog_table = await session.catalog_table()
+    _LOGGER.debug("[queries:get_catalog_table] Catalog table retrieved successfully.")
+
+    # Handle distinct namespaces case
+    if distinct_namespaces:
+        _LOGGER.debug("[queries:get_catalog_table] Extracting distinct namespaces...")
+        # Step 1: Select distinct namespaces
+        catalog_table = await asyncio.to_thread(
+            lambda: catalog_table.select_distinct("Namespace")
+        )
+        # Step 2: Sort namespaces
+        catalog_table = await asyncio.to_thread(
+            lambda: catalog_table.sort("Namespace")
+        )
+        _LOGGER.debug("[queries:get_catalog_table] Distinct namespaces extracted and sorted.")
+
+    # Determine table type for logging
+    table_type = "namespace table" if distinct_namespaces else "catalog table"
+
+    # Apply filters if provided (works for both full catalog and distinct namespaces)
+    catalog_table = await _apply_filters(catalog_table, filters, context_name=table_type)
+
+    # Apply row limiting using helper function (always from head for catalog tables)
+    catalog_table, is_complete = await _apply_row_limit(
+        catalog_table,
+        max_rows,
+        head=True,
+        context_name=table_type,
+    )
+
+    # Convert to Arrow format
+    arrow_table = await asyncio.to_thread(catalog_table.to_arrow)
+
+    _LOGGER.debug(
+        "[queries:get_catalog_table] Catalog table converted to Arrow format successfully."
+    )
+    return arrow_table, is_complete
