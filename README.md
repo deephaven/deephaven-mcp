@@ -8,11 +8,13 @@
 
 - [Overview](#overview)
 - [🚀 Quick Start](#-quick-start)
+- [🔄 Quick Upgrade](#-quick-upgrade)
 - [Key Use Cases](#key-use-cases)
 - [Deephaven MCP Components](#deephaven-mcp-components)
 - [Architecture Diagrams](#architecture-diagrams)
 - [Prerequisites](#prerequisites)
 - [Installation & Initial Setup](#installation--initial-setup)
+- [Upgrading](#upgrading)
 - [Configuring `deephaven_mcp.json`](#configuring-deephaven_mcpjson)
 - [Environment Variables](#environment-variables)
 - [AI Tool Setup](#ai-tool-setup)
@@ -171,7 +173,7 @@ rm -rf .venv
 
 ### 2. Reinstall with the latest version
 
-Repeat the [Quick Start](#-quick-start) steps 1-3 above to reinstall with the latest version.
+Repeat the [🚀 Quick Start](#-quick-start) steps 1-3 above to reinstall with the latest version.
 
 For more upgrade options, see the detailed [Upgrading](#upgrading) section below.
 
