@@ -384,8 +384,7 @@ async def get_programming_language_version(session: BaseSession) -> str:
     version_str = str(version_column[0].as_py())
 
     _LOGGER.debug(
-        "[queries:get_programming_language_version] Retrieved version: %s",
-        version_str,
+        f"[queries:get_programming_language_version] Retrieved version: {version_str}"
     )
     return version_str
 
