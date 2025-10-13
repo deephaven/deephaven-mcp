@@ -352,7 +352,7 @@ rm -rf .venv
 
 Then follow the installation steps again:
 
-- For quickstart users: Repeat steps 1-3 from the [Quickstart](#quickstart) section
+- For quickstart users: Repeat steps 1-3 from the [Quick Start](#-quick-start) section
 - For detailed installation: Follow the [Installing from PyPI](#installing-from-pypi) instructions
 
 This approach ensures:
