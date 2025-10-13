@@ -2113,8 +2113,11 @@ async def _get_system_config(
 
     Returns:
         tuple[dict, dict | None]: (system_config, error_dict)
-            - system_config: The enterprise system configuration dict if successful, empty dict {} if error
-            - error_dict: Error response dict with 'error' and 'isError' keys if system not found, None if successful
+            - system_config: The enterprise system configuration dict if successful, or an empty dict {} if the system is not found.
+            - error_dict: Error response dict with 'error' and 'isError' keys if the system is not found, or None if successful.
+
+    Raises:
+        Exceptions may be raised for unexpected errors (e.g., issues reading configuration).
     """
     config = await config_manager.get_config()
 
