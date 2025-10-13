@@ -82,11 +82,13 @@ chmod +x dev_manage_coreplus_client.sh
 ### 3. Install Deephaven MCP and Dependencies
 
 **For Community Core only (most users):**
+
 ```bash
 .venv/bin/pip install deephaven-mcp
 ```
 
 **For Enterprise systems (if you completed step 2):**
+
 ```bash
 .venv/bin/pip install "deephaven-mcp[coreplus]"
 ```
@@ -154,6 +156,24 @@ Restart your AI tool and try asking:
 > "Execute this Python code in my Deephaven session: `t = empty_table(100).update('x=i', 'y=i*2')`"
 
 **Need help?** Check the [Troubleshooting](#troubleshooting) section, ask the built-in docs server about Deephaven features, or join the [Deephaven Community Slack](https://deephaven.io/slack)!
+
+---
+
+## 🔄 Quick Upgrade
+
+**Already have `deephaven-mcp` installed?** Here's how to upgrade:
+
+### 1. Remove the old virtual environment
+
+```bash
+rm -rf .venv
+```
+
+### 2. Reinstall with the latest version
+
+Repeat the [Quick Start](#-quick-start) steps 1-3 above to reinstall with the latest version.
+
+For more upgrade options, see the detailed [Upgrading](#upgrading) section below.
 
 ---
 
@@ -316,6 +336,52 @@ Choose one of the following Python environment and package management tools:
     ```sh
     .venv/bin/pip install "deephaven-mcp[coreplus]"
     ```
+
+---
+
+## Upgrading
+
+### Recommended: Recreate Virtual Environment
+
+The simplest and most reliable way to upgrade is to delete your virtual environment and recreate it:
+
+```bash
+# Remove the old virtual environment
+rm -rf .venv
+```
+
+Then follow the installation steps again:
+
+- For quickstart users: Repeat steps 1-3 from the [Quickstart](#quickstart) section
+- For detailed installation: Follow the [Installing from PyPI](#installing-from-pypi) instructions
+
+This approach ensures:
+
+- Clean installation with no dependency conflicts
+- Correct CorePlus wheel version for Enterprise users
+- No leftover packages from previous versions
+
+After recreating the environment, restart your AI tool to use the new version.
+
+### Alternative: In-Place Upgrade
+
+If you prefer to upgrade without recreating the virtual environment:
+
+**For Community Core only:**
+
+```bash
+.venv/bin/pip install --upgrade deephaven-mcp
+```
+
+**For Enterprise systems:**
+
+```bash
+.venv/bin/pip install --upgrade "deephaven-mcp[coreplus]"
+```
+
+> **⚠️ Note for Enterprise Users**: When upgrading in-place, ensure your CorePlus client wheel version matches your Enterprise server version. Contact your Deephaven Enterprise administrator for the correct wheel version.
+
+After upgrading, restart your AI tool to use the new version.
 
 ---
 
