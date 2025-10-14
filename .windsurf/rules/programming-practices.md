@@ -10,4 +10,5 @@ trigger: always_on
    - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
    - 'Deephaven Community' and 'Deephaven Core' are interchangeable names for the same product
    - 'Deephaven Enterprise', 'Deephaven Core+', and 'Deephaven CorePlus' are interchangeable names for the same product
+   - In Deephaven, "schema" and "meta table" refer to the same concept - the table's column definitions including names, types, and properties.
 5. f-strings are preferred over % in format statements
