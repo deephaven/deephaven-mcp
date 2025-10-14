@@ -15,12 +15,14 @@ Tools Provided:
     - list_sessions: List all sessions (community and enterprise) with basic metadata.
     - get_session_details: Get detailed information about a specific session.
     - table_schemas: Retrieve schemas for one or more tables from a session (requires session_id).
+    - list_tables: Retrieve names of all tables in a session (lightweight alternative to table_schemas).
     - run_script: Execute a script on a specified Deephaven session (requires session_id).
     - pip_packages: Retrieve all installed pip packages (name and version) from a specified Deephaven session using importlib.metadata, returned as a list of dicts.
     - get_table_data: Retrieve table data with flexible formatting (json-row, json-column, csv) and optional row limiting for safe access to large tables.
     - get_table_meta: Retrieve table metadata/schema information as structured data describing column types and properties.
     - catalog_tables: Retrieve catalog table entries from enterprise (Core+) sessions with optional filtering by namespace or table name patterns.
     - catalog_namespaces: Retrieve distinct namespaces from enterprise (Core+) catalog for efficient discovery of data domains.
+    - catalog_schemas: Retrieve schemas for catalog tables in enterprise (Core+) sessions with flexible filtering by namespace, table names, or custom filters.
     - create_enterprise_session: Create a new enterprise session with configurable parameters and resource limits.
     - delete_enterprise_session: Delete an existing enterprise session and remove it from the session registry.
 
@@ -931,12 +933,8 @@ async def table_schemas(
                 f"[mcp_systems_server:table_schemas] Processing table '{table_name}' in session '{session_id}'"
             )
             try:
-                meta_table = await queries.get_meta_table(session, table_name)
-                # meta_table is a pyarrow.Table with columns: 'Name', 'DataType', etc.
-                schema = [
-                    {"name": row["Name"], "type": row["DataType"]}
-                    for row in meta_table.to_pylist()
-                ]
+                meta_table = await queries.get_session_meta_table(session, table_name)
+                schema = queries.meta_table_to_dict_list(meta_table)
                 schemas.append({"success": True, "table": table_name, "schema": schema})
                 _LOGGER.info(
                     f"[mcp_systems_server:table_schemas] Success: Retrieved schema for table '{table_name}'"
@@ -962,6 +960,114 @@ async def table_schemas(
     except Exception as e:
         _LOGGER.error(
             f"[mcp_systems_server:table_schemas] Failed for session: '{session_id}', error: {e!r}",
+            exc_info=True,
+        )
+        return {"success": False, "error": str(e), "isError": True}
+
+
+@mcp_server.tool()
+async def list_tables(context: Context, session_id: str) -> dict:
+    """
+    MCP Tool: Retrieve the names of all tables in a Deephaven session.
+
+    Returns a simple list of table names without schemas or metadata. This is a lightweight
+    alternative to table_schemas when you only need to discover what tables exist in a session.
+    Much faster than table_schemas since it doesn't fetch schema information for each table.
+
+    Terminology Note:
+    - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
+    - 'Deephaven Community' and 'Deephaven Core' are interchangeable names for the same product
+    - 'Deephaven Enterprise', 'Deephaven Core+', and 'Deephaven CorePlus' are interchangeable names for the same product
+
+    AI Agent Usage:
+    - Use this for quick table discovery when you don't need schema details
+    - Much faster than table_schemas for large sessions with many tables
+    - Follow up with table_schemas or get_table_meta for specific tables you're interested in
+    - Works with both Community and Enterprise sessions
+    - Check 'count' field to see how many tables exist
+    - Always check 'success' field before accessing 'table_names'
+
+    Args:
+        context (Context): The MCP context object, required by MCP protocol but not actively used.
+        session_id (str): ID of the Deephaven session to query. Must match an existing active session.
+
+    Returns:
+        dict: Structured result object with the following keys:
+            - 'success' (bool): Always present. True if table names were retrieved successfully, False on any error.
+            - 'session_id' (str, optional): The session ID if successful. Useful for confirming which session was queried.
+            - 'table_names' (list[str], optional): List of table names if successful. Empty list if session has no tables.
+            - 'count' (int, optional): Number of tables found if successful. Convenient for quick checks.
+            - 'error' (str, optional): Human-readable error message if retrieval failed. Omitted on success.
+            - 'isError' (bool, optional): Present and True only when success=False. Explicit error flag for frameworks.
+
+    Error Scenarios:
+        - Invalid session_id: Returns error if session doesn't exist or is not accessible
+        - Session connection issues: Returns error if unable to communicate with Deephaven server
+        - Session not available: Returns error if session is closed or unavailable
+
+    Example Successful Response:
+        {
+            'success': True,
+            'session_id': 'community:localhost:10000',
+            'table_names': ['trades', 'quotes', 'orders'],
+            'count': 3
+        }
+
+    Example Error Response:
+        {
+            'success': False,
+            'error': 'Session not found: community:localhost:10000',
+            'isError': True
+        }
+
+    Performance Notes:
+        - Very fast operation, typically completes in milliseconds
+        - No network data transfer (just metadata query)
+        - Safe to call frequently for session monitoring
+        - Scales well even with hundreds of tables
+
+    Logging:
+        - Logs tool invocation, success/failure, and error details at INFO/ERROR levels.
+    """
+    _LOGGER.info(
+        f"[mcp_systems_server:list_tables] Invoked: session_id={session_id!r}"
+    )
+
+    try:
+        # Get session registry and session
+        session_registry: CombinedSessionRegistry = (
+            context.request_context.lifespan_context["session_registry"]
+        )
+
+        _LOGGER.debug(
+            f"[mcp_systems_server:list_tables] Retrieving session manager for '{session_id}'"
+        )
+        session_manager = await session_registry.get(session_id)
+
+        _LOGGER.debug(
+            f"[mcp_systems_server:list_tables] Establishing session connection for '{session_id}'"
+        )
+        session = await session_manager.get()
+
+        _LOGGER.debug(
+            f"[mcp_systems_server:list_tables] Retrieving table names from session '{session_id}'"
+        )
+        table_names = await session.tables()
+
+        _LOGGER.info(
+            f"[mcp_systems_server:list_tables] Success: Retrieved {len(table_names)} table(s) from session '{session_id}'"
+        )
+
+        return {
+            "success": True,
+            "session_id": session_id,
+            "table_names": table_names,
+            "count": len(table_names),
+        }
+
+    except Exception as e:
+        _LOGGER.error(
+            f"[mcp_systems_server:list_tables] Failed for session: '{session_id}', error: {e!r}",
             exc_info=True,
         )
         return {"success": False, "error": str(e), "isError": True}
@@ -1541,7 +1647,7 @@ async def get_table_meta(context: Context, session_id: str, table_name: str) -> 
         _LOGGER.debug(
             f"[mcp_systems_server:get_table_meta] Retrieving metadata for table '{table_name}'"
         )
-        meta_arrow_table = await queries.get_meta_table(session, table_name)
+        meta_arrow_table = await queries.get_session_meta_table(session, table_name)
 
         # Convert to row-oriented JSON (meta tables are small)
         meta_data = meta_arrow_table.to_pylist()
@@ -2012,6 +2118,339 @@ async def catalog_namespaces(
         format=format,
         tool_name="catalog_namespaces",
     )
+
+
+@mcp_server.tool()
+async def catalog_schemas(
+    context: Context,
+    session_id: str,
+    namespace: str | None = None,
+    table_names: list[str] | None = None,
+    filters: list[str] | None = None,
+    max_tables: int | None = 100,
+) -> dict:
+    """
+    MCP Tool: Retrieve schemas for catalog tables in a Deephaven Enterprise (Core+) session.
+
+    This tool retrieves column schemas for tables in the enterprise catalog. The catalog contains
+    metadata about tables accessible via the `deephaven_enterprise.database` package (the `db` variable).
+    You can filter by namespace, specify exact table names, use custom filters, or discover all schemas
+    up to the max_tables limit. This is essential for understanding the structure of catalog tables before
+    loading them with `db.live_table()` or `db.historical_table()`. Only works with enterprise sessions.
+
+    For more information, see:
+    - https://deephaven.io
+    - https://docs.deephaven.io/pycoreplus/latest/worker/code/deephaven_enterprise.database.html
+
+    Terminology Note:
+    - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
+    - 'ENTERPRISE' sessions run Deephaven Enterprise (also called 'Core+' or 'CorePlus')
+    - This tool only works with enterprise sessions; community sessions do not have catalog tables
+    - 'Namespace' refers to a data domain or organizational grouping of tables in the catalog
+
+    AI Agent Usage:
+    - Use this to understand catalog table structures before loading them into a session
+    - Filter by namespace to get schemas for all tables in a specific data domain
+    - Specify table_names when you know exactly which tables you need
+    - Use filters for complex discovery patterns (e.g., tables containing specific keywords)
+    - Default max_tables=100 prevents accidentally fetching thousands of schemas
+    - Set max_tables=None only when you intentionally want all schemas (use with caution)
+    - Check 'namespace' field in each result to know which domain the table belongs to
+    - Use returned schemas to generate correct `db.live_table(namespace, table_name)` calls
+    - Individual table failures don't stop processing of other tables (similar to table_schemas)
+    - Always check 'success' field in each schema result before using the schema data
+
+    Filter Syntax Reference:
+    Filters use Deephaven query language with backticks (`) for string literals.
+    Multiple filters are combined with AND logic.
+
+    Common Filter Patterns:
+        Exact Match:
+            - Namespace exact: "Namespace = `market_data`"
+            - Table name exact: "TableName = `daily_prices`"
+
+        String Contains (case-sensitive):
+            - Namespace contains: "Namespace.contains(`market`)"
+            - Table name contains: "TableName.contains(`price`)"
+
+        String Contains (case-insensitive):
+            - Namespace: "Namespace.toLowerCase().contains(`market`)"
+            - Table name: "TableName.toLowerCase().contains(`price`)"
+
+        Multiple Values (IN):
+            - Namespace in list: "Namespace in `market_data`, `reference_data`"
+            - Case-insensitive: "Namespace icase in `market_data`, `reference_data`"
+
+        Combining Filters (AND logic):
+            filters=["Namespace = `market_data`", "TableName.contains(`price`)"]
+
+    Args:
+        context (Context): The MCP context object, required by MCP protocol but not actively used.
+        session_id (str): ID of the Deephaven enterprise session to query. Must be an enterprise (Core+) session.
+        namespace (str | None, optional): Filter to tables in this specific namespace. If None, searches all namespaces.
+                                         Defaults to None.
+        table_names (list[str] | None, optional): List of specific table names to retrieve schemas for.
+                                                  If None, retrieves schemas for all tables (up to max_tables limit).
+                                                  When specified with namespace, only tables in that namespace are considered.
+                                                  Defaults to None.
+        filters (list[str] | None, optional): List of Deephaven where clause expressions to filter the catalog.
+                                             Multiple filters are combined with AND logic. Use backticks (`) for string literals.
+                                             Applied before namespace and table_names filtering. Defaults to None.
+        max_tables (int | None, optional): Maximum number of table schemas to retrieve. Defaults to 100 for safety.
+                                          Set to None to retrieve all matching schemas (use with extreme caution for large catalogs).
+                                          This limit is applied after all filtering.
+
+    Returns:
+        dict: Structured result object with keys:
+            - 'success' (bool): True if the operation completed, False if it failed entirely.
+            - 'schemas' (list[dict], optional): List of per-table schema results if operation completed. Each contains:
+                - 'success' (bool): True if this table's schema was retrieved successfully
+                - 'namespace' (str): Namespace (data domain) the table belongs to
+                - 'table' (str): Table name
+                - 'schema' (list[dict], optional): List of column definitions (name/type pairs) if successful
+                - 'error' (str, optional): Error message if this table's schema retrieval failed
+                - 'isError' (bool, optional): Present and True if this table had an error
+            - 'count' (int, optional): Number of schemas returned if successful
+            - 'is_complete' (bool, optional): True if all matching tables were processed, False if truncated by max_tables
+            - 'error' (str, optional): Error message if the entire operation failed.
+            - 'isError' (bool, optional): Present and True if this is an error response.
+
+    Error Scenarios:
+        - Non-enterprise session: Returns error if session is not an enterprise (Core+) session
+        - Invalid session_id: Returns error if session doesn't exist or is not accessible
+        - Invalid filters: Returns error if filter syntax is invalid or references non-existent columns
+        - Session connection issues: Returns error if unable to communicate with Deephaven server
+        - Catalog access error: Returns error if unable to retrieve catalog table
+        - Individual table errors: Reported in per-table results, don't stop overall operation
+
+    Performance Considerations:
+        - Default max_tables=100 is safe for most use cases
+        - Fetching schemas for 1000+ tables can take significant time (several minutes)
+        - Use namespace or filters to narrow down the search space
+        - Specify exact table_names when you know what you need for fastest results
+        - Each schema fetch requires a separate query to the catalog
+
+    Example Successful Response (mixed results):
+        {
+            'success': True,
+            'schemas': [
+                {
+                    'success': True,
+                    'namespace': 'market_data',
+                    'table': 'daily_prices',
+                    'schema': [{'name': 'Date', 'type': 'LocalDate'}, {'name': 'Price', 'type': 'double'}]
+                },
+                {
+                    'success': False,
+                    'namespace': 'market_data',
+                    'table': 'missing_table',
+                    'error': 'Table not found in catalog',
+                    'isError': True
+                }
+            ],
+            'count': 2,
+            'is_complete': True
+        }
+
+    Example Error Response (total failure):
+        {
+            'success': False,
+            'error': 'Session is not an enterprise (Core+) session',
+            'isError': True
+        }
+
+    Example Usage:
+        # Get schemas for all tables in a namespace (up to 100)
+        Tool: catalog_schemas
+        Parameters: {
+            "session_id": "enterprise:prod:analytics",
+            "namespace": "market_data"
+        }
+
+        # Get schemas for specific tables in a namespace
+        Tool: catalog_schemas
+        Parameters: {
+            "session_id": "enterprise:prod:analytics",
+            "namespace": "market_data",
+            "table_names": ["daily_prices", "quotes"]
+        }
+
+        # Filter-based discovery across namespaces
+        Tool: catalog_schemas
+        Parameters: {
+            "session_id": "enterprise:prod:analytics",
+            "filters": ["TableName.contains(`price`)"]
+        }
+
+        # Get more than 100 schemas (explicit limit)
+        Tool: catalog_schemas
+        Parameters: {
+            "session_id": "enterprise:prod:analytics",
+            "namespace": "market_data",
+            "max_tables": 500
+        }
+
+        # Get all schemas (requires explicit None, use with extreme caution)
+        Tool: catalog_schemas
+        Parameters: {
+            "session_id": "enterprise:prod:analytics",
+            "max_tables": None
+        }
+
+    Logging:
+        - Logs tool invocation, per-table results, and error details at INFO/ERROR levels.
+    """
+    _LOGGER.info(
+        f"[mcp_systems_server:catalog_schemas] Invoked: session_id={session_id!r}, "
+        f"namespace={namespace!r}, table_names={table_names!r}, filters={filters!r}, max_tables={max_tables}"
+    )
+
+    schemas = []
+
+    try:
+        # Get session registry and session
+        _LOGGER.debug(
+            "[mcp_systems_server:catalog_schemas] Accessing session registry from context"
+        )
+        session_registry: CombinedSessionRegistry = (
+            context.request_context.lifespan_context["session_registry"]
+        )
+
+        _LOGGER.debug(
+            f"[mcp_systems_server:catalog_schemas] Retrieving session manager for '{session_id}'"
+        )
+        session_manager = await session_registry.get(session_id)
+
+        _LOGGER.debug(
+            f"[mcp_systems_server:catalog_schemas] Establishing session connection for '{session_id}'"
+        )
+        session = await session_manager.get()
+
+        # Validate this is an enterprise session
+        if not isinstance(session, CorePlusSession):
+            error_msg = (
+                f"catalog_schemas only works with enterprise (Core+) sessions, "
+                f"but session '{session_id}' is {type(session).__name__}"
+            )
+            _LOGGER.error(f"[mcp_systems_server:catalog_schemas] {error_msg}")
+            return {"success": False, "error": error_msg, "isError": True}
+
+        _LOGGER.info(
+            f"[mcp_systems_server:catalog_schemas] Session established for enterprise session: '{session_id}'"
+        )
+
+        # Build combined filters list
+        combined_filters = []
+        if filters:
+            combined_filters.extend(filters)
+        if namespace:
+            combined_filters.append(f"Namespace = `{namespace}`")
+        if table_names:
+            table_names_quoted = ", ".join(f"`{name}`" for name in table_names)
+            combined_filters.append(f"TableName in {table_names_quoted}")
+
+        _LOGGER.debug(
+            f"[mcp_systems_server:catalog_schemas] Combined filters: {combined_filters!r}"
+        )
+
+        # Get catalog table with filters
+        # Use max_tables as max_rows to limit catalog query and prevent excessive RAM usage
+        _LOGGER.debug(
+            f"[mcp_systems_server:catalog_schemas] Retrieving catalog table from session '{session_id}' "
+            f"(max_rows={max_tables})"
+        )
+        catalog_arrow_table, is_complete_catalog = await queries.get_catalog_table(
+            session,
+            max_rows=max_tables,  # Limit catalog query to match max_tables
+            filters=combined_filters if combined_filters else None,
+            distinct_namespaces=False,
+        )
+
+        # Convert to list of dicts for easier processing
+        catalog_entries = catalog_arrow_table.to_pylist()
+        _LOGGER.info(
+            f"[mcp_systems_server:catalog_schemas] Retrieved {len(catalog_entries)} catalog entries after filtering"
+        )
+
+        # is_complete_catalog already reflects whether the catalog was truncated
+        is_complete = is_complete_catalog
+        
+        _LOGGER.debug(
+            f"[mcp_systems_server:catalog_schemas] Processing {len(catalog_entries)} catalog entries "
+            f"(is_complete={is_complete})"
+        )
+
+        # Fetch schema for each catalog entry
+        for entry in catalog_entries:
+            # These fields are required - let it fail if they're missing
+            catalog_namespace = entry["Namespace"]
+            catalog_table_name = entry["TableName"]
+
+            _LOGGER.debug(
+                f"[mcp_systems_server:catalog_schemas] Processing catalog table "
+                f"'{catalog_namespace}.{catalog_table_name}'"
+            )
+
+            try:
+                # Get schema for catalog table (tries historical_table first, then live_table)
+                _LOGGER.debug(
+                    f"[mcp_systems_server:catalog_schemas] Retrieving schema for "
+                    f"'{catalog_namespace}.{catalog_table_name}'"
+                )
+                arrow_meta_table = await queries.get_catalog_meta_table(
+                    session, catalog_namespace, catalog_table_name
+                )
+
+                schema = queries.meta_table_to_dict_list(arrow_meta_table)
+
+                schemas.append(
+                    {
+                        "success": True,
+                        "namespace": catalog_namespace,
+                        "table": catalog_table_name,
+                        "schema": schema,
+                    }
+                )
+
+                _LOGGER.info(
+                    f"[mcp_systems_server:catalog_schemas] Success: Retrieved schema for "
+                    f"'{catalog_namespace}.{catalog_table_name}' ({len(schema)} columns)"
+                )
+
+            except Exception as table_exc:
+                _LOGGER.error(
+                    f"[mcp_systems_server:catalog_schemas] Failed to get schema for "
+                    f"'{catalog_namespace}.{catalog_table_name}': {table_exc!r}",
+                    exc_info=True,
+                )
+                schemas.append(
+                    {
+                        "success": False,
+                        "namespace": catalog_namespace,
+                        "table": catalog_table_name,
+                        "error": str(table_exc),
+                        "isError": True,
+                    }
+                )
+
+        _LOGGER.info(
+            f"[mcp_systems_server:catalog_schemas] Completed: Retrieved {len(schemas)} schema(s), "
+            f"is_complete={is_complete}"
+        )
+
+        return {
+            "success": True,
+            "schemas": schemas,
+            "count": len(schemas),
+            "is_complete": is_complete,
+        }
+
+    except Exception as e:
+        _LOGGER.error(
+            f"[mcp_systems_server:catalog_schemas] Failed for session: '{session_id}', error: {e!r}",
+            exc_info=True,
+        )
+        return {"success": False, "error": str(e), "isError": True}
 
 
 async def _check_session_limits(

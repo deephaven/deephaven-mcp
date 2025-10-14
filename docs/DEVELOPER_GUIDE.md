@@ -907,6 +907,98 @@ filters=["TableName.matches(`.*_daily_.*`)"]
 - Default max_rows of 1000 is lighter than catalog_tables (10000)
 - Ideal for top-down data exploration: namespaces → tables → schemas → data
 
+##### `catalog_schemas`
+
+**Purpose**: Retrieve schemas for catalog tables in a Deephaven Enterprise (Core+) session with flexible filtering.
+
+**Parameters**:
+
+- `session_id` (required, string): ID of the Deephaven enterprise session to query.
+- `namespace` (optional, string): Filter to tables in this specific namespace. If None, searches all namespaces.
+- `table_names` (optional, list[string]): List of specific table names to retrieve schemas for. If None, retrieves schemas for all tables (up to max_tables limit).
+- `filters` (optional, list[string]): List of Deephaven where clause expressions to filter the catalog. Multiple filters are combined with AND logic. Use backticks (`) for string literals.
+- `max_tables` (optional, integer): Maximum number of table schemas to retrieve. Defaults to 100 for safety. Set to null to retrieve all matching schemas (use with extreme caution for large catalogs).
+
+**Returns**:
+
+```json
+{
+  "success": true,
+  "schemas": [
+    {
+      "success": true,
+      "namespace": "market_data",
+      "table": "daily_prices",
+      "schema": [
+        {"name": "Date", "type": "LocalDate"},
+        {"name": "Price", "type": "double"}
+      ]
+    },
+    {
+      "success": false,
+      "namespace": "market_data",
+      "table": "missing_table",
+      "error": "Table not found in catalog",
+      "isError": true
+    }
+  ],
+  "count": 2,
+  "is_complete": true
+}
+```
+
+On complete failure:
+
+```json
+{
+  "success": false,
+  "error": "Error message",
+  "isError": true
+}
+```
+
+**Example Usage**:
+
+```python
+# Get schemas for all tables in a namespace (up to 100)
+catalog_schemas(session_id="enterprise:prod:analytics", namespace="market_data")
+
+# Get schemas for specific tables in a namespace
+catalog_schemas(
+    session_id="enterprise:prod:analytics",
+    namespace="market_data",
+    table_names=["daily_prices", "quotes"]
+)
+
+# Filter-based discovery across namespaces
+catalog_schemas(
+    session_id="enterprise:prod:analytics",
+    filters=["TableName.contains(`price`)"]
+)
+
+# Get all schemas (requires explicit None, use with caution)
+catalog_schemas(
+    session_id="enterprise:prod:analytics",
+    max_tables=None
+)
+```
+
+**Description**: This tool retrieves column schemas for tables in the enterprise catalog. Essential for understanding the structure of catalog tables before loading them with `db.live_table()` or `db.historical_table()`. Only works with Deephaven Enterprise (Core+) sessions. The tool supports flexible filtering by namespace, specific table names, or custom filter expressions.
+
+**Performance Considerations**:
+- Default max_tables=100 is safe for most use cases
+- Fetching schemas for 1000+ tables can take significant time (several minutes)
+- Use namespace or filters to narrow down the search space
+- Specify exact table_names when you know what you need for fastest results
+- Each schema fetch requires a separate query to the catalog
+
+**Important Notes**:
+- Individual table failures don't stop processing of other tables (similar to `table_schemas`)
+- Returns both `namespace` and `table` fields for each schema result
+- String literals in filters MUST use backticks (`), not quotes
+- Filters are applied at the catalog level before fetching schemas
+- Use `catalog_tables` first to discover available tables, then use this tool to get their schemas
+
 ##### `table_schemas`
 
 **Purpose**: Retrieve schemas for one or more tables from a Deephaven session.
@@ -954,6 +1046,43 @@ On complete failure (e.g., session not available):
 ```
 
 **Description**: This tool returns the column schemas for the specified tables in the given Deephaven session. If no table_names are provided, schemas for all tables in the session are returned. The tool maintains the ability to report individual table successes/failures while providing an overall operation status.
+
+##### `list_tables`
+
+**Purpose**: Retrieve the names of all tables in a Deephaven session (lightweight alternative to table_schemas).
+
+**Parameters**:
+
+- `session_id` (required, string): ID of the Deephaven session to query.
+
+**Returns**:
+
+```json
+{
+  "success": true,
+  "session_id": "community:localhost:10000",
+  "table_names": ["trades", "quotes", "orders"],
+  "count": 3
+}
+```
+
+On error:
+
+```json
+{
+  "success": false,
+  "error": "Error message",
+  "isError": true
+}
+```
+
+**Description**: This tool provides a lightweight way to discover what tables exist in a session without fetching their schemas. It's much faster than `table_schemas` when you only need table names. Works with both Community and Enterprise sessions. Use this for quick table discovery, then follow up with `table_schemas` or `get_table_meta` for specific tables you're interested in.
+
+**Performance Notes**:
+- Very fast operation (typically milliseconds)
+- Minimal network transfer (only table names, not schemas or data)
+- Safe to call frequently for session monitoring
+- Scales well even with hundreds of tables
 
 ##### `run_script`
 

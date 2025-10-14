@@ -5,7 +5,9 @@ This module provides coroutine-compatible utility functions for querying Deephav
 
 **Functions Provided:**
     - `get_table(session, table_name)`: Retrieve a Deephaven table as a pyarrow.Table snapshot.
-    - `get_meta_table(session, table_name)`: Retrieve a table's schema/meta table as a pyarrow.Table snapshot.
+    - `get_session_meta_table(session, table_name)`: Retrieve a session table's schema/meta table as a pyarrow.Table snapshot.
+    - `get_catalog_meta_table(session, namespace, table_name)`: Retrieve a catalog table's schema/meta table as a pyarrow.Table snapshot.
+    - `meta_table_to_dict_list(meta_table)`: Convert a meta table to a list of dictionaries for JSON serialization.
     - `get_catalog_table(session)`: Retrieve the catalog table from an enterprise session with optional filtering and namespace extraction.
     - `get_pip_packages_table(session)`: Get a table of installed pip packages as a pyarrow.Table.
     - `get_programming_language_version_table(session)`: Get a table with Python version information as a pyarrow.Table.
@@ -27,7 +29,7 @@ import pyarrow
 from pydeephaven.table import Table
 
 from deephaven_mcp._exceptions import UnsupportedOperationError
-from deephaven_mcp.client import BaseSession
+from deephaven_mcp.client import BaseSession, CorePlusSession
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -51,9 +53,7 @@ def _validate_python_session(function_name: str, session: BaseSession) -> None:
     """
     if session.programming_language.lower() != "python":
         _LOGGER.warning(
-            "[queries:%s] Unsupported programming language: %s",
-            function_name,
-            session.programming_language,
+            f"[queries:{function_name}] Unsupported programming language: {session.programming_language}"
         )
         raise UnsupportedOperationError(
             f"{function_name} only supports Python sessions, "
@@ -87,10 +87,7 @@ async def _apply_filters(
     """
     if filters:
         _LOGGER.debug(
-            "[queries:_apply_filters] Applying %d filter(s) to %s: %s",
-            len(filters),
-            context_name,
-            filters,
+            f"[queries:_apply_filters] Applying {len(filters)} filter(s) to {context_name}: {filters}"
         )
         table = await asyncio.to_thread(table.where, filters)
         _LOGGER.debug("[queries:_apply_filters] Filters applied successfully.")
@@ -139,31 +136,24 @@ async def _apply_row_limit(
         if head:
             limited_table = await asyncio.to_thread(lambda: table.head(max_rows))
             _LOGGER.debug(
-                "[queries:_apply_row_limit] Limited to first %d rows of %s",
-                max_rows,
-                context_name,
+                f"[queries:_apply_row_limit] Limited to first {max_rows} rows of {context_name}"
             )
         else:
             limited_table = await asyncio.to_thread(lambda: table.tail(max_rows))
             _LOGGER.debug(
-                "[queries:_apply_row_limit] Limited to last %d rows of %s",
-                max_rows,
-                context_name,
+                f"[queries:_apply_row_limit] Limited to last {max_rows} rows of {context_name}"
             )
 
         # Determine if we got the complete table
         is_complete = original_size <= max_rows
         _LOGGER.debug(
-            "[queries:_apply_row_limit] %s has %d total rows",
-            context_name.capitalize(),
-            original_size,
+            f"[queries:_apply_row_limit] {context_name.capitalize()} has {original_size} total rows"
         )
         return limited_table, is_complete
     else:
         # Full table requested - log warning for safety
         _LOGGER.warning(
-            "[queries:_apply_row_limit] Retrieving ENTIRE %s - this may cause memory issues for large tables!",
-            context_name,
+            f"[queries:_apply_row_limit] Retrieving ENTIRE {context_name} - this may cause memory issues for large tables!"
         )
         return table, True
 
@@ -220,10 +210,7 @@ async def get_table(
         - This function is intended for internal use only
     """
     _LOGGER.debug(
-        "[queries:get_table] Retrieving table '%s' from session (max_rows=%s, head=%s)...",
-        table_name,
-        max_rows,
-        head,
+        f"[queries:get_table] Retrieving table '{table_name}' from session (max_rows={max_rows}, head={head})..."
     )
 
     # Open the table
@@ -241,17 +228,69 @@ async def get_table(
     arrow_table = await asyncio.to_thread(table.to_arrow)
 
     _LOGGER.debug(
-        "[queries:get_table] Table '%s' converted to Arrow format successfully.",
-        table_name,
+        f"[queries:get_table] Table '{table_name}' converted to Arrow format successfully."
     )
     return arrow_table, is_complete
 
 
-async def get_meta_table(session: BaseSession, table_name: str) -> pyarrow.Table:
+async def _extract_meta_table(table: Table, context: str) -> pyarrow.Table:
     """
-    Asynchronously retrieve the meta table (schema/metadata) for a Deephaven table as a pyarrow.Table snapshot.
+    Helper function to extract meta_table from a Deephaven table.
+    
+    This internal helper consolidates the common pattern of extracting and converting
+    a table's meta_table to Arrow format, used by both session and catalog meta table functions.
+    
+    Args:
+        table (Table): A Deephaven table object with a meta_table property.
+        context (str): Context string for logging (e.g., table name or namespace.table).
+    
+    Returns:
+        pyarrow.Table: The meta table containing schema/metadata information.
+    
+    Raises:
+        Exception: If the meta table cannot be accessed or converted to Arrow format.
+    
+    Note:
+        This is an internal helper function used by get_session_meta_table and get_catalog_meta_table.
+    """
+    meta_table = await asyncio.to_thread(lambda: table.meta_table)
+    arrow_meta_table = await asyncio.to_thread(meta_table.to_arrow)
+    _LOGGER.debug(
+        f"[queries:_extract_meta_table] Meta table for '{context}' retrieved successfully."
+    )
+    return arrow_meta_table
 
-    This helper uses the async methods of BaseSession to open the specified table, access its meta_table property, and convert it to a pyarrow.Table.
+
+def meta_table_to_dict_list(meta_table: pyarrow.Table) -> list[dict[str, str]]:
+    """
+    Convert a meta table (pyarrow.Table) to a list of dictionaries.
+    
+    This helper extracts the 'Name' and 'DataType' columns from a meta table
+    and returns them as a list of dictionaries with 'name' and 'type' keys,
+    suitable for JSON serialization.
+    
+    Args:
+        meta_table (pyarrow.Table): A meta table with 'Name' and 'DataType' columns.
+    
+    Returns:
+        list[dict[str, str]]: A list of dictionaries, each with 'name' and 'type' keys.
+                             Example: [{"name": "col1", "type": "int64"}, ...]
+    
+    Note:
+        This is a helper function for converting meta tables to JSON-serializable format.
+    """
+    return [
+        {"name": row["Name"], "type": row["DataType"]}
+        for row in meta_table.to_pylist()
+    ]
+
+
+async def get_session_meta_table(session: BaseSession, table_name: str) -> pyarrow.Table:
+    """
+    Asynchronously retrieve the meta table (schema/metadata) for a Deephaven session table as a pyarrow.Table.
+
+    This function opens a table from the session's namespace and retrieves its meta table.
+    Use this for tables that exist in the session (created via scripts, queries, or bound tables).
 
     Args:
         session (BaseSession): An active Deephaven session. Must not be closed.
@@ -259,26 +298,82 @@ async def get_meta_table(session: BaseSession, table_name: str) -> pyarrow.Table
 
     Returns:
         pyarrow.Table: The meta table containing schema/metadata information for the specified table.
+                      Each row represents a column with fields like 'Name' and 'DataType'.
 
     Raises:
-        Exception: If the table or its meta table does not exist, the session is closed, or if conversion to Arrow fails.
+        Exception: If the table does not exist, the session is closed, or if meta table retrieval fails.
 
     Note:
-        - Logging is performed at DEBUG level for entry, exit, and error tracing.
-        - This function is intended for internal use only.
+        - For catalog tables in Enterprise sessions, use get_catalog_meta_table instead
+        - Logging is performed at DEBUG level for entry, exit, and error tracing
+        - This function is intended for internal use only
     """
     _LOGGER.debug(
-        "[queries:get_meta_table] Retrieving meta table for '%s' from session...",
-        table_name,
+        f"[queries:get_session_meta_table] Retrieving meta table for session table '{table_name}'..."
     )
     table = await session.open_table(table_name)
-    meta_table = await asyncio.to_thread(lambda: table.meta_table)
-    arrow_meta_table = await asyncio.to_thread(meta_table.to_arrow)
+    return await _extract_meta_table(table, table_name)
+
+
+async def get_catalog_meta_table(
+    session: CorePlusSession, namespace: str, table_name: str
+) -> pyarrow.Table:
+    """
+    Asynchronously retrieve the meta table (schema/metadata) for a catalog table in a Deephaven Enterprise session.
+
+    This function loads a catalog table (trying historical_table first, then live_table as fallback)
+    and retrieves its meta table. Use this for tables in the Enterprise catalog system.
+
+    Args:
+        session: An active Deephaven Enterprise (Core+) session. Must be a CorePlusSession.
+        namespace (str): The catalog namespace containing the table.
+        table_name (str): The name of the table within the namespace.
+
+    Returns:
+        pyarrow.Table: The meta table containing schema/metadata information for the specified catalog table.
+                      Each row represents a column with fields like 'Name' and 'DataType'.
+
+    Raises:
+        Exception: If the table cannot be accessed via either historical_table or live_table,
+                  or if the meta table cannot be retrieved.
+
+    Note:
+        - Tries historical_table first (immutable snapshot, better for schema inspection)
+        - Falls back to live_table if historical_table fails
+        - For session tables, use get_session_meta_table instead
+        - Logging is performed at DEBUG level for entry, exit, and error tracing
+        - This function is intended for internal use only
+    """
     _LOGGER.debug(
-        "[queries:get_meta_table] Meta table for '%s' retrieved successfully.",
-        table_name,
+        f"[queries:get_catalog_meta_table] Retrieving meta table for catalog table '{namespace}.{table_name}'..."
     )
-    return arrow_meta_table
+    
+    # Try historical_table first (immutable snapshot, preferred for schema inspection)
+    table: Table | None = None
+    try:
+        _LOGGER.debug(
+            f"[queries:get_catalog_meta_table] Attempting historical_table for '{namespace}.{table_name}'"
+        )
+        table = await session.historical_table(namespace, table_name)
+    except Exception as hist_exc:
+        _LOGGER.debug(
+            f"[queries:get_catalog_meta_table] historical_table failed for '{namespace}.{table_name}', trying live_table: {hist_exc}"
+        )
+        # Fall back to live_table
+        try:
+            table = await session.live_table(namespace, table_name)
+        except Exception as live_exc:
+            _LOGGER.error(
+                f"[queries:get_catalog_meta_table] Both historical_table and live_table failed for '{namespace}.{table_name}': "
+                f"historical={hist_exc}, live={live_exc}"
+            )
+            raise Exception(
+                f"Failed to load catalog table '{namespace}.{table_name}': "
+                f"historical_table error: {hist_exc}, live_table error: {live_exc}"
+            ) from live_exc
+    
+    # Extract meta table using common helper
+    return await _extract_meta_table(table, f"{namespace}.{table_name}")
 
 
 async def get_programming_language_version_table(session: BaseSession) -> pyarrow.Table:
@@ -509,9 +604,7 @@ async def get_dh_versions(session: BaseSession) -> tuple[str | None, str | None]
             break
 
     _LOGGER.debug(
-        "[queries:get_dh_versions] Found versions: deephaven-core=%s, deephaven_coreplus_worker=%s",
-        dh_core_version,
-        dh_coreplus_version,
+        f"[queries:get_dh_versions] Found versions: deephaven-core={dh_core_version}, deephaven_coreplus_worker={dh_coreplus_version}"
     )
     return dh_core_version, dh_coreplus_version
 
@@ -610,16 +703,13 @@ async def get_catalog_table(
     from deephaven_mcp.client import CorePlusSession
 
     _LOGGER.debug(
-        "[queries:get_catalog_table] Retrieving catalog table from enterprise session (max_rows=%s, filters=%s)...",
-        max_rows,
-        filters,
+        f"[queries:get_catalog_table] Retrieving catalog table from enterprise session (max_rows={max_rows}, filters={filters})..."
     )
 
     # Check if the session is an enterprise session
     if not isinstance(session, CorePlusSession):
         _LOGGER.error(
-            "[queries:get_catalog_table] Session is not an enterprise (Core+) session: %s",
-            type(session).__name__,
+            f"[queries:get_catalog_table] Session is not an enterprise (Core+) session: {type(session).__name__}"
         )
         raise UnsupportedOperationError(
             f"get_catalog_table only supports enterprise (Core+) sessions, "
