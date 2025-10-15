@@ -2259,29 +2259,29 @@ async def catalog_tables_schema(
 
     Example Usage:
         # Get schemas for all tables in a namespace (up to 100)
-        Tool: catalog_schemas
+        Tool: catalog_tables_schema
         Parameters: {
             "session_id": "enterprise:prod:analytics",
             "namespace": "market_data"
         }
 
         # Get schemas for specific tables in a namespace
-        Tool: catalog_schemas
+        Tool: catalog_tables_schema
         Parameters: {
             "session_id": "enterprise:prod:analytics",
             "namespace": "market_data",
-            "table_names": ["daily_prices", "quotes"]
+            "table_names": ["daily_prices", "intraday_quotes"]
         }
 
         # Filter-based discovery across namespaces
-        Tool: catalog_schemas
+        Tool: catalog_tables_schema
         Parameters: {
             "session_id": "enterprise:prod:analytics",
             "filters": ["TableName.contains(`price`)"]
         }
 
         # Get more than 100 schemas (explicit limit)
-        Tool: catalog_schemas
+        Tool: catalog_tables_schema
         Parameters: {
             "session_id": "enterprise:prod:analytics",
             "namespace": "market_data",
@@ -2289,7 +2289,7 @@ async def catalog_tables_schema(
         }
 
         # Get all schemas (requires explicit None, use with extreme caution)
-        Tool: catalog_schemas
+        Tool: catalog_tables_schema
         Parameters: {
             "session_id": "enterprise:prod:analytics",
             "max_tables": None
@@ -2299,7 +2299,7 @@ async def catalog_tables_schema(
         - Logs tool invocation, per-table results, and error details at INFO/ERROR levels.
     """
     _LOGGER.info(
-        f"[mcp_systems_server:catalog_schemas] Invoked: session_id={session_id!r}, "
+        f"[mcp_systems_server:catalog_tables_schema] Invoked: session_id={session_id!r}, "
         f"namespace={namespace!r}, table_names={table_names!r}, filters={filters!r}, max_tables={max_tables}"
     )
 
@@ -2308,20 +2308,20 @@ async def catalog_tables_schema(
     try:
         # Use helper to get session from context
         session = await _get_session_from_context(
-            "catalog_schemas", context, session_id
+            "catalog_tables_schema", context, session_id
         )
 
         # Validate this is an enterprise session
         if not isinstance(session, CorePlusSession):
             error_msg = (
-                f"catalog_schemas only works with enterprise (Core+) sessions, "
+                f"catalog_tables_schema only works with enterprise (Core+) sessions, "
                 f"but session '{session_id}' is {type(session).__name__}"
             )
-            _LOGGER.error(f"[mcp_systems_server:catalog_schemas] {error_msg}")
+            _LOGGER.error(f"[mcp_systems_server:catalog_tables_schema] {error_msg}")
             return {"success": False, "error": error_msg, "isError": True}
 
         _LOGGER.info(
-            f"[mcp_systems_server:catalog_schemas] Session established for enterprise session: '{session_id}'"
+            f"[mcp_systems_server:catalog_tables_schema] Session established for enterprise session: '{session_id}'"
         )
 
         # Build combined filters list
@@ -2335,13 +2335,13 @@ async def catalog_tables_schema(
             combined_filters.append(f"TableName in {table_names_quoted}")
 
         _LOGGER.debug(
-            f"[mcp_systems_server:catalog_schemas] Combined filters: {combined_filters!r}"
+            f"[mcp_systems_server:catalog_tables_schema] Combined filters: {combined_filters!r}"
         )
 
         # Get catalog table with filters
         # Use max_tables as max_rows to limit catalog query and prevent excessive RAM usage
         _LOGGER.debug(
-            f"[mcp_systems_server:catalog_schemas] Retrieving catalog table from session '{session_id}' "
+            f"[mcp_systems_server:catalog_tables_schema] Retrieving catalog table from session '{session_id}' "
             f"(max_rows={max_tables})"
         )
         catalog_arrow_table, is_complete_catalog = await queries.get_catalog_table(
@@ -2354,14 +2354,14 @@ async def catalog_tables_schema(
         # Convert to list of dicts for easier processing
         catalog_entries = catalog_arrow_table.to_pylist()
         _LOGGER.info(
-            f"[mcp_systems_server:catalog_schemas] Retrieved {len(catalog_entries)} catalog entries after filtering"
+            f"[mcp_systems_server:catalog_tables_schema] Retrieved {len(catalog_entries)} catalog entries after filtering"
         )
 
         # is_complete_catalog already reflects whether the catalog was truncated
         is_complete = is_complete_catalog
 
         _LOGGER.debug(
-            f"[mcp_systems_server:catalog_schemas] Processing {len(catalog_entries)} catalog entries "
+            f"[mcp_systems_server:catalog_tables_schema] Processing {len(catalog_entries)} catalog entries "
             f"(is_complete={is_complete})"
         )
 
@@ -2372,14 +2372,14 @@ async def catalog_tables_schema(
             catalog_table_name = entry["TableName"]
 
             _LOGGER.debug(
-                f"[mcp_systems_server:catalog_schemas] Processing catalog table "
+                f"[mcp_systems_server:catalog_tables_schema] Processing catalog table "
                 f"'{catalog_namespace}.{catalog_table_name}'"
             )
 
             try:
                 # Get schema for catalog table (tries historical_table first, then live_table)
                 _LOGGER.debug(
-                    f"[mcp_systems_server:catalog_schemas] Retrieving schema for "
+                    f"[mcp_systems_server:catalog_tables_schema] Retrieving schema for "
                     f"'{catalog_namespace}.{catalog_table_name}'"
                 )
                 arrow_meta_table = await queries.get_catalog_meta_table(
@@ -2393,13 +2393,13 @@ async def catalog_tables_schema(
                 schemas.append(result)
 
                 _LOGGER.info(
-                    f"[mcp_systems_server:catalog_schemas] Success: Retrieved full schema for "
+                    f"[mcp_systems_server:catalog_tables_schema] Success: Retrieved full schema for "
                     f"'{catalog_namespace}.{catalog_table_name}' ({result['row_count']} columns)"
                 )
 
             except Exception as table_exc:
                 _LOGGER.error(
-                    f"[mcp_systems_server:catalog_schemas] Failed to get schema for "
+                    f"[mcp_systems_server:catalog_tables_schema] Failed to get schema for "
                     f"'{catalog_namespace}.{catalog_table_name}': {table_exc!r}",
                     exc_info=True,
                 )
@@ -2414,7 +2414,7 @@ async def catalog_tables_schema(
                 )
 
         _LOGGER.info(
-            f"[mcp_systems_server:catalog_schemas] Completed: Retrieved {len(schemas)} schema(s), "
+            f"[mcp_systems_server:catalog_tables_schema] Completed: Retrieved {len(schemas)} schema(s), "
             f"is_complete={is_complete}"
         )
 
@@ -2427,7 +2427,7 @@ async def catalog_tables_schema(
 
     except Exception as e:
         _LOGGER.error(
-            f"[mcp_systems_server:catalog_schemas] Failed for session: '{session_id}', error: {e!r}",
+            f"[mcp_systems_server:catalog_tables_schema] Failed for session: '{session_id}', error: {e!r}",
             exc_info=True,
         )
         return {"success": False, "error": str(e), "isError": True}
