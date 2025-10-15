@@ -34,7 +34,9 @@ class MockContext:
 # ===== Test Helper Functions =====
 
 
-def create_mock_arrow_meta_table(schema_data, schema_fields=None):
+def create_mock_arrow_meta_table(
+    schema_data: list[dict], schema_fields: list | None = None
+) -> MagicMock:
     """
     Create a mock PyArrow meta table for testing schema operations.
 
