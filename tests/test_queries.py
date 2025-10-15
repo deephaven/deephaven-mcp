@@ -514,8 +514,6 @@ async def test_extract_meta_table_error():
             await _extract_meta_table(table_mock, "test_table")
 
 
-
-
 @pytest.mark.asyncio
 async def test_get_pip_packages_table_success(caplog):
     session_mock = MagicMock()
@@ -1249,27 +1247,27 @@ async def test_get_catalog_meta_table_success_historical():
 
     # Create mock session
     session_mock = MagicMock(spec=CorePlusSession)
-    
+
     # Mock table with meta_table
     mock_table = MagicMock()
     mock_meta_table = MagicMock()
     mock_arrow_table = MagicMock(spec=pyarrow.Table)
-    
+
     mock_meta_table.to_arrow = MagicMock(return_value=mock_arrow_table)
     mock_table.meta_table = mock_meta_table
-    
+
     # historical_table succeeds
     session_mock.historical_table = AsyncMock(return_value=mock_table)
-    
+
     # Mock asyncio.to_thread to run synchronously
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
-    
+
     with patch("deephaven_mcp.queries.asyncio.to_thread", new=fake_to_thread):
         result = await get_catalog_meta_table(
             session_mock, "market_data", "daily_prices"
         )
-    
+
     assert result is mock_arrow_table
     session_mock.historical_table.assert_called_once_with("market_data", "daily_prices")
 
@@ -1281,30 +1279,30 @@ async def test_get_catalog_meta_table_fallback_to_live():
 
     # Create mock session
     session_mock = MagicMock(spec=CorePlusSession)
-    
+
     # Mock table with meta_table
     mock_table = MagicMock()
     mock_meta_table = MagicMock()
     mock_arrow_table = MagicMock(spec=pyarrow.Table)
-    
+
     mock_meta_table.to_arrow = MagicMock(return_value=mock_arrow_table)
     mock_table.meta_table = mock_meta_table
-    
+
     # historical_table fails, live_table succeeds
     session_mock.historical_table = AsyncMock(
         side_effect=Exception("Historical table not found")
     )
     session_mock.live_table = AsyncMock(return_value=mock_table)
-    
+
     # Mock asyncio.to_thread to run synchronously
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
-    
+
     with patch("deephaven_mcp.queries.asyncio.to_thread", new=fake_to_thread):
         result = await get_catalog_meta_table(
             session_mock, "market_data", "live_trades"
         )
-    
+
     assert result is mock_arrow_table
     session_mock.historical_table.assert_called_once_with("market_data", "live_trades")
     session_mock.live_table.assert_called_once_with("market_data", "live_trades")
@@ -1317,17 +1315,15 @@ async def test_get_catalog_meta_table_both_fail():
 
     # Create mock session
     session_mock = MagicMock(spec=CorePlusSession)
-    
+
     # Both historical_table and live_table fail
     session_mock.historical_table = AsyncMock(
         side_effect=Exception("Historical table not found")
     )
     session_mock.live_table = AsyncMock(side_effect=Exception("Live table not found"))
-    
+
     with pytest.raises(
         Exception,
         match="Failed to load catalog table 'market_data.missing_table'",
     ):
         await get_catalog_meta_table(session_mock, "market_data", "missing_table")
-
-

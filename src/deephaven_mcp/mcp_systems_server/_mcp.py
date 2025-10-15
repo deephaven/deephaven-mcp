@@ -508,21 +508,21 @@ async def _get_session_from_context(
 ) -> BaseSession:
     """
     Get an active session from the MCP context.
-    
+
     This helper eliminates duplication of the common pattern for accessing
     sessions from the MCP context. It handles the standard flow of:
     1. Extracting session_registry from context
     2. Getting the session_manager for the session_id
     3. Establishing the session connection
-    
+
     Args:
         function_name (str): Name of calling function for logging purposes
         context (Context): The MCP context object containing lifespan context
         session_id (str): ID of the session to retrieve
-    
+
     Returns:
         BaseSession: The active session connection
-    
+
     Raises:
         KeyError: If session_id not found in registry
         Exception: If session cannot be established or context is invalid
@@ -533,21 +533,21 @@ async def _get_session_from_context(
     session_registry: CombinedSessionRegistry = (
         context.request_context.lifespan_context["session_registry"]
     )
-    
+
     _LOGGER.debug(
         f"[mcp_systems_server:{function_name}] Retrieving session manager for '{session_id}'"
     )
     session_manager = await session_registry.get(session_id)
-    
+
     _LOGGER.debug(
         f"[mcp_systems_server:{function_name}] Establishing session connection for '{session_id}'"
     )
     session = await session_manager.get()
-    
+
     _LOGGER.info(
         f"[mcp_systems_server:{function_name}] Session established for '{session_id}'"
     )
-    
+
     return session
 
 
@@ -877,8 +877,8 @@ async def session_tables_schema(
     comprehension of table structure.
 
     Returns complete metadata information for the specified tables including column names, data types,
-    and all metadata properties. If no table_names are provided, returns schemas for all available 
-    tables in the session. This provides the FULL schema with all metadata properties, not just 
+    and all metadata properties. If no table_names are provided, returns schemas for all available
+    tables in the session. This provides the FULL schema with all metadata properties, not just
     simplified name/type pairs.
 
     Terminology Note:
@@ -933,8 +933,8 @@ async def session_tables_schema(
             'success': True,
             'schemas': [
                 {
-                    'success': True, 
-                    'table': 'MyTable', 
+                    'success': True,
+                    'table': 'MyTable',
                     'data': [{'Name': 'Col1', 'DataType': 'int', ...}, ...],
                     'row_count': 3
                 },
@@ -998,12 +998,16 @@ async def session_tables_schema(
                 f"[mcp_systems_server:session_tables_schema] Processing table '{table_name}' in session '{session_id}'"
             )
             try:
-                meta_arrow_table = await queries.get_session_meta_table(session, table_name)
-                
+                meta_arrow_table = await queries.get_session_meta_table(
+                    session, table_name
+                )
+
                 # Use helper to format result (no namespace for session tables)
-                result = _format_meta_table_result(meta_arrow_table, table_name, namespace=None)
+                result = _format_meta_table_result(
+                    meta_arrow_table, table_name, namespace=None
+                )
                 schemas.append(result)
-                
+
                 _LOGGER.info(
                     f"[mcp_systems_server:session_tables_schema] Success: Retrieved full schema for table '{table_name}' ({result['row_count']} columns)"
                 )
@@ -1413,7 +1417,7 @@ async def session_table_data(
 
     This tool queries the specified Deephaven session for table data and returns it in the requested format
     with optional row limiting. Supports multiple output formats optimized for AI agent consumption.
-    
+
     **Format Accuracy for AI Agents** (based on empirical research):
     - markdown-kv: 61% accuracy (highest comprehension, more tokens)
     - markdown-table: 55% accuracy (good balance)
@@ -1421,7 +1425,7 @@ async def session_table_data(
     - yaml: 50% accuracy
     - xml: 45% accuracy
     - csv: 44% accuracy (lowest comprehension, fewest tokens)
-    
+
     Includes safety limits (50MB max response size) to prevent memory issues.
 
     Terminology Note:
@@ -1665,9 +1669,7 @@ async def _get_catalog_data(
 
     try:
         # Use helper to get session from context
-        session = await _get_session_from_context(
-            tool_name, context, session_id
-        )
+        session = await _get_session_from_context(tool_name, context, session_id)
 
         # Get catalog data using queries module (includes enterprise check and filtering)
         _LOGGER.debug(
@@ -2357,7 +2359,7 @@ async def catalog_tables_schema(
 
         # is_complete_catalog already reflects whether the catalog was truncated
         is_complete = is_complete_catalog
-        
+
         _LOGGER.debug(
             f"[mcp_systems_server:catalog_schemas] Processing {len(catalog_entries)} catalog entries "
             f"(is_complete={is_complete})"
@@ -2438,14 +2440,14 @@ def _format_meta_table_result(
 ) -> dict:
     """
     Format a PyArrow meta table into a standardized result dictionary.
-    
-    This helper eliminates code duplication between session_tables_schema and 
+
+    This helper eliminates code duplication between session_tables_schema and
     catalog_tables_schema by providing a single place to format metadata results.
-    
+
     A "meta table" in Deephaven is a table that describes another table's structure.
     Each row in a meta table represents one column from the original table, with
     properties like Name, DataType, IsPartitioning, ComponentType, etc.
-    
+
     Args:
         arrow_meta_table (pyarrow.Table): The PyArrow meta table containing column metadata.
             Each row describes one column of the original table.
@@ -2453,7 +2455,7 @@ def _format_meta_table_result(
         namespace (str | None): Optional namespace for catalog tables. If provided (not None),
             it will be included in the result. Session tables should pass None since they
             don't have namespaces. Defaults to None.
-    
+
     Returns:
         dict: Formatted result with success status and metadata fields. The structure is:
             {
@@ -2465,11 +2467,11 @@ def _format_meta_table_result(
                 "row_count": int,  # Number of rows in meta table = number of columns in original table
                 "namespace": str  # Only present if namespace parameter was not None (catalog tables)
             }
-            
+
             Note: The "namespace" field is conditionally included only when the namespace
             parameter is not None. This keeps session table results clean (no namespace field)
             while catalog table results include the namespace for context.
-    
+
     Example:
         >>> # For a table with 2 columns (Date and Price)
         >>> result = _format_meta_table_result(meta_table, "daily_prices", "market_data")
@@ -2495,13 +2497,13 @@ def _format_meta_table_result(
     # to_pylist() returns native Python types (dict, list, str, int, bool, None)
     # which are JSON-serializable for MCP protocol
     meta_data = arrow_meta_table.to_pylist()
-    
+
     # Extract schema of the meta table itself
     meta_schema = [
         {"name": field.name, "type": str(field.type)}
         for field in arrow_meta_table.schema
     ]
-    
+
     result = {
         "success": True,
         "table": table_name,
@@ -2510,11 +2512,11 @@ def _format_meta_table_result(
         "meta_columns": meta_schema,
         "row_count": len(arrow_meta_table),
     }
-    
+
     # Only include namespace for catalog tables (where it's meaningful)
     if namespace is not None:
         result["namespace"] = namespace
-    
+
     return result
 
 
@@ -2623,14 +2625,14 @@ async def _get_system_config(
               or an empty dict {} if the system is not found.
             - error_dict (dict | None): Error response dict with 'error' and 'isError'
               keys if the system is not found, or None if successful.
-            
+
             Success case: ({"url": "...", "username": "...", ...}, None)
             Error case: ({}, {"error": "Enterprise system 'X' not found...", "isError": True})
 
     Raises:
         Exception: May raise exceptions for unexpected errors such as issues reading
             the configuration file or invalid configuration structure.
-    
+
     Example:
         >>> config_mgr = ConfigManager()
         >>> system_config, error = await _get_system_config("session_enterprise_create", config_mgr, "prod")
@@ -3240,15 +3242,15 @@ async def session_enterprise_delete(
 # ) -> dict:
 #     """
 #     MCP Tool: Safely sample data from a catalog table with strict row limits.
-#     
+#
 #     This tool provides safe access to catalog table data with enforced row limits
 #     to prevent overwhelming responses. Useful for previewing catalog table contents.
-#     
+#
 #     Terminology Note:
 #     - 'Session' and 'worker' are interchangeable terms for a running Deephaven instance
 #     - 'Enterprise session' runs Deephaven Enterprise (also called 'Core+' or 'CorePlus')
 #     - Catalog tables are only available in Enterprise (Core+) sessions
-#     
+#
 #     Args:
 #         context: MCP context
 #         session_id: Enterprise session ID
@@ -3256,7 +3258,7 @@ async def session_enterprise_delete(
 #         table_name: Name of the catalog table
 #         max_rows: Maximum rows to return (default 100, hard limit)
 #         format: Output format (json-row, json-column, csv)
-#     
+#
 #     Returns:
 #         dict: Sample data with success status and formatted table data
 #     """
@@ -3272,19 +3274,19 @@ async def session_enterprise_delete(
 # ) -> dict:
 #     """
 #     MCP Tool: Create a new Deephaven Community (Core) session.
-#     
+#
 #     Creates a new community session if the configuration supports it.
 #     Note: Community session creation may not be supported in all deployments.
-#     
+#
 #     Terminology Note:
 #     - 'Session' and 'worker' are interchangeable terms for a running Deephaven instance
 #     - 'COMMUNITY' sessions run Deephaven Community (also called 'Core')
-#     
+#
 #     Args:
 #         context: MCP context
 #         session_name: Name for the new session
 #         script_path: Optional initialization script path
-#     
+#
 #     Returns:
 #         dict: Creation result with session_id and status
 #     """
@@ -3299,18 +3301,18 @@ async def session_enterprise_delete(
 # ) -> dict:
 #     """
 #     MCP Tool: Delete a Deephaven Community (Core) session.
-#     
+#
 #     Deletes an existing community session if the configuration supports it.
 #     Note: Community session deletion may not be supported in all deployments.
-#     
+#
 #     Terminology Note:
 #     - 'Session' and 'worker' are interchangeable terms for a running Deephaven instance
 #     - 'COMMUNITY' sessions run Deephaven Community (also called 'Core')
-#     
+#
 #     Args:
 #         context: MCP context
 #         session_id: ID of the session to delete
-#     
+#
 #     Returns:
 #         dict: Deletion result with success status
 #     """

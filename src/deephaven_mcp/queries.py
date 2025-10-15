@@ -235,20 +235,20 @@ async def get_table(
 async def _extract_meta_table(table: Table, context: str) -> pyarrow.Table:
     """
     Helper function to extract meta_table from a Deephaven table.
-    
+
     This internal helper consolidates the common pattern of extracting and converting
     a table's meta_table to Arrow format, used by both session and catalog meta table functions.
-    
+
     Args:
         table (Table): A Deephaven table object with a meta_table property.
         context (str): Context string for logging (e.g., table name or namespace.table).
-    
+
     Returns:
         pyarrow.Table: The meta table containing schema/metadata information.
-    
+
     Raises:
         Exception: If the meta table cannot be accessed or converted to Arrow format.
-    
+
     Note:
         This is an internal helper function used by get_session_meta_table and get_catalog_meta_table.
     """
@@ -260,7 +260,9 @@ async def _extract_meta_table(table: Table, context: str) -> pyarrow.Table:
     return arrow_meta_table
 
 
-async def get_session_meta_table(session: BaseSession, table_name: str) -> pyarrow.Table:
+async def get_session_meta_table(
+    session: BaseSession, table_name: str
+) -> pyarrow.Table:
     """
     Asynchronously retrieve the meta table (schema/metadata) for a Deephaven session table as a pyarrow.Table.
 
@@ -322,7 +324,7 @@ async def get_catalog_meta_table(
     _LOGGER.debug(
         f"[queries:get_catalog_meta_table] Retrieving meta table for catalog table '{namespace}.{table_name}'..."
     )
-    
+
     # Try historical_table first (immutable snapshot, preferred for schema inspection)
     table: Table | None = None
     try:
@@ -346,7 +348,7 @@ async def get_catalog_meta_table(
                 f"Failed to load catalog table '{namespace}.{table_name}': "
                 f"historical_table error: {hist_exc}, live_table error: {live_exc}"
             ) from live_exc
-    
+
     # Extract meta table using common helper
     return await _extract_meta_table(table, f"{namespace}.{table_name}")
 
