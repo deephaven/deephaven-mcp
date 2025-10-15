@@ -2473,13 +2473,15 @@ async def test_session_table_data_success_default_params():
 
         assert result["success"] is True
         assert result["table_name"] == "table1"
-        assert result["format"] == "markdown-kv"  # Auto format for small table (≤1000)
+        assert (
+            result["format"] == "markdown-table"
+        )  # Default format changed to markdown-table
         assert result["row_count"] == 50
         assert result["is_complete"] is True
         assert "schema" in result
         assert "data" in result
-        assert isinstance(result["data"], str)  # markdown-kv returns string
-        assert "## Record 1" in result["data"]
+        assert isinstance(result["data"], str)  # markdown-table returns string
+        assert "|" in result["data"]  # markdown-table uses pipe delimiters
 
         # Verify queries.get_table was called with correct parameters
         mock_get_table.assert_called_once_with(
@@ -2566,7 +2568,9 @@ async def test_session_table_data_success_full_table():
         )
 
         assert result["success"] is True
-        assert result["format"] == "csv"  # Auto format for large table (>10000 rows)
+        assert (
+            result["format"] == "markdown-table"
+        )  # Default format is now markdown-table
         assert result["is_complete"] is True
 
         mock_get_table.assert_called_once_with(
@@ -5100,3 +5104,233 @@ async def test_catalog_tables_schema_empty_catalog():
     assert result["count"] == 0
     assert result["is_complete"] is True
     assert len(result["schemas"]) == 0
+
+
+# ===== _get_enterprise_session tests =====
+
+
+@pytest.mark.asyncio
+async def test_get_enterprise_session_success():
+    """Test _get_enterprise_session with a valid CorePlusSession."""
+    from deephaven_mcp.client import CorePlusSession
+    from deephaven_mcp.mcp_systems_server._mcp import _get_enterprise_session
+
+    mock_session = MagicMock(spec=CorePlusSession)
+    mock_session_manager = MagicMock()
+    mock_session_manager.get = AsyncMock(return_value=mock_session)
+
+    mock_registry = MagicMock()
+    mock_registry.get = AsyncMock(return_value=mock_session_manager)
+
+    context = MockContext({"session_registry": mock_registry})
+
+    session, error = await _get_enterprise_session(
+        "test_function", context, "test-session-id"
+    )
+
+    assert session is mock_session  # Returns the validated session
+    assert error is None
+
+
+@pytest.mark.asyncio
+async def test_get_enterprise_session_not_enterprise():
+    """Test _get_enterprise_session with a non-enterprise session."""
+    from deephaven_mcp.client import BaseSession
+    from deephaven_mcp.mcp_systems_server._mcp import _get_enterprise_session
+
+    mock_session = MagicMock(spec=BaseSession)
+    mock_session_manager = MagicMock()
+    mock_session_manager.get = AsyncMock(return_value=mock_session)
+
+    mock_registry = MagicMock()
+    mock_registry.get = AsyncMock(return_value=mock_session_manager)
+
+    context = MockContext({"session_registry": mock_registry})
+
+    session, error = await _get_enterprise_session(
+        "test_function", context, "test-session-id"
+    )
+
+    assert session is None
+    assert error is not None
+    assert error["success"] is False
+    assert "test_function only works with enterprise (Core+) sessions" in error["error"]
+    assert "test-session-id" in error["error"]
+    assert error["isError"] is True
+
+
+# ===== catalog_table_sample tests =====
+
+
+@pytest.mark.asyncio
+async def test_catalog_table_sample_success():
+    """Test catalog_table_sample with successful data retrieval."""
+    from deephaven_mcp.client import CorePlusSession
+
+    mock_session = MagicMock(spec=CorePlusSession)
+    mock_session_manager = MagicMock()
+    mock_session_manager.get = AsyncMock(return_value=mock_session)
+
+    mock_registry = MagicMock()
+    mock_registry.get = AsyncMock(return_value=mock_session_manager)
+
+    context = MockContext({"session_registry": mock_registry})
+
+    # Mock arrow table with data
+    mock_arrow_table = MagicMock()
+    mock_arrow_table.__len__ = MagicMock(return_value=10)
+    mock_arrow_table.schema = MagicMock()
+    mock_arrow_table.schema.__len__ = MagicMock(return_value=3)
+    mock_arrow_table.to_pydict = MagicMock(
+        return_value={
+            "col1": [1, 2, 3],
+            "col2": ["a", "b", "c"],
+            "col3": [4.5, 5.5, 6.5],
+        }
+    )
+
+    with patch(
+        "deephaven_mcp.mcp_systems_server._mcp.queries.get_catalog_table_data"
+    ) as mock_get_data:
+        mock_get_data.return_value = (mock_arrow_table, True)
+
+        result = await mcp_mod.catalog_table_sample(
+            context, "enterprise:prod:analytics", "public", "users", max_rows=10
+        )
+
+    assert result["success"] is True
+    assert result["row_count"] == 10
+    assert result["is_complete"] is True
+    assert (
+        result["format"] == "markdown-table"
+    )  # Default format changed to markdown-table
+    assert result["namespace"] == "public"
+    assert result["table_name"] == "users"
+    assert "data" in result
+
+
+@pytest.mark.asyncio
+async def test_catalog_table_sample_with_format():
+    """Test catalog_table_sample with different format."""
+    from deephaven_mcp.client import CorePlusSession
+
+    mock_session = MagicMock(spec=CorePlusSession)
+    mock_session_manager = MagicMock()
+    mock_session_manager.get = AsyncMock(return_value=mock_session)
+
+    mock_registry = MagicMock()
+    mock_registry.get = AsyncMock(return_value=mock_session_manager)
+
+    context = MockContext({"session_registry": mock_registry})
+
+    mock_arrow_table = MagicMock()
+    mock_arrow_table.__len__ = MagicMock(return_value=5)
+    mock_arrow_table.schema = MagicMock()
+    mock_arrow_table.schema.__len__ = MagicMock(return_value=2)
+    mock_arrow_table.to_pydict = MagicMock(
+        return_value={"id": [1, 2, 3], "name": ["Alice", "Bob", "Charlie"]}
+    )
+
+    with patch(
+        "deephaven_mcp.mcp_systems_server._mcp.queries.get_catalog_table_data"
+    ) as mock_get_data:
+        mock_get_data.return_value = (mock_arrow_table, False)
+
+        result = await mcp_mod.catalog_table_sample(
+            context,
+            "enterprise:prod:analytics",
+            "analytics",
+            "events",
+            max_rows=5,
+            format="markdown-table",
+        )
+
+    assert result["success"] is True
+    assert result["format"] == "markdown-table"
+    assert result["is_complete"] is False
+
+
+@pytest.mark.asyncio
+async def test_catalog_table_sample_not_enterprise_session():
+    """Test catalog_table_sample with non-enterprise session."""
+    from deephaven_mcp.client import BaseSession
+
+    mock_session = MagicMock(spec=BaseSession)
+    mock_session_manager = MagicMock()
+    mock_session_manager.get = AsyncMock(return_value=mock_session)
+
+    mock_registry = MagicMock()
+    mock_registry.get = AsyncMock(return_value=mock_session_manager)
+
+    context = MockContext({"session_registry": mock_registry})
+
+    result = await mcp_mod.catalog_table_sample(
+        context, "enterprise:prod:analytics", "public", "users"
+    )
+
+    assert result["success"] is False
+    assert "only works with enterprise (Core+) sessions" in result["error"]
+    assert result["isError"] is True
+
+
+@pytest.mark.asyncio
+async def test_catalog_table_sample_exception():
+    """Test catalog_table_sample with exception during data retrieval."""
+    from deephaven_mcp.client import CorePlusSession
+
+    mock_session = MagicMock(spec=CorePlusSession)
+    mock_session_manager = MagicMock()
+    mock_session_manager.get = AsyncMock(return_value=mock_session)
+
+    mock_registry = MagicMock()
+    mock_registry.get = AsyncMock(return_value=mock_session_manager)
+
+    context = MockContext({"session_registry": mock_registry})
+
+    with patch(
+        "deephaven_mcp.mcp_systems_server._mcp.queries.get_catalog_table_data"
+    ) as mock_get_data:
+        mock_get_data.side_effect = Exception("Database connection failed")
+
+        result = await mcp_mod.catalog_table_sample(
+            context, "enterprise:prod:analytics", "public", "users"
+        )
+
+    assert result["success"] is False
+    assert "Database connection failed" in result["error"]
+    assert result["isError"] is True
+
+
+@pytest.mark.asyncio
+async def test_catalog_table_sample_response_too_large():
+    """Test catalog_table_sample when response size exceeds limit."""
+    from deephaven_mcp.client import CorePlusSession
+
+    mock_session = MagicMock(spec=CorePlusSession)
+    mock_session_manager = MagicMock()
+    mock_session_manager.get = AsyncMock(return_value=mock_session)
+
+    mock_registry = MagicMock()
+    mock_registry.get = AsyncMock(return_value=mock_session_manager)
+
+    context = MockContext({"session_registry": mock_registry})
+
+    # Mock arrow table with huge data that exceeds size limit
+    mock_arrow_table = MagicMock()
+    mock_arrow_table.__len__ = MagicMock(return_value=100000)  # 100k rows
+    mock_arrow_table.schema = MagicMock()
+    mock_arrow_table.schema.__len__ = MagicMock(return_value=100)  # 100 columns
+
+    with patch(
+        "deephaven_mcp.mcp_systems_server._mcp.queries.get_catalog_table_data"
+    ) as mock_get_data:
+        mock_get_data.return_value = (mock_arrow_table, True)
+
+        result = await mcp_mod.catalog_table_sample(
+            context, "enterprise:prod:analytics", "public", "huge_table"
+        )
+
+    assert result["success"] is False
+    assert "max 50MB" in result["error"]
+    assert "reduce max_rows" in result["error"]
+    assert result["isError"] is True

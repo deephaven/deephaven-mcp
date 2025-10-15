@@ -22,6 +22,7 @@ Tools Provided:
     - catalog_tables_list: Retrieve catalog table entries from enterprise (Core+) sessions with optional filtering by namespace or table name patterns.
     - catalog_namespaces_list: Retrieve distinct namespaces from enterprise (Core+) catalog for efficient discovery of data domains.
     - catalog_tables_schema: Retrieve full schemas for catalog tables in enterprise (Core+) sessions with flexible filtering by namespace, table names, or custom filters.
+    - catalog_table_sample: Retrieve sample data from a catalog table in enterprise (Core+) sessions with flexible formatting and row limiting for safe previewing.
     - session_enterprise_create: Create a new enterprise session with configurable parameters and resource limits.
     - session_enterprise_delete: Delete an existing enterprise session and clean up resources.
 
@@ -38,7 +39,7 @@ import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Any, TypeVar
+from typing import Any, TypeVar, cast
 
 import aiofiles
 import pyarrow
@@ -551,6 +552,60 @@ async def _get_session_from_context(
     return session
 
 
+async def _get_enterprise_session(
+    function_name: str, context: Context, session_id: str
+) -> tuple[CorePlusSession | None, dict[str, object] | None]:
+    """
+    Get and validate an enterprise (Core+) session from context.
+
+    This helper combines session retrieval and validation into a single clean operation,
+    consolidating the common pattern of getting a session and verifying it's an enterprise
+    (Core+) session. This eliminates code duplication across catalog-related tools.
+
+    Args:
+        function_name (str): Name of calling function for logging and error messages.
+        context (Context): The MCP context object containing lifespan context with session_registry.
+        session_id (str): ID of the session to retrieve (e.g., "enterprise:prod:analytics").
+
+    Returns:
+        tuple: A 2-tuple (session, error) where:
+            - session (CorePlusSession | None): The validated enterprise session on success, None on failure.
+            - error (dict | None): None on success, structured error dict on failure with keys:
+                - 'success': False
+                - 'error': str (human-readable error message)
+                - 'isError': True
+
+    Error Conditions:
+        - Session not found in registry
+        - Session is not a CorePlusSession (community session provided)
+        - Any exception during session retrieval
+
+    Example:
+        >>> session, error = await _get_enterprise_session("catalog_tables_schema", context, "enterprise:prod:analytics")
+        >>> if error:
+        >>>     return error
+        >>> session = cast(CorePlusSession, session)  # Type narrowing for mypy
+    """
+    try:
+        # Get session from context
+        session = await _get_session_from_context(function_name, context, session_id)
+
+        # Validate it's an enterprise session
+        if not isinstance(session, CorePlusSession):
+            error_msg = (
+                f"{function_name} only works with enterprise (Core+) sessions, "
+                f"but session '{session_id}' is {type(session).__name__}"
+            )
+            _LOGGER.error(f"[mcp_systems_server:{function_name}] {error_msg}")
+            return None, {"success": False, "error": error_msg, "isError": True}
+
+        return session, None
+    except Exception as e:
+        error_msg = f"Failed to get session '{session_id}': {e}"
+        _LOGGER.error(f"[mcp_systems_server:{function_name}] {error_msg}")
+        return None, {"success": False, "error": error_msg, "isError": True}
+
+
 async def _get_session_liveness_info(
     mgr: BaseItemManager, session_id: str, attempt_to_connect: bool
 ) -> tuple[bool, str, str | None]:
@@ -696,6 +751,69 @@ async def _get_session_versions(
             f"[mcp_systems_server:session_details] Could not get Deephaven versions for '{session_id}': {e!r}"
         )
         return None, None
+
+
+def _build_table_data_response(
+    arrow_table: pyarrow.Table,
+    is_complete: bool,
+    format: str,
+    table_name: str | None = None,
+    namespace: str | None = None,
+) -> dict:
+    """
+    Build a standardized table data response with schema, formatting, and metadata.
+
+    This helper consolidates the common pattern of:
+    1. Extracting schema from Arrow table
+    2. Formatting data with format_table_data
+    3. Building response dict with standard fields
+
+    Used by both session table tools and catalog table tools to ensure consistent
+    response structure across all table data retrieval operations.
+
+    Args:
+        arrow_table (pyarrow.Table): The Arrow table containing the data.
+        is_complete (bool): Whether the entire table was retrieved (False if truncated by max_rows).
+        format (str): Desired output format (may be optimization strategy or specific format like "csv", "json-row", etc.).
+        table_name (str | None): Optional table name to include in response. Recommended for clarity.
+        namespace (str | None): Optional namespace to include in response. Use for catalog tables only.
+
+    Returns:
+        dict: Standardized response with success=True and fields:
+            - success (bool): Always True for this helper (errors handled by callers).
+            - format (str): Actual format used (resolved from optimization strategies to specific format).
+            - schema (list[dict]): Column definitions with name and type.
+            - row_count (int): Number of rows in the response.
+            - is_complete (bool): Whether entire table was retrieved.
+            - data (varies): Formatted table data (type depends on format).
+            - table_name (str, optional): Included if table_name parameter provided.
+            - namespace (str, optional): Included if namespace parameter provided (catalog tables).
+    """
+    # Extract schema
+    schema = [
+        {"name": field.name, "type": str(field.type)} for field in arrow_table.schema
+    ]
+
+    # Format data
+    actual_format, formatted_data = format_table_data(arrow_table, format_type=format)
+
+    # Build response
+    response = {
+        "success": True,
+        "format": actual_format,
+        "schema": schema,
+        "row_count": len(arrow_table),
+        "is_complete": is_complete,
+        "data": formatted_data,
+    }
+
+    # Add optional fields
+    if namespace is not None:
+        response["namespace"] = namespace
+    if table_name is not None:
+        response["table_name"] = table_name
+
+    return response
 
 
 @mcp_server.tool()
@@ -965,9 +1083,6 @@ async def session_tables_schema(
             "session_id": "enterprise:prod:analytics",
             "table_names": ["market_data"]
         }
-
-    Logging:
-        - Logs tool invocation, per-table results, and error details at INFO/ERROR levels.
     """
     _LOGGER.info(
         f"[mcp_systems_server:session_tables_schema] Invoked: session_id={session_id!r}, table_names={table_names!r}"
@@ -1097,9 +1212,6 @@ async def session_tables_list(context: Context, session_id: str) -> dict:
         - No network data transfer (just metadata query)
         - Safe to call frequently for session monitoring
         - Scales well even with hundreds of tables
-
-    Logging:
-        - Logs tool invocation, success/failure, and error details at INFO/ERROR levels.
     """
     _LOGGER.info(
         f"[mcp_systems_server:session_tables_list] Invoked: session_id={session_id!r}"
@@ -1190,9 +1302,6 @@ async def session_script_run(
             "session_id": "community:localhost:10000",
             "script_path": "/path/to/analysis_script.py"
         }
-
-    Logging:
-        - Logs tool invocation, script source/path, execution status, and error details at INFO/WARNING/ERROR levels.
     """
     _LOGGER.info(
         f"[mcp_systems_server:session_script_run] Invoked: session_id={session_id!r}, script={'<provided>' if script else None}, script_path={script_path!r}"
@@ -1407,7 +1516,7 @@ async def session_table_data(
     table_name: str,
     max_rows: int | None = 1000,
     head: bool = True,
-    format: str = "auto",
+    format: str = "optimize-rendering",
 ) -> dict:
     r"""
     MCP Tool: Retrieve TABULAR DATA from a specified Deephaven session table.
@@ -1441,16 +1550,17 @@ async def session_table_data(
                                         Set to None to retrieve entire table (use with caution for large tables).
         head (bool, optional): Direction of row retrieval. If True (default), retrieve from beginning.
                               If False, retrieve from end (most recent rows for time-series data).
-        format (str, optional): Output format selection. Defaults to "auto". Options:
-                               - "auto": Smart selection (≤1000: markdown-kv, 1001-10000: markdown-table, >10000: csv)
-                               - "optimize-accuracy": Always use markdown-kv (typically better comprehension, more tokens)
+        format (str, optional): Output format selection. Defaults to "optimize-rendering" for best table display.
+                               Options:
+                               - "optimize-rendering": (DEFAULT) Always use markdown-table (best for AI agent table display)
+                               - "optimize-accuracy": Always use markdown-kv (best comprehension, more tokens)
                                - "optimize-cost": Always use csv (fewer tokens, may be harder to parse)
                                - "optimize-speed": Always use json-column (fastest conversion)
+                               - "markdown-table": String with pipe-delimited table (| col1 | col2 |\n| --- | --- |\n| val1 | val2 |)
+                               - "markdown-kv": String with record headers and key-value pairs (## Record 1\ncol1: val1\ncol2: val2)
                                - "json-row": List of dicts, one per row: [{col1: val1, col2: val2}, ...]
                                - "json-column": Dict with column names as keys, value arrays: {col1: [val1, val2], col2: [val3, val4]}
                                - "csv": String with comma-separated values, includes header row
-                               - "markdown-table": String with pipe-delimited table (| col1 | col2 |\n| --- | --- |\n| val1 | val2 |)
-                               - "markdown-kv": String with record headers and key-value pairs (## Record 1\ncol1: val1\ncol2: val2)
                                - "yaml": String with YAML-formatted records list
                                - "xml": String with XML records structure
 
@@ -1458,7 +1568,7 @@ async def session_table_data(
         dict: Structured result object with the following keys:
             - 'success' (bool): Always present. True if table data was retrieved successfully, False on any error.
             - 'table_name' (str, optional): Name of the retrieved table if successful.
-            - 'format' (str, optional): Actual format used for the data if successful. May differ from request when "auto".
+            - 'format' (str, optional): Actual format used for the data if successful. May differ from request when using optimization strategies.
             - 'schema' (list[dict], optional): Array of column definitions if successful. Each dict contains:
                                               {'name': str, 'type': str} describing column name and PyArrow data type
                                               (e.g., 'int64', 'string', 'double', 'timestamp[ns]').
@@ -1476,35 +1586,31 @@ async def session_table_data(
         - Session connection issues: Returns error if unable to communicate with Deephaven server
         - Query execution errors: Returns error if table query fails (permissions, syntax, etc.)
 
+    Table Rendering:
+        - **This tool returns TABULAR DATA that should be displayed as a table to users**
+        - The 'data' field contains formatted table data ready for display
+        - Default format (markdown-table) renders well as tables in AI interfaces
+        - Always present the returned data in tabular format (table, grid, or structured rows)
+
     Performance Considerations:
         - Large tables: Use csv format or limit max_rows to avoid memory issues
         - Column analysis: Use json-column format for efficient column-wise operations
         - Row processing: Use json-row format for record-by-record iteration
-        - AI agent comprehension: markdown-kv format typically provides best understanding (but uses more tokens)
-        - Auto format: Recommended for general use, optimizes based on data size balancing comprehension and cost
         - Response size limit: 50MB maximum to prevent memory issues
-
-    Table Rendering:
-        - **This tool returns TABULAR DATA that MUST be displayed as a table to users**
-        - The 'data' field contains formatted table data ready for display
-        - Use 'markdown-table' or 'markdown-kv' formats for best table rendering in AI interfaces
-        - Always present the returned data in tabular format (table, grid, or structured rows)
-        - Do NOT present table data as plain text or unstructured content
 
     AI Agent Usage:
         - Always check 'success' field before accessing data fields
         - Use 'is_complete' to determine if more data exists beyond max_rows limit
         - Parse 'schema' array to understand column types before processing 'data'
-        - Handle variable data types when using auto format (list/dict/string depending on row count)
         - Use head=True (default) to get rows from table start, head=False to get from table end
         - Start with small max_rows values for large tables to avoid memory issues
-        - Use 'auto' for automatic format selection based on data size (balances comprehension and tokens)
-        - Use 'optimize-accuracy' to always get markdown-kv format (better comprehension, more tokens)
-        - Use 'optimize-cost' to always get csv format (fewer tokens, may be harder to parse)
-        - Check 'format' field in response to know actual format used (especially important with 'auto')
+        - Use 'optimize-rendering' (default) for best table display in AI interfaces
+        - Use 'optimize-accuracy' for highest comprehension (markdown-kv format, more tokens)
+        - Use 'optimize-cost' for fewest tokens (csv format, may be harder to parse)
+        - Check 'format' field in response to know actual format used
 
     Example Usage:
-        # Get first 1000 rows with auto format selection
+        # Get first 1000 rows with default format
         Tool: session_table_data
         Parameters: {
             "session_id": "community:localhost:10000",
@@ -1582,39 +1688,22 @@ async def session_table_data(
         col_count = len(arrow_table.schema)
         estimated_size = row_count * col_count * ESTIMATED_BYTES_PER_CELL
         size_error = _check_response_size(table_name, estimated_size)
+
         if size_error:
             return size_error
 
-        # Format data - all format logic handled by formatters package
+        # Build response using helper
         _LOGGER.debug(
             f"[mcp_systems_server:session_table_data] Formatting data with format='{format}'"
         )
-        actual_format, formatted_data = format_table_data(arrow_table, format)
-        _LOGGER.debug(
-            f"[mcp_systems_server:session_table_data] Data formatted as '{actual_format}'"
+        response = _build_table_data_response(
+            arrow_table, is_complete, format, table_name=table_name
         )
-
-        # Extract schema information
-        schema = [
-            {"name": field.name, "type": str(field.type)}
-            for field in arrow_table.schema
-        ]
-
-        result.update(
-            {
-                "success": True,
-                "table_name": table_name,
-                "format": actual_format,
-                "schema": schema,
-                "row_count": len(arrow_table),
-                "is_complete": is_complete,
-                "data": formatted_data,
-            }
-        )
+        result.update(response)
 
         _LOGGER.info(
             f"[mcp_systems_server:session_table_data] Successfully retrieved {row_count} rows "
-            f"from '{table_name}' in '{actual_format}' format"
+            f"from '{table_name}' in '{response['format']}' format"
         )
 
     except ValueError as e:
@@ -1758,7 +1847,7 @@ async def catalog_tables_list(
     session_id: str,
     max_rows: int | None = 10000,
     filters: list[str] | None = None,
-    format: str = "auto",
+    format: str = "optimize-rendering",
 ) -> dict:
     """
     MCP Tool: Retrieve catalog entries as a TABULAR LIST from a Deephaven Enterprise (Core+) session.
@@ -1865,9 +1954,10 @@ async def catalog_tables_list(
                                Set to None to retrieve entire catalog (use with caution for large deployments).
         filters (list[str] | None): Optional list of Deephaven where clause expressions to filter catalog.
                                     Multiple filters are combined with AND logic. Use backticks (`) for string literals.
-        format (str): Output format for catalog data. Options: "auto", "json-row", "json-column", "csv",
-                     "markdown-table", "markdown-kv", "yaml", "xml". Default is "auto" which intelligently
-                     selects format based on row count (≤1000: markdown-kv, 1001-10000: markdown-table, >10000: csv).
+        format (str): Output format for catalog data. Default is "optimize-rendering" for best table display.
+                     Options: "optimize-rendering" (default, uses markdown-table), "optimize-accuracy" (uses markdown-kv),
+                     "optimize-cost" (uses csv), "optimize-speed" (uses json-column), or explicit formats:
+                     "json-row", "json-column", "csv", "markdown-table", "markdown-kv", "yaml", "xml".
 
     Returns:
         dict: Structured result object with keys:
@@ -1883,7 +1973,7 @@ async def catalog_tables_list(
                 - json-column: Dict mapping column names to arrays of values
                 - csv: String with CSV-formatted catalog data
                 - markdown-table: String with pipe-delimited table format
-                - markdown-kv: String with record headers and key-value pairs (default for ≤1000 rows)
+                - markdown-kv: String with record headers and key-value pairs
                 - yaml: String with YAML-formatted catalog entries
                 - xml: String with XML catalog structure
             - 'error' (str, optional): Human-readable error message if retrieval failed. Omitted on success.
@@ -1970,7 +2060,7 @@ async def catalog_namespaces_list(
     session_id: str,
     max_rows: int | None = 1000,
     filters: list[str] | None = None,
-    format: str = "auto",
+    format: str = "optimize-rendering",
 ) -> dict:
     """
     MCP Tool: Retrieve catalog namespaces as a TABULAR LIST from a Deephaven Enterprise (Core+) session.
@@ -2029,9 +2119,10 @@ async def catalog_namespaces_list(
                                Set to None to retrieve all namespaces (use with caution).
         filters (list[str] | None): Optional list of Deephaven where clause expressions to filter
                                     the catalog before extracting namespaces. Use backticks (`) for string literals.
-        format (str): Output format for namespace data. Options: "auto", "json-row", "json-column", "csv",
-                     "markdown-table", "markdown-kv", "yaml", "xml". Default is "auto" which intelligently
-                     selects format based on row count (≤1000: markdown-kv, 1001-10000: markdown-table, >10000: csv).
+        format (str): Output format for namespace data. Default is "optimize-rendering" for best table display.
+                     Options: "optimize-rendering" (default, uses markdown-table), "optimize-accuracy" (uses markdown-kv),
+                     "optimize-cost" (uses csv), "optimize-speed" (uses json-column), or explicit formats:
+                     "json-row", "json-column", "csv", "markdown-table", "markdown-kv", "yaml", "xml".
 
     Returns:
         dict: Structured result object with keys:
@@ -2047,7 +2138,7 @@ async def catalog_namespaces_list(
                 - json-column: Dict mapping column name to array: {"Namespace": ["market_data", ...]}
                 - csv: String with CSV-formatted namespace data
                 - markdown-table: String with pipe-delimited table format
-                - markdown-kv: String with record headers and key-value pairs (default for ≤1000 rows)
+                - markdown-kv: String with record headers and key-value pairs
                 - yaml: String with YAML-formatted namespace list
                 - xml: String with XML namespace structure
             - 'error' (str, optional): Human-readable error message if retrieval failed. Omitted on success.
@@ -2294,9 +2385,6 @@ async def catalog_tables_schema(
             "session_id": "enterprise:prod:analytics",
             "max_tables": None
         }
-
-    Logging:
-        - Logs tool invocation, per-table results, and error details at INFO/ERROR levels.
     """
     _LOGGER.info(
         f"[mcp_systems_server:catalog_tables_schema] Invoked: session_id={session_id!r}, "
@@ -2306,19 +2394,15 @@ async def catalog_tables_schema(
     schemas = []
 
     try:
-        # Use helper to get session from context
-        session = await _get_session_from_context(
+        # Get and validate enterprise session
+        session, error = await _get_enterprise_session(
             "catalog_tables_schema", context, session_id
         )
 
-        # Validate this is an enterprise session
-        if not isinstance(session, CorePlusSession):
-            error_msg = (
-                f"catalog_tables_schema only works with enterprise (Core+) sessions, "
-                f"but session '{session_id}' is {type(session).__name__}"
-            )
-            _LOGGER.error(f"[mcp_systems_server:catalog_tables_schema] {error_msg}")
-            return {"success": False, "error": error_msg, "isError": True}
+        if error:
+            return error
+
+        session = cast(CorePlusSession, session)  # Type narrowing for mypy
 
         _LOGGER.info(
             f"[mcp_systems_server:catalog_tables_schema] Session established for enterprise session: '{session_id}'"
@@ -2428,6 +2512,206 @@ async def catalog_tables_schema(
     except Exception as e:
         _LOGGER.error(
             f"[mcp_systems_server:catalog_tables_schema] Failed for session: '{session_id}', error: {e!r}",
+            exc_info=True,
+        )
+        return {"success": False, "error": str(e), "isError": True}
+
+
+@mcp_server.tool()
+async def catalog_table_sample(
+    context: Context,
+    session_id: str,
+    namespace: str,
+    table_name: str,
+    max_rows: int | None = 100,
+    head: bool = True,
+    format: str = "optimize-rendering",
+) -> dict:
+    r"""
+    MCP Tool: Retrieve sample TABULAR DATA from a catalog table in a Deephaven Enterprise (Core+) session.
+
+    **Returns**: Sample table data formatted as TABULAR DATA for display. This tabular data should be
+    displayed as a table to users for previewing catalog table contents.
+
+    This tool loads a catalog table (trying historical_table first, then live_table as fallback) and
+    retrieves a sample of its data with flexible formatting options. Use this to preview catalog table
+    contents before loading the full table into a session. Only works with enterprise sessions.
+
+    **Format Accuracy for AI Agents** (based on empirical research):
+    - markdown-kv: 61% accuracy (highest comprehension, more tokens)
+    - markdown-table: 55% accuracy (good balance)
+    - json-row/json-column: 50% accuracy
+    - yaml: 50% accuracy
+    - xml: 45% accuracy
+    - csv: 44% accuracy (lowest comprehension, fewest tokens)
+
+    For more information, see:
+    - https://deephaven.io
+    - https://docs.deephaven.io/pycoreplus/latest/worker/code/deephaven_enterprise.database.html
+
+    Terminology Note:
+    - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
+    - 'ENTERPRISE' sessions run Deephaven Enterprise (also called 'Core+' or 'CorePlus')
+    - This tool only works with enterprise sessions; community sessions do not have catalog tables
+    - 'Namespace' refers to a data domain or organizational grouping of tables in the catalog
+    - 'Catalog' and 'database' are interchangeable terms - the catalog is the database of available tables
+
+    Table Rendering:
+    - **This tool returns TABULAR SAMPLE DATA that MUST be displayed as a table to users**
+    - The 'data' field contains formatted table data ready for display
+    - Use 'markdown-table' or 'markdown-kv' formats for best table rendering in AI interfaces
+    - Always present the returned data in tabular format (table, grid, or structured rows)
+    - Do NOT present table data as plain text or unstructured content
+
+    AI Agent Usage:
+    - Use this to preview catalog/database table contents before loading full tables
+    - The catalog is the database of available tables with sample data
+    - Default max_rows=100 provides safe preview without overwhelming responses
+    - Use head=True (default) to get rows from table start, head=False to get from table end
+    - Check 'is_complete' to know if the sample represents the entire table
+    - Combine with catalog_tables_schema to understand table structure before sampling
+    - Use 'optimize-rendering' (default) for best table display in AI interfaces
+    - Use 'optimize-accuracy' for highest comprehension (markdown-kv format, more tokens)
+    - Check 'format' field in response to know actual format used
+
+    Args:
+        context (Context): The MCP context object.
+        session_id (str): ID of the Deephaven enterprise session to query.
+        namespace (str): The catalog namespace containing the table.
+        table_name (str): Name of the catalog table to sample.
+        max_rows (int | None, optional): Maximum number of rows to retrieve. Defaults to 100 for safe sampling.
+                                         Set to None to retrieve entire table (use with caution for large tables).
+        head (bool, optional): Direction of row retrieval. If True (default), retrieve from beginning.
+                              If False, retrieve from end (most recent rows for time-series data).
+        format (str, optional): Output format selection. Defaults to "optimize-rendering" for best table display.
+                               Options:
+                               - "optimize-rendering": (DEFAULT) Always use markdown-table (best for AI agent table display)
+                               - "optimize-accuracy": Always use markdown-kv (better comprehension, more tokens)
+                               - "optimize-cost": Always use csv (fewer tokens, may be harder to parse)
+                               - "optimize-speed": Always use json-column (fastest conversion)
+                               - "markdown-table": String with pipe-delimited table (| col1 | col2 |\n| --- | --- |\n| val1 | val2 |)
+                               - "markdown-kv": String with record headers and key-value pairs (## Record 1\ncol1: val1\ncol2: val2)
+                               - "json-row": List of dicts, one per row
+                               - "json-column": Dict with column names as keys, value arrays
+                               - "csv": String with comma-separated values, includes header row
+                               - "yaml": String with YAML-formatted records list
+                               - "xml": String with XML records structure
+
+    Returns:
+        dict: Structured result object with the following keys:
+            - 'success' (bool): Always present. True if sample was retrieved successfully, False on any error.
+            - 'namespace' (str, optional): The catalog namespace if successful.
+            - 'table_name' (str, optional): Name of the sampled table if successful.
+            - 'format' (str, optional): Actual format used for the data if successful. May differ from request when using optimization strategies.
+            - 'schema' (list[dict], optional): Array of column definitions if successful. Each dict contains:
+                                              {'name': str, 'type': str} describing column name and PyArrow data type.
+            - 'row_count' (int, optional): Number of rows in the returned sample if successful.
+            - 'is_complete' (bool, optional): True if entire table was retrieved if successful. False if truncated by max_rows.
+            - 'data' (list | dict | str, optional): The actual sample data if successful. Type depends on format.
+            - 'error' (str, optional): Human-readable error message if retrieval failed. Omitted on success.
+            - 'isError' (bool, optional): Present and True only when success=False. Explicit error flag.
+
+    Error Scenarios:
+        - Invalid session_id: Returns error if session doesn't exist or is not accessible
+        - Community session: Returns error if session is not an enterprise (Core+) session
+        - Invalid namespace: Returns error if namespace doesn't exist in the catalog
+        - Invalid table_name: Returns error if table doesn't exist in the namespace
+        - Invalid format: Returns error if format is not one of the supported options
+        - Response too large: Returns error if estimated response would exceed 50MB limit
+        - Session connection issues: Returns error if unable to communicate with Deephaven server
+        - Table access errors: Returns error if table cannot be accessed via historical_table or live_table
+
+    Performance Considerations:
+        - Default max_rows of 100 is safe for previewing catalog tables
+        - Use csv format or limit max_rows for very wide tables
+        - Default optimize-rendering format provides good table display
+        - Response size limit: 50MB maximum to prevent memory issues
+
+    Example Usage:
+        # Sample first 100 rows with default format
+        Tool: catalog_table_sample
+        Parameters: {
+            "session_id": "enterprise:prod:analytics",
+            "namespace": "market_data",
+            "table_name": "daily_prices"
+        }
+
+        # Sample last 50 rows (most recent for time-series)
+        Tool: catalog_table_sample
+        Parameters: {
+            "session_id": "enterprise:prod:analytics",
+            "namespace": "market_data",
+            "table_name": "trades",
+            "max_rows": 50,
+            "head": false
+        }
+
+        # Sample with CSV format
+        Tool: catalog_table_sample
+        Parameters: {
+            "session_id": "enterprise:prod:analytics",
+            "namespace": "reference_data",
+            "table_name": "symbols",
+            "max_rows": 200,
+            "format": "csv"
+        }
+    """
+    _LOGGER.info(
+        f"[mcp_systems_server:catalog_table_sample] Invoked: session_id={session_id!r}, "
+        f"namespace={namespace!r}, table_name={table_name!r}, max_rows={max_rows}, head={head}, format={format!r}"
+    )
+
+    try:
+        # Get and validate enterprise session
+        session, error = await _get_enterprise_session(
+            "catalog_table_sample", context, session_id
+        )
+
+        if error:
+            return error
+
+        session = cast(CorePlusSession, session)  # Type narrowing for mypy
+
+        _LOGGER.info(
+            f"[mcp_systems_server:catalog_table_sample] Session established for enterprise session: '{session_id}'"
+        )
+
+        # Get catalog table data using queries module
+        _LOGGER.debug(
+            f"[mcp_systems_server:catalog_table_sample] Retrieving catalog table data for '{namespace}.{table_name}'"
+        )
+        arrow_table, is_complete = await queries.get_catalog_table_data(
+            session, namespace, table_name, max_rows=max_rows, head=head
+        )
+
+        # Check response size before formatting
+        row_count = len(arrow_table)
+        col_count = len(arrow_table.schema)
+        estimated_size = row_count * col_count * ESTIMATED_BYTES_PER_CELL
+        size_error = _check_response_size(f"{namespace}.{table_name}", estimated_size)
+
+        if size_error:
+            return size_error
+
+        # Build response using helper
+        _LOGGER.debug(
+            f"[mcp_systems_server:catalog_table_sample] Formatting {row_count} rows in format '{format}'"
+        )
+        response = _build_table_data_response(
+            arrow_table, is_complete, format, table_name=table_name, namespace=namespace
+        )
+
+        _LOGGER.info(
+            f"[mcp_systems_server:catalog_table_sample] Success: Retrieved {row_count} rows "
+            f"from '{namespace}.{table_name}' (is_complete={is_complete}, format={response['format']})"
+        )
+
+        return response
+
+    except Exception as e:
+        _LOGGER.error(
+            f"[mcp_systems_server:catalog_table_sample] Failed for session: '{session_id}', "
+            f"namespace: '{namespace}', table: '{table_name}', error: {e!r}",
             exc_info=True,
         )
         return {"success": False, "error": str(e), "isError": True}
@@ -2811,11 +3095,6 @@ async def session_enterprise_create(
             "admin_groups": ["data-engineers"],
             "viewer_groups": ["analysts", "data-scientists"]
         }
-
-    Logging:
-        - Info: Tool invocation, successful creation, parameter resolution
-        - Debug: Configuration loading, session registry operations
-        - Error: All failure scenarios with full context and stack traces
     """
     _LOGGER.info(
         f"[mcp_systems_server:session_enterprise_create] Invoked: "
@@ -3097,11 +3376,6 @@ async def session_enterprise_delete(
         - Close failure: "Failed to close session"
         - Registry error: "Failed to remove session from registry"
 
-    Logging:
-        - Info: Tool invocation, successful deletion, session cleanup
-        - Debug: Session registry operations, session identification
-        - Error: All failure scenarios with full context and stack traces
-
     Note:
         - This operation is irreversible - deleted sessions cannot be recovered
         - Any running queries or tables in the session will be lost
@@ -3229,41 +3503,6 @@ async def session_enterprise_delete(
 # =============================================================================
 # TODO: Future MCP Tools to Implement
 # =============================================================================
-
-# TODO: Implement catalog_table_sample
-# @mcp_server.tool()
-# async def catalog_table_sample(
-#     context: Context,
-#     session_id: str,
-#     namespace: str,
-#     table_name: str,
-#     max_rows: int = 100,
-#     format: str = "json-row",
-# ) -> dict:
-#     """
-#     MCP Tool: Safely sample data from a catalog table with strict row limits.
-#
-#     This tool provides safe access to catalog table data with enforced row limits
-#     to prevent overwhelming responses. Useful for previewing catalog table contents.
-#
-#     Terminology Note:
-#     - 'Session' and 'worker' are interchangeable terms for a running Deephaven instance
-#     - 'Enterprise session' runs Deephaven Enterprise (also called 'Core+' or 'CorePlus')
-#     - Catalog tables are only available in Enterprise (Core+) sessions
-#
-#     Args:
-#         context: MCP context
-#         session_id: Enterprise session ID
-#         namespace: Catalog namespace
-#         table_name: Name of the catalog table
-#         max_rows: Maximum rows to return (default 100, hard limit)
-#         format: Output format (json-row, json-column, csv)
-#
-#     Returns:
-#         dict: Sample data with success status and formatted table data
-#     """
-#     pass
-
 
 # TODO: Implement session_community_create (if supported)
 # @mcp_server.tool()

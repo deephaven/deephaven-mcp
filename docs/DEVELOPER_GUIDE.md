@@ -6,7 +6,7 @@
 
 > **Note:** This document contains low-level technical details for contributors working on the [deephaven-mcp](https://github.com/deephaven/deephaven-mcp) project. **End users seeking high-level usage and onboarding information should refer to the main documentation in the [`../README.md`](../README.md).**
 
-This repository houses the Python-based Model Context Protocol (MCP) servers for Deephaven:
+This repository houses the Python-based [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) servers for Deephaven:
 1. **Deephaven MCP Systems Server**: Orchestrates Deephaven Community Core sessions and Enterprise systems.
 2. **Deephaven MCP Docs Server**: Provides conversational Q&A about Deephaven documentation.
 
@@ -41,20 +41,25 @@ This repository houses the Python-based Model Context Protocol (MCP) servers for
       - [Systems Server Tools](#systems-server-tools)
       - [Error Handling](#error-handling)
       - [MCP Tools](#mcp-tools)
-        - [`mcp_reload`](#mcp_reload)
-        - [`enterprise_systems_status`](#enterprise_systems_status)
-        - [`sessions_list`](#sessions_list)
-        - [`session_details`](#session_details)
-        - [`session_enterprise_create`](#session_enterprise_create)
-        - [`session_enterprise_delete`](#session_enterprise_delete)
-        - [`session_tables_schema`](#session_tables_schema)
-        - [`session_tables_list`](#session_tables_list)
-        - [`session_table_data`](#session_table_data)
-        - [`session_script_run`](#session_script_run)
-        - [`session_pip_list`](#session_pip_list)
-        - [`catalog_tables_list`](#catalog_tables_list)
-        - [`catalog_namespaces_list`](#catalog_namespaces_list)
-        - [`catalog_tables_schema`](#catalog_tables_schema)
+        - [System Tools](#system-tools)
+          - [`mcp_reload`](#mcp_reload)
+          - [`enterprise_systems_status`](#enterprise_systems_status)
+        - [Session Management Tools](#session-management-tools)
+          - [`session_enterprise_create`](#session_enterprise_create)
+          - [`session_enterprise_delete`](#session_enterprise_delete)
+          - [`sessions_list`](#sessions_list)
+          - [`session_details`](#session_details)
+        - [Enterprise Catalog Tools](#enterprise-catalog-tools)
+          - [`catalog_tables_list`](#catalog_tables_list)
+          - [`catalog_namespaces_list`](#catalog_namespaces_list)
+          - [`catalog_tables_schema`](#catalog_tables_schema)
+          - [`catalog_table_sample`](#catalog_table_sample)
+        - [Session Data Tools](#session-data-tools)
+          - [`session_tables_schema`](#session_tables_schema)
+          - [`session_tables_list`](#session_tables_list)
+          - [`session_table_data`](#session_table_data)
+          - [`session_script_run`](#session_script_run)
+          - [`session_pip_list`](#session_pip_list)
       - [Systems Server Test Components](#systems-server-test-components)
         - [Test Server](#test-server)
         - [Test Client](#test-client)
@@ -573,7 +578,31 @@ This consistent format makes error handling and response parsing more predictabl
 
 #### MCP Tools
 
-The Systems Server provides the following MCP tools:
+The Systems Server provides 15 MCP tools organized into four categories:
+
+**Quick Reference:**
+
+| Tool | Category | Purpose | Enterprise Only |
+|------|----------|---------|-----------------|
+| [`mcp_reload`](#mcp_reload) | System | Reload configuration and clear sessions | No |
+| [`enterprise_systems_status`](#enterprise_systems_status) | System | Check status of enterprise systems | No |
+| [`sessions_list`](#sessions_list) | Session Management | List all active sessions | No |
+| [`session_details`](#session_details) | Session Management | Get detailed session information | No |
+| [`session_enterprise_create`](#session_enterprise_create) | Session Management | Create new enterprise session | Yes |
+| [`session_enterprise_delete`](#session_enterprise_delete) | Session Management | Delete enterprise session | Yes |
+| [`catalog_tables_list`](#catalog_tables_list) | Catalog Tools | List catalog table entries | Yes |
+| [`catalog_namespaces_list`](#catalog_namespaces_list) | Catalog Tools | List catalog namespaces | Yes |
+| [`catalog_tables_schema`](#catalog_tables_schema) | Catalog Tools | Get catalog table schemas | Yes |
+| [`catalog_table_sample`](#catalog_table_sample) | Catalog Tools | Sample catalog table data | Yes |
+| [`session_tables_schema`](#session_tables_schema) | Data Tools | Get table schemas from session | No |
+| [`session_tables_list`](#session_tables_list) | Data Tools | List table names in session | No |
+| [`session_table_data`](#session_table_data) | Data Tools | Retrieve table data | No |
+| [`session_script_run`](#session_script_run) | Data Tools | Execute Python script | No |
+| [`session_pip_list`](#session_pip_list) | Data Tools | List installed pip packages | No |
+
+---
+
+### System Tools
 
 ##### `mcp_reload`
 
@@ -806,7 +835,7 @@ On error:
 - `session_id` (required, string): ID of the Deephaven enterprise session to query.
 - `max_rows` (optional, integer): Maximum number of catalog entries to return. Defaults to 10000. Set to null to retrieve entire catalog (use with caution for large deployments).
 - `filters` (optional, list[string]): List of Deephaven where clause expressions to filter catalog results. Multiple filters are combined with AND logic. Use backticks (`) for string literals.
-- `format` (optional, string): Output format for catalog data. Options: "auto" (default), "json-row", "json-column", "csv".
+- `format` (optional, string): Output format for catalog data. Options: "optimize-rendering" (default), "optimize-accuracy", "optimize-cost", "optimize-speed", or explicit formats: "json-row", "json-column", "csv", "markdown-table", "markdown-kv", "yaml", "xml".
 
 **Returns**:
 
@@ -878,7 +907,7 @@ filters=["TableName.matches(`.*_daily_.*`)"]
 - `session_id` (required, string): ID of the Deephaven enterprise session to query.
 - `max_rows` (optional, integer): Maximum number of namespaces to return. Defaults to 1000. Set to null to retrieve all namespaces (use with caution).
 - `filters` (optional, list[string]): List of Deephaven where clause expressions to filter the catalog before extracting namespaces. Use backticks (`) for string literals.
-- `format` (optional, string): Output format for namespace data. Options: "auto" (default), "json-row", "json-column", "csv".
+- `format` (optional, string): Output format for namespace data. Options: "optimize-rendering" (default), "optimize-accuracy", "optimize-cost", "optimize-speed", or explicit formats: "json-row", "json-column", "csv", "markdown-table", "markdown-kv", "yaml", "xml".
 
 **Returns**:
 
@@ -1018,6 +1047,76 @@ catalog_schemas(
 - Filters are applied at the catalog level before fetching schemas
 - Use `catalog_tables_list` first to discover available tables, then use this tool to get their schemas
 
+##### `catalog_table_sample`
+
+**Purpose**: Retrieve sample data from a catalog table in a Deephaven Enterprise (Core+) session for previewing contents.
+
+**Parameters**:
+
+- `session_id` (required, string): ID of the Deephaven enterprise session to query.
+- `namespace` (required, string): The catalog namespace containing the table.
+- `table_name` (required, string): Name of the catalog table to sample.
+- `max_rows` (optional, integer): Maximum number of rows to retrieve. Defaults to 100. Set to null to retrieve entire table (use with caution for large tables).
+- `head` (optional, boolean): If True (default), retrieve from beginning. If False, retrieve from end (most recent rows for time-series data).
+- `format` (optional, string): Output format. Options: "optimize-rendering" (default), "optimize-accuracy", "optimize-cost", "optimize-speed", or explicit formats: "json-row", "json-column", "csv", "markdown-table", "markdown-kv", "yaml", "xml".
+
+**Returns**:
+
+```json
+{
+  "success": true,
+  "namespace": "market_data",
+  "table_name": "daily_prices",
+  "format": "markdown-table",
+  "schema": [
+    {"name": "Date", "type": "date32[day]"},
+    {"name": "Symbol", "type": "string"},
+    {"name": "Price", "type": "double"}
+  ],
+  "row_count": 100,
+  "is_complete": false,
+  "data": "| Date | Symbol | Price |\n| --- | --- | --- |\n| 2024-01-01 | AAPL | 150.25 |\n..."
+}
+```
+
+On error:
+
+```json
+{
+  "success": false,
+  "error": "Error message",
+  "isError": true
+}
+```
+
+**Description**: This tool retrieves sample data from catalog tables for previewing contents before loading the full table. It attempts to load the table using `historical_table` first, then falls back to `live_table` if needed. The tool enforces a 50MB response limit to prevent memory issues. Only works with Deephaven Enterprise (Core+) sessions.
+
+**Use Cases**:
+
+- Preview catalog table contents before loading full tables
+- Verify table structure and data format
+- Sample recent data from time-series tables (use `head=false`)
+- Quick data exploration without loading entire tables
+
+**Performance Considerations**:
+
+- Default max_rows=100 is safe for previewing
+- Use `optimize-rendering` (default) for best table display in AI interfaces
+- Use `optimize-cost` (csv) for large samples to minimize token usage
+- Response size limit: 50MB maximum to prevent memory issues
+
+**Important Notes**:
+
+- Only works with enterprise (Core+) sessions
+- Requires valid namespace and table_name from the catalog
+- Check `is_complete` field to know if sample represents entire table
+- Combine with `catalog_tables_schema` to understand table structure first
+- Use `catalog_tables_list` to discover available tables and namespaces
+
+---
+
+### Session Data Tools
+
 ##### `session_tables_schema`
 
 **Purpose**: Retrieve full metadata schemas for one or more tables from a Deephaven session.
@@ -1078,43 +1177,6 @@ On complete failure (e.g., session not available):
 - `meta_columns`: Schema of the metadata table itself (describes what fields are in `data`)
 - `row_count`: Number of columns in the original table (equals length of `data`)
 - `count`: Total number of table schemas returned (top-level field)
-
-##### `list_tables`
-
-**Purpose**: Retrieve the names of all tables in a Deephaven session (lightweight alternative to table_schemas).
-
-**Parameters**:
-
-- `session_id` (required, string): ID of the Deephaven session to query.
-
-**Returns**:
-
-```json
-{
-  "success": true,
-  "session_id": "community:localhost:10000",
-  "table_names": ["trades", "quotes", "orders"],
-  "count": 3
-}
-```
-
-On error:
-
-```json
-{
-  "success": false,
-  "error": "Error message",
-  "isError": true
-}
-```
-
-**Description**: This tool provides a lightweight way to discover what tables exist in a session without fetching their schemas. It's much faster than `session_tables_schema` when you only need table names. Works with both Community and Enterprise sessions. Use this for quick table discovery, then follow up with `session_tables_schema` for specific tables you're interested in.
-
-**Performance Notes**:
-- Very fast operation (typically milliseconds)
-- Minimal network transfer (only table names, not schemas or data)
-- Safe to call frequently for session monitoring
-- Scales well even with hundreds of tables
 
 ##### `session_script_run`
 
@@ -1191,33 +1253,33 @@ On error:
 - `table_name` (required, string): Name of the table to retrieve data from.
 - `max_rows` (optional, int): Maximum number of rows to retrieve. Defaults to 1000. Set to None for entire table.
 - `head` (optional, boolean): If True (default), retrieve from beginning. If False, retrieve from end.
-- `format` (optional, string): Output format. See [Format Options](#format-options) below. Defaults to "auto".
+- `format` (optional, string): Output format. See [Format Options](#format-options) below. Defaults to "optimize-rendering".
 
 **Format Options**:
 
-Different formats have different tradeoffs for AI agent comprehension and token usage:
+Different formats have different tradeoffs for AI agent comprehension and token usage. Based on empirical research ([source](https://www.improvingagents.com/blog/best-input-data-format-for-llms)), format accuracy ranges from 61% (markdown-kv) to 44% (csv).
 
 **Optimization Strategies:**
-- `"auto"` (default): Smart selection balancing comprehension and cost
-  - ≤1000 rows: markdown-kv (typically better comprehension)
-  - 1001-10000 rows: markdown-table (good balance)
-  - >10000 rows: csv (most token-efficient)
-- `"optimize-accuracy"`: Always use markdown-kv (typically better comprehension, more tokens)
-- `"optimize-cost"`: Always use csv (fewer tokens, may be harder to parse)
-- `"optimize-speed"`: Always use json-column (fastest conversion)
+
+- `"optimize-rendering"` (default): Always use markdown-table (best for AI agent table display, ~55% accuracy)
+- `"optimize-accuracy"`: Always use markdown-kv (highest comprehension at ~61%, more tokens)
+- `"optimize-cost"`: Always use csv (fewest tokens, ~44% accuracy, may be harder to parse)
+- `"optimize-speed"`: Always use json-column (fastest conversion, ~50% accuracy)
 
 **Explicit Formats:**
+
 - `"json-row"`: Array of row objects `[{col1: val1}, ...]`
 - `"json-column"`: Column-oriented object `{col1: [val1, val2], ...}`
 - `"csv"`: Comma-separated values string
-- `"markdown-table"`: Markdown table format
-- `"markdown-kv"`: Markdown key-value pairs
+- `"markdown-table"`: Markdown table format (pipe-delimited)
+- `"markdown-kv"`: Markdown key-value pairs per record
 - `"yaml"`: YAML format
 - `"xml"`: XML format
 
 **When to Use Each Format:**
+
+- **Table Display**: Use `optimize-rendering` (default, best for displaying tables in AI interfaces)
 - **Better Comprehension**: Use `optimize-accuracy` or explicit `markdown-kv` (uses more tokens)
-- **General Purpose**: Use `auto` (default, balances comprehension and cost)
 - **Large Tables**: Use `optimize-cost` or explicit `csv` (fewer tokens)
 - **Fastest Response**: Use `optimize-speed` or explicit `json-column`
 - **Legacy Systems**: Use `xml` for enterprise integrations
@@ -1250,7 +1312,7 @@ On error:
 }
 ```
 
-**Description**: This tool retrieves actual table data with flexible output formatting. Different formats have different tradeoffs between AI agent comprehension and token usage. The tool includes intelligent automatic format selection based on table size and enforces a 50MB response limit to prevent memory issues. The `is_complete` field indicates whether the entire table was retrieved or truncated by `max_rows`. The `format` field in the response shows the actual format used (important when using "auto").
+**Description**: This tool retrieves actual table data with flexible output formatting. Different formats have different tradeoffs between AI agent comprehension and token usage. The tool enforces a 50MB response limit to prevent memory issues. The `is_complete` field indicates whether the entire table was retrieved or truncated by `max_rows`. The `format` field in the response shows the actual format used (important when using optimization strategies, as they resolve to specific formats).
 
 ##### `session_tables_list`
 
@@ -1266,7 +1328,8 @@ On error:
 {
   "success": true,
   "session_id": "community:localhost:10000",
-  "tables": ["table1", "table2", "table3"]
+  "table_names": ["table1", "table2", "table3"],
+  "count": 3
 }
 ```
 

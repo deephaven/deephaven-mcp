@@ -292,6 +292,133 @@ async def get_session_meta_table(
     return await _extract_meta_table(table, table_name)
 
 
+async def _load_catalog_table(
+    session: CorePlusSession,
+    namespace: str,
+    table_name: str,
+) -> Table:
+    """
+    Load a catalog table, trying historical_table first, then live_table as fallback.
+
+    This helper consolidates the common pattern of loading catalog tables with
+    historical/live fallback logic.
+
+    Args:
+        session (CorePlusSession): An active Deephaven Enterprise (Core+) session.
+        namespace (str): The catalog namespace containing the table.
+        table_name (str): The name of the table within the namespace.
+
+    Returns:
+        Table: The loaded Deephaven table.
+
+    Raises:
+        Exception: If the table cannot be accessed via either historical_table or live_table.
+
+    Note:
+        This is an internal helper function for use by other queries functions.
+    """
+    _LOGGER.debug(
+        f"[queries:_load_catalog_table] Loading catalog table '{namespace}.{table_name}'"
+    )
+
+    # Try historical_table first (immutable snapshot, preferred)
+    try:
+        _LOGGER.debug(
+            f"[queries:_load_catalog_table] Attempting historical_table for '{namespace}.{table_name}'"
+        )
+        table = await session.historical_table(namespace, table_name)
+        _LOGGER.debug(
+            f"[queries:_load_catalog_table] Successfully loaded '{namespace}.{table_name}' via historical_table"
+        )
+        return table
+    except Exception as hist_exc:
+        _LOGGER.debug(
+            f"[queries:_load_catalog_table] historical_table failed for '{namespace}.{table_name}', trying live_table: {hist_exc}"
+        )
+        # Fall back to live_table
+        try:
+            table = await session.live_table(namespace, table_name)
+            _LOGGER.debug(
+                f"[queries:_load_catalog_table] Successfully loaded '{namespace}.{table_name}' via live_table"
+            )
+            return table
+        except Exception as live_exc:
+            _LOGGER.error(
+                f"[queries:_load_catalog_table] Both historical_table and live_table failed for '{namespace}.{table_name}': "
+                f"historical={hist_exc}, live={live_exc}"
+            )
+            raise Exception(
+                f"Failed to load catalog table '{namespace}.{table_name}': "
+                f"historical_table error: {hist_exc}, live_table error: {live_exc}"
+            ) from live_exc
+
+
+async def get_catalog_table_data(
+    session: CorePlusSession,
+    namespace: str,
+    table_name: str,
+    *,
+    max_rows: int | None,
+    head: bool = True,
+) -> tuple[pyarrow.Table, bool]:
+    """
+    Asynchronously retrieve data from a specific catalog table as a pyarrow.Table from a Deephaven Enterprise session.
+
+    This function loads a catalog table (trying historical_table first, then live_table as fallback)
+    and retrieves its data with optional row limiting. Use this for tables in the Enterprise catalog system.
+
+    Args:
+        session (CorePlusSession): An active Deephaven Enterprise (Core+) session.
+        namespace (str): The catalog namespace containing the table.
+        table_name (str): The name of the table within the namespace.
+        max_rows (int | None): Maximum number of rows to retrieve. Must be specified as keyword argument.
+                               Set to None to retrieve entire table (use with caution for large tables).
+        head (bool): If True and max_rows is not None, retrieve rows from the beginning using head().
+                    If False and max_rows is not None, retrieve rows from the end using tail().
+                    Ignored when max_rows=None. Default is True.
+
+    Returns:
+        tuple[pyarrow.Table, bool]: A tuple containing:
+            - pyarrow.Table: The requested table (or subset) as a pyarrow.Table snapshot
+            - bool: True if the entire table was retrieved, False if only a subset was returned
+
+    Raises:
+        Exception: If the table cannot be accessed via either historical_table or live_table,
+                  or if conversion to Arrow fails.
+
+    Note:
+        - Tries historical_table first (immutable snapshot, preferred for data sampling)
+        - Falls back to live_table if historical_table fails
+        - For session tables, use get_table instead
+        - Logging is performed at DEBUG level for entry, exit, and error tracing
+        - This function is intended for internal use only
+    """
+    _LOGGER.debug(
+        f"[queries:get_catalog_table_data] Retrieving catalog table data for '{namespace}.{table_name}' "
+        f"(max_rows={max_rows}, head={head})"
+    )
+
+    # Load catalog table using helper
+    table = await _load_catalog_table(session, namespace, table_name)
+
+    # Apply row limiting using helper function
+    limited_table, is_complete = await _apply_row_limit(
+        table,
+        max_rows,
+        head=head,
+        context_name=f"catalog table '{namespace}.{table_name}'",
+    )
+
+    # Convert to Arrow format
+    arrow_table = await asyncio.to_thread(limited_table.to_arrow)
+
+    _LOGGER.debug(
+        f"[queries:get_catalog_table_data] Catalog table '{namespace}.{table_name}' converted to Arrow format successfully "
+        f"({arrow_table.num_rows} rows, is_complete={is_complete})"
+    )
+    return arrow_table, is_complete
+
+
 async def get_catalog_meta_table(
     session: CorePlusSession, namespace: str, table_name: str
 ) -> pyarrow.Table:
@@ -325,29 +452,8 @@ async def get_catalog_meta_table(
         f"[queries:get_catalog_meta_table] Retrieving meta table for catalog table '{namespace}.{table_name}'..."
     )
 
-    # Try historical_table first (immutable snapshot, preferred for schema inspection)
-    table: Table | None = None
-    try:
-        _LOGGER.debug(
-            f"[queries:get_catalog_meta_table] Attempting historical_table for '{namespace}.{table_name}'"
-        )
-        table = await session.historical_table(namespace, table_name)
-    except Exception as hist_exc:
-        _LOGGER.debug(
-            f"[queries:get_catalog_meta_table] historical_table failed for '{namespace}.{table_name}', trying live_table: {hist_exc}"
-        )
-        # Fall back to live_table
-        try:
-            table = await session.live_table(namespace, table_name)
-        except Exception as live_exc:
-            _LOGGER.error(
-                f"[queries:get_catalog_meta_table] Both historical_table and live_table failed for '{namespace}.{table_name}': "
-                f"historical={hist_exc}, live={live_exc}"
-            )
-            raise Exception(
-                f"Failed to load catalog table '{namespace}.{table_name}': "
-                f"historical_table error: {hist_exc}, live_table error: {live_exc}"
-            ) from live_exc
+    # Load catalog table using helper
+    table = await _load_catalog_table(session, namespace, table_name)
 
     # Extract meta table using common helper
     return await _extract_meta_table(table, f"{namespace}.{table_name}")
