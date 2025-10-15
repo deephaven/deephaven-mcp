@@ -542,7 +542,7 @@ async def _get_session_from_context(
     _LOGGER.debug(
         f"[mcp_systems_server:{function_name}] Establishing session connection for '{session_id}'"
     )
-    session = await session_manager.get()
+    session: BaseSession = await session_manager.get()
 
     _LOGGER.info(
         f"[mcp_systems_server:{function_name}] Session established for '{session_id}'"
