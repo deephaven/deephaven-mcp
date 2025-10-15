@@ -274,4 +274,3 @@ try:
         sleep(1)
 except KeyboardInterrupt:
     print("Exiting Deephaven...")
-    server.stop()

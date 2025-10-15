@@ -201,6 +201,7 @@ Manages and connects to multiple [Deephaven Community Core](https://deephaven.io
 - **Enterprise Systems**: Connect to and manage Deephaven Enterprise (Core+) deployments
 - **Enterprise Session Creation**: Create and delete enterprise sessions with configurable resources and limits
 - **Catalog Discovery**: Browse enterprise catalog at table and namespace levels to discover available data sources
+- **Table Discovery**: Lightweight table name listing and comprehensive schema retrieval for both session and catalog tables
 - **Table Operations**: Retrieve table schemas, metadata, and actual data with flexible formatting options
 - **Script Execution**: Run Python or Groovy scripts directly on Deephaven sessions
 - **Package Management**: Query installed Python packages in session environments
@@ -1142,7 +1143,7 @@ For IDE and AI assistant troubleshooting, refer to the official documentation fo
 
 ## Advanced Usage
 
-*   **Detailed Server APIs and Tools:** For in-depth information about the tools exposed by the [Systems Server](#systems-server) (e.g., [`refresh`](docs/DEVELOPER_GUIDE.md#refresh), [`table_schemas`](docs/DEVELOPER_GUIDE.md#table_schemas)) and the [Docs Server](#docs-server) ([`docs_chat`](docs/DEVELOPER_GUIDE.md#docs_chat)), refer to the [Developer & Contributor Guide](docs/DEVELOPER_GUIDE.md).
+*   **Detailed Server APIs and Tools:** For in-depth information about the tools exposed by the [Systems Server](#systems-server) (e.g., [`mcp_reload`](docs/DEVELOPER_GUIDE.md#mcp_reload), [`session_tables_schema`](docs/DEVELOPER_GUIDE.md#session_tables_schema)) and the [Docs Server](#docs-server) ([`docs_chat`](docs/DEVELOPER_GUIDE.md#docs_chat)), refer to the [Developer & Contributor Guide](docs/DEVELOPER_GUIDE.md).
 *   **`uv` Workflow:** For more details on using `uv` for project management, see [docs/UV.md](docs/UV.md).
 
 ---

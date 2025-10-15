@@ -31,6 +31,159 @@ class MockContext:
         self.request_context = MockRequestContext(lifespan_context)
 
 
+# ===== Test Helper Functions =====
+
+
+def create_mock_arrow_meta_table(
+    schema_data: list[dict], schema_fields: list | None = None
+) -> MagicMock:
+    """
+    Create a mock PyArrow meta table for testing schema operations.
+
+    This helper eliminates duplication across schema-related tests by providing
+    a consistent way to create mock meta tables that match the behavior expected
+    by _format_meta_table_result().
+
+    Args:
+        schema_data: List of dicts representing metadata rows (e.g., column info)
+        schema_fields: Optional list of mock field objects for the schema.
+                      If None, creates default Name/DataType fields.
+
+    Returns:
+        MagicMock: A mock PyArrow Table with to_pylist(), __len__(), and schema
+    """
+    mock_arrow_meta = MagicMock()
+    mock_arrow_meta.to_pylist = MagicMock(return_value=schema_data)
+    mock_arrow_meta.__len__ = MagicMock(return_value=len(schema_data))
+
+    if schema_fields:
+        mock_arrow_meta.schema = schema_fields
+    else:
+        # Default schema fields that match typical Deephaven meta tables
+        field1 = MagicMock()
+        field1.name = "Name"
+        field1.type = "string"
+
+        field2 = MagicMock()
+        field2.name = "DataType"
+        field2.type = "string"
+
+        mock_arrow_meta.schema = [field1, field2]
+
+    return mock_arrow_meta
+
+
+def create_mock_catalog_schema_function(schema_data_map, error_tables=None):
+    """
+    Create a mock function for queries.get_catalog_meta_table that returns different
+    schemas based on table name.
+
+    This helper eliminates duplication in catalog schema tests by providing a
+    flexible way to mock different table schemas and error conditions.
+
+    Args:
+        schema_data_map: Dict mapping table_name -> schema_data (list of dicts)
+        error_tables: Optional set of table names that should raise exceptions
+
+    Returns:
+        Callable: A function that can be used as side_effect for get_catalog_meta_table
+    """
+    error_tables = error_tables or set()
+
+    def mock_get_catalog_meta_table(session, namespace, table_name):
+        if table_name in error_tables:
+            raise Exception(f"Table '{table_name}' not found in catalog")
+
+        schema_data = schema_data_map.get(
+            table_name, [{"Name": "Col1", "DataType": "int"}]  # Default schema
+        )
+        return create_mock_arrow_meta_table(schema_data)
+
+    return mock_get_catalog_meta_table
+
+
+# === Helper Function Tests ===
+
+
+@pytest.mark.asyncio
+async def test_get_session_from_context_success():
+    """Test _get_session_from_context successfully retrieves a session."""
+    from deephaven_mcp.mcp_systems_server._mcp import _get_session_from_context
+
+    # Create mock session
+    mock_session = MagicMock()
+
+    # Create mock session manager
+    mock_session_manager = MagicMock()
+    mock_session_manager.get = AsyncMock(return_value=mock_session)
+
+    # Create mock session registry
+    mock_registry = MagicMock()
+    mock_registry.get = AsyncMock(return_value=mock_session_manager)
+
+    # Create context with registry
+    context = MockContext({"session_registry": mock_registry})
+
+    # Call the helper
+    result = await _get_session_from_context(
+        "test_function", context, "test:session:id"
+    )
+
+    # Verify the session was returned
+    assert result is mock_session
+
+    # Verify the registry was accessed correctly
+    mock_registry.get.assert_called_once_with("test:session:id")
+    mock_session_manager.get.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_get_session_from_context_session_not_found():
+    """Test _get_session_from_context raises KeyError when session not found."""
+    from deephaven_mcp.mcp_systems_server._mcp import _get_session_from_context
+
+    # Create mock session registry that raises KeyError
+    mock_registry = MagicMock()
+    mock_registry.get = AsyncMock(side_effect=KeyError("Session not found"))
+
+    # Create context with registry
+    context = MockContext({"session_registry": mock_registry})
+
+    # Call the helper and expect KeyError
+    with pytest.raises(KeyError, match="Session not found"):
+        await _get_session_from_context("test_function", context, "nonexistent:session")
+
+    # Verify the registry was accessed
+    mock_registry.get.assert_called_once_with("nonexistent:session")
+
+
+@pytest.mark.asyncio
+async def test_get_session_from_context_session_connection_fails():
+    """Test _get_session_from_context propagates exception when session.get() fails."""
+    from deephaven_mcp.mcp_systems_server._mcp import _get_session_from_context
+
+    # Create mock session manager that fails on get()
+    mock_session_manager = MagicMock()
+    mock_session_manager.get = AsyncMock(
+        side_effect=Exception("Failed to establish connection")
+    )
+
+    # Create mock session registry
+    mock_registry = MagicMock()
+    mock_registry.get = AsyncMock(return_value=mock_session_manager)
+
+    # Create context with registry
+    context = MockContext({"session_registry": mock_registry})
+
+    # Call the helper and expect Exception
+    with pytest.raises(Exception, match="Failed to establish connection"):
+        await _get_session_from_context("test_function", context, "test:session:id")
+
+    # Verify both registry and manager were accessed
+    mock_registry.get.assert_called_once_with("test:session:id")
+    mock_session_manager.get.assert_called_once()
+
+
 # === refresh ===
 
 
@@ -62,7 +215,7 @@ def test_run_script_reads_script_from_file():
 
     with patch("aiofiles.open", return_value=DummyFile()):
         result = asyncio.run(
-            mcp_mod.run_script(
+            mcp_mod.session_script_run(
                 context, session_id="test_worker", script=None, script_path="dummy.py"
             )
         )
@@ -71,7 +224,7 @@ def test_run_script_reads_script_from_file():
 
 
 @pytest.mark.asyncio
-async def test_refresh_missing_context_keys():
+async def test_mcp_reload_missing_context_keys():
     # context missing session_registry
     config_manager = AsyncMock()
     refresh_lock = AsyncMock()
@@ -81,14 +234,14 @@ async def test_refresh_missing_context_keys():
     context = MockContext(
         {"config_manager": config_manager, "refresh_lock": refresh_lock}
     )
-    result = await mcp_mod.refresh(context)
+    result = await mcp_mod.mcp_reload(context)
     assert result["success"] is False
     assert result["isError"] is True
     assert "session_registry" in result["error"]
 
 
 @pytest.mark.asyncio
-async def test_refresh_lock_error():
+async def test_mcp_reload_lock_error():
     config_manager = AsyncMock()
     session_registry = AsyncMock()
     refresh_lock = AsyncMock()
@@ -103,7 +256,7 @@ async def test_refresh_lock_error():
             "refresh_lock": refresh_lock,
         }
     )
-    result = await mcp_mod.refresh(context)
+    result = await mcp_mod.mcp_reload(context)
     assert result["success"] is False
     assert result["isError"] is True
     assert "lock error" in result["error"]
@@ -113,7 +266,7 @@ async def test_refresh_lock_error():
 # but are not caused by this test (no real sockets are created or left open). This is required for Python 3.12 and older.
 @pytest.mark.filterwarnings("ignore:unclosed <socket.socket")
 @pytest.mark.asyncio
-async def test_refresh_success():
+async def test_mcp_reload_success():
     config_manager = AsyncMock()
     session_registry = AsyncMock()
     refresh_lock = AsyncMock()
@@ -128,19 +281,19 @@ async def test_refresh_success():
             "refresh_lock": refresh_lock,
         }
     )
-    result = await mcp_mod.refresh(context)
+    result = await mcp_mod.mcp_reload(context)
     assert result == {"success": True}
     config_manager.clear_config_cache.assert_awaited_once()
     session_registry.close.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_get_session_details_logs_version_info():
-    """Test that get_session_details logs programming language and Deephaven versions when available."""
+async def test_session_details_logs_version_info():
+    """Test that session_details logs programming language and Deephaven versions when available."""
     # Import the function
     import enum
 
-    from deephaven_mcp.mcp_systems_server._mcp import get_session_details
+    from deephaven_mcp.mcp_systems_server._mcp import session_details
     from deephaven_mcp.resource_manager._manager import ResourceLivenessStatus
     from deephaven_mcp.resource_manager._registry_combined import (
         CombinedSessionRegistry,
@@ -200,7 +353,7 @@ async def test_get_session_details_logs_version_info():
         ),
     ):
         # Call the function
-        result = await get_session_details(context, session_id, attempt_to_connect=True)
+        result = await session_details(context, session_id, attempt_to_connect=True)
 
         # Verify the function returned successfully
         assert result["success"] is True
@@ -211,10 +364,10 @@ async def test_get_session_details_logs_version_info():
 
         # Verify that the debug log messages were called (lines 447 and 458)
         mock_logger.debug.assert_any_call(
-            f"[mcp_systems_server:get_session_details] Session '{session_id}' programming_language_version: 3.9.7"
+            f"[mcp_systems_server:session_details] Session '{session_id}' programming_language_version: 3.9.7"
         )
         mock_logger.debug.assert_any_call(
-            f"[mcp_systems_server:get_session_details] Session '{session_id}' versions: community=0.24.0, enterprise=None"
+            f"[mcp_systems_server:session_details] Session '{session_id}' versions: community=0.24.0, enterprise=None"
         )
 
 
@@ -222,7 +375,7 @@ async def test_get_session_details_logs_version_info():
 
 
 @pytest.mark.asyncio
-async def test_create_enterprise_session_auto_name_no_username_and_language_transformer():
+async def test_session_enterprise_create_auto_name_no_username_and_language_transformer():
     """Covers auto-generated name without username (mcp-worker-...), language transformer execution, and creation_function."""
     mock_registry = MagicMock()
     mock_config_manager = MagicMock()
@@ -282,7 +435,7 @@ async def test_create_enterprise_session_auto_name_no_username_and_language_tran
         )
 
         # Use a non-Python programming language to exercise configuration_transformer
-        result = await mcp_mod.create_enterprise_session(
+        result = await mcp_mod.session_enterprise_create(
             context,
             "no-user-system",
             None,
@@ -316,7 +469,7 @@ async def test_create_enterprise_session_auto_name_no_username_and_language_tran
 
 
 @pytest.mark.asyncio
-async def test_delete_enterprise_session_removal_missing_in_registry():
+async def test_session_enterprise_delete_removal_missing_in_registry():
     """Covers branch where pop returns None (lines 1959-1960)."""
     mock_registry = MagicMock()
     mock_config_manager = MagicMock()
@@ -335,13 +488,13 @@ async def test_delete_enterprise_session_removal_missing_in_registry():
 
     full_config = {"enterprise": {"systems": enterprise_config}}
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
-    result = await mcp_mod.delete_enterprise_session(context, "sys", "s1")
+    result = await mcp_mod.session_enterprise_delete(context, "sys", "s1")
 
     assert result["success"] is True
 
 
 @pytest.mark.asyncio
-async def test_delete_enterprise_session_cleanup_created_sessions_empty():
+async def test_session_enterprise_delete_cleanup_created_sessions_empty():
     """Test session removal - session tracking now handled by registry automatically."""
     mock_registry = MagicMock()
     mock_config_manager = MagicMock()
@@ -361,14 +514,14 @@ async def test_delete_enterprise_session_cleanup_created_sessions_empty():
 
     full_config = {"enterprise": {"systems": enterprise_config}}
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
-    result = await mcp_mod.delete_enterprise_session(context, "sys2", "solo")
+    result = await mcp_mod.session_enterprise_delete(context, "sys2", "solo")
 
     assert result["success"] is True
     # Session tracking is now handled internally by the registry
 
 
 @pytest.mark.asyncio
-async def test_delete_enterprise_session_registry_pop_raises_error():
+async def test_session_enterprise_delete_registry_pop_raises_error():
     """Covers error path on removal (lines 1973-1977)."""
 
     class BadItems:
@@ -392,7 +545,7 @@ async def test_delete_enterprise_session_registry_pop_raises_error():
 
     full_config = {"enterprise": {"systems": enterprise_config}}
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
-    result = await mcp_mod.delete_enterprise_session(context, "sys3", "s3")
+    result = await mcp_mod.session_enterprise_delete(context, "sys3", "s3")
 
     assert result["success"] is False
     assert result["isError"] is True
@@ -400,7 +553,7 @@ async def test_delete_enterprise_session_registry_pop_raises_error():
 
 
 @pytest.mark.asyncio
-async def test_delete_enterprise_session_outer_exception_logger_info_raises():
+async def test_session_enterprise_delete_outer_exception_logger_info_raises():
     """Force outer exception handler (lines 1991-1998) by making _LOGGER.info raise."""
     mock_registry = MagicMock()
     mock_config_manager = MagicMock()
@@ -431,7 +584,7 @@ async def test_delete_enterprise_session_outer_exception_logger_info_raises():
         "deephaven_mcp.mcp_systems_server._mcp._LOGGER.info",
         side_effect=info_side_effect,
     ):
-        result = await mcp_mod.delete_enterprise_session(context, "sys4", "s4")
+        result = await mcp_mod.session_enterprise_delete(context, "sys4", "s4")
 
     assert result["success"] is False
     assert result["isError"] is True
@@ -439,7 +592,7 @@ async def test_delete_enterprise_session_outer_exception_logger_info_raises():
 
 
 @pytest.mark.asyncio
-async def test_refresh_failure():
+async def test_mcp_reload_failure():
     config_manager = AsyncMock()
     session_registry = AsyncMock()
     refresh_lock = AsyncMock()
@@ -454,7 +607,7 @@ async def test_refresh_failure():
             "refresh_lock": refresh_lock,
         }
     )
-    result = await mcp_mod.refresh(context)
+    result = await mcp_mod.mcp_reload(context)
     assert result["success"] is False
     assert result["isError"] is True
     assert "fail" in result["error"]
@@ -464,7 +617,7 @@ async def test_refresh_failure():
 
 
 @pytest.mark.asyncio
-async def test_table_schemas_empty_table_names():
+async def test_session_tables_schema_empty_table_names():
     session_registry = AsyncMock()
 
     class DummySession:
@@ -489,13 +642,15 @@ async def test_table_schemas_empty_table_names():
     mock_session_manager.get = AsyncMock(return_value=DummySession())
     session_registry.get = AsyncMock(return_value=mock_session_manager)
     context = MockContext({"session_registry": session_registry})
-    res = await mcp_mod.table_schemas(context, session_id="worker", table_names=[])
+    res = await mcp_mod.session_tables_schema(
+        context, session_id="worker", table_names=[]
+    )
     assert isinstance(res, dict)
-    assert res == {"success": True, "schemas": []}
+    assert res == {"success": True, "schemas": [], "count": 0}
 
 
 @pytest.mark.asyncio
-async def test_table_schemas_interface_contract():
+async def test_session_tables_schema_interface_contract():
     """Ensure session.tables() is properly mocked as an async method to match real interface"""
 
     # This test validates that our mocks match the real session interface
@@ -524,8 +679,8 @@ async def test_table_schemas_interface_contract():
 
     context = MockContext({"session_registry": session_registry})
 
-    with patch("deephaven_mcp.queries.get_meta_table", mock_get_meta_table):
-        result = await mcp_mod.table_schemas(
+    with patch("deephaven_mcp.queries.get_session_meta_table", mock_get_meta_table):
+        result = await mcp_mod.session_tables_schema(
             context, session_id="worker", table_names=None
         )
 
@@ -535,7 +690,7 @@ async def test_table_schemas_interface_contract():
 
 
 @pytest.mark.asyncio
-async def test_table_schemas_would_catch_original_bug():
+async def test_session_tables_schema_would_catch_original_bug():
     """Test that validates the original bug pattern would be caught"""
 
     # This simulates what the original buggy code was trying to do
@@ -568,7 +723,7 @@ async def test_table_schemas_would_catch_original_bug():
 
 
 @pytest.mark.asyncio
-async def test_table_schemas_no_tables():
+async def test_session_tables_schema_no_tables():
     session_registry = AsyncMock()
 
     class DummySession:
@@ -583,13 +738,15 @@ async def test_table_schemas_no_tables():
     mock_session_manager.get = AsyncMock(return_value=DummySession())
     session_registry.get = AsyncMock(return_value=mock_session_manager)
     context = MockContext({"session_registry": session_registry})
-    res = await mcp_mod.table_schemas(context, session_id="worker", table_names=None)
+    res = await mcp_mod.session_tables_schema(
+        context, session_id="worker", table_names=None
+    )
     assert isinstance(res, dict)
-    assert res == {"success": True, "schemas": []}
+    assert res == {"success": True, "schemas": [], "count": 0}
 
 
 @pytest.mark.asyncio
-async def test_table_schemas_success():
+async def test_session_tables_schema_success():
     # Create a consistent class-based mock session
     class DummySession:
         async def tables(self):
@@ -597,8 +754,20 @@ async def test_table_schemas_success():
 
     # Create a mock for queries.get_meta_table that returns proper schema data
     class MockArrowTable:
+        def __init__(self):
+            # Mock schema with field objects
+            class MockField:
+                def __init__(self, name, type_str):
+                    self.name = name
+                    self.type = type_str
+
+            self.schema = [MockField("Name", "string"), MockField("DataType", "string")]
+
+        def __len__(self):
+            return 1  # One column in the table
+
         def to_pylist(self):
-            return [{"Name": "table1", "DataType": "int"}]
+            return [{"Name": "col1", "DataType": "int"}]
 
     mock_get_meta_table = AsyncMock(return_value=MockArrowTable())
 
@@ -617,9 +786,9 @@ async def test_table_schemas_success():
     )
 
     # Patch queries.get_meta_table to return our mock data
-    with patch("deephaven_mcp.queries.get_meta_table", mock_get_meta_table):
-        # Call table_schemas with a specific table name
-        result = await mcp_mod.table_schemas(
+    with patch("deephaven_mcp.queries.get_session_meta_table", mock_get_meta_table):
+        # Call session_tables_schema with a specific table name
+        result = await mcp_mod.session_tables_schema(
             context, session_id="test-worker", table_names=["table1"]
         )
 
@@ -627,18 +796,21 @@ async def test_table_schemas_success():
     session_registry.get.assert_awaited_once_with("test-worker")
     mock_session_manager.get.assert_awaited_once()
 
-    # Verify the result
+    # Verify the result - now expects full metadata in 'data' field
     assert isinstance(result, dict)
     assert result["success"] is True
     assert len(result["schemas"]) == 1
     assert result["schemas"][0]["success"] is True
     assert result["schemas"][0]["table"] == "table1"
-    assert result["schemas"][0]["schema"][0]["name"] == "table1"
-    assert result["schemas"][0]["schema"][0]["type"] == "int"
+    assert "data" in result["schemas"][0]
+    assert result["schemas"][0]["data"][0]["Name"] == "col1"
+    assert result["schemas"][0]["data"][0]["DataType"] == "int"
+    assert "meta_columns" in result["schemas"][0]
+    assert result["schemas"][0]["row_count"] == 1
 
 
 @pytest.mark.asyncio
-async def test_table_schemas_all_tables():
+async def test_session_tables_schema_all_tables():
     # Create a mock session with two tables
     dummy_session = MagicMock()
     dummy_session.tables = AsyncMock(return_value=["t1", "t2"])
@@ -647,10 +819,25 @@ async def test_table_schemas_all_tables():
     # Will return different data based on which table is requested
     def get_meta_table_side_effect(session, table_name):
         class MockArrowTable:
-            def to_pylist(self):
-                return [{"Name": table_name, "DataType": "int"}]
+            def __init__(self, tname):
+                class MockField:
+                    def __init__(self, name, type_str):
+                        self.name = name
+                        self.type = type_str
 
-        return MockArrowTable()
+                self.schema = [
+                    MockField("Name", "string"),
+                    MockField("DataType", "string"),
+                ]
+                self._table_name = tname
+
+            def __len__(self):
+                return 1
+
+            def to_pylist(self):
+                return [{"Name": f"col_{self._table_name}", "DataType": "int"}]
+
+        return MockArrowTable(table_name)
 
     # Create the mock with side_effect to handle different tables
     mock_get_meta_table = AsyncMock(side_effect=get_meta_table_side_effect)
@@ -669,9 +856,9 @@ async def test_table_schemas_all_tables():
     )
 
     # Patch queries.get_meta_table to return our mock data
-    with patch("deephaven_mcp.queries.get_meta_table", mock_get_meta_table):
+    with patch("deephaven_mcp.queries.get_session_meta_table", mock_get_meta_table):
         # Call table_schemas with no table_names to test getting all tables
-        result = await mcp_mod.table_schemas(context, session_id="worker")
+        result = await mcp_mod.session_tables_schema(context, session_id="worker")
 
     # Should return results for both tables in the dummy_session.tables list
     assert isinstance(result, dict)
@@ -682,22 +869,36 @@ async def test_table_schemas_all_tables():
     assert result["schemas"][0]["table"] in ["t1", "t2"]
     assert result["schemas"][1]["table"] in ["t1", "t2"]
     assert result["schemas"][0]["table"] != result["schemas"][1]["table"]
-    assert result["schemas"][0]["schema"][0]["name"] in ["t1", "t2"]
-    assert result["schemas"][1]["schema"][0]["name"] in ["t1", "t2"]
-    assert result["schemas"][0]["schema"][0]["type"] == "int"
-    assert result["schemas"][1]["schema"][0]["type"] == "int"
+    # Check for full metadata in 'data' field
+    assert "data" in result["schemas"][0]
+    assert "data" in result["schemas"][1]
+    assert result["schemas"][0]["data"][0]["Name"] in ["col_t1", "col_t2"]
+    assert result["schemas"][1]["data"][0]["Name"] in ["col_t1", "col_t2"]
+    assert result["schemas"][0]["data"][0]["DataType"] == "int"
+    assert result["schemas"][1]["data"][0]["DataType"] == "int"
 
 
 @pytest.mark.asyncio
-async def test_table_schemas_schema_key_error():
+async def test_session_tables_schema_schema_key_error():
     # Create our mock session
     dummy_session = MagicMock()
     dummy_session.tables = AsyncMock(return_value=["table1"])
 
     # Create a mock for queries.get_meta_table that returns data with missing required keys
     class MockArrowTable:
+        def __init__(self):
+            class MockField:
+                def __init__(self, name, type_str):
+                    self.name = name
+                    self.type = type_str
+
+            self.schema = [MockField("foo", "string")]
+
+        def __len__(self):
+            return 1
+
         def to_pylist(self):
-            # Missing 'Name' and 'DataType' keys, which should trigger the KeyError
+            # Missing 'Name' and 'DataType' keys, which should trigger an error
             return [{"foo": "bar"}]
 
     # Set up the get_meta_table mock
@@ -718,9 +919,9 @@ async def test_table_schemas_schema_key_error():
     )
 
     # Patch queries.get_meta_table to return our mock
-    with patch("deephaven_mcp.queries.get_meta_table", mock_get_meta_table):
-        # Call table_schemas with a specific table name
-        result = await mcp_mod.table_schemas(
+    with patch("deephaven_mcp.queries.get_session_meta_table", mock_get_meta_table):
+        # Call session_tables_schema with a specific table name
+        result = await mcp_mod.session_tables_schema(
             context, session_id="test-worker", table_names=["table1"]
         )
 
@@ -728,21 +929,20 @@ async def test_table_schemas_schema_key_error():
     session_registry.get.assert_awaited_once_with("test-worker")
     mock_session_manager.get.assert_awaited_once()
 
-    # Verify that the function returns the expected error about the missing keys
+    # With the new implementation using to_pylist() directly, any data format is accepted
+    # The function no longer validates specific keys - it returns whatever metadata is present
     assert isinstance(result, dict)
     assert result["success"] is True  # Overall operation succeeded
     assert len(result["schemas"]) == 1
-    assert result["schemas"][0]["success"] is False
-    assert (
-        "Name" in result["schemas"][0]["error"]
-        or "'Name'" in result["schemas"][0]["error"]
-    )
-    # Don't check for "required" word as the exact error message may vary
-    assert "isError" in result["schemas"][0] and result["schemas"][0]["isError"] is True
+    assert result["schemas"][0]["success"] is True  # Individual table succeeded
+    assert result["schemas"][0]["table"] == "table1"
+    # The data is returned as-is from to_pylist(), even with non-standard keys
+    assert "data" in result["schemas"][0]
+    assert result["schemas"][0]["data"][0]["foo"] == "bar"
 
 
 @pytest.mark.asyncio
-async def test_table_schemas_session_error():
+async def test_session_tables_schema_session_error():
     # Following the pattern in _mcp.py:
     # 1. session_registry = context["session_registry"]
     # 2. session_manager = await session_registry.get(session_id) - set to fail here
@@ -757,18 +957,187 @@ async def test_table_schemas_session_error():
             "session_registry": session_registry,
         }
     )
-    res = await mcp_mod.table_schemas(context, session_id="worker", table_names=["t1"])
+    res = await mcp_mod.session_tables_schema(
+        context, session_id="worker", table_names=["t1"]
+    )
     assert isinstance(res, dict)
     assert res["success"] is False
     assert res["isError"] is True
     assert "fail" in res["error"]
 
 
+# === list_tables ===
+
+
+@pytest.mark.asyncio
+async def test_session_tables_list_success_multiple_tables():
+    """Test session_tables_list with multiple tables."""
+
+    # Create a mock session with multiple tables
+    class DummySession:
+        async def tables(self):
+            return ["trades", "quotes", "orders"]
+
+    # Set up session manager and registry mocks
+    mock_session_manager = MagicMock()
+    mock_session_manager.get = AsyncMock(return_value=DummySession())
+
+    session_registry = MagicMock()
+    session_registry.get = AsyncMock(return_value=mock_session_manager)
+
+    context = MockContext({"session_registry": session_registry})
+
+    # Call list_tables
+    result = await mcp_mod.session_tables_list(context, session_id="test-session")
+
+    # Verify correct session access pattern
+    session_registry.get.assert_awaited_once_with("test-session")
+    mock_session_manager.get.assert_awaited_once()
+
+    # Verify the result
+    assert isinstance(result, dict)
+    assert result["success"] is True
+    assert result["session_id"] == "test-session"
+    assert result["table_names"] == ["trades", "quotes", "orders"]
+    assert result["count"] == 3
+
+
+@pytest.mark.asyncio
+async def test_session_tables_list_success_empty_session():
+    """Test session_tables_list with no tables in session."""
+
+    # Create a mock session with no tables
+    class DummySession:
+        async def tables(self):
+            return []
+
+    # Set up session manager and registry mocks
+    mock_session_manager = MagicMock()
+    mock_session_manager.get = AsyncMock(return_value=DummySession())
+
+    session_registry = MagicMock()
+    session_registry.get = AsyncMock(return_value=mock_session_manager)
+
+    context = MockContext({"session_registry": session_registry})
+
+    # Call list_tables
+    result = await mcp_mod.session_tables_list(context, session_id="empty-session")
+
+    # Verify the result
+    assert isinstance(result, dict)
+    assert result["success"] is True
+    assert result["session_id"] == "empty-session"
+    assert result["table_names"] == []
+    assert result["count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_session_tables_list_invalid_session_id():
+    """Test session_tables_list with invalid session_id."""
+    # Set up session registry to raise error on get
+    session_registry = MagicMock()
+    session_registry.get = AsyncMock(
+        side_effect=Exception("Session not found: invalid-session")
+    )
+
+    context = MockContext({"session_registry": session_registry})
+
+    # Call list_tables
+    result = await mcp_mod.session_tables_list(context, session_id="invalid-session")
+
+    # Verify error response
+    assert isinstance(result, dict)
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "Session not found" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_session_tables_list_session_connection_failure():
+    """Test session_tables_list when session connection fails."""
+    # Set up session manager to raise error on get
+    mock_session_manager = MagicMock()
+    mock_session_manager.get = AsyncMock(side_effect=Exception("Connection failed"))
+
+    session_registry = MagicMock()
+    session_registry.get = AsyncMock(return_value=mock_session_manager)
+
+    context = MockContext({"session_registry": session_registry})
+
+    # Call list_tables
+    result = await mcp_mod.session_tables_list(context, session_id="test-session")
+
+    # Verify error response
+    assert isinstance(result, dict)
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "Connection failed" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_session_tables_list_session_tables_method_failure():
+    """Test session_tables_list when session.tables() method fails."""
+
+    # Create a mock session where tables() raises an error
+    class DummySession:
+        async def tables(self):
+            raise Exception("Failed to retrieve table list")
+
+    # Set up session manager and registry mocks
+    mock_session_manager = MagicMock()
+    mock_session_manager.get = AsyncMock(return_value=DummySession())
+
+    session_registry = MagicMock()
+    session_registry.get = AsyncMock(return_value=mock_session_manager)
+
+    context = MockContext({"session_registry": session_registry})
+
+    # Call list_tables
+    result = await mcp_mod.session_tables_list(context, session_id="test-session")
+
+    # Verify error response
+    assert isinstance(result, dict)
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "Failed to retrieve table list" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_session_tables_list_community_session():
+    """Test session_tables_list works with community sessions."""
+
+    # Create a mock community session
+    class CommunitySession:
+        async def tables(self):
+            return ["table1", "table2"]
+
+    # Set up session manager and registry mocks
+    mock_session_manager = MagicMock()
+    mock_session_manager.get = AsyncMock(return_value=CommunitySession())
+
+    session_registry = MagicMock()
+    session_registry.get = AsyncMock(return_value=mock_session_manager)
+
+    context = MockContext({"session_registry": session_registry})
+
+    # Call list_tables
+    result = await mcp_mod.session_tables_list(
+        context, session_id="community:local:test"
+    )
+
+    # Verify the result
+    assert isinstance(result, dict)
+    assert result["success"] is True
+    assert result["session_id"] == "community:local:test"
+    assert result["table_names"] == ["table1", "table2"]
+    assert result["count"] == 2
+
+
 # === run_script ===
 
 
 @pytest.mark.asyncio
-async def test_run_script_both_script_and_path():
+async def test_session_script_run_both_script_and_path():
     # Both script and script_path provided, should prefer script
     # Following the pattern in _mcp.py:
     # 1. session_registry = context["session_registry"]
@@ -788,7 +1157,7 @@ async def test_run_script_both_script_and_path():
     session_registry.get = AsyncMock(return_value=mock_session_manager)
 
     context = MockContext({"session_registry": session_registry})
-    result = await mcp_mod.run_script(
+    result = await mcp_mod.session_script_run(
         context, session_id="foo", script="print('hi')", script_path="/tmp/fake.py"
     )
     assert result["success"] is True
@@ -797,7 +1166,7 @@ async def test_run_script_both_script_and_path():
 
 
 @pytest.mark.asyncio
-async def test_run_script_missing_session():
+async def test_session_script_run_missing_session():
     # Following the pattern in _mcp.py:
     # 1. session_registry = context["session_registry"]
     # 2. session_manager = await session_registry.get(session_id) - fails here
@@ -808,14 +1177,16 @@ async def test_run_script_missing_session():
     session_registry.get = AsyncMock(side_effect=Exception("no session"))
 
     context = MockContext({"session_registry": session_registry})
-    result = await mcp_mod.run_script(context, session_id=None, script="print('hi')")
+    result = await mcp_mod.session_script_run(
+        context, session_id=None, script="print('hi')"
+    )
     assert result["success"] is False
     assert result["isError"] is True
     assert "no session" in result["error"]
 
 
 @pytest.mark.asyncio
-async def test_run_script_both_none():
+async def test_session_script_run_both_none():
     # Following the pattern in _mcp.py:
     # 1. session_registry = context["session_registry"]
     # 2. session_manager = await session_registry.get(worker_name)
@@ -831,7 +1202,7 @@ async def test_run_script_both_none():
     session_registry.get = AsyncMock(return_value=mock_session_manager)
 
     context = MockContext({"session_registry": session_registry})
-    result = await mcp_mod.run_script(context, session_id="foo")
+    result = await mcp_mod.session_script_run(context, session_id="foo")
     assert result["success"] is False
     assert result["isError"] is True
     assert "Must provide either script or script_path" in result["error"]
@@ -894,7 +1265,7 @@ async def test_app_lifespan_yields_context_and_cleans_up():
 @pytest.mark.asyncio
 @pytest.mark.filterwarnings("ignore:unclosed <socket.socket:ResourceWarning")
 @pytest.mark.filterwarnings("ignore:unclosed event loop:ResourceWarning")
-async def test_run_script_success():
+async def test_session_script_run_success():
     # Main success test for run_script
     class DummySession:
         called = None
@@ -913,7 +1284,9 @@ async def test_run_script_success():
     session_registry.get = AsyncMock(return_value=mock_session_manager)
 
     context = MockContext({"session_registry": session_registry})
-    result = await mcp_mod.run_script(context, session_id="worker", script="print(1)")
+    result = await mcp_mod.session_script_run(
+        context, session_id="worker", script="print(1)"
+    )
 
     # Check correct session access pattern
     session_registry.get.assert_awaited_once_with("worker")
@@ -925,13 +1298,13 @@ async def test_run_script_success():
 
 
 @pytest.mark.asyncio
-async def test_run_script_no_script():
+async def test_session_script_run_no_script():
     mock_session_manager = MagicMock()
     session_registry = MagicMock()
     session_registry.get = AsyncMock(return_value=mock_session_manager)
 
     context = MockContext({"session_registry": session_registry})
-    res = await mcp_mod.run_script(context, session_id="worker")
+    res = await mcp_mod.session_script_run(context, session_id="worker")
 
     # No calls to session_registry should be made since validation fails first
     session_registry.get.assert_not_awaited()
@@ -947,7 +1320,7 @@ async def test_run_script_no_script():
 @pytest.mark.asyncio
 @pytest.mark.filterwarnings("ignore:unclosed <socket.socket:ResourceWarning")
 @pytest.mark.filterwarnings("ignore:unclosed event loop:ResourceWarning")
-async def test_run_script_neither_script_nor_path():
+async def test_session_script_run_neither_script_nor_path():
     # Test validation that requires either script or script_path
     # This should fail before any session_registry calls
     mock_session_manager = MagicMock()
@@ -957,7 +1330,7 @@ async def test_run_script_neither_script_nor_path():
     context = MockContext({"session_registry": session_registry})
 
     # Call with neither script nor script_path
-    res = await mcp_mod.run_script(
+    res = await mcp_mod.session_script_run(
         context, session_id="worker", script=None, script_path=None
     )
 
@@ -975,14 +1348,16 @@ async def test_run_script_neither_script_nor_path():
 @pytest.mark.asyncio
 @pytest.mark.filterwarnings("ignore:unclosed <socket.socket:ResourceWarning")
 @pytest.mark.filterwarnings("ignore:unclosed event loop:ResourceWarning")
-async def test_run_script_session_error():
+async def test_session_script_run_session_error():
     # Run with fake session registry that errors on get
     # so that we hit the exception branch in run_script
     session_registry = MagicMock()
     session_registry.get = AsyncMock(side_effect=Exception("fail"))
 
     context = MockContext({"session_registry": session_registry})
-    res = await mcp_mod.run_script(context, session_id="worker", script="print(1)")
+    res = await mcp_mod.session_script_run(
+        context, session_id="worker", script="print(1)"
+    )
 
     # Verify the session registry was called with the correct session id
     session_registry.get.assert_awaited_once_with("worker")
@@ -998,7 +1373,7 @@ async def test_run_script_session_error():
 @pytest.mark.asyncio
 @pytest.mark.filterwarnings("ignore:unclosed <socket.socket:ResourceWarning")
 @pytest.mark.filterwarnings("ignore:unclosed event loop:ResourceWarning")
-async def test_run_script_script_path():
+async def test_session_script_run_script_path():
     # Test run_script with script_path and no script
     script_path = "/tmp/test.py"
     script_content = "print('loaded from file')"
@@ -1033,7 +1408,7 @@ async def test_run_script_script_path():
     # Apply the patches and run the test
     with patch("aiofiles.open", mock_open):
         context = MockContext({"session_registry": session_registry})
-        res = await mcp_mod.run_script(
+        res = await mcp_mod.session_script_run(
             context, session_id="worker", script_path=script_path
         )
 
@@ -1048,14 +1423,14 @@ async def test_run_script_script_path():
 
 
 @pytest.mark.asyncio
-async def test_run_script_script_path_none_error():
+async def test_session_script_run_script_path_none_error():
     # Test case where neither script nor script_path is provided
     # This should fail with a validation error, not by calling session_registry.get
     session_registry = MagicMock()
     session_registry.get = AsyncMock()
 
     context = MockContext({"session_registry": session_registry})
-    res = await mcp_mod.run_script(
+    res = await mcp_mod.session_script_run(
         context, session_id="worker", script=None, script_path=None
     )
 
@@ -1072,7 +1447,7 @@ async def test_run_script_script_path_none_error():
 
 
 @pytest.mark.asyncio
-async def test_pip_packages_success():
+async def test_session_pip_list_success():
     """Test successful retrieval of pip packages."""
     # Set up mock for the Arrow table and data frame
     mock_arrow_table = MagicMock()
@@ -1111,7 +1486,7 @@ async def test_pip_packages_success():
                 "config_manager": AsyncMock(),
             }
         )
-        result = await mcp_mod.pip_packages(context, session_id="test_worker")
+        result = await mcp_mod.session_pip_list(context, session_id="test_worker")
 
         # Check correct session access pattern
         mock_session_registry.get.assert_awaited_once_with("test_worker")
@@ -1125,7 +1500,7 @@ async def test_pip_packages_success():
 
 
 @pytest.mark.asyncio
-async def test_pip_packages_empty():
+async def test_session_pip_list_empty():
     """Test pip_packages with an empty table."""
     # Set up mock for the Arrow table and data frame with empty results
     mock_arrow_table = MagicMock()
@@ -1152,7 +1527,7 @@ async def test_pip_packages_empty():
         context = MockContext(
             {"session_registry": mock_session_registry, "config_manager": AsyncMock()}
         )
-        result = await mcp_mod.pip_packages(context, session_id="test_worker")
+        result = await mcp_mod.session_pip_list(context, session_id="test_worker")
 
     # Verify results
     assert result["success"] is True
@@ -1165,7 +1540,7 @@ async def test_pip_packages_empty():
 
 
 @pytest.mark.asyncio
-async def test_pip_packages_malformed_data():
+async def test_session_pip_list_malformed_data():
     """Test pip_packages with malformed data."""
     # Set up mock for the Arrow table and data frame with malformed results
     mock_arrow_table = MagicMock()
@@ -1197,7 +1572,7 @@ async def test_pip_packages_malformed_data():
                 "config_manager": AsyncMock(),
             }
         )
-        result = await mcp_mod.pip_packages(context, session_id="test_worker")
+        result = await mcp_mod.session_pip_list(context, session_id="test_worker")
 
     # Verify results
     assert result["success"] is False
@@ -1211,7 +1586,7 @@ async def test_pip_packages_malformed_data():
 
 
 @pytest.mark.asyncio
-async def test_pip_packages_error():
+async def test_session_pip_list_error():
     """Test pip_packages with an error."""
     # Mock the query that fetches pip packages to throw an exception
     mock_get_pip_packages_table = AsyncMock(side_effect=Exception("Table error"))
@@ -1237,7 +1612,7 @@ async def test_pip_packages_error():
                 "config_manager": AsyncMock(),
             }
         )
-        result = await mcp_mod.pip_packages(context, session_id="test_worker")
+        result = await mcp_mod.session_pip_list(context, session_id="test_worker")
 
         # Verify results
         assert result["success"] is False
@@ -1250,7 +1625,7 @@ async def test_pip_packages_error():
 
 
 @pytest.mark.asyncio
-async def test_pip_packages_session_not_found():
+async def test_session_pip_list_session_not_found():
     """Test pip_packages when the session is not found."""
     mock_get_pip_packages_table = AsyncMock(return_value=MagicMock())
 
@@ -1268,7 +1643,9 @@ async def test_pip_packages_session_not_found():
                 "config_manager": AsyncMock(),
             }
         )
-        result = await mcp_mod.pip_packages(context, session_id="nonexistent_worker")
+        result = await mcp_mod.session_pip_list(
+            context, session_id="nonexistent_worker"
+        )
         assert result["success"] is False
         assert "Worker not found" in result["error"]
         assert result["isError"] is True
@@ -1686,8 +2063,8 @@ async def test_enterprise_systems_status_no_enterprise_registry():
 
 
 @pytest.mark.asyncio
-async def test_list_sessions_success():
-    """Test list_sessions with multiple sessions of different types."""
+async def test_sessions_list_success():
+    """Test sessions_list with multiple sessions of different types."""
     # Mock session registry
     mock_registry = AsyncMock()
 
@@ -1712,7 +2089,7 @@ async def test_list_sessions_success():
     mock_context.request_context.lifespan_context = {"session_registry": mock_registry}
 
     # Call function
-    result = await mcp_mod.list_sessions(mock_context)
+    result = await mcp_mod.sessions_list(mock_context)
 
     # Verify results
     assert result["success"] is True
@@ -1734,8 +2111,8 @@ async def test_list_sessions_success():
 
 
 @pytest.mark.asyncio
-async def test_list_sessions_with_unknown_type():
-    """Test list_sessions with a session that has no system_type attribute."""
+async def test_sessions_list_with_unknown_type():
+    """Test sessions_list with a session that has no system_type attribute."""
     # Mock session registry
     mock_registry = AsyncMock()
 
@@ -1752,7 +2129,7 @@ async def test_list_sessions_with_unknown_type():
     mock_context.request_context.lifespan_context = {"session_registry": mock_registry}
 
     # Call function
-    result = await mcp_mod.list_sessions(mock_context)
+    result = await mcp_mod.sessions_list(mock_context)
 
     # Verify results
     assert result["success"] is True
@@ -1763,8 +2140,8 @@ async def test_list_sessions_with_unknown_type():
 
 
 @pytest.mark.asyncio
-async def test_list_sessions_with_processing_error():
-    """Test list_sessions when processing a session raises an exception."""
+async def test_sessions_list_with_processing_error():
+    """Test sessions_list when processing a session raises an exception."""
     # Mock session registry
     mock_registry = AsyncMock()
 
@@ -1784,7 +2161,7 @@ async def test_list_sessions_with_processing_error():
     mock_context.request_context.lifespan_context = {"session_registry": mock_registry}
 
     # Call function
-    result = await mcp_mod.list_sessions(mock_context)
+    result = await mcp_mod.sessions_list(mock_context)
 
     # Verify results
     assert result["success"] is True
@@ -1794,8 +2171,8 @@ async def test_list_sessions_with_processing_error():
 
 
 @pytest.mark.asyncio
-async def test_list_sessions_registry_error():
-    """Test list_sessions when the session registry raises an exception."""
+async def test_sessions_list_registry_error():
+    """Test sessions_list when the session registry raises an exception."""
     # Mock context with registry that raises an exception
     mock_context = MagicMock()
     mock_context.request_context.lifespan_context.__getitem__.side_effect = Exception(
@@ -1803,15 +2180,15 @@ async def test_list_sessions_registry_error():
     )
 
     # Call function
-    result = await mcp_mod.list_sessions(mock_context)
+    result = await mcp_mod.sessions_list(mock_context)
 
     # Verify results
     assert result["success"] is False
 
 
 @pytest.mark.asyncio
-async def test_get_session_details_session_not_found():
-    """Test get_session_details for a non-existent session."""
+async def test_session_details_session_not_found():
+    """Test session_details for a non-existent session."""
     # Mock session registry
     mock_registry = AsyncMock()
     mock_registry.get.side_effect = Exception("Session not found")
@@ -1821,7 +2198,7 @@ async def test_get_session_details_session_not_found():
     mock_context.request_context.lifespan_context = {"session_registry": mock_registry}
 
     # Call function
-    result = await mcp_mod.get_session_details(mock_context, "nonexistent")
+    result = await mcp_mod.session_details(mock_context, "nonexistent")
 
     # Verify results
     assert result["success"] is False
@@ -1831,8 +2208,8 @@ async def test_get_session_details_session_not_found():
 
 
 @pytest.mark.asyncio
-async def test_get_session_details_with_session_error():
-    """Test get_session_details when getting the session raises an exception."""
+async def test_session_details_with_session_error():
+    """Test session_details when getting the session raises an exception."""
     # Mock session registry
     mock_registry = AsyncMock()
 
@@ -1854,7 +2231,7 @@ async def test_get_session_details_with_session_error():
     mock_context.request_context.lifespan_context = {"session_registry": mock_registry}
 
     # Call function
-    result = await mcp_mod.get_session_details(mock_context, "session1")
+    result = await mcp_mod.session_details(mock_context, "session1")
 
     # Verify results
     assert result["success"] is True
@@ -1863,8 +2240,8 @@ async def test_get_session_details_with_session_error():
 
 
 @pytest.mark.asyncio
-async def test_get_session_details_with_processing_error():
-    """Test get_session_details when processing a session raises an exception."""
+async def test_session_details_with_processing_error():
+    """Test session_details when processing a session raises an exception."""
     # Mock session registry
     mock_registry = AsyncMock()
 
@@ -1892,7 +2269,7 @@ async def test_get_session_details_with_processing_error():
     mock_context.request_context.lifespan_context = {"session_registry": mock_registry}
 
     # Call function
-    result = await mcp_mod.get_session_details(mock_context, "session1")
+    result = await mcp_mod.session_details(mock_context, "session1")
 
     # Verify results
     assert result["success"] is False
@@ -1902,8 +2279,8 @@ async def test_get_session_details_with_processing_error():
 
 
 @pytest.mark.asyncio
-async def test_get_session_details_registry_error():
-    """Test get_session_details when the session registry raises an exception."""
+async def test_session_details_registry_error():
+    """Test session_details when the session registry raises an exception."""
     # Mock context with registry that raises an exception
     mock_context = MagicMock()
     mock_context.request_context.lifespan_context.__getitem__.side_effect = Exception(
@@ -1911,7 +2288,7 @@ async def test_get_session_details_registry_error():
     )
 
     # Call function
-    result = await mcp_mod.get_session_details(mock_context, "session1")
+    result = await mcp_mod.session_details(mock_context, "session1")
 
     # Verify results
     assert result["success"] is False
@@ -1920,8 +2297,8 @@ async def test_get_session_details_registry_error():
 
 
 @pytest.mark.asyncio
-async def test_get_session_details_success_with_programming_language():
-    """Test get_session_details for an existing session with programming_language property."""
+async def test_session_details_success_with_programming_language():
+    """Test session_details for an existing session with programming_language property."""
     # Mock session registry
     mock_registry = AsyncMock()
 
@@ -1954,7 +2331,7 @@ async def test_get_session_details_success_with_programming_language():
     mock_context.request_context.lifespan_context = {"session_registry": mock_registry}
 
     # Call function
-    result = await mcp_mod.get_session_details(
+    result = await mcp_mod.session_details(
         mock_context, "session1", attempt_to_connect=True
     )
 
@@ -1972,8 +2349,8 @@ async def test_get_session_details_success_with_programming_language():
 
 
 @pytest.mark.asyncio
-async def test_get_session_details_success_without_programming_language():
-    """Test get_session_details for an existing session without programming_language property."""
+async def test_session_details_success_without_programming_language():
+    """Test session_details for an existing session without programming_language property."""
     # Mock session registry
     mock_registry = AsyncMock()
 
@@ -2005,7 +2382,7 @@ async def test_get_session_details_success_without_programming_language():
     mock_context.request_context.lifespan_context = {"session_registry": mock_registry}
 
     # Call function
-    result = await mcp_mod.get_session_details(
+    result = await mcp_mod.session_details(
         mock_context, "session1", attempt_to_connect=True
     )
 
@@ -2054,7 +2431,7 @@ def test_check_response_size_over_limit():
 
 
 @pytest.mark.asyncio
-async def test_get_table_data_success_default_params():
+async def test_session_table_data_success_default_params():
     """Test get_table_data with default parameters."""
     # Mock context and session registry
     mock_registry = MagicMock()
@@ -2092,7 +2469,7 @@ async def test_get_table_data_success_default_params():
     ) as mock_get_table:
         mock_get_table.return_value = (mock_arrow_table, True)
 
-        result = await mcp_mod.get_table_data(context, "session1", "table1")
+        result = await mcp_mod.session_table_data(context, "session1", "table1")
 
         assert result["success"] is True
         assert result["table_name"] == "table1"
@@ -2111,7 +2488,7 @@ async def test_get_table_data_success_default_params():
 
 
 @pytest.mark.asyncio
-async def test_get_table_data_success_custom_params():
+async def test_session_table_data_success_custom_params():
     """Test get_table_data with custom parameters."""
     mock_registry = MagicMock()
     mock_session_manager = MagicMock()
@@ -2136,7 +2513,7 @@ async def test_get_table_data_success_custom_params():
     ) as mock_get_table:
         mock_get_table.return_value = (mock_arrow_table, False)
 
-        result = await mcp_mod.get_table_data(
+        result = await mcp_mod.session_table_data(
             context, "session1", "table1", max_rows=50, head=False, format="json-row"
         )
 
@@ -2150,7 +2527,7 @@ async def test_get_table_data_success_custom_params():
 
 
 @pytest.mark.asyncio
-async def test_get_table_data_success_full_table():
+async def test_session_table_data_success_full_table():
     """Test get_table_data with max_rows=None for full table."""
     mock_registry = MagicMock()
     mock_session_manager = MagicMock()
@@ -2184,7 +2561,7 @@ async def test_get_table_data_success_full_table():
 
         mock_get_table.return_value = (mock_arrow_table, True)
 
-        result = await mcp_mod.get_table_data(
+        result = await mcp_mod.session_table_data(
             context, "session1", "table1", max_rows=None
         )
 
@@ -2198,7 +2575,7 @@ async def test_get_table_data_success_full_table():
 
 
 @pytest.mark.asyncio
-async def test_get_table_data_invalid_format():
+async def test_session_table_data_invalid_format():
     """Test get_table_data with invalid format parameter."""
     mock_registry = MagicMock()
     mock_session_manager = MagicMock()
@@ -2222,7 +2599,7 @@ async def test_get_table_data_invalid_format():
     ) as mock_get_table:
         mock_get_table.return_value = (mock_arrow_table, True)
 
-        result = await mcp_mod.get_table_data(
+        result = await mcp_mod.session_table_data(
             context, "session1", "table1", format="invalid"
         )
 
@@ -2232,7 +2609,7 @@ async def test_get_table_data_invalid_format():
 
 
 @pytest.mark.asyncio
-async def test_get_table_data_size_limit_exceeded():
+async def test_session_table_data_size_limit_exceeded():
     """Test get_table_data when response size exceeds limit."""
     mock_registry = MagicMock()
     mock_session_manager = MagicMock()
@@ -2257,7 +2634,7 @@ async def test_get_table_data_size_limit_exceeded():
     ) as mock_get_table:
         mock_get_table.return_value = (mock_arrow_table, True)
 
-        result = await mcp_mod.get_table_data(context, "session1", "table1")
+        result = await mcp_mod.session_table_data(context, "session1", "table1")
 
         assert result["success"] is False
         assert "max 50MB" in result["error"]
@@ -2265,14 +2642,14 @@ async def test_get_table_data_size_limit_exceeded():
 
 
 @pytest.mark.asyncio
-async def test_get_table_data_session_not_found():
+async def test_session_table_data_session_not_found():
     """Test get_table_data when session is not found."""
     mock_registry = MagicMock()
     mock_registry.get = AsyncMock(side_effect=Exception("Session not found"))
 
     context = MockContext({"session_registry": mock_registry})
 
-    result = await mcp_mod.get_table_data(context, "invalid_session", "table1")
+    result = await mcp_mod.session_table_data(context, "invalid_session", "table1")
 
     assert result["success"] is False
     assert "Session not found" in result["error"]
@@ -2280,7 +2657,7 @@ async def test_get_table_data_session_not_found():
 
 
 @pytest.mark.asyncio
-async def test_get_table_data_table_not_found():
+async def test_session_table_data_table_not_found():
     """Test get_table_data when table is not found."""
     mock_registry = MagicMock()
     mock_session_manager = MagicMock()
@@ -2296,145 +2673,24 @@ async def test_get_table_data_table_not_found():
     ) as mock_get_table:
         mock_get_table.side_effect = Exception("Table 'invalid_table' not found")
 
-        result = await mcp_mod.get_table_data(context, "session1", "invalid_table")
+        result = await mcp_mod.session_table_data(context, "session1", "invalid_table")
 
         assert result["success"] is False
         assert "Table 'invalid_table' not found" in result["error"]
         assert result["isError"] is True
 
 
-# === get_table_meta ===
-
-
-@pytest.mark.asyncio
-async def test_get_table_meta_success():
-    """Test get_table_meta successful metadata retrieval."""
-    mock_registry = MagicMock()
-    mock_session_manager = MagicMock()
-    mock_session = MagicMock()
-
-    mock_registry.get = AsyncMock(return_value=mock_session_manager)
-    mock_session_manager.get = AsyncMock(return_value=mock_session)
-
-    context = MockContext({"session_registry": mock_registry})
-
-    # Mock meta arrow table
-    mock_meta_table = MagicMock()
-    mock_meta_table.__len__ = MagicMock(return_value=3)
-    mock_field1 = MagicMock()
-    mock_field1.name = "Name"
-    mock_field1.type = "string"
-    mock_field2 = MagicMock()
-    mock_field2.name = "DataType"
-    mock_field2.type = "string"
-    mock_field3 = MagicMock()
-    mock_field3.name = "IsPartitioning"
-    mock_field3.type = "bool"
-    mock_meta_table.schema = [mock_field1, mock_field2, mock_field3]
-    mock_meta_table.to_pylist.return_value = [
-        {"Name": "col1", "DataType": "int64", "IsPartitioning": False},
-        {"Name": "col2", "DataType": "string", "IsPartitioning": False},
-        {"Name": "col3", "DataType": "double", "IsPartitioning": True},
-    ]
-
-    with patch(
-        "deephaven_mcp.mcp_systems_server._mcp.queries.get_meta_table"
-    ) as mock_get_meta:
-        mock_get_meta.return_value = mock_meta_table
-
-        result = await mcp_mod.get_table_meta(context, "session1", "table1")
-
-        assert result["success"] is True
-        assert result["table_name"] == "table1"
-        assert result["format"] == "json-row"
-        assert result["row_count"] == 3
-        assert result["is_complete"] is True
-        assert len(result["meta_columns"]) == 3
-        assert result["data"] == [
-            {"Name": "col1", "DataType": "int64", "IsPartitioning": False},
-            {"Name": "col2", "DataType": "string", "IsPartitioning": False},
-            {"Name": "col3", "DataType": "double", "IsPartitioning": True},
-        ]
-
-        mock_get_meta.assert_called_once_with(mock_session, "table1")
-
-
-@pytest.mark.asyncio
-async def test_get_table_meta_session_not_found():
-    """Test get_table_meta when session is not found."""
-    mock_registry = MagicMock()
-    mock_registry.get = AsyncMock(side_effect=Exception("Session not found"))
-
-    context = MockContext({"session_registry": mock_registry})
-
-    result = await mcp_mod.get_table_meta(context, "invalid_session", "table1")
-
-    assert result["success"] is False
-    assert "Session not found" in result["error"]
-    assert result["isError"] is True
-
-
-@pytest.mark.asyncio
-async def test_get_table_meta_table_not_found():
-    """Test get_table_meta when table is not found."""
-    mock_registry = MagicMock()
-    mock_session_manager = MagicMock()
-    mock_session = MagicMock()
-
-    mock_registry.get = AsyncMock(return_value=mock_session_manager)
-    mock_session_manager.get = AsyncMock(return_value=mock_session)
-
-    context = MockContext({"session_registry": mock_registry})
-
-    with patch(
-        "deephaven_mcp.mcp_systems_server._mcp.queries.get_meta_table"
-    ) as mock_get_meta:
-        mock_get_meta.side_effect = Exception("Table 'invalid_table' not found")
-
-        result = await mcp_mod.get_table_meta(context, "session1", "invalid_table")
-
-        assert result["success"] is False
-        assert "Table 'invalid_table' not found" in result["error"]
-        assert result["isError"] is True
-
-
-@pytest.mark.asyncio
-async def test_get_table_meta_empty_schema():
-    """Test get_table_meta with empty schema (edge case)."""
-    mock_registry = MagicMock()
-    mock_session_manager = MagicMock()
-    mock_session = MagicMock()
-
-    mock_registry.get = AsyncMock(return_value=mock_session_manager)
-    mock_session_manager.get = AsyncMock(return_value=mock_session)
-
-    context = MockContext({"session_registry": mock_registry})
-
-    # Mock empty meta table
-    mock_meta_table = MagicMock()
-    mock_meta_table.__len__ = MagicMock(return_value=0)
-    mock_meta_table.schema = []
-    mock_meta_table.to_pylist.return_value = []
-
-    with patch(
-        "deephaven_mcp.mcp_systems_server._mcp.queries.get_meta_table"
-    ) as mock_get_meta:
-        mock_get_meta.return_value = mock_meta_table
-
-        result = await mcp_mod.get_table_meta(context, "session1", "empty_table")
-
-        assert result["success"] is True
-        assert result["row_count"] == 0
-        assert result["meta_columns"] == []
-        assert result["data"] == []
+# === get_table_meta tests removed ===
+# The get_table_meta function has been merged into session_tables_schema
+# All functionality is now tested by session_tables_schema tests
 
 
 # === create_enterprise_session ===
 
 
 @pytest.mark.asyncio
-async def test_create_enterprise_session_success_with_defaults():
-    """Test create_enterprise_session with config defaults."""
+async def test_session_enterprise_create_success_with_defaults():
+    """Test session_enterprise_create with config defaults."""
     mock_registry = MagicMock()
     mock_config_manager = MagicMock()
 
@@ -2484,7 +2740,7 @@ async def test_create_enterprise_session_success_with_defaults():
         {"config_manager": mock_config_manager, "session_registry": mock_registry}
     )
 
-    result = await mcp_mod.create_enterprise_session(
+    result = await mcp_mod.session_enterprise_create(
         context, "prod-system", "test-worker"
     )
 
@@ -2522,8 +2778,8 @@ async def test_create_enterprise_session_success_with_defaults():
 
 
 @pytest.mark.asyncio
-async def test_create_enterprise_session_success_with_overrides():
-    """Test create_enterprise_session with parameter overrides."""
+async def test_session_enterprise_create_success_with_overrides():
+    """Test session_enterprise_create with parameter overrides."""
     mock_registry = MagicMock()
     mock_config_manager = MagicMock()
 
@@ -2567,7 +2823,7 @@ async def test_create_enterprise_session_success_with_overrides():
         {"config_manager": mock_config_manager, "session_registry": mock_registry}
     )
 
-    result = await mcp_mod.create_enterprise_session(
+    result = await mcp_mod.session_enterprise_create(
         context,
         "prod-system",
         "custom-worker",
@@ -2600,8 +2856,8 @@ async def test_create_enterprise_session_success_with_overrides():
 
 
 @pytest.mark.asyncio
-async def test_create_enterprise_session_auto_generate_name():
-    """Test create_enterprise_session auto-generates worker name when None."""
+async def test_session_enterprise_create_auto_generate_name():
+    """Test session_enterprise_create auto-generates worker name when None."""
     mock_registry = MagicMock()
     mock_config_manager = MagicMock()
 
@@ -2646,7 +2902,7 @@ async def test_create_enterprise_session_auto_generate_name():
             {"config_manager": mock_config_manager, "session_registry": mock_registry}
         )
 
-        result = await mcp_mod.create_enterprise_session(context, "test-system")
+        result = await mcp_mod.session_enterprise_create(context, "test-system")
 
         assert result["success"] is True
         assert result["session_name"] == "mcp-test-20241126-1430"
@@ -2654,8 +2910,8 @@ async def test_create_enterprise_session_auto_generate_name():
 
 
 @pytest.mark.asyncio
-async def test_create_enterprise_session_system_not_found():
-    """Test create_enterprise_session when enterprise system not found."""
+async def test_session_enterprise_create_system_not_found():
+    """Test session_enterprise_create when enterprise system not found."""
     mock_registry = MagicMock()
     mock_config_manager = MagicMock()
 
@@ -2667,7 +2923,7 @@ async def test_create_enterprise_session_system_not_found():
         {"config_manager": mock_config_manager, "session_registry": mock_registry}
     )
 
-    result = await mcp_mod.create_enterprise_session(
+    result = await mcp_mod.session_enterprise_create(
         context, "nonexistent-system", "worker"
     )
 
@@ -2677,8 +2933,8 @@ async def test_create_enterprise_session_system_not_found():
 
 
 @pytest.mark.asyncio
-async def test_create_enterprise_session_max_workers_exceeded():
-    """Test create_enterprise_session when max concurrent workers limit exceeded."""
+async def test_session_enterprise_create_max_workers_exceeded():
+    """Test session_enterprise_create when max concurrent workers limit exceeded."""
     mock_registry = MagicMock()
     mock_config_manager = MagicMock()
 
@@ -2717,7 +2973,7 @@ async def test_create_enterprise_session_max_workers_exceeded():
         {"config_manager": mock_config_manager, "session_registry": mock_registry}
     )
 
-    result = await mcp_mod.create_enterprise_session(
+    result = await mcp_mod.session_enterprise_create(
         context, "limited-system", "worker3"
     )
 
@@ -2729,8 +2985,8 @@ async def test_create_enterprise_session_max_workers_exceeded():
 
 
 @pytest.mark.asyncio
-async def test_create_enterprise_session_session_conflict():
-    """Test create_enterprise_session when session ID already exists."""
+async def test_session_enterprise_create_session_conflict():
+    """Test session_enterprise_create when session ID already exists."""
     mock_registry = MagicMock()
     mock_config_manager = MagicMock()
 
@@ -2757,7 +3013,7 @@ async def test_create_enterprise_session_session_conflict():
         {"config_manager": mock_config_manager, "session_registry": mock_registry}
     )
 
-    result = await mcp_mod.create_enterprise_session(
+    result = await mcp_mod.session_enterprise_create(
         context, "conflict-system", "existing-worker"
     )
 
@@ -2770,8 +3026,8 @@ async def test_create_enterprise_session_session_conflict():
 
 
 @pytest.mark.asyncio
-async def test_create_enterprise_session_factory_creation_failure():
-    """Test create_enterprise_session when worker creation fails."""
+async def test_session_enterprise_create_factory_creation_failure():
+    """Test session_enterprise_create when worker creation fails."""
     mock_registry = MagicMock()
     mock_config_manager = MagicMock()
 
@@ -2810,7 +3066,7 @@ async def test_create_enterprise_session_factory_creation_failure():
         {"config_manager": mock_config_manager, "session_registry": mock_registry}
     )
 
-    result = await mcp_mod.create_enterprise_session(
+    result = await mcp_mod.session_enterprise_create(
         context, "failing-system", "failing-worker"
     )
 
@@ -2820,8 +3076,8 @@ async def test_create_enterprise_session_factory_creation_failure():
 
 
 @pytest.mark.asyncio
-async def test_create_enterprise_session_disabled_by_zero_max_workers():
-    """Test create_enterprise_session when worker creation is disabled (max_concurrent_sessions = 0)."""
+async def test_session_enterprise_create_disabled_by_zero_max_workers():
+    """Test session_enterprise_create when worker creation is disabled (max_concurrent_sessions = 0)."""
     mock_registry = MagicMock()
     mock_config_manager = MagicMock()
 
@@ -2843,7 +3099,7 @@ async def test_create_enterprise_session_disabled_by_zero_max_workers():
         {"config_manager": mock_config_manager, "session_registry": mock_registry}
     )
 
-    result = await mcp_mod.create_enterprise_session(
+    result = await mcp_mod.session_enterprise_create(
         context, "disabled-system", "test-worker"
     )
 
@@ -2856,8 +3112,8 @@ async def test_create_enterprise_session_disabled_by_zero_max_workers():
 
 
 @pytest.mark.asyncio
-async def test_delete_enterprise_session_success():
-    """Test delete_enterprise_session successful deletion."""
+async def test_session_enterprise_delete_success():
+    """Test session_enterprise_delete successful deletion."""
     mock_registry = MagicMock()
     mock_config_manager = MagicMock()
 
@@ -2879,13 +3135,13 @@ async def test_delete_enterprise_session_success():
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
 
     mock_registry.get = AsyncMock(return_value=mock_session_manager)
-    mock_registry._items = {"enterprise:test-system:test-worker": mock_session_manager}
+    mock_registry.remove_session = AsyncMock(return_value=mock_session_manager)
 
     context = MockContext(
         {"config_manager": mock_config_manager, "session_registry": mock_registry}
     )
 
-    result = await mcp_mod.delete_enterprise_session(
+    result = await mcp_mod.session_enterprise_delete(
         context, "test-system", "test-worker"
     )
 
@@ -2903,8 +3159,8 @@ async def test_delete_enterprise_session_success():
 
 
 @pytest.mark.asyncio
-async def test_delete_enterprise_session_system_not_found():
-    """Test delete_enterprise_session when enterprise system not found."""
+async def test_session_enterprise_delete_system_not_found():
+    """Test session_enterprise_delete when enterprise system not found."""
     mock_registry = MagicMock()
     mock_config_manager = MagicMock()
 
@@ -2916,7 +3172,7 @@ async def test_delete_enterprise_session_system_not_found():
         {"config_manager": mock_config_manager, "session_registry": mock_registry}
     )
 
-    result = await mcp_mod.delete_enterprise_session(
+    result = await mcp_mod.session_enterprise_delete(
         context, "nonexistent-system", "worker"
     )
 
@@ -2926,8 +3182,8 @@ async def test_delete_enterprise_session_system_not_found():
 
 
 @pytest.mark.asyncio
-async def test_delete_enterprise_session_session_not_found():
-    """Test delete_enterprise_session when session not found."""
+async def test_session_enterprise_delete_session_not_found():
+    """Test session_enterprise_delete when session not found."""
     mock_registry = MagicMock()
     mock_config_manager = MagicMock()
 
@@ -2950,7 +3206,7 @@ async def test_delete_enterprise_session_session_not_found():
         {"config_manager": mock_config_manager, "session_registry": mock_registry}
     )
 
-    result = await mcp_mod.delete_enterprise_session(
+    result = await mcp_mod.session_enterprise_delete(
         context, "test-system", "nonexistent-worker"
     )
 
@@ -2963,8 +3219,8 @@ async def test_delete_enterprise_session_session_not_found():
 
 
 @pytest.mark.asyncio
-async def test_delete_enterprise_session_not_enterprise_session():
-    """Test delete_enterprise_session when session is not an EnterpriseSessionManager."""
+async def test_session_enterprise_delete_not_enterprise_session():
+    """Test session_enterprise_delete when session is not an EnterpriseSessionManager."""
     mock_registry = MagicMock()
     mock_config_manager = MagicMock()
 
@@ -2990,7 +3246,7 @@ async def test_delete_enterprise_session_not_enterprise_session():
         {"config_manager": mock_config_manager, "session_registry": mock_registry}
     )
 
-    result = await mcp_mod.delete_enterprise_session(
+    result = await mcp_mod.session_enterprise_delete(
         context, "test-system", "wrong-type-worker"
     )
 
@@ -3000,8 +3256,8 @@ async def test_delete_enterprise_session_not_enterprise_session():
 
 
 @pytest.mark.asyncio
-async def test_delete_enterprise_session_close_failure_continues():
-    """Test delete_enterprise_session continues removal even if close fails."""
+async def test_session_enterprise_delete_close_failure_continues():
+    """Test session_enterprise_delete continues removal even if close fails."""
     mock_registry = MagicMock()
     mock_config_manager = MagicMock()
 
@@ -3029,7 +3285,7 @@ async def test_delete_enterprise_session_close_failure_continues():
         {"config_manager": mock_config_manager, "session_registry": mock_registry}
     )
 
-    result = await mcp_mod.delete_enterprise_session(
+    result = await mcp_mod.session_enterprise_delete(
         context, "test-system", "failing-close-worker"
     )
 
@@ -3173,7 +3429,7 @@ def test_resolve_session_parameters():
 
 
 @pytest.mark.asyncio
-async def test_create_enterprise_session_success():
+async def test_session_enterprise_create_success():
     """Test successful enterprise session creation."""
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock()
@@ -3224,7 +3480,7 @@ async def test_create_enterprise_session_success():
 
     full_config = {"enterprise": {"systems": enterprise_config}}
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
-    result = await mcp_mod.create_enterprise_session(
+    result = await mcp_mod.session_enterprise_create(
         context,
         system_name="test-system",
         session_name="test-session",
@@ -3249,7 +3505,7 @@ async def test_create_enterprise_session_success():
 
 
 @pytest.mark.asyncio
-async def test_create_enterprise_session_auto_generated_name():
+async def test_session_enterprise_create_auto_generated_name():
     """Test enterprise session creation with auto-generated session name."""
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock()
@@ -3297,7 +3553,7 @@ async def test_create_enterprise_session_auto_generated_name():
 
     full_config = {"enterprise": {"systems": enterprise_config}}
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
-    result = await mcp_mod.create_enterprise_session(
+    result = await mcp_mod.session_enterprise_create(
         context,
         system_name="test-system",
         session_name=None,  # This should trigger auto-generation
@@ -3314,7 +3570,7 @@ async def test_create_enterprise_session_auto_generated_name():
 
 
 @pytest.mark.asyncio
-async def test_create_enterprise_session_max_sessions_reached():
+async def test_session_enterprise_create_max_sessions_reached():
     """Test enterprise session creation when max concurrent sessions reached."""
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock()
@@ -3356,7 +3612,7 @@ async def test_create_enterprise_session_max_sessions_reached():
 
     full_config = {"enterprise": {"systems": enterprise_config}}
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
-    result = await mcp_mod.create_enterprise_session(
+    result = await mcp_mod.session_enterprise_create(
         context, system_name="test-system", session_name="test-session"
     )
 
@@ -3370,7 +3626,7 @@ async def test_create_enterprise_session_max_sessions_reached():
 
 
 @pytest.mark.asyncio
-async def test_create_enterprise_session_disabled():
+async def test_session_enterprise_create_disabled():
     """Test enterprise session creation when session creation is disabled."""
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock()
@@ -3396,7 +3652,7 @@ async def test_create_enterprise_session_disabled():
     full_config = {"enterprise": {"systems": enterprise_config}}
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
 
-    result = await mcp_mod.create_enterprise_session(
+    result = await mcp_mod.session_enterprise_create(
         context, system_name="test-system", session_name="test-session"
     )
 
@@ -3407,7 +3663,7 @@ async def test_create_enterprise_session_disabled():
 
 
 @pytest.mark.asyncio
-async def test_create_enterprise_session_system_not_found():
+async def test_session_enterprise_create_system_not_found_v2():
     """Test enterprise session creation with non-existent system."""
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock()
@@ -3423,7 +3679,7 @@ async def test_create_enterprise_session_system_not_found():
     full_config = {"enterprise": {"systems": {}}}
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
 
-    result = await mcp_mod.create_enterprise_session(
+    result = await mcp_mod.session_enterprise_create(
         context, system_name="nonexistent-system", session_name="test-session"
     )
 
@@ -3437,7 +3693,7 @@ async def test_create_enterprise_session_system_not_found():
 
 
 @pytest.mark.asyncio
-async def test_delete_enterprise_session_success():
+async def test_session_enterprise_delete_success_v2():
     """Test successful enterprise session deletion."""
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock()
@@ -3469,7 +3725,7 @@ async def test_delete_enterprise_session_success():
 
     full_config = {"enterprise": {"systems": enterprise_config}}
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
-    result = await mcp_mod.delete_enterprise_session(
+    result = await mcp_mod.session_enterprise_delete(
         context, system_name="test-system", session_name="test-session"
     )
 
@@ -3488,7 +3744,7 @@ async def test_delete_enterprise_session_success():
 
 
 @pytest.mark.asyncio
-async def test_delete_enterprise_session_not_found():
+async def test_session_enterprise_delete_not_found():
     """Test enterprise session deletion when session doesn't exist."""
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock()
@@ -3510,7 +3766,7 @@ async def test_delete_enterprise_session_not_found():
         }
     )
 
-    result = await mcp_mod.delete_enterprise_session(
+    result = await mcp_mod.session_enterprise_delete(
         context, system_name="test-system", session_name="nonexistent-session"
     )
 
@@ -3524,7 +3780,7 @@ async def test_delete_enterprise_session_not_found():
 
 
 @pytest.mark.asyncio
-async def test_delete_enterprise_session_system_not_found():
+async def test_session_enterprise_delete_system_not_found_v2():
     """Test enterprise session deletion with non-existent system."""
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock()
@@ -3540,7 +3796,7 @@ async def test_delete_enterprise_session_system_not_found():
         }
     )
 
-    result = await mcp_mod.delete_enterprise_session(
+    result = await mcp_mod.session_enterprise_delete(
         context, system_name="nonexistent-system", session_name="test-session"
     )
 
@@ -3875,7 +4131,9 @@ async def test_catalog_tables_success_no_filters():
                 [{"Namespace": "ns1", "TableName": "t1"}],
             )
 
-            result = await mcp_mod.catalog_tables(context, "enterprise:prod:analytics")
+            result = await mcp_mod.catalog_tables_list(
+                context, "enterprise:prod:analytics"
+            )
 
             assert result["success"] is True
             assert result["session_id"] == "enterprise:prod:analytics"
@@ -3922,7 +4180,7 @@ async def test_catalog_tables_success_with_filters():
             mock_format.return_value = ("json-row", [{"Namespace": "market_data"}])
 
             filters = ["Namespace = `market_data`", "TableName.contains(`price`)"]
-            result = await mcp_mod.catalog_tables(
+            result = await mcp_mod.catalog_tables_list(
                 context, "enterprise:prod:analytics", filters=filters
             )
 
@@ -3966,7 +4224,7 @@ async def test_catalog_tables_success_csv_format():
         ) as mock_format:
             mock_format.return_value = ("csv", "Namespace\nmarket_data\n")
 
-            result = await mcp_mod.catalog_tables(
+            result = await mcp_mod.catalog_tables_list(
                 context, "enterprise:prod:analytics", format="csv"
             )
 
@@ -4008,7 +4266,7 @@ async def test_catalog_tables_incomplete_results():
         ) as mock_format:
             mock_format.return_value = ("json-row", [])
 
-            result = await mcp_mod.catalog_tables(
+            result = await mcp_mod.catalog_tables_list(
                 context, "enterprise:prod:analytics", max_rows=1000
             )
 
@@ -4038,7 +4296,7 @@ async def test_catalog_tables_not_enterprise_session():
             "get_catalog_table only supports enterprise (Core+) sessions"
         )
 
-        result = await mcp_mod.catalog_tables(context, "community:local:test")
+        result = await mcp_mod.catalog_tables_list(context, "community:local:test")
 
         assert result["success"] is False
         assert "enterprise" in result["error"].lower()
@@ -4053,7 +4311,7 @@ async def test_catalog_tables_session_not_found():
 
     context = MockContext({"session_registry": mock_registry})
 
-    result = await mcp_mod.catalog_tables(context, "invalid_session")
+    result = await mcp_mod.catalog_tables_list(context, "invalid_session")
 
     assert result["success"] is False
     assert "Session not found" in result["error"]
@@ -4077,7 +4335,7 @@ async def test_catalog_tables_invalid_filter():
     ) as mock_get_catalog:
         mock_get_catalog.side_effect = RuntimeError("Invalid filter syntax")
 
-        result = await mcp_mod.catalog_tables(
+        result = await mcp_mod.catalog_tables_list(
             context, "enterprise:prod:analytics", filters=["InvalidFilter!!!"]
         )
 
@@ -4113,7 +4371,7 @@ async def test_catalog_tables_invalid_format():
         ) as mock_format:
             mock_format.side_effect = ValueError("Unsupported format: invalid")
 
-            result = await mcp_mod.catalog_tables(
+            result = await mcp_mod.catalog_tables_list(
                 context, "enterprise:prod:analytics", format="invalid"
             )
 
@@ -4144,7 +4402,7 @@ async def test_catalog_tables_size_limit_exceeded():
     ) as mock_get_catalog:
         mock_get_catalog.return_value = (mock_catalog_table, False)
 
-        result = await mcp_mod.catalog_tables(context, "enterprise:prod:analytics")
+        result = await mcp_mod.catalog_tables_list(context, "enterprise:prod:analytics")
 
         assert result["success"] is False
         assert "50MB" in result["error"] or "max" in result["error"].lower()
@@ -4185,7 +4443,7 @@ async def test_catalog_namespaces_success_no_filters():
         ) as mock_format:
             mock_format.return_value = ("json-row", [{"Namespace": "market_data"}])
 
-            result = await mcp_mod.catalog_namespaces(
+            result = await mcp_mod.catalog_namespaces_list(
                 context, "enterprise:prod:analytics"
             )
 
@@ -4234,7 +4492,7 @@ async def test_catalog_namespaces_success_with_filters():
             mock_format.return_value = ("json-row", [{"Namespace": "market_data"}])
 
             filters = ["TableName.contains(`daily`)"]
-            result = await mcp_mod.catalog_namespaces(
+            result = await mcp_mod.catalog_namespaces_list(
                 context, "enterprise:prod:analytics", filters=filters
             )
 
@@ -4278,7 +4536,7 @@ async def test_catalog_namespaces_success_csv_format():
         ) as mock_format:
             mock_format.return_value = ("csv", "Namespace\nmarket_data\n")
 
-            result = await mcp_mod.catalog_namespaces(
+            result = await mcp_mod.catalog_namespaces_list(
                 context, "enterprise:prod:analytics", format="csv"
             )
 
@@ -4320,7 +4578,7 @@ async def test_catalog_namespaces_incomplete_results():
         ) as mock_format:
             mock_format.return_value = ("json-row", [])
 
-            result = await mcp_mod.catalog_namespaces(
+            result = await mcp_mod.catalog_namespaces_list(
                 context, "enterprise:prod:analytics", max_rows=500
             )
 
@@ -4350,7 +4608,7 @@ async def test_catalog_namespaces_not_enterprise_session():
             "get_catalog_namespaces only supports enterprise (Core+) sessions"
         )
 
-        result = await mcp_mod.catalog_namespaces(context, "community:local:test")
+        result = await mcp_mod.catalog_namespaces_list(context, "community:local:test")
 
         assert result["success"] is False
         assert "enterprise" in result["error"].lower()
@@ -4365,7 +4623,7 @@ async def test_catalog_namespaces_session_not_found():
 
     context = MockContext({"session_registry": mock_registry})
 
-    result = await mcp_mod.catalog_namespaces(context, "invalid_session")
+    result = await mcp_mod.catalog_namespaces_list(context, "invalid_session")
 
     assert result["success"] is False
     assert "Session not found" in result["error"]
@@ -4399,7 +4657,7 @@ async def test_catalog_namespaces_invalid_format():
         ) as mock_format:
             mock_format.side_effect = ValueError("Unsupported format: invalid")
 
-            result = await mcp_mod.catalog_namespaces(
+            result = await mcp_mod.catalog_namespaces_list(
                 context, "enterprise:prod:analytics", format="invalid"
             )
 
@@ -4430,8 +4688,415 @@ async def test_catalog_namespaces_size_limit_exceeded():
     ) as mock_get_namespaces:
         mock_get_namespaces.return_value = (namespaces_table_mock, False)
 
-        result = await mcp_mod.catalog_namespaces(context, "enterprise:prod:analytics")
+        result = await mcp_mod.catalog_namespaces_list(
+            context, "enterprise:prod:analytics"
+        )
 
         assert result["success"] is False
         assert "50MB" in result["error"] or "max" in result["error"].lower()
         assert result["isError"] is True
+
+
+# === catalog_tables_schema ===
+
+
+@pytest.mark.asyncio
+async def test_catalog_tables_schema_success_with_namespace():
+    """Test catalog_schemas with namespace filter."""
+    from deephaven_mcp.client import CorePlusSession
+
+    # Create mock CorePlusSession
+    mock_session = MagicMock(spec=CorePlusSession)
+
+    # Mock catalog table data
+    catalog_data = [
+        {"Namespace": "market_data", "TableName": "daily_prices"},
+        {"Namespace": "market_data", "TableName": "quotes"},
+    ]
+
+    mock_catalog_table = MagicMock()
+    mock_catalog_table.to_pylist = MagicMock(return_value=catalog_data)
+
+    # Use helper to create mock schema function
+    schema_map = {
+        "daily_prices": [
+            {"Name": "Date", "DataType": "LocalDate"},
+            {"Name": "Price", "DataType": "double"},
+        ],
+        "quotes": [
+            {"Name": "Date", "DataType": "LocalDate"},
+            {"Name": "Price", "DataType": "double"},
+        ],
+    }
+    mock_get_catalog_meta = create_mock_catalog_schema_function(schema_map)
+
+    # Set up session manager and registry
+    mock_session_manager = MagicMock()
+    mock_session_manager.get = AsyncMock(return_value=mock_session)
+
+    mock_registry = MagicMock()
+    mock_registry.get = AsyncMock(return_value=mock_session_manager)
+
+    context = MockContext({"session_registry": mock_registry})
+
+    # Mock both queries functions
+    with (
+        patch(
+            "deephaven_mcp.mcp_systems_server._mcp.queries.get_catalog_table"
+        ) as mock_get_catalog,
+        patch(
+            "deephaven_mcp.mcp_systems_server._mcp.queries.get_catalog_meta_table"
+        ) as mock_get_schema,
+    ):
+        mock_get_catalog.return_value = (mock_catalog_table, True)
+        mock_get_schema.side_effect = mock_get_catalog_meta
+
+        result = await mcp_mod.catalog_tables_schema(
+            context, "enterprise:prod:analytics", namespace="market_data"
+        )
+
+    # Verify result
+    assert result["success"] is True
+    assert result["count"] == 2
+    assert result["is_complete"] is True
+    assert len(result["schemas"]) == 2
+
+    # Check first schema - now expects full metadata in 'data' field
+    assert result["schemas"][0]["success"] is True
+    assert result["schemas"][0]["namespace"] == "market_data"
+    assert result["schemas"][0]["table"] == "daily_prices"
+    assert "data" in result["schemas"][0]
+    assert len(result["schemas"][0]["data"]) == 2  # 2 columns
+    assert "meta_columns" in result["schemas"][0]
+    assert "row_count" in result["schemas"][0]
+
+    # Check second schema
+    assert result["schemas"][1]["success"] is True
+    assert result["schemas"][1]["namespace"] == "market_data"
+    assert result["schemas"][1]["table"] == "quotes"
+    assert "data" in result["schemas"][1]
+
+
+@pytest.mark.asyncio
+async def test_catalog_tables_schema_success_with_table_names():
+    """Test catalog_schemas with specific table_names filter."""
+    from deephaven_mcp.client import CorePlusSession
+
+    mock_session = MagicMock(spec=CorePlusSession)
+
+    # Catalog will be filtered by table_names at the catalog level
+    # So it should only return the requested table
+    catalog_data = [
+        {"Namespace": "market_data", "TableName": "quotes"},
+    ]
+
+    mock_catalog_table = MagicMock()
+    mock_catalog_table.to_pylist = MagicMock(return_value=catalog_data)
+
+    # Use helper to create mock schema function (default schema for all tables)
+    mock_get_catalog_meta = create_mock_catalog_schema_function({})
+
+    mock_session_manager = MagicMock()
+    mock_session_manager.get = AsyncMock(return_value=mock_session)
+
+    mock_registry = MagicMock()
+    mock_registry.get = AsyncMock(return_value=mock_session_manager)
+
+    context = MockContext({"session_registry": mock_registry})
+
+    with (
+        patch(
+            "deephaven_mcp.mcp_systems_server._mcp.queries.get_catalog_table"
+        ) as mock_get_catalog,
+        patch(
+            "deephaven_mcp.mcp_systems_server._mcp.queries.get_catalog_meta_table"
+        ) as mock_get_schema,
+    ):
+        mock_get_catalog.return_value = (mock_catalog_table, True)
+        mock_get_schema.side_effect = mock_get_catalog_meta
+
+        result = await mcp_mod.catalog_tables_schema(
+            context,
+            "enterprise:prod:analytics",
+            table_names=["quotes"],  # Only request quotes
+        )
+
+        # Verify the filter was passed correctly to get_catalog_table
+        call_args = mock_get_catalog.call_args
+        assert call_args[1]["filters"] == ["TableName in `quotes`"]
+
+    # Should only return 1 schema (quotes)
+    assert result["success"] is True
+    assert result["count"] == 1
+    assert len(result["schemas"]) == 1
+    assert result["schemas"][0]["table"] == "quotes"
+
+
+@pytest.mark.asyncio
+async def test_catalog_tables_schema_max_tables_limit():
+    """Test catalog_schemas respects max_tables limit."""
+    from deephaven_mcp.client import CorePlusSession
+
+    mock_session = MagicMock(spec=CorePlusSession)
+
+    # Create 150 catalog entries, but get_catalog_table will only return 50 due to max_rows=50
+    catalog_data = [
+        {"Namespace": "market_data", "TableName": f"table_{i}"}
+        for i in range(50)  # Only 50 entries returned due to max_rows limit
+    ]
+
+    mock_catalog_table = MagicMock()
+    mock_catalog_table.to_pylist = MagicMock(return_value=catalog_data)
+
+    # Use helper to create mock schema function (default schema for all tables)
+    mock_get_catalog_meta = create_mock_catalog_schema_function({})
+
+    mock_session_manager = MagicMock()
+    mock_session_manager.get = AsyncMock(return_value=mock_session)
+
+    mock_registry = MagicMock()
+    mock_registry.get = AsyncMock(return_value=mock_session_manager)
+
+    context = MockContext({"session_registry": mock_registry})
+
+    with (
+        patch(
+            "deephaven_mcp.mcp_systems_server._mcp.queries.get_catalog_table"
+        ) as mock_get_catalog,
+        patch(
+            "deephaven_mcp.mcp_systems_server._mcp.queries.get_catalog_meta_table"
+        ) as mock_get_schema,
+    ):
+        mock_get_catalog.return_value = (
+            mock_catalog_table,
+            False,
+        )  # is_complete=False because truncated
+        mock_get_schema.side_effect = mock_get_catalog_meta
+
+        result = await mcp_mod.catalog_tables_schema(
+            context,
+            "enterprise:prod:analytics",
+            max_tables=50,  # Limit to 50
+        )
+
+    # Should only return 50 schemas
+    assert result["success"] is True
+    assert result["count"] == 50
+    assert result["is_complete"] is False  # Truncated
+    assert len(result["schemas"]) == 50
+
+
+@pytest.mark.asyncio
+async def test_catalog_tables_schema_not_enterprise_session():
+    """Test catalog_schemas fails with non-enterprise session."""
+    # Create a non-CorePlusSession mock
+    mock_session = MagicMock()  # Not CorePlusSession
+
+    mock_session_manager = MagicMock()
+    mock_session_manager.get = AsyncMock(return_value=mock_session)
+
+    mock_registry = MagicMock()
+    mock_registry.get = AsyncMock(return_value=mock_session_manager)
+
+    context = MockContext({"session_registry": mock_registry})
+
+    result = await mcp_mod.catalog_tables_schema(
+        context, "community:local:test", namespace="market_data"
+    )
+
+    # Should fail with error about enterprise-only
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "enterprise" in result["error"].lower() or "Core+" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_catalog_tables_schema_mixed_success_failure():
+    """Test catalog_schemas with some tables succeeding and some failing."""
+    from deephaven_mcp.client import CorePlusSession
+
+    mock_session = MagicMock(spec=CorePlusSession)
+
+    catalog_data = [
+        {"Namespace": "market_data", "TableName": "good_table"},
+        {"Namespace": "market_data", "TableName": "bad_table"},
+    ]
+
+    mock_catalog_table = MagicMock()
+    mock_catalog_table.to_pylist = MagicMock(return_value=catalog_data)
+
+    # Use helper to create mock schema function - fail for bad_table
+    mock_get_catalog_meta = create_mock_catalog_schema_function(
+        schema_data_map={}, error_tables={"bad_table"}
+    )
+
+    mock_session_manager = MagicMock()
+    mock_session_manager.get = AsyncMock(return_value=mock_session)
+
+    mock_registry = MagicMock()
+    mock_registry.get = AsyncMock(return_value=mock_session_manager)
+
+    context = MockContext({"session_registry": mock_registry})
+
+    with (
+        patch(
+            "deephaven_mcp.mcp_systems_server._mcp.queries.get_catalog_table"
+        ) as mock_get_catalog,
+        patch(
+            "deephaven_mcp.mcp_systems_server._mcp.queries.get_catalog_meta_table"
+        ) as mock_get_schema,
+    ):
+        mock_get_catalog.return_value = (mock_catalog_table, True)
+        mock_get_schema.side_effect = mock_get_catalog_meta
+
+        result = await mcp_mod.catalog_tables_schema(
+            context, "enterprise:prod:analytics"
+        )
+
+    # Overall operation should succeed
+    assert result["success"] is True
+    assert result["count"] == 2
+
+    # First table should succeed
+    assert result["schemas"][0]["success"] is True
+    assert result["schemas"][0]["table"] == "good_table"
+
+    # Second table should fail
+    assert result["schemas"][1]["success"] is False
+    assert result["schemas"][1]["table"] == "bad_table"
+    assert result["schemas"][1]["isError"] is True
+    assert "not found" in result["schemas"][1]["error"].lower()
+
+
+@pytest.mark.asyncio
+async def test_catalog_tables_schema_session_not_found():
+    """Test catalog_schemas when session is not found."""
+    mock_registry = MagicMock()
+    mock_registry.get = AsyncMock(side_effect=Exception("Session not found"))
+
+    context = MockContext({"session_registry": mock_registry})
+
+    result = await mcp_mod.catalog_tables_schema(context, "enterprise:prod:nonexistent")
+
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "Session not found" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_catalog_tables_schema_catalog_retrieval_error():
+    """Test catalog_schemas when catalog table retrieval fails."""
+    from deephaven_mcp.client import CorePlusSession
+
+    mock_session = MagicMock(spec=CorePlusSession)
+
+    mock_session_manager = MagicMock()
+    mock_session_manager.get = AsyncMock(return_value=mock_session)
+
+    mock_registry = MagicMock()
+    mock_registry.get = AsyncMock(return_value=mock_session_manager)
+
+    context = MockContext({"session_registry": mock_registry})
+
+    # Mock queries.get_catalog_table to raise error
+    with patch(
+        "deephaven_mcp.mcp_systems_server._mcp.queries.get_catalog_table"
+    ) as mock_get_catalog:
+        mock_get_catalog.side_effect = Exception("Catalog access denied")
+
+        result = await mcp_mod.catalog_tables_schema(
+            context, "enterprise:prod:analytics"
+        )
+
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "Catalog access denied" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_catalog_tables_schema_with_filters():
+    """Test catalog_schemas with custom filters."""
+    from deephaven_mcp.client import CorePlusSession
+
+    mock_session = MagicMock(spec=CorePlusSession)
+
+    # Catalog will be pre-filtered by queries.get_catalog_table
+    catalog_data = [
+        {"Namespace": "market_data", "TableName": "daily_prices"},
+    ]
+
+    mock_catalog_table = MagicMock()
+    mock_catalog_table.to_pylist = MagicMock(return_value=catalog_data)
+
+    # Use helper to create mock schema function with specific schema for daily_prices
+    schema_map = {"daily_prices": [{"Name": "Price", "DataType": "double"}]}
+    mock_get_catalog_meta = create_mock_catalog_schema_function(schema_map)
+
+    mock_session_manager = MagicMock()
+    mock_session_manager.get = AsyncMock(return_value=mock_session)
+
+    mock_registry = MagicMock()
+    mock_registry.get = AsyncMock(return_value=mock_session_manager)
+
+    context = MockContext({"session_registry": mock_registry})
+
+    with (
+        patch(
+            "deephaven_mcp.mcp_systems_server._mcp.queries.get_catalog_table"
+        ) as mock_get_catalog,
+        patch(
+            "deephaven_mcp.mcp_systems_server._mcp.queries.get_catalog_meta_table"
+        ) as mock_get_schema,
+    ):
+        mock_get_catalog.return_value = (mock_catalog_table, True)
+        mock_get_schema.side_effect = mock_get_catalog_meta
+
+        result = await mcp_mod.catalog_tables_schema(
+            context,
+            "enterprise:prod:analytics",
+            filters=["TableName.contains(`price`)"],
+        )
+
+        # Verify filters were passed to get_catalog_table
+        call_args = mock_get_catalog.call_args
+        assert call_args[1]["filters"] == ["TableName.contains(`price`)"]
+
+    assert result["success"] is True
+    assert result["count"] == 1
+    assert result["schemas"][0]["table"] == "daily_prices"
+
+
+@pytest.mark.asyncio
+async def test_catalog_tables_schema_empty_catalog():
+    """Test catalog_schemas when catalog has no matching tables."""
+    from deephaven_mcp.client import CorePlusSession
+
+    mock_session = MagicMock(spec=CorePlusSession)
+
+    # Empty catalog
+    catalog_data = []
+
+    mock_catalog_table = MagicMock()
+    mock_catalog_table.to_pylist = MagicMock(return_value=catalog_data)
+
+    mock_session_manager = MagicMock()
+    mock_session_manager.get = AsyncMock(return_value=mock_session)
+
+    mock_registry = MagicMock()
+    mock_registry.get = AsyncMock(return_value=mock_session_manager)
+
+    context = MockContext({"session_registry": mock_registry})
+
+    with patch(
+        "deephaven_mcp.mcp_systems_server._mcp.queries.get_catalog_table"
+    ) as mock_get_catalog:
+        mock_get_catalog.return_value = (mock_catalog_table, True)
+
+        result = await mcp_mod.catalog_tables_schema(
+            context, "enterprise:prod:analytics", namespace="nonexistent"
+        )
+
+    assert result["success"] is True
+    assert result["count"] == 0
+    assert result["is_complete"] is True
+    assert len(result["schemas"]) == 0

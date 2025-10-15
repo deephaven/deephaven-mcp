@@ -41,19 +41,20 @@ This repository houses the Python-based Model Context Protocol (MCP) servers for
       - [Systems Server Tools](#systems-server-tools)
       - [Error Handling](#error-handling)
       - [MCP Tools](#mcp-tools)
-        - [`refresh`](#refresh)
+        - [`mcp_reload`](#mcp_reload)
         - [`enterprise_systems_status`](#enterprise_systems_status)
-        - [`create_enterprise_session`](#create_enterprise_session)
-        - [`delete_enterprise_session`](#delete_enterprise_session)
-        - [`list_sessions`](#list_sessions)
-        - [`get_session_details`](#get_session_details)
-        - [`catalog_tables`](#catalog_tables)
-        - [`catalog_namespaces`](#catalog_namespaces)
-        - [`table_schemas`](#table_schemas)
-        - [`run_script`](#run_script)
-        - [`pip_packages`](#pip_packages)
-        - [`get_table_data`](#get_table_data)
-        - [`get_table_meta`](#get_table_meta)
+        - [`sessions_list`](#sessions_list)
+        - [`session_details`](#session_details)
+        - [`session_enterprise_create`](#session_enterprise_create)
+        - [`session_enterprise_delete`](#session_enterprise_delete)
+        - [`session_tables_schema`](#session_tables_schema)
+        - [`session_tables_list`](#session_tables_list)
+        - [`session_table_data`](#session_table_data)
+        - [`session_script_run`](#session_script_run)
+        - [`session_pip_list`](#session_pip_list)
+        - [`catalog_tables_list`](#catalog_tables_list)
+        - [`catalog_namespaces_list`](#catalog_namespaces_list)
+        - [`catalog_tables_schema`](#catalog_tables_schema)
       - [Systems Server Test Components](#systems-server-test-components)
         - [Test Server](#test-server)
         - [Test Client](#test-client)
@@ -120,7 +121,7 @@ The [deephaven-mcp](https://github.com/deephaven/deephaven-mcp) project provides
 1. **Deephaven MCP Systems Server**:
    * Enables orchestration, inspection, and management of Deephaven Community Core worker nodes via the MCP protocol
    * Built with [FastMCP](https://github.com/jlowin/fastmcp)
-   * Exposes tools for refreshing configuration, listing workers, inspecting table schemas, and running scripts
+   * Exposes tools for reloading configuration, listing sessions, inspecting table schemas, and running scripts
    * Maintains [PyDeephaven](https://github.com/deephaven/deephaven-core/tree/main/py) client sessions to each configured worker, with sophisticated session management.
    * The Systems Server orchestrates multiple Deephaven Community Core worker nodes, providing a unified interface for managing workers, their sessions, and data through the Model Context Protocol (MCP). It includes sophisticated session management with automatic caching, concurrent access safety, and lifecycle management.
 
@@ -268,8 +269,8 @@ The Deephaven MCP Systems Server is an [MCP](https://github.com/modelcontextprot
 Key architectural features include:
 
 - **Efficient Session Management**: Implements a sophisticated session caching system using [PyDeephaven](https://github.com/deephaven/deephaven-core/tree/main/py) that automatically reuses existing connections when possible and manages session lifecycles.
-- **Concurrent Access Safety**: Uses [asyncio](https://docs.python.org/3/library/asyncio.html) Lock mechanisms to ensure thread-safe operations during configuration refreshes and session management.
-- **Automatic Resource Cleanup**: Gracefully handles session termination and cleanup during server shutdown or refresh operations.
+- **Concurrent Access Safety**: Uses [asyncio](https://docs.python.org/3/library/asyncio.html) Lock mechanisms to ensure thread-safe operations during configuration reloads and session management.
+- **Automatic Resource Cleanup**: Gracefully handles session termination and cleanup during server shutdown or reload operations.
 - **On-Demand Session Creation**: Sessions to worker nodes are created only when needed and cached for future use.
 - **Async-First Design**: Built around [asyncio](https://docs.python.org/3/library/asyncio.html) for high-concurrency performance and non-blocking operations.
 - **Configurable Session Behavior**: Supports worker configuration options such as `never_timeout` to control session persistence and lifecycle management.
@@ -574,7 +575,7 @@ This consistent format makes error handling and response parsing more predictabl
 
 The Systems Server provides the following MCP tools:
 
-##### `refresh`
+##### `mcp_reload`
 
 **Purpose**: Atomically reload configuration and clear all active session cache.
 
@@ -598,7 +599,7 @@ On error:
 }
 ```
 
-**Description**: This tool reloads the Deephaven session configuration from the file specified in `DH_MCP_CONFIG_FILE` and clears all active session objects. It uses dependency injection via the Context to access the config manager, session registry, and a coroutine-safe refresh lock. The operation is protected by the provided lock to prevent concurrent refreshes. All sessions will be automatically recreated with the new configuration on next access.
+**Description**: This tool reloads the Deephaven session configuration from the file specified in `DH_MCP_CONFIG_FILE` and clears all active session objects. It uses dependency injection via the Context to access the config manager, session registry, and a coroutine-safe reload lock. The operation is protected by the provided lock to prevent concurrent reloads. All sessions will be automatically recreated with the new configuration on next access.
 
 ##### `enterprise_systems_status`
 
@@ -641,7 +642,7 @@ On error:
 
 **Description**: This tool provides comprehensive status information about all configured enterprise systems. Status values include "ONLINE", "OFFLINE", "UNAUTHORIZED", "MISCONFIGURED", or "UNKNOWN". Sensitive configuration fields are redacted for security.
 
-##### `create_enterprise_session`
+##### `session_enterprise_create`
 
 **Purpose**: Create a new enterprise session on a specified enterprise system.
 
@@ -685,7 +686,7 @@ On error:
 
 **Description**: This tool creates a new enterprise session on the specified enterprise system and registers it in the session registry for future use. The session is configured with either provided parameters or defaults from the enterprise system configuration. Parameter resolution follows the priority: tool parameter → config default → API default.
 
-##### `delete_enterprise_session`
+##### `session_enterprise_delete`
 
 **Purpose**: Delete an enterprise session by terminating it and removing it from the session registry.
 
@@ -717,7 +718,7 @@ On error:
 
 **Description**: This tool permanently terminates an enterprise session and removes it from the session registry. The session cannot be recovered after deletion. Use with caution as any unsaved work in the session will be lost.
 
-##### `list_sessions`
+##### `sessions_list`
 
 **Purpose**: List all sessions (community and enterprise) with basic metadata.
 
@@ -755,9 +756,9 @@ On error:
 }
 ```
 
-**Description**: This is a lightweight operation that doesn't connect to sessions or check their status. For detailed information about a specific session, use `get_session_details`.
+**Description**: This is a lightweight operation that doesn't connect to sessions or check their status. For detailed information about a specific session, use `session_details`.
 
-##### `get_session_details`
+##### `session_details`
 
 **Purpose**: Get detailed information about a specific session.
 
@@ -796,7 +797,7 @@ On error:
 
 **Description**: This tool provides comprehensive status information about a specific session. It supports two operational modes: quick status check (default) or active connection verification.
 
-##### `catalog_tables`
+##### `catalog_tables_list`
 
 **Purpose**: Retrieve catalog table entries from a Deephaven Enterprise (Core+) session with optional filtering.
 
@@ -868,7 +869,7 @@ filters=["TableName.matches(`.*_daily_.*`)"]
 - Multiple filters in the list are combined with AND logic
 - For complete filter syntax, see: https://deephaven.io/core/docs/how-to-guides/use-filters/
 
-##### `catalog_namespaces`
+##### `catalog_namespaces_list`
 
 **Purpose**: Retrieve distinct namespaces from a Deephaven Enterprise (Core+) catalog for efficient data domain discovery.
 
@@ -902,14 +903,124 @@ filters=["TableName.matches(`.*_daily_.*`)"]
 **Description**: This tool retrieves the distinct list of namespaces from an enterprise catalog, enabling efficient discovery of data domains before drilling down into specific tables. This is typically the first step in exploring an enterprise data catalog. Much faster than retrieving the full catalog when you just need to know what data domains exist.
 
 **Important Notes**:
+
 - Returns only distinct namespace values (one column: "Namespace")
 - Filters are applied to the full catalog before extracting namespaces
 - Default max_rows of 1000 is lighter than catalog_tables (10000)
 - Ideal for top-down data exploration: namespaces → tables → schemas → data
 
-##### `table_schemas`
+##### `catalog_tables_schema`
 
-**Purpose**: Retrieve schemas for one or more tables from a Deephaven session.
+**Purpose**: Retrieve full metadata schemas for catalog tables in a Deephaven Enterprise (Core+) session with flexible filtering.
+
+**Parameters**:
+
+- `session_id` (required, string): ID of the Deephaven enterprise session to query.
+- `namespace` (optional, string): Filter to tables in this specific namespace. If None, searches all namespaces.
+- `table_names` (optional, list[string]): List of specific table names to retrieve schemas for. If None, retrieves schemas for all tables (up to max_tables limit).
+- `filters` (optional, list[string]): List of Deephaven where clause expressions to filter the catalog. Multiple filters are combined with AND logic. Use backticks (`) for string literals.
+- `max_tables` (optional, integer): Maximum number of table schemas to retrieve. Defaults to 100 for safety. Set to null to retrieve all matching schemas (use with extreme caution for large catalogs).
+
+**Returns**:
+
+```json
+{
+  "success": true,
+  "schemas": [
+    {
+      "success": true,
+      "namespace": "market_data",
+      "table": "daily_prices",
+      "format": "json-row",
+      "data": [
+        {"Name": "Date", "DataType": "LocalDate", "IsPartitioning": false},
+        {"Name": "Price", "DataType": "double", "IsPartitioning": false}
+      ],
+      "meta_columns": [
+        {"name": "Name", "type": "string"},
+        {"name": "DataType", "type": "string"},
+        {"name": "IsPartitioning", "type": "bool"}
+      ],
+      "row_count": 2
+    },
+    {
+      "success": false,
+      "namespace": "market_data",
+      "table": "missing_table",
+      "error": "Table not found in catalog",
+      "isError": true
+    }
+  ],
+  "count": 2,
+  "is_complete": true
+}
+```
+
+On complete failure:
+
+```json
+{
+  "success": false,
+  "error": "Error message",
+  "isError": true
+}
+```
+
+**Example Usage**:
+
+```python
+# Get schemas for all tables in a namespace (up to 100)
+catalog_schemas(session_id="enterprise:prod:analytics", namespace="market_data")
+
+# Get schemas for specific tables in a namespace
+catalog_schemas(
+    session_id="enterprise:prod:analytics",
+    namespace="market_data",
+    table_names=["daily_prices", "quotes"]
+)
+
+# Filter-based discovery across namespaces
+catalog_schemas(
+    session_id="enterprise:prod:analytics",
+    filters=["TableName.contains(`price`)"]
+)
+
+# Get all schemas (requires explicit None, use with caution)
+catalog_schemas(
+    session_id="enterprise:prod:analytics",
+    max_tables=None
+)
+```
+
+**Description**: This tool retrieves FULL metadata schemas for tables in the enterprise catalog. The metadata includes all column properties (Name, DataType, IsPartitioning, ComponentType, etc.), not just simplified name/type pairs. Essential for understanding the complete structure of catalog tables before loading them with `db.live_table()` or `db.historical_table()`. Only works with Deephaven Enterprise (Core+) sessions. The tool supports flexible filtering by namespace, specific table names, or custom filter expressions.
+
+**Response Fields** (per table):
+
+- `format`: Always "json-row" - indicates data is a list of dicts
+- `data`: Full metadata rows with all column properties
+- `meta_columns`: Schema of the metadata table itself (describes what fields are in `data`)
+- `row_count`: Number of columns in the catalog table (equals length of `data`)
+- `namespace`: Catalog namespace (only in catalog schemas, not session schemas)
+- `count`: Total number of table schemas returned (top-level field)
+- `is_complete`: Whether all matching tables were retrieved or truncated by max_tables
+
+**Performance Considerations**:
+- Default max_tables=100 is safe for most use cases
+- Fetching schemas for 1000+ tables can take significant time (several minutes)
+- Use namespace or filters to narrow down the search space
+- Specify exact table_names when you know what you need for fastest results
+- Each schema fetch requires a separate query to the catalog
+
+**Important Notes**:
+- Individual table failures don't stop processing of other tables (similar to `table_schemas`)
+- Returns both `namespace` and `table` fields for each schema result
+- String literals in filters MUST use backticks (`), not quotes
+- Filters are applied at the catalog level before fetching schemas
+- Use `catalog_tables_list` first to discover available tables, then use this tool to get their schemas
+
+##### `session_tables_schema`
+
+**Purpose**: Retrieve full metadata schemas for one or more tables from a Deephaven session.
 
 **Parameters**:
 
@@ -921,21 +1032,26 @@ filters=["TableName.matches(`.*_daily_.*`)"]
 ```json
 {
   "success": true,
+  "count": 2,
   "schemas": [
     {
       "success": true,
       "table": "table_name",
-      "schema": [
-        {"name": "column1", "type": "int"},
-        {"name": "column2", "type": "string"}
+      "format": "json-row",
+      "data": [
+        {"Name": "column1", "DataType": "int", "IsPartitioning": false},
+        {"Name": "column2", "DataType": "java.lang.String", "IsPartitioning": false}
       ],
-      "error": null,
-      "isError": false
+      "meta_columns": [
+        {"name": "Name", "type": "string"},
+        {"name": "DataType", "type": "string"},
+        {"name": "IsPartitioning", "type": "bool"}
+      ],
+      "row_count": 2
     },
     {
       "success": false,
       "table": "missing_table",
-      "schema": null,
       "error": "Table not found",
       "isError": true
     }
@@ -953,9 +1069,54 @@ On complete failure (e.g., session not available):
 }
 ```
 
-**Description**: This tool returns the column schemas for the specified tables in the given Deephaven session. If no table_names are provided, schemas for all tables in the session are returned. The tool maintains the ability to report individual table successes/failures while providing an overall operation status.
+**Description**: This tool returns the FULL metadata schemas for the specified tables in the given Deephaven session. The metadata includes all column properties (Name, DataType, IsPartitioning, ComponentType, etc.), not just simplified name/type pairs. If no table_names are provided, schemas for all tables in the session are returned. The tool maintains the ability to report individual table successes/failures while providing an overall operation status.
 
-##### `run_script`
+**Response Fields**:
+
+- `format`: Always "json-row" - indicates data is a list of dicts
+- `data`: Full metadata rows with all column properties
+- `meta_columns`: Schema of the metadata table itself (describes what fields are in `data`)
+- `row_count`: Number of columns in the original table (equals length of `data`)
+- `count`: Total number of table schemas returned (top-level field)
+
+##### `list_tables`
+
+**Purpose**: Retrieve the names of all tables in a Deephaven session (lightweight alternative to table_schemas).
+
+**Parameters**:
+
+- `session_id` (required, string): ID of the Deephaven session to query.
+
+**Returns**:
+
+```json
+{
+  "success": true,
+  "session_id": "community:localhost:10000",
+  "table_names": ["trades", "quotes", "orders"],
+  "count": 3
+}
+```
+
+On error:
+
+```json
+{
+  "success": false,
+  "error": "Error message",
+  "isError": true
+}
+```
+
+**Description**: This tool provides a lightweight way to discover what tables exist in a session without fetching their schemas. It's much faster than `session_tables_schema` when you only need table names. Works with both Community and Enterprise sessions. Use this for quick table discovery, then follow up with `session_tables_schema` for specific tables you're interested in.
+
+**Performance Notes**:
+- Very fast operation (typically milliseconds)
+- Minimal network transfer (only table names, not schemas or data)
+- Safe to call frequently for session monitoring
+- Scales well even with hundreds of tables
+
+##### `session_script_run`
 
 **Purpose**: Execute a script on a specified Deephaven session.
 
@@ -987,7 +1148,7 @@ On error:
 
 **Description**: This tool executes a Python script on the specified Deephaven session. The script can be provided either as a string or as a file path. The tool only returns success status and does not include stdout or created tables in the response.
 
-##### `pip_packages`
+##### `session_pip_list`
 
 **Purpose**: Retrieve installed pip packages from a specified Deephaven session.
 
@@ -1020,7 +1181,7 @@ On error:
 
 **Description**: This tool queries the specified Deephaven session for information about installed pip packages using importlib.metadata. It executes a query on the session to retrieve package names and versions for all installed Python packages available in that session's environment.
 
-##### `get_table_data`
+##### `session_table_data`
 
 **Purpose**: Retrieve table data from a specified Deephaven session with flexible formatting options optimized for AI agent consumption.
 
@@ -1091,34 +1252,21 @@ On error:
 
 **Description**: This tool retrieves actual table data with flexible output formatting. Different formats have different tradeoffs between AI agent comprehension and token usage. The tool includes intelligent automatic format selection based on table size and enforces a 50MB response limit to prevent memory issues. The `is_complete` field indicates whether the entire table was retrieved or truncated by `max_rows`. The `format` field in the response shows the actual format used (important when using "auto").
 
-##### `get_table_meta`
+##### `session_tables_list`
 
-**Purpose**: Retrieve metadata (schema) information for a specified table.
+**Purpose**: Retrieve the names of all tables in a Deephaven session (lightweight operation).
 
 **Parameters**:
 
 - `session_id` (required, string): ID of the Deephaven session to query.
-- `table_name` (required, string): Name of the table to retrieve metadata for.
 
 **Returns**:
 
 ```json
 {
   "success": true,
-  "table_name": "my_table",
-  "format": "json-row",
-  "meta_columns": [
-    {"name": "Name", "type": "string"},
-    {"name": "DataType", "type": "string"},
-    {"name": "IsPartitioning", "type": "bool"}
-  ],
-  "row_count": 3,
-  "is_complete": true,
-  "data": [
-    {"Name": "col1", "DataType": "int", "IsPartitioning": false},
-    {"Name": "col2", "DataType": "java.lang.String", "IsPartitioning": false},
-    {"Name": "col3", "DataType": "double", "IsPartitioning": true}
-  ]
+  "session_id": "community:localhost:10000",
+  "tables": ["table1", "table2", "table3"]
 }
 ```
 
@@ -1132,7 +1280,9 @@ On error:
 }
 ```
 
-**Description**: This tool retrieves comprehensive table metadata including column names, data types, and properties like partitioning information. Unlike `get_table_data`, this tool focuses on table structure rather than actual data, making it ideal for schema discovery and validation. The metadata is always returned in json-row format and includes detailed type information specific to Deephaven's type system.
+**Description**: This tool provides a lightweight way to discover what tables exist in a session without fetching their schemas. It's much faster than `session_tables_schema` when you only need table names. Works with both Community and Enterprise sessions. Use this for quick table discovery, then follow up with `session_tables_schema` for specific tables you're interested in.
+
+**Note**: The `get_table_meta` tool has been merged into `session_tables_schema`. Use `session_tables_schema` with a single table name for equivalent functionality with full metadata.
 
 #### Systems Server Test Components
 

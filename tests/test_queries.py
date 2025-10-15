@@ -9,13 +9,15 @@ from deephaven_mcp._exceptions import UnsupportedOperationError
 from deephaven_mcp.queries import (
     _apply_filters,
     _apply_row_limit,
+    _extract_meta_table,
     _validate_python_session,
+    get_catalog_meta_table,
     get_catalog_table,
     get_dh_versions,
-    get_meta_table,
     get_pip_packages_table,
     get_programming_language_version,
     get_programming_language_version_table,
+    get_session_meta_table,
     get_table,
 )
 
@@ -413,7 +415,7 @@ async def test_get_table_head_parameter_ignored_with_full_table():
 
 
 @pytest.mark.asyncio
-async def test_get_meta_table_success():
+async def test_get_session_meta_table_success():
     session_mock = MagicMock()
     table_mock = MagicMock()
     meta_table_mock = MagicMock()
@@ -430,23 +432,23 @@ async def test_get_meta_table_success():
         return fn(*args, **kwargs)
 
     with patch("deephaven_mcp.queries.asyncio.to_thread", new=fake_to_thread):
-        result = await get_meta_table(session_mock, "foo")
+        result = await get_session_meta_table(session_mock, "foo")
         assert result is arrow_mock
         session_mock.open_table.assert_awaited_once_with("foo")
 
 
 @pytest.mark.asyncio
-async def test_get_meta_table_open_table_error():
+async def test_get_session_meta_table_open_table_error():
     session_mock = MagicMock()
     session_mock.open_table = AsyncMock(side_effect=RuntimeError("fail-open"))
     with pytest.raises(RuntimeError) as excinfo:
-        await get_meta_table(session_mock, "foo")
+        await get_session_meta_table(session_mock, "foo")
     assert "fail-open" in str(excinfo.value)
     session_mock.open_table.assert_awaited_once_with("foo")
 
 
 @pytest.mark.asyncio
-async def test_get_meta_table_to_arrow_error():
+async def test_get_session_meta_table_to_arrow_error():
     session_mock = MagicMock()
     table_mock = MagicMock()
     meta_table_mock = MagicMock()
@@ -463,9 +465,53 @@ async def test_get_meta_table_to_arrow_error():
 
     with patch("deephaven_mcp.queries.asyncio.to_thread", new=fake_to_thread):
         with pytest.raises(RuntimeError) as excinfo:
-            await get_meta_table(session_mock, "foo")
+            await get_session_meta_table(session_mock, "foo")
         assert "fail-arrow" in str(excinfo.value)
         session_mock.open_table.assert_awaited_once_with("foo")
+
+
+# ===== _extract_meta_table tests =====
+
+
+@pytest.mark.asyncio
+async def test_extract_meta_table_success():
+    """Test _extract_meta_table successfully extracts meta table from a table"""
+    table_mock = MagicMock()
+    meta_table_mock = MagicMock()
+    arrow_mock = object()
+    type(table_mock).meta_table = property(lambda self: meta_table_mock)
+
+    def to_arrow():
+        return arrow_mock
+
+    meta_table_mock.to_arrow = to_arrow
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with patch("deephaven_mcp.queries.asyncio.to_thread", new=fake_to_thread):
+        result = await _extract_meta_table(table_mock, "test_table")
+        assert result is arrow_mock
+
+
+@pytest.mark.asyncio
+async def test_extract_meta_table_error():
+    """Test _extract_meta_table handles errors properly"""
+    table_mock = MagicMock()
+    meta_table_mock = MagicMock()
+    type(table_mock).meta_table = property(lambda self: meta_table_mock)
+
+    def to_arrow():
+        raise RuntimeError("Meta table extraction failed")
+
+    meta_table_mock.to_arrow = to_arrow
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with patch("deephaven_mcp.queries.asyncio.to_thread", new=fake_to_thread):
+        with pytest.raises(RuntimeError, match="Meta table extraction failed"):
+            await _extract_meta_table(table_mock, "test_table")
 
 
 @pytest.mark.asyncio
@@ -1189,3 +1235,95 @@ async def test_get_catalog_namespaces_catalog_retrieval_error():
 
     with pytest.raises(RuntimeError, match="Catalog not available"):
         await get_catalog_table(session_mock, max_rows=1000, distinct_namespaces=True)
+
+
+# ===== get_catalog_meta_table tests =====
+
+
+@pytest.mark.asyncio
+async def test_get_catalog_meta_table_success_historical():
+    """Test get_catalog_meta_table successfully retrieves meta table via historical_table"""
+    from deephaven_mcp.client import CorePlusSession
+
+    # Create mock session
+    session_mock = MagicMock(spec=CorePlusSession)
+
+    # Mock table with meta_table
+    mock_table = MagicMock()
+    mock_meta_table = MagicMock()
+    mock_arrow_table = MagicMock(spec=pyarrow.Table)
+
+    mock_meta_table.to_arrow = MagicMock(return_value=mock_arrow_table)
+    mock_table.meta_table = mock_meta_table
+
+    # historical_table succeeds
+    session_mock.historical_table = AsyncMock(return_value=mock_table)
+
+    # Mock asyncio.to_thread to run synchronously
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with patch("deephaven_mcp.queries.asyncio.to_thread", new=fake_to_thread):
+        result = await get_catalog_meta_table(
+            session_mock, "market_data", "daily_prices"
+        )
+
+    assert result is mock_arrow_table
+    session_mock.historical_table.assert_called_once_with("market_data", "daily_prices")
+
+
+@pytest.mark.asyncio
+async def test_get_catalog_meta_table_fallback_to_live():
+    """Test get_catalog_meta_table falls back to live_table when historical_table fails"""
+    from deephaven_mcp.client import CorePlusSession
+
+    # Create mock session
+    session_mock = MagicMock(spec=CorePlusSession)
+
+    # Mock table with meta_table
+    mock_table = MagicMock()
+    mock_meta_table = MagicMock()
+    mock_arrow_table = MagicMock(spec=pyarrow.Table)
+
+    mock_meta_table.to_arrow = MagicMock(return_value=mock_arrow_table)
+    mock_table.meta_table = mock_meta_table
+
+    # historical_table fails, live_table succeeds
+    session_mock.historical_table = AsyncMock(
+        side_effect=Exception("Historical table not found")
+    )
+    session_mock.live_table = AsyncMock(return_value=mock_table)
+
+    # Mock asyncio.to_thread to run synchronously
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with patch("deephaven_mcp.queries.asyncio.to_thread", new=fake_to_thread):
+        result = await get_catalog_meta_table(
+            session_mock, "market_data", "live_trades"
+        )
+
+    assert result is mock_arrow_table
+    session_mock.historical_table.assert_called_once_with("market_data", "live_trades")
+    session_mock.live_table.assert_called_once_with("market_data", "live_trades")
+
+
+@pytest.mark.asyncio
+async def test_get_catalog_meta_table_both_fail():
+    """Test get_catalog_meta_table raises exception when both historical and live fail"""
+    from deephaven_mcp.client import CorePlusSession
+
+    # Create mock session
+    session_mock = MagicMock(spec=CorePlusSession)
+
+    # Both historical_table and live_table fail
+    session_mock.historical_table = AsyncMock(
+        side_effect=Exception("Historical table not found")
+    )
+    session_mock.live_table = AsyncMock(side_effect=Exception("Live table not found"))
+
+    with pytest.raises(
+        Exception,
+        match="Failed to load catalog table 'market_data.missing_table'",
+    ):
+        await get_catalog_meta_table(session_mock, "market_data", "missing_table")
