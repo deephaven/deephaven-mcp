@@ -41,21 +41,25 @@ This repository houses the Python-based [Model Context Protocol (MCP)](https://m
       - [Systems Server Tools](#systems-server-tools)
       - [Error Handling](#error-handling)
       - [MCP Tools](#mcp-tools)
-        - [`mcp_reload`](#mcp_reload)
-        - [`enterprise_systems_status`](#enterprise_systems_status)
-        - [`session_enterprise_create`](#session_enterprise_create)
-        - [`session_enterprise_delete`](#session_enterprise_delete)
-        - [`sessions_list`](#sessions_list)
-        - [`session_details`](#session_details)
-        - [`catalog_tables_list`](#catalog_tables_list)
-        - [`catalog_namespaces_list`](#catalog_namespaces_list)
-        - [`catalog_tables_schema`](#catalog_tables_schema)
-        - [`catalog_table_sample`](#catalog_table_sample)
-        - [`session_tables_schema`](#session_tables_schema)
-        - [`session_script_run`](#session_script_run)
-        - [`session_pip_list`](#session_pip_list)
-        - [`session_table_data`](#session_table_data)
-        - [`session_tables_list`](#session_tables_list)
+        - [System Tools](#system-tools)
+          - [`mcp_reload`](#mcp_reload)
+          - [`enterprise_systems_status`](#enterprise_systems_status)
+        - [Session Management Tools](#session-management-tools)
+          - [`session_enterprise_create`](#session_enterprise_create)
+          - [`session_enterprise_delete`](#session_enterprise_delete)
+          - [`sessions_list`](#sessions_list)
+          - [`session_details`](#session_details)
+        - [Enterprise Catalog Tools](#enterprise-catalog-tools)
+          - [`catalog_tables_list`](#catalog_tables_list)
+          - [`catalog_namespaces_list`](#catalog_namespaces_list)
+          - [`catalog_tables_schema`](#catalog_tables_schema)
+          - [`catalog_table_sample`](#catalog_table_sample)
+        - [Session Data Tools](#session-data-tools)
+          - [`session_tables_schema`](#session_tables_schema)
+          - [`session_tables_list`](#session_tables_list)
+          - [`session_table_data`](#session_table_data)
+          - [`session_script_run`](#session_script_run)
+          - [`session_pip_list`](#session_pip_list)
       - [Systems Server Test Components](#systems-server-test-components)
         - [Test Server](#test-server)
         - [Test Client](#test-client)
@@ -574,7 +578,31 @@ This consistent format makes error handling and response parsing more predictabl
 
 #### MCP Tools
 
-The Systems Server provides the following MCP tools:
+The Systems Server provides 15 MCP tools organized into four categories:
+
+**Quick Reference:**
+
+| Tool | Category | Purpose | Enterprise Only |
+|------|----------|---------|-----------------|
+| [`mcp_reload`](#mcp_reload) | System | Reload configuration and clear sessions | No |
+| [`enterprise_systems_status`](#enterprise_systems_status) | System | Check status of enterprise systems | No |
+| [`sessions_list`](#sessions_list) | Session Management | List all active sessions | No |
+| [`session_details`](#session_details) | Session Management | Get detailed session information | No |
+| [`session_enterprise_create`](#session_enterprise_create) | Session Management | Create new enterprise session | Yes |
+| [`session_enterprise_delete`](#session_enterprise_delete) | Session Management | Delete enterprise session | Yes |
+| [`catalog_tables_list`](#catalog_tables_list) | Catalog Tools | List catalog table entries | Yes |
+| [`catalog_namespaces_list`](#catalog_namespaces_list) | Catalog Tools | List catalog namespaces | Yes |
+| [`catalog_tables_schema`](#catalog_tables_schema) | Catalog Tools | Get catalog table schemas | Yes |
+| [`catalog_table_sample`](#catalog_table_sample) | Catalog Tools | Sample catalog table data | Yes |
+| [`session_tables_schema`](#session_tables_schema) | Data Tools | Get table schemas from session | No |
+| [`session_tables_list`](#session_tables_list) | Data Tools | List table names in session | No |
+| [`session_table_data`](#session_table_data) | Data Tools | Retrieve table data | No |
+| [`session_script_run`](#session_script_run) | Data Tools | Execute Python script | No |
+| [`session_pip_list`](#session_pip_list) | Data Tools | List installed pip packages | No |
+
+---
+
+### System Tools
 
 ##### `mcp_reload`
 
@@ -1084,6 +1112,10 @@ On error:
 - Check `is_complete` field to know if sample represents entire table
 - Combine with `catalog_tables_schema` to understand table structure first
 - Use `catalog_tables_list` to discover available tables and namespaces
+
+---
+
+### Session Data Tools
 
 ##### `session_tables_schema`
 
