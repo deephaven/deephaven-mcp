@@ -19,7 +19,6 @@ from deephaven_mcp.queries import (
     get_programming_language_version_table,
     get_session_meta_table,
     get_table,
-    meta_table_to_dict_list,
 )
 
 # ===== Helper function tests =====
@@ -515,53 +514,6 @@ async def test_extract_meta_table_error():
             await _extract_meta_table(table_mock, "test_table")
 
 
-# ===== meta_table_to_dict_list tests =====
-
-
-def test_meta_table_to_dict_list_success():
-    """Test meta_table_to_dict_list successfully converts meta table to dict list format"""
-    # Create a mock pyarrow.Table
-    mock_meta_table = MagicMock(spec=pyarrow.Table)
-    mock_meta_table.to_pylist.return_value = [
-        {"Name": "col1", "DataType": "int64"},
-        {"Name": "col2", "DataType": "string"},
-        {"Name": "col3", "DataType": "double"},
-    ]
-    
-    result = meta_table_to_dict_list(mock_meta_table)
-    
-    assert result == [
-        {"name": "col1", "type": "int64"},
-        {"name": "col2", "type": "string"},
-        {"name": "col3", "type": "double"},
-    ]
-    mock_meta_table.to_pylist.assert_called_once()
-
-
-def test_meta_table_to_dict_list_empty():
-    """Test meta_table_to_dict_list with empty meta table"""
-    mock_meta_table = MagicMock(spec=pyarrow.Table)
-    mock_meta_table.to_pylist.return_value = []
-    
-    result = meta_table_to_dict_list(mock_meta_table)
-    
-    assert result == []
-    mock_meta_table.to_pylist.assert_called_once()
-
-
-def test_meta_table_to_dict_list_single_column():
-    """Test meta_table_to_dict_list with single column"""
-    mock_meta_table = MagicMock(spec=pyarrow.Table)
-    mock_meta_table.to_pylist.return_value = [
-        {"Name": "timestamp", "DataType": "datetime64[ns]"},
-    ]
-    
-    result = meta_table_to_dict_list(mock_meta_table)
-    
-    assert result == [
-        {"name": "timestamp", "type": "datetime64[ns]"},
-    ]
-    mock_meta_table.to_pylist.assert_called_once()
 
 
 @pytest.mark.asyncio

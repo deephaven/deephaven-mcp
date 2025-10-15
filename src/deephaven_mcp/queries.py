@@ -7,7 +7,6 @@ This module provides coroutine-compatible utility functions for querying Deephav
     - `get_table(session, table_name)`: Retrieve a Deephaven table as a pyarrow.Table snapshot.
     - `get_session_meta_table(session, table_name)`: Retrieve a session table's schema/meta table as a pyarrow.Table snapshot.
     - `get_catalog_meta_table(session, namespace, table_name)`: Retrieve a catalog table's schema/meta table as a pyarrow.Table snapshot.
-    - `meta_table_to_dict_list(meta_table)`: Convert a meta table to a list of dictionaries for JSON serialization.
     - `get_catalog_table(session)`: Retrieve the catalog table from an enterprise session with optional filtering and namespace extraction.
     - `get_pip_packages_table(session)`: Get a table of installed pip packages as a pyarrow.Table.
     - `get_programming_language_version_table(session)`: Get a table with Python version information as a pyarrow.Table.
@@ -259,30 +258,6 @@ async def _extract_meta_table(table: Table, context: str) -> pyarrow.Table:
         f"[queries:_extract_meta_table] Meta table for '{context}' retrieved successfully."
     )
     return arrow_meta_table
-
-
-def meta_table_to_dict_list(meta_table: pyarrow.Table) -> list[dict[str, str]]:
-    """
-    Convert a meta table (pyarrow.Table) to a list of dictionaries.
-    
-    This helper extracts the 'Name' and 'DataType' columns from a meta table
-    and returns them as a list of dictionaries with 'name' and 'type' keys,
-    suitable for JSON serialization.
-    
-    Args:
-        meta_table (pyarrow.Table): A meta table with 'Name' and 'DataType' columns.
-    
-    Returns:
-        list[dict[str, str]]: A list of dictionaries, each with 'name' and 'type' keys.
-                             Example: [{"name": "col1", "type": "int64"}, ...]
-    
-    Note:
-        This is a helper function for converting meta tables to JSON-serializable format.
-    """
-    return [
-        {"name": row["Name"], "type": row["DataType"]}
-        for row in meta_table.to_pylist()
-    ]
 
 
 async def get_session_meta_table(session: BaseSession, table_name: str) -> pyarrow.Table:

@@ -10,21 +10,20 @@ Key Features:
     - All docstrings are optimized for agentic and programmatic consumption and describe both user-facing and technical details.
 
 Tools Provided:
-    - refresh: Reload configuration and clear all sessions atomically.
+    - mcp_reload: Reload configuration and clear all sessions atomically.
     - enterprise_systems_status: List all enterprise (Core+) systems with their status and configuration details.
-    - list_sessions: List all sessions (community and enterprise) with basic metadata.
-    - get_session_details: Get detailed information about a specific session.
-    - table_schemas: Retrieve schemas for one or more tables from a session (requires session_id).
-    - list_tables: Retrieve names of all tables in a session (lightweight alternative to table_schemas).
-    - run_script: Execute a script on a specified Deephaven session (requires session_id).
-    - pip_packages: Retrieve all installed pip packages (name and version) from a specified Deephaven session using importlib.metadata, returned as a list of dicts.
-    - get_table_data: Retrieve table data with flexible formatting (json-row, json-column, csv) and optional row limiting for safe access to large tables.
-    - get_table_meta: Retrieve table metadata/schema information as structured data describing column types and properties.
-    - catalog_tables: Retrieve catalog table entries from enterprise (Core+) sessions with optional filtering by namespace or table name patterns.
-    - catalog_namespaces: Retrieve distinct namespaces from enterprise (Core+) catalog for efficient discovery of data domains.
-    - catalog_schemas: Retrieve schemas for catalog tables in enterprise (Core+) sessions with flexible filtering by namespace, table names, or custom filters.
-    - create_enterprise_session: Create a new enterprise session with configurable parameters and resource limits.
-    - delete_enterprise_session: Delete an existing enterprise session and remove it from the session registry.
+    - sessions_list: List all sessions (community and enterprise) with basic metadata.
+    - session_details: Get detailed information about a specific session.
+    - session_tables_schema: Retrieve full metadata schemas for one or more tables from a session (requires session_id).
+    - session_tables_list: Retrieve names of all tables in a session (lightweight alternative to session_tables_schema).
+    - session_script_run: Execute a script on a specified Deephaven session (requires session_id).
+    - session_pip_list: Retrieve all installed pip packages (name and version) from a specified Deephaven session using importlib.metadata, returned as a list of dicts.
+    - session_table_data: Retrieve table data with flexible formatting (json-row, json-column, csv) and optional row limiting for safe access to large tables.
+    - catalog_tables_list: Retrieve catalog table entries from enterprise (Core+) sessions with optional filtering by namespace or table name patterns.
+    - catalog_namespaces_list: Retrieve distinct namespaces from enterprise (Core+) catalog for efficient discovery of data domains.
+    - catalog_tables_schema: Retrieve full schemas for catalog tables in enterprise (Core+) sessions with flexible filtering by namespace, table names, or custom filters.
+    - session_enterprise_create: Create a new enterprise session with configurable parameters and resource limits.
+    - session_enterprise_delete: Delete an existing enterprise session and clean up resources.
 
 Return Types:
     - All tools return structured dict objects, never raise exceptions to the MCP layer.
@@ -42,6 +41,7 @@ from datetime import datetime
 from typing import Any, TypeVar
 
 import aiofiles
+import pyarrow
 from mcp.server.fastmcp import Context, FastMCP
 
 from deephaven_mcp import queries
@@ -182,9 +182,9 @@ See the module-level docstring for an overview of the available tools and error 
 """
 
 
-# TODO: remove refresh?
+# TODO: remove mcp_reload?
 @mcp_server.tool()
-async def refresh(context: Context) -> dict:
+async def mcp_reload(context: Context) -> dict:
     """
     MCP Tool: Reload configuration and clear all active sessions.
 
@@ -226,7 +226,7 @@ async def refresh(context: Context) -> dict:
         - Session registry errors: Returns error if session_registry operations (close, initialize) fail
     """
     _LOGGER.info(
-        "[mcp_systems_server:refresh] Invoked: refreshing session configuration and session cache."
+        "[mcp_systems_server:mcp_reload] Invoked: refreshing session configuration and session cache."
     )
     # Acquire the refresh lock to prevent concurrent refreshes. This does not
     # guarantee atomicity with respect to other config/session operations, but
@@ -247,12 +247,12 @@ async def refresh(context: Context) -> dict:
             await session_registry.close()
             await session_registry.initialize(config_manager)
         _LOGGER.info(
-            "[mcp_systems_server:refresh] Success: Session configuration and session cache have been reloaded."
+            "[mcp_systems_server:mcp_reload] Success: Session configuration and session cache have been reloaded."
         )
         return {"success": True}
     except Exception as e:
         _LOGGER.error(
-            f"[mcp_systems_server:refresh] Failed to refresh session configuration/session cache: {e!r}",
+            f"[mcp_systems_server:mcp_reload] Failed to refresh session configuration/session cache: {e!r}",
             exc_info=True,
         )
         return {"success": False, "error": str(e), "isError": True}
@@ -394,7 +394,7 @@ async def enterprise_systems_status(
 
 
 @mcp_server.tool()
-async def list_sessions(context: Context) -> dict:
+async def sessions_list(context: Context) -> dict:
     """
     MCP Tool: List all sessions with basic metadata.
 
@@ -453,27 +453,27 @@ async def list_sessions(context: Context) -> dict:
         - Registry operation errors: Returns error if session_registry.get_all() fails
         - Session processing errors: Returns error if individual session metadata cannot be extracted
     """
-    _LOGGER.info("[mcp_systems_server:list_sessions] Invoked.")
+    _LOGGER.info("[mcp_systems_server:sessions_list] Invoked")
     try:
         _LOGGER.debug(
-            "[mcp_systems_server:list_sessions] Accessing session registry from context"
+            "[mcp_systems_server:sessions_list] Accessing session registry from context"
         )
         session_registry: CombinedSessionRegistry = (
             context.request_context.lifespan_context["session_registry"]
         )
         _LOGGER.debug(
-            "[mcp_systems_server:list_sessions] Retrieving all sessions from registry"
+            "[mcp_systems_server:sessions_list] Retrieving all sessions from registry"
         )
         sessions = await session_registry.get_all()
 
         _LOGGER.info(
-            "[mcp_systems_server:list_sessions] Found %d sessions.", len(sessions)
+            "[mcp_systems_server:sessions_list] Found %d sessions.", len(sessions)
         )
 
         results = []
         for fq_name, mgr in sessions.items():
             _LOGGER.debug(
-                "[mcp_systems_server:list_sessions] Processing session '%s'", fq_name
+                "[mcp_systems_server:sessions_list] Processing session '%s'", fq_name
             )
 
             try:
@@ -492,15 +492,63 @@ async def list_sessions(context: Context) -> dict:
                 )
             except Exception as e:
                 _LOGGER.warning(
-                    f"[mcp_systems_server:list_sessions] Could not process session '{fq_name}': {e!r}"
+                    f"[mcp_systems_server:sessions_list] Could not process session '{fq_name}': {e!r}"
                 )
                 results.append({"session_id": fq_name, "error": str(e)})
         return {"success": True, "sessions": results}
     except Exception as e:
         _LOGGER.error(
-            f"[mcp_systems_server:list_sessions] Failed: {e!r}", exc_info=True
+            f"[mcp_systems_server:sessions_list] Failed: {e!r}", exc_info=True
         )
         return {"success": False, "error": str(e), "isError": True}
+
+
+async def _get_session_from_context(
+    function_name: str, context: Context, session_id: str
+) -> BaseSession:
+    """
+    Get an active session from the MCP context.
+    
+    This helper eliminates duplication of the common pattern for accessing
+    sessions from the MCP context. It handles the standard flow of:
+    1. Extracting session_registry from context
+    2. Getting the session_manager for the session_id
+    3. Establishing the session connection
+    
+    Args:
+        function_name (str): Name of calling function for logging purposes
+        context (Context): The MCP context object containing lifespan context
+        session_id (str): ID of the session to retrieve
+    
+    Returns:
+        BaseSession: The active session connection
+    
+    Raises:
+        KeyError: If session_id not found in registry
+        Exception: If session cannot be established or context is invalid
+    """
+    _LOGGER.debug(
+        f"[mcp_systems_server:{function_name}] Accessing session registry from context"
+    )
+    session_registry: CombinedSessionRegistry = (
+        context.request_context.lifespan_context["session_registry"]
+    )
+    
+    _LOGGER.debug(
+        f"[mcp_systems_server:{function_name}] Retrieving session manager for '{session_id}'"
+    )
+    session_manager = await session_registry.get(session_id)
+    
+    _LOGGER.debug(
+        f"[mcp_systems_server:{function_name}] Establishing session connection for '{session_id}'"
+    )
+    session = await session_manager.get()
+    
+    _LOGGER.info(
+        f"[mcp_systems_server:{function_name}] Session established for '{session_id}'"
+    )
+    
+    return session
 
 
 async def _get_session_liveness_info(
@@ -529,12 +577,12 @@ async def _get_session_liveness_info(
         liveness_detail = detail
         available = await mgr.is_alive()
         _LOGGER.debug(
-            f"[mcp_systems_server:get_session_details] Session '{session_id}' liveness: {liveness_status}, detail: {liveness_detail}"
+            f"[mcp_systems_server:session_details] Session '{session_id}' liveness: {liveness_status}, detail: {liveness_detail}"
         )
         return available, liveness_status, liveness_detail
     except Exception as e:
         _LOGGER.warning(
-            f"[mcp_systems_server:get_session_details] Could not check liveness for '{session_id}': {e!r}"
+            f"[mcp_systems_server:session_details] Could not check liveness for '{session_id}': {e!r}"
         )
         return False, "OFFLINE", str(e)
 
@@ -566,12 +614,12 @@ async def _get_session_property(
         session = await mgr.get()
         result = await getter_func(session)
         _LOGGER.debug(
-            f"[mcp_systems_server:get_session_details] Session '{session_id}' {property_name}: {result}"
+            f"[mcp_systems_server:session_details] Session '{session_id}' {property_name}: {result}"
         )
         return result
     except Exception as e:
         _LOGGER.warning(
-            f"[mcp_systems_server:get_session_details] Could not get {property_name} for '{session_id}': {e!r}"
+            f"[mcp_systems_server:session_details] Could not get {property_name} for '{session_id}': {e!r}"
         )
         return None
 
@@ -602,12 +650,12 @@ async def _get_session_programming_language(
         session: BaseSession = await mgr.get()
         programming_language = str(session.programming_language)
         _LOGGER.debug(
-            f"[mcp_systems_server:get_session_details] Session '{session_id}' programming_language: {programming_language}"
+            f"[mcp_systems_server:session_details] Session '{session_id}' programming_language: {programming_language}"
         )
         return programming_language
     except Exception as e:
         _LOGGER.warning(
-            f"[mcp_systems_server:get_session_details] Could not get programming_language for '{session_id}': {e!r}"
+            f"[mcp_systems_server:session_details] Could not get programming_language for '{session_id}': {e!r}"
         )
         return None
 
@@ -640,18 +688,18 @@ async def _get_session_versions(
         session = await mgr.get()
         community_version, enterprise_version = await queries.get_dh_versions(session)
         _LOGGER.debug(
-            f"[mcp_systems_server:get_session_details] Session '{session_id}' versions: community={community_version}, enterprise={enterprise_version}"
+            f"[mcp_systems_server:session_details] Session '{session_id}' versions: community={community_version}, enterprise={enterprise_version}"
         )
         return community_version, enterprise_version
     except Exception as e:
         _LOGGER.warning(
-            f"[mcp_systems_server:get_session_details] Could not get Deephaven versions for '{session_id}': {e!r}"
+            f"[mcp_systems_server:session_details] Could not get Deephaven versions for '{session_id}': {e!r}"
         )
         return None, None
 
 
 @mcp_server.tool()
-async def get_session_details(
+async def session_details(
     context: Context, session_id: str, attempt_to_connect: bool = False
 ) -> dict:
     """
@@ -705,11 +753,11 @@ async def get_session_details(
         from the response.
     """
     _LOGGER.info(
-        f"[mcp_systems_server:get_session_details] Invoked for session_id: {session_id}"
+        f"[mcp_systems_server:session_details] Invoked for session_id: {session_id}"
     )
     try:
         _LOGGER.debug(
-            "[mcp_systems_server:get_session_details] Accessing session registry from context"
+            "[mcp_systems_server:session_details] Accessing session registry from context"
         )
         session_registry: CombinedSessionRegistry = (
             context.request_context.lifespan_context["session_registry"]
@@ -717,12 +765,12 @@ async def get_session_details(
 
         # Get the specific session manager directly
         _LOGGER.debug(
-            f"[mcp_systems_server:get_session_details] Retrieving session manager for '{session_id}'"
+            f"[mcp_systems_server:session_details] Retrieving session manager for '{session_id}'"
         )
         try:
             mgr = await session_registry.get(session_id)
             _LOGGER.debug(
-                f"[mcp_systems_server:get_session_details] Successfully retrieved session manager for '{session_id}'"
+                f"[mcp_systems_server:session_details] Successfully retrieved session manager for '{session_id}'"
             )
         except Exception as e:
             return {
@@ -734,18 +782,18 @@ async def get_session_details(
         try:
             # Get basic metadata
             _LOGGER.debug(
-                f"[mcp_systems_server:get_session_details] Extracting metadata for session '{session_id}'"
+                f"[mcp_systems_server:session_details] Extracting metadata for session '{session_id}'"
             )
             system_type_str = mgr.system_type.name
             source = mgr.source
             session_name = mgr.name
             _LOGGER.debug(
-                f"[mcp_systems_server:get_session_details] Session '{session_id}' metadata: type={system_type_str}, source={source}, name={session_name}"
+                f"[mcp_systems_server:session_details] Session '{session_id}' metadata: type={system_type_str}, source={source}, name={session_name}"
             )
 
             # Get liveness status and availability
             _LOGGER.debug(
-                f"[mcp_systems_server:get_session_details] Checking liveness for session '{session_id}' (attempt_to_connect={attempt_to_connect})"
+                f"[mcp_systems_server:session_details] Checking liveness for session '{session_id}' (attempt_to_connect={attempt_to_connect})"
             )
             available, liveness_status, liveness_detail = (
                 await _get_session_liveness_info(mgr, session_id, attempt_to_connect)
@@ -753,7 +801,7 @@ async def get_session_details(
 
             # Get session properties using helper functions
             _LOGGER.debug(
-                f"[mcp_systems_server:get_session_details] Retrieving session properties for '{session_id}' (available={available})"
+                f"[mcp_systems_server:session_details] Retrieving session properties for '{session_id}' (available={available})"
             )
             programming_language = await _get_session_programming_language(
                 mgr, session_id, available
@@ -772,7 +820,7 @@ async def get_session_details(
                 mgr, session_id, available
             )
             _LOGGER.debug(
-                f"[mcp_systems_server:get_session_details] Completed property retrieval for session '{session_id}'"
+                f"[mcp_systems_server:session_details] Completed property retrieval for session '{session_id}'"
             )
 
             # Build session info dictionary with all potential fields
@@ -795,14 +843,14 @@ async def get_session_details(
                 k: v for k, v in session_info_with_nones.items() if v is not None
             }
             _LOGGER.debug(
-                f"[mcp_systems_server:get_session_details] Built session info for '{session_id}' with {len(session_info)} fields"
+                f"[mcp_systems_server:session_details] Built session info for '{session_id}' with {len(session_info)} fields"
             )
 
             return {"success": True, "session": session_info}
 
         except Exception as e:
             _LOGGER.warning(
-                f"[mcp_systems_server:get_session_details] Could not process session '{session_id}': {e!r}"
+                f"[mcp_systems_server:session_details] Could not process session '{session_id}': {e!r}"
             )
             return {
                 "success": False,
@@ -812,30 +860,37 @@ async def get_session_details(
 
     except Exception as e:
         _LOGGER.error(
-            f"[mcp_systems_server:get_session_details] Failed: {e!r}", exc_info=True
+            f"[mcp_systems_server:session_details] Failed: {e!r}", exc_info=True
         )
         return {"success": False, "error": str(e), "isError": True}
 
 
 @mcp_server.tool()
-async def table_schemas(
+async def session_tables_schema(
     context: Context, session_id: str, table_names: list[str] | None = None
 ) -> dict:
     """
-    MCP Tool: Retrieve column schemas for one or more tables from a Deephaven session.
+    MCP Tool: Retrieve full metadata schemas for one or more tables from a Deephaven session.
 
-    Returns column names and data types for the specified tables. If no table_names are provided,
-    returns schemas for all available tables in the session. Each table's schema is returned as
-    a list of dictionaries with 'name' and 'type' fields.
+    Returns complete metadata information for the specified tables including column names, data types,
+    and all metadata properties. If no table_names are provided, returns schemas for all available 
+    tables in the session. This provides the FULL schema with all metadata properties, not just 
+    simplified name/type pairs.
+
+    Terminology Note:
+    - 'Schema' and 'meta table' are interchangeable terms - both refer to table metadata
+    - The schema describes the structure and properties of columns in a table
+    - 'Session' and 'worker' are interchangeable terms for a running Deephaven instance
 
     AI Agent Usage:
-    - Call with no table_names to discover all available tables and their schemas
+    - Call with no table_names to discover all available tables and their full schemas
     - Call with specific table_names list when you know which tables you need
     - Always check the 'success' field in each schema result before using the schema data
-    - Use the returned column names and types to construct valid queries and operations
-    - The 'type' field contains Deephaven data type strings (e.g., 'int', 'double', 'java.lang.String')
-    - Essential before calling get_table_data or run_script to understand table structure
+    - The 'data' field contains full metadata with properties like Name, DataType, IsPartitioning, etc.
+    - Use the returned metadata to construct valid queries and understand table structure
+    - Essential before calling session_table_data or session_script_run to understand table structure
     - Individual table failures don't stop processing of other tables
+    - This returns FULL metadata, not simplified schema - use for complete table understanding
 
     Args:
         context (Context): The MCP context object.
@@ -849,7 +904,14 @@ async def table_schemas(
             - 'schemas' (list[dict], optional): List of per-table results if operation completed. Each contains:
                 - 'success' (bool): True if this table's schema was retrieved successfully
                 - 'table' (str): Table name
-                - 'schema' (list[dict], optional): List of column definitions (name/type pairs) if successful
+                - 'data' (list[dict], optional): Full metadata rows if successful. Each dict contains:
+                    - 'Name' (str): Column name
+                    - 'DataType' (str): Deephaven data type
+                    - 'IsPartitioning' (bool, optional): Whether column is used for partitioning
+                    - 'ComponentType' (str, optional): Component type for array/vector columns
+                    - Additional metadata properties depending on column type
+                - 'meta_columns' (list[dict], optional): Schema of the metadata table itself
+                - 'row_count' (int, optional): Number of columns in the table
                 - 'error' (str, optional): Error message if this table's schema retrieval failed
                 - 'isError' (bool, optional): Present and True if this table had an error
             - 'error' (str, optional): Error message if the entire operation failed.
@@ -859,7 +921,12 @@ async def table_schemas(
         {
             'success': True,
             'schemas': [
-                {'success': True, 'table': 'MyTable', 'schema': [{'name': 'Col1', 'type': 'int'}, ...]},
+                {
+                    'success': True, 
+                    'table': 'MyTable', 
+                    'data': [{'Name': 'Col1', 'DataType': 'int', ...}, ...],
+                    'row_count': 3
+                },
                 {'success': False, 'table': 'MissingTable', 'error': 'Table not found', 'isError': True}
             ]
         }
@@ -868,21 +935,21 @@ async def table_schemas(
         {'success': False, 'error': 'Failed to connect to session: ...', 'isError': True}
 
     Example Usage:
-        # Get schemas for all tables in the session
-        Tool: table_schemas
+        # Get full schemas for all tables in the session
+        Tool: session_tables_schema
         Parameters: {
             "session_id": "community:localhost:10000"
         }
 
-        # Get schemas for specific tables
-        Tool: table_schemas
+        # Get full schemas for specific tables
+        Tool: session_tables_schema
         Parameters: {
             "session_id": "community:localhost:10000",
             "table_names": ["trades", "quotes", "orders"]
         }
 
-        # Get schema for a single table
-        Tool: table_schemas
+        # Get full schema for a single table
+        Tool: session_tables_schema
         Parameters: {
             "session_id": "enterprise:prod:analytics",
             "table_names": ["market_data"]
@@ -892,56 +959,46 @@ async def table_schemas(
         - Logs tool invocation, per-table results, and error details at INFO/ERROR levels.
     """
     _LOGGER.info(
-        f"[mcp_systems_server:table_schemas] Invoked: session_id={session_id!r}, table_names={table_names!r}"
+        f"[mcp_systems_server:session_tables_schema] Invoked: session_id={session_id!r}, table_names={table_names!r}"
     )
     schemas = []
     try:
-        _LOGGER.debug(
-            "[mcp_systems_server:table_schemas] Accessing session registry from context"
-        )
-        session_registry: CombinedSessionRegistry = (
-            context.request_context.lifespan_context["session_registry"]
-        )
-        _LOGGER.debug(
-            f"[mcp_systems_server:table_schemas] Retrieving session manager for '{session_id}'"
-        )
-        session_manager = await session_registry.get(session_id)
-        _LOGGER.debug(
-            f"[mcp_systems_server:table_schemas] Establishing session connection for '{session_id}'"
-        )
-        session = await session_manager.get()
-        _LOGGER.info(
-            f"[mcp_systems_server:table_schemas] Session established for session: '{session_id}'"
+        # Use helper to get session from context
+        session = await _get_session_from_context(
+            "session_tables_schema", context, session_id
         )
 
         if table_names is not None:
             selected_table_names = table_names
             _LOGGER.info(
-                f"[mcp_systems_server:table_schemas] Fetching schemas for specified tables: {selected_table_names!r}"
+                f"[mcp_systems_server:session_tables_schema] Fetching schemas for specified tables: {selected_table_names!r}"
             )
         else:
             _LOGGER.debug(
-                f"[mcp_systems_server:table_schemas] Discovering available tables in session '{session_id}'"
+                f"[mcp_systems_server:session_tables_schema] Discovering available tables in session '{session_id}'"
             )
             selected_table_names = await session.tables()
             _LOGGER.info(
-                f"[mcp_systems_server:table_schemas] Fetching schemas for all tables in session: {selected_table_names!r}"
+                f"[mcp_systems_server:session_tables_schema] Fetching schemas for all tables in session: {selected_table_names!r}"
             )
 
         for table_name in selected_table_names:
             _LOGGER.debug(
-                f"[mcp_systems_server:table_schemas] Processing table '{table_name}' in session '{session_id}'"
+                f"[mcp_systems_server:session_tables_schema] Processing table '{table_name}' in session '{session_id}'"
             )
             try:
-                meta_table = await queries.get_session_meta_table(session, table_name)
-                schema = queries.meta_table_to_dict_list(meta_table)
-                schemas.append({"success": True, "table": table_name, "schema": schema})
+                meta_arrow_table = await queries.get_session_meta_table(session, table_name)
+                
+                # Use helper to format result (no namespace for session tables)
+                result = _format_meta_table_result(meta_arrow_table, table_name, namespace=None)
+                schemas.append(result)
+                
                 _LOGGER.info(
-                    f"[mcp_systems_server:table_schemas] Success: Retrieved schema for table '{table_name}'"
+                    f"[mcp_systems_server:session_tables_schema] Success: Retrieved full schema for table '{table_name}' ({result['row_count']} columns)"
                 )
             except Exception as table_exc:
                 _LOGGER.error(
-                    f"[mcp_systems_server:table_schemas] Failed to get schema for table '{table_name}': {table_exc!r}",
+                    f"[mcp_systems_server:session_tables_schema] Failed to get schema for table '{table_name}': {table_exc!r}",
                     exc_info=True,
                 )
                 schemas.append(
@@ -954,19 +1011,19 @@ async def table_schemas(
                 )
 
         _LOGGER.info(
-            f"[mcp_systems_server:table_schemas] Returning {len(schemas)} table results"
+            f"[mcp_systems_server:session_tables_schema] Returning {len(schemas)} table results"
         )
-        return {"success": True, "schemas": schemas}
+        return {"success": True, "schemas": schemas, "count": len(schemas)}
     except Exception as e:
         _LOGGER.error(
-            f"[mcp_systems_server:table_schemas] Failed for session: '{session_id}', error: {e!r}",
+            f"[mcp_systems_server:session_tables_schema] Failed for session: '{session_id}', error: {e!r}",
             exc_info=True,
         )
         return {"success": False, "error": str(e), "isError": True}
 
 
 @mcp_server.tool()
-async def list_tables(context: Context, session_id: str) -> dict:
+async def session_tables_list(context: Context, session_id: str) -> dict:
     """
     MCP Tool: Retrieve the names of all tables in a Deephaven session.
 
@@ -1030,32 +1087,22 @@ async def list_tables(context: Context, session_id: str) -> dict:
         - Logs tool invocation, success/failure, and error details at INFO/ERROR levels.
     """
     _LOGGER.info(
-        f"[mcp_systems_server:list_tables] Invoked: session_id={session_id!r}"
+        f"[mcp_systems_server:session_tables_list] Invoked: session_id={session_id!r}"
     )
 
     try:
-        # Get session registry and session
-        session_registry: CombinedSessionRegistry = (
-            context.request_context.lifespan_context["session_registry"]
+        # Use helper to get session from context
+        session = await _get_session_from_context(
+            "session_tables_list", context, session_id
         )
 
         _LOGGER.debug(
-            f"[mcp_systems_server:list_tables] Retrieving session manager for '{session_id}'"
-        )
-        session_manager = await session_registry.get(session_id)
-
-        _LOGGER.debug(
-            f"[mcp_systems_server:list_tables] Establishing session connection for '{session_id}'"
-        )
-        session = await session_manager.get()
-
-        _LOGGER.debug(
-            f"[mcp_systems_server:list_tables] Retrieving table names from session '{session_id}'"
+            f"[mcp_systems_server:session_tables_list] Retrieving table names from session '{session_id}'"
         )
         table_names = await session.tables()
 
         _LOGGER.info(
-            f"[mcp_systems_server:list_tables] Success: Retrieved {len(table_names)} table(s) from session '{session_id}'"
+            f"[mcp_systems_server:session_tables_list] Success: Retrieved {len(table_names)} table(s) from session '{session_id}'"
         )
 
         return {
@@ -1067,14 +1114,14 @@ async def list_tables(context: Context, session_id: str) -> dict:
 
     except Exception as e:
         _LOGGER.error(
-            f"[mcp_systems_server:list_tables] Failed for session: '{session_id}', error: {e!r}",
+            f"[mcp_systems_server:session_tables_list] Failed for session: '{session_id}', error: {e!r}",
             exc_info=True,
         )
         return {"success": False, "error": str(e), "isError": True}
 
 
 @mcp_server.tool()
-async def run_script(
+async def session_script_run(
     context: Context,
     session_id: str,
     script: str | None = None,
@@ -1133,16 +1180,16 @@ async def run_script(
         - Logs tool invocation, script source/path, execution status, and error details at INFO/WARNING/ERROR levels.
     """
     _LOGGER.info(
-        f"[mcp_systems_server:run_script] Invoked: session_id={session_id!r}, script={'<provided>' if script else None}, script_path={script_path!r}"
+        f"[mcp_systems_server:session_script_run] Invoked: session_id={session_id!r}, script={'<provided>' if script else None}, script_path={script_path!r}"
     )
     result: dict[str, object] = {"success": False}
     try:
         _LOGGER.debug(
-            f"[mcp_systems_server:run_script] Validating script parameters for session '{session_id}'"
+            f"[mcp_systems_server:session_script_run] Validating script parameters for session '{session_id}'"
         )
         if script is None and script_path is None:
             _LOGGER.warning(
-                "[mcp_systems_server:run_script] No script or script_path provided. Returning error."
+                "[mcp_systems_server:session_script_run] No script or script_path provided. Returning error."
             )
             result["error"] = "Must provide either script or script_path."
             result["isError"] = True
@@ -1150,55 +1197,45 @@ async def run_script(
 
         if script is None:
             _LOGGER.info(
-                f"[mcp_systems_server:run_script] Reading script from file: {script_path!r}"
+                f"[mcp_systems_server:session_script_run] Reading script from file: {script_path!r}"
             )
             if script_path is None:
                 raise RuntimeError(
                     "Internal error: script_path is None after prior guard"
                 )  # pragma: no cover
             _LOGGER.debug(
-                f"[mcp_systems_server:run_script] Opening script file '{script_path}' for reading"
+                f"[mcp_systems_server:session_script_run] Opening script file '{script_path}' for reading"
             )
             async with aiofiles.open(script_path) as f:
                 script = await f.read()
             _LOGGER.debug(
-                f"[mcp_systems_server:run_script] Successfully read {len(script)} characters from script file"
+                f"[mcp_systems_server:session_script_run] Successfully read {len(script)} characters from script file"
             )
 
-        _LOGGER.debug(
-            "[mcp_systems_server:run_script] Accessing session registry from context"
+        # Use helper to get session from context
+        session = await _get_session_from_context(
+            "session_script_run", context, session_id
         )
-        session_registry: CombinedSessionRegistry = (
-            context.request_context.lifespan_context["session_registry"]
-        )
-        _LOGGER.debug(
-            f"[mcp_systems_server:run_script] Retrieving session manager for '{session_id}'"
-        )
-        session_manager = await session_registry.get(session_id)
-        _LOGGER.debug(
-            f"[mcp_systems_server:run_script] Establishing session connection for '{session_id}'"
-        )
-        session = await session_manager.get()
         _LOGGER.info(
-            f"[mcp_systems_server:run_script] Session established for session: '{session_id}'"
+            f"[mcp_systems_server:session_script_run] Session established for session: '{session_id}'"
         )
 
         _LOGGER.info(
-            f"[mcp_systems_server:run_script] Executing script on session: '{session_id}'"
+            f"[mcp_systems_server:session_script_run] Executing script on session: '{session_id}'"
         )
         _LOGGER.debug(
-            f"[mcp_systems_server:run_script] Script length: {len(script)} characters"
+            f"[mcp_systems_server:session_script_run] Script length: {len(script)} characters"
         )
 
         await session.run_script(script)
 
         _LOGGER.info(
-            f"[mcp_systems_server:run_script] Script executed successfully on session: '{session_id}'"
+            f"[mcp_systems_server:session_script_run] Script executed successfully on session: '{session_id}'"
         )
         result["success"] = True
     except Exception as e:
         _LOGGER.error(
-            f"[mcp_systems_server:run_script] Failed for session: '{session_id}', error: {e!r}",
+            f"[mcp_systems_server:session_script_run] Failed for session: '{session_id}', error: {e!r}",
             exc_info=True,
         )
         result["error"] = str(e)
@@ -1207,7 +1244,7 @@ async def run_script(
 
 
 @mcp_server.tool()
-async def pip_packages(context: Context, session_id: str) -> dict:
+async def session_pip_list(context: Context, session_id: str) -> dict:
     """
     MCP Tool: Retrieve installed pip packages from a specified Deephaven session.
 
@@ -1241,37 +1278,27 @@ async def pip_packages(context: Context, session_id: str) -> dict:
         {'success': False, 'error': 'Failed to get pip packages: ...', 'isError': True}
     """
     _LOGGER.info(
-        f"[mcp_systems_server:pip_packages] Invoked for session_id: {session_id!r}"
+        f"[mcp_systems_server:session_pip_list] Invoked for session_id: {session_id!r}"
     )
     result: dict = {"success": False}
     try:
-        _LOGGER.debug(
-            "[mcp_systems_server:pip_packages] Accessing session registry from context"
+        # Use helper to get session from context
+        session = await _get_session_from_context(
+            "session_pip_list", context, session_id
         )
-        session_registry: CombinedSessionRegistry = (
-            context.request_context.lifespan_context["session_registry"]
-        )
-        _LOGGER.debug(
-            f"[mcp_systems_server:pip_packages] Retrieving session manager for '{session_id}'"
-        )
-        session_manager = await session_registry.get(session_id)
-        _LOGGER.debug(
-            f"[mcp_systems_server:pip_packages] Establishing session connection for '{session_id}'"
-        )
-        session = await session_manager.get()
         _LOGGER.info(
-            f"[mcp_systems_server:pip_packages] Session established for session: '{session_id}'"
+            f"[mcp_systems_server:session_pip_list] Session established for session: '{session_id}'"
         )
 
         _LOGGER.debug(
-            f"[mcp_systems_server:pip_packages] Querying pip packages for session '{session_id}'"
+            f"[mcp_systems_server:session_pip_list] Querying pip packages for session '{session_id}'"
         )
         arrow_table = await queries.get_pip_packages_table(session)
         _LOGGER.debug(
-            f"[mcp_systems_server:pip_packages] Retrieved pip packages table for session '{session_id}'"
+            f"[mcp_systems_server:session_pip_list] Retrieved pip packages table for session '{session_id}'"
         )
         _LOGGER.info(
-            f"[mcp_systems_server:pip_packages] Pip packages table retrieved successfully for session: '{session_id}'"
+            f"[mcp_systems_server:session_pip_list] Pip packages table retrieved successfully for session: '{session_id}'"
         )
 
         # Convert the Arrow table to a list of dicts
@@ -1298,7 +1325,7 @@ async def pip_packages(context: Context, session_id: str) -> dict:
         result["result"] = packages
     except Exception as e:
         _LOGGER.error(
-            f"[mcp_systems_server:pip_packages] Failed for session: '{session_id}', error: {e!r}",
+            f"[mcp_systems_server:session_pip_list] Failed for session: '{session_id}', error: {e!r}",
             exc_info=True,
         )
         result["error"] = str(e)
@@ -1349,7 +1376,7 @@ def _check_response_size(table_name: str, estimated_size: int) -> dict | None:
 
 
 @mcp_server.tool()
-async def get_table_data(
+async def session_table_data(
     context: Context,
     session_id: str,
     table_name: str,
@@ -1487,27 +1514,21 @@ async def get_table_data(
         }
     """
     _LOGGER.info(
-        f"[mcp_systems_server:get_table_data] Invoked: session_id={session_id!r}, "
+        f"[mcp_systems_server:session_table_data] Invoked: session_id={session_id!r}, "
         f"table_name={table_name!r}, max_rows={max_rows}, head={head}, format={format!r}"
     )
 
     result: dict[str, object] = {"success": False}
 
     try:
-        # Get session registry and session
-        session_registry: CombinedSessionRegistry = (
-            context.request_context.lifespan_context["session_registry"]
+        # Use helper to get session from context
+        session = await _get_session_from_context(
+            "session_table_data", context, session_id
         )
-
-        _LOGGER.debug(
-            f"[mcp_systems_server:get_table_data] Retrieving session '{session_id}'"
-        )
-        session_manager = await session_registry.get(session_id)
-        session = await session_manager.get()
 
         # Get table data using queries module
         _LOGGER.debug(
-            f"[mcp_systems_server:get_table_data] Retrieving table data for '{table_name}'"
+            f"[mcp_systems_server:session_table_data] Retrieving table data for '{table_name}'"
         )
         arrow_table, is_complete = await queries.get_table(
             session, table_name, max_rows=max_rows, head=head
@@ -1523,11 +1544,11 @@ async def get_table_data(
 
         # Format data - all format logic handled by formatters package
         _LOGGER.debug(
-            f"[mcp_systems_server:get_table_data] Formatting data with format='{format}'"
+            f"[mcp_systems_server:session_table_data] Formatting data with format='{format}'"
         )
         actual_format, formatted_data = format_table_data(arrow_table, format)
         _LOGGER.debug(
-            f"[mcp_systems_server:get_table_data] Data formatted as '{actual_format}'"
+            f"[mcp_systems_server:session_table_data] Data formatted as '{actual_format}'"
         )
 
         # Extract schema information
@@ -1549,135 +1570,21 @@ async def get_table_data(
         )
 
         _LOGGER.info(
-            f"[mcp_systems_server:get_table_data] Successfully retrieved {row_count} rows "
+            f"[mcp_systems_server:session_table_data] Successfully retrieved {row_count} rows "
             f"from '{table_name}' in '{actual_format}' format"
         )
 
     except ValueError as e:
         # Format validation error from formatters package
         _LOGGER.error(
-            f"[mcp_systems_server:get_table_data] Invalid format parameter: {e!r}"
+            f"[mcp_systems_server:session_table_data] Invalid format parameter: {e!r}"
         )
         result["error"] = str(e)
         result["isError"] = True
 
     except Exception as e:
         _LOGGER.error(
-            f"[mcp_systems_server:get_table_data] Failed for session '{session_id}', "
-            f"table '{table_name}': {e!r}",
-            exc_info=True,
-        )
-        result["error"] = str(e)
-        result["isError"] = True
-
-    return result
-
-
-@mcp_server.tool()
-async def get_table_meta(context: Context, session_id: str, table_name: str) -> dict:
-    """
-    MCP Tool: Retrieve metadata information for a specified table.
-
-    Returns detailed schema information for a table including column names, data types, and properties.
-    Focuses on table structure rather than actual data.
-
-    AI Agent Usage:
-    - Use this to understand table structure before data operations
-    - Check 'data' array for column definitions with names and types
-    - Always check 'success' field before accessing metadata fields
-    - Similar to table_schemas but returns more detailed metadata properties
-    - Essential for generating Deephaven scripts that reference specific columns and use appropriate data types
-    - Helps ensure generated code uses correct column names and compatible operations
-
-    Args:
-        context (Context): The MCP context object.
-        session_id (str): ID of the Deephaven session to query.
-        table_name (str): Name of the table to retrieve metadata for.
-
-    Returns:
-        dict: Structured result object with keys:
-            - 'success' (bool): True if metadata was retrieved successfully, False on error.
-            - 'table_name' (str, optional): Name of the table if successful.
-            - 'format' (str, optional): Always "json-row" for meta tables if successful.
-            - 'meta_columns' (list[dict], optional): Schema of the meta table itself if successful. Each dict contains:
-                {'name': str, 'type': str} describing the metadata table structure.
-            - 'row_count' (int, optional): Number of metadata rows (columns in original table) if successful.
-            - 'is_complete' (bool, optional): Always True for meta tables if successful. Metadata is never truncated.
-            - 'data' (list[dict], optional): Array of metadata objects if successful. Each dict describes one column with:
-                - 'Name' (str): Column name in the original table
-                - 'DataType' (str): Deephaven data type (e.g., 'int', 'double', 'java.lang.String')
-                - 'IsPartitioning' (bool, optional): Whether this column is used for partitioning
-                - 'ComponentType' (str, optional): Component type for array/vector columns
-                - Additional metadata properties depending on column type and table configuration
-            - 'error' (str, optional): Human-readable error message if metadata retrieval failed. Omitted on success.
-            - 'isError' (bool, optional): Present and True only when success=False. Explicit error flag for frameworks.
-
-    Error Scenarios:
-        - Invalid session_id: Returns error if session doesn't exist or is not accessible
-        - Invalid table_name: Returns error if table doesn't exist in the session
-        - Session connection issues: Returns error if unable to communicate with Deephaven server
-        - Permission errors: Returns error if session lacks permission to access table metadata
-        - Server errors: Returns error if Deephaven server fails to generate metadata
-
-    Performance Notes:
-        - Metadata retrieval is typically fast regardless of table size
-        - No size limits apply to metadata (unlike table data)
-        - Safe to call repeatedly as metadata is cached by Deephaven
-        - Minimal memory usage compared to actual data retrieval
-    """
-    _LOGGER.info(
-        f"[mcp_systems_server:get_table_meta] Invoked: session_id={session_id!r}, table_name={table_name!r}"
-    )
-
-    result: dict[str, object] = {"success": False}
-
-    try:
-        # Get session registry and session
-        session_registry: CombinedSessionRegistry = (
-            context.request_context.lifespan_context["session_registry"]
-        )
-
-        _LOGGER.debug(
-            f"[mcp_systems_server:get_table_meta] Retrieving session '{session_id}'"
-        )
-        session_manager = await session_registry.get(session_id)
-        session = await session_manager.get()
-
-        # Get table metadata using queries module
-        _LOGGER.debug(
-            f"[mcp_systems_server:get_table_meta] Retrieving metadata for table '{table_name}'"
-        )
-        meta_arrow_table = await queries.get_session_meta_table(session, table_name)
-
-        # Convert to row-oriented JSON (meta tables are small)
-        meta_data = meta_arrow_table.to_pylist()
-
-        # Extract schema of the meta table itself
-        meta_schema = [
-            {"name": field.name, "type": str(field.type)}
-            for field in meta_arrow_table.schema
-        ]
-
-        result.update(
-            {
-                "success": True,
-                "table_name": table_name,
-                "format": "json-row",
-                "meta_columns": meta_schema,
-                "row_count": len(meta_arrow_table),
-                "is_complete": True,  # Meta tables are always complete
-                "data": meta_data,
-            }
-        )
-
-        _LOGGER.info(
-            f"[mcp_systems_server:get_table_meta] Success: Retrieved metadata for table '{table_name}' "
-            f"({len(meta_arrow_table)} columns)"
-        )
-
-    except Exception as e:
-        _LOGGER.error(
-            f"[mcp_systems_server:get_table_meta] Failed for session '{session_id}', "
+            f"[mcp_systems_server:session_table_data] Failed for session '{session_id}', "
             f"table '{table_name}': {e!r}",
             exc_info=True,
         )
@@ -1718,16 +1625,10 @@ async def _get_catalog_data(
     data_type = "namespaces" if distinct_namespaces else "catalog entries"
 
     try:
-        # Get session registry from context
-        session_registry: CombinedSessionRegistry = (
-            context.request_context.lifespan_context["session_registry"]
+        # Use helper to get session from context
+        session = await _get_session_from_context(
+            tool_name, context, session_id
         )
-
-        _LOGGER.debug(
-            f"[mcp_systems_server:{tool_name}] Retrieving session '{session_id}'"
-        )
-        session_manager = await session_registry.get(session_id)
-        session = await session_manager.get()
 
         # Get catalog data using queries module (includes enterprise check and filtering)
         _LOGGER.debug(
@@ -1811,7 +1712,7 @@ async def _get_catalog_data(
 
 
 @mcp_server.tool()
-async def catalog_tables(
+async def catalog_tables_list(
     context: Context,
     session_id: str,
     max_rows: int | None = 10000,
@@ -2002,7 +1903,7 @@ async def catalog_tables(
 
 
 @mcp_server.tool()
-async def catalog_namespaces(
+async def catalog_namespaces_list(
     context: Context,
     session_id: str,
     max_rows: int | None = 1000,
@@ -2121,7 +2022,7 @@ async def catalog_namespaces(
 
 
 @mcp_server.tool()
-async def catalog_schemas(
+async def catalog_tables_schema(
     context: Context,
     session_id: str,
     namespace: str | None = None,
@@ -2308,23 +2209,10 @@ async def catalog_schemas(
     schemas = []
 
     try:
-        # Get session registry and session
-        _LOGGER.debug(
-            "[mcp_systems_server:catalog_schemas] Accessing session registry from context"
+        # Use helper to get session from context
+        session = await _get_session_from_context(
+            "catalog_schemas", context, session_id
         )
-        session_registry: CombinedSessionRegistry = (
-            context.request_context.lifespan_context["session_registry"]
-        )
-
-        _LOGGER.debug(
-            f"[mcp_systems_server:catalog_schemas] Retrieving session manager for '{session_id}'"
-        )
-        session_manager = await session_registry.get(session_id)
-
-        _LOGGER.debug(
-            f"[mcp_systems_server:catalog_schemas] Establishing session connection for '{session_id}'"
-        )
-        session = await session_manager.get()
 
         # Validate this is an enterprise session
         if not isinstance(session, CorePlusSession):
@@ -2401,20 +2289,15 @@ async def catalog_schemas(
                     session, catalog_namespace, catalog_table_name
                 )
 
-                schema = queries.meta_table_to_dict_list(arrow_meta_table)
-
-                schemas.append(
-                    {
-                        "success": True,
-                        "namespace": catalog_namespace,
-                        "table": catalog_table_name,
-                        "schema": schema,
-                    }
+                # Use helper to format result (include namespace for catalog tables)
+                result = _format_meta_table_result(
+                    arrow_meta_table, catalog_table_name, namespace=catalog_namespace
                 )
+                schemas.append(result)
 
                 _LOGGER.info(
-                    f"[mcp_systems_server:catalog_schemas] Success: Retrieved schema for "
-                    f"'{catalog_namespace}.{catalog_table_name}' ({len(schema)} columns)"
+                    f"[mcp_systems_server:catalog_schemas] Success: Retrieved full schema for "
+                    f"'{catalog_namespace}.{catalog_table_name}' ({result['row_count']} columns)"
                 )
 
             except Exception as table_exc:
@@ -2453,18 +2336,105 @@ async def catalog_schemas(
         return {"success": False, "error": str(e), "isError": True}
 
 
+def _format_meta_table_result(
+    arrow_meta_table: pyarrow.Table,
+    table_name: str,
+    namespace: str | None = None,
+) -> dict:
+    """
+    Format a PyArrow meta table into a standardized result dictionary.
+    
+    This helper eliminates code duplication between session_tables_schema and 
+    catalog_tables_schema by providing a single place to format metadata results.
+    
+    A "meta table" in Deephaven is a table that describes another table's structure.
+    Each row in a meta table represents one column from the original table, with
+    properties like Name, DataType, IsPartitioning, ComponentType, etc.
+    
+    Args:
+        arrow_meta_table (pyarrow.Table): The PyArrow meta table containing column metadata.
+            Each row describes one column of the original table.
+        table_name (str): Name of the table being described.
+        namespace (str | None): Optional namespace for catalog tables. If provided (not None),
+            it will be included in the result. Session tables should pass None since they
+            don't have namespaces. Defaults to None.
+    
+    Returns:
+        dict: Formatted result with success status and metadata fields. The structure is:
+            {
+                "success": True,  # Always True for successful formatting
+                "table": str,  # Name of the table
+                "format": "json-row",  # Data format (always "json-row" = list of dicts)
+                "data": list[dict],  # Full metadata rows with all column properties
+                "meta_columns": list[dict],  # Schema of the meta table itself (describes "data" structure)
+                "row_count": int,  # Number of rows in meta table = number of columns in original table
+                "namespace": str  # Only present if namespace parameter was not None (catalog tables)
+            }
+            
+            Note: The "namespace" field is conditionally included only when the namespace
+            parameter is not None. This keeps session table results clean (no namespace field)
+            while catalog table results include the namespace for context.
+    
+    Example:
+        >>> # For a table with 2 columns (Date and Price)
+        >>> result = _format_meta_table_result(meta_table, "daily_prices", "market_data")
+        >>> result
+        {
+            "success": True,
+            "table": "daily_prices",
+            "namespace": "market_data",
+            "format": "json-row",
+            "data": [
+                {"Name": "Date", "DataType": "LocalDate", "IsPartitioning": False},
+                {"Name": "Price", "DataType": "double", "IsPartitioning": False}
+            ],
+            "meta_columns": [
+                {"name": "Name", "type": "string"},
+                {"name": "DataType", "type": "string"},
+                {"name": "IsPartitioning", "type": "bool"}
+            ],
+            "row_count": 2
+        }
+    """
+    # Convert to full metadata using to_pylist() for complete information
+    # to_pylist() returns native Python types (dict, list, str, int, bool, None)
+    # which are JSON-serializable for MCP protocol
+    meta_data = arrow_meta_table.to_pylist()
+    
+    # Extract schema of the meta table itself
+    meta_schema = [
+        {"name": field.name, "type": str(field.type)}
+        for field in arrow_meta_table.schema
+    ]
+    
+    result = {
+        "success": True,
+        "table": table_name,
+        "format": "json-row",  # Explicit format for AI agent clarity
+        "data": meta_data,
+        "meta_columns": meta_schema,
+        "row_count": len(arrow_meta_table),
+    }
+    
+    # Only include namespace for catalog tables (where it's meaningful)
+    if namespace is not None:
+        result["namespace"] = namespace
+    
+    return result
+
+
 async def _check_session_limits(
     session_registry: CombinedSessionRegistry, system_name: str, max_sessions: int
 ) -> dict | None:
     """Check if session creation is allowed and within limits.
 
     Args:
-        session_registry: The session registry
-        system_name: Name of the enterprise system
-        max_sessions: Maximum concurrent sessions allowed
+        session_registry (CombinedSessionRegistry): The session registry
+        system_name (str): Name of the enterprise system
+        max_sessions (int): Maximum concurrent sessions allowed
 
     Returns:
-        dict: Error response dict if not allowed, None if allowed
+        dict | None: Error response dict if not allowed, None if allowed
     """
     # Check if session creation is disabled
     if max_sessions == 0:
@@ -2490,8 +2460,8 @@ def _generate_session_name_if_none(
     """Generate a session name if none provided.
 
     Args:
-        system_config: Enterprise system configuration dict
-        session_name: Provided session name or None
+        system_config (dict): Enterprise system configuration dict
+        session_name (str | None): Provided session name or None
 
     Returns:
         str: Either the provided session_name or auto-generated name
@@ -2521,8 +2491,8 @@ async def _check_session_id_available(
     This ensures each session has a unique identifier in the registry.
 
     Args:
-        session_registry: The session registry to check
-        session_id: The session ID to check for availability
+        session_registry (CombinedSessionRegistry): The session registry to check
+        session_id (str): The session ID to check for availability
 
     Returns:
         dict | None: Error response dict if session exists, None if available
@@ -2543,20 +2513,35 @@ async def _get_system_config(
     """Get system config from configuration and validate system exists.
 
     Retrieves the configuration for the specified enterprise system. Returns both
-    the system configuration and any error that occurred during retrieval.
+    the system configuration and any error that occurred during retrieval. This is
+    a common validation step used by enterprise session management functions.
 
     Args:
-        function_name: Name of the calling function for logging
-        config_manager: ConfigManager instance
-        system_name: Name of the enterprise system
+        function_name (str): Name of the calling function for logging purposes.
+            Used to create contextual log messages.
+        config_manager (ConfigManager): ConfigManager instance to retrieve configuration.
+        system_name (str): Name of the enterprise system to look up in the configuration.
 
     Returns:
-        tuple[dict, dict | None]: (system_config, error_dict)
-            - system_config: The enterprise system configuration dict if successful, or an empty dict {} if the system is not found.
-            - error_dict: Error response dict with 'error' and 'isError' keys if the system is not found, or None if successful.
+        tuple[dict, dict | None]: A tuple containing (system_config, error_dict):
+            - system_config (dict): The enterprise system configuration dict if found,
+              or an empty dict {} if the system is not found.
+            - error_dict (dict | None): Error response dict with 'error' and 'isError'
+              keys if the system is not found, or None if successful.
+            
+            Success case: ({"url": "...", "username": "...", ...}, None)
+            Error case: ({}, {"error": "Enterprise system 'X' not found...", "isError": True})
 
     Raises:
-        Exceptions may be raised for unexpected errors (e.g., issues reading configuration).
+        Exception: May raise exceptions for unexpected errors such as issues reading
+            the configuration file or invalid configuration structure.
+    
+    Example:
+        >>> config_mgr = ConfigManager()
+        >>> system_config, error = await _get_system_config("session_enterprise_create", config_mgr, "prod")
+        >>> if error:
+        ...     return error  # System not found
+        >>> # Use system_config for session creation
     """
     config = await config_manager.get_config()
 
@@ -2576,7 +2561,7 @@ async def _get_system_config(
 
 
 @mcp_server.tool()
-async def create_enterprise_session(
+async def session_enterprise_create(
     context: Context,
     system_name: str,
     session_name: str | None = None,
@@ -2736,7 +2721,7 @@ async def create_enterprise_session(
         - Error: All failure scenarios with full context and stack traces
     """
     _LOGGER.info(
-        f"[mcp_systems_server:create_enterprise_session] Invoked: "
+        f"[mcp_systems_server:session_enterprise_create] Invoked: "
         f"system_name={system_name!r}, session_name={session_name!r}, "
         f"heap_size_gb={heap_size_gb}, auto_delete_timeout={auto_delete_timeout}, "
         f"server={server!r}, engine={engine!r}, "
@@ -2807,7 +2792,7 @@ async def create_enterprise_session(
         )
 
         _LOGGER.debug(
-            f"[mcp_systems_server:create_enterprise_session] Resolved configuration: {resolved_config}"
+            f"[mcp_systems_server:session_enterprise_create] Resolved configuration: {resolved_config}"
         )
 
         # Get enterprise factory and create session
@@ -2827,7 +2812,7 @@ async def create_enterprise_session(
             configuration_transformer = language_transformer
 
         _LOGGER.debug(
-            f"[mcp_systems_server:create_enterprise_session] Creating session with parameters: "
+            f"[mcp_systems_server:session_enterprise_create] Creating session with parameters: "
             f"name={session_name}, heap_size_gb={resolved_config['heap_size_gb']}, "
             f"auto_delete_timeout={resolved_config['auto_delete_timeout']}, "
             f"server={resolved_config['server']}, engine={resolved_config['engine']}, "
@@ -2865,7 +2850,7 @@ async def create_enterprise_session(
         await session_registry.add_session(enterprise_session_manager)
 
         _LOGGER.info(
-            f"[mcp_systems_server:create_enterprise_session] Successfully created session "
+            f"[mcp_systems_server:session_enterprise_create] Successfully created session "
             f"'{session_name}' on system '{system_name}' with session ID '{session_id}'"
         )
 
@@ -2886,7 +2871,7 @@ async def create_enterprise_session(
 
     except Exception as e:
         _LOGGER.error(
-            f"[mcp_systems_server:create_enterprise_session] Failed to create session "
+            f"[mcp_systems_server:session_enterprise_create] Failed to create session "
             f"'{session_name}' on system '{system_name}': {e!r}",
             exc_info=True,
         )
@@ -2955,7 +2940,7 @@ def _resolve_session_parameters(
 
 
 @mcp_server.tool()
-async def delete_enterprise_session(
+async def session_enterprise_delete(
     context: Context,
     system_name: str,
     session_name: str,
@@ -3027,7 +3012,7 @@ async def delete_enterprise_session(
         - Use with caution in production environments
     """
     _LOGGER.info(
-        f"[mcp_systems_server:delete_enterprise_session] Invoked: "
+        f"[mcp_systems_server:session_enterprise_delete] Invoked: "
         f"system_name={system_name!r}, session_name={session_name!r}"
     )
 
@@ -3056,7 +3041,7 @@ async def delete_enterprise_session(
         )
 
         _LOGGER.debug(
-            f"[mcp_systems_server:delete_enterprise_session] Looking for session '{session_id}'"
+            f"[mcp_systems_server:session_enterprise_delete] Looking for session '{session_id}'"
         )
 
         # Check if session exists in registry
@@ -3064,7 +3049,7 @@ async def delete_enterprise_session(
             session_manager = await session_registry.get(session_id)
         except KeyError:
             error_msg = f"Session '{session_id}' not found"
-            _LOGGER.error(f"[mcp_systems_server:delete_enterprise_session] {error_msg}")
+            _LOGGER.error(f"[mcp_systems_server:session_enterprise_delete] {error_msg}")
             result["error"] = error_msg
             result["isError"] = True
             return result
@@ -3072,27 +3057,27 @@ async def delete_enterprise_session(
         # Verify it's an EnterpriseSessionManager (safety check)
         if not isinstance(session_manager, EnterpriseSessionManager):
             error_msg = f"Session '{session_id}' is not an enterprise session"
-            _LOGGER.error(f"[mcp_systems_server:delete_enterprise_session] {error_msg}")
+            _LOGGER.error(f"[mcp_systems_server:session_enterprise_delete] {error_msg}")
             result["error"] = error_msg
             result["isError"] = True
             return result
 
         _LOGGER.debug(
-            f"[mcp_systems_server:delete_enterprise_session] Found enterprise session manager for '{session_id}'"
+            f"[mcp_systems_server:session_enterprise_delete] Found enterprise session manager for '{session_id}'"
         )
 
         # Close the session if it's active
         try:
             _LOGGER.debug(
-                f"[mcp_systems_server:delete_enterprise_session] Closing session '{session_id}'"
+                f"[mcp_systems_server:session_enterprise_delete] Closing session '{session_id}'"
             )
             await session_manager.close()
             _LOGGER.debug(
-                f"[mcp_systems_server:delete_enterprise_session] Successfully closed session '{session_id}'"
+                f"[mcp_systems_server:session_enterprise_delete] Successfully closed session '{session_id}'"
             )
         except Exception as e:
             _LOGGER.warning(
-                f"[mcp_systems_server:delete_enterprise_session] Failed to close session '{session_id}': {e}"
+                f"[mcp_systems_server:session_enterprise_delete] Failed to close session '{session_id}': {e}"
             )
             # Continue with removal even if close failed
 
@@ -3104,22 +3089,22 @@ async def delete_enterprise_session(
                     f"Session '{session_id}' was not found in registry during removal"
                 )
                 _LOGGER.warning(
-                    f"[mcp_systems_server:delete_enterprise_session] {error_msg}"
+                    f"[mcp_systems_server:session_enterprise_delete] {error_msg}"
                 )
             else:
                 _LOGGER.debug(
-                    f"[mcp_systems_server:delete_enterprise_session] Removed session '{session_id}' from registry"
+                    f"[mcp_systems_server:session_enterprise_delete] Removed session '{session_id}' from registry"
                 )
 
         except Exception as e:
             error_msg = f"Failed to remove session '{session_id}' from registry: {e}"
-            _LOGGER.error(f"[mcp_systems_server:delete_enterprise_session] {error_msg}")
+            _LOGGER.error(f"[mcp_systems_server:session_enterprise_delete] {error_msg}")
             result["error"] = error_msg
             result["isError"] = True
             return result
 
         _LOGGER.info(
-            f"[mcp_systems_server:delete_enterprise_session] Successfully deleted session "
+            f"[mcp_systems_server:session_enterprise_delete] Successfully deleted session "
             f"'{session_name}' from system '{system_name}' (session ID: '{session_id}')"
         )
 
@@ -3134,7 +3119,7 @@ async def delete_enterprise_session(
 
     except Exception as e:
         _LOGGER.error(
-            f"[mcp_systems_server:delete_enterprise_session] Failed to delete session "
+            f"[mcp_systems_server:session_enterprise_delete] Failed to delete session "
             f"'{session_name}' from system '{system_name}': {e!r}",
             exc_info=True,
         )
@@ -3142,3 +3127,96 @@ async def delete_enterprise_session(
         result["isError"] = True
 
     return result
+
+
+# =============================================================================
+# TODO: Future MCP Tools to Implement
+# =============================================================================
+
+# TODO: Implement catalog_table_sample
+# @mcp_server.tool()
+# async def catalog_table_sample(
+#     context: Context,
+#     session_id: str,
+#     namespace: str,
+#     table_name: str,
+#     max_rows: int = 100,
+#     format: str = "json-row",
+# ) -> dict:
+#     """
+#     MCP Tool: Safely sample data from a catalog table with strict row limits.
+#     
+#     This tool provides safe access to catalog table data with enforced row limits
+#     to prevent overwhelming responses. Useful for previewing catalog table contents.
+#     
+#     Terminology Note:
+#     - 'Session' and 'worker' are interchangeable terms for a running Deephaven instance
+#     - 'Enterprise session' runs Deephaven Enterprise (also called 'Core+' or 'CorePlus')
+#     - Catalog tables are only available in Enterprise (Core+) sessions
+#     
+#     Args:
+#         context: MCP context
+#         session_id: Enterprise session ID
+#         namespace: Catalog namespace
+#         table_name: Name of the catalog table
+#         max_rows: Maximum rows to return (default 100, hard limit)
+#         format: Output format (json-row, json-column, csv)
+#     
+#     Returns:
+#         dict: Sample data with success status and formatted table data
+#     """
+#     pass
+
+
+# TODO: Implement session_community_create (if supported)
+# @mcp_server.tool()
+# async def session_community_create(
+#     context: Context,
+#     session_name: str,
+#     script_path: str | None = None,
+# ) -> dict:
+#     """
+#     MCP Tool: Create a new Deephaven Community (Core) session.
+#     
+#     Creates a new community session if the configuration supports it.
+#     Note: Community session creation may not be supported in all deployments.
+#     
+#     Terminology Note:
+#     - 'Session' and 'worker' are interchangeable terms for a running Deephaven instance
+#     - 'COMMUNITY' sessions run Deephaven Community (also called 'Core')
+#     
+#     Args:
+#         context: MCP context
+#         session_name: Name for the new session
+#         script_path: Optional initialization script path
+#     
+#     Returns:
+#         dict: Creation result with session_id and status
+#     """
+#     pass
+
+
+# TODO: Implement session_community_delete (if supported)
+# @mcp_server.tool()
+# async def session_community_delete(
+#     context: Context,
+#     session_id: str,
+# ) -> dict:
+#     """
+#     MCP Tool: Delete a Deephaven Community (Core) session.
+#     
+#     Deletes an existing community session if the configuration supports it.
+#     Note: Community session deletion may not be supported in all deployments.
+#     
+#     Terminology Note:
+#     - 'Session' and 'worker' are interchangeable terms for a running Deephaven instance
+#     - 'COMMUNITY' sessions run Deephaven Community (also called 'Core')
+#     
+#     Args:
+#         context: MCP context
+#         session_id: ID of the session to delete
+#     
+#     Returns:
+#         dict: Deletion result with success status
+#     """
+#     pass
