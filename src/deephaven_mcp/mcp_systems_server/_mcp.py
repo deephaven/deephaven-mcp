@@ -870,7 +870,11 @@ async def session_tables_schema(
     context: Context, session_id: str, table_names: list[str] | None = None
 ) -> dict:
     """
-    MCP Tool: Retrieve full metadata schemas for one or more tables from a Deephaven session.
+    MCP Tool: Retrieve table schemas as TABULAR METADATA from a Deephaven session.
+
+    **Returns**: Schema information formatted as TABULAR DATA where each row represents a column
+    in the source table. This tabular metadata should be displayed as a table to users for easy
+    comprehension of table structure.
 
     Returns complete metadata information for the specified tables including column names, data types,
     and all metadata properties. If no table_names are provided, returns schemas for all available 
@@ -881,6 +885,13 @@ async def session_tables_schema(
     - 'Schema' and 'meta table' are interchangeable terms - both refer to table metadata
     - The schema describes the structure and properties of columns in a table
     - 'Session' and 'worker' are interchangeable terms for a running Deephaven instance
+
+    Table Rendering:
+    - **This tool returns TABULAR METADATA that MUST be displayed as a table to users**
+    - Each row in the result represents one column from the source table
+    - The table shows column properties: Name, DataType, IsPartitioning, ComponentType, etc.
+    - Present schema data in tabular format (table or grid) for easy comprehension
+    - Do NOT present schema data as plain text or unstructured lists
 
     AI Agent Usage:
     - Call with no table_names to discover all available tables and their full schemas
@@ -1163,14 +1174,14 @@ async def session_script_run(
 
     Example Usage:
         # Execute inline Python script
-        Tool: run_script
+        Tool: session_script_run
         Parameters: {
             "session_id": "community:localhost:10000",
             "script": "from deephaven import new_table\nfrom deephaven.column import int_col\nmy_table = new_table([int_col('ID', [1, 2, 3])])"
         }
 
         # Execute script from file
-        Tool: run_script
+        Tool: session_script_run
         Parameters: {
             "session_id": "community:localhost:10000",
             "script_path": "/path/to/analysis_script.py"
@@ -1246,10 +1257,20 @@ async def session_script_run(
 @mcp_server.tool()
 async def session_pip_list(context: Context, session_id: str) -> dict:
     """
-    MCP Tool: Retrieve installed pip packages from a specified Deephaven session.
+    MCP Tool: Retrieve installed pip packages as a TABULAR LIST from a Deephaven session.
+
+    **Returns**: Package information formatted as TABULAR DATA with columns for package name and version.
+    This tabular data should be displayed as a table to users for easy scanning of available libraries.
 
     Queries the specified Deephaven session for installed pip packages using importlib.metadata.
     Returns package names and versions for all Python packages available in the session's environment.
+
+    Table Rendering:
+    - **This tool returns TABULAR PACKAGE DATA that MUST be displayed as a table to users**
+    - Each row represents one installed package
+    - Columns: package (name), version
+    - Present as a table for easy scanning of available libraries
+    - Do NOT present package data as plain text or unstructured lists
 
     AI Agent Usage:
     - Use this to understand what libraries are available in a session before running scripts
@@ -1385,11 +1406,22 @@ async def session_table_data(
     format: str = "auto",
 ) -> dict:
     r"""
-    MCP Tool: Retrieve table data from a specified Deephaven session with flexible formatting options.
+    MCP Tool: Retrieve TABULAR DATA from a specified Deephaven session table.
+
+    **Returns**: Structured table data formatted for optimal AI agent comprehension and rendering.
+    The response contains TABULAR DATA that should be displayed as a table to users.
 
     This tool queries the specified Deephaven session for table data and returns it in the requested format
     with optional row limiting. Supports multiple output formats optimized for AI agent consumption.
-    Format selection based on empirical research showing significant accuracy differences between formats.
+    
+    **Format Accuracy for AI Agents** (based on empirical research):
+    - markdown-kv: 61% accuracy (highest comprehension, more tokens)
+    - markdown-table: 55% accuracy (good balance)
+    - json-row/json-column: 50% accuracy
+    - yaml: 50% accuracy
+    - xml: 45% accuracy
+    - csv: 44% accuracy (lowest comprehension, fewest tokens)
+    
     Includes safety limits (50MB max response size) to prevent memory issues.
 
     Terminology Note:
@@ -1448,6 +1480,13 @@ async def session_table_data(
         - Auto format: Recommended for general use, optimizes based on data size balancing comprehension and cost
         - Response size limit: 50MB maximum to prevent memory issues
 
+    Table Rendering:
+        - **This tool returns TABULAR DATA that MUST be displayed as a table to users**
+        - The 'data' field contains formatted table data ready for display
+        - Use 'markdown-table' or 'markdown-kv' formats for best table rendering in AI interfaces
+        - Always present the returned data in tabular format (table, grid, or structured rows)
+        - Do NOT present table data as plain text or unstructured content
+
     AI Agent Usage:
         - Always check 'success' field before accessing data fields
         - Use 'is_complete' to determine if more data exists beyond max_rows limit
@@ -1462,14 +1501,14 @@ async def session_table_data(
 
     Example Usage:
         # Get first 1000 rows with auto format selection
-        Tool: get_table_data
+        Tool: session_table_data
         Parameters: {
             "session_id": "community:localhost:10000",
             "table_name": "my_table"
         }
 
         # Get last 500 rows (most recent for time-series)
-        Tool: get_table_data
+        Tool: session_table_data
         Parameters: {
             "session_id": "community:localhost:10000",
             "table_name": "trades",
@@ -1478,7 +1517,7 @@ async def session_table_data(
         }
 
         # Get data in CSV format for efficient parsing
-        Tool: get_table_data
+        Tool: session_table_data
         Parameters: {
             "session_id": "enterprise:prod:analytics",
             "table_name": "market_data",
@@ -1487,7 +1526,7 @@ async def session_table_data(
         }
 
         # Get data optimized for AI comprehension
-        Tool: get_table_data
+        Tool: session_table_data
         Parameters: {
             "session_id": "community:localhost:10000",
             "table_name": "customer_records",
@@ -1496,7 +1535,7 @@ async def session_table_data(
         }
 
         # Get entire small table in JSON row format
-        Tool: get_table_data
+        Tool: session_table_data
         Parameters: {
             "session_id": "community:localhost:10000",
             "table_name": "config_settings",
@@ -1505,7 +1544,7 @@ async def session_table_data(
         }
 
         # Get data in markdown table format
-        Tool: get_table_data
+        Tool: session_table_data
         Parameters: {
             "session_id": "enterprise:prod:analytics",
             "table_name": "summary_stats",
@@ -1720,13 +1759,25 @@ async def catalog_tables_list(
     format: str = "auto",
 ) -> dict:
     """
-    MCP Tool: Retrieve catalog table entries from a Deephaven Enterprise (Core+) session.
+    MCP Tool: Retrieve catalog entries as a TABULAR LIST from a Deephaven Enterprise (Core+) session.
 
-    The catalog table contains metadata about tables accessible via the `deephaven_enterprise.database`
+    **Returns**: Catalog table entries formatted as TABULAR DATA for display. Each row represents
+    a table available in the enterprise catalog/database. This tabular data should be displayed as a table
+    to users for easy browsing of available data sources.
+
+    The catalog (also called database) contains metadata about tables accessible via the `deephaven_enterprise.database`
     package (the `db` variable) in an enterprise session. This includes tables that can be accessed
     using methods like `db.live_table(namespace, table_name)` or `db.historical_table(namespace, table_name)`.
     The catalog includes table names, namespaces, schemas, and other descriptive information. This tool
     enables discovery of available tables and their properties. Only works with enterprise sessions.
+
+    **Format Accuracy for AI Agents** (based on empirical research):
+    - markdown-kv: 61% accuracy (highest comprehension, more tokens)
+    - markdown-table: 55% accuracy (good balance)
+    - json-row/json-column: 50% accuracy
+    - yaml: 50% accuracy
+    - xml: 45% accuracy
+    - csv: 44% accuracy (lowest comprehension, fewest tokens)
 
     For more information, see:
     - https://deephaven.io
@@ -1736,16 +1787,25 @@ async def catalog_tables_list(
     - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
     - 'ENTERPRISE' sessions run Deephaven Enterprise (also called 'Core+' or 'CorePlus')
     - This tool only works with enterprise sessions; community sessions do not have catalog tables
+    - 'Catalog' and 'database' are interchangeable terms - the catalog is the database of available tables
+
+    Table Rendering:
+    - **This tool returns TABULAR CATALOG DATA that MUST be displayed as a table to users**
+    - Each row represents one table available in the enterprise catalog
+    - Columns include: Namespace, TableName, and other catalog metadata
+    - Present as a table for easy browsing and discovery of data sources
+    - Do NOT present catalog data as plain text or unstructured lists
 
     AI Agent Usage:
-    - Use this to discover what tables are available via the `db` variable in an enterprise session
+    - Use this to discover what tables are available in the catalog/database via the `db` variable
+    - The catalog is the database of available tables in an enterprise session
     - Tables in the catalog can be accessed using `db.live_table(namespace, table_name)` or `db.historical_table(namespace, table_name)`
     - Filter by namespace to find tables in specific data domains
     - Filter by table name patterns to locate specific tables
     - Check 'is_complete' to know if all catalog entries were returned
-    - Combine with table_schemas to get full metadata for discovered tables
+    - Combine with catalog_tables_schema to get full metadata for discovered tables
     - Essential first step before querying enterprise data sources
-    - Use filters to narrow down large catalogs efficiently
+    - Use filters to narrow down large catalogs/databases efficiently
 
     Filter Syntax Reference:
     Filters use Deephaven query language with backticks (`) for string literals.
@@ -1845,41 +1905,41 @@ async def catalog_tables_list(
 
     Example Usage:
         # Get first 10000 catalog entries
-        Tool: catalog_tables
+        Tool: catalog_tables_list
         Parameters: {
             "session_id": "enterprise:prod:analytics"
         }
 
         # Filter by namespace
-        Tool: catalog_tables
+        Tool: catalog_tables_list
         Parameters: {
             "session_id": "enterprise:prod:analytics",
             "filters": ["Namespace = `market_data`"]
         }
 
         # Filter by table name pattern
-        Tool: catalog_tables
+        Tool: catalog_tables_list
         Parameters: {
             "session_id": "enterprise:prod:analytics",
             "filters": ["TableName.contains(`price`)"]
         }
 
         # Multiple filters (AND logic)
-        Tool: catalog_tables
+        Tool: catalog_tables_list
         Parameters: {
             "session_id": "enterprise:prod:analytics",
             "filters": ["Namespace = `market_data`", "TableName.toLowerCase().contains(`daily`)"]
         }
 
         # Get all catalog entries (use with caution)
-        Tool: catalog_tables
+        Tool: catalog_tables_list
         Parameters: {
             "session_id": "enterprise:prod:analytics",
             "max_rows": null
         }
 
         # CSV format for easy parsing
-        Tool: catalog_tables
+        Tool: catalog_tables_list
         Parameters: {
             "session_id": "enterprise:prod:analytics",
             "filters": ["Namespace = `reference_data`"],
@@ -1911,14 +1971,26 @@ async def catalog_namespaces_list(
     format: str = "auto",
 ) -> dict:
     """
-    MCP Tool: Retrieve distinct namespaces from a Deephaven Enterprise (Core+) catalog.
+    MCP Tool: Retrieve catalog namespaces as a TABULAR LIST from a Deephaven Enterprise (Core+) session.
+
+    **Returns**: Namespace information formatted as TABULAR DATA for display. Each row represents
+    a data domain available in the enterprise catalog/database. This tabular data should be displayed as a
+    table to users for easy browsing of available data domains.
 
     This tool retrieves the list of distinct namespaces available via the `deephaven_enterprise.database`
     package (the `db` variable) in an enterprise session. These namespaces represent data domains that
-    contain tables accessible using methods like `db.live_table(namespace, table_name)` or
+    contain tables in the catalog (database) accessible using methods like `db.live_table(namespace, table_name)` or
     `db.historical_table(namespace, table_name)`. This enables efficient discovery of data domains
     before drilling down into specific tables. This is typically the first step in exploring an
     enterprise data catalog. Only works with enterprise sessions.
+
+    **Format Accuracy for AI Agents** (based on empirical research):
+    - markdown-kv: 61% accuracy (highest comprehension, more tokens)
+    - markdown-table: 55% accuracy (good balance)
+    - json-row/json-column: 50% accuracy
+    - yaml: 50% accuracy
+    - xml: 45% accuracy
+    - csv: 44% accuracy (lowest comprehension, fewest tokens)
 
     For more information, see:
     - https://deephaven.io
@@ -1929,13 +2001,22 @@ async def catalog_namespaces_list(
     - 'ENTERPRISE' sessions run Deephaven Enterprise (also called 'Core+' or 'CorePlus')
     - This tool only works with enterprise sessions; community sessions do not have catalog tables
     - 'Namespace' refers to a data domain or organizational grouping of tables
+    - 'Catalog' and 'database' are interchangeable terms - the catalog is the database of available tables
+
+    Table Rendering:
+    - **This tool returns TABULAR NAMESPACE DATA that MUST be displayed as a table to users**
+    - Each row represents one data domain (namespace) in the enterprise catalog
+    - Column: Namespace (the name of the data domain)
+    - Present as a table for easy browsing and discovery of data domains
+    - Do NOT present namespace data as plain text or unstructured lists
 
     AI Agent Usage:
-    - Use this as the first step to discover available data domains in an enterprise system
+    - Use this as the first step to discover available data domains in the enterprise catalog/database
+    - The catalog is the database of available tables organized by namespaces (data domains)
     - Namespaces represent data domains accessible via `db.live_table(namespace, table_name)` or `db.historical_table(namespace, table_name)`
     - Much faster than retrieving full catalog when you just need to know what domains exist
     - Filter catalog first if you want namespaces from a specific subset of tables
-    - Combine with catalog_tables to drill down into specific namespaces
+    - Combine with catalog_tables_list to drill down into specific namespaces
     - Essential for top-down data exploration workflow
     - Returns lightweight data (just namespace names) for quick discovery
 
@@ -1986,20 +2067,20 @@ async def catalog_namespaces_list(
 
     Example Usage:
         # Get all namespaces (up to 1000)
-        Tool: catalog_namespaces
+        Tool: catalog_namespaces_list
         Parameters: {
             "session_id": "enterprise:prod:analytics"
         }
 
         # Get namespaces from filtered catalog
-        Tool: catalog_namespaces
+        Tool: catalog_namespaces_list
         Parameters: {
             "session_id": "enterprise:prod:analytics",
             "filters": ["TableName.contains(`daily`)"]
         }
 
         # CSV format
-        Tool: catalog_namespaces
+        Tool: catalog_namespaces_list
         Parameters: {
             "session_id": "enterprise:prod:analytics",
             "format": "csv"
@@ -2031,9 +2112,13 @@ async def catalog_tables_schema(
     max_tables: int | None = 100,
 ) -> dict:
     """
-    MCP Tool: Retrieve schemas for catalog tables in a Deephaven Enterprise (Core+) session.
+    MCP Tool: Retrieve catalog table schemas as TABULAR METADATA from a Deephaven Enterprise (Core+) session.
 
-    This tool retrieves column schemas for tables in the enterprise catalog. The catalog contains
+    **Returns**: Schema information formatted as TABULAR DATA where each row represents a column
+    in a catalog/database table. This tabular metadata should be displayed as a table to users for easy
+    comprehension of catalog table structures.
+
+    This tool retrieves column schemas for tables in the enterprise catalog (database). The catalog contains
     metadata about tables accessible via the `deephaven_enterprise.database` package (the `db` variable).
     You can filter by namespace, specify exact table names, use custom filters, or discover all schemas
     up to the max_tables limit. This is essential for understanding the structure of catalog tables before
@@ -2048,9 +2133,19 @@ async def catalog_tables_schema(
     - 'ENTERPRISE' sessions run Deephaven Enterprise (also called 'Core+' or 'CorePlus')
     - This tool only works with enterprise sessions; community sessions do not have catalog tables
     - 'Namespace' refers to a data domain or organizational grouping of tables in the catalog
+    - 'Catalog' and 'database' are interchangeable terms - the catalog is the database of available tables
+    - 'Schema' and 'meta table' are interchangeable terms - both refer to table metadata
+
+    Table Rendering:
+    - **This tool returns TABULAR SCHEMA METADATA that MUST be displayed as a table to users**
+    - Each row in the result represents one column from a catalog table
+    - The table shows column properties: Name, DataType, IsPartitioning, ComponentType, etc.
+    - Present schema data in tabular format (table or grid) for easy comprehension
+    - Do NOT present schema data as plain text or unstructured lists
 
     AI Agent Usage:
-    - Use this to understand catalog table structures before loading them into a session
+    - Use this to understand catalog/database table structures before loading them into a session
+    - The catalog is the database of available tables with their schemas
     - Filter by namespace to get schemas for all tables in a specific data domain
     - Specify table_names when you know exactly which tables you need
     - Use filters for complex discovery patterns (e.g., tables containing specific keywords)
@@ -2058,7 +2153,7 @@ async def catalog_tables_schema(
     - Set max_tables=None only when you intentionally want all schemas (use with caution)
     - Check 'namespace' field in each result to know which domain the table belongs to
     - Use returned schemas to generate correct `db.live_table(namespace, table_name)` calls
-    - Individual table failures don't stop processing of other tables (similar to table_schemas)
+    - Individual table failures don't stop processing of other tables (similar to session_tables_schema)
     - Always check 'success' field in each schema result before using the schema data
 
     Filter Syntax Reference:
