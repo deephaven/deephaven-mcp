@@ -6,9 +6,9 @@ selection based on empirical research showing significant accuracy differences b
 
 Features:
     - Multiple output formats: JSON (row/column), CSV, Markdown (table/kv), YAML, XML
-    - Intelligent auto-selection based on table size and optimization goals
+    - Optimization strategies for rendering, accuracy, cost, and speed
     - Research-backed format accuracy rankings (markdown-kv: 60.7%, csv: 44%)
-    - Optimization strategies: accuracy, cost (token efficiency), speed
+    - Explicit format selection for advanced use cases
     - Comprehensive format validation with helpful error messages
 
 Format Accuracy Rankings (from research):
@@ -20,10 +20,11 @@ Format Accuracy Rankings (from research):
     - xml: ~45% accuracy
     - csv: ~44% accuracy (lowest, most token-efficient)
 
-Auto-Selection Logic:
-    - ≤1000 rows: markdown-kv (prioritize accuracy)
-    - 1001-10000 rows: markdown-table (balance accuracy and scalability)
-    - >10000 rows: csv (prioritize token efficiency)
+Optimization Strategies:
+    - optimize-rendering: Always use markdown-table (best for AI agent table display)
+    - optimize-accuracy: Always use markdown-kv (highest comprehension, more tokens)
+    - optimize-cost: Always use csv (fewest tokens, most cost-effective)
+    - optimize-speed: Always use json-column (fastest conversion)
 
 Supported Formats:
     Explicit Formats (7 total):
@@ -49,7 +50,7 @@ Supported Formats:
             Example: "<records><record id=\\"1\\"><name>Alice</name></record></records>"
 
     Optimization Strategies (4 total):
-        auto: Smart selection based on table size (default, recommended)
+        optimize-rendering: Always use markdown-table (best for AI agent table display)
         optimize-accuracy: Always use markdown-kv (highest accuracy)
         optimize-cost: Always use csv (most token-efficient)
         optimize-speed: Always use json-column (fastest conversion)
@@ -59,8 +60,8 @@ Usage:
     >>> import pyarrow as pa
     >>>
     >>> table = pa.table({"id": [1, 2], "name": ["Alice", "Bob"]})
-    >>> format_used, data = format_table_data(table, "auto")
-    >>> # Returns: ("markdown-kv", "## Record 1\\nid: 1\\nname: Alice\\n...")
+    >>> format_used, data = format_table_data(table, "optimize-rendering")
+    >>> # Returns: ("markdown-table", "| id | name |\\n| --- | --- |\\n...")
 
 Dependencies:
     - pyarrow: Table data structure and CSV conversion
@@ -95,7 +96,7 @@ _FORMATTERS = {
 }
 
 VALID_FORMATS: set[str] = set(_FORMATTERS.keys()) | {
-    "auto",
+    "optimize-rendering",
     "optimize-accuracy",
     "optimize-cost",
     "optimize-speed",
@@ -113,7 +114,7 @@ Type:
 Contents:
     - Explicit formats: "json-row", "json-column", "csv", "markdown-table", 
       "markdown-kv", "yaml", "xml"
-    - Optimization strategies: "auto", "optimize-accuracy", "optimize-cost", 
+    - Optimization strategies: "optimize-rendering", "optimize-accuracy", "optimize-cost", 
       "optimize-speed"
 
 See the module docstring's "Supported Formats" section for detailed descriptions and examples
@@ -132,16 +133,13 @@ def format_table_data(
     format_type: str,
 ) -> tuple[str, object]:
     """
-    Convert Arrow table to specified format with automatic selection.
+    Convert Arrow table to specified format.
 
     Args:
         arrow_table (pa.Table): PyArrow Table to format
         format_type (str): Format name or optimization strategy. Valid options:
-            - "auto": Smart selection balancing accuracy and cost (DEFAULT)
-                      ≤1000 rows: markdown-kv (best accuracy)
-                      1001-10000 rows: markdown-table (good accuracy, scalable)
-                      >10000 rows: csv (cost-effective for large data)
-            - "optimize-accuracy": Always use most accurate format (markdown-kv)
+            - "optimize-rendering": Always use markdown-table (best for AI agent table display)
+            - "optimize-accuracy": Always use markdown-kv (most accurate format)
             - "optimize-cost": Always use most token-efficient format (csv)
             - "optimize-speed": Always use fastest conversion (json-column)
             - Explicit formats: "json-row", "json-column", "csv", "markdown-table",
@@ -150,7 +148,7 @@ def format_table_data(
     Returns:
         tuple[str, object]: A 2-tuple containing:
             - actual_format_used (str): The concrete format name used (e.g., "markdown-kv").
-              For optimization strategies like "auto", this will be the resolved format,
+              For optimization strategies, this will be the resolved format,
               not the strategy name.
             - formatted_data (object): The formatted table data. Type varies by format:
                 * json-row: list[dict] - Array of row objects
@@ -162,9 +160,9 @@ def format_table_data(
                    a comma-separated list of all valid format options for easy reference.
 
     Examples:
-        >>> # Auto selection (smart)
-        >>> format, data = format_table_data(table, "auto")
-        >>> # format = "markdown-kv" (for tables ≤1000 rows)
+        >>> # Optimize for rendering
+        >>> format, data = format_table_data(table, "optimize-rendering")
+        >>> # format = "markdown-table"
 
         >>> # Always maximize accuracy
         >>> format, data = format_table_data(table, "optimize-accuracy")
@@ -193,7 +191,7 @@ def format_table_data(
     )
 
     # Resolve optimization strategies to actual formats
-    actual_format, reason = _resolve_format(format_type, row_count)
+    actual_format, reason = _resolve_format(format_type)
     _LOGGER.debug(f"[formatters:format_table_data] Using '{actual_format}' ({reason})")
 
     # Get formatter and apply
@@ -208,35 +206,24 @@ def format_table_data(
     return actual_format, data
 
 
-def _resolve_format(format_type: str, row_count: int) -> tuple[str, str]:
+def _resolve_format(format_type: str) -> tuple[str, str]:
     """
     Resolve optimization strategy to concrete format name.
 
     Args:
         format_type (str): Format name or optimization strategy
-        row_count (int): Number of rows in the table (used for auto-selection)
 
     Returns:
         tuple[str, str]: (actual_format, reason)
             - actual_format (str): Concrete format name to use (e.g., "markdown-kv", "csv")
             - reason (str): Human-readable explanation of why this format was chosen.
-              Always non-empty. Examples: "≤1000 rows, optimizing for accuracy",
-              "optimize-cost strategy", "explicit format: csv"
+              Always non-empty. Examples: "optimize-cost strategy", "explicit format: csv"
 
     Note:
         This function assumes format_type has already been validated against VALID_FORMATS.
     """
-    if format_type == "auto":
-        # Smart selection: balance accuracy and cost based on size
-        if row_count <= 1000:
-            return "markdown-kv", "≤1000 rows, optimizing for accuracy"
-        elif row_count <= 10000:
-            return (
-                "markdown-table",
-                "1001-10000 rows, balancing accuracy and scalability",
-            )
-        else:
-            return "csv", ">10000 rows, optimizing for token efficiency"
+    if format_type == "optimize-rendering":
+        return "markdown-table", "optimize-rendering strategy"
 
     elif format_type == "optimize-accuracy":
         return "markdown-kv", "optimize-accuracy strategy"

@@ -1,4 +1,4 @@
-"""Tests for formatters/__init__.py - format_table_data() and auto-selection logic."""
+"""Tests for formatters/__init__.py - format_table_data() and optimization strategies."""
 
 import pyarrow as pa
 import pytest
@@ -24,7 +24,7 @@ def create_test_table(rows: int) -> pa.Table:
 def test_valid_formats_contains_all_expected():
     """Test that VALID_FORMATS contains all expected format names."""
     expected = {
-        "auto",
+        "optimize-rendering",
         "optimize-accuracy",
         "optimize-cost",
         "optimize-speed",
@@ -42,156 +42,85 @@ def test_valid_formats_contains_all_expected():
 # === _resolve_format() unit tests ===
 
 
-def test_resolve_format_auto_small_table():
-    """Test _resolve_format with auto for small table (≤1000 rows)."""
-    actual_format, reason = _resolve_format("auto", 500)
-    assert actual_format == "markdown-kv"
-    assert reason == "≤1000 rows, optimizing for accuracy"
-
-
-def test_resolve_format_auto_at_1000_rows():
-    """Test _resolve_format with auto at exactly 1000 rows."""
-    actual_format, reason = _resolve_format("auto", 1000)
-    assert actual_format == "markdown-kv"
-    assert reason == "≤1000 rows, optimizing for accuracy"
-
-
-def test_resolve_format_auto_medium_table():
-    """Test _resolve_format with auto for medium table (1001-10000 rows)."""
-    actual_format, reason = _resolve_format("auto", 5000)
+def test_resolve_format_optimize_rendering():
+    """Test _resolve_format with optimize-rendering strategy."""
+    actual_format, reason = _resolve_format("optimize-rendering")
     assert actual_format == "markdown-table"
-    assert reason == "1001-10000 rows, balancing accuracy and scalability"
-
-
-def test_resolve_format_auto_at_10000_rows():
-    """Test _resolve_format with auto at exactly 10000 rows."""
-    actual_format, reason = _resolve_format("auto", 10000)
-    assert actual_format == "markdown-table"
-    assert reason == "1001-10000 rows, balancing accuracy and scalability"
-
-
-def test_resolve_format_auto_large_table():
-    """Test _resolve_format with auto for large table (>10000 rows)."""
-    actual_format, reason = _resolve_format("auto", 15000)
-    assert actual_format == "csv"
-    assert reason == ">10000 rows, optimizing for token efficiency"
+    assert reason == "optimize-rendering strategy"
 
 
 def test_resolve_format_optimize_accuracy():
     """Test _resolve_format with optimize-accuracy strategy."""
-    actual_format, reason = _resolve_format("optimize-accuracy", 50000)
+    actual_format, reason = _resolve_format("optimize-accuracy")
     assert actual_format == "markdown-kv"
     assert reason == "optimize-accuracy strategy"
 
 
 def test_resolve_format_optimize_cost():
     """Test _resolve_format with optimize-cost strategy."""
-    actual_format, reason = _resolve_format("optimize-cost", 100)
+    actual_format, reason = _resolve_format("optimize-cost")
     assert actual_format == "csv"
     assert reason == "optimize-cost strategy"
 
 
 def test_resolve_format_optimize_speed():
     """Test _resolve_format with optimize-speed strategy."""
-    actual_format, reason = _resolve_format("optimize-speed", 1000)
+    actual_format, reason = _resolve_format("optimize-speed")
     assert actual_format == "json-column"
     assert reason == "optimize-speed strategy"
 
 
 def test_resolve_format_explicit_json_row():
     """Test _resolve_format with explicit json-row format."""
-    actual_format, reason = _resolve_format("json-row", 100)
+    actual_format, reason = _resolve_format("json-row")
     assert actual_format == "json-row"
     assert reason == "explicit format: json-row"
 
 
 def test_resolve_format_explicit_csv():
     """Test _resolve_format with explicit csv format."""
-    actual_format, reason = _resolve_format("csv", 5000)
+    actual_format, reason = _resolve_format("csv")
     assert actual_format == "csv"
     assert reason == "explicit format: csv"
 
 
 def test_resolve_format_explicit_markdown_kv():
     """Test _resolve_format with explicit markdown-kv format."""
-    actual_format, reason = _resolve_format("markdown-kv", 20000)
+    actual_format, reason = _resolve_format("markdown-kv")
     assert actual_format == "markdown-kv"
     assert reason == "explicit format: markdown-kv"
-
-
-def test_resolve_format_auto_with_zero_rows():
-    """Test _resolve_format with auto for empty table."""
-    actual_format, reason = _resolve_format("auto", 0)
-    assert actual_format == "markdown-kv"
-    assert reason == "≤1000 rows, optimizing for accuracy"
-
-
-# === Auto-selection tests ===
-
-
-def test_auto_format_small_table():
-    """Test auto format selection for small table (≤1000 rows) → markdown-kv."""
-    table = create_test_table(500)
-    actual_format, data = format_table_data(table, "auto")
-
-    assert actual_format == "markdown-kv"
-    assert isinstance(data, str)
-    assert "## Record 1" in data
-
-
-def test_auto_format_at_1000_rows():
-    """Test auto format selection at exactly 1000 rows → markdown-kv."""
-    table = create_test_table(1000)
-    actual_format, data = format_table_data(table, "auto")
-
-    assert actual_format == "markdown-kv"
-    assert isinstance(data, str)
-
-
-def test_auto_format_medium_table():
-    """Test auto format selection for medium table (1001-10000 rows) → markdown-table."""
-    table = create_test_table(5000)
-    actual_format, data = format_table_data(table, "auto")
-
-    assert actual_format == "markdown-table"
-    assert isinstance(data, str)
-    assert "| id | name | value |" in data
-
-
-def test_auto_format_at_10000_rows():
-    """Test auto format selection at exactly 10000 rows → markdown-table."""
-    table = create_test_table(10000)
-    actual_format, data = format_table_data(table, "auto")
-
-    assert actual_format == "markdown-table"
-
-
-def test_auto_format_large_table():
-    """Test auto format selection for large table (>10000 rows) → csv."""
-    table = create_test_table(15000)
-    actual_format, data = format_table_data(table, "auto")
-
-    assert actual_format == "csv"
-    assert isinstance(data, str)
-    assert "id" in data and "name" in data and "value" in data
 
 
 # === Optimization strategy tests ===
 
 
-def test_optimize_accuracy_small_table():
-    """Test optimize-accuracy always returns markdown-kv for small tables."""
-    table = create_test_table(100)
-    actual_format, data = format_table_data(table, "optimize-accuracy")
+def test_optimize_rendering_always_markdown_table():
+    """Test optimize-rendering always returns markdown-table."""
+    small_table = create_test_table(100)
+    large_table = create_test_table(50000)
 
+    # Small table
+    actual_format, data = format_table_data(small_table, "optimize-rendering")
+    assert actual_format == "markdown-table"
+    assert isinstance(data, str)
+    assert "|" in data
+
+    # Large table
+    actual_format, data = format_table_data(large_table, "optimize-rendering")
+    assert actual_format == "markdown-table"
+
+
+def test_optimize_accuracy_always_markdown_kv():
+    """Test optimize-accuracy always returns markdown-kv."""
+    small_table = create_test_table(100)
+    large_table = create_test_table(50000)
+
+    # Small table
+    actual_format, data = format_table_data(small_table, "optimize-accuracy")
     assert actual_format == "markdown-kv"
 
-
-def test_optimize_accuracy_large_table():
-    """Test optimize-accuracy always returns markdown-kv even for large tables."""
-    table = create_test_table(50000)
-    actual_format, data = format_table_data(table, "optimize-accuracy")
-
+    # Large table
+    actual_format, data = format_table_data(large_table, "optimize-accuracy")
     assert actual_format == "markdown-kv"
 
 
@@ -331,7 +260,13 @@ def test_invalid_format_lists_all_valid_formats():
 
     error_msg = str(exc_info.value)
     # Check that all valid formats are mentioned
-    for fmt in ["auto", "json-row", "csv", "markdown-kv", "optimize-accuracy"]:
+    for fmt in [
+        "optimize-rendering",
+        "json-row",
+        "csv",
+        "markdown-kv",
+        "optimize-accuracy",
+    ]:
         assert fmt in error_msg
 
 
@@ -348,14 +283,14 @@ def test_returns_tuple_of_format_and_data():
     assert isinstance(result[0], str)
 
 
-def test_actual_format_matches_returned_format():
+def test_format_tuple_first_element_is_actual_format():
     """Test that first element of tuple matches the actual format used."""
     table = create_test_table(3)
 
-    # Test with auto (should return actual format, not "auto")
-    actual_format, data = format_table_data(table, "auto")
-    assert actual_format in ["markdown-kv", "markdown-table", "csv"]
-    assert actual_format != "auto"
+    # Test with optimization strategy (should return actual format, not strategy name)
+    actual_format, data = format_table_data(table, "optimize-rendering")
+    assert actual_format == "markdown-table"
+    assert actual_format != "optimize-rendering"
 
     # Test with explicit format
     actual_format, data = format_table_data(table, "csv")
@@ -383,9 +318,9 @@ def test_single_row_table():
     assert len(data) == 1
 
 
-def test_auto_with_zero_rows():
-    """Test auto selection with zero rows."""
+def test_optimize_rendering_with_zero_rows():
+    """Test optimize-rendering with zero rows."""
     empty_table = pa.table({"id": [], "name": []})
 
-    actual_format, data = format_table_data(empty_table, "auto")
-    assert actual_format == "markdown-kv"  # Should use markdown-kv for 0 rows
+    actual_format, data = format_table_data(empty_table, "optimize-rendering")
+    assert actual_format == "markdown-table"  # Should use markdown-table

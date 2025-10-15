@@ -774,14 +774,14 @@ def _build_table_data_response(
     Args:
         arrow_table (pyarrow.Table): The Arrow table containing the data.
         is_complete (bool): Whether the entire table was retrieved (False if truncated by max_rows).
-        format (str): Desired output format (may be "auto" or specific format like "csv", "json-row", etc.).
+        format (str): Desired output format (may be optimization strategy or specific format like "csv", "json-row", etc.).
         table_name (str | None): Optional table name to include in response. Recommended for clarity.
         namespace (str | None): Optional namespace to include in response. Use for catalog tables only.
 
     Returns:
         dict: Standardized response with success=True and fields:
             - success (bool): Always True for this helper (errors handled by callers).
-            - format (str): Actual format used (resolved from "auto" to specific format).
+            - format (str): Actual format used (resolved from optimization strategies to specific format).
             - schema (list[dict]): Column definitions with name and type.
             - row_count (int): Number of rows in the response.
             - is_complete (bool): Whether entire table was retrieved.
@@ -1516,7 +1516,7 @@ async def session_table_data(
     table_name: str,
     max_rows: int | None = 1000,
     head: bool = True,
-    format: str = "auto",
+    format: str = "optimize-rendering",
 ) -> dict:
     r"""
     MCP Tool: Retrieve TABULAR DATA from a specified Deephaven session table.
@@ -1550,16 +1550,17 @@ async def session_table_data(
                                         Set to None to retrieve entire table (use with caution for large tables).
         head (bool, optional): Direction of row retrieval. If True (default), retrieve from beginning.
                               If False, retrieve from end (most recent rows for time-series data).
-        format (str, optional): Output format selection. Defaults to "auto". Options:
-                               - "auto": Smart selection (≤1000: markdown-kv, 1001-10000: markdown-table, >10000: csv)
-                               - "optimize-accuracy": Always use markdown-kv (typically better comprehension, more tokens)
+        format (str, optional): Output format selection. Defaults to "optimize-rendering" for best table display.
+                               Options:
+                               - "optimize-rendering": (DEFAULT) Always use markdown-table (best for AI agent table display)
+                               - "optimize-accuracy": Always use markdown-kv (best comprehension, more tokens)
                                - "optimize-cost": Always use csv (fewer tokens, may be harder to parse)
                                - "optimize-speed": Always use json-column (fastest conversion)
+                               - "markdown-table": String with pipe-delimited table (| col1 | col2 |\n| --- | --- |\n| val1 | val2 |)
+                               - "markdown-kv": String with record headers and key-value pairs (## Record 1\ncol1: val1\ncol2: val2)
                                - "json-row": List of dicts, one per row: [{col1: val1, col2: val2}, ...]
                                - "json-column": Dict with column names as keys, value arrays: {col1: [val1, val2], col2: [val3, val4]}
                                - "csv": String with comma-separated values, includes header row
-                               - "markdown-table": String with pipe-delimited table (| col1 | col2 |\n| --- | --- |\n| val1 | val2 |)
-                               - "markdown-kv": String with record headers and key-value pairs (## Record 1\ncol1: val1\ncol2: val2)
                                - "yaml": String with YAML-formatted records list
                                - "xml": String with XML records structure
 
@@ -1567,7 +1568,7 @@ async def session_table_data(
         dict: Structured result object with the following keys:
             - 'success' (bool): Always present. True if table data was retrieved successfully, False on any error.
             - 'table_name' (str, optional): Name of the retrieved table if successful.
-            - 'format' (str, optional): Actual format used for the data if successful. May differ from request when "auto".
+            - 'format' (str, optional): Actual format used for the data if successful. May differ from request when using optimization strategies.
             - 'schema' (list[dict], optional): Array of column definitions if successful. Each dict contains:
                                               {'name': str, 'type': str} describing column name and PyArrow data type
                                               (e.g., 'int64', 'string', 'double', 'timestamp[ns]').
@@ -1585,35 +1586,31 @@ async def session_table_data(
         - Session connection issues: Returns error if unable to communicate with Deephaven server
         - Query execution errors: Returns error if table query fails (permissions, syntax, etc.)
 
+    Table Rendering:
+        - **This tool returns TABULAR DATA that should be displayed as a table to users**
+        - The 'data' field contains formatted table data ready for display
+        - Default format (markdown-table) renders well as tables in AI interfaces
+        - Always present the returned data in tabular format (table, grid, or structured rows)
+
     Performance Considerations:
         - Large tables: Use csv format or limit max_rows to avoid memory issues
         - Column analysis: Use json-column format for efficient column-wise operations
         - Row processing: Use json-row format for record-by-record iteration
-        - AI agent comprehension: markdown-kv format typically provides best understanding (but uses more tokens)
-        - Auto format: Recommended for general use, optimizes based on data size balancing comprehension and cost
         - Response size limit: 50MB maximum to prevent memory issues
-
-    Table Rendering:
-        - **This tool returns TABULAR DATA that MUST be displayed as a table to users**
-        - The 'data' field contains formatted table data ready for display
-        - Use 'markdown-table' or 'markdown-kv' formats for best table rendering in AI interfaces
-        - Always present the returned data in tabular format (table, grid, or structured rows)
-        - Do NOT present table data as plain text or unstructured content
 
     AI Agent Usage:
         - Always check 'success' field before accessing data fields
         - Use 'is_complete' to determine if more data exists beyond max_rows limit
         - Parse 'schema' array to understand column types before processing 'data'
-        - Handle variable data types when using auto format (list/dict/string depending on row count)
         - Use head=True (default) to get rows from table start, head=False to get from table end
         - Start with small max_rows values for large tables to avoid memory issues
-        - Use 'auto' for automatic format selection based on data size (balances comprehension and tokens)
-        - Use 'optimize-accuracy' to always get markdown-kv format (better comprehension, more tokens)
-        - Use 'optimize-cost' to always get csv format (fewer tokens, may be harder to parse)
-        - Check 'format' field in response to know actual format used (especially important with 'auto')
+        - Use 'optimize-rendering' (default) for best table display in AI interfaces
+        - Use 'optimize-accuracy' for highest comprehension (markdown-kv format, more tokens)
+        - Use 'optimize-cost' for fewest tokens (csv format, may be harder to parse)
+        - Check 'format' field in response to know actual format used
 
     Example Usage:
-        # Get first 1000 rows with auto format selection
+        # Get first 1000 rows with default format
         Tool: session_table_data
         Parameters: {
             "session_id": "community:localhost:10000",
@@ -1850,7 +1847,7 @@ async def catalog_tables_list(
     session_id: str,
     max_rows: int | None = 10000,
     filters: list[str] | None = None,
-    format: str = "auto",
+    format: str = "optimize-rendering",
 ) -> dict:
     """
     MCP Tool: Retrieve catalog entries as a TABULAR LIST from a Deephaven Enterprise (Core+) session.
@@ -1957,9 +1954,10 @@ async def catalog_tables_list(
                                Set to None to retrieve entire catalog (use with caution for large deployments).
         filters (list[str] | None): Optional list of Deephaven where clause expressions to filter catalog.
                                     Multiple filters are combined with AND logic. Use backticks (`) for string literals.
-        format (str): Output format for catalog data. Options: "auto", "json-row", "json-column", "csv",
-                     "markdown-table", "markdown-kv", "yaml", "xml". Default is "auto" which intelligently
-                     selects format based on row count (≤1000: markdown-kv, 1001-10000: markdown-table, >10000: csv).
+        format (str): Output format for catalog data. Default is "optimize-rendering" for best table display.
+                     Options: "optimize-rendering" (default, uses markdown-table), "optimize-accuracy" (uses markdown-kv),
+                     "optimize-cost" (uses csv), "optimize-speed" (uses json-column), or explicit formats:
+                     "json-row", "json-column", "csv", "markdown-table", "markdown-kv", "yaml", "xml".
 
     Returns:
         dict: Structured result object with keys:
@@ -1975,7 +1973,7 @@ async def catalog_tables_list(
                 - json-column: Dict mapping column names to arrays of values
                 - csv: String with CSV-formatted catalog data
                 - markdown-table: String with pipe-delimited table format
-                - markdown-kv: String with record headers and key-value pairs (default for ≤1000 rows)
+                - markdown-kv: String with record headers and key-value pairs
                 - yaml: String with YAML-formatted catalog entries
                 - xml: String with XML catalog structure
             - 'error' (str, optional): Human-readable error message if retrieval failed. Omitted on success.
@@ -2062,7 +2060,7 @@ async def catalog_namespaces_list(
     session_id: str,
     max_rows: int | None = 1000,
     filters: list[str] | None = None,
-    format: str = "auto",
+    format: str = "optimize-rendering",
 ) -> dict:
     """
     MCP Tool: Retrieve catalog namespaces as a TABULAR LIST from a Deephaven Enterprise (Core+) session.
@@ -2121,9 +2119,10 @@ async def catalog_namespaces_list(
                                Set to None to retrieve all namespaces (use with caution).
         filters (list[str] | None): Optional list of Deephaven where clause expressions to filter
                                     the catalog before extracting namespaces. Use backticks (`) for string literals.
-        format (str): Output format for namespace data. Options: "auto", "json-row", "json-column", "csv",
-                     "markdown-table", "markdown-kv", "yaml", "xml". Default is "auto" which intelligently
-                     selects format based on row count (≤1000: markdown-kv, 1001-10000: markdown-table, >10000: csv).
+        format (str): Output format for namespace data. Default is "optimize-rendering" for best table display.
+                     Options: "optimize-rendering" (default, uses markdown-table), "optimize-accuracy" (uses markdown-kv),
+                     "optimize-cost" (uses csv), "optimize-speed" (uses json-column), or explicit formats:
+                     "json-row", "json-column", "csv", "markdown-table", "markdown-kv", "yaml", "xml".
 
     Returns:
         dict: Structured result object with keys:
@@ -2139,7 +2138,7 @@ async def catalog_namespaces_list(
                 - json-column: Dict mapping column name to array: {"Namespace": ["market_data", ...]}
                 - csv: String with CSV-formatted namespace data
                 - markdown-table: String with pipe-delimited table format
-                - markdown-kv: String with record headers and key-value pairs (default for ≤1000 rows)
+                - markdown-kv: String with record headers and key-value pairs
                 - yaml: String with YAML-formatted namespace list
                 - xml: String with XML namespace structure
             - 'error' (str, optional): Human-readable error message if retrieval failed. Omitted on success.
@@ -2526,9 +2525,9 @@ async def catalog_table_sample(
     table_name: str,
     max_rows: int | None = 100,
     head: bool = True,
-    format: str = "auto",
+    format: str = "optimize-rendering",
 ) -> dict:
-    """
+    r"""
     MCP Tool: Retrieve sample TABULAR DATA from a catalog table in a Deephaven Enterprise (Core+) session.
 
     **Returns**: Sample table data formatted as TABULAR DATA for display. This tabular data should be
@@ -2571,8 +2570,9 @@ async def catalog_table_sample(
     - Use head=True (default) to get rows from table start, head=False to get from table end
     - Check 'is_complete' to know if the sample represents the entire table
     - Combine with catalog_tables_schema to understand table structure before sampling
-    - Use 'auto' format for automatic selection based on data size (balances comprehension and tokens)
-    - Check 'format' field in response to know actual format used (especially important with 'auto')
+    - Use 'optimize-rendering' (default) for best table display in AI interfaces
+    - Use 'optimize-accuracy' for highest comprehension (markdown-kv format, more tokens)
+    - Check 'format' field in response to know actual format used
 
     Args:
         context (Context): The MCP context object.
@@ -2583,16 +2583,17 @@ async def catalog_table_sample(
                                          Set to None to retrieve entire table (use with caution for large tables).
         head (bool, optional): Direction of row retrieval. If True (default), retrieve from beginning.
                               If False, retrieve from end (most recent rows for time-series data).
-        format (str, optional): Output format selection. Defaults to "auto". Options:
-                               - "auto": Smart selection (≤1000: markdown-kv, 1001-10000: markdown-table, >10000: csv)
+        format (str, optional): Output format selection. Defaults to "optimize-rendering" for best table display.
+                               Options:
+                               - "optimize-rendering": (DEFAULT) Always use markdown-table (best for AI agent table display)
                                - "optimize-accuracy": Always use markdown-kv (better comprehension, more tokens)
                                - "optimize-cost": Always use csv (fewer tokens, may be harder to parse)
                                - "optimize-speed": Always use json-column (fastest conversion)
+                               - "markdown-table": String with pipe-delimited table (| col1 | col2 |\n| --- | --- |\n| val1 | val2 |)
+                               - "markdown-kv": String with record headers and key-value pairs (## Record 1\ncol1: val1\ncol2: val2)
                                - "json-row": List of dicts, one per row
                                - "json-column": Dict with column names as keys, value arrays
                                - "csv": String with comma-separated values, includes header row
-                               - "markdown-table": String with pipe-delimited table
-                               - "markdown-kv": String with record headers and key-value pairs
                                - "yaml": String with YAML-formatted records list
                                - "xml": String with XML records structure
 
@@ -2601,7 +2602,7 @@ async def catalog_table_sample(
             - 'success' (bool): Always present. True if sample was retrieved successfully, False on any error.
             - 'namespace' (str, optional): The catalog namespace if successful.
             - 'table_name' (str, optional): Name of the sampled table if successful.
-            - 'format' (str, optional): Actual format used for the data if successful. May differ from request when "auto".
+            - 'format' (str, optional): Actual format used for the data if successful. May differ from request when using optimization strategies.
             - 'schema' (list[dict], optional): Array of column definitions if successful. Each dict contains:
                                               {'name': str, 'type': str} describing column name and PyArrow data type.
             - 'row_count' (int, optional): Number of rows in the returned sample if successful.
@@ -2623,11 +2624,11 @@ async def catalog_table_sample(
     Performance Considerations:
         - Default max_rows of 100 is safe for previewing catalog tables
         - Use csv format or limit max_rows for very wide tables
-        - Auto format recommended for general use
+        - Default optimize-rendering format provides good table display
         - Response size limit: 50MB maximum to prevent memory issues
 
     Example Usage:
-        # Sample first 100 rows with auto format
+        # Sample first 100 rows with default format
         Tool: catalog_table_sample
         Parameters: {
             "session_id": "enterprise:prod:analytics",

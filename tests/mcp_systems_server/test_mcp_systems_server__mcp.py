@@ -2473,13 +2473,15 @@ async def test_session_table_data_success_default_params():
 
         assert result["success"] is True
         assert result["table_name"] == "table1"
-        assert result["format"] == "markdown-kv"  # Auto format for small table (≤1000)
+        assert (
+            result["format"] == "markdown-table"
+        )  # Default format changed to markdown-table
         assert result["row_count"] == 50
         assert result["is_complete"] is True
         assert "schema" in result
         assert "data" in result
-        assert isinstance(result["data"], str)  # markdown-kv returns string
-        assert "## Record 1" in result["data"]
+        assert isinstance(result["data"], str)  # markdown-table returns string
+        assert "|" in result["data"]  # markdown-table uses pipe delimiters
 
         # Verify queries.get_table was called with correct parameters
         mock_get_table.assert_called_once_with(
@@ -2566,7 +2568,9 @@ async def test_session_table_data_success_full_table():
         )
 
         assert result["success"] is True
-        assert result["format"] == "csv"  # Auto format for large table (>10000 rows)
+        assert (
+            result["format"] == "markdown-table"
+        )  # Default format is now markdown-table
         assert result["is_complete"] is True
 
         mock_get_table.assert_called_once_with(
@@ -5197,7 +5201,9 @@ async def test_catalog_table_sample_success():
     assert result["success"] is True
     assert result["row_count"] == 10
     assert result["is_complete"] is True
-    assert result["format"] == "markdown-kv"  # Default format
+    assert (
+        result["format"] == "markdown-table"
+    )  # Default format changed to markdown-table
     assert result["namespace"] == "public"
     assert result["table_name"] == "users"
     assert "data" in result
