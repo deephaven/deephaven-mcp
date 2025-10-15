@@ -302,7 +302,7 @@ async def get_catalog_meta_table(
     and retrieves its meta table. Use this for tables in the Enterprise catalog system.
 
     Args:
-        session: An active Deephaven Enterprise (Core+) session. Must be a CorePlusSession.
+        session (CorePlusSession): An active Deephaven Enterprise (Core+) session.
         namespace (str): The catalog namespace containing the table.
         table_name (str): The name of the table within the namespace.
 
