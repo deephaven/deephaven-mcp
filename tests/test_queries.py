@@ -10,9 +10,11 @@ from deephaven_mcp.queries import (
     _apply_filters,
     _apply_row_limit,
     _extract_meta_table,
+    _load_catalog_table,
     _validate_python_session,
     get_catalog_meta_table,
     get_catalog_table,
+    get_catalog_table_data,
     get_dh_versions,
     get_pip_packages_table,
     get_programming_language_version,
@@ -1327,3 +1329,231 @@ async def test_get_catalog_meta_table_both_fail():
         match="Failed to load catalog table 'market_data.missing_table'",
     ):
         await get_catalog_meta_table(session_mock, "market_data", "missing_table")
+
+
+# ===== _load_catalog_table tests =====
+
+
+@pytest.mark.asyncio
+async def test_load_catalog_table_success_historical():
+    """Test _load_catalog_table successfully loads via historical_table"""
+    from deephaven_mcp.client import CorePlusSession
+
+    # Create mock session
+    session_mock = MagicMock(spec=CorePlusSession)
+    mock_table = MagicMock()
+
+    # historical_table succeeds
+    session_mock.historical_table = AsyncMock(return_value=mock_table)
+
+    result = await _load_catalog_table(session_mock, "market_data", "daily_prices")
+
+    assert result is mock_table
+    session_mock.historical_table.assert_called_once_with("market_data", "daily_prices")
+
+
+@pytest.mark.asyncio
+async def test_load_catalog_table_fallback_to_live():
+    """Test _load_catalog_table falls back to live_table when historical_table fails"""
+    from deephaven_mcp.client import CorePlusSession
+
+    # Create mock session
+    session_mock = MagicMock(spec=CorePlusSession)
+    mock_table = MagicMock()
+
+    # historical_table fails, live_table succeeds
+    session_mock.historical_table = AsyncMock(
+        side_effect=Exception("Historical table not found")
+    )
+    session_mock.live_table = AsyncMock(return_value=mock_table)
+
+    result = await _load_catalog_table(session_mock, "market_data", "live_trades")
+
+    assert result is mock_table
+    session_mock.historical_table.assert_called_once_with("market_data", "live_trades")
+    session_mock.live_table.assert_called_once_with("market_data", "live_trades")
+
+
+@pytest.mark.asyncio
+async def test_load_catalog_table_both_fail():
+    """Test _load_catalog_table raises exception when both historical and live fail"""
+    from deephaven_mcp.client import CorePlusSession
+
+    # Create mock session
+    session_mock = MagicMock(spec=CorePlusSession)
+
+    # Both historical_table and live_table fail
+    session_mock.historical_table = AsyncMock(
+        side_effect=Exception("Historical table not found")
+    )
+    session_mock.live_table = AsyncMock(side_effect=Exception("Live table not found"))
+
+    with pytest.raises(
+        Exception,
+        match="Failed to load catalog table 'market_data.missing_table'",
+    ):
+        await _load_catalog_table(session_mock, "market_data", "missing_table")
+
+
+# ===== get_catalog_table_data tests =====
+
+
+@pytest.mark.asyncio
+async def test_get_catalog_table_data_success_with_limit():
+    """Test get_catalog_table_data successfully retrieves data with row limit"""
+    from deephaven_mcp.client import CorePlusSession
+
+    # Create mock session
+    session_mock = MagicMock(spec=CorePlusSession)
+    mock_table = MagicMock()
+    mock_limited_table = MagicMock()
+    mock_arrow_table = MagicMock(spec=pyarrow.Table)
+    mock_arrow_table.num_rows = 100
+
+    # Mock table size
+    mock_table.size = 1000
+
+    # Mock head() for row limiting
+    mock_table.head = MagicMock(return_value=mock_limited_table)
+    mock_limited_table.to_arrow = MagicMock(return_value=mock_arrow_table)
+
+    # historical_table succeeds
+    session_mock.historical_table = AsyncMock(return_value=mock_table)
+
+    # Mock asyncio.to_thread to run synchronously
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with patch("deephaven_mcp.queries.asyncio.to_thread", new=fake_to_thread):
+        result, is_complete = await get_catalog_table_data(
+            session_mock, "market_data", "daily_prices", max_rows=100, head=True
+        )
+
+    assert result is mock_arrow_table
+    assert is_complete is False  # 100 rows retrieved from 1000 total
+    session_mock.historical_table.assert_called_once_with("market_data", "daily_prices")
+    mock_table.head.assert_called_once_with(100)
+
+
+@pytest.mark.asyncio
+async def test_get_catalog_table_data_success_full_table():
+    """Test get_catalog_table_data retrieves full table when max_rows=None"""
+    from deephaven_mcp.client import CorePlusSession
+
+    # Create mock session
+    session_mock = MagicMock(spec=CorePlusSession)
+    mock_table = MagicMock()
+    mock_arrow_table = MagicMock(spec=pyarrow.Table)
+    mock_arrow_table.num_rows = 500
+
+    mock_table.to_arrow = MagicMock(return_value=mock_arrow_table)
+
+    # historical_table succeeds
+    session_mock.historical_table = AsyncMock(return_value=mock_table)
+
+    # Mock asyncio.to_thread to run synchronously
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with patch("deephaven_mcp.queries.asyncio.to_thread", new=fake_to_thread):
+        result, is_complete = await get_catalog_table_data(
+            session_mock, "market_data", "small_table", max_rows=None
+        )
+
+    assert result is mock_arrow_table
+    assert is_complete is True  # Full table retrieved
+    session_mock.historical_table.assert_called_once_with("market_data", "small_table")
+
+
+@pytest.mark.asyncio
+async def test_get_catalog_table_data_with_tail():
+    """Test get_catalog_table_data retrieves last rows when head=False"""
+    from deephaven_mcp.client import CorePlusSession
+
+    # Create mock session
+    session_mock = MagicMock(spec=CorePlusSession)
+    mock_table = MagicMock()
+    mock_limited_table = MagicMock()
+    mock_arrow_table = MagicMock(spec=pyarrow.Table)
+    mock_arrow_table.num_rows = 50
+
+    # Mock table size
+    mock_table.size = 1000
+
+    # Mock tail() for row limiting
+    mock_table.tail = MagicMock(return_value=mock_limited_table)
+    mock_limited_table.to_arrow = MagicMock(return_value=mock_arrow_table)
+
+    # historical_table succeeds
+    session_mock.historical_table = AsyncMock(return_value=mock_table)
+
+    # Mock asyncio.to_thread to run synchronously
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with patch("deephaven_mcp.queries.asyncio.to_thread", new=fake_to_thread):
+        result, is_complete = await get_catalog_table_data(
+            session_mock, "market_data", "trades", max_rows=50, head=False
+        )
+
+    assert result is mock_arrow_table
+    assert is_complete is False  # 50 rows retrieved from 1000 total
+    session_mock.historical_table.assert_called_once_with("market_data", "trades")
+    mock_table.tail.assert_called_once_with(50)
+
+
+@pytest.mark.asyncio
+async def test_get_catalog_table_data_fallback_to_live():
+    """Test get_catalog_table_data falls back to live_table when historical fails"""
+    from deephaven_mcp.client import CorePlusSession
+
+    # Create mock session
+    session_mock = MagicMock(spec=CorePlusSession)
+    mock_table = MagicMock()
+    mock_arrow_table = MagicMock(spec=pyarrow.Table)
+    mock_arrow_table.num_rows = 100
+
+    mock_table.to_arrow = MagicMock(return_value=mock_arrow_table)
+
+    # historical_table fails, live_table succeeds
+    session_mock.historical_table = AsyncMock(
+        side_effect=Exception("Historical table not found")
+    )
+    session_mock.live_table = AsyncMock(return_value=mock_table)
+
+    # Mock asyncio.to_thread to run synchronously
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with patch("deephaven_mcp.queries.asyncio.to_thread", new=fake_to_thread):
+        result, is_complete = await get_catalog_table_data(
+            session_mock, "market_data", "live_trades", max_rows=None
+        )
+
+    assert result is mock_arrow_table
+    assert is_complete is True
+    session_mock.historical_table.assert_called_once_with("market_data", "live_trades")
+    session_mock.live_table.assert_called_once_with("market_data", "live_trades")
+
+
+@pytest.mark.asyncio
+async def test_get_catalog_table_data_load_failure():
+    """Test get_catalog_table_data raises exception when table cannot be loaded"""
+    from deephaven_mcp.client import CorePlusSession
+
+    # Create mock session
+    session_mock = MagicMock(spec=CorePlusSession)
+
+    # Both historical_table and live_table fail
+    session_mock.historical_table = AsyncMock(
+        side_effect=Exception("Historical table not found")
+    )
+    session_mock.live_table = AsyncMock(side_effect=Exception("Live table not found"))
+
+    with pytest.raises(
+        Exception,
+        match="Failed to load catalog table 'market_data.missing_table'",
+    ):
+        await get_catalog_table_data(
+            session_mock, "market_data", "missing_table", max_rows=100
+        )
