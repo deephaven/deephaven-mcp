@@ -292,24 +292,34 @@ class CorePlusSessionFactory(
             raise InternalError(
                 "Core+ features are not available (deephaven-coreplus-client not installed)"
             )
-        else:
+        
+        try:
             from deephaven_enterprise.client.session_manager import SessionManager
+        except (ImportError, ModuleNotFoundError) as e:
+            _LOGGER.error(
+                f"[CorePlusSessionFactory:from_url] Failed to import SessionManager: {e}"
+            )
+            raise InternalError(
+                "Missing required package: deephaven-coreplus-client is not installed. "
+                "Please install it to use Deephaven Enterprise (DHE) features. "
+                f"Original error: {e}"
+            ) from e
 
-            try:
-                _LOGGER.debug(
-                    f"[CorePlusSessionFactory:from_url] Creating SessionManager for URL: {url}"
-                )
-                return cls(SessionManager(url))
-            except Exception as e:
-                _LOGGER.error(
-                    f"[CorePlusSessionFactory:from_url] Failed to create SessionManager with URL {url}: {e}"
-                )
-                raise DeephavenConnectionError(
-                    f"Failed to establish connection to Deephaven at {url}: {e}"
-                ) from e
+        try:
+            _LOGGER.debug(
+                f"[CorePlusSessionFactory:from_url] Creating SessionManager for URL: {url}"
+            )
+            return cls(SessionManager(url))
+        except Exception as e:
+            _LOGGER.error(
+                f"[CorePlusSessionFactory:from_url] Failed to create SessionManager with URL {url}: {e}"
+            )
+            raise DeephavenConnectionError(
+                f"Failed to establish connection to Deephaven at {url}: {e}"
+            ) from e
 
     @classmethod
-    async def from_config(cls, worker_cfg: dict[str, Any]) -> "CorePlusSessionFactory":
+    async def from_config(cls, worker_cfg: dict[str, Any]) -> "CorePlusSessionFactory":  # noqa: C901
         """
         Create and authenticate a CorePlusSessionFactory from a configuration dictionary.
 
@@ -433,7 +443,17 @@ class CorePlusSessionFactory(
         _LOGGER.debug(
             f"[CorePlusSessionFactory:from_config] Creating SessionManager from config: url={url}, auth_type={auth_type}"
         )
-        from deephaven_enterprise.client.session_manager import SessionManager
+        try:
+            from deephaven_enterprise.client.session_manager import SessionManager
+        except (ImportError, ModuleNotFoundError) as e:
+            _LOGGER.error(
+                f"[CorePlusSessionFactory:from_config] Failed to import SessionManager: {e}"
+            )
+            raise InternalError(
+                "Missing required package: deephaven-coreplus-client is not installed. "
+                "Please install it to use Deephaven Enterprise (DHE) features. "
+                f"Original error: {e}"
+            ) from e
 
         try:
             manager = SessionManager(url)

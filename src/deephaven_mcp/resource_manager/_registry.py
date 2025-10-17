@@ -254,8 +254,11 @@ class CorePlusSessionFactoryRegistry(BaseRegistry[CorePlusSessionFactoryManager]
 
         if not is_enterprise_available and factories_config:
             raise ConfigurationError(
-                "Enterprise factory configurations found but Core+ features are not available. "
-                "Please install deephaven-coreplus-client or remove enterprise factory configurations."
+                "Missing required package: deephaven-coreplus-client is not installed. "
+                "Enterprise factory configurations were found in your config, but the required "
+                "deephaven-coreplus-client package is not available. "
+                "Please install deephaven-coreplus-client to use Deephaven Enterprise (DHE) features, "
+                "or remove the enterprise factory configurations from your config file."
             )
 
         _LOGGER.info(
