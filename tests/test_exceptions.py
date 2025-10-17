@@ -103,7 +103,7 @@ class TestExceptionParameterized:
             (
                 MissingEnterprisePackageError,
                 [InternalError, McpError, RuntimeError],
-                "deephaven-coreplus-client is not installed",
+                "Core+ features are not available (deephaven-coreplus-client not installed)",
             ),
         ],
     )
