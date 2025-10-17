@@ -2,7 +2,7 @@
 
 [![PyPI](https://img.shields.io/pypi/v/deephaven-mcp)](https://pypi.org/project/deephaven-mcp/)
 [![License](https://img.shields.io/github/license/deephaven/deephaven-mcp)](https://github.com/deephaven/deephaven-mcp/blob/main/LICENSE)
-![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/deephaven/deephaven-mcp/ci.yml?branch=main)
+[![Build Status](https://img.shields.io/github/actions/workflow/status/deephaven/deephaven-mcp/unit-tests.yml?branch=main)](https://github.com/deephaven/deephaven-mcp/actions/workflows/unit-tests.yml)
 
 ## Table of Contents
 
