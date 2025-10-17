@@ -138,7 +138,7 @@ class MissingEnterprisePackageError(InternalError):
         """
         if message is None:
             message = (
-                "Core+ features are not available (deephaven-coreplus-client not installed)"
+                "Core+ features are not available (deephaven-coreplus-client Python package not installed)"
             )
         
         self.package_message = message
