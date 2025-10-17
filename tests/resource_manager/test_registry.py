@@ -421,7 +421,8 @@ async def test_factory_registry_enterprise_not_available_raises_config_error():
         # Verify the error message is helpful
         assert "Enterprise factory configurations" in str(exc_info.value)
         assert "deephaven-coreplus-client" in str(exc_info.value)
-        assert "install deephaven-coreplus-client" in str(exc_info.value)
+        assert "install" in str(exc_info.value).lower()
+        assert "Python package" in str(exc_info.value)
 
 
 # --- Error Handling Tests ---

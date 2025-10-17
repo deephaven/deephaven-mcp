@@ -71,7 +71,6 @@ if TYPE_CHECKING:
 from deephaven_mcp._exceptions import (
     AuthenticationError,
     DeephavenConnectionError,
-    InternalError,
     MissingEnterprisePackageError,
     QueryError,
     ResourceError,
