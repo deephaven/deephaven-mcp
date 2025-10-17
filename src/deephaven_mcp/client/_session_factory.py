@@ -72,6 +72,7 @@ from deephaven_mcp._exceptions import (
     AuthenticationError,
     DeephavenConnectionError,
     InternalError,
+    MissingEnterprisePackageError,
     QueryError,
     ResourceError,
     SessionCreationError,
@@ -289,10 +290,7 @@ class CorePlusSessionFactory(
             configuration for the initial connection.json download.
         """
         if not is_enterprise_available:
-            raise InternalError(
-                "Missing required package: deephaven-coreplus-client is not installed. "
-                "This package is required to use Deephaven Enterprise (DHE) features."
-            )
+            raise MissingEnterprisePackageError()
         else:
             from deephaven_enterprise.client.session_manager import SessionManager
 
@@ -357,8 +355,8 @@ class CorePlusSessionFactory(
                 without needing to perform separate authentication steps.
 
         Raises:
-            InternalError: If the required deephaven-coreplus-client package is not installed.
-                This package is necessary to use Deephaven Enterprise (DHE) features.
+            MissingEnterprisePackageError: If the required deephaven-coreplus-client
+                package is not installed.
             DeephavenConnectionError: If unable to connect to the specified server URL,
                 such as network issues or invalid connection.json format.
             AuthenticationError: If authentication fails due to missing or invalid credentials,
@@ -416,10 +414,7 @@ class CorePlusSessionFactory(
             use environment variables or secure credential storage systems.
         """
         if not is_enterprise_available:
-            raise InternalError(
-                "Missing required package: deephaven-coreplus-client is not installed. "
-                "This package is required to use Deephaven Enterprise (DHE) features."
-            )
+            raise MissingEnterprisePackageError()
 
         # Validate config
         try:

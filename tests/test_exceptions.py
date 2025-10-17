@@ -8,6 +8,7 @@ from deephaven_mcp._exceptions import (
     EnterpriseSystemConfigurationError,
     InternalError,
     McpError,
+    MissingEnterprisePackageError,
     QueryError,
     ResourceError,
     SessionCreationError,
@@ -50,6 +51,19 @@ class TestBaseExceptions:
             raise InternalError(message)
         assert str(exc_info.value) == message
 
+    def test_missing_enterprise_package_error(self):
+        """Test that MissingEnterprisePackageError provides prominent error message."""
+        # Test with default message
+        with pytest.raises(MissingEnterprisePackageError) as exc_info:
+            raise MissingEnterprisePackageError()
+        
+        error_message = str(exc_info.value)
+        assert "deephaven-coreplus-client" in error_message
+        assert "ERROR: Missing Required Package" in error_message
+        assert "pip install" in error_message
+        assert isinstance(exc_info.value, InternalError)
+        assert isinstance(exc_info.value, McpError)
+
     def test_unsupported_operation_error(self):
         """Test that UnsupportedOperationError can be raised and caught properly."""
         message = "operation not supported"
@@ -85,6 +99,11 @@ class TestExceptionParameterized:
                 EnterpriseSystemConfigurationError,
                 [ConfigurationError, McpError],
                 "enterprise system configuration error",
+            ),
+            (
+                MissingEnterprisePackageError,
+                [InternalError, McpError, RuntimeError],
+                "deephaven-coreplus-client is not installed",
             ),
         ],
     )
@@ -126,6 +145,7 @@ class TestExceptionModule:
             "McpError",
             "InternalError",
             "UnsupportedOperationError",
+            "MissingEnterprisePackageError",
             # Session exceptions
             "SessionError",
             "SessionCreationError",

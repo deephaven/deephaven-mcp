@@ -419,8 +419,8 @@ async def test_factory_registry_enterprise_not_available_raises_config_error():
             await registry.initialize(manager)
 
         # Verify the error message is helpful
-        assert "Enterprise factory configurations found" in str(exc_info.value)
-        assert "Core+ features are not available" in str(exc_info.value)
+        assert "Enterprise factory configurations" in str(exc_info.value)
+        assert "deephaven-coreplus-client" in str(exc_info.value)
         assert "install deephaven-coreplus-client" in str(exc_info.value)
 
 
