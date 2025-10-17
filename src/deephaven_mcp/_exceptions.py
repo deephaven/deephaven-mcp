@@ -154,10 +154,10 @@ class MissingEnterprisePackageError(InternalError):
         separator = "=" * 80
         return f"""
 {separator}
-ERROR: Missing Required Package
+ERROR: Core+ features are not available
 {separator}
 
-The package 'deephaven-coreplus-client' is not installed.
+The Python package 'deephaven-coreplus-client' is not installed.
 
 This package is required to use Deephaven Enterprise (DHE) features.
 
