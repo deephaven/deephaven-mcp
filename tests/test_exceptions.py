@@ -8,6 +8,7 @@ from deephaven_mcp._exceptions import (
     EnterpriseSystemConfigurationError,
     InternalError,
     McpError,
+    MissingEnterprisePackageError,
     QueryError,
     ResourceError,
     SessionCreationError,
@@ -50,6 +51,19 @@ class TestBaseExceptions:
             raise InternalError(message)
         assert str(exc_info.value) == message
 
+    def test_missing_enterprise_package_error(self):
+        """Test that MissingEnterprisePackageError provides prominent error message."""
+        # Test with default message
+        with pytest.raises(MissingEnterprisePackageError) as exc_info:
+            raise MissingEnterprisePackageError()
+
+        error_message = str(exc_info.value)
+        assert "deephaven-coreplus-client" in error_message
+        assert "ERROR: Core+ features are not available" in error_message
+        assert "pip install" in error_message
+        assert isinstance(exc_info.value, InternalError)
+        assert isinstance(exc_info.value, McpError)
+
     def test_unsupported_operation_error(self):
         """Test that UnsupportedOperationError can be raised and caught properly."""
         message = "operation not supported"
@@ -86,6 +100,11 @@ class TestExceptionParameterized:
                 [ConfigurationError, McpError],
                 "enterprise system configuration error",
             ),
+            (
+                MissingEnterprisePackageError,
+                [InternalError, McpError, RuntimeError],
+                "Core+ features are not available (deephaven-coreplus-client Python package not installed)",
+            ),
         ],
     )
     def test_exception_basics(self, exception_class, parent_classes, message):
@@ -93,7 +112,10 @@ class TestExceptionParameterized:
         # Test raising and catching the exception
         with pytest.raises(exception_class) as exc_info:
             raise exception_class(message)
-        assert str(exc_info.value) == message
+
+        # MissingEnterprisePackageError has custom __str__ formatting, so skip the message check
+        if exception_class != MissingEnterprisePackageError:
+            assert str(exc_info.value) == message
 
         # Test inheritance
         for parent_class in parent_classes:
@@ -126,6 +148,7 @@ class TestExceptionModule:
             "McpError",
             "InternalError",
             "UnsupportedOperationError",
+            "MissingEnterprisePackageError",
             # Session exceptions
             "SessionError",
             "SessionCreationError",

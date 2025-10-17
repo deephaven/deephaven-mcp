@@ -41,6 +41,7 @@ __all__ = [
     "McpError",
     "InternalError",
     "UnsupportedOperationError",
+    "MissingEnterprisePackageError",
     # Session exceptions
     "SessionCreationError",
     "SessionError",
@@ -109,6 +110,66 @@ class InternalError(McpError, RuntimeError):
     """
 
     pass
+
+
+class MissingEnterprisePackageError(InternalError):
+    """Exception raised when deephaven-coreplus-client package is not installed.
+
+    This exception provides prominent error messaging to help users quickly identify
+    and resolve the missing package issue when attempting to use Deephaven Enterprise
+    (DHE) features.
+
+    The exception formats the error message to be highly visible and actionable,
+    with clear instructions on how to resolve the issue.
+
+    Examples:
+        ```python
+        if not is_enterprise_available:
+            raise MissingEnterprisePackageError()
+        ```
+    """
+
+    def __init__(self, message: str | None = None):
+        """Initialize the exception with an optional custom message.
+
+        Args:
+            message: Optional custom message. If not provided, uses a default
+                    message about the missing deephaven-coreplus-client package.
+        """
+        if message is None:
+            message = "Core+ features are not available (deephaven-coreplus-client Python package not installed)"
+
+        self.package_message = message
+        super().__init__(message)
+
+    def __str__(self) -> str:
+        """Return a prominently formatted error message.
+
+        Returns:
+            A formatted error message with clear visual separation and
+            actionable instructions for resolving the issue.
+        """
+        separator = "=" * 80
+        return f"""
+{separator}
+ERROR: Core+ features are not available
+{separator}
+
+The Python package 'deephaven-coreplus-client' is not installed.
+
+This package is required to use Deephaven Enterprise (DHE) features.
+
+To resolve this issue:
+  1. Obtain the deephaven-coreplus-client wheel file from your 
+     Deephaven Enterprise administrator
+  2. Install it using pip:
+     
+     pip install /path/to/deephaven_coreplus_client-X.Y.Z-py3-none-any.whl
+
+For more information, see the installation documentation.
+
+{separator}
+"""
 
 
 # Session Exceptions

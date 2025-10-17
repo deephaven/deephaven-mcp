@@ -36,7 +36,11 @@ else:
     from typing_extensions import override  # pragma: no cover
 
 from deephaven_mcp import config
-from deephaven_mcp._exceptions import ConfigurationError, InternalError
+from deephaven_mcp._exceptions import (
+    ConfigurationError,
+    InternalError,
+    MissingEnterprisePackageError,
+)
 from deephaven_mcp.client import is_enterprise_available
 
 from ._manager import CommunitySessionManager, CorePlusSessionFactoryManager
@@ -254,9 +258,11 @@ class CorePlusSessionFactoryRegistry(BaseRegistry[CorePlusSessionFactoryManager]
 
         if not is_enterprise_available and factories_config:
             raise ConfigurationError(
-                "Enterprise factory configurations found but Core+ features are not available. "
-                "Please install deephaven-coreplus-client or remove enterprise factory configurations."
-            )
+                "Enterprise factory configurations were found in your config, but the required "
+                "Python package 'deephaven-coreplus-client' is not installed. "
+                "Please install the deephaven-coreplus-client package to use Deephaven Enterprise (DHE) features, "
+                "or remove the enterprise factory configurations from your config file."
+            ) from MissingEnterprisePackageError()
 
         _LOGGER.info(
             "[%s] Found %d core+ factory configurations to load.",

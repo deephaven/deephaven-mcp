@@ -864,9 +864,9 @@ async def test_from_config_not_enterprise_available(monkeypatch):
     with patch("deephaven_mcp.client._session_factory.is_enterprise_available", False):
         import deephaven_mcp.client._session_factory as sm_mod
 
-        with pytest.raises(sm_mod.InternalError) as excinfo:
+        with pytest.raises(exc.MissingEnterprisePackageError) as excinfo:
             await sm_mod.CorePlusSessionFactory.from_config(worker_cfg)
-        assert "Core+ features are not available" in str(excinfo.value)
+        assert "deephaven-coreplus-client" in str(excinfo.value)
 
 
 @pytest.mark.asyncio
@@ -1122,11 +1122,11 @@ async def test_from_config_when_enterprise_not_available(monkeypatch):
 
     import deephaven_mcp.client._session_factory as sm_mod
 
-    # Should raise InternalError when enterprise not available
-    with pytest.raises(exc.InternalError) as excinfo:
+    # Should raise MissingEnterprisePackageError when enterprise not available
+    with pytest.raises(exc.MissingEnterprisePackageError) as excinfo:
         await sm_mod.CorePlusSessionFactory.from_config(worker_cfg)
 
-    assert "Core+ features are not available" in str(excinfo.value)
+    assert "deephaven-coreplus-client" in str(excinfo.value)
 
 
 @pytest.mark.asyncio
@@ -1138,10 +1138,10 @@ async def test_from_url_when_enterprise_not_available(monkeypatch):
 
     import deephaven_mcp.client._session_factory as sm_mod
 
-    # Should raise InternalError when enterprise not available
-    with pytest.raises(exc.InternalError) as excinfo:
+    # Should raise MissingEnterprisePackageError when enterprise not available
+    with pytest.raises(exc.MissingEnterprisePackageError) as excinfo:
         sm_mod.CorePlusSessionFactory.from_url(
             "https://example.com/iris/connection.json"
         )
 
-    assert "Core+ features are not available" in str(excinfo.value)
+    assert "deephaven-coreplus-client" in str(excinfo.value)
