@@ -721,7 +721,7 @@ Here's the standard `mcpServers` configuration for Deephaven. It works for both 
     "command": "/full/path/to/your/.venv/bin/dh-mcp-systems-server",
     "args": [],
     "env": {
-      "DH_MCP_CONFIG_FILE": "/full/path/to/deephaven-mcp/deephaven_mcp.json",
+      "DH_MCP_CONFIG_FILE": "/full/path/to/your/deephaven_mcp.json",
       "PYTHONLOGLEVEL": "INFO"
     }
   },
