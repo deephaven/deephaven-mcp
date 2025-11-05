@@ -8,7 +8,9 @@ import pytest
 from deephaven_mcp._exceptions import CommunitySessionConfigurationError
 from deephaven_mcp.config._community_session import (
     redact_community_session_config,
+    redact_community_session_creation_config,
     validate_community_sessions_config,
+    validate_community_session_creation_config,
     validate_single_community_session_config,
 )
 
@@ -77,9 +79,6 @@ def test_redact_community_session_config_empty():
     # No sensitive values
     cfg = {"foo": "bar"}
     assert redact_community_session_config(cfg) == cfg
-
-
-import pytest
 
 
 def test_redact_community_session_config_edge_cases():
@@ -371,3 +370,352 @@ def test_validate_single_cs_auth_type_custom_authenticator_warning(caplog):
     assert "com.example.custom.AuthenticationHandler" in warning_message
     assert "not a commonly known value" in warning_message
     assert "Custom authenticators are also valid" in warning_message
+
+
+# --- Session Creation Configuration Tests ---
+
+
+def test_session_creation_none_config_is_valid():
+    """Test that None config is valid (session creation not configured)."""
+    # Should not raise
+    validate_community_session_creation_config(None)
+
+
+def test_session_creation_empty_dict_is_valid():
+    """Test that empty dict is valid (all fields optional)."""
+    validate_community_session_creation_config({})
+
+
+def test_session_creation_valid_minimal_config():
+    """Test valid minimal configuration."""
+    config = {
+        "max_concurrent_sessions": 5,
+    }
+    validate_community_session_creation_config(config)
+
+
+def test_session_creation_valid_full_config_docker():
+    """Test valid full configuration with Docker launch method."""
+    config = {
+        "max_concurrent_sessions": 10,
+        "defaults": {
+            "launch_method": "docker",
+            "auth_type": "PSK",
+            "auth_token": "test-token",
+            "docker_image": "ghcr.io/deephaven/server:latest",
+            "docker_memory_limit_gb": 8.0,
+            "docker_cpu_limit": 2.0,
+            "docker_volumes": ["/host:/container:ro"],
+            "heap_size_gb": 4.0,
+            "extra_jvm_args": ["-XX:+UseG1GC"],
+            "environment_vars": {"KEY": "value"},
+            "startup_timeout_seconds": 60,
+            "startup_check_interval_seconds": 2,
+            "startup_retries": 3,
+        },
+    }
+    validate_community_session_creation_config(config)
+
+
+def test_session_creation_valid_full_config_pip():
+    """Test valid full configuration with pip launch method."""
+    config = {
+        "max_concurrent_sessions": 3,
+        "defaults": {
+            "launch_method": "pip",
+            "auth_type": "Anonymous",
+            "heap_size_gb": 2.0,
+            "startup_timeout_seconds": 30,
+        },
+    }
+    validate_community_session_creation_config(config)
+
+
+def test_session_creation_invalid_not_dict():
+    """Test that non-dict config raises error."""
+    with pytest.raises(
+        CommunitySessionConfigurationError,
+        match="'session_creation' must be a dictionary in community config",
+    ):
+        validate_community_session_creation_config("not a dict")
+
+
+def test_session_creation_invalid_max_concurrent_sessions_negative():
+    """Test that negative max_concurrent_sessions raises error."""
+    config = {"max_concurrent_sessions": -1}
+    with pytest.raises(
+        CommunitySessionConfigurationError,
+        match="'max_concurrent_sessions' must be non-negative",
+    ):
+        validate_community_session_creation_config(config)
+
+
+def test_session_creation_invalid_max_concurrent_sessions_not_int():
+    """Test that non-integer max_concurrent_sessions raises error."""
+    config = {"max_concurrent_sessions": "five"}
+    with pytest.raises(
+        CommunitySessionConfigurationError,
+        match="Field 'max_concurrent_sessions' in session_creation config must be of type int",
+    ):
+        validate_community_session_creation_config(config)
+
+
+def test_session_creation_invalid_defaults_not_dict():
+    """Test that non-dict defaults raises error."""
+    config = {"defaults": "not a dict"}
+    with pytest.raises(
+        CommunitySessionConfigurationError,
+        match="Field 'defaults' in session_creation config must be of type dict",
+    ):
+        validate_community_session_creation_config(config)
+
+
+def test_session_creation_invalid_launch_method():
+    """Test that invalid launch_method raises error."""
+    config = {"defaults": {"launch_method": "invalid"}}
+    with pytest.raises(
+        CommunitySessionConfigurationError,
+        match="'launch_method' must be one of",
+    ):
+        validate_community_session_creation_config(config)
+
+
+def test_session_creation_invalid_auth_type_generates_warning(caplog):
+    """Test that invalid auth_type generates warning (not error)."""
+    config = {"defaults": {"auth_type": "InvalidAuth"}}
+    # Should not raise, just warn
+    validate_community_session_creation_config(config)
+    assert "auth_type='InvalidAuth' which is not a commonly known value" in caplog.text
+
+
+def test_session_creation_auth_token_and_env_var_mutually_exclusive():
+    """Test that auth_token and auth_token_env_var are mutually exclusive."""
+    config = {
+        "defaults": {
+            "auth_token": "token",
+            "auth_token_env_var": "ENV_VAR",
+        }
+    }
+    with pytest.raises(
+        CommunitySessionConfigurationError,
+        match="both 'auth_token' and 'auth_token_env_var' are set",
+    ):
+        validate_community_session_creation_config(config)
+
+
+def test_session_creation_invalid_heap_size_negative():
+    """Test that negative heap_size_gb raises error."""
+    config = {"defaults": {"heap_size_gb": -1.0}}
+    with pytest.raises(
+        CommunitySessionConfigurationError,
+        match="'heap_size_gb' must be positive",
+    ):
+        validate_community_session_creation_config(config)
+
+
+def test_session_creation_invalid_docker_memory_limit_negative():
+    """Test that negative docker_memory_limit_gb raises error."""
+    config = {"defaults": {"docker_memory_limit_gb": -1.0}}
+    with pytest.raises(
+        CommunitySessionConfigurationError,
+        match="'docker_memory_limit_gb' must be positive",
+    ):
+        validate_community_session_creation_config(config)
+
+
+def test_session_creation_invalid_docker_cpu_limit_negative():
+    """Test that negative docker_cpu_limit raises error."""
+    config = {"defaults": {"docker_cpu_limit": -1.0}}
+    with pytest.raises(
+        CommunitySessionConfigurationError,
+        match="'docker_cpu_limit' must be positive",
+    ):
+        validate_community_session_creation_config(config)
+
+
+def test_session_creation_invalid_startup_timeout_negative():
+    """Test that negative startup_timeout_seconds raises error."""
+    config = {"defaults": {"startup_timeout_seconds": -1.0}}
+    with pytest.raises(
+        CommunitySessionConfigurationError,
+        match="'startup_timeout_seconds' must be positive",
+    ):
+        validate_community_session_creation_config(config)
+
+
+def test_session_creation_invalid_startup_check_interval_negative():
+    """Test that negative startup_check_interval_seconds raises error."""
+    config = {"defaults": {"startup_check_interval_seconds": -1.0}}
+    with pytest.raises(
+        CommunitySessionConfigurationError,
+        match="'startup_check_interval_seconds' must be positive",
+    ):
+        validate_community_session_creation_config(config)
+
+
+def test_session_creation_invalid_startup_retries_negative():
+    """Test that negative startup_retries raises error."""
+    config = {"defaults": {"startup_retries": -1}}
+    with pytest.raises(
+        CommunitySessionConfigurationError,
+        match="'startup_retries' must be non-negative",
+    ):
+        validate_community_session_creation_config(config)
+
+
+def test_session_creation_invalid_docker_volumes_not_list():
+    """Test that non-list docker_volumes raises error."""
+    config = {"defaults": {"docker_volumes": "not a list"}}
+    with pytest.raises(
+        CommunitySessionConfigurationError,
+        match="Field 'docker_volumes' in session_creation.defaults must be of type list",
+    ):
+        validate_community_session_creation_config(config)
+
+
+def test_session_creation_invalid_extra_jvm_args_not_list():
+    """Test that non-list extra_jvm_args raises error."""
+    config = {"defaults": {"extra_jvm_args": "not a list"}}
+    with pytest.raises(
+        CommunitySessionConfigurationError,
+        match="Field 'extra_jvm_args' in session_creation.defaults must be of type list",
+    ):
+        validate_community_session_creation_config(config)
+
+
+def test_session_creation_invalid_environment_vars_not_dict():
+    """Test that non-dict environment_vars raises error."""
+    config = {"defaults": {"environment_vars": "not a dict"}}
+    with pytest.raises(
+        CommunitySessionConfigurationError,
+        match="Field 'environment_vars' in session_creation.defaults must be of type dict",
+    ):
+        validate_community_session_creation_config(config)
+
+
+def test_session_creation_unknown_field_raises_error():
+    """Test that unknown fields raise errors."""
+    config = {"defaults": {"unknown_field": "value"}}
+    with pytest.raises(
+        CommunitySessionConfigurationError,
+        match="Unknown field 'unknown_field' in session_creation.defaults config",
+    ):
+        validate_community_session_creation_config(config)
+
+
+def test_session_creation_unknown_field_in_session_creation():
+    """Test unknown field in session_creation."""
+    config = {
+        "unknown_field": "value",
+    }
+    
+    with pytest.raises(CommunitySessionConfigurationError, match="Unknown field 'unknown_field' in session_creation config"):
+        validate_community_session_creation_config(config)
+
+
+def test_session_creation_field_wrong_type_tuple_allowed():
+    """Test field with wrong type when tuple of types allowed."""
+    config = {
+        "defaults": {
+            "heap_size_gb": "not_a_number",  # Should be int or float
+        }
+    }
+    
+    with pytest.raises(CommunitySessionConfigurationError, match="must be one of types"):
+        validate_community_session_creation_config(config)
+
+
+def test_session_creation_docker_volumes_item_not_string():
+    """Test docker_volumes items must be strings."""
+    config = {
+        "defaults": {
+            "docker_volumes": ["/valid/path", 123, "/another/path"],  # Item is not string
+        }
+    }
+    
+    with pytest.raises(CommunitySessionConfigurationError, match="'docker_volumes\\[1\\]' must be a string"):
+        validate_community_session_creation_config(config)
+
+
+def test_session_creation_extra_jvm_args_item_not_string():
+    """Test extra_jvm_args items must be strings."""
+    config = {
+        "defaults": {
+            "extra_jvm_args": ["-XX:+UseG1GC", 123, "-Xms1g"],  # Item is not string
+        }
+    }
+    
+    with pytest.raises(CommunitySessionConfigurationError, match="'extra_jvm_args\\[1\\]' must be a string"):
+        validate_community_session_creation_config(config)
+
+
+def test_session_creation_environment_vars_key_not_string():
+    """Test environment_vars keys must be strings."""
+    config = {
+        "defaults": {
+            "environment_vars": {123: "value"},  # Key is not string
+        }
+    }
+    
+    with pytest.raises(CommunitySessionConfigurationError, match="'environment_vars' key must be a string"):
+        validate_community_session_creation_config(config)
+
+
+def test_session_creation_environment_vars_value_not_string():
+    """Test environment_vars values must be strings."""
+    config = {
+        "defaults": {
+            "environment_vars": {"KEY": 123},  # Value is not string
+        }
+    }
+    
+    with pytest.raises(CommunitySessionConfigurationError, match="'environment_vars\\[KEY\\]' value must be a string"):
+        validate_community_session_creation_config(config)
+
+
+# --- Session Creation Redaction Tests ---
+
+
+def test_session_creation_redact_empty_config_returns_empty():
+    """Test that empty config returns empty dict."""
+    assert redact_community_session_creation_config({}) == {}
+
+
+def test_session_creation_redact_redacts_auth_token():
+    """Test that auth_token is redacted."""
+    config = {"defaults": {"auth_token": "secret-token"}}
+    redacted = redact_community_session_creation_config(config)
+    assert redacted["defaults"]["auth_token"] == "[REDACTED]"
+
+
+def test_session_creation_redact_preserves_non_sensitive_fields():
+    """Test that non-sensitive fields are preserved."""
+    config = {
+        "max_concurrent_sessions": 5,
+        "defaults": {
+            "launch_method": "docker",
+            "auth_type": "PSK",
+            "heap_size_gb": 4.0,
+        },
+    }
+    redacted = redact_community_session_creation_config(config)
+    assert redacted["max_concurrent_sessions"] == 5
+    assert redacted["defaults"]["launch_method"] == "docker"
+    assert redacted["defaults"]["auth_type"] == "PSK"
+    assert redacted["defaults"]["heap_size_gb"] == 4.0
+
+
+def test_session_creation_redact_does_not_redact_auth_token_env_var():
+    """Test that auth_token_env_var is NOT redacted (it's just a variable name)."""
+    config = {"defaults": {"auth_token_env_var": "MY_TOKEN"}}
+    redacted = redact_community_session_creation_config(config)
+    # Environment variable names are not sensitive, only their values are
+    assert redacted["defaults"]["auth_token_env_var"] == "MY_TOKEN"
+
+
+def test_session_creation_redact_does_not_modify_original():
+    """Test that redaction does not modify the original config."""
+    config = {"defaults": {"auth_token": "secret"}}
+    original_token = config["defaults"]["auth_token"]
+    redact_community_session_creation_config(config)
+    assert config["defaults"]["auth_token"] == original_token

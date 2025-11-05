@@ -45,6 +45,29 @@ The configuration file must be a JSON object. It may contain the following top-l
               - `client_cert_chain` (str | None, optional): Path to a PEM file containing the client certificate chain for mutual TLS.
               - `client_private_key` (str | None, optional): Path to a PEM file containing the client private key for mutual TLS.
 
+        - `session_creation` (dict, optional):
+            Configuration for dynamically creating community sessions on demand.
+            If this key is present, its value must be a dictionary (which can be empty, e.g., {}).
+            If this key is absent, dynamic session creation is not configured.
+            The session_creation configuration dict may contain:
+
+              - `max_concurrent_sessions` (int, optional): Maximum number of concurrent dynamically created sessions. Set to 0 to disable dynamic session creation.
+              - `defaults` (dict, optional): Default parameters for creating new community sessions:
+                  * `launch_method` (str, optional): Method to launch sessions ("docker" or "pip").
+                  * `auth_type` (str, optional): Default authentication type for created sessions.
+                  * `auth_token` (str, optional): Default authentication token. Use this OR `auth_token_env_var`, but not both.
+                  * `auth_token_env_var` (str, optional): Environment variable for auth token. Use this OR `auth_token`, but not both.
+                  * `docker_image` (str, optional): Docker image to use for docker launch method.
+                  * `docker_memory_limit_gb` (float, optional): Memory limit in GB for docker containers.
+                  * `docker_cpu_limit` (float, optional): CPU limit for docker containers.
+                  * `docker_volumes` (list[str], optional): Volume mounts for docker containers.
+                  * `heap_size_gb` (int | float, optional): JVM heap size in GB.
+                  * `extra_jvm_args` (list[str], optional): Additional JVM arguments.
+                  * `environment_vars` (dict[str, str], optional): Environment variables for the session.
+                  * `startup_timeout_seconds` (int | float, optional): Timeout for session startup.
+                  * `startup_check_interval_seconds` (int | float, optional): Interval between startup health checks.
+                  * `startup_retries` (int, optional): Number of startup retry attempts.
+
       Notes:
         - All fields are optional; if a field is omitted, the consuming code may use an internal default value for that field, or the feature may be disabled.
         - All file paths should be absolute, or relative to the process working directory.
@@ -164,8 +187,9 @@ Usage Patterns:
 -----------------------------------------------------------------------------
 - The configuration may optionally include a `community` dictionary.
 - Accessing configuration sections:
+    >>> import os
+    >>> os.environ['DH_MCP_CONFIG_FILE'] = '/path/to/deephaven_mcp.json'
     >>> config_manager = ConfigManager()
-    >>> await config_manager.load_config("/path/to/deephaven_mcp.json")
     >>> config = await config_manager.get_config()
     >>> config_section = get_config_section(config, ["community", "sessions"])
     >>> # Access specific session data from config_section
@@ -203,6 +227,8 @@ __all__ = [
     "validate_community_sessions_config",
     "validate_single_community_session_config",
     "redact_community_session_config",
+    "validate_community_session_creation_config",
+    "redact_community_session_creation_config",
     # Enterprise system API
     "validate_enterprise_systems_config",
     "validate_single_enterprise_system",
@@ -229,7 +255,9 @@ from deephaven_mcp._exceptions import (
 
 from ._community_session import (
     redact_community_session_config,
+    redact_community_session_creation_config,
     validate_community_sessions_config,
+    validate_community_session_creation_config,
     validate_single_community_session_config,
 )
 from ._enterprise_system import (
@@ -249,14 +277,21 @@ str: Name of the environment variable specifying the path to the Deephaven MCP c
 
 @dataclass
 class _ConfigPathSpec:
-    """Specification for a valid configuration path."""
+    """Specification for a valid configuration path.
+    
+    Attributes:
+        required (bool): Whether this configuration path is required to be present.
+        expected_type (type): The expected Python type for values at this path (e.g., dict, str, int).
+        validator (Callable[[Any], None] | None): Optional validation function to call for this path.
+            Should raise an exception if validation fails.
+        redactor (Callable[[Any], Any] | None): Optional function to redact sensitive data for logging.
+            Takes the config value and returns a redacted version.
+    """
 
     required: bool
     expected_type: type
     validator: Callable[[Any], None] | None = None
-    redactor: Callable[[Any], Any] | None = (
-        None  # Function to redact sensitive data for logging
-    )
+    redactor: Callable[[Any], Any] | None = None
 
 
 # Schema defining all valid configuration paths
@@ -276,6 +311,12 @@ _SCHEMA_PATHS: dict[tuple[str, ...], _ConfigPathSpec] = {
             if isinstance(sessions_dict, dict)
             else sessions_dict
         ),
+    ),
+    ("community", "session_creation"): _ConfigPathSpec(
+        required=False,
+        expected_type=dict,
+        validator=validate_community_session_creation_config,
+        redactor=redact_community_session_creation_config,
     ),
     ("enterprise",): _ConfigPathSpec(
         required=False, expected_type=dict, validator=None  # Validated by nested paths
@@ -370,8 +411,8 @@ class ConfigManager:
         exceptions are raised.
 
         Returns:
-            dict[str, Any]: The loaded and validated configuration dictionary. Returns an empty
-                dictionary if the config file path is not set or the file is empty (but valid JSON like {}).
+            dict[str, Any]: The loaded and validated configuration dictionary. May be an empty
+                dictionary if the file contains valid but empty JSON (e.g., {}).
 
         Raises:
             RuntimeError: If the DH_MCP_CONFIG_FILE environment variable is not set.
@@ -621,13 +662,17 @@ def _log_config_summary(config: dict[str, Any]) -> None:
     Log a summary of the loaded Deephaven MCP configuration.
 
     This function logs the configuration with sensitive data redacted as formatted JSON.
+    Sensitive fields (auth tokens, passwords, private keys, etc.) are replaced with
+    "[REDACTED]" before logging. The configuration is logged at INFO level as pretty-printed
+    JSON. If JSON serialization fails, the config is logged as a Python dict representation.
 
     Args:
         config (dict[str, Any]): The loaded and validated configuration dictionary.
 
     Example:
-        >>> config = {'community': {'sessions': {'local': {...}}}}
+        >>> config = {'community': {'sessions': {'local': {'auth_token': 'secret'}}}}
         >>> _log_config_summary(config)
+        # Logs: {"community": {"sessions": {"local": {"auth_token": "[REDACTED]"}}}}
     """
     _LOGGER.info("[ConfigManager:get_config] Configuration summary:")
 
@@ -751,13 +796,17 @@ def _should_recurse_into_nested_dict(current_path: tuple[str, ...]) -> bool:
     schema paths exist that are children of the current path (i.e., they start with
     the current path and have at least one more component). This is used during
     validation to decide whether to recursively validate nested dictionary sections.
+    
+    For example, if current_path is ('community',) and _SCHEMA_PATHS contains
+    ('community', 'sessions'), this returns True because there are nested paths.
+    If current_path is ('community', 'sessions') and no deeper paths exist, returns False.
 
     Args:
-        current_path (tuple[str, ...]): The current path tuple to check for children
+        current_path (tuple[str, ...]): The current path tuple to check for children.
 
     Returns:
         bool: True if there are nested paths that extend beyond the current path,
-              False if this is a leaf node in the schema tree
+              False if this is a leaf node in the schema tree.
     """
     return any(
         nested_path[: len(current_path)] == current_path
@@ -818,59 +867,59 @@ def _validate_section(data: dict[str, Any], path: tuple[str, ...]) -> None:
 
 def validate_config(config: dict[str, Any]) -> dict[str, Any]:
     """
-        Validate the Deephaven MCP application configuration dictionary.
+    Validate the Deephaven MCP application configuration dictionary.
 
-        This function ensures that the configuration dictionary conforms to the expected schema for Deephaven MCP.
-        The configuration may contain the following top-level keys:
-          - 'community' (dict, optional):
-                A dictionary mapping community configuration.
-                If this key is present, its value must be a dictionary (which can be empty, e.g., {}).
-                If this key is absent, it implies no community configuration is present.
-                Each community configuration dict may contain any of the following fields (all are optional):
+    This function ensures that the configuration dictionary conforms to the expected schema for Deephaven MCP.
+    The configuration may contain the following top-level keys:
+      - 'community' (dict, optional):
+            A dictionary mapping community configuration.
+            If this key is present, its value must be a dictionary (which can be empty, e.g., {}).
+            If this key is absent, it implies no community configuration is present.
+            Each community configuration dict may contain any of the following fields (all are optional):
 
-                  - 'sessions' (dict, optional):
-                      A dictionary mapping community session names (str) to client session configuration dicts.
-                      If this key is present, its value must be a dictionary (which can be empty, e.g., {}).
-                      If this key is absent, it implies no community sessions are configured.
-                      Each community session configuration dict may contain any of the following fields (all are optional):
+              - 'sessions' (dict, optional):
+                  A dictionary mapping community session names (str) to client session configuration dicts.
+                  If this key is present, its value must be a dictionary (which can be empty, e.g., {}).
+                  If this key is absent, it implies no community sessions are configured.
+                  Each community session configuration dict may contain any of the following fields (all are optional):
 
-                        - 'host' (str): Hostname or IP address of the community server.
-                        - 'port' (int): Port number for the community server connection.
-                        - 'auth_type' (str): Authentication type. Common values include:
-                            * "Anonymous": Default, no authentication required.
-                            * "Basic": HTTP Basic authentication (requires username:password format in auth_token).
-                            * "io.deephaven.authentication.psk.PskAuthenticationHandler": Pre-shared key authentication.
-                            * Custom authenticator strings are also valid.
-                        - 'auth_token' (str, optional): The direct authentication token or password. May be empty if `auth_type` is "Anonymous". Use this OR `auth_token_env_var`, but not both.
-                        - 'auth_token_env_var' (str, optional): The name of an environment variable from which to read the authentication token. Use this OR `auth_token`, but not both.
-                        - 'never_timeout' (bool): If True, sessions to this community server never time out.
-                        - 'session_type' (str): Programming language for the session. Common values include:
-                            * "python": For Python-based Deephaven instances.
-                            * "groovy": For Groovy-based Deephaven instances.
-                        - 'use_tls' (bool): Whether to use TLS/SSL for the connection.
-                        - 'tls_root_certs' (str | None, optional): Path to a PEM file containing root certificates to trust for TLS.
-                        - 'client_cert_chain' (str | None, optional): Path to a PEM file containing the client certificate chain for mutual TLS.
-                        - 'client_private_key' (str | None, optional): Path to a PEM file containing the client private key for mutual TLS.
+                    - 'host' (str): Hostname or IP address of the community server.
+                    - 'port' (int): Port number for the community server connection.
+                    - 'auth_type' (str): Authentication type. Common values include:
+                        * "Anonymous": Default, no authentication required.
+                        * "Basic": HTTP Basic authentication (requires username:password format in auth_token).
+                        * "io.deephaven.authentication.psk.PskAuthenticationHandler": Pre-shared key authentication.
+                        * Custom authenticator strings are also valid.
+                    - 'auth_token' (str, optional): The direct authentication token or password. May be empty if `auth_type` is "Anonymous". Use this OR `auth_token_env_var`, but not both.
+                    - 'auth_token_env_var' (str, optional): The name of an environment variable from which to read the authentication token. Use this OR `auth_token`, but not both.
+                    - 'never_timeout' (bool): If True, sessions to this community server never time out.
+                    - 'session_type' (str): Programming language for the session. Common values include:
+                        * "python": For Python-based Deephaven instances.
+                        * "groovy": For Groovy-based Deephaven instances.
+                    - 'use_tls' (bool): Whether to use TLS/SSL for the connection.
+                    - 'tls_root_certs' (str | None, optional): Path to a PEM file containing root certificates to trust for TLS.
+                    - 'client_cert_chain' (str | None, optional): Path to a PEM file containing the client certificate chain for mutual TLS.
+                    - 'client_private_key' (str | None, optional): Path to a PEM file containing the client private key for mutual TLS.
 
-          - 'enterprise' (dict, optional):
-                A dictionary mapping enterprise configuration.
-                If this key is present, its value must be a dictionary (which can be empty).
-                Each enterprise configuration dict is validated according to the schema defined in
-                `src/deephaven_mcp/config/_enterprise_system.py`. Key fields typically include:
+      - 'enterprise' (dict, optional):
+            A dictionary mapping enterprise configuration.
+            If this key is present, its value must be a dictionary (which can be empty).
+            Each enterprise configuration dict is validated according to the schema defined in
+            `src/deephaven_mcp/config/_enterprise_system.py`. Key fields typically include:
 
-                  - 'systems' (dict, optional):
-                      A dictionary mapping enterprise system names (str) to system configuration dicts.
-                      If this key is present, its value must be a dictionary (which can be empty).
-                      Each enterprise system configuration dict must include:
-                          - 'connection_json_url' (str, required): URL to the server's connection.json file.
-                          - 'auth_type' (str, required): One of:
-                              * "password":
-                                  - 'username' (str, required): The username.
-                                  - 'password' (str, optional): The password.
-                                  - 'password_env_var' (str, optional): Environment variable for the password.
-                                    (Note: `password` and `password_env_var` are mutually exclusive.)
-                              * "private_key":
-                                  - 'private_key_path' (str, required): The path to the private key file.
+              - 'systems' (dict, optional):
+                  A dictionary mapping enterprise system names (str) to system configuration dicts.
+                  If this key is present, its value must be a dictionary (which can be empty).
+                  Each enterprise system configuration dict must include:
+                      - 'connection_json_url' (str, required): URL to the server's connection.json file.
+                      - 'auth_type' (str, required): One of:
+                          * "password":
+                              - 'username' (str, required): The username.
+                              - 'password' (str, optional): The password.
+                              - 'password_env_var' (str, optional): Environment variable for the password.
+                                (Note: `password` and `password_env_var` are mutually exclusive.)
+                          * "private_key":
+                              - 'private_key_path' (str, required): The path to the private key file.
 
     Validation Rules:
       - Only known keys are allowed at each level of nesting.
