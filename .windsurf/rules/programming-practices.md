@@ -20,3 +20,4 @@ trigger: always_on
     - yaml: 50% accuracy
     - xml: 45% accuracy
     - csv: 44% accuracy (lowest comprehension, fewest tokens)
+7. When moving or removing files, use the git version of the command when appropriate to maintain history.
