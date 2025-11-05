@@ -10,7 +10,7 @@ recovery or reporting strategies.
 
 Exception Hierarchy:
     - Base exceptions: McpError (base for all MCP exceptions), InternalError (extends McpError and RuntimeError)
-    - Session exceptions: SessionError (extends McpError), SessionCreationError (extends SessionError)
+    - Session exceptions: SessionError (extends McpError), SessionCreationError (extends SessionError), SessionLaunchError (extends SessionCreationError)
     - Authentication exceptions: AuthenticationError (extends McpError)
     - Query exceptions: QueryError (extends McpError)
     - Connection exceptions: DeephavenConnectionError (extends McpError)
@@ -45,6 +45,7 @@ __all__ = [
     # Session exceptions
     "SessionCreationError",
     "SessionError",
+    "SessionLaunchError",
     # Authentication exceptions
     "AuthenticationError",
     # Query exceptions
@@ -223,6 +224,37 @@ class SessionCreationError(SessionError):
         except SessionCreationError as e:
             logger.error(f"Failed to create session: {e}")
             # Implement fallback or retry logic
+        ```
+    """
+
+    pass
+
+
+class SessionLaunchError(SessionCreationError):
+    """Exception raised when launching a Deephaven Community session fails.
+
+    This exception is raised during the launch phase of dynamically created community sessions
+    (via Docker or pip). It represents failures in the actual process/container startup,
+    port allocation, health checking, or session readiness verification.
+
+    This is a subclass of SessionCreationError, specifically for launch-related failures
+    during dynamic session creation, as opposed to configuration or connection issues.
+
+    Examples:
+        - Docker container failed to start
+        - pip-installed Deephaven process failed to start
+        - Unable to find available port for session
+        - Session health check failed or timed out
+        - Container/process startup returned non-zero exit code
+        - Failed to stop running container/process
+
+    Usage:
+        ```python
+        try:
+            session = await launcher.launch(session_name, port, config)
+        except SessionLaunchError as e:
+            logger.error(f"Failed to launch session: {e}")
+            # Implement cleanup or retry logic
         ```
     """
 
