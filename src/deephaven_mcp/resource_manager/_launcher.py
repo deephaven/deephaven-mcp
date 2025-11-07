@@ -388,6 +388,7 @@ class DockerLaunchedSession(LaunchedSession):
         docker_memory_limit_gb: float | None,
         docker_cpu_limit: float | None,
         docker_volumes: list[str],
+        instance_id: str | None = None,
     ) -> "DockerLaunchedSession":
         """
         Launch a Deephaven session via Docker.
@@ -411,6 +412,8 @@ class DockerLaunchedSession(LaunchedSession):
             docker_memory_limit_gb (float | None): Container memory limit in GB, or None for no limit.
             docker_cpu_limit (float | None): Container CPU limit in cores, or None for no limit.
             docker_volumes (list[str]): Volume mounts in format ["host:container:mode"] (empty list for none).
+            instance_id (str | None): MCP server instance ID for tracking orphaned containers.
+                If provided, the container will be labeled for cleanup on server crash/SIGKILL.
 
         Returns:
             DockerLaunchedSession: The launched Docker session.
@@ -434,6 +437,13 @@ class DockerLaunchedSession(LaunchedSession):
             "--network",
             "host",  # Use host network for simple port access
         ]
+        
+        # Add instance tracking label for orphan cleanup
+        if instance_id:
+            cmd.extend(["--label", f"deephaven-mcp-server-instance={instance_id}"])
+            _LOGGER.debug(
+                f"[_launcher:DockerLaunchedSession] Labeling container with instance ID: {instance_id}"
+            )
 
         # Add resource limits if specified
         if docker_memory_limit_gb is not None:
@@ -779,6 +789,7 @@ async def launch_session(
     docker_memory_limit_gb: float | None = None,
     docker_cpu_limit: float | None = None,
     docker_volumes: list[str] = [],
+    instance_id: str | None = None,
 ) -> LaunchedSession:
     """
     Launch a Deephaven session using the specified method.
@@ -798,6 +809,7 @@ async def launch_session(
         docker_memory_limit_gb (float | None): Container memory limit in GB (docker only).
         docker_cpu_limit (float | None): Container CPU limit in cores (docker only).
         docker_volumes (list[str]): Volume mounts (docker only).
+        instance_id (str | None): MCP server instance ID for orphan tracking (docker only).
 
     Returns:
         LaunchedSession: The launched session (DockerLaunchedSession or PipLaunchedSession).
@@ -823,6 +835,7 @@ async def launch_session(
             docker_memory_limit_gb=docker_memory_limit_gb,
             docker_cpu_limit=docker_cpu_limit,
             docker_volumes=docker_volumes,
+            instance_id=instance_id,
         )
     elif launch_method == "pip":
         # Validate that Docker-specific parameters aren't used with pip

@@ -285,6 +285,42 @@ class TestDockerLaunchedSessionLaunch:
                 )
 
     @pytest.mark.asyncio
+    async def test_launch_with_instance_id(self):
+        """Test Docker launch with instance_id for orphan tracking (lines 443-444)."""
+        
+        with patch("asyncio.create_subprocess_exec") as mock_subprocess:
+            mock_process = AsyncMock()
+            mock_process.returncode = 0
+            mock_process.communicate = AsyncMock(return_value=(b"container_xyz789\n", b""))
+            mock_subprocess.return_value = mock_process
+
+            result = await DockerLaunchedSession.launch(
+                session_name="test",
+                port=10000,
+                auth_token="token",
+                heap_size_gb=4.0,
+                extra_jvm_args=[],
+                environment_vars={},
+                docker_image="ghcr.io/deephaven/server:latest",
+                docker_memory_limit_gb=None,
+                docker_cpu_limit=None,
+                docker_volumes=[],
+                instance_id="test-instance-uuid-123",
+            )
+
+            assert result.container_id == "container_xyz789"
+            
+            # Verify the --label flag was added with instance_id
+            call_args = mock_subprocess.call_args[0]
+            label_found = False
+            for i, arg in enumerate(call_args):
+                if arg == "--label" and i + 1 < len(call_args):
+                    if call_args[i + 1] == "deephaven-mcp-server-instance=test-instance-uuid-123":
+                        label_found = True
+                        break
+            assert label_found, "Docker label with instance_id not found in command"
+
+    @pytest.mark.asyncio
     async def test_stop_success(self):
         """Test successful Docker stop."""
         session = DockerLaunchedSession(host="localhost", port=10000, auth_type="anonymous", auth_token=None, container_id="test_container")

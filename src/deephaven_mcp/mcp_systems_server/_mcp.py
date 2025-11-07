@@ -62,10 +62,15 @@ from deephaven_mcp.resource_manager import (
     CombinedSessionRegistry,
     DynamicCommunitySessionManager,
     EnterpriseSessionManager,
+    PipLaunchedSession,
     SystemType,
     find_available_port,
     generate_auth_token,
     launch_session,
+)
+from deephaven_mcp.resource_manager._instance_tracker import (
+    InstanceTracker,
+    cleanup_orphaned_resources,
 )
 
 T = TypeVar("T")
@@ -175,8 +180,19 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
         "[mcp_systems_server:app_lifespan] Starting MCP server '%s'", server.name
     )
     session_registry = None
+    instance_tracker = None
 
     try:
+        # Register this server instance for tracking
+        instance_tracker = await InstanceTracker.create_and_register()
+        _LOGGER.info(
+            "[mcp_systems_server:app_lifespan] Server instance: %s",
+            instance_tracker.instance_id
+        )
+        
+        # Clean up orphaned resources from previous crashed/killed instances
+        await cleanup_orphaned_resources()
+        
         config_manager = ConfigManager()
 
         # Make sure config can be loaded before starting
@@ -194,6 +210,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
             "config_manager": config_manager,
             "session_registry": session_registry,
             "refresh_lock": refresh_lock,
+            "instance_tracker": instance_tracker,
         }
     finally:
         _LOGGER.info(
@@ -202,6 +219,8 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
         )
         if session_registry is not None:
             await session_registry.close()
+        if instance_tracker is not None:
+            await instance_tracker.unregister()
         _LOGGER.info(
             "[mcp_systems_server:app_lifespan] MCP server '%s' shut down.", server.name
         )
@@ -3924,6 +3943,9 @@ async def session_community_create(
         _LOGGER.info(
             f"[mcp_systems_server:session_community_create] Launching {resolved_launch_method} session '{session_name}' on port {port}"
         )
+        # Get instance tracker from context for orphan tracking
+        instance_tracker: InstanceTracker = context.request_context.lifespan_context["instance_tracker"]
+        
         launched_session = await launch_session(
             launch_method=resolved_launch_method,
             session_name=session_name,
@@ -3936,6 +3958,7 @@ async def session_community_create(
             docker_memory_limit_gb=resolved_docker_memory_limit,
             docker_cpu_limit=resolved_docker_cpu_limit,
             docker_volumes=resolved_docker_volumes,
+            instance_id=instance_tracker.instance_id,
         )
 
         # Wait for session to be ready
@@ -3980,6 +4003,13 @@ async def session_community_create(
             config=session_config,
             launched_session=launched_session,
         )
+        
+        # Track pip process if applicable (for orphan cleanup)
+        if isinstance(launched_session, PipLaunchedSession):
+            await instance_tracker.track_pip_process(
+                session_name, 
+                launched_session.process.pid
+            )
 
         # Add to registry
         await session_registry.add_session(session_manager)
@@ -4161,6 +4191,12 @@ async def session_community_delete(
             f"[mcp_systems_server:session_community_delete] Found dynamic community session manager for '{session_id}'"
         )
 
+        # Untrack pip process if applicable (before closing)
+        instance_tracker: InstanceTracker = context.request_context.lifespan_context["instance_tracker"]
+        if isinstance(session_manager, DynamicCommunitySessionManager):
+            if isinstance(session_manager.launched_session, PipLaunchedSession):
+                await instance_tracker.untrack_pip_process(session_name)
+        
         # Close the session (this will also stop the Docker container/pip process)
         try:
             _LOGGER.debug(

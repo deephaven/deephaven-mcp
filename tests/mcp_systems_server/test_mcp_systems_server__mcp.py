@@ -38,6 +38,15 @@ class MockContext:
         self.request_context = MockRequestContext(lifespan_context)
 
 
+def create_mock_instance_tracker():
+    """Create a mock InstanceTracker for tests."""
+    mock_tracker = MagicMock()
+    mock_tracker.instance_id = "test-instance-id"
+    mock_tracker.track_pip_process = AsyncMock()
+    mock_tracker.untrack_pip_process = AsyncMock()
+    return mock_tracker
+
+
 # ===== Test Helper Functions =====
 
 
@@ -1491,6 +1500,7 @@ async def test_session_pip_list_success():
             {
                 "session_registry": mock_session_registry,
                 "config_manager": AsyncMock(),
+                "instance_tracker": create_mock_instance_tracker(),
             }
         )
         result = await mcp_mod.session_pip_list(context, session_id="test_worker")
@@ -1577,6 +1587,7 @@ async def test_session_pip_list_malformed_data():
             {
                 "session_registry": mock_session_registry,
                 "config_manager": AsyncMock(),
+                "instance_tracker": create_mock_instance_tracker(),
             }
         )
         result = await mcp_mod.session_pip_list(context, session_id="test_worker")
@@ -1617,6 +1628,7 @@ async def test_session_pip_list_error():
             {
                 "session_registry": mock_session_registry,
                 "config_manager": AsyncMock(),
+                "instance_tracker": create_mock_instance_tracker(),
             }
         )
         result = await mcp_mod.session_pip_list(context, session_id="test_worker")
@@ -1648,6 +1660,7 @@ async def test_session_pip_list_session_not_found():
             {
                 "session_registry": mock_session_registry,
                 "config_manager": AsyncMock(),
+                "instance_tracker": create_mock_instance_tracker(),
             }
         )
         result = await mcp_mod.session_pip_list(
@@ -1713,6 +1726,7 @@ async def test_enterprise_systems_status_success():
         {
             "session_registry": mock_session_registry,
             "config_manager": mock_config_manager,
+            "instance_tracker": create_mock_instance_tracker(),
         }
     )
 
@@ -1787,6 +1801,7 @@ async def test_enterprise_systems_status_with_attempt_to_connect():
         {
             "session_registry": mock_session_registry,
             "config_manager": mock_config_manager,
+            "instance_tracker": create_mock_instance_tracker(),
         }
     )
 
@@ -1839,6 +1854,7 @@ async def test_enterprise_systems_status_no_systems():
         {
             "session_registry": mock_session_registry,
             "config_manager": mock_config_manager,
+            "instance_tracker": create_mock_instance_tracker(),
         }
     )
 
@@ -1898,6 +1914,7 @@ async def test_enterprise_systems_status_all_status_types():
         {
             "session_registry": mock_session_registry,
             "config_manager": mock_config_manager,
+            "instance_tracker": create_mock_instance_tracker(),
         }
     )
 
@@ -1940,6 +1957,7 @@ async def test_enterprise_systems_status_config_error():
         {
             "session_registry": mock_session_registry,
             "config_manager": mock_config_manager,
+            "instance_tracker": create_mock_instance_tracker(),
         }
     )
 
@@ -1976,6 +1994,7 @@ async def test_enterprise_systems_status_registry_error():
         {
             "session_registry": mock_session_registry,
             "config_manager": mock_config_manager,
+            "instance_tracker": create_mock_instance_tracker(),
         }
     )
 
@@ -2017,6 +2036,7 @@ async def test_enterprise_systems_status_liveness_error():
         {
             "session_registry": mock_session_registry,
             "config_manager": mock_config_manager,
+            "instance_tracker": create_mock_instance_tracker(),
         }
     )
 
@@ -2055,6 +2075,7 @@ async def test_enterprise_systems_status_no_enterprise_registry():
         {
             "session_registry": mock_session_registry,
             "config_manager": mock_config_manager,
+            "instance_tracker": create_mock_instance_tracker(),
         }
     )
 
@@ -5393,6 +5414,7 @@ async def test_session_community_create_success():
         context = MockContext({
             "config_manager": mock_config_manager,
             "session_registry": mock_session_registry,
+            "instance_tracker": create_mock_instance_tracker(),
         })
 
         result = await mcp_mod.session_community_create(
@@ -5424,6 +5446,7 @@ async def test_session_community_create_not_configured():
     context = MockContext({
         "config_manager": mock_config_manager,
         "session_registry": mock_session_registry,
+        "instance_tracker": create_mock_instance_tracker(),
     })
 
     result = await mcp_mod.session_community_create(
@@ -5457,6 +5480,7 @@ async def test_session_community_create_max_sessions_reached():
     context = MockContext({
         "config_manager": mock_config_manager,
         "session_registry": mock_session_registry,
+        "instance_tracker": create_mock_instance_tracker(),
     })
 
     result = await mcp_mod.session_community_create(
@@ -5497,6 +5521,7 @@ async def test_session_community_create_launch_failure():
         context = MockContext({
             "config_manager": mock_config_manager,
             "session_registry": mock_session_registry,
+            "instance_tracker": create_mock_instance_tracker(),
         })
 
         result = await mcp_mod.session_community_create(
@@ -5516,12 +5541,17 @@ async def test_session_community_delete_success():
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock()
 
+    # Create a mock launched session (Docker by default)
+    mock_launched_session = MagicMock(spec=DockerLaunchedSession)
+    mock_launched_session.launch_method = "docker"
+    
     # Create a mock dynamic session manager
     mock_manager = MagicMock(spec=DynamicCommunitySessionManager)
     mock_manager.full_name = "community:dynamic:test-session"
     mock_manager._name = "test-session"
     mock_manager.source = "dynamic"
     mock_manager.system_type = SystemType.COMMUNITY
+    mock_manager.launched_session = mock_launched_session
     mock_manager.close = AsyncMock()
 
     mock_session_registry.get = AsyncMock(return_value=mock_manager)
@@ -5530,6 +5560,7 @@ async def test_session_community_delete_success():
     context = MockContext({
         "config_manager": mock_config_manager,
         "session_registry": mock_session_registry,
+        "instance_tracker": create_mock_instance_tracker(),
     })
 
     result = await mcp_mod.session_community_delete(
@@ -5548,6 +5579,52 @@ async def test_session_community_delete_success():
 
 
 @pytest.mark.asyncio
+async def test_session_community_delete_pip_session():
+    """Test deleting a pip-launched session to cover untrack_pip_process call."""
+    mock_config_manager = MagicMock()
+    mock_session_registry = MagicMock()
+    mock_instance_tracker = create_mock_instance_tracker()
+
+    # Create a mock pip-launched session
+    mock_launched_session = MagicMock(spec=PipLaunchedSession)
+    mock_launched_session.launch_method = "pip"
+    
+    # Create a mock pip-launched session manager
+    mock_manager = MagicMock(spec=DynamicCommunitySessionManager)
+    mock_manager.full_name = "community:dynamic:pip-session"
+    mock_manager._name = "pip-session"
+    mock_manager.source = "dynamic"
+    mock_manager.system_type = SystemType.COMMUNITY
+    mock_manager.launched_session = mock_launched_session
+    mock_manager.close = AsyncMock()
+
+    mock_session_registry.get = AsyncMock(return_value=mock_manager)
+    mock_session_registry.remove_session = AsyncMock()
+
+    context = MockContext({
+        "config_manager": mock_config_manager,
+        "session_registry": mock_session_registry,
+        "instance_tracker": mock_instance_tracker,
+    })
+
+    result = await mcp_mod.session_community_delete(
+        context,
+        session_name="pip-session",
+    )
+
+    # Verify success
+    assert result["success"] is True
+    assert result["session_id"] == "community:dynamic:pip-session"
+    
+    # Verify untrack_pip_process was called (line 4197)
+    mock_instance_tracker.untrack_pip_process.assert_called_once_with("pip-session")
+    
+    # Verify session was closed and removed
+    mock_manager.close.assert_called_once()
+    mock_session_registry.remove_session.assert_called_once()
+
+
+@pytest.mark.asyncio
 async def test_session_community_delete_not_found():
     """Test community session deletion when session not found."""
     mock_config_manager = MagicMock()
@@ -5558,6 +5635,7 @@ async def test_session_community_delete_not_found():
     context = MockContext({
         "config_manager": mock_config_manager,
         "session_registry": mock_session_registry,
+        "instance_tracker": create_mock_instance_tracker(),
     })
 
     result = await mcp_mod.session_community_delete(
@@ -5588,6 +5666,7 @@ async def test_session_community_delete_not_dynamic():
     context = MockContext({
         "config_manager": mock_config_manager,
         "session_registry": mock_session_registry,
+        "instance_tracker": create_mock_instance_tracker(),
     })
 
     result = await mcp_mod.session_community_delete(
@@ -5650,6 +5729,7 @@ class TestSessionCommunityCreateComplete:
             context = MockContext({
                 "config_manager": mock_config_manager,
                 "session_registry": mock_session_registry,
+                "instance_tracker": create_mock_instance_tracker(),
             })
 
             result = await mcp_mod.session_community_create(
@@ -5703,6 +5783,7 @@ class TestSessionCommunityCreateComplete:
             context = MockContext({
                 "config_manager": mock_config_manager,
                 "session_registry": mock_session_registry,
+                "instance_tracker": create_mock_instance_tracker(),
             })
 
             result = await mcp_mod.session_community_create(context, session_name="test-session")
@@ -5751,6 +5832,7 @@ class TestSessionCommunityCreateComplete:
             context = MockContext({
                 "config_manager": mock_config_manager,
                 "session_registry": mock_session_registry,
+                "instance_tracker": create_mock_instance_tracker(),
             })
 
             result = await mcp_mod.session_community_create(context, session_name="test-session")
@@ -5782,6 +5864,7 @@ class TestSessionCommunityCreateComplete:
         context = MockContext({
             "config_manager": mock_config_manager,
             "session_registry": mock_session_registry,
+            "instance_tracker": create_mock_instance_tracker(),
         })
 
         result = await mcp_mod.session_community_create(context, session_name="test-session")
@@ -5828,6 +5911,7 @@ class TestSessionCommunityCreateComplete:
             context = MockContext({
                 "config_manager": mock_config_manager,
                 "session_registry": mock_session_registry,
+                "instance_tracker": create_mock_instance_tracker(),
             })
 
             result = await mcp_mod.session_community_create(context, session_name="test-session")
@@ -5880,6 +5964,7 @@ class TestSessionCommunityCreateComplete:
             context = MockContext({
                 "config_manager": mock_config_manager,
                 "session_registry": mock_session_registry,
+                "instance_tracker": create_mock_instance_tracker(),
             })
 
             result = await mcp_mod.session_community_create(context, session_name="test-session")
@@ -5908,6 +5993,7 @@ class TestSessionCommunityDeleteComplete:
         context = MockContext({
             "config_manager": mock_config_manager,
             "session_registry": mock_session_registry,
+            "instance_tracker": create_mock_instance_tracker(),
         })
 
         result = await mcp_mod.session_community_delete(context, session_name="test-session")
@@ -5922,11 +6008,15 @@ class TestSessionCommunityDeleteComplete:
         mock_config_manager = MagicMock()
         mock_session_registry = MagicMock()
 
+        mock_launched_session = MagicMock(spec=DockerLaunchedSession)
+        mock_launched_session.launch_method = "docker"
+        
         mock_manager = MagicMock(spec=DynamicCommunitySessionManager)
         mock_manager.full_name = "community:dynamic:test-session"
         mock_manager._name = "test-session"
         mock_manager.source = "dynamic"
         mock_manager.system_type = SystemType.COMMUNITY
+        mock_manager.launched_session = mock_launched_session
         mock_manager.close = AsyncMock(side_effect=Exception("Close failed"))
 
         mock_session_registry.get = AsyncMock(return_value=mock_manager)
@@ -5935,6 +6025,7 @@ class TestSessionCommunityDeleteComplete:
         context = MockContext({
             "config_manager": mock_config_manager,
             "session_registry": mock_session_registry,
+            "instance_tracker": create_mock_instance_tracker(),
         })
 
         result = await mcp_mod.session_community_delete(context, session_name="test-session")
@@ -5950,11 +6041,15 @@ class TestSessionCommunityDeleteComplete:
         mock_config_manager = MagicMock()
         mock_session_registry = MagicMock()
 
+        mock_launched_session = MagicMock(spec=DockerLaunchedSession)
+        mock_launched_session.launch_method = "docker"
+        
         mock_manager = MagicMock(spec=DynamicCommunitySessionManager)
         mock_manager.full_name = "community:dynamic:test-session"
         mock_manager._name = "test-session"
         mock_manager.source = "dynamic"
         mock_manager.system_type = SystemType.COMMUNITY
+        mock_manager.launched_session = mock_launched_session
         mock_manager.close = AsyncMock()
 
         mock_session_registry.get = AsyncMock(return_value=mock_manager)
@@ -5963,6 +6058,7 @@ class TestSessionCommunityDeleteComplete:
         context = MockContext({
             "config_manager": mock_config_manager,
             "session_registry": mock_session_registry,
+            "instance_tracker": create_mock_instance_tracker(),
         })
 
         result = await mcp_mod.session_community_delete(context, session_name="test-session")
@@ -5983,6 +6079,7 @@ class TestSessionCommunityDeleteComplete:
         context = MockContext({
             "config_manager": mock_config_manager,
             "session_registry": mock_session_registry,
+            "instance_tracker": create_mock_instance_tracker(),
         })
 
         result = await mcp_mod.session_community_delete(context, session_name="test-session")
@@ -6037,6 +6134,7 @@ class TestRemainingEdgeCases:
             context = MockContext({
                 "config_manager": mock_config_manager,
                 "session_registry": mock_session_registry,
+                "instance_tracker": create_mock_instance_tracker(),
             })
 
             result = await mcp_mod.session_community_create(context, session_name="test-session")
@@ -6085,6 +6183,7 @@ class TestRemainingEdgeCases:
             context = MockContext({
                 "config_manager": mock_config_manager,
                 "session_registry": mock_session_registry,
+                "instance_tracker": create_mock_instance_tracker(),
             })
 
             result = await mcp_mod.session_community_create(context, session_name="test-session")
@@ -6130,6 +6229,7 @@ class TestRemainingEdgeCases:
             context = MockContext({
                 "config_manager": mock_config_manager,
                 "session_registry": mock_session_registry,
+                "instance_tracker": create_mock_instance_tracker(),
             })
 
             result = await mcp_mod.session_community_create(context, session_name="test-session")
@@ -6144,11 +6244,15 @@ class TestRemainingEdgeCases:
         mock_config_manager = MagicMock()
         mock_session_registry = MagicMock()
 
+        mock_launched_session = MagicMock(spec=DockerLaunchedSession)
+        mock_launched_session.launch_method = "docker"
+        
         mock_manager = MagicMock(spec=DynamicCommunitySessionManager)
         mock_manager.full_name = "community:dynamic:test-session"
         mock_manager._name = "test-session"
         mock_manager.source = "dynamic"
         mock_manager.system_type = SystemType.COMMUNITY
+        mock_manager.launched_session = mock_launched_session
         mock_manager.close = AsyncMock()
 
         mock_session_registry.get = AsyncMock(return_value=mock_manager)
@@ -6157,6 +6261,7 @@ class TestRemainingEdgeCases:
         context = MockContext({
             "config_manager": mock_config_manager,
             "session_registry": mock_session_registry,
+            "instance_tracker": create_mock_instance_tracker(),
         })
 
         result = await mcp_mod.session_community_delete(context, session_name="test-session")
@@ -6208,6 +6313,7 @@ class TestSessionDetailsDynamicCommunity:
         context = MockContext({
             "config_manager": mock_config_manager,
             "session_registry": mock_session_registry,
+            "instance_tracker": create_mock_instance_tracker(),
         })
 
         result = await mcp_mod.session_details(context, session_id="community:dynamic:test-session")
@@ -6259,6 +6365,7 @@ class TestSessionDetailsDynamicCommunity:
         context = MockContext({
             "config_manager": mock_config_manager,
             "session_registry": mock_session_registry,
+            "instance_tracker": create_mock_instance_tracker(),
         })
 
         result = await mcp_mod.session_details(context, session_id="community:dynamic:pip-session")
@@ -6304,6 +6411,7 @@ class TestSessionDetailsDynamicCommunity:
         context = MockContext({
             "config_manager": mock_config_manager,
             "session_registry": mock_session_registry,
+            "instance_tracker": create_mock_instance_tracker(),
         })
 
         result = await mcp_mod.session_details(context, session_id="community:dynamic:minimal-session")
@@ -6351,6 +6459,7 @@ async def test_session_community_create_case_insensitive_params():
         context = MockContext({
             "config_manager": mock_config_manager,
             "session_registry": mock_session_registry,
+            "instance_tracker": create_mock_instance_tracker(),
         })
         
         # This should NOT raise validation errors - parameters should be normalized
@@ -6394,6 +6503,7 @@ async def test_session_community_create_validates_programming_language_with_pip(
     context = MockContext({
         "config_manager": mock_config_manager,
         "session_registry": mock_session_registry,
+        "instance_tracker": create_mock_instance_tracker(),
     })
     
     # Should raise validation error: programming_language only for docker
@@ -6431,6 +6541,7 @@ async def test_session_community_create_validates_docker_image_with_pip():
     context = MockContext({
         "config_manager": mock_config_manager,
         "session_registry": mock_session_registry,
+        "instance_tracker": create_mock_instance_tracker(),
     })
     
     # Should raise validation error: docker_image only for docker
@@ -6468,6 +6579,7 @@ async def test_session_community_create_validates_docker_memory_limit_with_pip()
     context = MockContext({
         "config_manager": mock_config_manager,
         "session_registry": mock_session_registry,
+        "instance_tracker": create_mock_instance_tracker(),
     })
     
     # Should raise validation error: docker_memory_limit_gb only for docker
@@ -6505,6 +6617,7 @@ async def test_session_community_create_validates_docker_cpu_limit_with_pip():
     context = MockContext({
         "config_manager": mock_config_manager,
         "session_registry": mock_session_registry,
+        "instance_tracker": create_mock_instance_tracker(),
     })
     
     # Should raise validation error: docker_cpu_limit only for docker
@@ -6542,6 +6655,7 @@ async def test_session_community_create_validates_docker_volumes_with_pip():
     context = MockContext({
         "config_manager": mock_config_manager,
         "session_registry": mock_session_registry,
+        "instance_tracker": create_mock_instance_tracker(),
     })
     
     # Should raise validation error: docker_volumes only for docker
@@ -6579,6 +6693,7 @@ async def test_session_community_create_validates_mutually_exclusive_params():
     context = MockContext({
         "config_manager": mock_config_manager,
         "session_registry": mock_session_registry,
+        "instance_tracker": create_mock_instance_tracker(),
     })
     
     # Should raise validation error: can't specify both
@@ -6652,6 +6767,7 @@ async def test_session_community_delete_validates_source():
     context = MockContext({
         "config_manager": mock_config_manager,
         "session_registry": mock_session_registry,
+        "instance_tracker": create_mock_instance_tracker(),
     })
     
     # Attempt to delete static session
@@ -6690,6 +6806,7 @@ async def test_session_community_delete_allows_dynamic_sessions():
     context = MockContext({
         "config_manager": mock_config_manager,
         "session_registry": mock_session_registry,
+        "instance_tracker": create_mock_instance_tracker(),
     })
     
     # Delete dynamic session
@@ -6748,6 +6865,7 @@ async def test_session_community_create_explicit_docker_image():
         context = MockContext({
             "config_manager": mock_config_manager,
             "session_registry": mock_session_registry,
+            "instance_tracker": create_mock_instance_tracker(),
         })
         
         # Use explicit docker_image (power user override)
@@ -6801,6 +6919,7 @@ async def test_session_community_create_groovy_programming_language():
         context = MockContext({
             "config_manager": mock_config_manager,
             "session_registry": mock_session_registry,
+            "instance_tracker": create_mock_instance_tracker(),
         })
         
         # Use Groovy programming language
@@ -6837,6 +6956,7 @@ async def test_session_community_create_unsupported_programming_language():
     context = MockContext({
         "config_manager": mock_config_manager,
         "session_registry": mock_session_registry,
+        "instance_tracker": create_mock_instance_tracker(),
     })
     
     # Use unsupported programming language
@@ -6892,6 +7012,7 @@ async def test_session_community_create_groovy_from_config_defaults():
         context = MockContext({
             "config_manager": mock_config_manager,
             "session_registry": mock_session_registry,
+            "instance_tracker": create_mock_instance_tracker(),
         })
         
         # Don't specify programming_language - should use config default (Groovy)
@@ -6929,6 +7050,7 @@ async def test_session_community_create_invalid_config_programming_language():
     context = MockContext({
         "config_manager": mock_config_manager,
         "session_registry": mock_session_registry,
+        "instance_tracker": create_mock_instance_tracker(),
     })
     
     # Should fail with invalid config language error
@@ -6972,6 +7094,7 @@ async def test_session_details_to_dict_exception():
         context = MockContext({
             "config_manager": mock_config_manager,
             "session_registry": mock_session_registry,
+            "instance_tracker": create_mock_instance_tracker(),
         })
         
         result = await mcp_mod.session_details(context, session_id="community:dynamic:test-session")
