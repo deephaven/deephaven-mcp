@@ -98,6 +98,8 @@ from deephaven_mcp.client import (
     CoreSession,
 )
 
+from ._launcher import LaunchedSession
+
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -1884,6 +1886,145 @@ class CommunitySessionManager(BaseItemManager[CoreSession]):
             return (ResourceLivenessStatus.ONLINE, None)
         else:
             return (ResourceLivenessStatus.OFFLINE, "Session not alive")
+
+
+class DynamicCommunitySessionManager(CommunitySessionManager):
+    """
+    Manages a dynamically created Deephaven Community session.
+
+    This class extends CommunitySessionManager to add lifecycle management for
+    dynamically launched sessions (via Docker or pip). It tracks the launched
+    session which manages its own lifecycle.
+
+    Attributes:
+        launched_session (LaunchedSession): The launched session that manages its own lifecycle.
+    """
+
+    @override
+    def __init__(
+        self,
+        name: str,
+        config: dict[str, Any],
+        launched_session: LaunchedSession,
+    ):
+        """
+        Initialize a DynamicCommunitySessionManager.
+
+        Args:
+            name: Unique identifier for this manager instance.
+            config: Configuration dictionary for CoreSession creation.
+            launched_session: The launched session (includes auth info and lifecycle management).
+        """
+        super().__init__(name, config)
+        self.launched_session = launched_session
+
+        _LOGGER.debug(
+            f"[DynamicCommunitySessionManager] Created manager for '{name}' "
+            f"(port: {launched_session.port}, method: {launched_session.launch_method})"
+        )
+
+    @property
+    def connection_url(self) -> str:
+        """Get the base connection URL for this session."""
+        return self.launched_session.connection_url
+
+    @property
+    def connection_url_with_auth(self) -> str:
+        """Get the connection URL with authentication token (if applicable)."""
+        return self.launched_session.connection_url_with_auth
+
+    @property
+    def port(self) -> int:
+        """Get the port the session is listening on."""
+        return self.launched_session.port
+
+    @property
+    def launch_method(self) -> str:
+        """Get the launch method used (docker or pip)."""
+        return self.launched_session.launch_method
+
+    @property
+    def container_id(self) -> str | None:
+        """Get the Docker container ID (if launched via Docker)."""
+        if hasattr(self.launched_session, "container_id"):
+            return self.launched_session.container_id
+        return None
+
+    @property
+    def process_id(self) -> int | None:
+        """Get the process ID (if launched via pip)."""
+        if hasattr(self.launched_session, "process") and self.launched_session.process:
+            return self.launched_session.process.pid
+        return None
+
+    @override
+    async def close(self) -> None:
+        """
+        Close the session and stop the underlying process/container.
+
+        This method:
+        1. Closes the CoreSession connection (if established)
+        2. Stops the launched process/container
+        3. Cleans up all resources
+
+        Errors during cleanup are logged but don't prevent the cleanup from completing.
+        """
+        _LOGGER.info(
+            f"[DynamicCommunitySessionManager] Closing dynamic session '{self.full_name}'"
+        )
+
+        # First, close the session connection if it exists
+        try:
+            await super().close()
+        except Exception as e:
+            _LOGGER.warning(
+                f"[DynamicCommunitySessionManager] Error closing session connection for '{self.full_name}': {e}"
+            )
+
+        # Then, stop the launched session
+        try:
+            _LOGGER.debug(
+                f"[DynamicCommunitySessionManager] Stopping {self.launch_method} "
+                f"session '{self.full_name}'"
+            )
+            await self.launched_session.stop()
+            _LOGGER.info(
+                f"[DynamicCommunitySessionManager] Successfully stopped {self.launch_method} "
+                f"session '{self.full_name}'"
+            )
+        except Exception as e:
+            _LOGGER.error(
+                f"[DynamicCommunitySessionManager] Error stopping {self.launch_method} "
+                f"session '{self.full_name}': {e}",
+                exc_info=True,
+            )
+
+    def to_dict(self) -> dict[str, Any]:
+        """
+        Convert session information to a dictionary for API responses.
+
+        Returns:
+            dict: Session information including connection details.
+        """
+        base_dict = {
+            "session_id": self.full_name,
+            "session_type": "COMMUNITY",
+            "source": "dynamic",
+            "name": self._name,
+            "connection_url": self.connection_url,
+            "connection_url_with_auth": self.connection_url_with_auth,
+            "auth_type": self.launched_session.auth_type.upper(),  # "PSK" or "ANONYMOUS"
+            "launch_method": self.launch_method,
+            "port": self.port,
+        }
+
+        # Add launch-method-specific details
+        if self.launch_method == "docker":
+            base_dict["container_id"] = self.container_id
+        elif self.launch_method == "pip":
+            base_dict["process_id"] = self.process_id
+
+        return base_dict
 
 
 class EnterpriseSessionManager(BaseItemManager[CorePlusSession]):

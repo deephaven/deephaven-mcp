@@ -22,12 +22,19 @@ def test_imports_and_all():
         "BaseItemManager",
         "CombinedSessionRegistry",
         "CommunitySessionManager",
+        "DynamicCommunitySessionManager",
         "EnterpriseSessionManager",
         "CorePlusSessionFactoryManager",
         "CommunitySessionRegistry",
         "CorePlusSessionFactoryRegistry",
         "ResourceLivenessStatus",
         "SystemType",
+        "LaunchedSession",
+        "DockerLaunchedSession",
+        "PipLaunchedSession",
+        "launch_session",
+        "find_available_port",
+        "generate_auth_token",
     ]
     assert sorted(mod.__all__) == sorted(expected_all)
 

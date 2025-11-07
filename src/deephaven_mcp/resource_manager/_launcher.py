@@ -1,0 +1,847 @@
+"""Session launcher for dynamically creating Deephaven Community sessions.
+
+This module provides session classes for starting Deephaven Community sessions via:
+- **Docker containers** (DockerLaunchedSession) - Launches Deephaven in isolated containers
+- **pip-installed Deephaven** (PipLaunchedSession) - Launches Deephaven as local processes
+
+Design Pattern:
+- Sessions own their complete lifecycle (launch + stop)
+- Abstract base class (LaunchedSession) defines the session interface
+- Concrete subclasses implement launch() as classmethod factory and stop() as instance method
+- Idempotent stop() methods allow safe multiple calls without side effects
+
+Key Features:
+- **Runtime validation** of session parameters (ports, auth, resources)
+- **Process lifecycle management** with graceful shutdown and forced termination fallback
+- **Health checking** via wait_until_ready() with configurable timeouts and retries
+- **Graceful cleanup** with proper resource release
+- **Authentication support** via JVM system properties (PSK or anonymous)
+
+Typical Usage:
+    # Launch a Docker session
+    session = await DockerLaunchedSession.launch(
+        session_name="my-session",
+        port=10000,
+        auth_token="secret",
+        heap_size_gb=4.0,
+        extra_jvm_args=[],
+        environment_vars={},
+        docker_image="ghcr.io/deephaven/server:latest",
+        docker_memory_limit_gb=8.0,
+        docker_cpu_limit=None,
+        docker_volumes=[],
+    )
+    
+    # Wait for it to be ready
+    if await session.wait_until_ready():
+        print(f"Session ready at {session.connection_url}")
+    
+    # Use the session...
+    
+    # Clean up
+    await session.stop()
+
+Or use the convenience function:
+    session = await launch_session(
+        launch_method="docker",
+        session_name="my-session",
+        port=10000,
+        auth_token="secret",
+        heap_size_gb=4.0,
+        extra_jvm_args=[],
+        environment_vars={},
+        docker_image="ghcr.io/deephaven/server:latest",
+    )
+"""
+
+import asyncio
+import logging
+import os
+from abc import ABC, abstractmethod
+from typing import Literal
+
+import aiohttp
+
+from deephaven_mcp._exceptions import SessionLaunchError
+
+_LOGGER = logging.getLogger(__name__)
+
+
+class LaunchedSession(ABC):
+    """
+    Base class for a launched Deephaven session.
+
+    This abstract class defines the interface for sessions that have been launched
+    and are managing their own lifecycle. Subclasses implement launch() as a class
+    method factory and stop() for cleanup.
+
+    Attributes:
+        launch_method (Literal["docker", "pip"]): How the session was launched.
+        host (str): The host the session is listening on (typically "localhost").
+        port (int): The port the session is listening on.
+        auth_type (Literal["anonymous", "psk"]): Authentication type.
+        auth_token (str | None): Authentication token for PSK auth, or None for anonymous.
+    """
+
+    def __init__(
+        self,
+        launch_method: Literal["docker", "pip"],
+        host: str,
+        port: int,
+        auth_type: Literal["anonymous", "psk"],
+        auth_token: str | None,
+    ):
+        """Initialize a LaunchedSession instance.
+
+        This constructor performs runtime validation of all parameters to ensure
+        consistency between authentication settings and validates literal types that
+        are only checked statically by type checkers.
+
+        Args:
+            launch_method (Literal["docker", "pip"]): How the session was launched.
+                Must be exactly "docker" or "pip" (runtime validated).
+            host (str): The host the session is listening on (typically "localhost").
+            port (int): The port the session is listening on.
+            auth_type (Literal["anonymous", "psk"]): Authentication type.
+                Must be exactly "anonymous" or "psk" (runtime validated).
+            auth_token (str | None): Authentication token for PSK auth, or None for anonymous.
+                Required when auth_type="psk", must be None when auth_type="anonymous".
+
+        Raises:
+            ValueError: If parameters have invalid values or are inconsistent:
+                - launch_method not in ("docker", "pip")
+                - auth_type not in ("anonymous", "psk")
+                - auth_type="psk" but auth_token is None/empty
+                - auth_type="anonymous" but auth_token is provided
+        """
+        # Validate launch_method (runtime check, Literal is only static)
+        if launch_method not in ("docker", "pip"):
+            raise ValueError(
+                f"launch_method must be 'docker' or 'pip', got '{launch_method}'"
+            )
+
+        # Validate auth_type (runtime check, Literal is only static)
+        if auth_type not in ("anonymous", "psk"):
+            raise ValueError(
+                f"auth_type must be 'anonymous' or 'psk', got '{auth_type}'"
+            )
+
+        # Validate consistency between auth_type and auth_token
+        if auth_type == "psk" and not auth_token:
+            raise ValueError("auth_token is required when auth_type is 'psk'")
+
+        if auth_type == "anonymous" and auth_token:
+            raise ValueError(
+                "auth_token should not be provided when auth_type is 'anonymous'"
+            )
+
+        self.launch_method = launch_method
+        self.host = host
+        self.port = port
+        self.auth_type = auth_type
+        self.auth_token = auth_token
+
+    @property
+    def connection_url(self) -> str:
+        """Get the base connection URL for this session without authentication.
+        
+        This URL can be used for anonymous connections or when authentication will
+        be provided through other means (e.g., separate headers or tokens).
+        
+        Returns:
+            str: The HTTP URL (e.g., "http://localhost:10000") that can be used to
+                connect to the Deephaven server. This URL does not include authentication
+                parameters - use connection_url_with_auth for URLs with PSK tokens included.
+                
+        Example:
+            >>> session.connection_url
+            'http://localhost:10000'
+        """
+        return f"http://{self.host}:{self.port}"
+
+    @property
+    def connection_url_with_auth(self) -> str:
+        """Get the connection URL with authentication token included (if applicable).
+        
+        For PSK authentication, this appends the auth token as a query parameter.
+        For anonymous authentication, this returns the base URL without modifications.
+
+        Returns:
+            str: For PSK auth: URL with ?authToken=<token> appended (e.g.,
+                "http://localhost:10000/?authToken=abc123").
+                For anonymous auth: Base URL without auth parameters (e.g.,
+                "http://localhost:10000").
+        
+        Note:
+            For PSK auth, auth_token is guaranteed to be present due to __init__ validation,
+            so this property will never return a malformed URL.
+            
+        Example:
+            >>> # PSK authentication
+            >>> session.auth_type
+            'psk'
+            >>> session.connection_url_with_auth
+            'http://localhost:10000/?authToken=secret123'
+            >>> 
+            >>> # Anonymous authentication
+            >>> session.auth_type
+            'anonymous'
+            >>> session.connection_url_with_auth
+            'http://localhost:10000'
+        """
+        if self.auth_type == "psk":
+            # auth_token is guaranteed to exist for PSK (validated in __init__)
+            return f"{self.connection_url}/?authToken={self.auth_token}"
+        return self.connection_url
+
+    @abstractmethod
+    async def stop(self) -> None:
+        """
+        Stop this session and clean up all associated resources.
+        
+        Concrete implementations must be idempotent - calling this method multiple
+        times should be safe and subsequent calls after the first should be no-ops.
+
+        Raises:
+            SessionLaunchError: If stop fails due to errors terminating the underlying
+                process/container or cleaning up resources.
+        """
+        pass  # pragma: no cover
+
+    async def wait_until_ready(
+        self,
+        timeout_seconds: float = 60,
+        check_interval_seconds: float = 2,
+        max_retries: int = 3,
+    ) -> bool:
+        """
+        Wait for this session to become ready by polling its HTTP health endpoint.
+
+        A session is considered "ready" when its HTTP server responds with any of the
+        following status codes:
+        - 200 (OK) - Server is fully operational
+        - 404 (Not Found) - Server is running but endpoint not found (still means server is up)
+        - 401 (Unauthorized) - Server is running but requires authentication
+        - 403 (Forbidden) - Server is running but access is forbidden
+        
+        These status codes all indicate the server is running and accepting connections,
+        even if authentication or specific routing hasn't been fully configured yet.
+
+        This method implements a polling strategy with retries:
+        1. Makes up to max_retries connection attempts per check interval
+        2. Waits 0.5 seconds between retry attempts (within a check interval)
+        3. Waits check_interval_seconds between check intervals
+        4. Continues until session is ready or timeout_seconds is reached
+
+        Args:
+            timeout_seconds (float): Maximum time in seconds to wait for session to be ready.
+                Default: 60 seconds. If the timeout is reached, returns False.
+            check_interval_seconds (float): Time in seconds between health check attempts.
+                Default: 2 seconds. Actual wait may be shorter if approaching timeout.
+            max_retries (int): Number of connection attempts per check interval before waiting
+                for the next interval. Default: 3 attempts. Each failed attempt waits 0.5s
+                before retry.
+
+        Returns:
+            bool: True if session became ready within the timeout period, False if the
+                timeout was reached without the session becoming ready.
+
+        Raises:
+            SessionLaunchError: If an unexpected error occurs during health checking
+                (not connection errors, which are retried, but unexpected exceptions like
+                programming errors or system failures).
+                
+        Example:
+            >>> session = await DockerLaunchedSession.launch(...)
+            >>> # Wait up to 60 seconds with default settings
+            >>> if await session.wait_until_ready():
+            ...     print(f"Session ready at {session.connection_url}")
+            ... else:
+            ...     print("Session failed to start within timeout")
+            ...     await session.stop()  # Clean up failed session
+        """
+        _LOGGER.info(
+            f"[_launcher:LaunchedSession] Waiting for session on port {self.port} "
+            f"(timeout: {timeout_seconds}s, interval: {check_interval_seconds}s, retries: {max_retries})"
+        )
+
+        start_time = asyncio.get_event_loop().time()
+        check_count = 0
+
+        while True:
+            elapsed = asyncio.get_event_loop().time() - start_time
+            if elapsed >= timeout_seconds:
+                _LOGGER.warning(
+                    f"[_launcher:LaunchedSession] Timeout after {elapsed:.1f}s "
+                    f"({check_count} checks)"
+                )
+                return False
+
+            check_count += 1
+            _LOGGER.debug(
+                f"[_launcher:LaunchedSession] Health check #{check_count} "
+                f"(elapsed: {elapsed:.1f}s)"
+            )
+
+            # Try to connect with retries
+            for attempt in range(max_retries):
+                try:
+                    async with aiohttp.ClientSession() as client:
+                        # Try to connect to the Deephaven server
+                        # Use a simple GET to the root path - Deephaven should respond
+                        async with client.get(
+                            self.connection_url,
+                            timeout=aiohttp.ClientTimeout(total=5),
+                        ) as response:
+                            # Any response (even 404) means the server is up
+                            if response.status in (200, 404, 401, 403):
+                                _LOGGER.info(
+                                    f"[_launcher:LaunchedSession] Session ready on port {self.port} "
+                                    f"after {elapsed:.1f}s ({check_count} checks, attempt {attempt + 1})"
+                                )
+                                return True
+                            else:
+                                _LOGGER.debug(
+                                    f"[_launcher:LaunchedSession] Unexpected status {response.status}, "
+                                    f"attempt {attempt + 1}/{max_retries}"
+                                )
+
+                except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                    _LOGGER.debug(
+                        f"[_launcher:LaunchedSession] Connection failed (attempt {attempt + 1}/{max_retries}): {e}"
+                    )
+                    if attempt < max_retries - 1:
+                        # Brief backoff before retry
+                        await asyncio.sleep(0.5)
+                    continue
+
+                except Exception as e:
+                    _LOGGER.error(
+                        f"[_launcher:LaunchedSession] Unexpected error during health check: {e}"
+                    )
+                    raise SessionLaunchError(f"Health check failed: {e}") from e
+
+            # Wait before next check interval
+            remaining_time = timeout_seconds - (asyncio.get_event_loop().time() - start_time)
+            if remaining_time > 0:
+                wait_time = min(check_interval_seconds, remaining_time)
+                await asyncio.sleep(wait_time)
+
+
+class DockerLaunchedSession(LaunchedSession):
+    """A Deephaven session launched via Docker.
+    
+    This class extends LaunchedSession to manage Deephaven sessions running in Docker
+    containers. It handles container lifecycle (launch and stop) and provides
+    Docker-specific attributes.
+    
+    Attributes:
+        launch_method (Literal["docker"]): Always "docker" for this class.
+        host (str): The host the session is listening on (inherited from LaunchedSession).
+        port (int): The port the session is listening on (inherited from LaunchedSession).
+        auth_type (Literal["anonymous", "psk"]): Authentication type (inherited from LaunchedSession).
+        auth_token (str | None): Authentication token for PSK auth (inherited from LaunchedSession).
+        container_id (str): Docker container ID for this session.
+        _stopped (bool): Internal flag tracking whether stop() has been called (for idempotency).
+    """
+
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        auth_type: Literal["anonymous", "psk"],
+        auth_token: str | None,
+        container_id: str,
+    ):
+        """Initialize a DockerLaunchedSession.
+
+        Args:
+            host (str): The host the session is listening on.
+            port (int): The port the session is listening on.
+            auth_type (Literal["anonymous", "psk"]): Authentication type.
+            auth_token (str | None): Authentication token for PSK auth, or None for anonymous.
+            container_id (str): Docker container ID (must be non-empty).
+
+        Raises:
+            ValueError: If container_id is None or empty string.
+            ValueError: If auth_type/auth_token are inconsistent (inherited from LaunchedSession).
+        """
+        super().__init__("docker", host, port, auth_type, auth_token)
+        
+        # Validate container_id
+        if not container_id:
+            raise ValueError("container_id must be a non-empty string")
+        
+        self.container_id = container_id
+        self._stopped = False  # Track if stop() has been called for idempotency 
+
+    @classmethod
+    async def launch(
+        cls,
+        session_name: str,
+        port: int,
+        auth_token: str | None,
+        heap_size_gb: float,
+        extra_jvm_args: list[str],
+        environment_vars: dict[str, str],
+        docker_image: str,
+        docker_memory_limit_gb: float | None,
+        docker_cpu_limit: float | None,
+        docker_volumes: list[str],
+    ) -> "DockerLaunchedSession":
+        """
+        Launch a Deephaven session via Docker.
+
+        This method starts a Deephaven server in a Docker container with the specified
+        configuration. The container uses host networking mode for simple port access.
+
+        Requirements:
+            - Docker must be installed and the Docker daemon must be running
+            - The specified docker_image must be available (pulled or built locally)
+            - The specified port must be available on the host
+
+        Args:
+            session_name (str): Name for the Docker container (will be prefixed with "deephaven-mcp-").
+            port (int): Port to bind the session to.
+            auth_token (str | None): Authentication token (PSK) for the session, or None for anonymous.
+            heap_size_gb (float): JVM heap size in gigabytes.
+            extra_jvm_args (list[str]): Additional JVM arguments (empty list for none).
+            environment_vars (dict[str, str]): Environment variables to set (empty dict for none).
+            docker_image (str): Docker image to use (e.g., "ghcr.io/deephaven/server:latest").
+            docker_memory_limit_gb (float | None): Container memory limit in GB, or None for no limit.
+            docker_cpu_limit (float | None): Container CPU limit in cores, or None for no limit.
+            docker_volumes (list[str]): Volume mounts in format ["host:container:mode"] (empty list for none).
+
+        Returns:
+            DockerLaunchedSession: The launched Docker session.
+
+        Raises:
+            SessionLaunchError: If launch fails (e.g., Docker not available, image not found,
+                port already in use, or container fails to start).
+        """
+        _LOGGER.info(
+            f"[_launcher:DockerLaunchedSession] Launching Docker session '{session_name}' on port {port}"
+        )
+
+        # Build docker run command
+        cmd = [
+            "docker",
+            "run",
+            "--rm",  # Remove container when stopped
+            "--detach",  # Run in background
+            "--name",
+            f"deephaven-mcp-{session_name}",
+            "--network",
+            "host",  # Use host network for simple port access
+        ]
+
+        # Add resource limits if specified
+        if docker_memory_limit_gb is not None:
+            memory_bytes = int(docker_memory_limit_gb * 1024 * 1024 * 1024)
+            cmd.extend(["--memory", f"{memory_bytes}"])
+            _LOGGER.debug(
+                f"[_launcher:DockerLaunchedSession] Setting memory limit: {docker_memory_limit_gb}GB"
+            )
+
+        if docker_cpu_limit is not None:
+            cmd.extend(["--cpus", str(docker_cpu_limit)])
+            _LOGGER.debug(
+                f"[_launcher:DockerLaunchedSession] Setting CPU limit: {docker_cpu_limit} cores"
+            )
+
+        # Add volume mounts
+        if docker_volumes:
+            for volume in docker_volumes:
+                cmd.extend(["-v", volume])
+                _LOGGER.debug(f"[_launcher:DockerLaunchedSession] Adding volume mount: {volume}")
+
+        # Build JVM args
+        jvm_args = [f"-Xmx{heap_size_gb}g"]
+        if extra_jvm_args:
+            jvm_args.extend(extra_jvm_args)
+
+        # Set authentication via JVM system properties
+        if auth_token:
+            # PSK authentication: set the pre-shared key
+            jvm_args.append(f"-Dauthentication.psk={auth_token}")
+        else:
+            # Anonymous authentication: set the auth handler
+            jvm_args.append("-DAuthHandlers=io.deephaven.auth.AnonymousAuthenticationHandler")
+
+        # Set environment variables
+        env_vars = environment_vars.copy()
+        env_vars["START_OPTS"] = " ".join(jvm_args)
+        env_vars["DEEPHAVEN_PORT"] = str(port)
+
+        # Add environment variables to command
+        for key, value in env_vars.items():
+            cmd.extend(["-e", f"{key}={value}"])
+
+        # Add image
+        cmd.append(docker_image)
+
+        _LOGGER.debug(f"[_launcher:DockerLaunchedSession] Docker command: {' '.join(cmd)}")
+
+        # Launch container
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+
+            stdout, stderr = await process.communicate()
+
+            if process.returncode != 0:
+                error_msg = stderr.decode() if stderr else "Unknown error"
+                raise SessionLaunchError(
+                    f"Docker launch failed with return code {process.returncode}: {error_msg}"
+                )
+
+            container_id = stdout.decode().strip()
+            if not container_id:
+                error_msg = stderr.decode() if stderr else "No error output"
+                raise SessionLaunchError(
+                    f"Docker launch succeeded but returned empty container ID. Error: {error_msg}"
+                )
+            
+            _LOGGER.info(
+                f"[_launcher:DockerLaunchedSession] Successfully launched container {container_id[:12]}"
+            )
+
+            return cls(
+                host="localhost",
+                port=port,
+                auth_type="psk" if auth_token else "anonymous",
+                auth_token=auth_token,
+                container_id=container_id,
+            )
+
+        except Exception as e:
+            raise SessionLaunchError(f"Failed to launch Docker container: {e}") from e
+
+    async def stop(self) -> None:
+        """Stop this Docker container.
+
+        This method is idempotent - calling it multiple times is safe.
+        Subsequent calls after the first will be no-ops.
+
+        Raises:
+            SessionLaunchError: If stop fails.
+        """
+        # Idempotent: if already stopped, do nothing
+        if self._stopped:
+            _LOGGER.debug(
+                f"[_launcher:DockerLaunchedSession] Container {self.container_id[:12]} already stopped, skipping"
+            )
+            return
+
+        _LOGGER.info(
+            f"[_launcher:DockerLaunchedSession] Stopping container {self.container_id[:12]}"
+        )
+
+        try:
+            process = await asyncio.create_subprocess_exec(
+                "docker",
+                "stop",
+                self.container_id,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+
+            stdout, stderr = await process.communicate()
+
+            if process.returncode != 0:
+                error_msg = stderr.decode() if stderr else "Unknown error"
+                _LOGGER.warning(
+                    f"[_launcher:DockerLaunchedSession] Docker stop failed: {error_msg}"
+                )
+                # Try force kill
+                _LOGGER.info(
+                    f"[_launcher:DockerLaunchedSession] Attempting force kill of container {self.container_id[:12]}"
+                )
+                kill_process = await asyncio.create_subprocess_exec(
+                    "docker",
+                    "kill",
+                    self.container_id,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                await kill_process.communicate()
+
+            _LOGGER.info(
+                f"[_launcher:DockerLaunchedSession] Successfully stopped container {self.container_id[:12]}"
+            )
+            
+            # Mark as stopped for idempotency
+            self._stopped = True
+
+        except Exception as e:
+            raise SessionLaunchError(f"Failed to stop Docker container: {e}") from e
+
+
+class PipLaunchedSession(LaunchedSession):
+    """A Deephaven session launched via pip-installed deephaven.
+    
+    This class extends LaunchedSession to manage Deephaven sessions running as local
+    processes via the `deephaven server` command. It handles process lifecycle
+    (launch and stop) and provides process-specific attributes.
+    
+    Attributes:
+        launch_method (Literal["pip"]): Always "pip" for this class.
+        host (str): The host the session is listening on (inherited from LaunchedSession).
+        port (int): The port the session is listening on (inherited from LaunchedSession).
+        auth_type (Literal["anonymous", "psk"]): Authentication type (inherited from LaunchedSession).
+        auth_token (str | None): Authentication token for PSK auth (inherited from LaunchedSession).
+        process (asyncio.subprocess.Process): The subprocess running the Deephaven server.
+        _stopped (bool): Internal flag tracking whether stop() has been called (for idempotency).
+    """
+
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        auth_type: Literal["anonymous", "psk"],
+        auth_token: str | None,
+        process: asyncio.subprocess.Process,
+    ):
+        """Initialize a PipLaunchedSession.
+
+        Args:
+            host (str): The host the session is listening on.
+            port (int): The port the session is listening on.
+            auth_type (Literal["anonymous", "psk"]): Authentication type.
+            auth_token (str | None): Authentication token for PSK auth, or None for anonymous.
+            process (asyncio.subprocess.Process): The subprocess running the Deephaven server (must not be None).
+
+        Raises:
+            ValueError: If process is None.
+            ValueError: If auth_type/auth_token are inconsistent (inherited from LaunchedSession).
+        """
+        super().__init__("pip", host, port, auth_type, auth_token)
+        
+        # Validate process
+        if process is None:
+            raise ValueError("process must not be None")
+        
+        self.process = process
+        self._stopped = False  # Track if stop() has been called
+
+    @classmethod
+    async def launch(
+        cls,
+        session_name: str,
+        port: int,
+        auth_token: str | None,
+        heap_size_gb: float,
+        extra_jvm_args: list[str],
+        environment_vars: dict[str, str],
+    ) -> "PipLaunchedSession":
+        """
+        Launch a Deephaven session via pip-installed deephaven.
+
+        This method starts a Deephaven server using the `deephaven server` command,
+        which must be available in the current environment (typically installed via pip).
+
+        Requirements:
+            - The `deephaven` package must be installed (e.g., `pip install deephaven-server`)
+            - The `deephaven` command must be in PATH
+            - The specified port must be available
+
+        Args:
+            session_name (str): Name for the session (used in logging).
+            port (int): Port to bind the session to.
+            auth_token (str | None): Authentication token (PSK) for the session, or None for anonymous.
+            heap_size_gb (float): JVM heap size in gigabytes.
+            extra_jvm_args (list[str]): Additional JVM arguments.
+            environment_vars (dict[str, str]): Environment variables to set (empty dict for none).
+
+        Returns:
+            PipLaunchedSession: The launched session.
+
+        Raises:
+            SessionLaunchError: If launch fails (e.g., deephaven command not found,
+                port already in use, or server fails to start).
+        """
+        _LOGGER.info(
+            f"[_launcher:PipLaunchedSession] Launching pip session '{session_name}' on port {port}"
+        )
+
+        # Build JVM args
+        jvm_args = [f"-Xmx{heap_size_gb}g"]
+        jvm_args.extend(extra_jvm_args)
+
+        # Set authentication via JVM system properties
+        if auth_token:
+            # PSK authentication: set the pre-shared key
+            jvm_args.append(f"-Dauthentication.psk={auth_token}")
+        else:
+            # Anonymous authentication: set the auth handler
+            jvm_args.append("-DAuthHandlers=io.deephaven.auth.AnonymousAuthenticationHandler")
+
+        jvm_args_str = " ".join(jvm_args)
+
+        # Build command
+        cmd = [
+            "deephaven",
+            "server",
+            "--port",
+            str(port),
+            "--no-browser",  # Never open browser for MCP sessions
+            "--jvm-args",
+            jvm_args_str,
+        ]
+
+        # Set up environment
+        env = environment_vars.copy()
+
+        _LOGGER.debug(f"[_launcher:PipLaunchedSession] Command: {' '.join(cmd)}")
+
+        # Launch process
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env={**os.environ, **env},  # Merge with current environment
+            )
+
+            _LOGGER.info(
+                f"[_launcher:PipLaunchedSession] Successfully launched process PID {process.pid}"
+            )
+
+            return cls(
+                host="localhost",
+                port=port,
+                auth_type="psk" if auth_token else "anonymous",
+                auth_token=auth_token,
+                process=process,
+            )
+
+        except Exception as e:
+            raise SessionLaunchError(f"Failed to launch pip session: {e}") from e
+
+    async def stop(self) -> None:
+        """Stop this pip-launched session.
+
+        This method is idempotent - calling it multiple times is safe.
+        Subsequent calls after the first will be no-ops.
+
+        Raises:
+            SessionLaunchError: If stop fails.
+        """
+        # Idempotent: if already stopped, do nothing
+        if self._stopped:
+            _LOGGER.debug(
+                f"[_launcher:PipLaunchedSession] Process PID {self.process.pid} already stopped, skipping"
+            )
+            return
+
+        _LOGGER.info(f"[_launcher:PipLaunchedSession] Stopping process PID {self.process.pid}")
+
+        try:
+            # Try graceful termination first
+            self.process.terminate()
+
+            try:
+                # Wait up to 10 seconds for graceful shutdown
+                await asyncio.wait_for(self.process.wait(), timeout=10.0)
+                _LOGGER.info(
+                    f"[_launcher:PipLaunchedSession] Process PID {self.process.pid} terminated gracefully"
+                )
+            except asyncio.TimeoutError:
+                # Force kill if graceful shutdown times out
+                _LOGGER.warning(
+                    f"[_launcher:PipLaunchedSession] Process PID {self.process.pid} did not terminate gracefully, forcing kill"
+                )
+                self.process.kill()
+                await self.process.wait()
+                _LOGGER.info(
+                    f"[_launcher:PipLaunchedSession] Process PID {self.process.pid} killed"
+                )
+            
+            # Mark as stopped for idempotency
+            self._stopped = True
+
+        except Exception as e:
+            raise SessionLaunchError(f"Failed to stop pip session: {e}") from e
+
+
+async def launch_session(
+    launch_method: Literal["docker", "pip"],
+    session_name: str,
+    port: int,
+    auth_token: str | None,
+    heap_size_gb: float,
+    extra_jvm_args: list[str],
+    environment_vars: dict[str, str],
+    docker_image: str = "",
+    docker_memory_limit_gb: float | None = None,
+    docker_cpu_limit: float | None = None,
+    docker_volumes: list[str] = [],
+) -> LaunchedSession:
+    """
+    Launch a Deephaven session using the specified method.
+
+    This is a convenience function that delegates to the appropriate session class's
+    launch() method based on the launch_method parameter.
+
+    Args:
+        launch_method (Literal["docker", "pip"]): The launch method.
+        session_name (str): Name for the session.
+        port (int): Port to bind the session to.
+        auth_token (str | None): Authentication token (PSK) for the session, or None for anonymous.
+        heap_size_gb (float): JVM heap size in gigabytes.
+        extra_jvm_args (list[str]): Additional JVM arguments.
+        environment_vars (dict[str, str]): Environment variables to set.
+        docker_image (str): Docker image to use (docker only).
+        docker_memory_limit_gb (float | None): Container memory limit in GB (docker only).
+        docker_cpu_limit (float | None): Container CPU limit in cores (docker only).
+        docker_volumes (list[str]): Volume mounts (docker only).
+
+    Returns:
+        LaunchedSession: The launched session (DockerLaunchedSession or PipLaunchedSession).
+
+    Raises:
+        ValueError: If launch_method is not supported, or if Docker-specific parameters
+            are provided when launch_method is "pip".
+        SessionLaunchError: If launch fails.
+    """
+    _LOGGER.debug(
+        f"[_launcher:launch_session] Launching {launch_method} session '{session_name}' on port {port}"
+    )
+    
+    if launch_method == "docker":
+        return await DockerLaunchedSession.launch(
+            session_name=session_name,
+            port=port,
+            auth_token=auth_token,
+            heap_size_gb=heap_size_gb,
+            extra_jvm_args=extra_jvm_args,
+            environment_vars=environment_vars,
+            docker_image=docker_image,
+            docker_memory_limit_gb=docker_memory_limit_gb,
+            docker_cpu_limit=docker_cpu_limit,
+            docker_volumes=docker_volumes,
+        )
+    elif launch_method == "pip":
+        # Validate that Docker-specific parameters aren't used with pip
+        if docker_image:
+            raise ValueError("docker_image parameter cannot be used with launch_method='pip'")
+        if docker_memory_limit_gb is not None:
+            raise ValueError("docker_memory_limit_gb parameter cannot be used with launch_method='pip'")
+        if docker_cpu_limit is not None:
+            raise ValueError("docker_cpu_limit parameter cannot be used with launch_method='pip'")
+        if docker_volumes:
+            raise ValueError("docker_volumes parameter cannot be used with launch_method='pip'")
+        
+        return await PipLaunchedSession.launch(
+            session_name=session_name,
+            port=port,
+            auth_token=auth_token,
+            heap_size_gb=heap_size_gb,
+            extra_jvm_args=extra_jvm_args,
+            environment_vars=environment_vars,
+        )
+    else:
+        raise ValueError(f"Unsupported launch method: {launch_method}")
