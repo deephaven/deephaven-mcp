@@ -10,7 +10,7 @@ Overview:
     The resource_manager package provides two primary patterns for working with Deephaven:
     
     1. **Static Sessions** (pre-configured): Connect to existing Deephaven servers using
-       CommunitySessionManager or EnterpriseSessionManager. Sessions are loaded from
+       StaticCommunitySessionManager or EnterpriseSessionManager. Sessions are loaded from
        configuration and cached for reuse.
     
     2. **Dynamic Sessions** (on-demand): Launch new Deephaven servers on-demand using
@@ -18,9 +18,13 @@ Overview:
        manages lifecycle, and handles cleanup.
 
 Exports - Session Managers:
-    - CommunitySessionManager: Manages lifecycle of pre-configured Deephaven Community sessions.
-      Connects to existing servers specified in configuration. Used for static deployments
-      where servers are already running.
+    - CommunitySessionManager: Abstract base class for Deephaven Community session managers.
+      Provides common functionality for both static and dynamic sessions. Not typically
+      instantiated directly - use StaticCommunitySessionManager or DynamicCommunitySessionManager.
+      
+    - StaticCommunitySessionManager: Manages lifecycle of statically configured Deephaven
+      Community sessions. Connects to pre-existing servers specified in configuration files.
+      Used for servers that are already running and managed externally.
       
     - DynamicCommunitySessionManager: Manages lifecycle of dynamically launched Deephaven
       Community sessions. Launches sessions on-demand via Docker or pip, automatically handles
@@ -71,8 +75,9 @@ Exports - Enums:
     - SystemType: Backend system type enum with values COMMUNITY and ENTERPRISE. Used to
       distinguish between Deephaven Community and Enterprise (Core+) deployments.
       
-    - ResourceLivenessStatus: Resource health status enum with values ALIVE, DEAD, and UNKNOWN.
-      Used by managers to track connection health and determine when to recreate resources.
+    - ResourceLivenessStatus: Resource health status enum with values ONLINE, OFFLINE,
+      UNAUTHORIZED, MISCONFIGURED, and UNKNOWN. Used by managers to track connection health
+      and determine when to recreate resources.
 
 Features:
     - Coroutine-safe item cache keyed by name, protected by asyncio.Lock
@@ -111,7 +116,7 @@ Usage Example - Static Sessions:
     >>> 
     >>> # Get a pre-configured session manager
     >>> manager = await registry.get("my-session")
-    >>> session = await manager.get_session()
+    >>> session = await manager.get()
     >>> # Use session...
     >>> await session.close()
 
@@ -157,6 +162,7 @@ from ._manager import (
     DynamicCommunitySessionManager,
     EnterpriseSessionManager,
     ResourceLivenessStatus,
+    StaticCommunitySessionManager,
     SystemType,
 )
 from ._registry import CommunitySessionRegistry, CorePlusSessionFactoryRegistry
@@ -168,6 +174,7 @@ __all__ = [
     "ResourceLivenessStatus",
     "BaseItemManager",
     "CommunitySessionManager",
+    "StaticCommunitySessionManager",
     "DynamicCommunitySessionManager",
     "EnterpriseSessionManager",
     "CorePlusSessionFactoryManager",

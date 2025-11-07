@@ -52,6 +52,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Community session creation via pip launcher
+community = [
+    "deephaven-server>=0.39",  # Deephaven server for pip-based session launching
+]
+
 # Testing (coverage, etc.)
 test = [
     "pytest>=8.0.0", # Test framework

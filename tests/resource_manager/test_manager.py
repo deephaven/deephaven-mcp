@@ -339,9 +339,23 @@ async def test_close_logs_on_liveness_failure(monkeypatch, caplog):
 
 
 @pytest.mark.asyncio
+async def test_static_community_session_manager_has_correct_source():
+    """Test that StaticCommunitySessionManager sets source to 'config'."""
+    from deephaven_mcp.resource_manager import StaticCommunitySessionManager, SystemType
+    
+    manager = StaticCommunitySessionManager("test-session", {"server": "localhost"})
+    
+    assert manager.source == "config"
+    assert manager.system_type == SystemType.COMMUNITY
+    assert manager.full_name == "community:config:test-session"
+    assert manager.name == "test-session"
+
+
+@pytest.mark.asyncio
 async def test_community_session_manager_check_liveness_offline(monkeypatch):
     """Covers line 1698: CommunitySessionManager._check_liveness returns OFFLINE if is_alive() is False."""
-    mgr = CommunitySessionManager("test", {"server": "foo"})
+    from deephaven_mcp.resource_manager import StaticCommunitySessionManager
+    mgr = StaticCommunitySessionManager("test", {"server": "foo"})
     mock_session = Mock()
     mock_session.is_alive = AsyncMock(return_value=False)
     result = await mgr._check_liveness(mock_session)
@@ -386,8 +400,9 @@ class TestCommunitySessionManager:
     @patch("deephaven_mcp.client.CoreSession.from_config")
     async def test_create_item(self, mock_from_config):
         """Test that _create_item correctly calls CoreSession.from_config."""
+        from deephaven_mcp.resource_manager import StaticCommunitySessionManager
         mock_from_config.return_value = "mock_session"
-        manager = CommunitySessionManager(
+        manager = StaticCommunitySessionManager(
             name="test_community",
             config={"host": "localhost"},
         )
@@ -399,8 +414,9 @@ class TestCommunitySessionManager:
     @patch("deephaven_mcp.client.CoreSession.from_config")
     async def test_create_item_raises_exception(self, mock_from_config):
         """Test that _create_item raises SessionCreationError on failure."""
+        from deephaven_mcp.resource_manager import StaticCommunitySessionManager
         mock_from_config.side_effect = Exception("Connection failed")
-        manager = CommunitySessionManager(
+        manager = StaticCommunitySessionManager(
             name="test_community",
             config={},
         )
@@ -410,7 +426,8 @@ class TestCommunitySessionManager:
     @pytest.mark.asyncio
     async def test_check_liveness(self):
         """Test that _check_liveness correctly calls the session's is_alive method."""
-        manager = CommunitySessionManager(
+        from deephaven_mcp.resource_manager import StaticCommunitySessionManager
+        manager = StaticCommunitySessionManager(
             name="test_community",
             config={},
         )

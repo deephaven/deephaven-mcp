@@ -1622,7 +1622,7 @@ class CommunitySessionManager(BaseItemManager[CoreSession]):
         SystemType.COMMUNITY: The system type constant for Community deployments
     """
 
-    def __init__(self, name: str, config: dict[str, Any]):
+    def __init__(self, name: str, config: dict[str, Any], source: str):
         """Initialize a new Community session manager with configuration.
 
         Creates a new manager instance for handling a Deephaven Community session
@@ -1633,9 +1633,9 @@ class CommunitySessionManager(BaseItemManager[CoreSession]):
         Manager Identity:
             The manager is configured with:
             - **system_type**: Set to SystemType.COMMUNITY for Community deployments
-            - **source**: Set to "community" to identify the configuration source
+            - **source**: Identifies where this session came from (e.g., "config" for static, "dynamic" for runtime)
             - **name**: The unique identifier for this specific manager instance
-            - **full_name**: Computed as "community.{name}" for global uniqueness
+            - **full_name**: Computed as "community:{source}:{name}" for global uniqueness
 
         Configuration Storage:
             The provided configuration dictionary is stored internally and used
@@ -1689,6 +1689,9 @@ class CommunitySessionManager(BaseItemManager[CoreSession]):
             config: Configuration dictionary containing all parameters needed for
                 CoreSession creation. Must include at minimum a "server" parameter.
                 Additional parameters depend on authentication and session requirements.
+            source: Source identifier indicating where this session came from (required).
+                Use "config" for static sessions from configuration files.
+                Use "dynamic" for sessions created at runtime via MCP tools.
 
         Thread Safety:
             This constructor is thread-safe and can be called from any asyncio task.
@@ -1701,7 +1704,7 @@ class CommunitySessionManager(BaseItemManager[CoreSession]):
         """
         super().__init__(
             system_type=SystemType.COMMUNITY,
-            source="community",
+            source=source,
             name=name,
         )
         self._config = config
@@ -1888,16 +1891,109 @@ class CommunitySessionManager(BaseItemManager[CoreSession]):
             return (ResourceLivenessStatus.OFFLINE, "Session not alive")
 
 
+class StaticCommunitySessionManager(CommunitySessionManager):
+    """
+    Manages a statically configured Deephaven Community session.
+
+    This class extends CommunitySessionManager for sessions defined in configuration files.
+    These sessions connect to pre-existing Deephaven servers that are managed externally
+    (e.g., servers started manually or by other processes).
+
+    Key Characteristics:
+        - **Source**: Automatically set to "config" to identify configuration-based sessions
+        - **Server Lifecycle**: Does NOT manage server startup/shutdown (server must exist)
+        - **Configuration**: Loaded from deephaven_mcp.json or similar config files
+        - **Full Name Format**: "community:config:{name}"
+
+    Usage:
+        Typically created by CommunitySessionRegistry when loading configuration:
+        ```python
+        manager = StaticCommunitySessionManager("local-dev", {
+            "server": "http://localhost:10000",
+            "auth_type": "anonymous"
+        })
+        session = await manager.get()
+        ```
+
+    See Also:
+        DynamicCommunitySessionManager: For runtime-created sessions with lifecycle management
+        CommunitySessionRegistry: Registry that creates these managers from configuration
+    """
+
+    @override
+    def __init__(self, name: str, config: dict[str, Any]):
+        """
+        Initialize a StaticCommunitySessionManager for a configuration-based session.
+
+        Args:
+            name (str): Unique identifier for this manager instance within the registry.
+                Used to construct full_name as "community:config:{name}".
+            config (dict[str, Any]): Configuration dictionary for CoreSession creation.
+                Must contain server connection details (host, port, auth, etc.).
+
+        Note:
+            The source parameter is automatically set to "config" - callers do not need
+            to specify it. This distinguishes static sessions from dynamic ones.
+        """
+        # Call parent with source="config" to identify as configuration-based
+        super().__init__(name, config, source="config")
+
+
 class DynamicCommunitySessionManager(CommunitySessionManager):
     """
     Manages a dynamically created Deephaven Community session.
 
-    This class extends CommunitySessionManager to add lifecycle management for
-    dynamically launched sessions (via Docker or pip). It tracks the launched
-    session which manages its own lifecycle.
+    This class extends CommunitySessionManager to add full lifecycle management for
+    sessions that are launched on-demand via Docker containers or pip-installed servers.
+    Unlike static sessions, this manager controls server startup, monitoring, and shutdown.
+
+    Key Characteristics:
+        - **Source**: Automatically set to "dynamic" to identify runtime-created sessions
+        - **Server Lifecycle**: DOES manage server startup/shutdown (via LaunchedSession)
+        - **Launch Methods**: Supports Docker containers or pip-installed deephaven-server
+        - **Full Name Format**: "community:dynamic:{name}"
+        - **Created By**: MCP tools like session_community_create
+
+    Additional Properties:
+        This class provides convenient properties that delegate to the launched_session:
+        - connection_url: Base HTTP URL for the session
+        - connection_url_with_auth: URL with authentication token included
+        - port: Port number the session is listening on
+        - container_id: Docker container ID (for Docker launches)
+        - process_id: Process ID (for pip launches)
+
+    Lifecycle Management:
+        The launched_session handles:
+        - Starting the Docker container or pip process
+        - Waiting for the server to be ready
+        - Stopping the container/process on close()
+        - Health monitoring via wait_until_ready()
+
+    Usage:
+        Typically created by MCP tools during session_community_create:
+        ```python
+        launched = await launch_session(
+            launch_method="docker",
+            port=10000,
+            programming_language="python",
+            auth_type="PSK",
+            auth_token="secret"
+        )
+        manager = DynamicCommunitySessionManager(
+            name="my-session",
+            config={"host": "localhost", "port": 10000, "auth_token": "secret"},
+            launched_session=launched
+        )
+        ```
 
     Attributes:
-        launched_session (LaunchedSession): The launched session that manages its own lifecycle.
+        launched_session (LaunchedSession): The launched session that manages server lifecycle.
+            Can be DockerLaunchedSession or PipLaunchedSession.
+
+    See Also:
+        StaticCommunitySessionManager: For pre-existing servers from configuration
+        LaunchedSession: Base class for Docker/pip session launchers
+        launch_session: Factory function that creates launched sessions
     """
 
     @override
@@ -1908,14 +2004,23 @@ class DynamicCommunitySessionManager(CommunitySessionManager):
         launched_session: LaunchedSession,
     ):
         """
-        Initialize a DynamicCommunitySessionManager.
+        Initialize a DynamicCommunitySessionManager for a runtime-created session.
 
         Args:
-            name: Unique identifier for this manager instance.
-            config: Configuration dictionary for CoreSession creation.
-            launched_session: The launched session (includes auth info and lifecycle management).
+            name (str): Unique identifier for this manager instance within the registry.
+                Used to construct full_name as "community:dynamic:{name}".
+            config (dict[str, Any]): Configuration dictionary for CoreSession creation.
+                Must contain connection details matching the launched session (host, port, auth).
+            launched_session (LaunchedSession): The launched session that provides server
+                lifecycle management. Can be DockerLaunchedSession or PipLaunchedSession.
+
+        Note:
+            The source parameter is automatically set to "dynamic" - callers do not need
+            to specify it. This distinguishes dynamic sessions from static ones and enables
+            proper cleanup and validation in deletion operations.
         """
-        super().__init__(name, config)
+        # Call parent with source="dynamic" to distinguish from static config sessions
+        super().__init__(name, config, source="dynamic")
         self.launched_session = launched_session
 
         _LOGGER.debug(

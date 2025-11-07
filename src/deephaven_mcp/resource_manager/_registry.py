@@ -43,7 +43,11 @@ from deephaven_mcp._exceptions import (
 )
 from deephaven_mcp.client import is_enterprise_available
 
-from ._manager import CommunitySessionManager, CorePlusSessionFactoryManager
+from ._manager import (
+    CommunitySessionManager,
+    CorePlusSessionFactoryManager,
+    StaticCommunitySessionManager,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -232,7 +236,7 @@ class CommunitySessionRegistry(BaseRegistry[CommunitySessionManager]):
                 self.__class__.__name__,
                 session_name,
             )
-            self._items[session_name] = CommunitySessionManager(
+            self._items[session_name] = StaticCommunitySessionManager(
                 session_name, session_config
             )
 
