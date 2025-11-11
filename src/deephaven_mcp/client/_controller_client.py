@@ -492,7 +492,7 @@ class CorePlusControllerClient(
     async def make_temporary_config(
         self,
         name: str,
-        heap_size_gb: float,
+        heap_size_gb: int,
         server: str | None = None,
         extra_jvm_args: list[str] | None = None,
         extra_environment_vars: list[str] | None = None,
@@ -510,7 +510,7 @@ class CorePlusControllerClient(
 
         Args:
             name: The name of the temporary query. This is used for identification.
-            heap_size_gb: The heap size of the worker in gigabytes (GB).
+            heap_size_gb: The heap size of the worker in gigabytes (integer only, e.g., 8 for -Xmx8g).
             server: The specific server to run the worker on. If None, the controller
                 will choose a suitable server.
             extra_jvm_args: A list of extra JVM arguments to pass to the worker.

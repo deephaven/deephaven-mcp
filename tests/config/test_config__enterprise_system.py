@@ -587,7 +587,7 @@ def test_session_creation_valid_with_all_defaults():
             "session_creation": {
                 "max_concurrent_sessions": 3,
                 "defaults": {
-                    "heap_size_gb": 8.0,
+                    "heap_size_gb": 8,
                     "auto_delete_timeout": 600,
                     "server": "gpu-server-1",
                     "engine": "DeephavenCommunity",
@@ -619,7 +619,7 @@ def test_session_creation_valid_partial_defaults():
             "password": "pass",
             "session_creation": {
                 "defaults": {
-                    "heap_size_gb": 4.5,  # float is valid
+                    "heap_size_gb": 4,  # int required
                     "server": "worker-node-east",
                 }
                 # max_concurrent_sessions omitted - validator allows omission
@@ -781,13 +781,13 @@ def test_session_creation_invalid_heap_size_wrong_type():
             "username": "user",
             "password": "pass",
             "session_creation": {
-                "defaults": {"heap_size_gb": "invalid"}  # Should be int or float
+                "defaults": {"heap_size_gb": "invalid"}  # Should be int
             },
         }
     }
     with pytest.raises(
         EnterpriseSystemConfigurationError,
-        match=r"Field 'heap_size_gb' in session_creation defaults for enterprise system 'test_system' must be one of types \(int, float\), but got str\.",
+        match=r"Field 'heap_size_gb' in session_creation defaults for enterprise system 'test_system' must be of type int, but got str\.",
     ):
         validate_enterprise_systems_config(config)
 

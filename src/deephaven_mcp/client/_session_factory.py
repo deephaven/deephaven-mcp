@@ -684,7 +684,7 @@ class CorePlusSessionFactory(
     async def connect_to_new_worker(
         self: "CorePlusSessionFactory",
         name: str | None = None,
-        heap_size_gb: float | None = None,
+        heap_size_gb: int | None = None,
         server: str | None = None,
         extra_jvm_args: list[str] | None = None,
         extra_environment_vars: list[str] | None = None,
@@ -714,7 +714,7 @@ class CorePlusSessionFactory(
                 identify your worker in monitoring tools and logs.
 
             # Resource configuration
-            heap_size_gb: JVM heap size in gigabytes. Determines the maximum amount of memory available
+            heap_size_gb: JVM heap size in gigabytes (integer only, e.g., 8 for -Xmx8g). Determines the maximum amount of memory available
                 to the worker process. Larger values are necessary for processing larger datasets, but
                 require more system resources. If None (default), the server's default heap size is used.
             server: Specific server to run the worker on. If None (default), the server will be chosen

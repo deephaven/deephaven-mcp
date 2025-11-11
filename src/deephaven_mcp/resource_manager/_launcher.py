@@ -23,13 +23,13 @@ Typical Usage:
         session_name="my-session",
         port=10000,
         auth_token="secret",
-        heap_size_gb=4.0,
+        heap_size_gb=4,
         extra_jvm_args=[],
         environment_vars={},
         docker_image="ghcr.io/deephaven/server:latest",
         docker_memory_limit_gb=8.0,
         docker_cpu_limit=None,
-        docker_volumes=[],
+        docker_volumes=[],  # Empty list for no volumes, or ["host:container:ro"]
     )
     
     # Wait for it to be ready
@@ -47,7 +47,7 @@ Or use the convenience function:
         session_name="my-session",
         port=10000,
         auth_token="secret",
-        heap_size_gb=4.0,
+        heap_size_gb=4,
         extra_jvm_args=[],
         environment_vars={},
         docker_image="ghcr.io/deephaven/server:latest",
@@ -57,7 +57,9 @@ Or use the convenience function:
 import asyncio
 import logging
 import os
+import sys
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import Literal
 
 import aiohttp
@@ -65,6 +67,33 @@ import aiohttp
 from deephaven_mcp._exceptions import SessionLaunchError
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _find_deephaven_executable() -> str:
+    """
+    Find the deephaven executable in the current Python venv (private helper).
+    
+    This ensures we use the deephaven version from the same venv as the MCP server,
+    avoiding version mismatch issues and segfaults.
+    
+    Returns:
+        str: Path to deephaven executable (absolute path from venv, or "deephaven" for PATH fallback).
+    
+    Note:
+        This is a private helper function. Use PipLaunchedSession.launch() for public API.
+    """
+    # Check in the same venv as the current Python
+    python_executable = Path(sys.executable)
+    deephaven_executable = python_executable.parent / "deephaven"
+    
+    if deephaven_executable.exists():
+        return str(deephaven_executable)
+    
+    # Fall back to PATH
+    _LOGGER.warning(
+        f"deephaven not found in venv at {deephaven_executable}, falling back to PATH"
+    )
+    return "deephaven"
 
 
 class LaunchedSession(ABC):
@@ -283,6 +312,14 @@ class LaunchedSession(ABC):
                 f"(elapsed: {elapsed:.1f}s)"
             )
 
+            # For pip sessions, check if process has crashed
+            if hasattr(self, 'process') and self.process.returncode is not None:
+                _LOGGER.error(
+                    f"[_launcher:LaunchedSession] Process terminated during health check "
+                    f"with exit code {self.process.returncode}"
+                )
+                return False
+
             # Try to connect with retries
             for attempt in range(max_retries):
                 try:
@@ -381,7 +418,7 @@ class DockerLaunchedSession(LaunchedSession):
         session_name: str,
         port: int,
         auth_token: str | None,
-        heap_size_gb: float,
+        heap_size_gb: int,
         extra_jvm_args: list[str],
         environment_vars: dict[str, str],
         docker_image: str,
@@ -394,7 +431,7 @@ class DockerLaunchedSession(LaunchedSession):
         Launch a Deephaven session via Docker.
 
         This method starts a Deephaven server in a Docker container with the specified
-        configuration. The container uses host networking mode for simple port access.
+        configuration. The container uses port mapping to expose the Deephaven server.
 
         Requirements:
             - Docker must be installed and the Docker daemon must be running
@@ -405,7 +442,7 @@ class DockerLaunchedSession(LaunchedSession):
             session_name (str): Name for the Docker container (will be prefixed with "deephaven-mcp-").
             port (int): Port to bind the session to.
             auth_token (str | None): Authentication token (PSK) for the session, or None for anonymous.
-            heap_size_gb (float): JVM heap size in gigabytes.
+            heap_size_gb (int): JVM heap size in gigabytes (integer only, e.g., 2 for -Xmx2g).
             extra_jvm_args (list[str]): Additional JVM arguments (empty list for none).
             environment_vars (dict[str, str]): Environment variables to set (empty dict for none).
             docker_image (str): Docker image to use (e.g., "ghcr.io/deephaven/server:latest").
@@ -434,8 +471,8 @@ class DockerLaunchedSession(LaunchedSession):
             "--detach",  # Run in background
             "--name",
             f"deephaven-mcp-{session_name}",
-            "--network",
-            "host",  # Use host network for simple port access
+            "-p",
+            f"{port}:10000",  # Map host port to container's port 10000
         ]
         
         # Add instance tracking label for orphan cleanup
@@ -481,7 +518,6 @@ class DockerLaunchedSession(LaunchedSession):
         # Set environment variables
         env_vars = environment_vars.copy()
         env_vars["START_OPTS"] = " ".join(jvm_args)
-        env_vars["DEEPHAVEN_PORT"] = str(port)
 
         # Add environment variables to command
         for key, value in env_vars.items():
@@ -643,7 +679,7 @@ class PipLaunchedSession(LaunchedSession):
         session_name: str,
         port: int,
         auth_token: str | None,
-        heap_size_gb: float,
+        heap_size_gb: int,
         extra_jvm_args: list[str],
         environment_vars: dict[str, str],
     ) -> "PipLaunchedSession":
@@ -654,15 +690,15 @@ class PipLaunchedSession(LaunchedSession):
         which must be available in the current environment (typically installed via pip).
 
         Requirements:
-            - The `deephaven` package must be installed (e.g., `pip install deephaven-server`)
-            - The `deephaven` command must be in PATH
+            - The `deephaven-server` package must be installed (e.g., `pip install deephaven-server`)
+            - The `deephaven` executable must be available (checked in venv first, then PATH)
             - The specified port must be available
 
         Args:
             session_name (str): Name for the session (used in logging).
             port (int): Port to bind the session to.
             auth_token (str | None): Authentication token (PSK) for the session, or None for anonymous.
-            heap_size_gb (float): JVM heap size in gigabytes.
+            heap_size_gb (int): JVM heap size in gigabytes (integer only, e.g., 2 for -Xmx2g).
             extra_jvm_args (list[str]): Additional JVM arguments.
             environment_vars (dict[str, str]): Environment variables to set (empty dict for none).
 
@@ -691,9 +727,15 @@ class PipLaunchedSession(LaunchedSession):
 
         jvm_args_str = " ".join(jvm_args)
 
+        # Find deephaven executable in the same venv as the current Python
+        deephaven_cmd = _find_deephaven_executable()
+        _LOGGER.debug(
+            f"[_launcher:PipLaunchedSession] Using deephaven executable: {deephaven_cmd}"
+        )
+
         # Build command
         cmd = [
-            "deephaven",
+            deephaven_cmd,
             "server",
             "--port",
             str(port),
@@ -782,13 +824,13 @@ async def launch_session(
     session_name: str,
     port: int,
     auth_token: str | None,
-    heap_size_gb: float,
+    heap_size_gb: int,
     extra_jvm_args: list[str],
     environment_vars: dict[str, str],
     docker_image: str = "",
     docker_memory_limit_gb: float | None = None,
     docker_cpu_limit: float | None = None,
-    docker_volumes: list[str] = [],
+    docker_volumes: list[str] | None = None,
     instance_id: str | None = None,
 ) -> LaunchedSession:
     """
@@ -802,13 +844,13 @@ async def launch_session(
         session_name (str): Name for the session.
         port (int): Port to bind the session to.
         auth_token (str | None): Authentication token (PSK) for the session, or None for anonymous.
-        heap_size_gb (float): JVM heap size in gigabytes.
+        heap_size_gb (int): JVM heap size in gigabytes (integer only, e.g., 2 for -Xmx2g).
         extra_jvm_args (list[str]): Additional JVM arguments.
         environment_vars (dict[str, str]): Environment variables to set.
         docker_image (str): Docker image to use (docker only).
         docker_memory_limit_gb (float | None): Container memory limit in GB (docker only).
         docker_cpu_limit (float | None): Container CPU limit in cores (docker only).
-        docker_volumes (list[str]): Volume mounts (docker only).
+        docker_volumes (list[str] | None): Volume mounts (docker only), or None for no volumes.
         instance_id (str | None): MCP server instance ID for orphan tracking (docker only).
 
     Returns:
@@ -822,6 +864,10 @@ async def launch_session(
     _LOGGER.debug(
         f"[_launcher:launch_session] Launching {launch_method} session '{session_name}' on port {port}"
     )
+    
+    # Handle mutable default arguments
+    if docker_volumes is None:
+        docker_volumes = []
     
     if launch_method == "docker":
         return await DockerLaunchedSession.launch(

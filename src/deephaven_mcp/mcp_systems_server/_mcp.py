@@ -3033,7 +3033,7 @@ async def session_enterprise_create(
     context: Context,
     system_name: str,
     session_name: str | None = None,
-    heap_size_gb: float | None = None,
+    heap_size_gb: int | None = None,
     programming_language: str | None = None,
     auto_delete_timeout: int | None = None,
     server: str | None = None,
@@ -3074,7 +3074,7 @@ async def session_enterprise_create(
             Must match a configured enterprise system name.
         session_name (str | None): Name for the new session. If None, auto-generates
             a timestamp-based name like "mcp-{username}-20241126-1130".
-        heap_size_gb (float | None): JVM heap size in gigabytes. If None, uses
+        heap_size_gb (int | None): JVM heap size in gigabytes (integer only, e.g., 8 for -Xmx8g). If None, uses
             config default or Deephaven default.
         programming_language (str | None): Programming language for the session.
             Supported values: "Python" (default) or "Groovy". If None, uses config default or "Python".
@@ -3345,7 +3345,7 @@ async def session_enterprise_create(
 
 
 def _resolve_session_parameters(
-    heap_size_gb: float | None,
+    heap_size_gb: int | None,
     auto_delete_timeout: int | None,
     server: str | None,
     engine: str | None,
@@ -3361,7 +3361,7 @@ def _resolve_session_parameters(
     """Resolve session parameters with priority: tool param -> config default -> API default.
 
     Args:
-        heap_size_gb (float | None): Tool parameter value for JVM heap size in GB.
+        heap_size_gb (int | None): Tool parameter value for JVM heap size in GB (integer only).
         auto_delete_timeout (int | None): Tool parameter value for session timeout in seconds.
         server (str | None): Tool parameter value for target server.
         engine (str | None): Tool parameter value for engine type.
@@ -3600,7 +3600,7 @@ async def session_community_create(
     programming_language: str | None = None,
     auth_type: str | None = None,
     auth_token: str | None = None,
-    heap_size_gb: float | None = None,
+    heap_size_gb: int | None = None,
     extra_jvm_args: list[str] | None = None,
     environment_vars: dict[str, str] | None = None,
     docker_image: str | None = None,
@@ -3617,7 +3617,7 @@ async def session_community_create(
 
     Launch Method Requirements:
     - Docker: Requires Docker daemon running (default method)
-    - Pip: Requires deephaven-server package installed (pip install "deephaven-mcp[community]")
+    - Pip: Requires deephaven-server package installed (pip install "deephaven-mcp[local-server]")
 
     Terminology Note:
     - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
@@ -3639,7 +3639,7 @@ async def session_community_create(
             Will be used to create session_id in format "community:dynamic:{session_name}".
         launch_method (str | None): How to launch the session ("docker" or "pip", case-insensitive).
             - "docker": Uses Docker containers (requires Docker daemon running)
-            - "pip": Uses pip-installed deephaven-server (requires: pip install "deephaven-mcp[community]")
+            - "pip": Uses pip-installed deephaven-server (requires: pip install "deephaven-mcp[local-server]")
             Defaults to configuration value or "docker".
         programming_language (str | None): Programming language ("Python" or "Groovy", case-insensitive).
             Only applies to docker launch method - raises error if used with pip launch.
@@ -3667,9 +3667,9 @@ async def session_community_create(
             Raises error if used with pip launch method.
         docker_volumes (list[str] | None): Volume mounts in format ["host:container:mode"] (docker only).
             Raises error if used with pip launch method.
-        heap_size_gb (float | None): JVM heap size in gigabytes.
+        heap_size_gb (int | None): JVM heap size in gigabytes (integer only, e.g., 4 for -Xmx4g).
             Applies to both docker and pip launches.
-            Defaults to configuration value or 4.0.
+            Defaults to configuration value or 4.
         extra_jvm_args (list[str] | None): Additional JVM arguments as list of strings.
         environment_vars (dict[str, str] | None): Environment variables to set in the session.
 

@@ -52,9 +52,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Community session creation via pip launcher
-community = [
-    "deephaven-server>=0.39",  # Deephaven server for pip-based session launching
+# Local Deephaven server for dynamic session creation
+local-server = [
+    "deephaven-server>=0.39",  # Deephaven server for local session launching
 ]
 
 # Testing (coverage, etc.)
@@ -62,6 +62,7 @@ test = [
     "pytest>=8.0.0", # Test framework
     "pytest-asyncio>=0.23.0", # Async test support
     "pytest-cov>=4.1.0",    # Code coverage reporting
+    "pytest-timeout>=2.1.0", # Test timeout support for integration tests
 ]
 dev = [
     # Code formatting and style tools
@@ -81,6 +82,7 @@ dev = [
     "pytest>=8.0.0",           # Main test framework
     "pytest-asyncio>=0.23.0",  # Async test support for pytest
     "pytest-cov>=4.1.0",       # Code coverage reporting for pytest
+    "pytest-timeout>=2.1.0",   # Test timeout support for integration tests
     "httpx[cli]>=0.24.0",      # HTTP client for integration and stress tests
     "typing_extensions>=4.3.0" # Typing backports for dev/type checking
 
@@ -140,10 +142,14 @@ match = '(?!test_).*\.py'  # Ignore test files by default
 # Pytest configuration for testing
 [tool.pytest.ini_options]
 testpaths = ["tests"]  # Directory containing test files
-addopts = "-W error -W ignore::pytest.PytestUnraisableExceptionWarning --cov=deephaven_mcp --cov-report=term-missing --cov-report=xml"
+addopts = "-W error -W ignore::pytest.PytestUnraisableExceptionWarning --cov=deephaven_mcp --cov-report=term-missing --cov-report=xml -m 'not integration'"
 python_files = ["test_*.py"]  # Test file naming pattern
 python_classes = ["Test"]  # Test class naming pattern
 python_functions = ["test_"]  # Test function naming pattern
+markers = [
+    "integration: marks tests as integration tests (require Docker/pip, skipped by default). IMPORTANT: Run with -s flag to disable output capture",
+]
+asyncio_mode = "strict"
 filterwarnings = [
     "ignore:The NumPy module was reloaded (imported a second time).*:UserWarning"
 ]

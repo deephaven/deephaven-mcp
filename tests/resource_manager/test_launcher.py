@@ -189,7 +189,7 @@ class TestDockerLaunchedSessionLaunch:
                 session_name="test",
                 port=10000,
                 auth_token="token",
-                heap_size_gb=4.0,
+                heap_size_gb=4,
                 extra_jvm_args=[],
                 environment_vars={},
                 docker_image="ghcr.io/deephaven/server:latest",
@@ -224,7 +224,7 @@ class TestDockerLaunchedSessionLaunch:
                 session_name="test",
                 port=10000,
                 auth_token="token",
-                heap_size_gb=4.0,
+                heap_size_gb=4,
                 extra_jvm_args=[],
                 environment_vars={},
                 docker_image="ghcr.io/deephaven/server:latest",
@@ -251,7 +251,7 @@ class TestDockerLaunchedSessionLaunch:
                     session_name="test",
                     port=10000,
                     auth_token="token",
-                    heap_size_gb=4.0,
+                    heap_size_gb=4,
                     extra_jvm_args=[],
                     environment_vars={},
                     docker_image="ghcr.io/deephaven/server:latest",
@@ -275,7 +275,7 @@ class TestDockerLaunchedSessionLaunch:
                     session_name="test",
                     port=10000,
                     auth_token="token",
-                    heap_size_gb=4.0,
+                    heap_size_gb=4,
                     extra_jvm_args=[],
                     environment_vars={},
                     docker_image="ghcr.io/deephaven/server:latest",
@@ -298,7 +298,7 @@ class TestDockerLaunchedSessionLaunch:
                 session_name="test",
                 port=10000,
                 auth_token="token",
-                heap_size_gb=4.0,
+                heap_size_gb=4,
                 extra_jvm_args=[],
                 environment_vars={},
                 docker_image="ghcr.io/deephaven/server:latest",
@@ -427,7 +427,7 @@ class TestPipLaunchedSessionLaunch:
                 session_name="test",
                 port=10000,
                 auth_token="token",
-                heap_size_gb=4.0,
+                heap_size_gb=4,
                 extra_jvm_args=[],
                 environment_vars={},
             )
@@ -449,7 +449,7 @@ class TestPipLaunchedSessionLaunch:
                 session_name="test",
                 port=10000,
                 auth_token="token",
-                heap_size_gb=4.0,
+                heap_size_gb=4,
                 extra_jvm_args=["-XX:+UseG1GC"],
                 environment_vars={},
             )
@@ -457,7 +457,8 @@ class TestPipLaunchedSessionLaunch:
             # Verify subprocess was called
             mock_subprocess.assert_called_once()
             call_args = mock_subprocess.call_args[0]
-            assert "deephaven" in call_args
+            # First arg should be deephaven executable (path ending with 'deephaven')
+            assert call_args[0].endswith("deephaven")
             assert "server" in call_args
 
     @pytest.mark.asyncio
@@ -537,6 +538,16 @@ class TestPipLaunchedSessionLaunch:
                 process=None,
             )
 
+    def test_find_deephaven_executable_fallback_to_path(self):
+        """Test PATH fallback when deephaven not in venv (covers lines 93-96)."""
+        from deephaven_mcp.resource_manager._launcher import _find_deephaven_executable
+        
+        with patch("sys.executable", "/nonexistent/python"):
+            with patch("pathlib.Path.exists", return_value=False):
+                result = _find_deephaven_executable()
+                # Should fall back to "deephaven" (PATH lookup)
+                assert result == "deephaven"
+
 
 # ============================================================================
 # Edge Case Tests
@@ -589,7 +600,7 @@ class TestDockerLauncherEdgeCases:
                 session_name="test",
                 port=10000,
                 auth_token="token",
-                heap_size_gb=4.0,
+                heap_size_gb=4,
                 extra_jvm_args=[],
                 environment_vars={},
                 docker_image="ghcr.io/deephaven/server:latest",
@@ -617,7 +628,7 @@ class TestDockerLauncherEdgeCases:
                 session_name="test",
                 port=10000,
                 auth_token="token",
-                heap_size_gb=4.0,
+                heap_size_gb=4,
                 extra_jvm_args=[],
                 environment_vars={},
                 docker_image="ghcr.io/deephaven/server:latest",
@@ -645,7 +656,7 @@ class TestDockerLauncherEdgeCases:
                 session_name="test",
                 port=10000,
                 auth_token=None,  # No auth token
-                heap_size_gb=4.0,
+                heap_size_gb=4,
                 extra_jvm_args=[],
                 environment_vars={},
                 docker_image="ghcr.io/deephaven/server:latest",
@@ -678,7 +689,7 @@ class TestDockerLauncherEdgeCases:
                 session_name="test",
                 port=10000,
                 auth_token="token",
-                heap_size_gb=4.0,
+                heap_size_gb=4,
                 extra_jvm_args=["-XX:+UseG1GC", "-XX:MaxGCPauseMillis=200"],
                 environment_vars={},
                 docker_image="ghcr.io/deephaven/server:latest",
@@ -717,7 +728,7 @@ class TestPipLauncherEdgeCases:
                 session_name="test",
                 port=10000,
                 auth_token=None,  # No auth token
-                heap_size_gb=4.0,
+                heap_size_gb=4,
                 extra_jvm_args=[],
                 environment_vars={},
             )
@@ -743,7 +754,7 @@ class TestPipLauncherEdgeCases:
                     session_name="test",
                     port=10000,
                     auth_token="token",
-                    heap_size_gb=4.0,
+                    heap_size_gb=4,
                     extra_jvm_args=[],
                     environment_vars={},
                 )
@@ -918,6 +929,25 @@ class TestWaitUntilReady:
             with pytest.raises(SessionLaunchError, match="Health check failed"):
                 await session.wait_until_ready( timeout_seconds=5)
 
+    @pytest.mark.asyncio
+    async def test_wait_until_ready_detects_process_crash(self):
+        """Test that wait_until_ready detects when pip process crashes (covers lines 317-321)."""
+        mock_process = AsyncMock()
+        mock_process.pid = 12345
+        mock_process.returncode = 1  # Process has crashed
+
+        session = PipLaunchedSession(
+            host="localhost",
+            port=10000,
+            auth_type="anonymous",
+            auth_token=None,
+            process=mock_process,
+        )
+
+        # Should detect crash immediately
+        ready = await session.wait_until_ready(timeout_seconds=10, check_interval_seconds=1)
+        assert ready is False
+
 
 class TestWaitUntilReadyRetryBackoff:
     """Test line 197: backoff sleep between retries."""
@@ -1001,7 +1031,7 @@ class TestLaunchSession:
                 session_name="test",
                 port=10000,
                 auth_token="token",
-                heap_size_gb=4.0,
+                heap_size_gb=4,
                 extra_jvm_args=[],
                 environment_vars={},
                 docker_image="test:latest",
@@ -1020,7 +1050,7 @@ class TestLaunchSession:
                 session_name="test",
                 port=10000,
                 auth_token="token",
-                heap_size_gb=4.0,
+                heap_size_gb=4,
                 extra_jvm_args=[],
                 environment_vars={},
             )
@@ -1036,7 +1066,7 @@ class TestLaunchSession:
                 session_name="test",
                 port=10000,
                 auth_token="token",
-                heap_size_gb=4.0,
+                heap_size_gb=4,
                 extra_jvm_args=[],
                 environment_vars={},
             )
@@ -1050,7 +1080,7 @@ class TestLaunchSession:
                 session_name="test",
                 port=10000,
                 auth_token="token",
-                heap_size_gb=4.0,
+                heap_size_gb=4,
                 extra_jvm_args=[],
                 environment_vars={},
                 docker_image="test:latest",
@@ -1065,7 +1095,7 @@ class TestLaunchSession:
                 session_name="test",
                 port=10000,
                 auth_token="token",
-                heap_size_gb=4.0,
+                heap_size_gb=4,
                 extra_jvm_args=[],
                 environment_vars={},
                 docker_memory_limit_gb=8.0,
@@ -1080,7 +1110,7 @@ class TestLaunchSession:
                 session_name="test",
                 port=10000,
                 auth_token="token",
-                heap_size_gb=4.0,
+                heap_size_gb=4,
                 extra_jvm_args=[],
                 environment_vars={},
                 docker_cpu_limit=2.0,
@@ -1095,7 +1125,7 @@ class TestLaunchSession:
                 session_name="test",
                 port=10000,
                 auth_token="token",
-                heap_size_gb=4.0,
+                heap_size_gb=4,
                 extra_jvm_args=[],
                 environment_vars={},
                 docker_volumes=["/host:/container"],

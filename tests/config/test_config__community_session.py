@@ -406,7 +406,7 @@ def test_session_creation_valid_full_config_docker():
             "docker_memory_limit_gb": 8.0,
             "docker_cpu_limit": 2.0,
             "docker_volumes": ["/host:/container:ro"],
-            "heap_size_gb": 4.0,
+            "heap_size_gb": 4,
             "extra_jvm_args": ["-XX:+UseG1GC"],
             "environment_vars": {"KEY": "value"},
             "startup_timeout_seconds": 60,
@@ -424,7 +424,7 @@ def test_session_creation_valid_full_config_pip():
         "defaults": {
             "launch_method": "pip",
             "auth_type": "Anonymous",
-            "heap_size_gb": 2.0,
+            "heap_size_gb": 2,
             "startup_timeout_seconds": 30,
         },
     }
@@ -505,7 +505,7 @@ def test_session_creation_auth_token_and_env_var_mutually_exclusive():
 
 def test_session_creation_invalid_heap_size_negative():
     """Test that negative heap_size_gb raises error."""
-    config = {"defaults": {"heap_size_gb": -1.0}}
+    config = {"defaults": {"heap_size_gb": -1}}
     with pytest.raises(
         CommunitySessionConfigurationError,
         match="'heap_size_gb' must be positive",
@@ -617,7 +617,7 @@ def test_session_creation_field_wrong_type_tuple_allowed():
     """Test field with wrong type when tuple of types allowed."""
     config = {
         "defaults": {
-            "heap_size_gb": "not_a_number",  # Should be int or float
+            "docker_memory_limit_gb": "not_a_number",  # Should be float, int, or None
         }
     }
     

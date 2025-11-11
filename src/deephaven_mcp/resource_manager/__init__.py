@@ -136,7 +136,7 @@ Usage Example - Dynamic Sessions:
     ...     session_name="test-session",
     ...     port=port,
     ...     auth_token=token,
-    ...     heap_size_gb=4.0,
+    ...     heap_size_gb=4,
     ...     extra_jvm_args=[],
     ...     environment_vars={},
     ...     docker_image="ghcr.io/deephaven/server:latest",
