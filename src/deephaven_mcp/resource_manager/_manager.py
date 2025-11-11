@@ -2030,34 +2030,59 @@ class DynamicCommunitySessionManager(CommunitySessionManager):
 
     @property
     def connection_url(self) -> str:
-        """Get the base connection URL for this session."""
+        """Get the base connection URL for this session.
+        
+        Returns:
+            str: The base URL without authentication token (e.g., "http://localhost:10000").
+        """
         return self.launched_session.connection_url
 
     @property
     def connection_url_with_auth(self) -> str:
-        """Get the connection URL with authentication token (if applicable)."""
+        """Get the connection URL with authentication token (if applicable).
+        
+        Returns:
+            str: The complete URL with auth token parameter if PSK auth is used,
+                otherwise the base URL.
+        """
         return self.launched_session.connection_url_with_auth
 
     @property
     def port(self) -> int:
-        """Get the port the session is listening on."""
+        """Get the port the session is listening on.
+        
+        Returns:
+            int: The TCP port number where the Deephaven server is accessible.
+        """
         return self.launched_session.port
 
     @property
     def launch_method(self) -> str:
-        """Get the launch method used (docker or pip)."""
+        """Get the launch method used (docker or pip).
+        
+        Returns:
+            str: Either "docker" or "pip" indicating how the session was launched.
+        """
         return self.launched_session.launch_method
 
     @property
     def container_id(self) -> str | None:
-        """Get the Docker container ID (if launched via Docker)."""
+        """Get the Docker container ID (if launched via Docker).
+        
+        Returns:
+            str | None: The Docker container ID if launch_method is "docker", otherwise None.
+        """
         if hasattr(self.launched_session, "container_id"):
             return self.launched_session.container_id
         return None
 
     @property
     def process_id(self) -> int | None:
-        """Get the process ID (if launched via pip)."""
+        """Get the process ID (if launched via pip).
+        
+        Returns:
+            int | None: The system process ID if launch_method is "pip", otherwise None.
+        """
         if hasattr(self.launched_session, "process") and self.launched_session.process:
             return self.launched_session.process.pid
         return None
@@ -2110,6 +2135,10 @@ class DynamicCommunitySessionManager(CommunitySessionManager):
 
         Returns:
             dict: Session information including connection details.
+            
+        Note:
+            Does NOT include connection_url_with_auth or auth_token for security.
+            Use session_community_credentials MCP tool if credentials are needed.
         """
         base_dict = {
             "session_id": self.full_name,
@@ -2117,7 +2146,6 @@ class DynamicCommunitySessionManager(CommunitySessionManager):
             "source": "dynamic",
             "name": self._name,
             "connection_url": self.connection_url,
-            "connection_url_with_auth": self.connection_url_with_auth,
             "auth_type": self.launched_session.auth_type.upper(),  # "PSK" or "ANONYMOUS"
             "launch_method": self.launch_method,
             "port": self.port,

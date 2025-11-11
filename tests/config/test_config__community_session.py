@@ -9,8 +9,9 @@ from deephaven_mcp._exceptions import CommunitySessionConfigurationError
 from deephaven_mcp.config._community_session import (
     redact_community_session_config,
     redact_community_session_creation_config,
-    validate_community_sessions_config,
     validate_community_session_creation_config,
+    validate_community_sessions_config,
+    validate_security_community_config,
     validate_single_community_session_config,
 )
 
@@ -719,3 +720,75 @@ def test_session_creation_redact_does_not_modify_original():
     original_token = config["defaults"]["auth_token"]
     redact_community_session_creation_config(config)
     assert config["defaults"]["auth_token"] == original_token
+
+
+# --- validate_security_community_config Tests ---
+
+
+def test_validate_security_community_config_none():
+    """Test that None security.community config is valid (optional section)."""
+    validate_security_community_config(None)  # Should not raise
+
+
+def test_validate_security_community_config_empty_dict():
+    """Test that empty security.community config is valid."""
+    validate_security_community_config({})  # Should not raise
+
+
+def test_validate_security_community_config_mode_none():
+    """Test that credential_retrieval_mode='none' is valid."""
+    config = {"credential_retrieval_mode": "none"}
+    validate_security_community_config(config)  # Should not raise
+
+
+def test_validate_security_community_config_mode_dynamic_only():
+    """Test that credential_retrieval_mode='dynamic_only' is valid."""
+    config = {"credential_retrieval_mode": "dynamic_only"}
+    validate_security_community_config(config)  # Should not raise
+
+
+def test_validate_security_community_config_mode_static_only():
+    """Test that credential_retrieval_mode='static_only' is valid."""
+    config = {"credential_retrieval_mode": "static_only"}
+    validate_security_community_config(config)  # Should not raise
+
+
+def test_validate_security_community_config_mode_all():
+    """Test that credential_retrieval_mode='all' is valid."""
+    config = {"credential_retrieval_mode": "all"}
+    validate_security_community_config(config)  # Should not raise
+
+
+def test_validate_security_community_config_not_dict():
+    """Test that non-dict security.community config raises error."""
+    with pytest.raises(CommunitySessionConfigurationError, match="'security.community' must be a dictionary"):
+        validate_security_community_config("not_a_dict")
+
+
+def test_validate_security_community_config_mode_not_string():
+    """Test that credential_retrieval_mode must be a string."""
+    config = {"credential_retrieval_mode": True}  # Boolean instead of string
+    with pytest.raises(
+        CommunitySessionConfigurationError,
+        match="'security.community.credential_retrieval_mode' must be a string, got bool"
+    ):
+        validate_security_community_config(config)
+
+
+def test_validate_security_community_config_invalid_mode():
+    """Test that invalid credential_retrieval_mode value raises error."""
+    config = {"credential_retrieval_mode": "invalid_mode"}
+    with pytest.raises(
+        CommunitySessionConfigurationError,
+        match="'security.community.credential_retrieval_mode' must be one of"
+    ):
+        validate_security_community_config(config)
+
+
+def test_validate_security_community_config_with_other_fields():
+    """Test that config with other fields is valid (future-proofing)."""
+    config = {
+        "credential_retrieval_mode": "dynamic_only",
+        "future_security_field": "value"
+    }
+    validate_security_community_config(config)  # Should not raise

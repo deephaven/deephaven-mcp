@@ -15,6 +15,24 @@ Configuration Schema:
 ---------------------
 The configuration file must be a JSON object. It may contain the following top-level keys:
 
+  - `security` (dict, optional):
+      A dictionary containing security-related configuration for all session types.
+      If this key is present, its value must be a dictionary (which can be empty, e.g., {}).
+      If this key is absent, all security settings use their secure defaults.
+      The security configuration dict may contain:
+
+        - `community` (dict, optional):
+            Security settings specific to community sessions.
+            If this key is present, its value must be a dictionary (which can be empty, e.g., {}).
+            May contain:
+
+              - `credential_retrieval_mode` (str, optional, default: "none"): Controls which community session credentials 
+                can be retrieved programmatically via the session_community_credentials MCP tool. Valid values:
+                  * "none": Credential retrieval disabled (secure default)
+                  * "dynamic_only": Only allow retrieval for auto-generated tokens (dynamic sessions)
+                  * "static_only": Only allow retrieval for pre-configured tokens (static sessions)
+                  * "all": Allow retrieval for both dynamic and static session credentials
+
   - `community` (dict, optional):
       A dictionary mapping community configuration.
       If this key is present, its value must be a dictionary (which can be empty, e.g., {}).
@@ -256,8 +274,9 @@ from deephaven_mcp._exceptions import (
 from ._community_session import (
     redact_community_session_config,
     redact_community_session_creation_config,
-    validate_community_sessions_config,
     validate_community_session_creation_config,
+    validate_community_sessions_config,
+    validate_security_community_config,
     validate_single_community_session_config,
 )
 from ._enterprise_system import (
@@ -277,15 +296,23 @@ str: Name of the environment variable specifying the path to the Deephaven MCP c
 
 @dataclass
 class _ConfigPathSpec:
-    """Specification for a valid configuration path.
+    """Specification for a valid configuration path in the schema.
+    
+    Defines the validation and redaction rules for a specific configuration path.
+    Used by the validation engine to ensure configuration correctness and security.
     
     Attributes:
-        required (bool): Whether this configuration path is required to be present.
+        required (bool): Whether this configuration path must be present. If True and the
+            path is missing, validation will fail with ConfigurationError.
         expected_type (type): The expected Python type for values at this path (e.g., dict, str, int).
-        validator (Callable[[Any], None] | None): Optional validation function to call for this path.
-            Should raise an exception if validation fails.
-        redactor (Callable[[Any], Any] | None): Optional function to redact sensitive data for logging.
-            Takes the config value and returns a redacted version.
+            Type mismatches will cause validation to fail.
+        validator (Callable[[Any], None] | None): Optional validation function for custom validation logic.
+            Receives the value at this path and should raise CommunitySessionConfigurationError or
+            EnterpriseSystemConfigurationError if validation fails (automatically wrapped as ConfigurationError).
+            If None, only type validation is performed.
+        redactor (Callable[[Any], Any] | None): Optional function to redact sensitive data for safe logging.
+            Receives the config value and returns a redacted version (typically replacing sensitive
+            strings with "[REDACTED]"). If None, no redaction is applied to this path.
     """
 
     required: bool
@@ -296,6 +323,14 @@ class _ConfigPathSpec:
 
 # Schema defining all valid configuration paths
 _SCHEMA_PATHS: dict[tuple[str, ...], _ConfigPathSpec] = {
+    ("security",): _ConfigPathSpec(
+        required=False, expected_type=dict, validator=None  # Validated by nested paths
+    ),
+    ("security", "community"): _ConfigPathSpec(
+        required=False,
+        expected_type=dict,
+        validator=validate_security_community_config,
+    ),
     ("community",): _ConfigPathSpec(
         required=False, expected_type=dict, validator=None  # Validated by nested paths
     ),
@@ -339,9 +374,21 @@ _SCHEMA_PATHS: dict[tuple[str, ...], _ConfigPathSpec] = {
 
 class ConfigManager:
     """
-    Async configuration manager for Deephaven MCP configuration.
+    Async, coroutine-safe configuration manager for Deephaven MCP.
 
-    This class encapsulates all logic for loading, validating, and caching the configuration for Deephaven MCP.
+    This class encapsulates all logic for loading, validating, and caching the configuration
+    from a JSON file. Key features:
+    
+    - **Async I/O**: Uses aiofiles for non-blocking file reads
+    - **Caching**: Loads configuration once and caches it for subsequent calls
+    - **Coroutine-safe**: Uses asyncio.Lock to ensure thread-safe concurrent access
+    - **Validation**: Strict schema validation with detailed error reporting
+    - **Security**: Redacts sensitive fields (tokens, passwords) in logs
+    
+    Typical usage pattern:
+        config_manager = ConfigManager()
+        config = await config_manager.get_config()  # First call loads from disk
+        config2 = await config_manager.get_config()  # Subsequent calls return cached data
     """
 
     def __init__(self) -> None:
@@ -349,7 +396,8 @@ class ConfigManager:
         Initialize a new ConfigManager instance.
 
         Sets up the internal configuration cache and an asyncio.Lock for coroutine safety.
-        Typically, only one instance (DEFAULT_CONFIG_MANAGER) should be used in production.
+        Multiple instances can be created if needed (e.g., for testing), but typically a
+        single instance is sufficient for an application.
         """
         self._cache: dict[str, Any] | None = None
         self._lock = asyncio.Lock()
@@ -449,17 +497,23 @@ def get_config_section(
     section: Sequence[str],
 ) -> Any:
     """
-    Retrieve a config subsection by path. Raises KeyError if not found.
+    Navigate to and retrieve a nested configuration section by path.
+    
+    This helper function traverses the configuration dictionary using the provided path sequence,
+    returning the value at the final key. Useful for accessing deeply nested configuration values.
 
     Args:
-        config (dict[str, Any]): The configuration dictionary to navigate.
-        section (Sequence[str]): The path to the config section (e.g., ['community', 'sessions', 'foo']).
+        config (dict[str, Any]): The root configuration dictionary to navigate.
+        section (Sequence[str]): The path to the config section as a sequence of keys.
+            For example, ['community', 'sessions', 'local-dev'] accesses config['community']['sessions']['local-dev'].
 
     Returns:
-        Any: The config subsection at the given path.
+        Any: The configuration value at the specified path. Can be any type (dict, str, int, list, etc.)
+            depending on what's stored at that location.
 
     Raises:
-        KeyError: If the section path does not exist.
+        KeyError: If any key in the section path does not exist or if any intermediate value is not a dictionary.
+            The error message includes the full path for debugging.
     """
     _LOGGER.debug(f"[get_config_section] Getting config section for path: {section}")
     curr = config
@@ -475,14 +529,22 @@ def get_all_config_names(
     section: Sequence[str],
 ) -> list[str]:
     """
-    Retrieve all names from a given config section path.
+    Retrieve all configuration names (keys) from a specific section path.
+    
+    This helper function is useful for discovering what sessions, systems, or other named entities
+    are configured. Returns an empty list if the section doesn't exist or isn't a dictionary,
+    making it safe to call without pre-checking.
 
     Args:
-        config (dict[str, Any]): The configuration dictionary to search within.
-        section (Sequence[str]): The path to the config section (e.g., ['community', 'sessions']).
+        config (dict[str, Any]): The root configuration dictionary to search within.
+        section (Sequence[str]): The path to the config section (e.g., ['community', 'sessions']
+            to get all session names, or ['enterprise', 'systems'] to get all system names).
 
     Returns:
-        list[str]: A list of names from the given config section. If the section doesn't exist, returns an empty list.
+        list[str]: A list of configuration names (dictionary keys) from the specified section.
+            Returns an empty list in two cases:
+            1. The section path doesn't exist (KeyError from get_config_section)
+            2. The section exists but is not a dictionary (e.g., it's a string or int)
     """
     _LOGGER.debug(
         f"[get_all_config_names] Getting list of all names from config section path: {section}"
@@ -510,16 +572,25 @@ def get_all_config_names(
 
 async def _load_config_from_file(config_path: str) -> dict[str, Any]:
     """
-    Load and parse the Deephaven MCP configuration from a JSON file asynchronously.
+    Load and parse the Deephaven MCP configuration from a JSON file using async I/O.
+    
+    Uses aiofiles for non-blocking file reads, ensuring the event loop is not blocked
+    during file I/O operations. All JSON parsing and I/O errors are caught and wrapped
+    as ConfigurationError with descriptive messages.
 
     Args:
-        config_path (str): The file path to the configuration JSON file.
+        config_path (str): The absolute or relative path to the configuration JSON file.
 
     Returns:
-        dict[str, Any]: The parsed configuration as a dictionary.
+        dict[str, Any]: The parsed configuration as a dictionary. The JSON must contain
+            an object (dict) at the root level.
 
     Raises:
-        ConfigurationError: If the file is not found, cannot be read, is not valid JSON, or any other I/O error occurs.
+        ConfigurationError: For any of the following conditions:
+            - File not found (FileNotFoundError)
+            - Permission denied (PermissionError)
+            - Invalid JSON syntax (json.JSONDecodeError)
+            - Any other I/O error (Exception)
 
     Example:
         >>> config = await _load_config_from_file('/path/to/config.json')
@@ -561,17 +632,19 @@ async def _load_config_from_file(config_path: str) -> dict[str, Any]:
 
 def get_config_path() -> str:
     """
-    Retrieve the configuration file path from the environment variable.
+    Retrieve the configuration file path from the DH_MCP_CONFIG_FILE environment variable.
 
-    This function retrieves the path to the Deephaven MCP configuration JSON file from the environment variable specified by CONFIG_ENV_VAR.
+    Args:
+        None
 
     Returns:
-        str: The path to the Deephaven MCP configuration JSON file as specified by the CONFIG_ENV_VAR environment variable.
+        str: The absolute or relative path to the Deephaven MCP configuration JSON file.
 
     Raises:
-        RuntimeError: If the CONFIG_ENV_VAR environment variable is not set.
+        RuntimeError: If the DH_MCP_CONFIG_FILE environment variable is not set.
 
     Example:
+        >>> import os
         >>> os.environ['DH_MCP_CONFIG_FILE'] = '/path/to/config.json'
         >>> path = get_config_path()
         >>> print(path)
@@ -591,20 +664,26 @@ def get_config_path() -> str:
 
 async def load_and_validate_config(config_path: str) -> dict[str, Any]:
     """
-    Load and validate the Deephaven MCP configuration from a JSON file.
+    Load, parse, and validate the Deephaven MCP configuration from a JSON file.
 
-    This function loads the configuration from the specified file path, parses it as JSON,
-    and validates it according to the expected schema. All exceptions are logged and
-    re-raised as ConfigurationError for unified error handling.
+    This is the main entry point for loading configuration. It performs the following steps:
+    1. Loads the JSON file using async I/O (_load_config_from_file)
+    2. Validates the structure and values against the schema (validate_config)
+    3. Logs detailed error messages for any failures
+    4. Wraps all exceptions as ConfigurationError for consistent error handling
 
     Args:
-        config_path (str): The path to the configuration JSON file.
+        config_path (str): The absolute or relative path to the configuration JSON file.
 
     Returns:
-        dict[str, Any]: The loaded and validated configuration dictionary.
+        dict[str, Any]: The fully validated configuration dictionary, guaranteed to conform
+            to the expected schema.
 
     Raises:
-        ConfigurationError: If the file cannot be read, is not valid JSON, or fails validation.
+        ConfigurationError: For any failure during loading or validation, including:
+            - File I/O errors (file not found, permission denied, etc.)
+            - JSON parsing errors (invalid syntax)
+            - Schema validation errors (unknown keys, wrong types, missing required fields)
 
     Example:
         >>> config = await load_and_validate_config('/path/to/config.json')
@@ -621,19 +700,21 @@ async def load_and_validate_config(config_path: str) -> dict[str, Any]:
 
 
 def _apply_redaction_to_config(config: dict[str, Any]) -> dict[str, Any]:
-    """Apply all configured redaction functions to a deep copy of the config.
+    """Apply redaction to sensitive configuration fields for safe logging.
 
-    This function creates a deep copy of the configuration and applies redaction functions
-    to sensitive fields as defined in the _SCHEMA_PATHS. Redaction is used to safely log
-    configuration data without exposing sensitive information like passwords or tokens.
-    If a configuration section doesn't exist, redaction is skipped for that section.
+    Creates a deep copy of the configuration and applies all redaction functions defined in
+    _SCHEMA_PATHS. This ensures that sensitive data (auth tokens, passwords, private keys, etc.)
+    is replaced with "[REDACTED]" before logging. The original configuration is never modified.
+    
+    Redaction is applied to each path that has a redactor function defined in _SCHEMA_PATHS.
+    If a configuration section doesn't exist, its redaction is silently skipped (no error).
 
     Args:
-        config (dict[str, Any]): The configuration dictionary to redact.
+        config (dict[str, Any]): The configuration dictionary to redact. This is NOT modified.
 
     Returns:
-        dict[str, Any]: A deep copy of the config with sensitive data redacted according
-                       to the redactor functions defined in _SCHEMA_PATHS.
+        dict[str, Any]: A new deep copy of the configuration with sensitive fields redacted.
+            The structure remains identical, only sensitive values are replaced.
     """
     config_copy = copy.deepcopy(config)
 
@@ -668,6 +749,9 @@ def _log_config_summary(config: dict[str, Any]) -> None:
 
     Args:
         config (dict[str, Any]): The loaded and validated configuration dictionary.
+    
+    Returns:
+        None
 
     Example:
         >>> config = {'community': {'sessions': {'local': {'auth_token': 'secret'}}}}
@@ -707,6 +791,9 @@ def _validate_unknown_keys(
         data (dict[str, Any]): The configuration dictionary section to validate
         path (tuple[str, ...]): The current path tuple for error reporting context
         valid_keys (set[str]): Set of allowed key names at this path level
+    
+    Returns:
+        None
 
     Raises:
         ConfigurationError: If any unknown keys are found in the data
@@ -732,6 +819,9 @@ def _validate_required_keys(
         data (dict[str, Any]): The configuration dictionary section to validate
         path (tuple[str, ...]): The current path tuple for error reporting context
         required_keys (set[str]): Set of key names that must be present at this path level
+    
+    Returns:
+        None
 
     Raises:
         ConfigurationError: If any required keys are missing from the data
@@ -754,13 +844,17 @@ def _validate_key_type_and_value(
     Performs two types of validation:
     1. Type validation - ensures the value matches the expected type in the spec
     2. Specialized validation - if a validator is provided in the spec, runs it
-       and handles any configuration exceptions
+       and handles any configuration exceptions (wraps CommunitySessionConfigurationError
+       and EnterpriseSystemConfigurationError as ConfigurationError)
 
     Args:
         key (str): The configuration key being validated
         value (Any): The value to validate
         spec (_ConfigPathSpec): The configuration path specification containing type and validator
         path (tuple[str, ...]): The parent path tuple (will be combined with key to form current_path)
+    
+    Returns:
+        None
 
     Raises:
         ConfigurationError: If validation fails for type or specialized validation
@@ -825,11 +919,15 @@ def _validate_section(data: dict[str, Any], path: tuple[str, ...]) -> None:
     4. Recursively validating nested dictionary sections
 
     This is the core validation engine that processes each level of the configuration
-    hierarchy according to the schema defined in _SCHEMA_PATHS.
+    hierarchy according to the schema defined in _SCHEMA_PATHS. Recursion continues
+    only if nested schema paths exist for the current path.
 
     Args:
         data (dict[str, Any]): The dictionary containing configuration data to validate
         path (tuple[str, ...]): The current path tuple representing the location in the config
+    
+    Returns:
+        None
 
     Raises:
         ConfigurationError: If validation fails for any reason (unknown keys, missing required keys,
@@ -871,6 +969,23 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
 
     This function ensures that the configuration dictionary conforms to the expected schema for Deephaven MCP.
     The configuration may contain the following top-level keys:
+    
+      - 'security' (dict, optional):
+            A dictionary containing security-related configuration for all session types.
+            If this key is present, its value must be a dictionary (which can be empty, e.g., {}).
+            If this key is absent, all security settings use their secure defaults.
+            
+              - 'community' (dict, optional):
+                  Security settings specific to community sessions.
+                  May contain:
+                  
+                    - 'credential_retrieval_mode' (str, optional, default: "none"): Controls which community 
+                      session credentials can be retrieved programmatically. Valid values:
+                        * "none": Credential retrieval disabled (secure default)
+                        * "dynamic_only": Only auto-generated tokens (dynamic sessions)
+                        * "static_only": Only pre-configured tokens (static sessions)
+                        * "all": Both dynamic and static session credentials
+      
       - 'community' (dict, optional):
             A dictionary mapping community configuration.
             If this key is present, its value must be a dictionary (which can be empty, e.g., {}).

@@ -829,7 +829,7 @@ class TestDynamicCommunitySessionManager:
         result = manager.to_dict()
 
         assert result["connection_url"] == "http://localhost:10000"
-        assert result["connection_url_with_auth"] == "http://localhost:10000/?authToken=test-token"
+        # Note: connection_url_with_auth removed from to_dict() for security
         assert result["port"] == 10000
         assert result["container_id"] == "test_container"
         assert "process_id" not in result
@@ -881,7 +881,7 @@ class TestDynamicCommunitySessionManager:
         result = manager.to_dict()
 
         assert result["connection_url"] == "http://localhost:10000"
-        assert result["connection_url_with_auth"] == "http://localhost:10000"
+        # Note: connection_url_with_auth removed from to_dict() for security
 
     def test_to_dict_with_anonymous_auth(self):
         """Test that to_dict handles Anonymous auth type."""
@@ -903,7 +903,7 @@ class TestDynamicCommunitySessionManager:
         result = manager.to_dict()
 
         assert result["auth_type"] == "ANONYMOUS"
-        assert result["connection_url_with_auth"] == "http://localhost:10000"
+        # Note: connection_url_with_auth removed from to_dict() for security
 
     @pytest.mark.asyncio
     async def test_close_success(self):

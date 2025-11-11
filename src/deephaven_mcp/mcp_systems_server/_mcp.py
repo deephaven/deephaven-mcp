@@ -25,6 +25,7 @@ Tools Provided:
     - catalog_table_sample: Retrieve sample data from a catalog table in enterprise (Core+) sessions with flexible formatting and row limiting for safe previewing.
     - session_community_create: Create a new dynamically launched Community session via Docker or pip.
     - session_community_delete: Delete a dynamically created Community session and clean up resources.
+    - session_community_credentials: SECURITY SENSITIVE - Retrieve connection credentials for browser access (disabled by default, requires security.community.credential_retrieval_mode configuration).
     - session_enterprise_create: Create a new enterprise session with configurable parameters and resource limits.
     - session_enterprise_delete: Delete an existing enterprise session and clean up resources.
 
@@ -60,6 +61,7 @@ from deephaven_mcp.formatters import format_table_data
 from deephaven_mcp.resource_manager import (
     BaseItemManager,
     CombinedSessionRegistry,
+    CommunitySessionManager,
     DynamicCommunitySessionManager,
     EnterpriseSessionManager,
     PipLaunchedSession,
@@ -3679,15 +3681,19 @@ async def session_community_create(
             - 'session_id' (str): Full identifier in format "community:dynamic:{session_name}"
             - 'session_name' (str): Simple name provided by user
             - 'connection_url' (str): Base HTTP URL without authentication
-            - 'connection_url_with_auth' (str): HTTP URL with auth token as query parameter
             - 'auth_type' (str): "PSK" or "ANONYMOUS" (normalized to uppercase)
-            - 'auth_token' (str, optional): Authentication token (only present for PSK authentication)
             - 'launch_method' (str): "docker" or "pip" (normalized to lowercase)
             - 'port' (int): Port number where session is listening
             - 'container_id' (str, optional): Docker container ID (only for docker launch)
             - 'process_id' (int, optional): Process ID of deephaven server (only for pip launch)
             - 'error' (str, optional): Error message if creation failed. Omitted on success.
             - 'isError' (bool, optional): Present and True if this is an error response
+        
+        Security Note:
+            - auth_token and connection_url_with_auth are NOT included for security
+            - Auto-generated tokens are logged to console (similar to Jupyter)
+            - Use session_community_credentials tool to retrieve credentials programmatically
+              (requires credential_retrieval_enabled=true in configuration)
 
         Example Success Response (docker):
         {
@@ -3695,9 +3701,7 @@ async def session_community_create(
             "session_id": "community:dynamic:my-session",
             "session_name": "my-session",
             "connection_url": "http://localhost:45123",
-            "connection_url_with_auth": "http://localhost:45123/?authToken=abc123",
             "auth_type": "PSK",
-            "auth_token": "abc123xyz...",
             "launch_method": "docker",
             "port": 45123,
             "container_id": "a1b2c3d4..."
@@ -3709,9 +3713,7 @@ async def session_community_create(
             "session_id": "community:dynamic:my-session",
             "session_name": "my-session",
             "connection_url": "http://localhost:45123",
-            "connection_url_with_auth": "http://localhost:45123/?authToken=abc123",
             "auth_type": "PSK",
-            "auth_token": "abc123xyz...",
             "launch_method": "pip",
             "port": 45123,
             "process_id": 98765
@@ -3750,8 +3752,8 @@ async def session_community_create(
     Note:
         - Created sessions are automatically cleaned up on MCP server shutdown
         - Sessions consume system resources - delete when no longer needed
-        - Auth tokens are logged at WARNING level for user visibility
-        - Connection URLs include the auth token for easy browser access
+        - Auto-generated auth tokens are logged to console at WARNING level
+        - For browser access, copy the URL from console logs or use session_community_credentials tool
     """
     _LOGGER.info(
         f"[mcp_systems_server:session_community_create] Invoked: session_name={session_name!r}"
@@ -4017,14 +4019,18 @@ async def session_community_create(
             f"[mcp_systems_server:session_community_create] Successfully created and registered session '{session_id}'"
         )
 
-        # Log auth token prominently if auto-generated
+        # Log auth token prominently if auto-generated (similar to Jupyter)
         if auto_generated_token and resolved_auth_token:
-            _LOGGER.warning(
-                f"[mcp_systems_server:session_community_create] IMPORTANT: Auto-generated auth token for session '{session_name}': {resolved_auth_token}"
-            )
-            _LOGGER.warning(
-                f"[mcp_systems_server:session_community_create] Connection URL: {launched_session.connection_url}/?authToken={resolved_auth_token}"
-            )
+            _LOGGER.warning("=" * 70)
+            _LOGGER.warning(f"🔑 Session '{session_name}' Created - Browser Access Information:")
+            _LOGGER.warning(f"   Port: {port}")
+            _LOGGER.warning(f"   Base URL: {launched_session.connection_url}")
+            _LOGGER.warning(f"   Auth Token: {resolved_auth_token}")
+            _LOGGER.warning(f"   Browser URL: {launched_session.connection_url}/?authToken={resolved_auth_token}")
+            _LOGGER.warning("")
+            _LOGGER.warning("   To retrieve credentials via MCP tool, enable credential_retrieval_enabled")
+            _LOGGER.warning("   in your deephaven_mcp.json configuration.")
+            _LOGGER.warning("=" * 70)
 
         # Build success response
         result.update(
@@ -4033,17 +4039,14 @@ async def session_community_create(
                 "session_id": session_id,
                 "session_name": session_name,
                 "connection_url": launched_session.connection_url,
-                "connection_url_with_auth": launched_session.connection_url_with_auth,
                 "auth_type": resolved_auth_type,
                 "launch_method": resolved_launch_method,
                 "port": port,
             }
         )
 
-        # Add auth token to response for PSK authentication
-        # Include token in response to provide confirmation of what's being used
-        if resolved_auth_token:
-            result["auth_token"] = resolved_auth_token
+        # Note: auth_token and connection_url_with_auth are NOT included in response for security.
+        # Use session_community_credentials tool if programmatic access to credentials is needed.
 
         # Add launch-method-specific details
         if resolved_launch_method == "docker":
@@ -4256,3 +4259,272 @@ async def session_community_delete(
         result["isError"] = True
 
     return result
+
+
+@mcp_server.tool()
+async def session_community_credentials(
+    context: Context,
+    session_id: str,
+) -> dict:
+    """
+    SECURITY SENSITIVE: Retrieve connection credentials for browser access.
+    
+    Returns authentication credentials for connecting to a Deephaven Community session
+    via web browser. This tool exposes sensitive credentials and should only be called
+    when the user explicitly needs browser access.
+    
+    IMPORTANT: This tool is DISABLED by default for security. To enable, add to your
+    deephaven_mcp.json configuration:
+    
+    {
+      "security": {
+        "community": {
+          "credential_retrieval_mode": "dynamic_only"  // or "all", "static_only"
+        }
+      }
+    }
+    
+    Valid credential_retrieval_mode values:
+    - "none": Disabled (secure default)
+    - "dynamic_only": Only auto-generated tokens (dynamic sessions)
+    - "static_only": Only pre-configured tokens (static sessions)
+    - "all": Both dynamic and static session credentials
+    
+    Terminology Note:
+    - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
+    - 'Deephaven Community' and 'Deephaven Core' are interchangeable names for the same product
+    
+    AI Agent Usage Guidelines:
+    - **When to Call**: Only when user explicitly requests browser access, connection URL,
+      or credentials. Do not call proactively or for informational purposes.
+    - **Credential Handling**: Never cache, log, or display credentials in plain text unless
+      user specifically asks. Treat auth_token as sensitive data.
+    - **Error Handling**: If tool returns disabled error, inform user that credential
+      retrieval is disabled for security and guide them to enable it in configuration.
+    - **Session Types**: Works for both static (config-based) and dynamic (on-demand) sessions,
+      but access is controlled by credential_retrieval_mode setting.
+    - **Mode Selection Guidance**:
+        * "dynamic_only": Recommended for development - allows retrieving auto-generated tokens
+        * "static_only": For controlled environments with pre-configured credentials
+        * "all": Maximum flexibility but requires careful security consideration
+        * "none": Default - no credential retrieval allowed (most secure)
+    
+    Security Note:
+    - Credentials are returned in plain text
+    - All calls are logged for security audit
+    - Only use for legitimate browser access needs
+    - Disabled by default - must be explicitly enabled in configuration
+    
+    Args:
+        context (Context): MCP context provided by the MCP framework
+        session_id (str): Session ID in format "community:source:name" where:
+            - source="config" for static (configuration-based) sessions
+            - source="dynamic" for dynamic (on-demand created) sessions
+            - name is the unique session identifier within that source
+            Examples: "community:config:local-dev", "community:dynamic:my-session"
+    
+    Returns:
+        dict: Response structure varies based on success/failure:
+        
+        On Success (success=True):
+            - success (bool): Always True
+            - auth_type (str): Authentication type - "PSK" (pre-shared key) or "ANONYMOUS"
+            - auth_token (str): Authentication token string. For PSK auth, contains the token value.
+                For ANONYMOUS auth, returns empty string "". Never None.
+            - connection_url (str): Base server URL without authentication parameters.
+                Format: "http://host:port" or "https://host:port"
+                Example: "http://localhost:45123"
+            - connection_url_with_auth (str): Complete browser-ready URL including auth token if applicable.
+                For PSK: Base URL + "/?authToken={token}"
+                For ANONYMOUS: Same as connection_url (no auth parameter needed)
+        
+        On Failure (success=False):
+            - success (bool): Always False
+            - error (str): Human-readable error message explaining the failure
+            - isError (bool): Always True to indicate error condition
+    
+    Example Success Response (PSK Authentication):
+        {
+            "success": True,
+            "auth_type": "PSK",
+            "auth_token": "abc123xyz789...",
+            "connection_url": "http://localhost:45123",
+            "connection_url_with_auth": "http://localhost:45123/?authToken=abc123xyz789"
+        }
+    
+    Example Success Response (ANONYMOUS Authentication):
+        {
+            "success": True,
+            "auth_type": "ANONYMOUS",
+            "auth_token": "",
+            "connection_url": "http://localhost:45123",
+            "connection_url_with_auth": "http://localhost:45123"
+        }
+    
+    Example Disabled Response:
+        {
+            "success": False,
+            "error": "Credential retrieval is disabled (mode='none'). To enable, configure in deephaven_mcp.json...",
+            "isError": True
+        }
+    
+    Example Session Not Found Response:
+        {
+            "success": False,
+            "error": "Session 'community:config:my-session' not found: ...",
+            "isError": True
+        }
+    """
+    _LOGGER.info(
+        f"[mcp_systems_server:session_community_credentials] Invoked for session_id: {session_id}"
+    )
+    
+    try:
+        # Get config manager from context
+        config_manager: ConfigManager = context.request_context.lifespan_context[
+            "config_manager"
+        ]
+        
+        # Check credential retrieval mode from security config
+        config = await config_manager.get_config()
+        security_config = config.get("security", {})
+        security_community_config = security_config.get("community", {})
+        credential_retrieval_mode = security_community_config.get(
+            "credential_retrieval_mode", "none"
+        )
+        
+        # Validate session_id format - must be a community session
+        if not session_id.startswith("community:"):
+            return {
+                "success": False,
+                "error": f"Invalid session_id '{session_id}'. This tool only works for community sessions (format: 'community:config:name' or 'community:dynamic:name')",
+                "isError": True,
+            }
+        
+        # Check if credential retrieval is disabled globally (mode='none')
+        if credential_retrieval_mode == "none":
+            _LOGGER.warning(
+                f"[mcp_systems_server:session_community_credentials] DENIED: Credential retrieval disabled (mode='none') for session_id '{session_id}'"
+            )
+            return {
+                "success": False,
+                "error": (
+                    "Credential retrieval is disabled (mode='none'). To enable, configure in deephaven_mcp.json:\n\n"
+                    "Available modes:\n"
+                    '  - "none": Disable all credential retrieval (secure default)\n'
+                    '  - "dynamic_only": Allow only auto-generated session credentials\n'
+                    '  - "static_only": Allow only pre-configured session credentials\n'
+                    '  - "all": Allow all credential retrieval\n\n'
+                    "Configuration example:\n"
+                    '{\n'
+                    '  "security": {\n'
+                    '    "community": {\n'
+                    '      "credential_retrieval_mode": "dynamic_only"\n'
+                    '    }\n'
+                    '  }\n'
+                    '}\n\n'
+                    "Documentation: https://github.com/deephaven/deephaven-mcp/"
+                ),
+                "isError": True,
+            }
+        
+        # Get session registry and session manager
+        session_registry: CombinedSessionRegistry = (
+            context.request_context.lifespan_context["session_registry"]
+        )
+        
+        try:
+            mgr = await session_registry.get(session_id)
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"Session '{session_id}' not found: {str(e)}",
+                "isError": True,
+            }
+        
+        # Verify it's a community session manager
+        if not isinstance(mgr, CommunitySessionManager):
+            return {
+                "success": False,
+                "error": f"Session '{session_id}' is not a community session",
+                "isError": True,
+            }
+        
+        # Determine session type
+        is_dynamic = isinstance(mgr, DynamicCommunitySessionManager)
+        is_static = not is_dynamic
+        
+        # Check mode-specific permissions
+        if credential_retrieval_mode == "dynamic_only" and is_static:
+            _LOGGER.warning(
+                f"[mcp_systems_server:session_community_credentials] DENIED: Static session credential retrieval disabled (mode='dynamic_only') for session_id '{session_id}'"
+            )
+            return {
+                "success": False,
+                "error": (
+                    f"Credential retrieval for static sessions is disabled. Current mode: 'dynamic_only'. "
+                    f"Session '{session_id}' is a static (config-based) session. "
+                    f"To retrieve static session credentials, set security.community.credential_retrieval_mode to 'all' or 'static_only' in deephaven_mcp.json."
+                ),
+                "isError": True,
+            }
+        elif credential_retrieval_mode == "static_only" and is_dynamic:
+            _LOGGER.warning(
+                f"[mcp_systems_server:session_community_credentials] DENIED: Dynamic session credential retrieval disabled (mode='static_only') for session_id '{session_id}'"
+            )
+            return {
+                "success": False,
+                "error": (
+                    f"Credential retrieval for dynamic sessions is disabled. Current mode: 'static_only'. "
+                    f"Session '{session_id}' is a dynamic (on-demand) session. "
+                    f"To retrieve dynamic session credentials, set security.community.credential_retrieval_mode to 'all' or 'dynamic_only' in deephaven_mcp.json."
+                ),
+                "isError": True,
+            }
+        
+        # Credential retrieval is allowed - proceed
+        session_type_str = "dynamic" if is_dynamic else "static"
+        _LOGGER.warning(
+            f"[mcp_systems_server:session_community_credentials] SECURITY: Credential retrieval ALLOWED (mode='{credential_retrieval_mode}', type='{session_type_str}') for session_id '{session_id}'"
+        )
+        
+        # Get credentials based on session type
+        if is_dynamic:
+            # Dynamic session - get from launched_session
+            auth_token = mgr.launched_session.auth_token if mgr.launched_session.auth_token else ""
+            connection_url = mgr.connection_url
+            connection_url_with_auth = mgr.connection_url_with_auth
+            auth_type = mgr.launched_session.auth_type.upper()
+        else:
+            # Static session - get from config
+            server = mgr._config.get("server", "")
+            auth_token = mgr._config.get("auth_token", "")
+            auth_type = mgr._config.get("auth_type", "ANONYMOUS").upper()
+            
+            # Build connection URL with auth if token exists
+            connection_url = server
+            if auth_token:
+                connection_url_with_auth = f"{server}/?authToken={auth_token}"
+            else:
+                connection_url_with_auth = server
+        
+        result = {
+            "success": True,
+            "auth_type": auth_type,
+            "auth_token": auth_token,
+            "connection_url": connection_url,
+            "connection_url_with_auth": connection_url_with_auth,
+        }
+        
+        _LOGGER.warning(
+            f"[mcp_systems_server:session_community_credentials] SECURITY: Credentials retrieved for session_id '{session_id}'"
+        )
+        
+        return result
+        
+    except Exception as e:
+        _LOGGER.error(
+            f"[mcp_systems_server:session_community_credentials] Failed: {e!r}",
+            exc_info=True,
+        )
+        return {"success": False, "error": str(e), "isError": True}

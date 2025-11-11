@@ -1,15 +1,19 @@
 """
 Configuration handling specific to Deephaven Community Sessions.
 
-This module provides validation and redaction functions for two types of community
-session configurations:
+This module provides validation and redaction functions for community session
+configurations:
 
-1. **Static Community Sessions** (`community.sessions`):
+1. **Security Settings** (`security.community`):
+   - Security configuration for community sessions (credential retrieval permissions)
+   - Validated by `validate_security_community_config()`
+
+2. **Static Community Sessions** (`community.sessions`):
    - Pre-configured connections to existing Deephaven Community servers
    - Validated by `validate_community_sessions_config()` and `validate_single_community_session_config()`
    - Redacted by `redact_community_session_config()`
 
-2. **Dynamic Session Creation** (`community.session_creation`):
+3. **Dynamic Session Creation** (`community.session_creation`):
    - Configuration for on-demand creation of Deephaven Community sessions via Docker or pip
    - Validated by `validate_community_session_creation_config()`
    - Redacted by `redact_community_session_creation_config()`
@@ -26,6 +30,7 @@ All validation errors raise `CommunitySessionConfigurationError` with descriptiv
 """
 
 __all__ = [
+    "validate_security_community_config",
     "validate_community_sessions_config",
     "validate_single_community_session_config",
     "redact_community_session_config",
@@ -55,7 +60,7 @@ Custom authenticator strings are also valid but not listed here.
 """
 
 
-_ALLOWED_COMMUNITY_SESSION_FIELDS: dict[str, type | tuple[type, type]] = {
+_ALLOWED_COMMUNITY_SESSION_FIELDS: dict[str, type | tuple[type, ...]] = {
     "host": str,
     "port": int,
     "auth_type": str,
@@ -125,6 +130,54 @@ def redact_community_session_config(
     return config_copy
 
 
+# Valid values for credential_retrieval_mode
+_VALID_CREDENTIAL_RETRIEVAL_MODES = {"none", "dynamic_only", "static_only", "all"}
+
+
+def validate_security_community_config(security_community_config: Any | None) -> None:
+    """
+    Validate the 'security.community' configuration section.
+    
+    Validates security settings for community sessions from the top-level 'security' section.
+    Currently validates the 'credential_retrieval_mode' field which controls which community
+    session credentials can be retrieved via the session_community_credentials MCP tool.
+    
+    Valid credential_retrieval_mode values:
+    - "none" (default): Credential retrieval disabled for all sessions (most secure)
+    - "dynamic_only": Only auto-generated tokens (dynamic sessions) can be retrieved
+    - "static_only": Only pre-configured tokens (static sessions) can be retrieved
+    - "all": Both dynamic and static session credentials can be retrieved
+    
+    Args:
+        security_community_config (dict[str, Any] | None): The security.community configuration dictionary.
+            Can be None if the 'security.community' keys are absent.
+    
+    Raises:
+        CommunitySessionConfigurationError: If the config is not a dict, or if
+            credential_retrieval_mode is present but not a valid string enum value.
+    """
+    if security_community_config is None:
+        return
+    
+    if not isinstance(security_community_config, dict):
+        raise CommunitySessionConfigurationError(
+            "'security.community' must be a dictionary in configuration"
+        )
+    
+    # Validate credential_retrieval_mode if present
+    if "credential_retrieval_mode" in security_community_config:
+        value = security_community_config["credential_retrieval_mode"]
+        if not isinstance(value, str):
+            raise CommunitySessionConfigurationError(
+                f"'security.community.credential_retrieval_mode' must be a string, got {type(value).__name__}"
+            )
+        if value not in _VALID_CREDENTIAL_RETRIEVAL_MODES:
+            valid_modes = '", "'.join(sorted(_VALID_CREDENTIAL_RETRIEVAL_MODES))
+            raise CommunitySessionConfigurationError(
+                f"'security.community.credential_retrieval_mode' must be one of: \"{valid_modes}\", got \"{value}\""
+            )
+
+
 def validate_community_sessions_config(
     community_sessions_map: Any | None,
 ) -> None:
@@ -152,7 +205,7 @@ def validate_community_sessions_config(
 
     if not isinstance(community_sessions_map, dict):
         _LOGGER.error(
-            "'community_sessions' must be a dictionary in Deephaven community session config, got %s",
+            "[config:validate_community_sessions_config] 'community_sessions' must be a dictionary in Deephaven community session config, got %s",
             type(community_sessions_map).__name__,
         )
         raise CommunitySessionConfigurationError(
@@ -166,9 +219,15 @@ def validate_community_sessions_config(
 def _validate_field_types(session_name: str, config_item: dict[str, Any]) -> None:
     """Validate field types for a community session configuration.
     
+    Checks that all fields in the configuration are known (present in _ALLOWED_COMMUNITY_SESSION_FIELDS)
+    and that their values match the expected types. Handles both single types and tuple types (union types).
+    
     Args:
         session_name (str): The name of the community session being validated.
         config_item (dict[str, Any]): The configuration dictionary to validate.
+    
+    Returns:
+        None
         
     Raises:
         CommunitySessionConfigurationError: If unknown fields are present or field types don't match expected types.
@@ -200,11 +259,14 @@ def _validate_auth_configuration(
     """Validate authentication-related configuration for a community session.
     
     Checks mutual exclusivity of auth_token and auth_token_env_var, and logs warnings
-    for unknown auth_type values.
+    for unknown auth_type values (custom authenticators are allowed but generate a warning).
     
     Args:
         session_name (str): The name of the community session being validated.
         config_item (dict[str, Any]): The configuration dictionary to validate.
+    
+    Returns:
+        None
         
     Raises:
         CommunitySessionConfigurationError: If both auth_token and auth_token_env_var are set.
@@ -221,7 +283,7 @@ def _validate_auth_configuration(
         auth_type_value = config_item["auth_type"]
         if auth_type_value not in _KNOWN_AUTH_TYPES:
             _LOGGER.warning(
-                "Community session config for '%s' uses auth_type='%s' which is not a commonly known value. "
+                "[config:validate_single_community_session_config] Community session config for '%s' uses auth_type='%s' which is not a commonly known value. "
                 "Known values are: %s. Custom authenticators are also valid - if this is intentional, you can ignore this warning.",
                 session_name,
                 auth_type_value,
@@ -233,12 +295,18 @@ def validate_single_community_session_config(
     session_name: str,
     config_item: dict[str, Any],
 ) -> None:
-    """
-    Validate a single community session's configuration.
+    """Validate a single community session's configuration.
+    
+    Performs comprehensive validation including type checking, mutual exclusivity checks,
+    and required field validation. Currently _REQUIRED_FIELDS is empty, so no fields are
+    required.
 
     Args:
         session_name (str): The name of the community session.
         config_item (dict[str, Any]): The configuration dictionary for the session.
+    
+    Returns:
+        None
 
     Raises:
         CommunitySessionConfigurationError: If the configuration item is invalid (e.g., not a
@@ -364,7 +432,7 @@ def validate_community_session_creation_config(
 
     if not isinstance(session_creation_config, dict):
         _LOGGER.error(
-            "'session_creation' must be a dictionary in community config, got %s",
+            "[config:validate_community_session_creation_config] 'session_creation' must be a dictionary in community config, got %s",
             type(session_creation_config).__name__,
         )
         raise CommunitySessionConfigurationError(
@@ -411,6 +479,9 @@ def _validate_session_creation_defaults(defaults: dict[str, Any]) -> None:
     
     Args:
         defaults (dict[str, Any]): The defaults dictionary from session_creation configuration.
+    
+    Returns:
+        None
         
     Raises:
         CommunitySessionConfigurationError: If any validation check fails.
@@ -449,7 +520,7 @@ def _validate_session_creation_defaults(defaults: dict[str, Any]) -> None:
         auth_type = defaults["auth_type"]
         if auth_type not in _KNOWN_AUTH_TYPES:
             _LOGGER.warning(
-                "session_creation.defaults uses auth_type='%s' which is not a commonly known value. "
+                "[config:_validate_session_creation_defaults] session_creation.defaults uses auth_type='%s' which is not a commonly known value. "
                 "Known values are: %s. Custom authenticators are also valid - if this is intentional, you can ignore this warning.",
                 auth_type,
                 ", ".join(sorted(_KNOWN_AUTH_TYPES)),

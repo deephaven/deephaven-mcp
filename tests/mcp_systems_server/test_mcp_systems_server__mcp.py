@@ -6322,7 +6322,7 @@ class TestSessionDetailsDynamicCommunity:
         assert result["success"] is True
         session_info = result["session"]
         assert "connection_url" in session_info
-        assert "connection_url_with_auth" in session_info
+        # Note: connection_url_with_auth removed from to_dict() for security
         assert session_info["auth_type"] == "PSK"
         assert session_info["launch_method"] == "docker"
         assert session_info["port"] == 10000
@@ -7114,3 +7114,537 @@ async def test_session_details_to_dict_exception():
         assert "connection_url" not in session_info  # This comes from to_dict()
         assert "port" not in session_info  # This comes from to_dict()
         assert "launch_method" not in session_info  # This comes from to_dict()
+
+
+# ===== session_community_credentials Tests =====
+
+
+@pytest.mark.asyncio
+async def test_session_community_credentials_disabled_by_default():
+    """Test that credential retrieval is disabled by default (mode='none')."""
+    mock_config_manager = MagicMock()
+    mock_session_registry = MagicMock()
+    
+    # Config without security section (defaults to mode='none')
+    config = {
+        "community": {
+            "session_creation": {
+                "max_concurrent_sessions": 5,
+                "defaults": {},
+            }
+        }
+    }
+    
+    mock_config_manager.get_config = AsyncMock(return_value=config)
+    
+    context = MockContext({
+        "config_manager": mock_config_manager,
+        "session_registry": mock_session_registry,
+    })
+    
+    result = await mcp_mod.session_community_credentials(context, session_id="community:dynamic:test-session")
+    
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "Credential retrieval is disabled" in result["error"]
+    assert "mode='none'" in result["error"]
+    assert "security" in result["error"]
+    assert "credential_retrieval_mode" in result["error"]
+    assert "deephaven_mcp.json" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_session_community_credentials_explicit_none():
+    """Test that credential retrieval respects explicit 'none' mode."""
+    mock_config_manager = MagicMock()
+    mock_session_registry = MagicMock()
+    
+    # Config with explicit mode='none'
+    config = {
+        "security": {
+            "community": {
+                "credential_retrieval_mode": "none"
+            }
+        }
+    }
+    
+    mock_config_manager.get_config = AsyncMock(return_value=config)
+    
+    context = MockContext({
+        "config_manager": mock_config_manager,
+        "session_registry": mock_session_registry,
+    })
+    
+    result = await mcp_mod.session_community_credentials(context, session_id="community:dynamic:test-session")
+    
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "Credential retrieval is disabled" in result["error"]
+    assert "mode='none'" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_session_community_credentials_dynamic_success():
+    """Test successful credential retrieval for dynamic session with mode='dynamic_only'."""
+    mock_config_manager = MagicMock()
+    mock_session_registry = MagicMock()
+    
+    # Config with mode='dynamic_only'
+    config = {
+        "security": {
+            "community": {
+                "credential_retrieval_mode": "dynamic_only"
+            }
+        }
+    }
+    
+    mock_config_manager.get_config = AsyncMock(return_value=config)
+    
+    # Create a mock DynamicCommunitySessionManager
+    mock_launched_session = MagicMock(spec=DockerLaunchedSession)
+    mock_launched_session.auth_token = "test_auth_token_123"
+    mock_launched_session.auth_type = "psk"
+    mock_launched_session.port = 10000
+    mock_launched_session.launch_method = "docker"
+    mock_launched_session.connection_url = "http://localhost:10000"
+    mock_launched_session.connection_url_with_auth = "http://localhost:10000/?authToken=test_auth_token_123"
+    mock_launched_session.container_id = "test_container_id"
+    
+    manager = DynamicCommunitySessionManager(
+        name="test-session",
+        config={"host": "localhost", "port": 10000},
+        launched_session=mock_launched_session
+    )
+    
+    mock_session_registry.get = AsyncMock(return_value=manager)
+    
+    context = MockContext({
+        "config_manager": mock_config_manager,
+        "session_registry": mock_session_registry,
+    })
+    
+    result = await mcp_mod.session_community_credentials(context, session_id="community:dynamic:test-session")
+    
+    assert result["success"] is True
+    assert result["connection_url"] == "http://localhost:10000"
+    assert result["connection_url_with_auth"] == "http://localhost:10000/?authToken=test_auth_token_123"
+    assert result["auth_token"] == "test_auth_token_123"
+    assert result["auth_type"] == "PSK"
+    assert "error" not in result
+    assert "isError" not in result
+
+
+@pytest.mark.asyncio
+async def test_session_community_credentials_anonymous_auth():
+    """Test credential retrieval with anonymous auth (no token)."""
+    mock_config_manager = MagicMock()
+    mock_session_registry = MagicMock()
+    
+    config = {
+        "security": {
+            "community": {
+                "credential_retrieval_mode": "all"
+            }
+        }
+    }
+    
+    mock_config_manager.get_config = AsyncMock(return_value=config)
+    
+    # Create a mock session with anonymous auth (no token)
+    mock_launched_session = MagicMock(spec=DockerLaunchedSession)
+    mock_launched_session.auth_token = None
+    mock_launched_session.auth_type = "anonymous"
+    mock_launched_session.port = 10000
+    mock_launched_session.launch_method = "docker"
+    mock_launched_session.connection_url = "http://localhost:10000"
+    mock_launched_session.connection_url_with_auth = "http://localhost:10000"
+    mock_launched_session.container_id = "test_container_id"
+    
+    manager = DynamicCommunitySessionManager(
+        name="test-session",
+        config={"host": "localhost", "port": 10000},
+        launched_session=mock_launched_session
+    )
+    
+    mock_session_registry.get = AsyncMock(return_value=manager)
+    
+    context = MockContext({
+        "config_manager": mock_config_manager,
+        "session_registry": mock_session_registry,
+    })
+    
+    result = await mcp_mod.session_community_credentials(context, session_id="community:dynamic:test-session")
+    
+    assert result["success"] is True
+    assert result["auth_token"] == ""  # Empty string for None
+    assert result["auth_type"] == "ANONYMOUS"
+
+
+@pytest.mark.asyncio
+async def test_session_community_credentials_no_config():
+    """Test when community config is empty."""
+    mock_config_manager = MagicMock()
+    mock_session_registry = MagicMock()
+    
+    # Empty config - should default to disabled
+    config = {}
+    mock_config_manager.get_config = AsyncMock(return_value=config)
+    
+    context = MockContext({
+        "config_manager": mock_config_manager,
+        "session_registry": mock_session_registry,
+    })
+    
+    result = await mcp_mod.session_community_credentials(context, session_id="community:dynamic:test-session")
+    
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "Credential retrieval is disabled" in result["error"]
+    assert "mode='none'" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_session_community_credentials_session_not_found():
+    """Test when session does not exist."""
+    mock_config_manager = MagicMock()
+    mock_session_registry = MagicMock()
+    
+    config = {
+        "security": {
+            "community": {
+                "credential_retrieval_mode": "all"
+            }
+        }
+    }
+    
+    mock_config_manager.get_config = AsyncMock(return_value=config)
+    
+    # Session not found
+    mock_session_registry.get = AsyncMock(side_effect=KeyError("Session not found"))
+    
+    context = MockContext({
+        "config_manager": mock_config_manager,
+        "session_registry": mock_session_registry,
+    })
+    
+    result = await mcp_mod.session_community_credentials(context, session_id="community:dynamic:nonexistent")
+    
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "Session 'community:dynamic:nonexistent' not found" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_session_community_credentials_not_dynamic_session():
+    """Test when session is not a DynamicCommunitySessionManager."""
+    mock_config_manager = MagicMock()
+    mock_session_registry = MagicMock()
+    
+    config = {
+        "security": {
+            "community": {
+                "credential_retrieval_mode": "all"
+            }
+        }
+    }
+    
+    mock_config_manager.get_config = AsyncMock(return_value=config)
+    
+    # Return a different type of manager (not DynamicCommunitySessionManager)
+    mock_manager = MagicMock()
+    mock_manager.__class__.__name__ = "StaticCommunitySessionManager"
+    mock_session_registry.get = AsyncMock(return_value=mock_manager)
+    
+    context = MockContext({
+        "config_manager": mock_config_manager,
+        "session_registry": mock_session_registry,
+    })
+    
+    result = await mcp_mod.session_community_credentials(context, session_id="community:dynamic:static-session")
+    
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "not a community session" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_session_community_credentials_static_session():
+    """Test credential retrieval for static community session with mode='static_only'."""
+    from deephaven_mcp.resource_manager._manager import StaticCommunitySessionManager
+    
+    mock_config_manager = MagicMock()
+    mock_session_registry = MagicMock()
+    
+    config = {
+        "security": {
+            "community": {
+                "credential_retrieval_mode": "static_only"
+            }
+        }
+    }
+    
+    mock_config_manager.get_config = AsyncMock(return_value=config)
+    
+    # Create a static session manager
+    static_config = {
+        "server": "http://localhost:10000",
+        "auth_token": "static_token_123",
+        "auth_type": "PSK",
+    }
+    
+    manager = StaticCommunitySessionManager(
+        name="local-dev",
+        config=static_config
+    )
+    
+    mock_session_registry.get = AsyncMock(return_value=manager)
+    
+    context = MockContext({
+        "config_manager": mock_config_manager,
+        "session_registry": mock_session_registry,
+    })
+    
+    result = await mcp_mod.session_community_credentials(context, session_id="community:config:local-dev")
+    
+    assert result["success"] is True
+    assert result["connection_url"] == "http://localhost:10000"
+    assert result["connection_url_with_auth"] == "http://localhost:10000/?authToken=static_token_123"
+    assert result["auth_token"] == "static_token_123"
+    assert result["auth_type"] == "PSK"
+    assert "error" not in result
+    assert "isError" not in result
+
+
+@pytest.mark.asyncio
+async def test_session_community_credentials_static_session_anonymous():
+    """Test credential retrieval for static community session with anonymous auth."""
+    from deephaven_mcp.resource_manager._manager import StaticCommunitySessionManager
+    
+    mock_config_manager = MagicMock()
+    mock_session_registry = MagicMock()
+    
+    config = {
+        "security": {
+            "community": {
+                "credential_retrieval_mode": "all"
+            }
+        }
+    }
+    
+    mock_config_manager.get_config = AsyncMock(return_value=config)
+    
+    # Create a static session manager with anonymous auth (no token)
+    static_config = {
+        "server": "http://localhost:10000",
+        "auth_token": "",  # Empty token for anonymous
+        "auth_type": "anonymous",
+    }
+    
+    manager = StaticCommunitySessionManager(
+        name="local-dev-anon",
+        config=static_config
+    )
+    
+    mock_session_registry.get = AsyncMock(return_value=manager)
+    
+    context = MockContext({
+        "config_manager": mock_config_manager,
+        "session_registry": mock_session_registry,
+    })
+    
+    result = await mcp_mod.session_community_credentials(context, session_id="community:config:local-dev-anon")
+    
+    assert result["success"] is True
+    assert result["connection_url"] == "http://localhost:10000"
+    assert result["connection_url_with_auth"] == "http://localhost:10000"  # No auth query param
+    assert result["auth_token"] == ""  # Empty string
+    assert result["auth_type"] == "ANONYMOUS"
+    assert "error" not in result
+    assert "isError" not in result
+
+
+@pytest.mark.asyncio
+async def test_session_community_credentials_invalid_session_id():
+    """Test when session_id has invalid format."""
+    mock_config_manager = MagicMock()
+    mock_session_registry = MagicMock()
+    
+    config = {
+        "security": {
+            "community": {
+                "credential_retrieval_mode": "all"
+            }
+        }
+    }
+    
+    mock_config_manager.get_config = AsyncMock(return_value=config)
+    
+    context = MockContext({
+        "config_manager": mock_config_manager,
+        "session_registry": mock_session_registry,
+    })
+    
+    result = await mcp_mod.session_community_credentials(context, session_id="enterprise:test-session")
+    
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "Invalid session_id" in result["error"]
+    assert "community:dynamic:" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_session_community_credentials_exception_handling():
+    """Test exception handling in session_community_credentials."""
+    mock_config_manager = MagicMock()
+    mock_session_registry = MagicMock()
+    
+    # Make get_config raise an exception
+    mock_config_manager.get_config = AsyncMock(
+        side_effect=RuntimeError("Unexpected config error")
+    )
+    
+    context = MockContext({
+        "config_manager": mock_config_manager,
+        "session_registry": mock_session_registry,
+    })
+    
+    result = await mcp_mod.session_community_credentials(context, session_id="community:dynamic:test-session")
+    
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "Unexpected config error" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_session_community_credentials_dynamic_only_denies_static():
+    """Test that mode='dynamic_only' denies static session credentials."""
+    from deephaven_mcp.resource_manager._manager import StaticCommunitySessionManager
+    
+    mock_config_manager = MagicMock()
+    mock_session_registry = MagicMock()
+    
+    config = {
+        "security": {
+            "community": {
+                "credential_retrieval_mode": "dynamic_only"
+            }
+        }
+    }
+    
+    mock_config_manager.get_config = AsyncMock(return_value=config)
+    
+    # Create a static session manager
+    static_config = {
+        "server": "http://localhost:10000",
+        "auth_token": "static_token_123",
+        "auth_type": "PSK",
+    }
+    
+    manager = StaticCommunitySessionManager(
+        name="local-dev",
+        config=static_config
+    )
+    
+    mock_session_registry.get = AsyncMock(return_value=manager)
+    
+    context = MockContext({
+        "config_manager": mock_config_manager,
+        "session_registry": mock_session_registry,
+    })
+    
+    result = await mcp_mod.session_community_credentials(context, session_id="community:config:local-dev")
+    
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "static sessions is disabled" in result["error"]
+    assert "dynamic_only" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_session_community_credentials_static_only_denies_dynamic():
+    """Test that mode='static_only' denies dynamic session credentials."""
+    mock_config_manager = MagicMock()
+    mock_session_registry = MagicMock()
+    
+    config = {
+        "security": {
+            "community": {
+                "credential_retrieval_mode": "static_only"
+            }
+        }
+    }
+    
+    mock_config_manager.get_config = AsyncMock(return_value=config)
+    
+    # Create a mock DynamicCommunitySessionManager
+    mock_launched_session = MagicMock(spec=DockerLaunchedSession)
+    mock_launched_session.auth_token = "test_auth_token_123"
+    mock_launched_session.auth_type = "psk"
+    mock_launched_session.port = 10000
+    mock_launched_session.launch_method = "docker"
+    mock_launched_session.connection_url = "http://localhost:10000"
+    mock_launched_session.connection_url_with_auth = "http://localhost:10000/?authToken=test_auth_token_123"
+    mock_launched_session.container_id = "test_container_id"
+    
+    manager = DynamicCommunitySessionManager(
+        name="test-session",
+        config={"host": "localhost", "port": 10000},
+        launched_session=mock_launched_session
+    )
+    
+    mock_session_registry.get = AsyncMock(return_value=manager)
+    
+    context = MockContext({
+        "config_manager": mock_config_manager,
+        "session_registry": mock_session_registry,
+    })
+    
+    result = await mcp_mod.session_community_credentials(context, session_id="community:dynamic:test-session")
+    
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "dynamic sessions is disabled" in result["error"]
+    assert "static_only" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_session_community_credentials_all_allows_both():
+    """Test that mode='all' allows both dynamic and static session credentials."""
+    from deephaven_mcp.resource_manager._manager import StaticCommunitySessionManager
+    
+    mock_config_manager = MagicMock()
+    mock_session_registry = MagicMock()
+    
+    config = {
+        "security": {
+            "community": {
+                "credential_retrieval_mode": "all"
+            }
+        }
+    }
+    
+    mock_config_manager.get_config = AsyncMock(return_value=config)
+    
+    # Test with static session
+    static_config = {
+        "server": "http://localhost:10000",
+        "auth_token": "static_token_123",
+        "auth_type": "PSK",
+    }
+    
+    static_manager = StaticCommunitySessionManager(
+        name="local-dev",
+        config=static_config
+    )
+    
+    mock_session_registry.get = AsyncMock(return_value=static_manager)
+    
+    context = MockContext({
+        "config_manager": mock_config_manager,
+        "session_registry": mock_session_registry,
+    })
+    
+    result = await mcp_mod.session_community_credentials(context, session_id="community:config:local-dev")
+    
+    assert result["success"] is True
+    assert result["auth_token"] == "static_token_123"
