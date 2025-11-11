@@ -609,8 +609,11 @@ def test_session_creation_unknown_field_in_session_creation():
     config = {
         "unknown_field": "value",
     }
-    
-    with pytest.raises(CommunitySessionConfigurationError, match="Unknown field 'unknown_field' in session_creation config"):
+
+    with pytest.raises(
+        CommunitySessionConfigurationError,
+        match="Unknown field 'unknown_field' in session_creation config",
+    ):
         validate_community_session_creation_config(config)
 
 
@@ -621,8 +624,10 @@ def test_session_creation_field_wrong_type_tuple_allowed():
             "docker_memory_limit_gb": "not_a_number",  # Should be float, int, or None
         }
     }
-    
-    with pytest.raises(CommunitySessionConfigurationError, match="must be one of types"):
+
+    with pytest.raises(
+        CommunitySessionConfigurationError, match="must be one of types"
+    ):
         validate_community_session_creation_config(config)
 
 
@@ -630,11 +635,18 @@ def test_session_creation_docker_volumes_item_not_string():
     """Test docker_volumes items must be strings."""
     config = {
         "defaults": {
-            "docker_volumes": ["/valid/path", 123, "/another/path"],  # Item is not string
+            "docker_volumes": [
+                "/valid/path",
+                123,
+                "/another/path",
+            ],  # Item is not string
         }
     }
-    
-    with pytest.raises(CommunitySessionConfigurationError, match="'docker_volumes\\[1\\]' must be a string"):
+
+    with pytest.raises(
+        CommunitySessionConfigurationError,
+        match="'docker_volumes\\[1\\]' must be a string",
+    ):
         validate_community_session_creation_config(config)
 
 
@@ -645,8 +657,11 @@ def test_session_creation_extra_jvm_args_item_not_string():
             "extra_jvm_args": ["-XX:+UseG1GC", 123, "-Xms1g"],  # Item is not string
         }
     }
-    
-    with pytest.raises(CommunitySessionConfigurationError, match="'extra_jvm_args\\[1\\]' must be a string"):
+
+    with pytest.raises(
+        CommunitySessionConfigurationError,
+        match="'extra_jvm_args\\[1\\]' must be a string",
+    ):
         validate_community_session_creation_config(config)
 
 
@@ -657,8 +672,11 @@ def test_session_creation_environment_vars_key_not_string():
             "environment_vars": {123: "value"},  # Key is not string
         }
     }
-    
-    with pytest.raises(CommunitySessionConfigurationError, match="'environment_vars' key must be a string"):
+
+    with pytest.raises(
+        CommunitySessionConfigurationError,
+        match="'environment_vars' key must be a string",
+    ):
         validate_community_session_creation_config(config)
 
 
@@ -669,8 +687,11 @@ def test_session_creation_environment_vars_value_not_string():
             "environment_vars": {"KEY": 123},  # Value is not string
         }
     }
-    
-    with pytest.raises(CommunitySessionConfigurationError, match="'environment_vars\\[KEY\\]' value must be a string"):
+
+    with pytest.raises(
+        CommunitySessionConfigurationError,
+        match="'environment_vars\\[KEY\\]' value must be a string",
+    ):
         validate_community_session_creation_config(config)
 
 
@@ -761,7 +782,10 @@ def test_validate_security_community_config_mode_all():
 
 def test_validate_security_community_config_not_dict():
     """Test that non-dict security.community config raises error."""
-    with pytest.raises(CommunitySessionConfigurationError, match="'security.community' must be a dictionary"):
+    with pytest.raises(
+        CommunitySessionConfigurationError,
+        match="'security.community' must be a dictionary",
+    ):
         validate_security_community_config("not_a_dict")
 
 
@@ -770,7 +794,7 @@ def test_validate_security_community_config_mode_not_string():
     config = {"credential_retrieval_mode": True}  # Boolean instead of string
     with pytest.raises(
         CommunitySessionConfigurationError,
-        match="'security.community.credential_retrieval_mode' must be a string, got bool"
+        match="'security.community.credential_retrieval_mode' must be a string, got bool",
     ):
         validate_security_community_config(config)
 
@@ -780,7 +804,7 @@ def test_validate_security_community_config_invalid_mode():
     config = {"credential_retrieval_mode": "invalid_mode"}
     with pytest.raises(
         CommunitySessionConfigurationError,
-        match="'security.community.credential_retrieval_mode' must be one of"
+        match="'security.community.credential_retrieval_mode' must be one of",
     ):
         validate_security_community_config(config)
 
@@ -789,6 +813,6 @@ def test_validate_security_community_config_with_other_fields():
     """Test that config with other fields is valid (future-proofing)."""
     config = {
         "credential_retrieval_mode": "dynamic_only",
-        "future_security_field": "value"
+        "future_security_field": "value",
     }
     validate_security_community_config(config)  # Should not raise

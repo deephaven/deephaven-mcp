@@ -33,8 +33,10 @@ class TestFindAvailablePort:
         """Test that socket errors are wrapped in SessionLaunchError."""
         with patch("socket.socket") as mock_socket:
             mock_socket.side_effect = OSError("Socket error")
-            
-            with pytest.raises(SessionLaunchError, match="Failed to find available port"):
+
+            with pytest.raises(
+                SessionLaunchError, match="Failed to find available port"
+            ):
                 find_available_port()
 
 

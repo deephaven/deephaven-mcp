@@ -21,11 +21,11 @@ Usage:
     # On server startup
     instance = await InstanceTracker.create_and_register()
     await cleanup_orphaned_resources()
-    
+
     # During operation
     await instance.track_pip_process("my-session", 12345)
     await instance.untrack_pip_process("my-session")
-    
+
     # On server shutdown
     await instance.unregister()
 
@@ -43,7 +43,6 @@ import signal
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -51,27 +50,27 @@ _LOGGER = logging.getLogger(__name__)
 class InstanceTracker:
     """
     Tracks a single MCP server instance and its associated resources.
-    
+
     This class manages the lifecycle of an MCP server instance, including:
     - Generating and persisting a unique instance identifier
     - Tracking pip-launched session processes
     - Registering/unregistering the instance on startup/shutdown
     - Providing the instance ID for Docker container labeling
-    
+
     Attributes:
         instance_id (str): Unique UUID for this server instance.
         pid (int): Process ID of this server instance.
         started_at (str): ISO 8601 timestamp of when this instance started.
         instance_file (Path): Path to the instance metadata file.
     """
-    
+
     def __init__(self, instance_id: str, pid: int, started_at: str):
         """
         Initialize an InstanceTracker.
-        
+
         This constructor should not be called directly. Use create_and_register()
         or load_from_file() factory methods instead.
-        
+
         Args:
             instance_id (str): Unique UUID for this instance.
             pid (int): Process ID of this server instance.
@@ -81,24 +80,24 @@ class InstanceTracker:
         self.pid = pid
         self.started_at = started_at
         self._pip_processes: dict[str, int] = {}
-        
+
         # Ensure instances directory exists
         instances_dir = Path.home() / ".deephaven-mcp" / "instances"
         instances_dir.mkdir(parents=True, exist_ok=True)
-        
+
         self.instance_file = instances_dir / f"{instance_id}.json"
-    
+
     @classmethod
     async def create_and_register(cls) -> "InstanceTracker":
         """
         Create a new instance tracker and register it.
-        
+
         This factory method creates a new instance with a unique UUID and immediately
         persists it to disk. Call this on MCP server startup.
-        
+
         Returns:
             InstanceTracker: A new registered instance tracker.
-            
+
         Example:
             ```python
             instance = await InstanceTracker.create_and_register()
@@ -108,57 +107,57 @@ class InstanceTracker:
         instance_id = str(uuid.uuid4())
         pid = os.getpid()
         started_at = datetime.now().isoformat()
-        
+
         tracker = cls(instance_id, pid, started_at)
         await tracker._save()
-        
+
         _LOGGER.info(
             f"[InstanceTracker] Registered new instance {instance_id} (PID: {pid})"
         )
-        
+
         return tracker
-    
+
     @classmethod
     def load_from_file(cls, instance_file: Path) -> "InstanceTracker":
         """
         Load an existing instance tracker from a metadata file.
-        
+
         This is used during orphan cleanup to load information about other
         (potentially dead) server instances.
-        
+
         Args:
             instance_file (Path): Path to the instance metadata JSON file.
-            
+
         Returns:
             InstanceTracker: Instance tracker loaded from the file.
-            
+
         Raises:
             FileNotFoundError: If the instance file does not exist.
             json.JSONDecodeError: If the file contains invalid JSON.
             KeyError: If required fields (instance_id, pid, started_at) are missing from the JSON.
         """
         data = json.loads(instance_file.read_text())
-        
+
         tracker = cls(
             instance_id=data["instance_id"],
             pid=data["pid"],
-            started_at=data["started_at"]
+            started_at=data["started_at"],
         )
         tracker._pip_processes = data.get("pip_processes", {})
-        
+
         return tracker
-    
+
     async def track_pip_process(self, session_name: str, pid: int) -> None:
         """
         Track a new pip-launched session process.
-        
+
         Adds the process to the instance metadata so it can be cleaned up
         if the server crashes or is killed.
-        
+
         Args:
             session_name (str): Name of the session.
             pid (int): Process ID of the pip-launched deephaven-server process.
-            
+
         Example:
             ```python
             # After launching a pip session
@@ -167,21 +166,21 @@ class InstanceTracker:
         """
         self._pip_processes[session_name] = pid
         await self._save()
-        
+
         _LOGGER.debug(
             f"[InstanceTracker] Tracking pip process for session '{session_name}' (PID: {pid})"
         )
-    
+
     async def untrack_pip_process(self, session_name: str) -> None:
         """
         Stop tracking a pip-launched session process.
-        
+
         Removes the process from the instance metadata, typically called when
         the session is stopped normally.
-        
+
         Args:
             session_name (str): Name of the session to stop tracking.
-            
+
         Example:
             ```python
             # After stopping a pip session
@@ -191,19 +190,19 @@ class InstanceTracker:
         if session_name in self._pip_processes:
             del self._pip_processes[session_name]
             await self._save()
-            
+
             _LOGGER.debug(
                 f"[InstanceTracker] Stopped tracking pip process for session '{session_name}'"
             )
-    
+
     async def unregister(self) -> None:
         """
         Unregister this instance and remove its metadata file.
-        
+
         Call this on normal server shutdown to clean up instance tracking.
         This prevents the cleanup logic from attempting to clean up resources
         for a server that shut down normally.
-        
+
         Example:
             ```python
             # In app_lifespan finally block
@@ -212,18 +211,16 @@ class InstanceTracker:
         """
         try:
             self.instance_file.unlink(missing_ok=True)
-            _LOGGER.info(
-                f"[InstanceTracker] Unregistered instance {self.instance_id}"
-            )
+            _LOGGER.info(f"[InstanceTracker] Unregistered instance {self.instance_id}")
         except Exception as e:
             _LOGGER.warning(
                 f"[InstanceTracker] Error unregistering instance {self.instance_id}: {e}"
             )
-    
+
     async def _save(self) -> None:
         """
         Save instance metadata to disk using atomic write.
-        
+
         Persists the current state of the instance tracker, including tracked
         pip processes, to the instance metadata file. Uses atomic write
         (temp file + rename) to ensure the file is never left in a corrupted
@@ -235,7 +232,7 @@ class InstanceTracker:
             "started_at": self.started_at,
             "pip_processes": self._pip_processes,
         }
-        
+
         # Atomic write using temporary file + rename
         temp_file = self.instance_file.with_suffix(".tmp")
         temp_file.write_text(json.dumps(data, indent=2))
@@ -245,17 +242,17 @@ class InstanceTracker:
 def is_process_running(pid: int) -> bool:
     """
     Check if a process with the given PID is currently running.
-    
+
     Uses os.kill(pid, 0) which sends signal 0 to check process existence
     without actually sending a signal. This is the standard Unix way to
     check if a process is alive.
-    
+
     Args:
         pid (int): Process ID to check.
-        
+
     Returns:
         bool: True if the process is running, False otherwise.
-        
+
     Note:
         Returns False if the process doesn't exist OR if we don't have
         permission to check its status (e.g., process owned by another user).
@@ -270,7 +267,7 @@ def is_process_running(pid: int) -> bool:
 async def cleanup_orphaned_resources() -> None:
     """
     Clean up orphaned Docker containers and pip processes from dead server instances.
-    
+
     This function should be called on MCP server startup. It:
     1. Scans the instances directory for registered server instances
     2. Checks if each instance's process is still running
@@ -278,86 +275,90 @@ async def cleanup_orphaned_resources() -> None:
        - Stops and removes Docker containers (via instance label)
        - Kills pip processes (from instance metadata)
     4. Removes instance metadata files for dead instances
-    
+
     The cleanup is safe for concurrent server instances - only resources from
     dead servers are cleaned up. Running servers are left untouched.
-    
+
     This handles the SIGKILL case where a server is forcibly terminated without
     a chance to clean up its resources in the finally block.
-    
+
     Example:
         ```python
         # In app_lifespan, before yielding context
         await cleanup_orphaned_resources()
         ```
-        
+
     Note:
         Errors during cleanup are logged but don't raise exceptions, ensuring
         that server startup continues even if cleanup partially fails.
     """
     instances_dir = Path.home() / ".deephaven-mcp" / "instances"
-    
+
     if not instances_dir.exists():
-        _LOGGER.debug("[InstanceTracker] No instances directory, skipping orphan cleanup")
+        _LOGGER.debug(
+            "[InstanceTracker] No instances directory, skipping orphan cleanup"
+        )
         return
-    
+
     instance_files = list(instances_dir.glob("*.json"))
-    
+
     if not instance_files:
-        _LOGGER.debug("[InstanceTracker] No instance files found, skipping orphan cleanup")
+        _LOGGER.debug(
+            "[InstanceTracker] No instance files found, skipping orphan cleanup"
+        )
         return
-    
+
     _LOGGER.info(
         f"[InstanceTracker] Checking {len(instance_files)} instance(s) for orphaned resources..."
     )
-    
+
     for instance_file in instance_files:
         try:
             tracker = InstanceTracker.load_from_file(instance_file)
-            
+
             # Check if this instance's process is still running
             if is_process_running(tracker.pid):
                 _LOGGER.debug(
                     f"[InstanceTracker] Instance {tracker.instance_id} still running (PID {tracker.pid}), skipping"
                 )
                 continue
-            
+
             # Process is dead - clean up its orphaned resources
             _LOGGER.warning(
                 f"[InstanceTracker] Found dead instance {tracker.instance_id} (PID {tracker.pid}), cleaning up orphans..."
             )
-            
+
             # Clean up Docker containers
             await _cleanup_docker_containers_for_instance(tracker.instance_id)
-            
+
             # Clean up pip processes
             await _cleanup_pip_processes_for_instance(tracker)
-            
+
             # Remove instance metadata file
             instance_file.unlink(missing_ok=True)
             _LOGGER.info(
                 f"[InstanceTracker] Cleaned up orphaned resources for instance {tracker.instance_id}"
             )
-            
+
         except Exception as e:
             _LOGGER.error(
                 f"[InstanceTracker] Error cleaning up instance {instance_file.name}: {e}",
-                exc_info=True
+                exc_info=True,
             )
 
 
 async def _cleanup_docker_containers_for_instance(instance_id: str) -> None:
     """
     Clean up Docker containers for a specific server instance.
-    
+
     Finds all Docker containers labeled with the instance ID and stops/removes them.
     Uses the 'deephaven-mcp-server-instance' label to identify containers belonging
     to the dead instance. Attempts graceful stop via 'docker stop' before removing
     with 'docker rm'.
-    
+
     Args:
         instance_id (str): The instance UUID to clean up containers for.
-        
+
     Note:
         Errors during cleanup are logged but do not raise exceptions. This ensures
         that failure to clean up one container doesn't prevent cleanup of others
@@ -366,94 +367,104 @@ async def _cleanup_docker_containers_for_instance(instance_id: str) -> None:
     try:
         # Find containers with this instance ID label
         process = await asyncio.create_subprocess_exec(
-            "docker", "ps", "-a",
-            "--filter", f"label=deephaven-mcp-server-instance={instance_id}",
-            "--format", "{{.ID}}",
+            "docker",
+            "ps",
+            "-a",
+            "--filter",
+            f"label=deephaven-mcp-server-instance={instance_id}",
+            "--format",
+            "{{.ID}}",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        
+
         stdout, stderr = await process.communicate()
-        
+
         if process.returncode != 0:
             _LOGGER.warning(
                 f"[InstanceTracker] Docker ps command failed: {stderr.decode()}"
             )
             return
-        
-        container_ids = [cid.strip() for cid in stdout.decode().strip().split('\n') if cid.strip()]
-        
+
+        container_ids = [
+            cid.strip() for cid in stdout.decode().strip().split("\n") if cid.strip()
+        ]
+
         if not container_ids:
             _LOGGER.debug(
                 f"[InstanceTracker] No Docker containers found for instance {instance_id}"
             )
             return
-        
+
         _LOGGER.info(
             f"[InstanceTracker] Found {len(container_ids)} orphaned container(s) for instance {instance_id}"
         )
-        
+
         # Stop and remove each container
         for container_id in container_ids:
             _LOGGER.info(
                 f"[InstanceTracker] Stopping orphaned container {container_id[:12]}..."
             )
-            
+
             # Try to stop gracefully
             stop_process = await asyncio.create_subprocess_exec(
-                "docker", "stop", container_id,
+                "docker",
+                "stop",
+                container_id,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
             await stop_process.communicate()
-            
+
             # Remove the container
             rm_process = await asyncio.create_subprocess_exec(
-                "docker", "rm", container_id,
+                "docker",
+                "rm",
+                container_id,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
             await rm_process.communicate()
-            
+
             _LOGGER.info(
                 f"[InstanceTracker] Cleaned up orphaned container {container_id[:12]}"
             )
-            
+
     except Exception as e:
         _LOGGER.error(
             f"[InstanceTracker] Error cleaning up Docker containers for instance {instance_id}: {e}",
-            exc_info=True
+            exc_info=True,
         )
 
 
 async def _cleanup_pip_processes_for_instance(tracker: InstanceTracker) -> None:
     """
     Clean up pip processes for a specific server instance.
-    
+
     Terminates all pip processes tracked in the instance metadata. Sends SIGTERM
     to each tracked process after verifying it's still running. Processes that
     are already dead are logged and skipped.
-    
+
     Args:
         tracker (InstanceTracker): The instance tracker with pip process information.
-        
+
     Note:
         Errors during process termination (e.g., permission denied, process already
         exited) are logged as warnings but do not raise exceptions. This ensures
         that cleanup continues for all processes even if some fail.
     """
     pip_processes = tracker._pip_processes
-    
+
     if not pip_processes:
         _LOGGER.debug(
             f"[InstanceTracker] No pip processes found for instance {tracker.instance_id}"
         )
         return
-    
+
     _LOGGER.info(
         f"[InstanceTracker] Found {len(pip_processes)} orphaned pip process(es) for instance {tracker.instance_id}"
     )
-    
+
     for session_name, pid in pip_processes.items():
         try:
             if is_process_running(pid):

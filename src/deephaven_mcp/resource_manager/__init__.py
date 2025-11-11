@@ -8,11 +8,11 @@ management.
 
 Overview:
     The resource_manager package provides two primary patterns for working with Deephaven:
-    
+
     1. **Static Sessions** (pre-configured): Connect to existing Deephaven servers using
        StaticCommunitySessionManager or EnterpriseSessionManager. Sessions are loaded from
        configuration and cached for reuse.
-    
+
     2. **Dynamic Sessions** (on-demand): Launch new Deephaven servers on-demand using
        DynamicCommunitySessionManager with Docker or pip. Automatically allocates ports,
        manages lifecycle, and handles cleanup.
@@ -21,60 +21,60 @@ Exports - Session Managers:
     - CommunitySessionManager: Abstract base class for Deephaven Community session managers.
       Provides common functionality for both static and dynamic sessions. Not typically
       instantiated directly - use StaticCommunitySessionManager or DynamicCommunitySessionManager.
-      
+
     - StaticCommunitySessionManager: Manages lifecycle of statically configured Deephaven
       Community sessions. Connects to pre-existing servers specified in configuration files.
       Used for servers that are already running and managed externally.
-      
+
     - DynamicCommunitySessionManager: Manages lifecycle of dynamically launched Deephaven
       Community sessions. Launches sessions on-demand via Docker or pip, automatically handles
       port allocation, authentication tokens, and cleanup. Used for ephemeral or test sessions.
-      
+
     - EnterpriseSessionManager: Manages lifecycle of Deephaven Enterprise (Core+) sessions.
       Connects to existing enterprise servers with support for authentication, TLS, and
       CorePlusSessionFactory management.
-      
+
     - CorePlusSessionFactoryManager: Manages lifecycle of CorePlusSessionFactory objects
       used for creating enterprise sessions. Handles worker creation configuration and
       authentication.
-      
+
     - BaseItemManager: Abstract base class for all manager types. Provides common interface
       for item caching, liveness checking, and async-safe resource management.
 
 Exports - Registries:
     - CommunitySessionRegistry: Registry for all configured CommunitySessionManager instances.
       Provides centralized access to all community sessions loaded from configuration.
-      
+
     - CorePlusSessionFactoryRegistry: Registry for all configured CorePlusSessionFactoryManager
       instances. Provides centralized access to all enterprise factory configurations.
-      
+
     - CombinedSessionRegistry: Combined registry that provides unified access to both
       community and enterprise sessions. Simplifies code that needs to work with either type.
 
 Exports - Session Launchers:
     - LaunchedSession: Abstract base class for launched sessions. Defines interface for
       sessions that own their lifecycle (launch + stop).
-      
+
     - DockerLaunchedSession: Deephaven session launched via Docker container. Uses host
       networking, supports resource limits (memory/CPU), volume mounts, and custom JVM args.
-      
+
     - PipLaunchedSession: Deephaven session launched via pip-installed deephaven. Uses
       local process with subprocess management. Requires deephaven-server package installed.
-      
+
     - launch_session: Convenience function to launch sessions via docker or pip. Delegates
       to appropriate launcher based on method parameter.
 
 Exports - Utility Functions:
     - find_available_port: Find an available TCP port for session binding. Uses OS to
       assign from ephemeral port range. Useful for dynamic session creation.
-      
+
     - generate_auth_token: Generate cryptographically secure PSK authentication token.
       Creates 32-character hex string with 128 bits of entropy. Used for session security.
 
 Exports - Enums:
     - SystemType: Backend system type enum with values COMMUNITY and ENTERPRISE. Used to
       distinguish between Deephaven Community and Enterprise (Core+) deployments.
-      
+
     - ResourceLivenessStatus: Resource health status enum with values ONLINE, OFFLINE,
       UNAUTHORIZED, MISCONFIGURED, and UNKNOWN. Used by managers to track connection health
       and determine when to recreate resources.
@@ -109,11 +109,11 @@ Dependencies:
 
 Usage Example - Static Sessions:
     >>> from deephaven_mcp.resource_manager import CommunitySessionRegistry
-    >>> 
+    >>>
     >>> # Initialize registry from configuration
     >>> registry = CommunitySessionRegistry()
     >>> await registry.initialize(config_manager)
-    >>> 
+    >>>
     >>> # Get a pre-configured session manager
     >>> manager = await registry.get("my-session")
     >>> session = await manager.get()
@@ -126,11 +126,11 @@ Usage Example - Dynamic Sessions:
     ...     find_available_port,
     ...     generate_auth_token,
     ... )
-    >>> 
+    >>>
     >>> # Launch a session dynamically
     >>> port = find_available_port()
     >>> token = generate_auth_token()
-    >>> 
+    >>>
     >>> launched = await launch_session(
     ...     launch_method="docker",
     ...     session_name="test-session",
@@ -141,10 +141,10 @@ Usage Example - Dynamic Sessions:
     ...     environment_vars={},
     ...     docker_image="ghcr.io/deephaven/server:latest",
     ... )
-    >>> 
+    >>>
     >>> if await launched.wait_until_ready():
     ...     print(f"Session ready at {launched.connection_url}")
-    >>> 
+    >>>
     >>> # Clean up
     >>> await launched.stop()
 """

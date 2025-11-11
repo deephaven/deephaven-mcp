@@ -62,7 +62,9 @@ def find_available_port() -> int:
             _LOGGER.debug(f"[_utils:find_available_port] Found available port: {port}")
             return port
     except Exception as e:
-        _LOGGER.error(f"[_utils:find_available_port] Failed to find available port: {e}")
+        _LOGGER.error(
+            f"[_utils:find_available_port] Failed to find available port: {e}"
+        )
         raise SessionLaunchError(f"Failed to find available port: {e}") from e
 
 

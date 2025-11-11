@@ -54,11 +54,11 @@ from deephaven_mcp.resource_manager._launcher import _find_deephaven_executable
 def is_deephaven_available() -> bool:
     """Check if deephaven command is available in the same venv as current Python."""
     deephaven_cmd = _find_deephaven_executable()
-    
+
     # If it returned an absolute path, it exists
     if Path(deephaven_cmd).is_absolute():
         return True
-    
+
     # Otherwise it's "deephaven" - check if it's in PATH
     return shutil.which(deephaven_cmd) is not None
 
@@ -66,7 +66,7 @@ def is_deephaven_available() -> bool:
 def find_available_port_locked() -> int:
     """
     Thread-safe port allocation for integration tests.
-    
+
     Uses a lock to prevent multiple tests from getting the same port when
     run in parallel. This solves the TOCTOU race condition in find_available_port()
     where multiple tests call it simultaneously and get the same port.
@@ -91,7 +91,9 @@ class TestDockerLauncherIntegration:
         _LOGGER.info(f"[Integration Test] Allocated port {port} for Docker test")
         try:
             # Launch a real Docker container
-            _LOGGER.info(f"[Integration Test] Launching Docker container on port {port}")
+            _LOGGER.info(
+                f"[Integration Test] Launching Docker container on port {port}"
+            )
             session = await DockerLaunchedSession.launch(
                 session_name="integration-test",
                 port=port,
@@ -115,10 +117,18 @@ class TestDockerLauncherIntegration:
 
             # Wait for session to be ready (health check)
             # This verifies the container actually starts and responds
-            _LOGGER.info(f"[Integration Test] Container {session.container_id[:12]} started, waiting for health check")
-            ready = await session.wait_until_ready(timeout_seconds=60, check_interval_seconds=2)
-            assert ready, f"Docker container {session.container_id[:12]} failed to become ready within 60s"
-            _LOGGER.info(f"[Integration Test] Container {session.container_id[:12]} is ready")
+            _LOGGER.info(
+                f"[Integration Test] Container {session.container_id[:12]} started, waiting for health check"
+            )
+            ready = await session.wait_until_ready(
+                timeout_seconds=60, check_interval_seconds=2
+            )
+            assert (
+                ready
+            ), f"Docker container {session.container_id[:12]} failed to become ready within 60s"
+            _LOGGER.info(
+                f"[Integration Test] Container {session.container_id[:12]} is ready"
+            )
 
             # Verify connection URL is correct
             assert session.connection_url == f"http://localhost:{port}"
@@ -127,7 +137,9 @@ class TestDockerLauncherIntegration:
         finally:
             # Clean up - stop and remove container
             if session:
-                _LOGGER.info(f"[Integration Test] Cleaning up container {session.container_id[:12]}")
+                _LOGGER.info(
+                    f"[Integration Test] Cleaning up container {session.container_id[:12]}"
+                )
                 await session.stop()
                 _LOGGER.info(f"[Integration Test] Container cleanup complete")
 
@@ -138,7 +150,7 @@ class TestDockerLauncherIntegration:
         session = None
         instance_id = "test-integration-instance-123"
         port = find_available_port_locked()
-        
+
         try:
             # Launch with instance_id
             session = await DockerLaunchedSession.launch(
@@ -157,24 +169,30 @@ class TestDockerLauncherIntegration:
 
             # Wait for session to be ready (health check)
             # This verifies the container actually starts and responds
-            ready = await session.wait_until_ready(timeout_seconds=60, check_interval_seconds=2)
-            assert ready, f"Docker container {session.container_id[:12]} failed to become ready within 60s"
-            
+            ready = await session.wait_until_ready(
+                timeout_seconds=60, check_interval_seconds=2
+            )
+            assert (
+                ready
+            ), f"Docker container {session.container_id[:12]} failed to become ready within 60s"
+
             # Verify container has the label by checking with docker inspect
             process = await asyncio.create_subprocess_exec(
                 "docker",
                 "inspect",
                 "--format",
-                "{{index .Config.Labels \"deephaven-mcp-server-instance\"}}",
+                '{{index .Config.Labels "deephaven-mcp-server-instance"}}',
                 session.container_id,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
             stdout, stderr = await process.communicate()
-            
+
             if process.returncode == 0:
                 label_value = stdout.decode().strip()
-                assert label_value == instance_id, f"Expected label '{instance_id}', got '{label_value}'"
+                assert (
+                    label_value == instance_id
+                ), f"Expected label '{instance_id}', got '{label_value}'"
             else:
                 pytest.fail(f"Failed to inspect container: {stderr.decode()}")
 
@@ -189,10 +207,12 @@ class TestPipLauncherIntegration:
 
     @pytest.mark.asyncio
     @pytest.mark.timeout(300)  # 5 minute timeout (pip takes longer to start)
-    @pytest.mark.skipif(not is_deephaven_available(), reason="deephaven command not in PATH")
+    @pytest.mark.skipif(
+        not is_deephaven_available(), reason="deephaven command not in PATH"
+    )
     async def test_pip_launch_and_cleanup(self):
         """Test actual pip process launch, health check, and cleanup.
-        
+
         Prerequisites:
         - deephaven-server must be installed: pip install deephaven-server
         """
@@ -217,7 +237,9 @@ class TestPipLauncherIntegration:
             assert session.launch_method == "pip"
 
             # Check if process is still running before health check
-            _LOGGER.info(f"[Integration Test] Process PID {session.process.pid} launched, checking status")
+            _LOGGER.info(
+                f"[Integration Test] Process PID {session.process.pid} launched, checking status"
+            )
             # Give the process a moment to start or fail
             await asyncio.sleep(0.5)
             if session.process.returncode is not None:
@@ -226,10 +248,14 @@ class TestPipLauncherIntegration:
                 stdout_data = ""
                 try:
                     if session.process.stderr:
-                        stderr_bytes = await asyncio.wait_for(session.process.stderr.read(), timeout=1.0)
+                        stderr_bytes = await asyncio.wait_for(
+                            session.process.stderr.read(), timeout=1.0
+                        )
                         stderr_data = stderr_bytes.decode() if stderr_bytes else ""
                     if session.process.stdout:
-                        stdout_bytes = await asyncio.wait_for(session.process.stdout.read(), timeout=1.0)
+                        stdout_bytes = await asyncio.wait_for(
+                            session.process.stdout.read(), timeout=1.0
+                        )
                         stdout_data = stdout_bytes.decode() if stdout_bytes else ""
                 except Exception as e:
                     stderr_data = f"Could not read output: {e}"
@@ -238,16 +264,22 @@ class TestPipLauncherIntegration:
                     f"=== FULL STDOUT ===\n{stdout_data}\n"
                     f"=== FULL STDERR ===\n{stderr_data}"
                 )
-            
+
             # Wait for session to be ready (health check)
             # This verifies the process actually starts and responds
             # Use longer timeout for pip tests - JVM startup can be slow under load
-            _LOGGER.info(f"[Integration Test] Starting health check for PID {session.process.pid}")
-            ready = await session.wait_until_ready(timeout_seconds=240, check_interval_seconds=5)
-            
+            _LOGGER.info(
+                f"[Integration Test] Starting health check for PID {session.process.pid}"
+            )
+            ready = await session.wait_until_ready(
+                timeout_seconds=240, check_interval_seconds=5
+            )
+
             # If health check failed, capture stderr for debugging
             if not ready:
-                _LOGGER.error(f"[Integration Test] Health check failed! Process returncode: {session.process.returncode}")
+                _LOGGER.error(
+                    f"[Integration Test] Health check failed! Process returncode: {session.process.returncode}"
+                )
                 stderr_output = ""
                 stdout_output = ""
 
@@ -256,7 +288,7 @@ class TestPipLauncherIntegration:
                     try:
                         stderr_bytes = await asyncio.wait_for(
                             session.process.stderr.read(),  # Read all available data
-                            timeout=2.0
+                            timeout=2.0,
                         )
                         stderr_output = stderr_bytes.decode()
                     except Exception as e:
@@ -266,7 +298,7 @@ class TestPipLauncherIntegration:
                     try:
                         stdout_bytes = await asyncio.wait_for(
                             session.process.stdout.read(),  # Read all available data
-                            timeout=2.0
+                            timeout=2.0,
                         )
                         stdout_output = stdout_bytes.decode()
                     except Exception as e:
@@ -305,12 +337,12 @@ class TestOrphanCleanupIntegration:
         container_id = None
         instance_id = "orphan-test-instance-456"
         port = find_available_port_locked()
-        
+
         try:
             # Create instance tracker and register
             instances_dir = tmp_path / ".deephaven-mcp" / "instances"
             instances_dir.mkdir(parents=True, exist_ok=True)
-            
+
             # Create a real Docker container with our label
             process = await asyncio.create_subprocess_exec(
                 "docker",
@@ -326,39 +358,45 @@ class TestOrphanCleanupIntegration:
                 stderr=asyncio.subprocess.PIPE,
             )
             stdout, stderr = await process.communicate()
-            
+
             if process.returncode != 0:
                 pytest.fail(f"Failed to start test container: {stderr.decode()}")
-            
+
             container_id = stdout.decode().strip()
             assert container_id
-            
+
             # Create fake instance metadata with dead PID
             instance_file = instances_dir / f"{instance_id}.json"
             import json
-            instance_file.write_text(json.dumps({
-                "instance_id": instance_id,
-                "pid": 99999999,  # Fake dead PID
-                "started_at": "2025-01-01T00:00:00Z",
-                "pip_processes": {}
-            }))
-            
+
+            instance_file.write_text(
+                json.dumps(
+                    {
+                        "instance_id": instance_id,
+                        "pid": 99999999,  # Fake dead PID
+                        "started_at": "2025-01-01T00:00:00Z",
+                        "pip_processes": {},
+                    }
+                )
+            )
+
             # Temporarily override Path.home() to use tmp_path
             import deephaven_mcp.resource_manager._instance_tracker as tracker_mod
+
             original_home = Path.home
-            
+
             def mock_home():
                 return tmp_path
-            
+
             Path.home = staticmethod(mock_home)
-            
+
             try:
                 # Run cleanup - should find and stop the container
                 await cleanup_orphaned_resources()
-                
+
                 # Wait a moment for Docker to process the stop
                 await asyncio.sleep(2)
-                
+
                 # Verify container was stopped
                 check_process = await asyncio.create_subprocess_exec(
                     "docker",
@@ -370,17 +408,19 @@ class TestOrphanCleanupIntegration:
                     stderr=asyncio.subprocess.PIPE,
                 )
                 stdout, _ = await check_process.communicate()
-                
+
                 # Container should not be in running containers list
                 running_containers = stdout.decode().strip()
-                assert not running_containers, f"Container {container_id} still running after cleanup"
-                
+                assert (
+                    not running_containers
+                ), f"Container {container_id} still running after cleanup"
+
                 # Instance metadata should be removed
                 assert not instance_file.exists()
-                
+
             finally:
                 Path.home = original_home
-                
+
         finally:
             # Cleanup - make sure container is stopped even if test fails
             if container_id:
@@ -398,17 +438,19 @@ class TestOrphanCleanupIntegration:
 
     @pytest.mark.asyncio
     @pytest.mark.timeout(300)  # 5 minute timeout (pip takes longer to start)
-    @pytest.mark.skipif(not is_deephaven_available(), reason="deephaven command not in PATH")
+    @pytest.mark.skipif(
+        not is_deephaven_available(), reason="deephaven command not in PATH"
+    )
     async def test_cleanup_orphaned_pip_process(self, tmp_path):
         """Test that orphaned pip processes are actually cleaned up.
-        
+
         Prerequisites:
         - deephaven-server must be installed: pip install deephaven-server
         """
         process = None
         instance_id = "orphan-pip-test-instance-789"
         port = find_available_port_locked()
-        
+
         try:
             # Start a real pip process
             process = await asyncio.create_subprocess_exec(
@@ -421,57 +463,62 @@ class TestOrphanCleanupIntegration:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            
+
             # Wait a moment for process to start
             await asyncio.sleep(2)
-            
+
             # Verify process is running
             assert process.returncode is None
-            
+
             # Create instance metadata directory
             instances_dir = tmp_path / ".deephaven-mcp" / "instances"
             instances_dir.mkdir(parents=True, exist_ok=True)
-            
+
             # Create fake instance metadata with dead server PID but live pip process
             instance_file = instances_dir / f"{instance_id}.json"
             import json
-            instance_file.write_text(json.dumps({
-                "instance_id": instance_id,
-                "pid": 99999999,  # Fake dead server PID
-                "started_at": "2025-01-01T00:00:00Z",
-                "pip_processes": {
-                    "test-session": process.pid  # Real pip process PID
-                }
-            }))
-            
+
+            instance_file.write_text(
+                json.dumps(
+                    {
+                        "instance_id": instance_id,
+                        "pid": 99999999,  # Fake dead server PID
+                        "started_at": "2025-01-01T00:00:00Z",
+                        "pip_processes": {
+                            "test-session": process.pid  # Real pip process PID
+                        },
+                    }
+                )
+            )
+
             # Temporarily override Path.home() to use tmp_path
             original_home = Path.home
-            
+
             def mock_home():
                 return tmp_path
-            
+
             Path.home = staticmethod(mock_home)
-            
+
             try:
                 # Run cleanup - should find and kill the process
                 await cleanup_orphaned_resources()
-                
+
                 # Wait for process to be terminated
                 await asyncio.sleep(2)
-                
+
                 # Verify process was killed
                 try:
                     os.kill(process.pid, 0)
                     pytest.fail(f"Process {process.pid} still running after cleanup")
                 except OSError:
                     pass  # Good - process is dead
-                
+
                 # Instance metadata should be removed
                 assert not instance_file.exists()
-                
+
             finally:
                 Path.home = original_home
-                
+
         finally:
             # Cleanup - make sure process is killed even if test fails
             if process and process.returncode is None:
@@ -488,29 +535,31 @@ class TestInstanceTrackerIntegration:
 
     @pytest.mark.asyncio
     @pytest.mark.timeout(180)
-    @pytest.mark.skipif(not is_deephaven_available(), reason="deephaven command not in PATH")
+    @pytest.mark.skipif(
+        not is_deephaven_available(), reason="deephaven command not in PATH"
+    )
     async def test_track_and_untrack_real_pip_process(self, tmp_path):
         """Test tracking a real pip process through its lifecycle.
-        
+
         Prerequisites:
         - deephaven-server must be installed: pip install deephaven-server
         """
         process = None
         tracker = None
         port = find_available_port_locked()
-        
+
         # Temporarily override Path.home() to use tmp_path
         original_home = Path.home
-        
+
         def mock_home():
             return tmp_path
-        
+
         Path.home = staticmethod(mock_home)
-        
+
         try:
             # Create and register instance tracker
             tracker = await InstanceTracker.create_and_register()
-            
+
             # Start a real pip process
             process = await asyncio.create_subprocess_exec(
                 "deephaven",
@@ -522,34 +571,40 @@ class TestInstanceTrackerIntegration:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            
+
             # Wait a moment for process to start
             await asyncio.sleep(2)
             assert process.returncode is None
-            
+
             # Track the process
             await tracker.track_pip_process("test-session", process.pid)
-            
+
             # Verify process is tracked in metadata
             import json
-            instance_file = tmp_path / ".deephaven-mcp" / "instances" / f"{tracker.instance_id}.json"
+
+            instance_file = (
+                tmp_path
+                / ".deephaven-mcp"
+                / "instances"
+                / f"{tracker.instance_id}.json"
+            )
             data = json.loads(instance_file.read_text())
             assert "test-session" in data["pip_processes"]
             assert data["pip_processes"]["test-session"] == process.pid
-            
+
             # Untrack the process
             await tracker.untrack_pip_process("test-session")
-            
+
             # Verify process is no longer tracked
             data = json.loads(instance_file.read_text())
             assert "test-session" not in data["pip_processes"]
-            
+
             # Process should still be running (we just untracked it)
             assert process.returncode is None
-            
+
         finally:
             Path.home = original_home
-            
+
             # Cleanup
             if tracker:
                 await tracker.unregister()

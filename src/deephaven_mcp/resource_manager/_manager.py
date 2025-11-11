@@ -2031,7 +2031,7 @@ class DynamicCommunitySessionManager(CommunitySessionManager):
     @property
     def connection_url(self) -> str:
         """Get the base connection URL for this session.
-        
+
         Returns:
             str: The base URL without authentication token (e.g., "http://localhost:10000").
         """
@@ -2040,7 +2040,7 @@ class DynamicCommunitySessionManager(CommunitySessionManager):
     @property
     def connection_url_with_auth(self) -> str:
         """Get the connection URL with authentication token (if applicable).
-        
+
         Returns:
             str: The complete URL with auth token parameter if PSK auth is used,
                 otherwise the base URL.
@@ -2050,7 +2050,7 @@ class DynamicCommunitySessionManager(CommunitySessionManager):
     @property
     def port(self) -> int:
         """Get the port the session is listening on.
-        
+
         Returns:
             int: The TCP port number where the Deephaven server is accessible.
         """
@@ -2059,7 +2059,7 @@ class DynamicCommunitySessionManager(CommunitySessionManager):
     @property
     def launch_method(self) -> str:
         """Get the launch method used (docker or pip).
-        
+
         Returns:
             str: Either "docker" or "pip" indicating how the session was launched.
         """
@@ -2068,7 +2068,7 @@ class DynamicCommunitySessionManager(CommunitySessionManager):
     @property
     def container_id(self) -> str | None:
         """Get the Docker container ID (if launched via Docker).
-        
+
         Returns:
             str | None: The Docker container ID if launch_method is "docker", otherwise None.
         """
@@ -2079,7 +2079,7 @@ class DynamicCommunitySessionManager(CommunitySessionManager):
     @property
     def process_id(self) -> int | None:
         """Get the process ID (if launched via pip).
-        
+
         Returns:
             int | None: The system process ID if launch_method is "pip", otherwise None.
         """
@@ -2135,7 +2135,7 @@ class DynamicCommunitySessionManager(CommunitySessionManager):
 
         Returns:
             dict: Session information including connection details.
-            
+
         Note:
             Does NOT include connection_url_with_auth or auth_token for security.
             Use session_community_credentials MCP tool if credentials are needed.

@@ -137,33 +137,33 @@ _VALID_CREDENTIAL_RETRIEVAL_MODES = {"none", "dynamic_only", "static_only", "all
 def validate_security_community_config(security_community_config: Any | None) -> None:
     """
     Validate the 'security.community' configuration section.
-    
+
     Validates security settings for community sessions from the top-level 'security' section.
     Currently validates the 'credential_retrieval_mode' field which controls which community
     session credentials can be retrieved via the session_community_credentials MCP tool.
-    
+
     Valid credential_retrieval_mode values:
     - "none" (default): Credential retrieval disabled for all sessions (most secure)
     - "dynamic_only": Only auto-generated tokens (dynamic sessions) can be retrieved
     - "static_only": Only pre-configured tokens (static sessions) can be retrieved
     - "all": Both dynamic and static session credentials can be retrieved
-    
+
     Args:
         security_community_config (dict[str, Any] | None): The security.community configuration dictionary.
             Can be None if the 'security.community' keys are absent.
-    
+
     Raises:
         CommunitySessionConfigurationError: If the config is not a dict, or if
             credential_retrieval_mode is present but not a valid string enum value.
     """
     if security_community_config is None:
         return
-    
+
     if not isinstance(security_community_config, dict):
         raise CommunitySessionConfigurationError(
             "'security.community' must be a dictionary in configuration"
         )
-    
+
     # Validate credential_retrieval_mode if present
     if "credential_retrieval_mode" in security_community_config:
         value = security_community_config["credential_retrieval_mode"]
@@ -174,7 +174,7 @@ def validate_security_community_config(security_community_config: Any | None) ->
         if value not in _VALID_CREDENTIAL_RETRIEVAL_MODES:
             valid_modes = '", "'.join(sorted(_VALID_CREDENTIAL_RETRIEVAL_MODES))
             raise CommunitySessionConfigurationError(
-                f"'security.community.credential_retrieval_mode' must be one of: \"{valid_modes}\", got \"{value}\""
+                f'\'security.community.credential_retrieval_mode\' must be one of: "{valid_modes}", got "{value}"'
             )
 
 
@@ -218,17 +218,17 @@ def validate_community_sessions_config(
 
 def _validate_field_types(session_name: str, config_item: dict[str, Any]) -> None:
     """Validate field types for a community session configuration.
-    
+
     Checks that all fields in the configuration are known (present in _ALLOWED_COMMUNITY_SESSION_FIELDS)
     and that their values match the expected types. Handles both single types and tuple types (union types).
-    
+
     Args:
         session_name (str): The name of the community session being validated.
         config_item (dict[str, Any]): The configuration dictionary to validate.
-    
+
     Returns:
         None
-        
+
     Raises:
         CommunitySessionConfigurationError: If unknown fields are present or field types don't match expected types.
     """
@@ -257,17 +257,17 @@ def _validate_auth_configuration(
     session_name: str, config_item: dict[str, Any]
 ) -> None:
     """Validate authentication-related configuration for a community session.
-    
+
     Checks mutual exclusivity of auth_token and auth_token_env_var, and logs warnings
     for unknown auth_type values (custom authenticators are allowed but generate a warning).
-    
+
     Args:
         session_name (str): The name of the community session being validated.
         config_item (dict[str, Any]): The configuration dictionary to validate.
-    
+
     Returns:
         None
-        
+
     Raises:
         CommunitySessionConfigurationError: If both auth_token and auth_token_env_var are set.
     """
@@ -296,7 +296,7 @@ def validate_single_community_session_config(
     config_item: dict[str, Any],
 ) -> None:
     """Validate a single community session's configuration.
-    
+
     Performs comprehensive validation including type checking, mutual exclusivity checks,
     and required field validation. Currently _REQUIRED_FIELDS is empty, so no fields are
     required.
@@ -304,7 +304,7 @@ def validate_single_community_session_config(
     Args:
         session_name (str): The name of the community session.
         config_item (dict[str, Any]): The configuration dictionary for the session.
-    
+
     Returns:
         None
 
@@ -359,7 +359,7 @@ _ALLOWED_SESSION_CREATION_DEFAULTS: dict[str, type | tuple[type, ...]] = {
 
 
 def redact_community_session_creation_config(
-    session_creation_config: dict[str, Any]
+    session_creation_config: dict[str, Any],
 ) -> dict[str, Any]:
     """
     Redacts sensitive fields from a session_creation configuration dictionary.
@@ -471,18 +471,18 @@ def validate_community_session_creation_config(
 
 def _validate_session_creation_defaults(defaults: dict[str, Any]) -> None:
     """Validate the defaults section of session_creation configuration.
-    
+
     Validates field types, launch_method values, auth_type values, mutual exclusivity
     of auth_token and auth_token_env_var, numeric ranges (positive values for sizes/timeouts,
     non-negative for retries), and content validation for lists and dicts (docker_volumes,
     extra_jvm_args, environment_vars must contain appropriate string types).
-    
+
     Args:
         defaults (dict[str, Any]): The defaults dictionary from session_creation configuration.
-    
+
     Returns:
         None
-        
+
     Raises:
         CommunitySessionConfigurationError: If any validation check fails.
     """
@@ -541,7 +541,10 @@ def _validate_session_creation_defaults(defaults: dict[str, Any]) -> None:
                 f"'heap_size_gb' must be positive, got {heap_size}"
             )
 
-    if "docker_memory_limit_gb" in defaults and defaults["docker_memory_limit_gb"] is not None:
+    if (
+        "docker_memory_limit_gb" in defaults
+        and defaults["docker_memory_limit_gb"] is not None
+    ):
         memory_limit = defaults["docker_memory_limit_gb"]
         if memory_limit <= 0:
             raise CommunitySessionConfigurationError(
@@ -606,4 +609,3 @@ def _validate_session_creation_defaults(defaults: dict[str, Any]) -> None:
                 raise CommunitySessionConfigurationError(
                     f"'environment_vars[{key}]' value must be a string, got {type(value).__name__}"
                 )
-

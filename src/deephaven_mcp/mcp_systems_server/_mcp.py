@@ -189,12 +189,12 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
         instance_tracker = await InstanceTracker.create_and_register()
         _LOGGER.info(
             "[mcp_systems_server:app_lifespan] Server instance: %s",
-            instance_tracker.instance_id
+            instance_tracker.instance_id,
         )
-        
+
         # Clean up orphaned resources from previous crashed/killed instances
         await cleanup_orphaned_resources()
-        
+
         config_manager = ConfigManager()
 
         # Make sure config can be loaded before starting
@@ -1043,7 +1043,6 @@ async def session_details(
                     _LOGGER.warning(
                         f"[mcp_systems_server:session_details] Could not retrieve dynamic session info for '{session_id}': {e}"
                     )
-
 
             # Filter out None values
             session_info = {
@@ -3688,7 +3687,7 @@ async def session_community_create(
             - 'process_id' (int, optional): Process ID of deephaven server (only for pip launch)
             - 'error' (str, optional): Error message if creation failed. Omitted on success.
             - 'isError' (bool, optional): Present and True if this is an error response
-        
+
         Security Note:
             - auth_token and connection_url_with_auth are NOT included for security
             - Auto-generated tokens are logged to console (similar to Jupyter)
@@ -3776,7 +3775,9 @@ async def session_community_create(
         session_creation_config = community_config.get("session_creation")
 
         if not session_creation_config:
-            error_msg = "Community session creation not configured in deephaven_mcp.json"
+            error_msg = (
+                "Community session creation not configured in deephaven_mcp.json"
+            )
             _LOGGER.error(f"[mcp_systems_server:session_community_create] {error_msg}")
             result["error"] = error_msg
             result["isError"] = True
@@ -3789,7 +3790,9 @@ async def session_community_create(
         )
 
         # Check session limit
-        current_count = await session_registry.count_added_sessions(SystemType.COMMUNITY)
+        current_count = await session_registry.count_added_sessions(
+            SystemType.COMMUNITY
+        )
         if max_concurrent_sessions > 0 and current_count >= max_concurrent_sessions:
             error_msg = f"Session limit reached: {current_count}/{max_concurrent_sessions} sessions active"
             _LOGGER.error(f"[mcp_systems_server:session_community_create] {error_msg}")
@@ -3798,9 +3801,13 @@ async def session_community_create(
             return result
 
         # Resolve parameters (tool args > config defaults > hardcoded defaults)
-        resolved_launch_method = (launch_method or defaults.get("launch_method", DEFAULT_LAUNCH_METHOD)).lower()
-        resolved_auth_type = (auth_type or defaults.get("auth_type", DEFAULT_AUTH_TYPE)).upper()
-        
+        resolved_launch_method = (
+            launch_method or defaults.get("launch_method", DEFAULT_LAUNCH_METHOD)
+        ).lower()
+        resolved_auth_type = (
+            auth_type or defaults.get("auth_type", DEFAULT_AUTH_TYPE)
+        ).upper()
+
         # Validate docker-specific parameters only apply to docker launch method
         if programming_language and resolved_launch_method != "docker":
             error_msg = f"'programming_language' parameter only applies to docker launch method, not '{resolved_launch_method}'"
@@ -3808,35 +3815,35 @@ async def session_community_create(
             result["error"] = error_msg
             result["isError"] = True
             return result
-        
+
         if docker_image and resolved_launch_method != "docker":
             error_msg = f"'docker_image' parameter only applies to docker launch method, not '{resolved_launch_method}'"
             _LOGGER.error(f"[mcp_systems_server:session_community_create] {error_msg}")
             result["error"] = error_msg
             result["isError"] = True
             return result
-        
+
         if docker_memory_limit_gb and resolved_launch_method != "docker":
             error_msg = f"'docker_memory_limit_gb' parameter only applies to docker launch method, not '{resolved_launch_method}'"
             _LOGGER.error(f"[mcp_systems_server:session_community_create] {error_msg}")
             result["error"] = error_msg
             result["isError"] = True
             return result
-        
+
         if docker_cpu_limit and resolved_launch_method != "docker":
             error_msg = f"'docker_cpu_limit' parameter only applies to docker launch method, not '{resolved_launch_method}'"
             _LOGGER.error(f"[mcp_systems_server:session_community_create] {error_msg}")
             result["error"] = error_msg
             result["isError"] = True
             return result
-        
+
         if docker_volumes and resolved_launch_method != "docker":
             error_msg = f"'docker_volumes' parameter only applies to docker launch method, not '{resolved_launch_method}'"
             _LOGGER.error(f"[mcp_systems_server:session_community_create] {error_msg}")
             result["error"] = error_msg
             result["isError"] = True
             return result
-        
+
         # Validate mutually exclusive parameters
         if programming_language and docker_image:
             error_msg = "Cannot specify both 'programming_language' and 'docker_image' - use one or the other"
@@ -3844,7 +3851,7 @@ async def session_community_create(
             result["error"] = error_msg
             result["isError"] = True
             return result
-        
+
         # Resolve docker image based on programming_language or explicit docker_image
         if docker_image:
             # Explicit docker_image takes priority (power user override)
@@ -3858,31 +3865,49 @@ async def session_community_create(
                 resolved_docker_image = DEFAULT_DOCKER_IMAGE_GROOVY
             else:
                 error_msg = f"Unsupported programming_language: '{programming_language}'. Must be 'Python' or 'Groovy'"
-                _LOGGER.error(f"[mcp_systems_server:session_community_create] {error_msg}")
+                _LOGGER.error(
+                    f"[mcp_systems_server:session_community_create] {error_msg}"
+                )
                 result["error"] = error_msg
                 result["isError"] = True
                 return result
         else:
             # Use config default or fall back to language-based default
-            resolved_programming_language = defaults.get("programming_language", DEFAULT_PROGRAMMING_LANGUAGE)
+            resolved_programming_language = defaults.get(
+                "programming_language", DEFAULT_PROGRAMMING_LANGUAGE
+            )
             if resolved_programming_language.lower() == "python":
-                resolved_docker_image = defaults.get("docker_image", DEFAULT_DOCKER_IMAGE_PYTHON)
+                resolved_docker_image = defaults.get(
+                    "docker_image", DEFAULT_DOCKER_IMAGE_PYTHON
+                )
             elif resolved_programming_language.lower() == "groovy":
-                resolved_docker_image = defaults.get("docker_image", DEFAULT_DOCKER_IMAGE_GROOVY)
+                resolved_docker_image = defaults.get(
+                    "docker_image", DEFAULT_DOCKER_IMAGE_GROOVY
+                )
             else:
                 # Invalid language in config - raise error, don't silently fall back
                 error_msg = f"Invalid programming_language in config: '{resolved_programming_language}'. Must be 'Python' or 'Groovy'"
-                _LOGGER.error(f"[mcp_systems_server:session_community_create] {error_msg}")
+                _LOGGER.error(
+                    f"[mcp_systems_server:session_community_create] {error_msg}"
+                )
                 result["error"] = error_msg
                 result["isError"] = True
                 return result
-        
-        resolved_heap_size_gb = heap_size_gb or defaults.get("heap_size_gb", DEFAULT_HEAP_SIZE_GB)
-        
+
+        resolved_heap_size_gb = heap_size_gb or defaults.get(
+            "heap_size_gb", DEFAULT_HEAP_SIZE_GB
+        )
+
         # Resolve startup parameters from config or defaults (not exposed as tool parameters)
-        resolved_startup_timeout = defaults.get("startup_timeout_seconds", DEFAULT_STARTUP_TIMEOUT_SECONDS)
-        resolved_startup_interval = defaults.get("startup_check_interval_seconds", DEFAULT_STARTUP_CHECK_INTERVAL_SECONDS)
-        resolved_startup_retries = defaults.get("startup_retries", DEFAULT_STARTUP_RETRIES)
+        resolved_startup_timeout = defaults.get(
+            "startup_timeout_seconds", DEFAULT_STARTUP_TIMEOUT_SECONDS
+        )
+        resolved_startup_interval = defaults.get(
+            "startup_check_interval_seconds", DEFAULT_STARTUP_CHECK_INTERVAL_SECONDS
+        )
+        resolved_startup_retries = defaults.get(
+            "startup_retries", DEFAULT_STARTUP_RETRIES
+        )
 
         # Resolve optional parameters
         resolved_docker_memory_limit = docker_memory_limit_gb or defaults.get(
@@ -3910,7 +3935,7 @@ async def session_community_create(
                     )
             elif "auth_token" in defaults:
                 resolved_auth_token = defaults["auth_token"]
-            
+
             # Auto-generate if still None
             if not resolved_auth_token:
                 resolved_auth_token = generate_auth_token()
@@ -3946,8 +3971,10 @@ async def session_community_create(
             f"[mcp_systems_server:session_community_create] Launching {resolved_launch_method} session '{session_name}' on port {port}"
         )
         # Get instance tracker from context for orphan tracking
-        instance_tracker: InstanceTracker = context.request_context.lifespan_context["instance_tracker"]
-        
+        instance_tracker: InstanceTracker = context.request_context.lifespan_context[
+            "instance_tracker"
+        ]
+
         launched_session = await launch_session(
             launch_method=resolved_launch_method,
             session_name=session_name,
@@ -3984,8 +4011,10 @@ async def session_community_create(
                 _LOGGER.warning(
                     f"[mcp_systems_server:session_community_create] Failed to cleanup failed session: {e}"
                 )
-            
-            error_msg = f"Session failed to start within {resolved_startup_timeout} seconds"
+
+            error_msg = (
+                f"Session failed to start within {resolved_startup_timeout} seconds"
+            )
             result["error"] = error_msg
             result["isError"] = True
             return result
@@ -4005,12 +4034,11 @@ async def session_community_create(
             config=session_config,
             launched_session=launched_session,
         )
-        
+
         # Track pip process if applicable (for orphan cleanup)
         if isinstance(launched_session, PipLaunchedSession):
             await instance_tracker.track_pip_process(
-                session_name, 
-                launched_session.process.pid
+                session_name, launched_session.process.pid
             )
 
         # Add to registry
@@ -4022,13 +4050,19 @@ async def session_community_create(
         # Log auth token prominently if auto-generated (similar to Jupyter)
         if auto_generated_token and resolved_auth_token:
             _LOGGER.warning("=" * 70)
-            _LOGGER.warning(f"🔑 Session '{session_name}' Created - Browser Access Information:")
+            _LOGGER.warning(
+                f"🔑 Session '{session_name}' Created - Browser Access Information:"
+            )
             _LOGGER.warning(f"   Port: {port}")
             _LOGGER.warning(f"   Base URL: {launched_session.connection_url}")
             _LOGGER.warning(f"   Auth Token: {resolved_auth_token}")
-            _LOGGER.warning(f"   Browser URL: {launched_session.connection_url}/?authToken={resolved_auth_token}")
+            _LOGGER.warning(
+                f"   Browser URL: {launched_session.connection_url}/?authToken={resolved_auth_token}"
+            )
             _LOGGER.warning("")
-            _LOGGER.warning("   To retrieve credentials via MCP tool, enable credential_retrieval_enabled")
+            _LOGGER.warning(
+                "   To retrieve credentials via MCP tool, enable credential_retrieval_enabled"
+            )
             _LOGGER.warning("   in your deephaven_mcp.json configuration.")
             _LOGGER.warning("=" * 70)
 
@@ -4052,7 +4086,9 @@ async def session_community_create(
         if resolved_launch_method == "docker":
             result["container_id"] = launched_session.container_id
         elif resolved_launch_method == "pip":
-            result["process_id"] = launched_session.process.pid if launched_session.process else None
+            result["process_id"] = (
+                launched_session.process.pid if launched_session.process else None
+            )
 
     except Exception as e:
         _LOGGER.error(
@@ -4195,11 +4231,13 @@ async def session_community_delete(
         )
 
         # Untrack pip process if applicable (before closing)
-        instance_tracker: InstanceTracker = context.request_context.lifespan_context["instance_tracker"]
+        instance_tracker: InstanceTracker = context.request_context.lifespan_context[
+            "instance_tracker"
+        ]
         if isinstance(session_manager, DynamicCommunitySessionManager):
             if isinstance(session_manager.launched_session, PipLaunchedSession):
                 await instance_tracker.untrack_pip_process(session_name)
-        
+
         # Close the session (this will also stop the Docker container/pip process)
         try:
             _LOGGER.debug(
@@ -4268,14 +4306,14 @@ async def session_community_credentials(
 ) -> dict:
     """
     SECURITY SENSITIVE: Retrieve connection credentials for browser access.
-    
+
     Returns authentication credentials for connecting to a Deephaven Community session
     via web browser. This tool exposes sensitive credentials and should only be called
     when the user explicitly needs browser access.
-    
+
     IMPORTANT: This tool is DISABLED by default for security. To enable, add to your
     deephaven_mcp.json configuration:
-    
+
     {
       "security": {
         "community": {
@@ -4283,17 +4321,17 @@ async def session_community_credentials(
         }
       }
     }
-    
+
     Valid credential_retrieval_mode values:
     - "none": Disabled (secure default)
     - "dynamic_only": Only auto-generated tokens (dynamic sessions)
     - "static_only": Only pre-configured tokens (static sessions)
     - "all": Both dynamic and static session credentials
-    
+
     Terminology Note:
     - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
     - 'Deephaven Community' and 'Deephaven Core' are interchangeable names for the same product
-    
+
     AI Agent Usage Guidelines:
     - **When to Call**: Only when user explicitly requests browser access, connection URL,
       or credentials. Do not call proactively or for informational purposes.
@@ -4308,13 +4346,13 @@ async def session_community_credentials(
         * "static_only": For controlled environments with pre-configured credentials
         * "all": Maximum flexibility but requires careful security consideration
         * "none": Default - no credential retrieval allowed (most secure)
-    
+
     Security Note:
     - Credentials are returned in plain text
     - All calls are logged for security audit
     - Only use for legitimate browser access needs
     - Disabled by default - must be explicitly enabled in configuration
-    
+
     Args:
         context (Context): MCP context provided by the MCP framework
         session_id (str): Session ID in format "community:source:name" where:
@@ -4322,10 +4360,10 @@ async def session_community_credentials(
             - source="dynamic" for dynamic (on-demand created) sessions
             - name is the unique session identifier within that source
             Examples: "community:config:local-dev", "community:dynamic:my-session"
-    
+
     Returns:
         dict: Response structure varies based on success/failure:
-        
+
         On Success (success=True):
             - success (bool): Always True
             - auth_type (str): Authentication type - "PSK" (pre-shared key) or "ANONYMOUS"
@@ -4337,12 +4375,12 @@ async def session_community_credentials(
             - connection_url_with_auth (str): Complete browser-ready URL including auth token if applicable.
                 For PSK: Base URL + "/?authToken={token}"
                 For ANONYMOUS: Same as connection_url (no auth parameter needed)
-        
+
         On Failure (success=False):
             - success (bool): Always False
             - error (str): Human-readable error message explaining the failure
             - isError (bool): Always True to indicate error condition
-    
+
     Example Success Response (PSK Authentication):
         {
             "success": True,
@@ -4351,7 +4389,7 @@ async def session_community_credentials(
             "connection_url": "http://localhost:45123",
             "connection_url_with_auth": "http://localhost:45123/?authToken=abc123xyz789"
         }
-    
+
     Example Success Response (ANONYMOUS Authentication):
         {
             "success": True,
@@ -4360,14 +4398,14 @@ async def session_community_credentials(
             "connection_url": "http://localhost:45123",
             "connection_url_with_auth": "http://localhost:45123"
         }
-    
+
     Example Disabled Response:
         {
             "success": False,
             "error": "Credential retrieval is disabled (mode='none'). To enable, configure in deephaven_mcp.json...",
             "isError": True
         }
-    
+
     Example Session Not Found Response:
         {
             "success": False,
@@ -4378,13 +4416,13 @@ async def session_community_credentials(
     _LOGGER.info(
         f"[mcp_systems_server:session_community_credentials] Invoked for session_id: {session_id}"
     )
-    
+
     try:
         # Get config manager from context
         config_manager: ConfigManager = context.request_context.lifespan_context[
             "config_manager"
         ]
-        
+
         # Check credential retrieval mode from security config
         config = await config_manager.get_config()
         security_config = config.get("security", {})
@@ -4392,7 +4430,7 @@ async def session_community_credentials(
         credential_retrieval_mode = security_community_config.get(
             "credential_retrieval_mode", "none"
         )
-        
+
         # Validate session_id format - must be a community session
         if not session_id.startswith("community:"):
             return {
@@ -4400,7 +4438,7 @@ async def session_community_credentials(
                 "error": f"Invalid session_id '{session_id}'. This tool only works for community sessions (format: 'community:config:name' or 'community:dynamic:name')",
                 "isError": True,
             }
-        
+
         # Check if credential retrieval is disabled globally (mode='none')
         if credential_retrieval_mode == "none":
             _LOGGER.warning(
@@ -4416,23 +4454,23 @@ async def session_community_credentials(
                     '  - "static_only": Allow only pre-configured session credentials\n'
                     '  - "all": Allow all credential retrieval\n\n'
                     "Configuration example:\n"
-                    '{\n'
+                    "{\n"
                     '  "security": {\n'
                     '    "community": {\n'
                     '      "credential_retrieval_mode": "dynamic_only"\n'
-                    '    }\n'
-                    '  }\n'
-                    '}\n\n'
+                    "    }\n"
+                    "  }\n"
+                    "}\n\n"
                     "Documentation: https://github.com/deephaven/deephaven-mcp/"
                 ),
                 "isError": True,
             }
-        
+
         # Get session registry and session manager
         session_registry: CombinedSessionRegistry = (
             context.request_context.lifespan_context["session_registry"]
         )
-        
+
         try:
             mgr = await session_registry.get(session_id)
         except Exception as e:
@@ -4441,7 +4479,7 @@ async def session_community_credentials(
                 "error": f"Session '{session_id}' not found: {str(e)}",
                 "isError": True,
             }
-        
+
         # Verify it's a community session manager
         if not isinstance(mgr, CommunitySessionManager):
             return {
@@ -4449,11 +4487,11 @@ async def session_community_credentials(
                 "error": f"Session '{session_id}' is not a community session",
                 "isError": True,
             }
-        
+
         # Determine session type
         is_dynamic = isinstance(mgr, DynamicCommunitySessionManager)
         is_static = not is_dynamic
-        
+
         # Check mode-specific permissions
         if credential_retrieval_mode == "dynamic_only" and is_static:
             _LOGGER.warning(
@@ -4481,17 +4519,21 @@ async def session_community_credentials(
                 ),
                 "isError": True,
             }
-        
+
         # Credential retrieval is allowed - proceed
         session_type_str = "dynamic" if is_dynamic else "static"
         _LOGGER.warning(
             f"[mcp_systems_server:session_community_credentials] SECURITY: Credential retrieval ALLOWED (mode='{credential_retrieval_mode}', type='{session_type_str}') for session_id '{session_id}'"
         )
-        
+
         # Get credentials based on session type
         if is_dynamic:
             # Dynamic session - get from launched_session
-            auth_token = mgr.launched_session.auth_token if mgr.launched_session.auth_token else ""
+            auth_token = (
+                mgr.launched_session.auth_token
+                if mgr.launched_session.auth_token
+                else ""
+            )
             connection_url = mgr.connection_url
             connection_url_with_auth = mgr.connection_url_with_auth
             auth_type = mgr.launched_session.auth_type.upper()
@@ -4500,14 +4542,14 @@ async def session_community_credentials(
             server = mgr._config.get("server", "")
             auth_token = mgr._config.get("auth_token", "")
             auth_type = mgr._config.get("auth_type", "ANONYMOUS").upper()
-            
+
             # Build connection URL with auth if token exists
             connection_url = server
             if auth_token:
                 connection_url_with_auth = f"{server}/?authToken={auth_token}"
             else:
                 connection_url_with_auth = server
-        
+
         result = {
             "success": True,
             "auth_type": auth_type,
@@ -4515,13 +4557,13 @@ async def session_community_credentials(
             "connection_url": connection_url,
             "connection_url_with_auth": connection_url_with_auth,
         }
-        
+
         _LOGGER.warning(
             f"[mcp_systems_server:session_community_credentials] SECURITY: Credentials retrieved for session_id '{session_id}'"
         )
-        
+
         return result
-        
+
     except Exception as e:
         _LOGGER.error(
             f"[mcp_systems_server:session_community_credentials] Failed: {e!r}",

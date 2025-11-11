@@ -26,7 +26,7 @@ The configuration file must be a JSON object. It may contain the following top-l
             If this key is present, its value must be a dictionary (which can be empty, e.g., {}).
             May contain:
 
-              - `credential_retrieval_mode` (str, optional, default: "none"): Controls which community session credentials 
+              - `credential_retrieval_mode` (str, optional, default: "none"): Controls which community session credentials
                 can be retrieved programmatically via the session_community_credentials MCP tool. Valid values:
                   * "none": Credential retrieval disabled (secure default)
                   * "dynamic_only": Only allow retrieval for auto-generated tokens (dynamic sessions)
@@ -297,10 +297,10 @@ str: Name of the environment variable specifying the path to the Deephaven MCP c
 @dataclass
 class _ConfigPathSpec:
     """Specification for a valid configuration path in the schema.
-    
+
     Defines the validation and redaction rules for a specific configuration path.
     Used by the validation engine to ensure configuration correctness and security.
-    
+
     Attributes:
         required (bool): Whether this configuration path must be present. If True and the
             path is missing, validation will fail with ConfigurationError.
@@ -378,13 +378,13 @@ class ConfigManager:
 
     This class encapsulates all logic for loading, validating, and caching the configuration
     from a JSON file. Key features:
-    
+
     - **Async I/O**: Uses aiofiles for non-blocking file reads
     - **Caching**: Loads configuration once and caches it for subsequent calls
     - **Coroutine-safe**: Uses asyncio.Lock to ensure thread-safe concurrent access
     - **Validation**: Strict schema validation with detailed error reporting
     - **Security**: Redacts sensitive fields (tokens, passwords) in logs
-    
+
     Typical usage pattern:
         config_manager = ConfigManager()
         config = await config_manager.get_config()  # First call loads from disk
@@ -498,7 +498,7 @@ def get_config_section(
 ) -> Any:
     """
     Navigate to and retrieve a nested configuration section by path.
-    
+
     This helper function traverses the configuration dictionary using the provided path sequence,
     returning the value at the final key. Useful for accessing deeply nested configuration values.
 
@@ -530,7 +530,7 @@ def get_all_config_names(
 ) -> list[str]:
     """
     Retrieve all configuration names (keys) from a specific section path.
-    
+
     This helper function is useful for discovering what sessions, systems, or other named entities
     are configured. Returns an empty list if the section doesn't exist or isn't a dictionary,
     making it safe to call without pre-checking.
@@ -573,7 +573,7 @@ def get_all_config_names(
 async def _load_config_from_file(config_path: str) -> dict[str, Any]:
     """
     Load and parse the Deephaven MCP configuration from a JSON file using async I/O.
-    
+
     Uses aiofiles for non-blocking file reads, ensuring the event loop is not blocked
     during file I/O operations. All JSON parsing and I/O errors are caught and wrapped
     as ConfigurationError with descriptive messages.
@@ -705,7 +705,7 @@ def _apply_redaction_to_config(config: dict[str, Any]) -> dict[str, Any]:
     Creates a deep copy of the configuration and applies all redaction functions defined in
     _SCHEMA_PATHS. This ensures that sensitive data (auth tokens, passwords, private keys, etc.)
     is replaced with "[REDACTED]" before logging. The original configuration is never modified.
-    
+
     Redaction is applied to each path that has a redactor function defined in _SCHEMA_PATHS.
     If a configuration section doesn't exist, its redaction is silently skipped (no error).
 
@@ -749,7 +749,7 @@ def _log_config_summary(config: dict[str, Any]) -> None:
 
     Args:
         config (dict[str, Any]): The loaded and validated configuration dictionary.
-    
+
     Returns:
         None
 
@@ -791,7 +791,7 @@ def _validate_unknown_keys(
         data (dict[str, Any]): The configuration dictionary section to validate
         path (tuple[str, ...]): The current path tuple for error reporting context
         valid_keys (set[str]): Set of allowed key names at this path level
-    
+
     Returns:
         None
 
@@ -819,7 +819,7 @@ def _validate_required_keys(
         data (dict[str, Any]): The configuration dictionary section to validate
         path (tuple[str, ...]): The current path tuple for error reporting context
         required_keys (set[str]): Set of key names that must be present at this path level
-    
+
     Returns:
         None
 
@@ -852,7 +852,7 @@ def _validate_key_type_and_value(
         value (Any): The value to validate
         spec (_ConfigPathSpec): The configuration path specification containing type and validator
         path (tuple[str, ...]): The parent path tuple (will be combined with key to form current_path)
-    
+
     Returns:
         None
 
@@ -890,7 +890,7 @@ def _should_recurse_into_nested_dict(current_path: tuple[str, ...]) -> bool:
     schema paths exist that are children of the current path (i.e., they start with
     the current path and have at least one more component). This is used during
     validation to decide whether to recursively validate nested dictionary sections.
-    
+
     For example, if current_path is ('community',) and _SCHEMA_PATHS contains
     ('community', 'sessions'), this returns True because there are nested paths.
     If current_path is ('community', 'sessions') and no deeper paths exist, returns False.
@@ -925,7 +925,7 @@ def _validate_section(data: dict[str, Any], path: tuple[str, ...]) -> None:
     Args:
         data (dict[str, Any]): The dictionary containing configuration data to validate
         path (tuple[str, ...]): The current path tuple representing the location in the config
-    
+
     Returns:
         None
 
@@ -969,23 +969,23 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
 
     This function ensures that the configuration dictionary conforms to the expected schema for Deephaven MCP.
     The configuration may contain the following top-level keys:
-    
+
       - 'security' (dict, optional):
             A dictionary containing security-related configuration for all session types.
             If this key is present, its value must be a dictionary (which can be empty, e.g., {}).
             If this key is absent, all security settings use their secure defaults.
-            
+
               - 'community' (dict, optional):
                   Security settings specific to community sessions.
                   May contain:
-                  
-                    - 'credential_retrieval_mode' (str, optional, default: "none"): Controls which community 
+
+                    - 'credential_retrieval_mode' (str, optional, default: "none"): Controls which community
                       session credentials can be retrieved programmatically. Valid values:
                         * "none": Credential retrieval disabled (secure default)
                         * "dynamic_only": Only auto-generated tokens (dynamic sessions)
                         * "static_only": Only pre-configured tokens (static sessions)
                         * "all": Both dynamic and static session credentials
-      
+
       - 'community' (dict, optional):
             A dictionary mapping community configuration.
             If this key is present, its value must be a dictionary (which can be empty, e.g., {}).

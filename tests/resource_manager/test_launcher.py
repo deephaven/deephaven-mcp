@@ -22,7 +22,6 @@ from deephaven_mcp.resource_manager import (
     launch_session,
 )
 
-
 # ============================================================================
 # LaunchedSession Base Class Validation Tests
 # ============================================================================
@@ -59,7 +58,9 @@ class TestLaunchedSessionValidation:
 
     def test_init_validates_psk_requires_token(self):
         """Test that PSK auth requires auth_token."""
-        with pytest.raises(ValueError, match="auth_token is required when auth_type is 'psk'"):
+        with pytest.raises(
+            ValueError, match="auth_token is required when auth_type is 'psk'"
+        ):
             DockerLaunchedSession(
                 host="localhost",
                 port=10000,
@@ -70,7 +71,10 @@ class TestLaunchedSessionValidation:
 
     def test_init_validates_anonymous_rejects_token(self):
         """Test that anonymous auth rejects auth_token."""
-        with pytest.raises(ValueError, match="auth_token should not be provided when auth_type is 'anonymous'"):
+        with pytest.raises(
+            ValueError,
+            match="auth_token should not be provided when auth_type is 'anonymous'",
+        ):
             DockerLaunchedSession(
                 host="localhost",
                 port=10000,
@@ -133,7 +137,10 @@ class TestDockerLaunchedSession:
             auth_token="secret_token",
             container_id="test_container",
         )
-        assert session.connection_url_with_auth == "http://localhost:10000/?authToken=secret_token"
+        assert (
+            session.connection_url_with_auth
+            == "http://localhost:10000/?authToken=secret_token"
+        )
 
     def test_connection_url_with_auth_anonymous(self):
         """Test connection_url_with_auth for anonymous auth (covers line 158)."""
@@ -165,8 +172,6 @@ class TestPipLaunchedSession:
         assert session.process == mock_process
 
 
-
-
 # ============================================================================
 # DockerLaunchedSession Launch Tests
 # ============================================================================
@@ -182,7 +187,9 @@ class TestDockerLaunchedSessionLaunch:
         with patch("asyncio.create_subprocess_exec") as mock_subprocess:
             mock_process = AsyncMock()
             mock_process.returncode = 0
-            mock_process.communicate = AsyncMock(return_value=(b"container_abc123\n", b""))
+            mock_process.communicate = AsyncMock(
+                return_value=(b"container_abc123\n", b"")
+            )
             mock_subprocess.return_value = mock_process
 
             result = await DockerLaunchedSession.launch(
@@ -201,7 +208,7 @@ class TestDockerLaunchedSessionLaunch:
             assert result.container_id == "container_abc123"
             assert result.port == 10000
             assert result.launch_method == "docker"
-            
+
             # Verify PSK auth was set via START_OPTS
             call_args = mock_subprocess.call_args[0]
             psk_found = False
@@ -267,7 +274,9 @@ class TestDockerLaunchedSessionLaunch:
         with patch("asyncio.create_subprocess_exec") as mock_subprocess:
             mock_process = AsyncMock()
             mock_process.returncode = 0
-            mock_process.communicate = AsyncMock(return_value=(b"", b""))  # Empty stdout
+            mock_process.communicate = AsyncMock(
+                return_value=(b"", b"")
+            )  # Empty stdout
             mock_subprocess.return_value = mock_process
 
             with pytest.raises(SessionLaunchError, match="returned empty container ID"):
@@ -287,11 +296,13 @@ class TestDockerLaunchedSessionLaunch:
     @pytest.mark.asyncio
     async def test_launch_with_instance_id(self):
         """Test Docker launch with instance_id for orphan tracking (lines 443-444)."""
-        
+
         with patch("asyncio.create_subprocess_exec") as mock_subprocess:
             mock_process = AsyncMock()
             mock_process.returncode = 0
-            mock_process.communicate = AsyncMock(return_value=(b"container_xyz789\n", b""))
+            mock_process.communicate = AsyncMock(
+                return_value=(b"container_xyz789\n", b"")
+            )
             mock_subprocess.return_value = mock_process
 
             result = await DockerLaunchedSession.launch(
@@ -309,13 +320,16 @@ class TestDockerLaunchedSessionLaunch:
             )
 
             assert result.container_id == "container_xyz789"
-            
+
             # Verify the --label flag was added with instance_id
             call_args = mock_subprocess.call_args[0]
             label_found = False
             for i, arg in enumerate(call_args):
                 if arg == "--label" and i + 1 < len(call_args):
-                    if call_args[i + 1] == "deephaven-mcp-server-instance=test-instance-uuid-123":
+                    if (
+                        call_args[i + 1]
+                        == "deephaven-mcp-server-instance=test-instance-uuid-123"
+                    ):
                         label_found = True
                         break
             assert label_found, "Docker label with instance_id not found in command"
@@ -323,7 +337,13 @@ class TestDockerLaunchedSessionLaunch:
     @pytest.mark.asyncio
     async def test_stop_success(self):
         """Test successful Docker stop."""
-        session = DockerLaunchedSession(host="localhost", port=10000, auth_type="anonymous", auth_token=None, container_id="test_container")
+        session = DockerLaunchedSession(
+            host="localhost",
+            port=10000,
+            auth_type="anonymous",
+            auth_token=None,
+            container_id="test_container",
+        )
 
         with patch("asyncio.create_subprocess_exec") as mock_subprocess:
             mock_process = AsyncMock()
@@ -370,10 +390,16 @@ class TestDockerLaunchedSessionLaunch:
     @pytest.mark.asyncio
     async def test_stop_with_force_kill(self):
         """Test Docker stop with force kill fallback."""
-        session = DockerLaunchedSession(host="localhost", port=10000, auth_type="anonymous", auth_token=None, container_id="test_container")
+        session = DockerLaunchedSession(
+            host="localhost",
+            port=10000,
+            auth_type="anonymous",
+            auth_token=None,
+            container_id="test_container",
+        )
 
         call_count = [0]
-        
+
         async def mock_subprocess_exec(*args, **kwargs):
             call_count[0] += 1
             mock_process = AsyncMock()
@@ -389,7 +415,7 @@ class TestDockerLaunchedSessionLaunch:
 
         with patch("asyncio.create_subprocess_exec", side_effect=mock_subprocess_exec):
             await session.stop()
-            
+
             # Should have called both stop and kill
             assert call_count[0] == 2
 
@@ -467,12 +493,18 @@ class TestPipLaunchedSessionLaunch:
         mock_process = AsyncMock()
         mock_process.returncode = None
         mock_process.pid = 12345
-        
-        session = PipLaunchedSession(host="localhost", port=10000, auth_type="anonymous", auth_token=None, process=mock_process)
+
+        session = PipLaunchedSession(
+            host="localhost",
+            port=10000,
+            auth_type="anonymous",
+            auth_token=None,
+            process=mock_process,
+        )
 
         async def mock_wait():
             mock_process.returncode = 0
-        
+
         mock_process.wait = AsyncMock(side_effect=mock_wait)
 
         await session.stop()
@@ -487,7 +519,7 @@ class TestPipLaunchedSessionLaunch:
         mock_process = AsyncMock()
         mock_process.returncode = None
         mock_process.pid = 12345
-        
+
         session = PipLaunchedSession(
             host="localhost",
             port=10000,
@@ -498,7 +530,7 @@ class TestPipLaunchedSessionLaunch:
 
         async def mock_wait():
             mock_process.returncode = 0
-        
+
         mock_process.wait = AsyncMock(side_effect=mock_wait)
 
         # First stop
@@ -516,8 +548,14 @@ class TestPipLaunchedSessionLaunch:
         mock_process = AsyncMock()
         mock_process.returncode = None
         mock_process.pid = 12345
-        
-        session = PipLaunchedSession(host="localhost", port=10000, auth_type="anonymous", auth_token=None, process=mock_process)
+
+        session = PipLaunchedSession(
+            host="localhost",
+            port=10000,
+            auth_type="anonymous",
+            auth_token=None,
+            process=mock_process,
+        )
 
         # Simulate wait timing out
         with patch("asyncio.wait_for", side_effect=asyncio.TimeoutError):
@@ -541,7 +579,7 @@ class TestPipLaunchedSessionLaunch:
     def test_find_deephaven_executable_fallback_to_path(self):
         """Test PATH fallback when deephaven not in venv (covers lines 93-96)."""
         from deephaven_mcp.resource_manager._launcher import _find_deephaven_executable
-        
+
         with patch("sys.executable", "/nonexistent/python"):
             with patch("pathlib.Path.exists", return_value=False):
                 result = _find_deephaven_executable()
@@ -560,7 +598,13 @@ class TestWaitUntilReadyEdgeCases:
     @pytest.mark.asyncio
     async def test_unexpected_status_code(self):
         """Test handling of unexpected status codes (not 200/404/401/403)."""
-        session = DockerLaunchedSession(host="localhost", port=10000, auth_type="anonymous", auth_token=None, container_id="test")
+        session = DockerLaunchedSession(
+            host="localhost",
+            port=10000,
+            auth_type="anonymous",
+            auth_token=None,
+            container_id="test",
+        )
 
         mock_response = MagicMock()
         mock_response.status = 500  # Unexpected status
@@ -574,13 +618,10 @@ class TestWaitUntilReadyEdgeCases:
 
         with patch("aiohttp.ClientSession", return_value=mock_client):
             result = await session.wait_until_ready(
-                timeout_seconds=0.5,
-                check_interval_seconds=0.1,
-                max_retries=1
+                timeout_seconds=0.5, check_interval_seconds=0.1, max_retries=1
             )
             # Should timeout since 500 is not considered "ready"
             assert result is False
-
 
 
 class TestDockerLauncherEdgeCases:
@@ -671,7 +712,9 @@ class TestDockerLauncherEdgeCases:
             auth_handler_found = False
             for i, arg in enumerate(call_args):
                 if "START_OPTS=" in str(arg) and "AuthHandlers" in str(arg):
-                    assert "io.deephaven.auth.AnonymousAuthenticationHandler" in str(arg)
+                    assert "io.deephaven.auth.AnonymousAuthenticationHandler" in str(
+                        arg
+                    )
                     auth_handler_found = True
             assert auth_handler_found
 
@@ -703,12 +746,20 @@ class TestDockerLauncherEdgeCases:
     @pytest.mark.asyncio
     async def test_stop_exception_handling(self):
         """Test Docker stop exception handling."""
-        session = DockerLaunchedSession(host="localhost", port=10000, auth_type="anonymous", auth_token=None, container_id="test_container")
+        session = DockerLaunchedSession(
+            host="localhost",
+            port=10000,
+            auth_type="anonymous",
+            auth_token=None,
+            container_id="test_container",
+        )
 
         with patch("asyncio.create_subprocess_exec") as mock_subprocess:
             mock_subprocess.side_effect = RuntimeError("Docker daemon not running")
 
-            with pytest.raises(SessionLaunchError, match="Failed to stop Docker container"):
+            with pytest.raises(
+                SessionLaunchError, match="Failed to stop Docker container"
+            ):
                 await session.stop()
 
 
@@ -747,9 +798,13 @@ class TestPipLauncherEdgeCases:
         """Test pip launch exception handling."""
 
         with patch("asyncio.create_subprocess_exec") as mock_subprocess:
-            mock_subprocess.side_effect = FileNotFoundError("deephaven command not found")
+            mock_subprocess.side_effect = FileNotFoundError(
+                "deephaven command not found"
+            )
 
-            with pytest.raises(SessionLaunchError, match="Failed to launch pip session"):
+            with pytest.raises(
+                SessionLaunchError, match="Failed to launch pip session"
+            ):
                 await PipLaunchedSession.launch(
                     session_name="test",
                     port=10000,
@@ -767,8 +822,14 @@ class TestPipLauncherEdgeCases:
         mock_process.pid = 12345
         # Make wait raise an exception after terminate is called
         mock_process.wait = AsyncMock(side_effect=RuntimeError("Process error"))
-        
-        session = PipLaunchedSession(host="localhost", port=10000, auth_type="anonymous", auth_token=None, process=mock_process)
+
+        session = PipLaunchedSession(
+            host="localhost",
+            port=10000,
+            auth_type="anonymous",
+            auth_token=None,
+            process=mock_process,
+        )
 
         with pytest.raises(SessionLaunchError, match="Failed to stop pip session"):
             await session.stop()
@@ -780,7 +841,7 @@ class TestDynamicManagerEdgeCases:
     def test_to_dict_with_container_id(self):
         """Test to_dict includes container_id for docker sessions."""
         from deephaven_mcp.resource_manager import DynamicCommunitySessionManager
-        
+
         launched_session = DockerLaunchedSession(
             host="localhost",
             port=10000,
@@ -826,24 +887,24 @@ class TestWaitUntilReady:
             # Create mock response
             mock_response = MagicMock()
             mock_response.status = 200
-            
+
             # Create mock for response context manager
             mock_response_cm = MagicMock()
             mock_response_cm.__aenter__ = AsyncMock(return_value=mock_response)
             mock_response_cm.__aexit__ = AsyncMock(return_value=None)
-            
+
             # Create mock client
             mock_client = MagicMock()
             mock_client.get = MagicMock(return_value=mock_response_cm)
-            
+
             # Create mock for client context manager
             mock_client_cm = MagicMock()
             mock_client_cm.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client_cm.__aexit__ = AsyncMock(return_value=None)
-            
+
             MockClientSession.return_value = mock_client_cm
 
-            result = await session.wait_until_ready( timeout_seconds=5)
+            result = await session.wait_until_ready(timeout_seconds=5)
             assert result is True
 
     @pytest.mark.asyncio
@@ -860,21 +921,21 @@ class TestWaitUntilReady:
         with patch("aiohttp.ClientSession") as MockClientSession:
             mock_response = MagicMock()
             mock_response.status = 404
-            
+
             mock_response_cm = MagicMock()
             mock_response_cm.__aenter__ = AsyncMock(return_value=mock_response)
             mock_response_cm.__aexit__ = AsyncMock(return_value=None)
-            
+
             mock_client = MagicMock()
             mock_client.get = MagicMock(return_value=mock_response_cm)
-            
+
             mock_client_cm = MagicMock()
             mock_client_cm.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client_cm.__aexit__ = AsyncMock(return_value=None)
-            
+
             MockClientSession.return_value = mock_client_cm
 
-            result = await session.wait_until_ready( timeout_seconds=5)
+            result = await session.wait_until_ready(timeout_seconds=5)
             assert result is True
 
     @pytest.mark.asyncio
@@ -890,18 +951,18 @@ class TestWaitUntilReady:
 
         with patch("aiohttp.ClientSession") as MockClientSession:
             mock_client = MagicMock()
-            mock_client.get = MagicMock(side_effect=aiohttp.ClientError("Connection refused"))
-            
+            mock_client.get = MagicMock(
+                side_effect=aiohttp.ClientError("Connection refused")
+            )
+
             mock_client_cm = MagicMock()
             mock_client_cm.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client_cm.__aexit__ = AsyncMock(return_value=None)
-            
+
             MockClientSession.return_value = mock_client_cm
 
             result = await session.wait_until_ready(
-                timeout_seconds=0.5,
-                check_interval_seconds=0.1,
-                max_retries=1
+                timeout_seconds=0.5, check_interval_seconds=0.1, max_retries=1
             )
             assert result is False
 
@@ -919,15 +980,15 @@ class TestWaitUntilReady:
         with patch("aiohttp.ClientSession") as MockClientSession:
             mock_client = MagicMock()
             mock_client.get = MagicMock(side_effect=RuntimeError("Unexpected"))
-            
+
             mock_client_cm = MagicMock()
             mock_client_cm.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client_cm.__aexit__ = AsyncMock(return_value=None)
-            
+
             MockClientSession.return_value = mock_client_cm
 
             with pytest.raises(SessionLaunchError, match="Health check failed"):
-                await session.wait_until_ready( timeout_seconds=5)
+                await session.wait_until_ready(timeout_seconds=5)
 
     @pytest.mark.asyncio
     async def test_wait_until_ready_detects_process_crash(self):
@@ -945,7 +1006,9 @@ class TestWaitUntilReady:
         )
 
         # Should detect crash immediately
-        ready = await session.wait_until_ready(timeout_seconds=10, check_interval_seconds=1)
+        ready = await session.wait_until_ready(
+            timeout_seconds=10, check_interval_seconds=1
+        )
         assert ready is False
 
 
@@ -962,26 +1025,29 @@ class TestWaitUntilReadyRetryBackoff:
             auth_token=None,
             container_id="test",
         )
-        
+
         # Track sleep calls
         sleep_calls = []
-        
+
         original_sleep = asyncio.sleep
+
         async def tracking_sleep(duration):
             sleep_calls.append(duration)
             await original_sleep(0.001)  # Don't actually sleep
-        
+
         # Track attempts
         attempt_count = [0]
-        
+
         # Create a class that acts as an async context manager for the response
         class MockResponse:
             status = 200
+
             async def __aenter__(self):
                 return self
+
             async def __aexit__(self, *args):
                 pass
-        
+
         # Mock client.get() to fail first, then succeed
         def mock_get(*args, **kwargs):
             attempt_count[0] += 1
@@ -990,26 +1056,28 @@ class TestWaitUntilReadyRetryBackoff:
                 raise aiohttp.ClientError("Connection refused")
             # Second attempt: return async context manager
             return MockResponse()
-        
+
         # Mock ClientSession
         mock_client = MagicMock()
         mock_client.get = mock_get
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=None)
-        
-        with patch("aiohttp.ClientSession", return_value=mock_client), \
-             patch("asyncio.sleep", side_effect=tracking_sleep):
-            
+
+        with (
+            patch("aiohttp.ClientSession", return_value=mock_client),
+            patch("asyncio.sleep", side_effect=tracking_sleep),
+        ):
+
             result = await session.wait_until_ready(
-                timeout_seconds=10,
-                check_interval_seconds=1,
-                max_retries=3
+                timeout_seconds=10, check_interval_seconds=1, max_retries=3
             )
-            
+
             # Should succeed after retry
             assert result is True
             # Should have called sleep(0.5) for backoff (line 197)
-            assert 0.5 in sleep_calls, f"Backoff sleep(0.5) was not called. Sleep calls: {sleep_calls}"
+            assert (
+                0.5 in sleep_calls
+            ), f"Backoff sleep(0.5) was not called. Sleep calls: {sleep_calls}"
 
 
 # ============================================================================
@@ -1023,9 +1091,11 @@ class TestLaunchSession:
     @pytest.mark.asyncio
     async def test_launch_session_docker(self):
         """Test launch_session delegates to DockerLaunchedSession."""
-        with patch.object(DockerLaunchedSession, "launch", new_callable=AsyncMock) as mock_launch:
+        with patch.object(
+            DockerLaunchedSession, "launch", new_callable=AsyncMock
+        ) as mock_launch:
             mock_launch.return_value = MagicMock()
-            
+
             await launch_session(
                 launch_method="docker",
                 session_name="test",
@@ -1036,15 +1106,17 @@ class TestLaunchSession:
                 environment_vars={},
                 docker_image="test:latest",
             )
-            
+
             mock_launch.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_launch_session_pip(self):
         """Test launch_session delegates to PipLaunchedSession."""
-        with patch.object(PipLaunchedSession, "launch", new_callable=AsyncMock) as mock_launch:
+        with patch.object(
+            PipLaunchedSession, "launch", new_callable=AsyncMock
+        ) as mock_launch:
             mock_launch.return_value = MagicMock()
-            
+
             await launch_session(
                 launch_method="pip",
                 session_name="test",
@@ -1054,7 +1126,7 @@ class TestLaunchSession:
                 extra_jvm_args=[],
                 environment_vars={},
             )
-            
+
             mock_launch.assert_called_once()
 
     @pytest.mark.asyncio
@@ -1074,7 +1146,10 @@ class TestLaunchSession:
     @pytest.mark.asyncio
     async def test_launch_session_pip_rejects_docker_image(self):
         """Test launch_session pip rejects docker_image parameter."""
-        with pytest.raises(ValueError, match="docker_image parameter cannot be used with launch_method='pip'"):
+        with pytest.raises(
+            ValueError,
+            match="docker_image parameter cannot be used with launch_method='pip'",
+        ):
             await launch_session(
                 launch_method="pip",
                 session_name="test",
@@ -1089,7 +1164,10 @@ class TestLaunchSession:
     @pytest.mark.asyncio
     async def test_launch_session_pip_rejects_docker_memory_limit(self):
         """Test launch_session pip rejects docker_memory_limit_gb parameter."""
-        with pytest.raises(ValueError, match="docker_memory_limit_gb parameter cannot be used with launch_method='pip'"):
+        with pytest.raises(
+            ValueError,
+            match="docker_memory_limit_gb parameter cannot be used with launch_method='pip'",
+        ):
             await launch_session(
                 launch_method="pip",
                 session_name="test",
@@ -1104,7 +1182,10 @@ class TestLaunchSession:
     @pytest.mark.asyncio
     async def test_launch_session_pip_rejects_docker_cpu_limit(self):
         """Test launch_session pip rejects docker_cpu_limit parameter."""
-        with pytest.raises(ValueError, match="docker_cpu_limit parameter cannot be used with launch_method='pip'"):
+        with pytest.raises(
+            ValueError,
+            match="docker_cpu_limit parameter cannot be used with launch_method='pip'",
+        ):
             await launch_session(
                 launch_method="pip",
                 session_name="test",
@@ -1119,7 +1200,10 @@ class TestLaunchSession:
     @pytest.mark.asyncio
     async def test_launch_session_pip_rejects_docker_volumes(self):
         """Test launch_session pip rejects docker_volumes parameter."""
-        with pytest.raises(ValueError, match="docker_volumes parameter cannot be used with launch_method='pip'"):
+        with pytest.raises(
+            ValueError,
+            match="docker_volumes parameter cannot be used with launch_method='pip'",
+        ):
             await launch_session(
                 launch_method="pip",
                 session_name="test",
