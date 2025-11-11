@@ -18,7 +18,7 @@ from deephaven_mcp._exceptions import SessionLaunchError
 from deephaven_mcp.resource_manager import (
     DockerLaunchedSession,
     LaunchedSession,
-    PipLaunchedSession,
+    PythonLaunchedSession,
     launch_session,
 )
 
@@ -35,7 +35,7 @@ class TestLaunchedSessionValidation:
         # We need to bypass the type system to test runtime validation
         # Call LaunchedSession.__init__ directly with an invalid launch_method
         session = object.__new__(DockerLaunchedSession)
-        with pytest.raises(ValueError, match="launch_method must be 'docker' or 'pip'"):
+        with pytest.raises(ValueError, match="launch_method must be 'docker' or 'python'"):
             LaunchedSession.__init__(
                 session,
                 launch_method="invalid",  # type: ignore
@@ -154,13 +154,13 @@ class TestDockerLaunchedSession:
         assert session.connection_url_with_auth == "http://localhost:10000"
 
 
-class TestPipLaunchedSession:
-    """Tests for PipLaunchedSession class."""
+class TestPythonLaunchedSession:
+    """Tests for PythonLaunchedSession class."""
 
     def test_init(self):
-        """Test PipLaunchedSession initialization."""
+        """Test PythonLaunchedSession initialization."""
         mock_process = "mock_process"
-        session = PipLaunchedSession(
+        session = PythonLaunchedSession(
             host="localhost",
             port=10000,
             auth_type="anonymous",
@@ -168,7 +168,7 @@ class TestPipLaunchedSession:
             process=mock_process,
         )
         assert session.port == 10000
-        assert session.launch_method == "pip"
+        assert session.launch_method == "python"
         assert session.process == mock_process
 
 
@@ -433,11 +433,11 @@ class TestDockerLaunchedSessionLaunch:
 
 
 # ============================================================================
-# PipLaunchedSession Launch Tests
+# PythonLaunchedSession Launch Tests
 # ============================================================================
 
 
-class TestPipLaunchedSessionLaunch:
+class TestPythonLaunchedSessionLaunch:
     """Tests for PipLauncher class."""
 
     @pytest.mark.asyncio
@@ -449,7 +449,7 @@ class TestPipLaunchedSessionLaunch:
             mock_process.pid = 12345
             mock_subprocess.return_value = mock_process
 
-            result = await PipLaunchedSession.launch(
+            result = await PythonLaunchedSession.launch(
                 session_name="test",
                 port=10000,
                 auth_token="token",
@@ -460,7 +460,7 @@ class TestPipLaunchedSessionLaunch:
 
             assert result.process == mock_process
             assert result.port == 10000
-            assert result.launch_method == "pip"
+            assert result.launch_method == "python"
 
     @pytest.mark.asyncio
     async def test_launch_with_jvm_args(self):
@@ -471,7 +471,7 @@ class TestPipLaunchedSessionLaunch:
             mock_process.pid = 12345
             mock_subprocess.return_value = mock_process
 
-            await PipLaunchedSession.launch(
+            await PythonLaunchedSession.launch(
                 session_name="test",
                 port=10000,
                 auth_token="token",
@@ -494,7 +494,7 @@ class TestPipLaunchedSessionLaunch:
         mock_process.returncode = None
         mock_process.pid = 12345
 
-        session = PipLaunchedSession(
+        session = PythonLaunchedSession(
             host="localhost",
             port=10000,
             auth_type="anonymous",
@@ -520,7 +520,7 @@ class TestPipLaunchedSessionLaunch:
         mock_process.returncode = None
         mock_process.pid = 12345
 
-        session = PipLaunchedSession(
+        session = PythonLaunchedSession(
             host="localhost",
             port=10000,
             auth_type="anonymous",
@@ -549,7 +549,7 @@ class TestPipLaunchedSessionLaunch:
         mock_process.returncode = None
         mock_process.pid = 12345
 
-        session = PipLaunchedSession(
+        session = PythonLaunchedSession(
             host="localhost",
             port=10000,
             auth_type="anonymous",
@@ -568,7 +568,7 @@ class TestPipLaunchedSessionLaunch:
     async def test_init_validates_none_process(self):
         """Test that None process raises ValueError on init."""
         with pytest.raises(ValueError, match="process must not be None"):
-            PipLaunchedSession(
+            PythonLaunchedSession(
                 host="localhost",
                 port=10000,
                 auth_type="anonymous",
@@ -775,7 +775,7 @@ class TestPipLauncherEdgeCases:
             mock_process.pid = 12345
             mock_subprocess.return_value = mock_process
 
-            result = await PipLaunchedSession.launch(
+            result = await PythonLaunchedSession.launch(
                 session_name="test",
                 port=10000,
                 auth_token=None,  # No auth token
@@ -803,9 +803,9 @@ class TestPipLauncherEdgeCases:
             )
 
             with pytest.raises(
-                SessionLaunchError, match="Failed to launch pip session"
+                SessionLaunchError, match="Failed to launch python session"
             ):
-                await PipLaunchedSession.launch(
+                await PythonLaunchedSession.launch(
                     session_name="test",
                     port=10000,
                     auth_token="token",
@@ -823,7 +823,7 @@ class TestPipLauncherEdgeCases:
         # Make wait raise an exception after terminate is called
         mock_process.wait = AsyncMock(side_effect=RuntimeError("Process error"))
 
-        session = PipLaunchedSession(
+        session = PythonLaunchedSession(
             host="localhost",
             port=10000,
             auth_type="anonymous",
@@ -831,7 +831,7 @@ class TestPipLauncherEdgeCases:
             process=mock_process,
         )
 
-        with pytest.raises(SessionLaunchError, match="Failed to stop pip session"):
+        with pytest.raises(SessionLaunchError, match="Failed to stop python session"):
             await session.stop()
 
 
@@ -997,7 +997,7 @@ class TestWaitUntilReady:
         mock_process.pid = 12345
         mock_process.returncode = 1  # Process has crashed
 
-        session = PipLaunchedSession(
+        session = PythonLaunchedSession(
             host="localhost",
             port=10000,
             auth_type="anonymous",
@@ -1111,14 +1111,14 @@ class TestLaunchSession:
 
     @pytest.mark.asyncio
     async def test_launch_session_pip(self):
-        """Test launch_session delegates to PipLaunchedSession."""
+        """Test launch_session delegates to PythonLaunchedSession."""
         with patch.object(
-            PipLaunchedSession, "launch", new_callable=AsyncMock
+            PythonLaunchedSession, "launch", new_callable=AsyncMock
         ) as mock_launch:
             mock_launch.return_value = MagicMock()
 
             await launch_session(
-                launch_method="pip",
+                launch_method="python",
                 session_name="test",
                 port=10000,
                 auth_token="token",
@@ -1148,10 +1148,10 @@ class TestLaunchSession:
         """Test launch_session pip rejects docker_image parameter."""
         with pytest.raises(
             ValueError,
-            match="docker_image parameter cannot be used with launch_method='pip'",
+            match="docker_image parameter cannot be used with launch_method='python'",
         ):
             await launch_session(
-                launch_method="pip",
+                launch_method="python",
                 session_name="test",
                 port=10000,
                 auth_token="token",
@@ -1166,10 +1166,10 @@ class TestLaunchSession:
         """Test launch_session pip rejects docker_memory_limit_gb parameter."""
         with pytest.raises(
             ValueError,
-            match="docker_memory_limit_gb parameter cannot be used with launch_method='pip'",
+            match="docker_memory_limit_gb parameter cannot be used with launch_method='python'",
         ):
             await launch_session(
-                launch_method="pip",
+                launch_method="python",
                 session_name="test",
                 port=10000,
                 auth_token="token",
@@ -1184,10 +1184,10 @@ class TestLaunchSession:
         """Test launch_session pip rejects docker_cpu_limit parameter."""
         with pytest.raises(
             ValueError,
-            match="docker_cpu_limit parameter cannot be used with launch_method='pip'",
+            match="docker_cpu_limit parameter cannot be used with launch_method='python'",
         ):
             await launch_session(
-                launch_method="pip",
+                launch_method="python",
                 session_name="test",
                 port=10000,
                 auth_token="token",
@@ -1202,10 +1202,10 @@ class TestLaunchSession:
         """Test launch_session pip rejects docker_volumes parameter."""
         with pytest.raises(
             ValueError,
-            match="docker_volumes parameter cannot be used with launch_method='pip'",
+            match="docker_volumes parameter cannot be used with launch_method='python'",
         ):
             await launch_session(
-                launch_method="pip",
+                launch_method="python",
                 session_name="test",
                 port=10000,
                 auth_token="token",

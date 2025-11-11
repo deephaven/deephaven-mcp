@@ -23,7 +23,7 @@ Tools Provided:
     - catalog_namespaces_list: Retrieve distinct namespaces from enterprise (Core+) catalog for efficient discovery of data domains.
     - catalog_tables_schema: Retrieve full schemas for catalog tables in enterprise (Core+) sessions with flexible filtering by namespace, table names, or custom filters.
     - catalog_table_sample: Retrieve sample data from a catalog table in enterprise (Core+) sessions with flexible formatting and row limiting for safe previewing.
-    - session_community_create: Create a new dynamically launched Community session via Docker or pip.
+    - session_community_create: Create a new dynamically launched Community session via Docker or python.
     - session_community_delete: Delete a dynamically created Community session and clean up resources.
     - session_community_credentials: SECURITY SENSITIVE - Retrieve connection credentials for browser access (disabled by default, requires security.community.credential_retrieval_mode configuration).
     - session_enterprise_create: Create a new enterprise session with configurable parameters and resource limits.
@@ -64,7 +64,7 @@ from deephaven_mcp.resource_manager import (
     CommunitySessionManager,
     DynamicCommunitySessionManager,
     EnterpriseSessionManager,
-    PipLaunchedSession,
+    PythonLaunchedSession,
     SystemType,
     find_available_port,
     generate_auth_token,
@@ -165,7 +165,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
     Shutdown Process:
       - Logs server shutdown initiation.
       - Closes all active Deephaven sessions via the session registry.
-      - For dynamically created community sessions, stops Docker containers or pip processes.
+      - For dynamically created community sessions, stops Docker containers or python processes.
       - Logs completion of server shutdown.
       - This cleanup runs on normal shutdown, SIGTERM, or SIGINT signals.
 
@@ -930,10 +930,10 @@ async def session_details(
                 - connection_url (str, optional): Base connection URL for dynamically created sessions (e.g., "http://localhost:45123")
                 - connection_url_with_auth (str, optional): Connection URL with auth token for dynamically created sessions
                 - auth_type (str, optional): Authentication type for dynamically created sessions ("PSK" or "Anonymous")
-                - launch_method (str, optional): Launch method for dynamically created sessions ("docker" or "pip")
+                - launch_method (str, optional): Launch method for dynamically created sessions ("docker" or "python")
                 - port (int, optional): Port number for dynamically created sessions
                 - container_id (str, optional): Docker container ID for Docker-launched sessions
-                - process_id (int, optional): Process ID for pip-launched sessions
+                - process_id (int, optional): Process ID for python-launched sessions
             - 'error' (str, optional): Error message if retrieval failed.
             - 'isError' (bool, optional): Present and True if this is an error response.
 
@@ -4035,8 +4035,8 @@ async def session_community_create(
             launched_session=launched_session,
         )
 
-        # Track pip process if applicable (for orphan cleanup)
-        if isinstance(launched_session, PipLaunchedSession):
+        # Track python process if applicable (for orphan cleanup)
+        if isinstance(launched_session, PythonLaunchedSession):
             await instance_tracker.track_pip_process(
                 session_name, launched_session.process.pid
             )
@@ -4085,7 +4085,7 @@ async def session_community_create(
         # Add launch-method-specific details
         if resolved_launch_method == "docker":
             result["container_id"] = launched_session.container_id
-        elif resolved_launch_method == "pip":
+        elif resolved_launch_method == "python":
             result["process_id"] = (
                 launched_session.process.pid if launched_session.process else None
             )
@@ -4230,15 +4230,15 @@ async def session_community_delete(
             f"[mcp_systems_server:session_community_delete] Found dynamic community session manager for '{session_id}'"
         )
 
-        # Untrack pip process if applicable (before closing)
+        # Untrack python process if applicable (before closing)
         instance_tracker: InstanceTracker = context.request_context.lifespan_context[
             "instance_tracker"
         ]
         if isinstance(session_manager, DynamicCommunitySessionManager):
-            if isinstance(session_manager.launched_session, PipLaunchedSession):
+            if isinstance(session_manager.launched_session, PythonLaunchedSession):
                 await instance_tracker.untrack_pip_process(session_name)
 
-        # Close the session (this will also stop the Docker container/pip process)
+        # Close the session (this will also stop the Docker container/python process)
         try:
             _LOGGER.debug(
                 f"[mcp_systems_server:session_community_delete] Closing session '{session_id}'"

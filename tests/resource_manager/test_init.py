@@ -34,7 +34,7 @@ def test_imports_and_all():
         "SystemType",
         "LaunchedSession",
         "DockerLaunchedSession",
-        "PipLaunchedSession",
+        "PythonLaunchedSession",
         "launch_session",
         "find_available_port",
         "generate_auth_token",

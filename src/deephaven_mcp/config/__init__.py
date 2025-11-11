@@ -71,7 +71,7 @@ The configuration file must be a JSON object. It may contain the following top-l
 
               - `max_concurrent_sessions` (int, optional): Maximum number of concurrent dynamically created sessions. Set to 0 to disable dynamic session creation.
               - `defaults` (dict, optional): Default parameters for creating new community sessions:
-                  * `launch_method` (str, optional): Method to launch sessions ("docker" or "pip").
+                  * `launch_method` (str, optional): Method to launch sessions ("docker" or "python").
                   * `auth_type` (str, optional): Default authentication type for created sessions.
                   * `auth_token` (str, optional): Default authentication token. Use this OR `auth_token_env_var`, but not both.
                   * `auth_token_env_var` (str, optional): Environment variable for auth token. Use this OR `auth_token`, but not both.

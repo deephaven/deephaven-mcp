@@ -423,7 +423,7 @@ def test_session_creation_valid_full_config_pip():
     config = {
         "max_concurrent_sessions": 3,
         "defaults": {
-            "launch_method": "pip",
+            "launch_method": "python",
             "auth_type": "Anonymous",
             "heap_size_gb": 2,
             "startup_timeout_seconds": 30,

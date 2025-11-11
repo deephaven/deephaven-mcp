@@ -1944,13 +1944,13 @@ class DynamicCommunitySessionManager(CommunitySessionManager):
     Manages a dynamically created Deephaven Community session.
 
     This class extends CommunitySessionManager to add full lifecycle management for
-    sessions that are launched on-demand via Docker containers or pip-installed servers.
+    sessions that are launched on-demand via Docker containers or python-based servers.
     Unlike static sessions, this manager controls server startup, monitoring, and shutdown.
 
     Key Characteristics:
         - **Source**: Automatically set to "dynamic" to identify runtime-created sessions
         - **Server Lifecycle**: DOES manage server startup/shutdown (via LaunchedSession)
-        - **Launch Methods**: Supports Docker containers or pip-installed deephaven-server
+        - **Launch Methods**: Supports Docker containers or python-based deephaven-server
         - **Full Name Format**: "community:dynamic:{name}"
         - **Created By**: MCP tools like session_community_create
 
@@ -1960,11 +1960,11 @@ class DynamicCommunitySessionManager(CommunitySessionManager):
         - connection_url_with_auth: URL with authentication token included
         - port: Port number the session is listening on
         - container_id: Docker container ID (for Docker launches)
-        - process_id: Process ID (for pip launches)
+        - process_id: Process ID (for python launches)
 
     Lifecycle Management:
         The launched_session handles:
-        - Starting the Docker container or pip process
+        - Starting the Docker container or python process
         - Waiting for the server to be ready
         - Stopping the container/process on close()
         - Health monitoring via wait_until_ready()
@@ -1988,11 +1988,11 @@ class DynamicCommunitySessionManager(CommunitySessionManager):
 
     Attributes:
         launched_session (LaunchedSession): The launched session that manages server lifecycle.
-            Can be DockerLaunchedSession or PipLaunchedSession.
+            Can be DockerLaunchedSession or PythonLaunchedSession.
 
     See Also:
         StaticCommunitySessionManager: For pre-existing servers from configuration
-        LaunchedSession: Base class for Docker/pip session launchers
+        LaunchedSession: Base class for Docker/python session launchers
         launch_session: Factory function that creates launched sessions
     """
 
@@ -2012,7 +2012,7 @@ class DynamicCommunitySessionManager(CommunitySessionManager):
             config (dict[str, Any]): Configuration dictionary for CoreSession creation.
                 Must contain connection details matching the launched session (host, port, auth).
             launched_session (LaunchedSession): The launched session that provides server
-                lifecycle management. Can be DockerLaunchedSession or PipLaunchedSession.
+                lifecycle management. Can be DockerLaunchedSession or PythonLaunchedSession.
 
         Note:
             The source parameter is automatically set to "dynamic" - callers do not need
@@ -2058,10 +2058,10 @@ class DynamicCommunitySessionManager(CommunitySessionManager):
 
     @property
     def launch_method(self) -> str:
-        """Get the launch method used (docker or pip).
+        """Get the launch method used (docker or python).
 
         Returns:
-            str: Either "docker" or "pip" indicating how the session was launched.
+            str: Either "docker" or "python" indicating how the session was launched.
         """
         return self.launched_session.launch_method
 
@@ -2078,10 +2078,10 @@ class DynamicCommunitySessionManager(CommunitySessionManager):
 
     @property
     def process_id(self) -> int | None:
-        """Get the process ID (if launched via pip).
+        """Get the process ID (if launched via python).
 
         Returns:
-            int | None: The system process ID if launch_method is "pip", otherwise None.
+            int | None: The system process ID if launch_method is "python", otherwise None.
         """
         if hasattr(self.launched_session, "process") and self.launched_session.process:
             return self.launched_session.process.pid
@@ -2154,7 +2154,7 @@ class DynamicCommunitySessionManager(CommunitySessionManager):
         # Add launch-method-specific details
         if self.launch_method == "docker":
             base_dict["container_id"] = self.container_id
-        elif self.launch_method == "pip":
+        elif self.launch_method == "python":
             base_dict["process_id"] = self.process_id
 
         return base_dict

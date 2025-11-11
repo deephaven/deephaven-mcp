@@ -14,7 +14,7 @@ configurations:
    - Redacted by `redact_community_session_config()`
 
 3. **Dynamic Session Creation** (`community.session_creation`):
-   - Configuration for on-demand creation of Deephaven Community sessions via Docker or pip
+   - Configuration for on-demand creation of Deephaven Community sessions via Docker or python
    - Validated by `validate_community_session_creation_config()`
    - Redacted by `redact_community_session_creation_config()`
 
@@ -330,7 +330,7 @@ def validate_single_community_session_config(
 
 
 # Session creation configuration constants
-_ALLOWED_LAUNCH_METHODS: set[str] = {"docker", "pip"}
+_ALLOWED_LAUNCH_METHODS: set[str] = {"docker", "python"}
 """Set of allowed launch methods for dynamic community session creation."""
 
 _ALLOWED_SESSION_CREATION_FIELDS: dict[str, type | tuple[type, ...]] = {
@@ -402,11 +402,11 @@ def validate_community_session_creation_config(
     Validate the 'session_creation' configuration for community sessions.
 
     This validates the configuration used for dynamically creating community sessions
-    via Docker or pip-installed Deephaven. Performs comprehensive validation including:
+    via Docker or python-based Deephaven. Performs comprehensive validation including:
     - Type checking for all fields
     - Validation that max_concurrent_sessions is non-negative
     - Validation of the 'defaults' section (if present) including:
-      * launch_method must be 'docker' or 'pip'
+      * launch_method must be 'docker' or 'python'
       * Mutual exclusivity of auth_token and auth_token_env_var
       * Positive values for sizes and timeouts
       * Non-negative value for startup_retries

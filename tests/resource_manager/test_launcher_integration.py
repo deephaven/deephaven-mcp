@@ -40,7 +40,7 @@ _PORT_ALLOCATION_LOCK = threading.Lock()
 
 from deephaven_mcp.resource_manager import (
     DockerLaunchedSession,
-    PipLaunchedSession,
+    PythonLaunchedSession,
     find_available_port,
 )
 from deephaven_mcp.resource_manager._instance_tracker import (
@@ -220,7 +220,7 @@ class TestPipLauncherIntegration:
         port = find_available_port_locked()
         try:
             # Launch a real pip process
-            session = await PipLaunchedSession.launch(
+            session = await PythonLaunchedSession.launch(
                 session_name="integration-pip-test",
                 port=port,
                 auth_token="test-token-789",
@@ -234,7 +234,7 @@ class TestPipLauncherIntegration:
             assert session.process is not None
             assert session.process.pid > 0
             assert session.port == port
-            assert session.launch_method == "pip"
+            assert session.launch_method == "python"
 
             # Check if process is still running before health check
             _LOGGER.info(

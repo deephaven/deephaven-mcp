@@ -14,7 +14,7 @@ Overview:
        configuration and cached for reuse.
 
     2. **Dynamic Sessions** (on-demand): Launch new Deephaven servers on-demand using
-       DynamicCommunitySessionManager with Docker or pip. Automatically allocates ports,
+       DynamicCommunitySessionManager with Docker or python. Automatically allocates ports,
        manages lifecycle, and handles cleanup.
 
 Exports - Session Managers:
@@ -27,7 +27,7 @@ Exports - Session Managers:
       Used for servers that are already running and managed externally.
 
     - DynamicCommunitySessionManager: Manages lifecycle of dynamically launched Deephaven
-      Community sessions. Launches sessions on-demand via Docker or pip, automatically handles
+      Community sessions. Launches sessions on-demand via Docker or python, automatically handles
       port allocation, authentication tokens, and cleanup. Used for ephemeral or test sessions.
 
     - EnterpriseSessionManager: Manages lifecycle of Deephaven Enterprise (Core+) sessions.
@@ -58,10 +58,10 @@ Exports - Session Launchers:
     - DockerLaunchedSession: Deephaven session launched via Docker container. Uses host
       networking, supports resource limits (memory/CPU), volume mounts, and custom JVM args.
 
-    - PipLaunchedSession: Deephaven session launched via pip-installed deephaven. Uses
+    - PythonLaunchedSession: Deephaven session launched using the python launch method. Uses
       local process with subprocess management. Requires deephaven-server package installed.
 
-    - launch_session: Convenience function to launch sessions via docker or pip. Delegates
+    - launch_session: Convenience function to launch sessions via docker or python. Delegates
       to appropriate launcher based on method parameter.
 
 Exports - Utility Functions:
@@ -105,7 +105,7 @@ Dependencies:
     - aiofiles: For async file I/O (certificate and key file loading)
     - aiohttp: For session health checking (HTTP endpoint polling)
     - Docker (optional): Required for dynamic session launching via docker
-    - deephaven-server (optional): Required for dynamic session launching via pip
+    - deephaven-server (optional): Required for dynamic session launching via python
 
 Usage Example - Static Sessions:
     >>> from deephaven_mcp.resource_manager import CommunitySessionRegistry
@@ -152,7 +152,7 @@ Usage Example - Dynamic Sessions:
 from ._launcher import (
     DockerLaunchedSession,
     LaunchedSession,
-    PipLaunchedSession,
+    PythonLaunchedSession,
     launch_session,
 )
 from ._manager import (
@@ -183,7 +183,7 @@ __all__ = [
     "CombinedSessionRegistry",
     "LaunchedSession",
     "DockerLaunchedSession",
-    "PipLaunchedSession",
+    "PythonLaunchedSession",
     "launch_session",
     "find_available_port",
     "generate_auth_token",

@@ -22,7 +22,7 @@ from deephaven_mcp.mcp_systems_server._mcp import (
 from deephaven_mcp.resource_manager import (
     DockerLaunchedSession,
     DynamicCommunitySessionManager,
-    PipLaunchedSession,
+    PythonLaunchedSession,
     ResourceLivenessStatus,
     SystemType,
 )
@@ -5620,8 +5620,8 @@ async def test_session_community_delete_pip_session():
     mock_instance_tracker = create_mock_instance_tracker()
 
     # Create a mock pip-launched session
-    mock_launched_session = MagicMock(spec=PipLaunchedSession)
-    mock_launched_session.launch_method = "pip"
+    mock_launched_session = MagicMock(spec=PythonLaunchedSession)
+    mock_launched_session.launch_method = "python"
 
     # Create a mock pip-launched session manager
     mock_manager = MagicMock(spec=DynamicCommunitySessionManager)
@@ -6047,7 +6047,7 @@ class TestSessionCommunityCreateComplete:
             "session_creation": {
                 "max_concurrent_sessions": 5,
                 "defaults": {
-                    "launch_method": "pip",
+                    "launch_method": "python",
                 },
             }
         }
@@ -6060,9 +6060,9 @@ class TestSessionCommunityCreateComplete:
 
         mock_process = MagicMock()
         mock_process.pid = 12345
-        mock_launched_session = MagicMock(spec=PipLaunchedSession)
+        mock_launched_session = MagicMock(spec=PythonLaunchedSession)
         mock_launched_session.port = 10000
-        mock_launched_session.launch_method = "pip"
+        mock_launched_session.launch_method = "python"
         mock_launched_session.connection_url = "http://localhost:10000"
         mock_launched_session.connection_url_with_auth = "http://localhost:10000"
         mock_launched_session.process = mock_process
@@ -6255,7 +6255,7 @@ class TestRemainingEdgeCases:
             "session_creation": {
                 "max_concurrent_sessions": 5,
                 "defaults": {
-                    "launch_method": "pip",
+                    "launch_method": "python",
                 },
             }
         }
@@ -6268,9 +6268,9 @@ class TestRemainingEdgeCases:
 
         mock_process = MagicMock()
         mock_process.pid = 99999
-        mock_launched_session = MagicMock(spec=PipLaunchedSession)
+        mock_launched_session = MagicMock(spec=PythonLaunchedSession)
         mock_launched_session.port = 10000
-        mock_launched_session.launch_method = "pip"
+        mock_launched_session.launch_method = "python"
         mock_launched_session.connection_url = "http://localhost:10000"
         mock_launched_session.connection_url_with_auth = "http://localhost:10000"
         mock_launched_session.process = mock_process
@@ -6561,9 +6561,9 @@ class TestSessionDetailsDynamicCommunity:
         mock_process = MagicMock()
         mock_process.pid = 54321
 
-        mock_launched_session = MagicMock(spec=PipLaunchedSession)
+        mock_launched_session = MagicMock(spec=PythonLaunchedSession)
         mock_launched_session.port = 10001
-        mock_launched_session.launch_method = "pip"
+        mock_launched_session.launch_method = "python"
         mock_launched_session.connection_url = "http://localhost:10001"
         mock_launched_session.connection_url_with_auth = "http://localhost:10001"
         mock_launched_session.process = mock_process
@@ -6600,7 +6600,7 @@ class TestSessionDetailsDynamicCommunity:
         # Verify process_id was added
         assert result["success"] is True
         session_info = result["session"]
-        assert session_info["launch_method"] == "pip"
+        assert session_info["launch_method"] == "python"
         assert session_info["process_id"] == 54321
         assert (
             "container_id" not in session_info
@@ -6752,8 +6752,8 @@ async def test_session_community_create_validates_programming_language_with_pip(
     result = await mcp_mod.session_community_create(
         context,
         session_name="test-invalid",
-        launch_method="pip",
-        programming_language="Python",  # Not valid with pip!
+        launch_method="python",
+        programming_language="Python",  # Not valid with python!
     )
 
     assert result["success"] is False
@@ -6797,8 +6797,8 @@ async def test_session_community_create_validates_docker_image_with_pip():
     result = await mcp_mod.session_community_create(
         context,
         session_name="test-invalid",
-        launch_method="pip",
-        docker_image="ghcr.io/deephaven/server:custom",  # Not valid with pip!
+        launch_method="python",
+        docker_image="ghcr.io/deephaven/server:custom",  # Not valid with python!
     )
 
     assert result["success"] is False
@@ -6842,8 +6842,8 @@ async def test_session_community_create_validates_docker_memory_limit_with_pip()
     result = await mcp_mod.session_community_create(
         context,
         session_name="test-invalid",
-        launch_method="pip",
-        docker_memory_limit_gb=8.0,  # Not valid with pip!
+        launch_method="python",
+        docker_memory_limit_gb=8.0,  # Not valid with python!
     )
 
     assert result["success"] is False
@@ -6887,8 +6887,8 @@ async def test_session_community_create_validates_docker_cpu_limit_with_pip():
     result = await mcp_mod.session_community_create(
         context,
         session_name="test-invalid",
-        launch_method="pip",
-        docker_cpu_limit=2.0,  # Not valid with pip!
+        launch_method="python",
+        docker_cpu_limit=2.0,  # Not valid with python!
     )
 
     assert result["success"] is False
@@ -6932,8 +6932,8 @@ async def test_session_community_create_validates_docker_volumes_with_pip():
     result = await mcp_mod.session_community_create(
         context,
         session_name="test-invalid",
-        launch_method="pip",
-        docker_volumes=["/data:/opt/data:ro"],  # Not valid with pip!
+        launch_method="python",
+        docker_volumes=["/data:/opt/data:ro"],  # Not valid with python!
     )
 
     assert result["success"] is False

@@ -2,7 +2,7 @@
 
 This module provides session classes for starting Deephaven Community sessions via:
 - **Docker containers** (DockerLaunchedSession) - Launches Deephaven in isolated containers
-- **pip-installed Deephaven** (PipLaunchedSession) - Launches Deephaven as local processes
+- **Python launch method** (PythonLaunchedSession) - Launches Deephaven as local processes using pip-installed deephaven-server
 
 Design Pattern:
 - Sessions own their complete lifecycle (launch + stop)
@@ -80,7 +80,7 @@ def _find_deephaven_executable() -> str:
         str: Path to deephaven executable (absolute path from venv, or "deephaven" for PATH fallback).
 
     Note:
-        This is a private helper function. Use PipLaunchedSession.launch() for public API.
+        This is a private helper function. Use PythonLaunchedSession.launch() for public API.
     """
     # Check in the same venv as the current Python
     python_executable = Path(sys.executable)
@@ -105,7 +105,7 @@ class LaunchedSession(ABC):
     method factory and stop() for cleanup.
 
     Attributes:
-        launch_method (Literal["docker", "pip"]): How the session was launched.
+        launch_method (Literal["docker", "python"]): How the session was launched.
         host (str): The host the session is listening on (typically "localhost").
         port (int): The port the session is listening on.
         auth_type (Literal["anonymous", "psk"]): Authentication type.
@@ -114,7 +114,7 @@ class LaunchedSession(ABC):
 
     def __init__(
         self,
-        launch_method: Literal["docker", "pip"],
+        launch_method: Literal["docker", "python"],
         host: str,
         port: int,
         auth_type: Literal["anonymous", "psk"],
@@ -127,8 +127,8 @@ class LaunchedSession(ABC):
         are only checked statically by type checkers.
 
         Args:
-            launch_method (Literal["docker", "pip"]): How the session was launched.
-                Must be exactly "docker" or "pip" (runtime validated).
+            launch_method (Literal["docker", "python"]): How the session was launched.
+                Must be exactly "docker" or "python" (runtime validated).
             host (str): The host the session is listening on (typically "localhost").
             port (int): The port the session is listening on.
             auth_type (Literal["anonymous", "psk"]): Authentication type.
@@ -138,15 +138,15 @@ class LaunchedSession(ABC):
 
         Raises:
             ValueError: If parameters have invalid values or are inconsistent:
-                - launch_method not in ("docker", "pip")
+                - launch_method not in ("docker", "python")
                 - auth_type not in ("anonymous", "psk")
                 - auth_type="psk" but auth_token is None/empty
                 - auth_type="anonymous" but auth_token is provided
         """
         # Validate launch_method (runtime check, Literal is only static)
-        if launch_method not in ("docker", "pip"):
+        if launch_method not in ("docker", "python"):
             raise ValueError(
-                f"launch_method must be 'docker' or 'pip', got '{launch_method}'"
+                f"launch_method must be 'docker' or 'python', got '{launch_method}'"
             )
 
         # Validate auth_type (runtime check, Literal is only static)
@@ -312,7 +312,7 @@ class LaunchedSession(ABC):
                 f"(elapsed: {elapsed:.1f}s)"
             )
 
-            # For pip sessions, check if process has crashed
+            # For python sessions, check if process has crashed
             if hasattr(self, "process") and self.process.returncode is not None:
                 _LOGGER.error(
                     f"[_launcher:LaunchedSession] Process terminated during health check "
@@ -634,15 +634,16 @@ class DockerLaunchedSession(LaunchedSession):
             raise SessionLaunchError(f"Failed to stop Docker container: {e}") from e
 
 
-class PipLaunchedSession(LaunchedSession):
-    """A Deephaven session launched via pip-installed deephaven.
+class PythonLaunchedSession(LaunchedSession):
+    """A Deephaven session launched using the python launch method.
 
     This class extends LaunchedSession to manage Deephaven sessions running as local
-    processes via the `deephaven server` command. It handles process lifecycle
-    (launch and stop) and provides process-specific attributes.
+    processes via the `deephaven server` command from a pip-installed deephaven-server
+    package. It handles process lifecycle (launch and stop) and provides process-specific
+    attributes.
 
     Attributes:
-        launch_method (Literal["pip"]): Always "pip" for this class.
+        launch_method (Literal["python"]): Always "python" for this class.
         host (str): The host the session is listening on (inherited from LaunchedSession).
         port (int): The port the session is listening on (inherited from LaunchedSession).
         auth_type (Literal["anonymous", "psk"]): Authentication type (inherited from LaunchedSession).
@@ -659,7 +660,7 @@ class PipLaunchedSession(LaunchedSession):
         auth_token: str | None,
         process: asyncio.subprocess.Process,
     ):
-        """Initialize a PipLaunchedSession.
+        """Initialize a PythonLaunchedSession.
 
         Args:
             host (str): The host the session is listening on.
@@ -672,7 +673,7 @@ class PipLaunchedSession(LaunchedSession):
             ValueError: If process is None.
             ValueError: If auth_type/auth_token are inconsistent (inherited from LaunchedSession).
         """
-        super().__init__("pip", host, port, auth_type, auth_token)
+        super().__init__("python", host, port, auth_type, auth_token)
 
         # Validate process
         if process is None:
@@ -690,12 +691,13 @@ class PipLaunchedSession(LaunchedSession):
         heap_size_gb: int,
         extra_jvm_args: list[str],
         environment_vars: dict[str, str],
-    ) -> "PipLaunchedSession":
+    ) -> "PythonLaunchedSession":
         """
-        Launch a Deephaven session via pip-installed deephaven.
+        Launch a Deephaven session using the python launch method.
 
-        This method starts a Deephaven server using the `deephaven server` command,
-        which must be available in the current environment (typically installed via pip).
+        This method starts a Deephaven server using the `deephaven server` command from
+        a pip-installed deephaven-server package. The executable must be available in the
+        current environment.
 
         Requirements:
             - The `deephaven-server` package must be installed (e.g., `pip install deephaven-server`)
@@ -711,14 +713,14 @@ class PipLaunchedSession(LaunchedSession):
             environment_vars (dict[str, str]): Environment variables to set (empty dict for none).
 
         Returns:
-            PipLaunchedSession: The launched session.
+            PythonLaunchedSession: The launched session.
 
         Raises:
             SessionLaunchError: If launch fails (e.g., deephaven command not found,
                 port already in use, or server fails to start).
         """
         _LOGGER.info(
-            f"[_launcher:PipLaunchedSession] Launching pip session '{session_name}' on port {port}"
+            f"[_launcher:PythonLaunchedSession] Launching python session '{session_name}' on port {port}"
         )
 
         # Build JVM args
@@ -740,7 +742,7 @@ class PipLaunchedSession(LaunchedSession):
         # Find deephaven executable in the same venv as the current Python
         deephaven_cmd = _find_deephaven_executable()
         _LOGGER.debug(
-            f"[_launcher:PipLaunchedSession] Using deephaven executable: {deephaven_cmd}"
+            f"[_launcher:PythonLaunchedSession] Using deephaven executable: {deephaven_cmd}"
         )
 
         # Build command
@@ -757,7 +759,7 @@ class PipLaunchedSession(LaunchedSession):
         # Set up environment
         env = environment_vars.copy()
 
-        _LOGGER.debug(f"[_launcher:PipLaunchedSession] Command: {' '.join(cmd)}")
+        _LOGGER.debug(f"[_launcher:PythonLaunchedSession] Command: {' '.join(cmd)}")
 
         # Launch process
         try:
@@ -769,7 +771,7 @@ class PipLaunchedSession(LaunchedSession):
             )
 
             _LOGGER.info(
-                f"[_launcher:PipLaunchedSession] Successfully launched process PID {process.pid}"
+                f"[_launcher:PythonLaunchedSession] Successfully launched process PID {process.pid}"
             )
 
             return cls(
@@ -781,10 +783,10 @@ class PipLaunchedSession(LaunchedSession):
             )
 
         except Exception as e:
-            raise SessionLaunchError(f"Failed to launch pip session: {e}") from e
+            raise SessionLaunchError(f"Failed to launch python session: {e}") from e
 
     async def stop(self) -> None:
-        """Stop this pip-launched session.
+        """Stop this python-launched session.
 
         This method is idempotent - calling it multiple times is safe.
         Subsequent calls after the first will be no-ops.
@@ -795,12 +797,12 @@ class PipLaunchedSession(LaunchedSession):
         # Idempotent: if already stopped, do nothing
         if self._stopped:
             _LOGGER.debug(
-                f"[_launcher:PipLaunchedSession] Process PID {self.process.pid} already stopped, skipping"
+                f"[_launcher:PythonLaunchedSession] Process PID {self.process.pid} already stopped, skipping"
             )
             return
 
         _LOGGER.info(
-            f"[_launcher:PipLaunchedSession] Stopping process PID {self.process.pid}"
+            f"[_launcher:PythonLaunchedSession] Stopping process PID {self.process.pid}"
         )
 
         try:
@@ -811,28 +813,28 @@ class PipLaunchedSession(LaunchedSession):
                 # Wait up to 10 seconds for graceful shutdown
                 await asyncio.wait_for(self.process.wait(), timeout=10.0)
                 _LOGGER.info(
-                    f"[_launcher:PipLaunchedSession] Process PID {self.process.pid} terminated gracefully"
+                    f"[_launcher:PythonLaunchedSession] Process PID {self.process.pid} terminated gracefully"
                 )
             except TimeoutError:
                 # Force kill if graceful shutdown times out
                 _LOGGER.warning(
-                    f"[_launcher:PipLaunchedSession] Process PID {self.process.pid} did not terminate gracefully, forcing kill"
+                    f"[_launcher:PythonLaunchedSession] Process PID {self.process.pid} did not terminate gracefully, forcing kill"
                 )
                 self.process.kill()
                 await self.process.wait()
                 _LOGGER.info(
-                    f"[_launcher:PipLaunchedSession] Process PID {self.process.pid} killed"
+                    f"[_launcher:PythonLaunchedSession] Process PID {self.process.pid} killed"
                 )
 
             # Mark as stopped for idempotency
             self._stopped = True
 
         except Exception as e:
-            raise SessionLaunchError(f"Failed to stop pip session: {e}") from e
+            raise SessionLaunchError(f"Failed to stop python session: {e}") from e
 
 
 async def launch_session(
-    launch_method: Literal["docker", "pip"],
+    launch_method: Literal["docker", "python"],
     session_name: str,
     port: int,
     auth_token: str | None,
@@ -852,7 +854,7 @@ async def launch_session(
     launch() method based on the launch_method parameter.
 
     Args:
-        launch_method (Literal["docker", "pip"]): The launch method.
+        launch_method (Literal["docker", "python"]): The launch method.
         session_name (str): Name for the session.
         port (int): Port to bind the session to.
         auth_token (str | None): Authentication token (PSK) for the session, or None for anonymous.
@@ -866,11 +868,11 @@ async def launch_session(
         instance_id (str | None): MCP server instance ID for orphan tracking (docker only).
 
     Returns:
-        LaunchedSession: The launched session (DockerLaunchedSession or PipLaunchedSession).
+        LaunchedSession: The launched session (DockerLaunchedSession or PythonLaunchedSession).
 
     Raises:
         ValueError: If launch_method is not supported, or if Docker-specific parameters
-            are provided when launch_method is "pip".
+            are provided when launch_method is "python".
         SessionLaunchError: If launch fails.
     """
     _LOGGER.debug(
@@ -895,26 +897,26 @@ async def launch_session(
             docker_volumes=docker_volumes,
             instance_id=instance_id,
         )
-    elif launch_method == "pip":
-        # Validate that Docker-specific parameters aren't used with pip
+    elif launch_method == "python":
+        # Validate that Docker-specific parameters aren't used with python
         if docker_image:
             raise ValueError(
-                "docker_image parameter cannot be used with launch_method='pip'"
+                "docker_image parameter cannot be used with launch_method='python'"
             )
         if docker_memory_limit_gb is not None:
             raise ValueError(
-                "docker_memory_limit_gb parameter cannot be used with launch_method='pip'"
+                "docker_memory_limit_gb parameter cannot be used with launch_method='python'"
             )
         if docker_cpu_limit is not None:
             raise ValueError(
-                "docker_cpu_limit parameter cannot be used with launch_method='pip'"
+                "docker_cpu_limit parameter cannot be used with launch_method='python'"
             )
         if docker_volumes:
             raise ValueError(
-                "docker_volumes parameter cannot be used with launch_method='pip'"
+                "docker_volumes parameter cannot be used with launch_method='python'"
             )
 
-        return await PipLaunchedSession.launch(
+        return await PythonLaunchedSession.launch(
             session_name=session_name,
             port=port,
             auth_token=auth_token,

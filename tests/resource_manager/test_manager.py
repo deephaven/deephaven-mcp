@@ -17,7 +17,7 @@ from deephaven_mcp.resource_manager import (
     DockerLaunchedSession,
     DynamicCommunitySessionManager,
     EnterpriseSessionManager,
-    PipLaunchedSession,
+    PythonLaunchedSession,
     ResourceLivenessStatus,
     SystemType,
 )
@@ -844,7 +844,7 @@ class TestDynamicCommunitySessionManager:
         """Test that to_dict correctly identifies pip launch method."""
         mock_process = MagicMock()
         mock_process.pid = 12345
-        launched_session = PipLaunchedSession(
+        launched_session = PythonLaunchedSession(
             host="localhost",
             port=10000,
             auth_type="anonymous",
@@ -861,7 +861,7 @@ class TestDynamicCommunitySessionManager:
 
         result = manager.to_dict()
 
-        assert result["launch_method"] == "pip"
+        assert result["launch_method"] == "python"
         assert result["process_id"] == 12345
         assert "container_id" not in result
 
@@ -1009,7 +1009,7 @@ class TestDynamicCommunitySessionManager:
         mock_process = MagicMock()
         mock_process.pid = 12345
 
-        launched_session = PipLaunchedSession(
+        launched_session = PythonLaunchedSession(
             host="testhost",
             port=10000,
             auth_type="anonymous",
@@ -1029,7 +1029,7 @@ class TestDynamicCommunitySessionManager:
             manager.connection_url_with_auth == "http://testhost:10000"
         )  # anonymous, no token
         assert manager.port == 10000
-        assert manager.launch_method == "pip"
+        assert manager.launch_method == "python"
         assert manager.container_id is None
         assert manager.process_id == 12345
 
