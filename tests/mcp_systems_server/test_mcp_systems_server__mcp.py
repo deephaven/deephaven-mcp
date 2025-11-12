@@ -42,8 +42,8 @@ def create_mock_instance_tracker():
     """Create a mock InstanceTracker for tests."""
     mock_tracker = MagicMock()
     mock_tracker.instance_id = "test-instance-id"
-    mock_tracker.track_pip_process = AsyncMock()
-    mock_tracker.untrack_pip_process = AsyncMock()
+    mock_tracker.track_python_process = AsyncMock()
+    mock_tracker.untrack_python_process = AsyncMock()
     return mock_tracker
 
 
@@ -5479,6 +5479,76 @@ async def test_session_community_create_not_configured():
 
 
 @pytest.mark.asyncio
+async def test_session_community_create_sessions_disabled():
+    """Test community session creation when max_concurrent_sessions is 0 (disabled)."""
+    mock_config_manager = MagicMock()
+    mock_session_registry = MagicMock()
+
+    community_config = {
+        "session_creation": {
+            "max_concurrent_sessions": 0,  # Disabled
+            "defaults": {},
+        }
+    }
+
+    full_config = {"community": community_config}
+    mock_config_manager.get_config = AsyncMock(return_value=full_config)
+    mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
+    mock_session_registry.add_session = AsyncMock()
+    mock_session_registry.get_all = AsyncMock(return_value={})
+
+    mock_launched_session = MagicMock(spec=DockerLaunchedSession)
+    mock_launched_session.port = 10000
+    mock_launched_session.launch_method = "docker"
+    mock_launched_session.connection_url = "http://localhost:10000"
+    mock_launched_session.connection_url_with_auth = (
+        "http://localhost:10000/?authToken=test_token"
+    )
+    mock_launched_session.container_id = "test_container"
+    mock_launched_session.auth_type = "psk"
+    mock_launched_session.auth_token = "test_token"
+
+    with (
+        patch(
+            "deephaven_mcp.mcp_systems_server._mcp.launch_session"
+        ) as mock_launch_session,
+        patch(
+            "deephaven_mcp.mcp_systems_server._mcp.find_available_port",
+            return_value=10000,
+        ),
+        patch(
+            "deephaven_mcp.mcp_systems_server._mcp.generate_auth_token",
+            return_value="test_token",
+        ),
+        patch.object(
+            mock_launched_session,
+            "wait_until_ready",
+            new=AsyncMock(return_value=True),
+        ),
+    ):
+        mock_launch_session.return_value = mock_launched_session
+
+        context = MockContext(
+            {
+                "config_manager": mock_config_manager,
+                "session_registry": mock_session_registry,
+                "instance_tracker": create_mock_instance_tracker(),
+            }
+        )
+
+        result = await mcp_mod.session_community_create(
+            context,
+            session_name="test-session",
+        )
+
+        # Should succeed - limit is disabled so no limit check
+        assert result["success"] is True
+        assert result["session_id"] == "community:dynamic:test-session"
+        # count_added_sessions should NOT have been called since limit is disabled
+        mock_session_registry.count_added_sessions.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_session_community_create_max_sessions_reached():
     """Test community session creation when max sessions reached."""
     mock_config_manager = MagicMock()
@@ -5613,20 +5683,20 @@ async def test_session_community_delete_success():
 
 
 @pytest.mark.asyncio
-async def test_session_community_delete_pip_session():
-    """Test deleting a pip-launched session to cover untrack_pip_process call."""
+async def test_session_community_delete_python_session():
+    """Test deleting a python-launched session to cover untrack_python_process call."""
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock()
     mock_instance_tracker = create_mock_instance_tracker()
 
-    # Create a mock pip-launched session
+    # Create a mock python-launched session
     mock_launched_session = MagicMock(spec=PythonLaunchedSession)
     mock_launched_session.launch_method = "python"
 
-    # Create a mock pip-launched session manager
+    # Create a mock python-launched session manager
     mock_manager = MagicMock(spec=DynamicCommunitySessionManager)
-    mock_manager.full_name = "community:dynamic:pip-session"
-    mock_manager._name = "pip-session"
+    mock_manager.full_name = "community:dynamic:python-session"
+    mock_manager._name = "python-session"
     mock_manager.source = "dynamic"
     mock_manager.system_type = SystemType.COMMUNITY
     mock_manager.launched_session = mock_launched_session
@@ -5645,15 +5715,15 @@ async def test_session_community_delete_pip_session():
 
     result = await mcp_mod.session_community_delete(
         context,
-        session_name="pip-session",
+        session_name="python-session",
     )
 
     # Verify success
     assert result["success"] is True
-    assert result["session_id"] == "community:dynamic:pip-session"
+    assert result["session_id"] == "community:dynamic:python-session"
 
-    # Verify untrack_pip_process was called (line 4197)
-    mock_instance_tracker.untrack_pip_process.assert_called_once_with("pip-session")
+    # Verify untrack_python_process was called (line 4197)
+    mock_instance_tracker.untrack_python_process.assert_called_once_with("python-session")
 
     # Verify session was closed and removed
     mock_manager.close.assert_called_once()
@@ -6038,8 +6108,8 @@ class TestSessionCommunityCreateComplete:
             mock_launched_session.stop.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_create_with_pip_launch_method(self):
-        """Test lines 3891-3892: pip launch method sets process_id."""
+    async def test_create_with_python_launch_method(self):
+        """Test lines 3891-3892: python launch method sets process_id."""
         mock_config_manager = MagicMock()
         mock_session_registry = MagicMock()
 
@@ -6315,7 +6385,7 @@ class TestRemainingEdgeCases:
 
     @pytest.mark.asyncio
     async def test_create_auth_token_env_var_not_found(self):
-        """Test line 3746: warning when auth_token_env_var not in environment."""
+        """Test that error is raised when auth_token_env_var is configured but env var not found."""
         mock_config_manager = MagicMock()
         mock_session_registry = MagicMock()
 
@@ -6334,53 +6404,24 @@ class TestRemainingEdgeCases:
         mock_session_registry.add_session = AsyncMock()
         mock_session_registry.get_all = AsyncMock(return_value={})
 
-        mock_launched_session = MagicMock(spec=DockerLaunchedSession)
-        mock_launched_session.port = 10000
-        mock_launched_session.launch_method = "docker"
-        mock_launched_session.connection_url = "http://localhost:10000"
-        mock_launched_session.connection_url_with_auth = (
-            "http://localhost:10000/?authToken=test_token"
+        context = MockContext(
+            {
+                "config_manager": mock_config_manager,
+                "session_registry": mock_session_registry,
+                "instance_tracker": create_mock_instance_tracker(),
+            }
         )
-        mock_launched_session.container_id = "test"
-        mock_launched_session.auth_type = "psk"
-        mock_launched_session.auth_token = "test_token"
 
-        with (
-            patch(
-                "deephaven_mcp.mcp_systems_server._mcp.launch_session"
-            ) as mock_launch_session,
-            patch(
-                "deephaven_mcp.mcp_systems_server._mcp.find_available_port",
-                return_value=10000,
-            ),
-            patch(
-                "deephaven_mcp.mcp_systems_server._mcp.generate_auth_token",
-                return_value="generated",
-            ),
-            patch.object(
-                mock_launched_session,
-                "wait_until_ready",
-                new=AsyncMock(return_value=True),
-            ),
-            patch.dict(os.environ, {}, clear=True),
-        ):  # Empty environment
-
-            mock_launch_session.return_value = mock_launched_session
-
-            context = MockContext(
-                {
-                    "config_manager": mock_config_manager,
-                    "session_registry": mock_session_registry,
-                    "instance_tracker": create_mock_instance_tracker(),
-                }
-            )
-
+        with patch.dict(os.environ, {}, clear=True):  # Empty environment
             result = await mcp_mod.session_community_create(
                 context, session_name="test-session"
             )
 
-            # Should succeed with auto-generated token
-            assert result["success"] is True
+            # Should fail because explicitly configured env var is not set
+            assert result["success"] is False
+            assert "NONEXISTENT_VAR" in result["error"]
+            assert "not set" in result["error"]
+            assert result["isError"] is True
 
     @pytest.mark.asyncio
     async def test_create_cleanup_fails_on_timeout(self):
@@ -6552,12 +6593,12 @@ class TestSessionDetailsDynamicCommunity:
         assert session_info["container_id"] == "de18601a1657"
 
     @pytest.mark.asyncio
-    async def test_session_details_with_pip_process_id(self):
-        """Test lines 994-997: process_id field for pip launch method."""
+    async def test_session_details_with_python_process_id(self):
+        """Test lines 994-997: process_id field for python launch method."""
         mock_config_manager = MagicMock()
         mock_session_registry = MagicMock()
 
-        # Create a pip-launched session with process
+        # Create a python-launched session with process
         mock_process = MagicMock()
         mock_process.pid = 54321
 
@@ -6720,8 +6761,8 @@ async def test_session_community_create_case_insensitive_params():
 
 
 @pytest.mark.asyncio
-async def test_session_community_create_validates_programming_language_with_pip():
-    """Test that programming_language parameter raises error with pip launch method."""
+async def test_session_community_create_validates_programming_language_with_python():
+    """Test that programming_language parameter raises error with python launch method."""
     from deephaven_mcp.mcp_systems_server import _mcp as mcp_mod
 
     mock_config_manager = MagicMock()
@@ -6765,8 +6806,8 @@ async def test_session_community_create_validates_programming_language_with_pip(
 
 
 @pytest.mark.asyncio
-async def test_session_community_create_validates_docker_image_with_pip():
-    """Test that docker_image parameter raises error with pip launch method."""
+async def test_session_community_create_validates_docker_image_with_python():
+    """Test that docker_image parameter raises error with python launch method."""
     from deephaven_mcp.mcp_systems_server import _mcp as mcp_mod
 
     mock_config_manager = MagicMock()
@@ -6810,8 +6851,8 @@ async def test_session_community_create_validates_docker_image_with_pip():
 
 
 @pytest.mark.asyncio
-async def test_session_community_create_validates_docker_memory_limit_with_pip():
-    """Test that docker_memory_limit_gb parameter raises error with pip launch method."""
+async def test_session_community_create_validates_docker_memory_limit_with_python():
+    """Test that docker_memory_limit_gb parameter raises error with python launch method."""
     from deephaven_mcp.mcp_systems_server import _mcp as mcp_mod
 
     mock_config_manager = MagicMock()
@@ -6855,8 +6896,8 @@ async def test_session_community_create_validates_docker_memory_limit_with_pip()
 
 
 @pytest.mark.asyncio
-async def test_session_community_create_validates_docker_cpu_limit_with_pip():
-    """Test that docker_cpu_limit parameter raises error with pip launch method."""
+async def test_session_community_create_validates_docker_cpu_limit_with_python():
+    """Test that docker_cpu_limit parameter raises error with python launch method."""
     from deephaven_mcp.mcp_systems_server import _mcp as mcp_mod
 
     mock_config_manager = MagicMock()
@@ -6900,8 +6941,8 @@ async def test_session_community_create_validates_docker_cpu_limit_with_pip():
 
 
 @pytest.mark.asyncio
-async def test_session_community_create_validates_docker_volumes_with_pip():
-    """Test that docker_volumes parameter raises error with pip launch method."""
+async def test_session_community_create_validates_docker_volumes_with_python():
+    """Test that docker_volumes parameter raises error with python launch method."""
     from deephaven_mcp.mcp_systems_server import _mcp as mcp_mod
 
     mock_config_manager = MagicMock()
@@ -7406,6 +7447,48 @@ async def test_session_community_create_invalid_config_programming_language():
     assert "Invalid programming_language in config" in result["error"]
     assert "Ruby" in result["error"]
     assert "Python" in result["error"] and "Groovy" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_session_community_create_missing_auth_token_env_var():
+    """Test that missing auth_token_env_var returns configuration error."""
+    mock_config_manager = MagicMock()
+    mock_session_registry = MagicMock()
+
+    community_config = {
+        "session_creation": {
+            "max_concurrent_sessions": 5,
+            "defaults": {
+                "launch_method": "docker",
+                "auth_type": "PSK",
+                "auth_token_env_var": "MISSING_ENV_VAR",  # This env var is not set
+            },
+        }
+    }
+
+    full_config = {"community": community_config}
+    mock_config_manager.get_config = AsyncMock(return_value=full_config)
+    mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
+    mock_session_registry.get_all = AsyncMock(return_value={})
+
+    context = MockContext(
+        {
+            "config_manager": mock_config_manager,
+            "session_registry": mock_session_registry,
+            "instance_tracker": create_mock_instance_tracker(),
+        }
+    )
+
+    # Should return error when env var is not set
+    result = await mcp_mod.session_community_create(
+        context,
+        session_name="test-session",
+    )
+    
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "MISSING_ENV_VAR" in result["error"]
+    assert "not set" in result["error"]
 
 
 @pytest.mark.asyncio

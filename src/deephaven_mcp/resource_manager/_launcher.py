@@ -69,6 +69,53 @@ from deephaven_mcp._exceptions import SessionLaunchError
 _LOGGER = logging.getLogger(__name__)
 
 
+def _redact_auth_token_from_command(cmd: list[str], auth_token: str | None) -> str:
+    """Redact authentication token from command list for safe logging.
+    
+    Args:
+        cmd: Command as list of arguments.
+        auth_token: PSK authentication token to redact, or None.
+        
+    Returns:
+        str: Command string with auth token replaced by [REDACTED] if present.
+    """
+    cmd_str = " ".join(cmd)
+    if auth_token:
+        cmd_str = cmd_str.replace(auth_token, "[REDACTED]")
+    return cmd_str
+
+
+def _build_jvm_args(
+    heap_size_gb: int,
+    extra_jvm_args: list[str],
+    auth_token: str | None,
+) -> list[str]:
+    """Build JVM arguments with authentication configuration.
+    
+    This is a shared helper used by both Docker and Python launch methods to ensure
+    consistent JVM configuration across launch methods.
+    
+    Args:
+        heap_size_gb: JVM heap size in gigabytes (e.g., 4 for -Xmx4g).
+        extra_jvm_args: Additional JVM arguments to append.
+        auth_token: PSK authentication token, or None for anonymous auth.
+        
+    Returns:
+        list[str]: Complete list of JVM arguments including heap size, extra args, and auth config.
+    """
+    jvm_args = [f"-Xmx{heap_size_gb}g"]
+    jvm_args.extend(extra_jvm_args)
+
+    if auth_token:
+        jvm_args.append(f"-Dauthentication.psk={auth_token}")
+    else:
+        jvm_args.append(
+            "-DAuthHandlers=io.deephaven.auth.AnonymousAuthenticationHandler"
+        )
+
+    return jvm_args
+
+
 def _find_deephaven_executable() -> str:
     """
     Find the deephaven executable in the current Python venv (private helper).
@@ -465,7 +512,71 @@ class DockerLaunchedSession(LaunchedSession):
             f"[_launcher:DockerLaunchedSession] Launching Docker session '{session_name}' on port {port}"
         )
 
-        # Build docker run command
+        # Build JVM arguments with authentication
+        jvm_args = _build_jvm_args(heap_size_gb, extra_jvm_args, auth_token)
+
+        # Prepare environment variables
+        env_vars = environment_vars.copy()
+        env_vars["START_OPTS"] = " ".join(jvm_args)
+
+        # Build docker command with all parameters including environment variables
+        cmd = cls._build_docker_command(
+            session_name,
+            port,
+            instance_id,
+            docker_memory_limit_gb,
+            docker_cpu_limit,
+            docker_volumes,
+            env_vars,
+            docker_image,
+        )
+
+        # Log command with PSK redacted for security
+        _LOGGER.debug(
+            f"[_launcher:DockerLaunchedSession] Docker command: {_redact_auth_token_from_command(cmd, auth_token)}"
+        )
+
+        container_id = await cls._launch_container(cmd)
+
+        _LOGGER.info(
+            f"[_launcher:DockerLaunchedSession] Successfully launched container {container_id[:12]}"
+        )
+
+        return cls(
+            host="localhost",
+            port=port,
+            auth_type="psk" if auth_token else "anonymous",
+            auth_token=auth_token,
+            container_id=container_id,
+        )
+
+    @classmethod
+    def _build_docker_command(
+        cls,
+        session_name: str,
+        port: int,
+        instance_id: str | None,
+        docker_memory_limit_gb: float | None,
+        docker_cpu_limit: float | None,
+        docker_volumes: list[str],
+        environment_vars: dict[str, str],
+        docker_image: str,
+    ) -> list[str]:
+        """Build the Docker command with resource limits, volumes, and environment variables.
+        
+        Args:
+            session_name: Name for the Docker container (will be prefixed with "deephaven-mcp-").
+            port: Host port to map to container's port 10000.
+            instance_id: MCP server instance ID for labeling containers (for orphan cleanup), or None.
+            docker_memory_limit_gb: Container memory limit in GB, or None for no limit.
+            docker_cpu_limit: Container CPU limit in cores, or None for no limit.
+            docker_volumes: Volume mounts in format ["host:container:mode"].
+            environment_vars: Environment variables to set in the container.
+            docker_image: Docker image to use.
+            
+        Returns:
+            list[str]: Complete docker run command as list of arguments.
+        """
         cmd = [
             "docker",
             "run",
@@ -506,37 +617,27 @@ class DockerLaunchedSession(LaunchedSession):
                     f"[_launcher:DockerLaunchedSession] Adding volume mount: {volume}"
                 )
 
-        # Build JVM args
-        jvm_args = [f"-Xmx{heap_size_gb}g"]
-        if extra_jvm_args:
-            jvm_args.extend(extra_jvm_args)
-
-        # Set authentication via JVM system properties
-        if auth_token:
-            # PSK authentication: set the pre-shared key
-            jvm_args.append(f"-Dauthentication.psk={auth_token}")
-        else:
-            # Anonymous authentication: set the auth handler
-            jvm_args.append(
-                "-DAuthHandlers=io.deephaven.auth.AnonymousAuthenticationHandler"
-            )
-
-        # Set environment variables
-        env_vars = environment_vars.copy()
-        env_vars["START_OPTS"] = " ".join(jvm_args)
-
-        # Add environment variables to command
-        for key, value in env_vars.items():
+        # Add environment variables
+        for key, value in environment_vars.items():
             cmd.extend(["-e", f"{key}={value}"])
 
-        # Add image
         cmd.append(docker_image)
 
-        _LOGGER.debug(
-            f"[_launcher:DockerLaunchedSession] Docker command: {' '.join(cmd)}"
-        )
+        return cmd
 
-        # Launch container
+    @classmethod
+    async def _launch_container(cls, cmd: list[str]) -> str:
+        """Launch the Docker container and handle errors.
+        
+        Args:
+            cmd: Complete docker run command as list of arguments.
+            
+        Returns:
+            str: Container ID of the launched container.
+            
+        Raises:
+            SessionLaunchError: If docker command fails or returns empty container ID.
+        """
         try:
             process = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -559,17 +660,7 @@ class DockerLaunchedSession(LaunchedSession):
                     f"Docker launch succeeded but returned empty container ID. Error: {error_msg}"
                 )
 
-            _LOGGER.info(
-                f"[_launcher:DockerLaunchedSession] Successfully launched container {container_id[:12]}"
-            )
-
-            return cls(
-                host="localhost",
-                port=port,
-                auth_type="psk" if auth_token else "anonymous",
-                auth_token=auth_token,
-                container_id=container_id,
-            )
+            return container_id
 
         except Exception as e:
             raise SessionLaunchError(f"Failed to launch Docker container: {e}") from e
@@ -723,21 +814,19 @@ class PythonLaunchedSession(LaunchedSession):
             f"[_launcher:PythonLaunchedSession] Launching python session '{session_name}' on port {port}"
         )
 
-        # Build JVM args
-        jvm_args = [f"-Xmx{heap_size_gb}g"]
-        jvm_args.extend(extra_jvm_args)
-
-        # Set authentication via JVM system properties
-        if auth_token:
-            # PSK authentication: set the pre-shared key
-            jvm_args.append(f"-Dauthentication.psk={auth_token}")
-        else:
-            # Anonymous authentication: set the auth handler
-            jvm_args.append(
-                "-DAuthHandlers=io.deephaven.auth.AnonymousAuthenticationHandler"
-            )
-
+        # Build JVM arguments with authentication (using shared helper for consistency with Docker)
+        jvm_args = _build_jvm_args(heap_size_gb, extra_jvm_args, auth_token)
         jvm_args_str = " ".join(jvm_args)
+        
+        # Log authentication configuration
+        if auth_token:
+            _LOGGER.debug(
+                "[_launcher:PythonLaunchedSession] Configured PSK authentication"
+            )
+        else:
+            _LOGGER.debug(
+                "[_launcher:PythonLaunchedSession] Configured anonymous authentication"
+            )
 
         # Find deephaven executable in the same venv as the current Python
         deephaven_cmd = _find_deephaven_executable()
@@ -758,8 +847,15 @@ class PythonLaunchedSession(LaunchedSession):
 
         # Set up environment
         env = environment_vars.copy()
+        if env:
+            _LOGGER.debug(
+                f"[_launcher:PythonLaunchedSession] Environment variables: {list(env.keys())}"
+            )
 
-        _LOGGER.debug(f"[_launcher:PythonLaunchedSession] Command: {' '.join(cmd)}")
+        # Log command with PSK redacted for security
+        _LOGGER.debug(
+            f"[_launcher:PythonLaunchedSession] Command: {_redact_auth_token_from_command(cmd, auth_token)}"
+        )
 
         # Launch process
         try:

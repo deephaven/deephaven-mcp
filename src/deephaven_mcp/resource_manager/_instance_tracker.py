@@ -2,20 +2,20 @@
 Instance tracking and orphaned resource cleanup for MCP server instances.
 
 This module provides functionality to track running MCP server instances and clean up
-orphaned Docker containers and pip processes that may be left behind when a server
+orphaned Docker containers and python processes that may be left behind when a server
 is terminated with SIGKILL or crashes unexpectedly.
 
 Key Concepts:
     - Each MCP server instance is assigned a unique UUID on startup
-    - Instance metadata (UUID, PID, start time, pip processes) is persisted to disk
+    - Instance metadata (UUID, PID, start time, python processes) is persisted to disk
     - Docker containers are labeled with the instance UUID for identification
-    - Pip processes are tracked in the instance metadata file
+    - Python processes are tracked in the instance metadata file
     - On startup, dead instances are detected and their orphaned resources are cleaned up
 
 Architecture:
     - Instance metadata stored in: ~/.deephaven-mcp/instances/{uuid}.json
     - Docker containers labeled with: deephaven-mcp-server-instance={uuid}
-    - Pip processes tracked in instance file: {"pip_processes": {"session": pid}}
+    - Python processes tracked in instance file: {"python_processes": {"session": pid}}
 
 Usage:
     # On server startup
@@ -23,8 +23,8 @@ Usage:
     await cleanup_orphaned_resources()
 
     # During operation
-    await instance.track_pip_process("my-session", 12345)
-    await instance.untrack_pip_process("my-session")
+    await instance.track_python_process("my-session", 12345)
+    await instance.untrack_python_process("my-session")
 
     # On server shutdown
     await instance.unregister()
@@ -53,7 +53,7 @@ class InstanceTracker:
 
     This class manages the lifecycle of an MCP server instance, including:
     - Generating and persisting a unique instance identifier
-    - Tracking pip-launched session processes
+    - Tracking python-launched session processes
     - Registering/unregistering the instance on startup/shutdown
     - Providing the instance ID for Docker container labeling
 
@@ -79,7 +79,7 @@ class InstanceTracker:
         self.instance_id = instance_id
         self.pid = pid
         self.started_at = started_at
-        self._pip_processes: dict[str, int] = {}
+        self._python_processes: dict[str, int] = {}
 
         # Ensure instances directory exists
         instances_dir = Path.home() / ".deephaven-mcp" / "instances"
@@ -143,37 +143,37 @@ class InstanceTracker:
             pid=data["pid"],
             started_at=data["started_at"],
         )
-        tracker._pip_processes = data.get("pip_processes", {})
+        tracker._python_processes = data.get("python_processes", {})
 
         return tracker
 
-    async def track_pip_process(self, session_name: str, pid: int) -> None:
+    async def track_python_process(self, session_name: str, pid: int) -> None:
         """
-        Track a new pip-launched session process.
+        Track a new python-launched session process.
 
         Adds the process to the instance metadata so it can be cleaned up
         if the server crashes or is killed.
 
         Args:
             session_name (str): Name of the session.
-            pid (int): Process ID of the pip-launched deephaven-server process.
+            pid (int): Process ID of the python-launched deephaven-server process.
 
         Example:
             ```python
-            # After launching a pip session
-            await instance.track_pip_process("my-session", 12345)
+            # After launching a python session
+            await instance.track_python_process("my-session", 12345)
             ```
         """
-        self._pip_processes[session_name] = pid
+        self._python_processes[session_name] = pid
         await self._save()
 
         _LOGGER.debug(
-            f"[InstanceTracker] Tracking pip process for session '{session_name}' (PID: {pid})"
+            f"[InstanceTracker] Tracking python process for session '{session_name}' (PID: {pid})"
         )
 
-    async def untrack_pip_process(self, session_name: str) -> None:
+    async def untrack_python_process(self, session_name: str) -> None:
         """
-        Stop tracking a pip-launched session process.
+        Stop tracking a python-launched session process.
 
         Removes the process from the instance metadata, typically called when
         the session is stopped normally.
@@ -183,16 +183,16 @@ class InstanceTracker:
 
         Example:
             ```python
-            # After stopping a pip session
-            await instance.untrack_pip_process("my-session")
+            # After stopping a python session
+            await instance.untrack_python_process("my-session")
             ```
         """
-        if session_name in self._pip_processes:
-            del self._pip_processes[session_name]
+        if session_name in self._python_processes:
+            del self._python_processes[session_name]
             await self._save()
 
             _LOGGER.debug(
-                f"[InstanceTracker] Stopped tracking pip process for session '{session_name}'"
+                f"[InstanceTracker] Stopped tracking python process for session '{session_name}'"
             )
 
     async def unregister(self) -> None:
@@ -222,7 +222,7 @@ class InstanceTracker:
         Save instance metadata to disk using atomic write.
 
         Persists the current state of the instance tracker, including tracked
-        pip processes, to the instance metadata file. Uses atomic write
+        python processes, to the instance metadata file. Uses atomic write
         (temp file + rename) to ensure the file is never left in a corrupted
         state if the write is interrupted.
         """
@@ -230,7 +230,7 @@ class InstanceTracker:
             "instance_id": self.instance_id,
             "pid": self.pid,
             "started_at": self.started_at,
-            "pip_processes": self._pip_processes,
+            "python_processes": self._python_processes,
         }
 
         # Atomic write using temporary file + rename
@@ -266,14 +266,14 @@ def is_process_running(pid: int) -> bool:
 
 async def cleanup_orphaned_resources() -> None:
     """
-    Clean up orphaned Docker containers and pip processes from dead server instances.
+    Clean up orphaned Docker containers and python processes from dead server instances.
 
     This function should be called on MCP server startup. It:
     1. Scans the instances directory for registered server instances
     2. Checks if each instance's process is still running
     3. For dead instances, cleans up their orphaned resources:
        - Stops and removes Docker containers (via instance label)
-       - Kills pip processes (from instance metadata)
+       - Kills python processes (from instance metadata)
     4. Removes instance metadata files for dead instances
 
     The cleanup is safe for concurrent server instances - only resources from
@@ -331,8 +331,8 @@ async def cleanup_orphaned_resources() -> None:
             # Clean up Docker containers
             await _cleanup_docker_containers_for_instance(tracker.instance_id)
 
-            # Clean up pip processes
-            await _cleanup_pip_processes_for_instance(tracker)
+            # Clean up python processes
+            await _cleanup_python_processes_for_instance(tracker)
 
             # Remove instance metadata file
             instance_file.unlink(missing_ok=True)
@@ -437,46 +437,46 @@ async def _cleanup_docker_containers_for_instance(instance_id: str) -> None:
         )
 
 
-async def _cleanup_pip_processes_for_instance(tracker: InstanceTracker) -> None:
+async def _cleanup_python_processes_for_instance(tracker: InstanceTracker) -> None:
     """
-    Clean up pip processes for a specific server instance.
+    Clean up python processes for a specific server instance.
 
-    Terminates all pip processes tracked in the instance metadata. Sends SIGTERM
+    Terminates all python processes tracked in the instance metadata. Sends SIGTERM
     to each tracked process after verifying it's still running. Processes that
     are already dead are logged and skipped.
 
     Args:
-        tracker (InstanceTracker): The instance tracker with pip process information.
+        tracker (InstanceTracker): The instance tracker with python process information.
 
     Note:
         Errors during process termination (e.g., permission denied, process already
         exited) are logged as warnings but do not raise exceptions. This ensures
         that cleanup continues for all processes even if some fail.
     """
-    pip_processes = tracker._pip_processes
+    python_processes = tracker._python_processes
 
-    if not pip_processes:
+    if not python_processes:
         _LOGGER.debug(
-            f"[InstanceTracker] No pip processes found for instance {tracker.instance_id}"
+            f"[InstanceTracker] No python processes found for instance {tracker.instance_id}"
         )
         return
 
     _LOGGER.info(
-        f"[InstanceTracker] Found {len(pip_processes)} orphaned pip process(es) for instance {tracker.instance_id}"
+        f"[InstanceTracker] Found {len(python_processes)} orphaned python process(es) for instance {tracker.instance_id}"
     )
 
-    for session_name, pid in pip_processes.items():
+    for session_name, pid in python_processes.items():
         try:
             if is_process_running(pid):
                 _LOGGER.info(
-                    f"[InstanceTracker] Killing orphaned pip process {pid} (session: {session_name})"
+                    f"[InstanceTracker] Killing orphaned python process {pid} (session: {session_name})"
                 )
                 os.kill(pid, signal.SIGTERM)
             else:
                 _LOGGER.debug(
-                    f"[InstanceTracker] Pip process {pid} (session: {session_name}) already dead"
+                    f"[InstanceTracker] Python process {pid} (session: {session_name}) already dead"
                 )
         except Exception as e:
             _LOGGER.warning(
-                f"[InstanceTracker] Error killing pip process {pid} (session: {session_name}): {e}"
+                f"[InstanceTracker] Error killing python process {pid} (session: {session_name}): {e}"
             )

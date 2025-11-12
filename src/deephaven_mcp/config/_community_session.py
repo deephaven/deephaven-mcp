@@ -205,8 +205,7 @@ def validate_community_sessions_config(
 
     if not isinstance(community_sessions_map, dict):
         _LOGGER.error(
-            "[config:validate_community_sessions_config] 'community_sessions' must be a dictionary in Deephaven community session config, got %s",
-            type(community_sessions_map).__name__,
+            f"[config:validate_community_sessions_config] 'community_sessions' must be a dictionary in Deephaven community session config, got {type(community_sessions_map).__name__}"
         )
         raise CommunitySessionConfigurationError(
             "'community_sessions' must be a dictionary in Deephaven community session config"
@@ -283,11 +282,8 @@ def _validate_auth_configuration(
         auth_type_value = config_item["auth_type"]
         if auth_type_value not in _KNOWN_AUTH_TYPES:
             _LOGGER.warning(
-                "[config:validate_single_community_session_config] Community session config for '%s' uses auth_type='%s' which is not a commonly known value. "
-                "Known values are: %s. Custom authenticators are also valid - if this is intentional, you can ignore this warning.",
-                session_name,
-                auth_type_value,
-                ", ".join(sorted(_KNOWN_AUTH_TYPES)),
+                f"[config:validate_single_community_session_config] Community session config for '{session_name}' uses auth_type='{auth_type_value}' which is not a commonly known value. "
+                f"Known values are: {', '.join(sorted(_KNOWN_AUTH_TYPES))}. Custom authenticators are also valid - if this is intentional, you can ignore this warning."
             )
 
 
@@ -432,8 +428,7 @@ def validate_community_session_creation_config(
 
     if not isinstance(session_creation_config, dict):
         _LOGGER.error(
-            "[config:validate_community_session_creation_config] 'session_creation' must be a dictionary in community config, got %s",
-            type(session_creation_config).__name__,
+            f"[config:validate_community_session_creation_config] 'session_creation' must be a dictionary in community config, got {type(session_creation_config).__name__}"
         )
         raise CommunitySessionConfigurationError(
             "'session_creation' must be a dictionary in community config"
@@ -469,24 +464,15 @@ def validate_community_session_creation_config(
         _validate_session_creation_defaults(defaults)
 
 
-def _validate_session_creation_defaults(defaults: dict[str, Any]) -> None:
-    """Validate the defaults section of session_creation configuration.
-
-    Validates field types, launch_method values, auth_type values, mutual exclusivity
-    of auth_token and auth_token_env_var, numeric ranges (positive values for sizes/timeouts,
-    non-negative for retries), and content validation for lists and dicts (docker_volumes,
-    extra_jvm_args, environment_vars must contain appropriate string types).
+def _validate_defaults_field_types(defaults: dict[str, Any]) -> None:
+    """Validate that all session creation defaults fields have correct types.
 
     Args:
-        defaults (dict[str, Any]): The defaults dictionary from session_creation configuration.
-
-    Returns:
-        None
+        defaults: The defaults dictionary to validate.
 
     Raises:
-        CommunitySessionConfigurationError: If any validation check fails.
+        CommunitySessionConfigurationError: If field type is invalid.
     """
-    # Validate field types
     for field_name, field_value in defaults.items():
         if field_name not in _ALLOWED_SESSION_CREATION_DEFAULTS:
             raise CommunitySessionConfigurationError(
@@ -507,7 +493,16 @@ def _validate_session_creation_defaults(defaults: dict[str, Any]) -> None:
                 f"must be of type {allowed_types.__name__}, got {type(field_value).__name__}"
             )
 
-    # Validate launch_method value
+
+def _validate_defaults_enum_fields(defaults: dict[str, Any]) -> None:
+    """Validate enum-like defaults fields (launch_method, auth_type).
+
+    Args:
+        defaults: The defaults dictionary to validate.
+
+    Raises:
+        CommunitySessionConfigurationError: If enum value is invalid.
+    """
     if "launch_method" in defaults:
         launch_method = defaults["launch_method"]
         if launch_method not in _ALLOWED_LAUNCH_METHODS:
@@ -515,62 +510,86 @@ def _validate_session_creation_defaults(defaults: dict[str, Any]) -> None:
                 f"'launch_method' must be one of {_ALLOWED_LAUNCH_METHODS}, got '{launch_method}'"
             )
 
-    # Validate auth_type value
     if "auth_type" in defaults:
         auth_type = defaults["auth_type"]
         if auth_type not in _KNOWN_AUTH_TYPES:
             _LOGGER.warning(
-                "[config:_validate_session_creation_defaults] session_creation.defaults uses auth_type='%s' which is not a commonly known value. "
-                "Known values are: %s. Custom authenticators are also valid - if this is intentional, you can ignore this warning.",
-                auth_type,
-                ", ".join(sorted(_KNOWN_AUTH_TYPES)),
+                f"[config:_validate_enum_fields] session_creation.defaults uses auth_type='{auth_type}' which is not a commonly known value. "
+                f"Known values are: {', '.join(sorted(_KNOWN_AUTH_TYPES))}. Custom authenticators are also valid - if this is intentional, you can ignore this warning."
             )
 
-    # Validate mutual exclusivity of auth_token and auth_token_env_var
     if "auth_token" in defaults and "auth_token_env_var" in defaults:
         raise CommunitySessionConfigurationError(
             "In session_creation.defaults, both 'auth_token' and 'auth_token_env_var' are set. "
             "Please use only one."
         )
 
-    # Validate numeric ranges
-    if "heap_size_gb" in defaults:
-        heap_size = defaults["heap_size_gb"]
-        if heap_size <= 0:
+
+def _validate_positive_number(field_name: str, value: float | int) -> None:
+    """Validate a numeric field is positive.
+
+    Args:
+        field_name: Name of the field being validated.
+        value: Numeric value to check.
+
+    Raises:
+        CommunitySessionConfigurationError: If value is not positive.
+    """
+    if value <= 0:
+        raise CommunitySessionConfigurationError(
+            f"'{field_name}' must be positive, got {value}"
+        )
+
+
+def _validate_string_list(field_name: str, items: list) -> None:
+    """Validate a list contains only strings.
+
+    Args:
+        field_name: Name of the field being validated.
+        items: List to check.
+
+    Raises:
+        CommunitySessionConfigurationError: If list contains non-string items.
+    """
+    for i, item in enumerate(items):
+        if not isinstance(item, str):
             raise CommunitySessionConfigurationError(
-                f"'heap_size_gb' must be positive, got {heap_size}"
+                f"'{field_name}[{i}]' must be a string, got {type(item).__name__}"
             )
+
+
+def _validate_defaults_numeric_ranges(defaults: dict[str, Any]) -> None:
+    """Validate numeric defaults fields are within valid ranges.
+
+    Args:
+        defaults: The defaults dictionary to validate.
+
+    Raises:
+        CommunitySessionConfigurationError: If numeric value is out of range.
+    """
+    if "heap_size_gb" in defaults:
+        _validate_positive_number("heap_size_gb", defaults["heap_size_gb"])
 
     if (
         "docker_memory_limit_gb" in defaults
         and defaults["docker_memory_limit_gb"] is not None
     ):
-        memory_limit = defaults["docker_memory_limit_gb"]
-        if memory_limit <= 0:
-            raise CommunitySessionConfigurationError(
-                f"'docker_memory_limit_gb' must be positive, got {memory_limit}"
-            )
+        _validate_positive_number(
+            "docker_memory_limit_gb", defaults["docker_memory_limit_gb"]
+        )
 
     if "docker_cpu_limit" in defaults and defaults["docker_cpu_limit"] is not None:
-        cpu_limit = defaults["docker_cpu_limit"]
-        if cpu_limit <= 0:
-            raise CommunitySessionConfigurationError(
-                f"'docker_cpu_limit' must be positive, got {cpu_limit}"
-            )
+        _validate_positive_number("docker_cpu_limit", defaults["docker_cpu_limit"])
 
     if "startup_timeout_seconds" in defaults:
-        timeout = defaults["startup_timeout_seconds"]
-        if timeout <= 0:
-            raise CommunitySessionConfigurationError(
-                f"'startup_timeout_seconds' must be positive, got {timeout}"
-            )
+        _validate_positive_number(
+            "startup_timeout_seconds", defaults["startup_timeout_seconds"]
+        )
 
     if "startup_check_interval_seconds" in defaults:
-        interval = defaults["startup_check_interval_seconds"]
-        if interval <= 0:
-            raise CommunitySessionConfigurationError(
-                f"'startup_check_interval_seconds' must be positive, got {interval}"
-            )
+        _validate_positive_number(
+            "startup_check_interval_seconds", defaults["startup_check_interval_seconds"]
+        )
 
     if "startup_retries" in defaults:
         retries = defaults["startup_retries"]
@@ -579,25 +598,22 @@ def _validate_session_creation_defaults(defaults: dict[str, Any]) -> None:
                 f"'startup_retries' must be non-negative, got {retries}"
             )
 
-    # Validate docker_volumes is a list of strings
+
+def _validate_defaults_collection_contents(defaults: dict[str, Any]) -> None:
+    """Validate list and dict defaults fields contain correct types.
+
+    Args:
+        defaults: The defaults dictionary to validate.
+
+    Raises:
+        CommunitySessionConfigurationError: If collection contents are invalid.
+    """
     if "docker_volumes" in defaults:
-        volumes = defaults["docker_volumes"]
-        for i, volume in enumerate(volumes):
-            if not isinstance(volume, str):
-                raise CommunitySessionConfigurationError(
-                    f"'docker_volumes[{i}]' must be a string, got {type(volume).__name__}"
-                )
+        _validate_string_list("docker_volumes", defaults["docker_volumes"])
 
-    # Validate extra_jvm_args is a list of strings
     if "extra_jvm_args" in defaults:
-        jvm_args = defaults["extra_jvm_args"]
-        for i, arg in enumerate(jvm_args):
-            if not isinstance(arg, str):
-                raise CommunitySessionConfigurationError(
-                    f"'extra_jvm_args[{i}]' must be a string, got {type(arg).__name__}"
-                )
+        _validate_string_list("extra_jvm_args", defaults["extra_jvm_args"])
 
-    # Validate environment_vars is a dict with string keys and values
     if "environment_vars" in defaults:
         env_vars = defaults["environment_vars"]
         for key, value in env_vars.items():
@@ -609,3 +625,21 @@ def _validate_session_creation_defaults(defaults: dict[str, Any]) -> None:
                 raise CommunitySessionConfigurationError(
                     f"'environment_vars[{key}]' value must be a string, got {type(value).__name__}"
                 )
+
+
+def _validate_session_creation_defaults(defaults: dict[str, Any]) -> None:
+    """Validate the defaults section of session_creation configuration.
+
+    This orchestrates all validation steps using dedicated helper functions for each
+    validation category: field types, enum values, numeric ranges, and collection contents.
+
+    Args:
+        defaults: The defaults dictionary from session_creation configuration.
+
+    Raises:
+        CommunitySessionConfigurationError: If any validation check fails.
+    """
+    _validate_defaults_field_types(defaults)
+    _validate_defaults_enum_fields(defaults)
+    _validate_defaults_numeric_ranges(defaults)
+    _validate_defaults_collection_contents(defaults)

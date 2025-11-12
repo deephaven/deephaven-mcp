@@ -35,7 +35,9 @@ class TestLaunchedSessionValidation:
         # We need to bypass the type system to test runtime validation
         # Call LaunchedSession.__init__ directly with an invalid launch_method
         session = object.__new__(DockerLaunchedSession)
-        with pytest.raises(ValueError, match="launch_method must be 'docker' or 'python'"):
+        with pytest.raises(
+            ValueError, match="launch_method must be 'docker' or 'python'"
+        ):
             LaunchedSession.__init__(
                 session,
                 launch_method="invalid",  # type: ignore
@@ -438,11 +440,11 @@ class TestDockerLaunchedSessionLaunch:
 
 
 class TestPythonLaunchedSessionLaunch:
-    """Tests for PipLauncher class."""
+    """Tests for PythonLaunchedSession class."""
 
     @pytest.mark.asyncio
     async def test_launch_success(self):
-        """Test successful pip launch."""
+        """Test successful python launch."""
 
         with patch("asyncio.create_subprocess_exec") as mock_subprocess:
             mock_process = AsyncMock()
@@ -486,6 +488,33 @@ class TestPythonLaunchedSessionLaunch:
             # First arg should be deephaven executable (path ending with 'deephaven')
             assert call_args[0].endswith("deephaven")
             assert "server" in call_args
+
+    @pytest.mark.asyncio
+    async def test_launch_with_environment_vars(self):
+        """Test launch with environment variables."""
+
+        with patch("asyncio.create_subprocess_exec") as mock_subprocess:
+            mock_process = AsyncMock()
+            mock_process.pid = 12345
+            mock_subprocess.return_value = mock_process
+
+            result = await PythonLaunchedSession.launch(
+                session_name="test",
+                port=10000,
+                auth_token="token",
+                heap_size_gb=4,
+                extra_jvm_args=[],
+                environment_vars={"TEST_VAR": "test_value", "ANOTHER_VAR": "123"},
+            )
+
+            # Verify subprocess was called
+            mock_subprocess.assert_called_once()
+            # Verify environment vars were passed
+            call_kwargs = mock_subprocess.call_args[1]
+            assert "env" in call_kwargs
+            assert call_kwargs["env"]["TEST_VAR"] == "test_value"
+            assert call_kwargs["env"]["ANOTHER_VAR"] == "123"
+            assert result.process == mock_process
 
     @pytest.mark.asyncio
     async def test_stop_terminates_process(self):
@@ -763,12 +792,12 @@ class TestDockerLauncherEdgeCases:
                 await session.stop()
 
 
-class TestPipLauncherEdgeCases:
-    """Edge case tests for PipLauncher."""
+class TestPythonLauncherEdgeCases:
+    """Edge case tests for PythonLaunchedSession."""
 
     @pytest.mark.asyncio
     async def test_launch_without_auth_token(self):
-        """Test pip launch without auth token (anonymous)."""
+        """Test python launch without auth token (anonymous)."""
 
         with patch("asyncio.create_subprocess_exec") as mock_subprocess:
             mock_process = AsyncMock()
@@ -795,7 +824,7 @@ class TestPipLauncherEdgeCases:
 
     @pytest.mark.asyncio
     async def test_launch_exception_handling(self):
-        """Test pip launch exception handling."""
+        """Test python launch exception handling."""
 
         with patch("asyncio.create_subprocess_exec") as mock_subprocess:
             mock_subprocess.side_effect = FileNotFoundError(
@@ -992,7 +1021,7 @@ class TestWaitUntilReady:
 
     @pytest.mark.asyncio
     async def test_wait_until_ready_detects_process_crash(self):
-        """Test that wait_until_ready detects when pip process crashes (covers lines 317-321)."""
+        """Test that wait_until_ready detects when python process crashes (covers lines 317-321)."""
         mock_process = AsyncMock()
         mock_process.pid = 12345
         mock_process.returncode = 1  # Process has crashed

@@ -3,7 +3,7 @@ Unit tests for instance tracking and orphan cleanup functionality.
 
 Tests cover:
 - Instance registration and unregistration
-- Pip process tracking
+- Python process tracking
 - Orphan detection and cleanup
 - Docker container cleanup
 - File persistence and loading
@@ -61,58 +61,58 @@ class TestInstanceTracker:
         assert data["instance_id"] == tracker.instance_id
         assert data["pid"] == tracker.pid
         assert data["started_at"] == tracker.started_at
-        assert data["pip_processes"] == {}
+        assert data["python_processes"] == {}
 
     @pytest.mark.asyncio
-    async def test_track_pip_process(self, temp_instances_dir):
-        """Test tracking a pip process."""
+    async def test_track_python_process(self, temp_instances_dir):
+        """Test tracking a python process."""
         tracker = await InstanceTracker.create_and_register()
 
         # Track a process
-        await tracker.track_pip_process("test-session", 12345)
+        await tracker.track_python_process("test-session", 12345)
 
         # Verify it's tracked in memory
-        assert tracker._pip_processes["test-session"] == 12345
+        assert tracker._python_processes["test-session"] == 12345
 
         # Verify it's persisted to disk
         data = json.loads(tracker.instance_file.read_text())
-        assert data["pip_processes"]["test-session"] == 12345
+        assert data["python_processes"]["test-session"] == 12345
 
     @pytest.mark.asyncio
-    async def test_track_multiple_pip_processes(self, temp_instances_dir):
-        """Test tracking multiple pip processes."""
+    async def test_track_multiple_python_processes(self, temp_instances_dir):
+        """Test tracking multiple python processes."""
         tracker = await InstanceTracker.create_and_register()
 
         # Track multiple processes
-        await tracker.track_pip_process("session-1", 11111)
-        await tracker.track_pip_process("session-2", 22222)
-        await tracker.track_pip_process("session-3", 33333)
+        await tracker.track_python_process("session-1", 11111)
+        await tracker.track_python_process("session-2", 22222)
+        await tracker.track_python_process("session-3", 33333)
 
         # Verify all are tracked
-        assert len(tracker._pip_processes) == 3
-        assert tracker._pip_processes["session-1"] == 11111
-        assert tracker._pip_processes["session-2"] == 22222
-        assert tracker._pip_processes["session-3"] == 33333
+        assert len(tracker._python_processes) == 3
+        assert tracker._python_processes["session-1"] == 11111
+        assert tracker._python_processes["session-2"] == 22222
+        assert tracker._python_processes["session-3"] == 33333
 
         # Verify persistence
         data = json.loads(tracker.instance_file.read_text())
-        assert len(data["pip_processes"]) == 3
+        assert len(data["python_processes"]) == 3
 
     @pytest.mark.asyncio
-    async def test_untrack_pip_process(self, temp_instances_dir):
-        """Test untracking a pip process."""
+    async def test_untrack_python_process(self, temp_instances_dir):
+        """Test untracking a python process."""
         tracker = await InstanceTracker.create_and_register()
 
         # Track and then untrack
-        await tracker.track_pip_process("test-session", 12345)
-        await tracker.untrack_pip_process("test-session")
+        await tracker.track_python_process("test-session", 12345)
+        await tracker.untrack_python_process("test-session")
 
         # Verify it's removed
-        assert "test-session" not in tracker._pip_processes
+        assert "test-session" not in tracker._python_processes
 
         # Verify it's removed from disk
         data = json.loads(tracker.instance_file.read_text())
-        assert "test-session" not in data["pip_processes"]
+        assert "test-session" not in data["python_processes"]
 
     @pytest.mark.asyncio
     async def test_untrack_nonexistent_process(self, temp_instances_dir):
@@ -120,9 +120,9 @@ class TestInstanceTracker:
         tracker = await InstanceTracker.create_and_register()
 
         # Untracking a non-existent process should not raise
-        await tracker.untrack_pip_process("nonexistent")
+        await tracker.untrack_python_process("nonexistent")
 
-        assert "nonexistent" not in tracker._pip_processes
+        assert "nonexistent" not in tracker._python_processes
 
     @pytest.mark.asyncio
     async def test_unregister(self, temp_instances_dir):
@@ -159,7 +159,7 @@ class TestInstanceTracker:
             "instance_id": instance_id,
             "pid": 9999,
             "started_at": "2025-11-07T14:00:00Z",
-            "pip_processes": {
+            "python_processes": {
                 "session-1": 11111,
                 "session-2": 22222,
             },
@@ -173,8 +173,8 @@ class TestInstanceTracker:
         assert tracker.instance_id == instance_id
         assert tracker.pid == 9999
         assert tracker.started_at == "2025-11-07T14:00:00Z"
-        assert tracker._pip_processes["session-1"] == 11111
-        assert tracker._pip_processes["session-2"] == 22222
+        assert tracker._python_processes["session-1"] == 11111
+        assert tracker._python_processes["session-2"] == 22222
 
     def test_load_from_file_missing(self, temp_instances_dir):
         """Test loading from a missing file raises FileNotFoundError."""
@@ -243,7 +243,7 @@ class TestCleanupOrphanedResources:
             "instance_id": instance_id,
             "pid": os.getpid(),  # Current process - should be running
             "started_at": "2025-11-07T14:00:00Z",
-            "pip_processes": {"session-1": 11111},
+            "python_processes": {"session-1": 11111},
         }
         instance_file.write_text(json.dumps(data))
 
@@ -263,7 +263,7 @@ class TestCleanupOrphanedResources:
             "instance_id": instance_id,
             "pid": 999999,  # Non-existent process
             "started_at": "2025-11-07T14:00:00Z",
-            "pip_processes": {},
+            "python_processes": {},
         }
         instance_file.write_text(json.dumps(data))
 
@@ -291,7 +291,7 @@ class TestCleanupOrphanedResources:
             "instance_id": instance_id,
             "pid": 999999,
             "started_at": "2025-11-07T14:00:00Z",
-            "pip_processes": {},
+            "python_processes": {},
         }
         instance_file.write_text(json.dumps(data))
 
@@ -327,9 +327,9 @@ class TestCleanupOrphanedResources:
         assert not instance_file.exists()
 
     @pytest.mark.asyncio
-    async def test_cleanup_dead_instance_with_pip_processes(self, temp_instances_dir):
-        """Test cleanup of pip processes for a dead instance."""
-        instance_id = "test-pip-instance"
+    async def test_cleanup_dead_instance_with_python_processes(self, temp_instances_dir):
+        """Test cleanup of python processes for a dead instance."""
+        instance_id = "test-python-instance"
         instance_file = temp_instances_dir / f"{instance_id}.json"
 
         # Create test data with pip processes
@@ -337,7 +337,7 @@ class TestCleanupOrphanedResources:
             "instance_id": instance_id,
             "pid": 999999,  # Dead process
             "started_at": "2025-11-07T14:00:00Z",
-            "pip_processes": {"session-1": 88888, "session-2": 99999},
+            "python_processes": {"session-1": 88888, "session-2": 99999},
         }
         instance_file.write_text(json.dumps(data))
 
@@ -381,7 +381,7 @@ class TestCleanupOrphanedResources:
                 "instance_id": f"instance-{i}",
                 "pid": 999990 + i,
                 "started_at": "2025-11-07T14:00:00Z",
-                "pip_processes": {},
+                "python_processes": {},
             }
             instance_file.write_text(json.dumps(data))
 
@@ -418,7 +418,7 @@ class TestCleanupOrphanedResources:
             "instance_id": instance_id,
             "pid": 999999,
             "started_at": "2025-11-07T14:00:00Z",
-            "pip_processes": {},
+            "python_processes": {},
         }
         instance_file.write_text(json.dumps(data))
 
@@ -460,7 +460,7 @@ class TestCleanupOrphanedResources:
             "instance_id": "dead-instance-id",
             "pid": 99999,
             "started_at": "2025-11-07T14:00:00Z",
-            "pip_processes": {},
+            "python_processes": {},
         }
         instance_file.write_text(json.dumps(data))
 
@@ -488,7 +488,7 @@ class TestCleanupOrphanedResources:
             "instance_id": "dead-instance-id",
             "pid": 99999,
             "started_at": "2025-11-07T14:00:00Z",
-            "pip_processes": {},
+            "python_processes": {},
         }
         instance_file.write_text(json.dumps(data))
 
@@ -526,14 +526,14 @@ class TestCleanupOrphanedResources:
         assert not instance_file.exists()
 
     @pytest.mark.asyncio
-    async def test_cleanup_pip_process_already_dead(self, temp_instances_dir):
-        """Test cleanup when pip process is already dead (lines 447-449)."""
+    async def test_cleanup_python_process_already_dead(self, temp_instances_dir):
+        """Test cleanup when python process is already dead (lines 447-449)."""
         instance_file = temp_instances_dir / "dead-instance-id.json"
         data = {
             "instance_id": "dead-instance-id",
             "pid": 99999,
             "started_at": "2025-11-07T14:00:00Z",
-            "pip_processes": {"test-session": 88888},
+            "python_processes": {"test-session": 88888},
         }
         instance_file.write_text(json.dumps(data))
 
@@ -558,14 +558,14 @@ class TestCleanupOrphanedResources:
         assert not instance_file.exists()
 
     @pytest.mark.asyncio
-    async def test_cleanup_pip_process_kill_error(self, temp_instances_dir):
+    async def test_cleanup_python_process_kill_error(self, temp_instances_dir):
         """Test cleanup handles os.kill errors gracefully (lines 450-453)."""
         instance_file = temp_instances_dir / "dead-instance-id.json"
         data = {
             "instance_id": "dead-instance-id",
             "pid": 99999,
             "started_at": "2025-11-07T14:00:00Z",
-            "pip_processes": {"test-session": 88888},
+            "python_processes": {"test-session": 88888},
         }
         instance_file.write_text(json.dumps(data))
 
@@ -603,7 +603,7 @@ class TestCleanupOrphanedResources:
             "instance_id": "dead-instance-id",
             "pid": 99999,
             "started_at": "2025-11-07T14:00:00Z",
-            "pip_processes": {},
+            "python_processes": {},
         }
         instance_file.write_text(json.dumps(data))
 

@@ -43,14 +43,17 @@ import os
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Any, TypeVar, cast
+from typing import Any, Literal, TypeVar, cast
 
 import aiofiles
 import pyarrow
 from mcp.server.fastmcp import Context, FastMCP
 
 from deephaven_mcp import queries
-from deephaven_mcp._exceptions import UnsupportedOperationError
+from deephaven_mcp._exceptions import (
+    CommunitySessionConfigurationError,
+    UnsupportedOperationError,
+)
 from deephaven_mcp.client import BaseSession, CorePlusSession
 from deephaven_mcp.config import (
     ConfigManager,
@@ -64,6 +67,7 @@ from deephaven_mcp.resource_manager import (
     CommunitySessionManager,
     DynamicCommunitySessionManager,
     EnterpriseSessionManager,
+    LaunchedSession,
     PythonLaunchedSession,
     SystemType,
     find_available_port,
@@ -179,7 +183,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
             - 'refresh_lock' (asyncio.Lock): Lock for atomic refresh operations across tools.
     """
     _LOGGER.info(
-        "[mcp_systems_server:app_lifespan] Starting MCP server '%s'", server.name
+        f"[mcp_systems_server:app_lifespan] Starting MCP server '{server.name}'"
     )
     session_registry = None
     instance_tracker = None
@@ -188,8 +192,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
         # Register this server instance for tracking
         instance_tracker = await InstanceTracker.create_and_register()
         _LOGGER.info(
-            "[mcp_systems_server:app_lifespan] Server instance: %s",
-            instance_tracker.instance_id,
+            f"[mcp_systems_server:app_lifespan] Server instance: {instance_tracker.instance_id}"
         )
 
         # Clean up orphaned resources from previous crashed/killed instances
@@ -216,15 +219,14 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
         }
     finally:
         _LOGGER.info(
-            "[mcp_systems_server:app_lifespan] Shutting down MCP server '%s'",
-            server.name,
+            f"[mcp_systems_server:app_lifespan] Shutting down MCP server '{server.name}'"
         )
         if session_registry is not None:
             await session_registry.close()
         if instance_tracker is not None:
             await instance_tracker.unregister()
         _LOGGER.info(
-            "[mcp_systems_server:app_lifespan] MCP server '%s' shut down.", server.name
+            f"[mcp_systems_server:app_lifespan] MCP server '{server.name}' shut down."
         )
 
 
@@ -533,13 +535,13 @@ async def sessions_list(context: Context) -> dict:
         sessions = await session_registry.get_all()
 
         _LOGGER.info(
-            "[mcp_systems_server:sessions_list] Found %d sessions.", len(sessions)
+            f"[mcp_systems_server:sessions_list] Found {len(sessions)} sessions."
         )
 
         results = []
         for fq_name, mgr in sessions.items():
             _LOGGER.debug(
-                "[mcp_systems_server:sessions_list] Processing session '%s'", fq_name
+                f"[mcp_systems_server:sessions_list] Processing session '{fq_name}'"
             )
 
             try:
@@ -3593,6 +3595,347 @@ async def session_enterprise_delete(
 # =============================================================================
 
 
+async def _get_session_creation_config(
+    config_manager: ConfigManager,
+) -> tuple[dict, int, dict | None]:
+    """Get and validate session creation configuration.
+
+    Returns:
+        Tuple of (defaults_dict, max_concurrent_sessions, error_dict).
+        On error, error_dict is set and other values are empty.
+    """
+    config_data = await config_manager.get_config()
+    community_config = config_data.get("community", {})
+    session_creation_config = community_config.get("session_creation")
+
+    if not session_creation_config:
+        error_msg = "Community session creation not configured in deephaven_mcp.json"
+        _LOGGER.error(f"[mcp_systems_server:session_community_create] {error_msg}")
+        return {}, 0, {"success": False, "error": error_msg, "isError": True}
+
+    defaults = session_creation_config.get("defaults", {})
+    max_concurrent_sessions = session_creation_config.get(
+        "max_concurrent_sessions", DEFAULT_MAX_CONCURRENT_SESSIONS
+    )
+
+    return defaults, max_concurrent_sessions, None
+
+
+async def _check_session_limit(
+    session_registry: CombinedSessionRegistry,
+    max_concurrent_sessions: int,
+) -> dict | None:
+    """Check if session limit has been reached.
+
+    Returns:
+        Error dict if limit reached, None if limit not reached or disabled.
+    """
+    if max_concurrent_sessions <= 0:
+        return None
+
+    current_count = await session_registry.count_added_sessions(
+        SystemType.COMMUNITY, ""
+    )
+    if current_count >= max_concurrent_sessions:
+        error_msg = f"Session limit reached: {current_count}/{max_concurrent_sessions} sessions active"
+        _LOGGER.error(f"[mcp_systems_server:session_community_create] {error_msg}")
+        return {"success": False, "error": error_msg, "isError": True}
+
+    return None
+
+
+def _validate_docker_only_params(
+    launch_method: str,
+    programming_language: str | None,
+    docker_image: str | None,
+    docker_memory_limit_gb: float | None,
+    docker_cpu_limit: float | None,
+    docker_volumes: list[str] | None,
+) -> dict | None:
+    """Validate that docker-specific parameters are only used with docker launch method.
+
+    Returns:
+        Error dict if validation fails, None if validation passes.
+    """
+    docker_only_params = [
+        ("programming_language", programming_language),
+        ("docker_image", docker_image),
+        ("docker_memory_limit_gb", docker_memory_limit_gb),
+        ("docker_cpu_limit", docker_cpu_limit),
+        ("docker_volumes", docker_volumes),
+    ]
+
+    for param_name, param_value in docker_only_params:
+        if param_value and launch_method != "docker":
+            error_msg = f"'{param_name}' parameter only applies to docker launch method, not '{launch_method}'"
+            _LOGGER.error(f"[mcp_systems_server:session_community_create] {error_msg}")
+            return {"success": False, "error": error_msg, "isError": True}
+
+    # Check mutual exclusivity
+    if programming_language and docker_image:
+        error_msg = "Cannot specify both 'programming_language' and 'docker_image' - use one or the other"
+        _LOGGER.error(f"[mcp_systems_server:session_community_create] {error_msg}")
+        return {"success": False, "error": error_msg, "isError": True}
+
+    return None
+
+
+def _resolve_docker_image(
+    programming_language: str | None,
+    docker_image: str | None,
+    defaults: dict,
+) -> tuple[str, dict | None]:
+    """Resolve docker image from programming language or explicit image.
+
+    Returns:
+        Tuple of (resolved_docker_image, error_dict). error_dict is None on success.
+    """
+    if docker_image:
+        return docker_image, None
+
+    if programming_language:
+        lang_lower = programming_language.lower()
+        if lang_lower == "python":
+            return DEFAULT_DOCKER_IMAGE_PYTHON, None
+        elif lang_lower == "groovy":
+            return DEFAULT_DOCKER_IMAGE_GROOVY, None
+        else:
+            error_msg = f"Unsupported programming_language: '{programming_language}'. Must be 'Python' or 'Groovy'"
+            _LOGGER.error(f"[mcp_systems_server:session_community_create] {error_msg}")
+            return "", {"success": False, "error": error_msg, "isError": True}
+
+    # Use config defaults
+    resolved_lang = defaults.get("programming_language", DEFAULT_PROGRAMMING_LANGUAGE)
+    lang_lower = resolved_lang.lower()
+
+    if lang_lower == "python":
+        return defaults.get("docker_image", DEFAULT_DOCKER_IMAGE_PYTHON), None
+    elif lang_lower == "groovy":
+        return defaults.get("docker_image", DEFAULT_DOCKER_IMAGE_GROOVY), None
+    else:
+        error_msg = f"Invalid programming_language in config: '{resolved_lang}'. Must be 'Python' or 'Groovy'"
+        _LOGGER.error(f"[mcp_systems_server:session_community_create] {error_msg}")
+        return "", {"success": False, "error": error_msg, "isError": True}
+
+
+def _resolve_auth_token(
+    auth_type: str,
+    auth_token: str | None,
+    defaults: dict,
+) -> tuple[str | None, bool]:
+    """Resolve authentication token, auto-generating if needed.
+
+    Args:
+        auth_type: Authentication type (e.g., "PSK", "Anonymous").
+        auth_token: Explicit auth token parameter, or None.
+        defaults: Configuration defaults dictionary that may contain 'auth_token_env_var' or 'auth_token'.
+
+    Returns:
+        Tuple of (resolved_token, was_auto_generated).
+
+    Raises:
+        CommunitySessionConfigurationError: If auth_token_env_var is configured but the environment variable is not set.
+    """
+    if auth_type != "PSK":
+        return None, False
+
+    # Check explicit parameter
+    if auth_token:
+        return auth_token, False
+
+    # Check environment variable from config
+    if "auth_token_env_var" in defaults:
+        env_var = defaults["auth_token_env_var"]
+        token = os.environ.get(env_var)
+        if token:
+            return token, False
+        # If auth_token_env_var is explicitly configured but not set, this is an error
+        error_msg = f"Environment variable '{env_var}' specified in auth_token_env_var is not set"
+        _LOGGER.error(
+            f"[mcp_systems_server:session_community_create] {error_msg}"
+        )
+        raise CommunitySessionConfigurationError(error_msg)
+
+    # Check config default
+    if "auth_token" in defaults:
+        return defaults["auth_token"], False
+
+    # Auto-generate
+    token = generate_auth_token()
+    _LOGGER.debug(
+        "[mcp_systems_server:session_community_create] Auto-generated auth token"
+    )
+    return token, True
+
+
+async def _register_session_manager(
+    session_name: str,
+    session_id: str,
+    port: int,
+    resolved_auth_type: str,
+    resolved_auth_token: str | None,
+    launched_session: LaunchedSession,
+    session_registry: CombinedSessionRegistry,
+    instance_tracker: InstanceTracker,
+) -> None:
+    """Create session manager object and register it in the session registry."""
+    # Create session configuration
+    session_config = {
+        "host": "localhost",
+        "port": port,
+        "auth_type": resolved_auth_type,
+    }
+    if resolved_auth_token:
+        session_config["auth_token"] = resolved_auth_token
+
+    # Create manager
+    session_manager = DynamicCommunitySessionManager(
+        name=session_name,
+        config=session_config,
+        launched_session=launched_session,
+    )
+
+    # Track python process if applicable
+    if isinstance(launched_session, PythonLaunchedSession):
+        await instance_tracker.track_python_process(
+            session_name, launched_session.process.pid
+        )
+
+    # Add to registry
+    await session_registry.add_session(session_manager)
+    _LOGGER.info(
+        f"[mcp_systems_server:session_community_create] Successfully created and registered session '{session_id}'"
+    )
+
+
+async def _launch_process_and_wait_for_ready(
+    session_name: str,
+    resolved_launch_method: Literal["docker", "python"],
+    resolved_auth_token: str | None,
+    resolved_heap_size_gb: int,
+    resolved_extra_jvm_args: list[str],
+    resolved_environment_vars: dict[str, str],
+    resolved_docker_image: str,
+    resolved_docker_memory_limit: float | None,
+    resolved_docker_cpu_limit: float | None,
+    resolved_docker_volumes: list[str],
+    resolved_startup_timeout: int,
+    resolved_startup_interval: float,
+    resolved_startup_retries: int,
+    instance_tracker: InstanceTracker,
+) -> tuple[LaunchedSession | None, int | None, dict | None]:
+    """Launch Docker container or Python process and wait for health check.
+
+    Returns:
+        Tuple of (launched_session, port, error_dict). On success, error_dict is None.
+    """
+    port = find_available_port()
+    _LOGGER.debug(
+        f"[mcp_systems_server:session_community_create] Assigned port {port} to session '{session_name}'"
+    )
+
+    _LOGGER.info(
+        f"[mcp_systems_server:session_community_create] Launching {resolved_launch_method} session '{session_name}' on port {port}"
+    )
+
+    launched_session = await launch_session(
+        launch_method=resolved_launch_method,
+        session_name=session_name,
+        port=port,
+        auth_token=resolved_auth_token,
+        heap_size_gb=resolved_heap_size_gb,
+        extra_jvm_args=resolved_extra_jvm_args,
+        environment_vars=resolved_environment_vars,
+        docker_image=resolved_docker_image,
+        docker_memory_limit_gb=resolved_docker_memory_limit,
+        docker_cpu_limit=resolved_docker_cpu_limit,
+        docker_volumes=resolved_docker_volumes,
+        instance_id=instance_tracker.instance_id,
+    )
+
+    _LOGGER.info(
+        f"[mcp_systems_server:session_community_create] Waiting for session '{session_name}' to be ready"
+    )
+    is_ready = await launched_session.wait_until_ready(
+        timeout_seconds=resolved_startup_timeout,
+        check_interval_seconds=resolved_startup_interval,
+        max_retries=resolved_startup_retries,
+    )
+
+    if not is_ready:
+        _LOGGER.error(
+            f"[mcp_systems_server:session_community_create] Session '{session_name}' failed to start within {resolved_startup_timeout}s"
+        )
+        try:
+            await launched_session.stop()
+        except Exception as e:
+            _LOGGER.warning(
+                f"[mcp_systems_server:session_community_create] Failed to cleanup failed session: {e}"
+            )
+
+        error_msg = f"Session failed to start within {resolved_startup_timeout} seconds"
+        return None, None, {"success": False, "error": error_msg, "isError": True}
+
+    return launched_session, port, None
+
+
+def _build_success_response(
+    session_id: str,
+    session_name: str,
+    connection_url: str,
+    resolved_auth_type: str,
+    resolved_launch_method: str,
+    port: int,
+    launched_session: LaunchedSession,
+) -> dict:
+    """Build the success response dict for session creation.
+
+    Returns:
+        Success response dict with session details.
+    """
+    result = {
+        "success": True,
+        "session_id": session_id,
+        "session_name": session_name,
+        "connection_url": connection_url,
+        "auth_type": resolved_auth_type,
+        "launch_method": resolved_launch_method,
+        "port": port,
+    }
+
+    # Add launch-method-specific details
+    if resolved_launch_method == "docker":
+        result["container_id"] = getattr(launched_session, "container_id", None)
+    elif resolved_launch_method == "python":
+        process = getattr(launched_session, "process", None)
+        result["process_id"] = process.pid if process else None
+
+    return result
+
+
+def _log_auto_generated_credentials(
+    session_name: str,
+    port: int,
+    connection_url: str,
+    auth_token: str,
+) -> None:
+    """Log auto-generated credentials prominently for user access."""
+    _LOGGER.warning("=" * 70)
+    _LOGGER.warning(
+        f"🔑 Session '{session_name}' Created - Browser Access Information:"
+    )
+    _LOGGER.warning(f"   Port: {port}")
+    _LOGGER.warning(f"   Base URL: {connection_url}")
+    _LOGGER.warning(f"   Auth Token: {auth_token}")
+    _LOGGER.warning(f"   Browser URL: {connection_url}/?authToken={auth_token}")
+    _LOGGER.warning("")
+    _LOGGER.warning(
+        "   To retrieve credentials via MCP tool, enable credential_retrieval_enabled"
+    )
+    _LOGGER.warning("   in your deephaven_mcp.json configuration.")
+    _LOGGER.warning("=" * 70)
+
+
 @mcp_server.tool()
 async def session_community_create(
     context: Context,
@@ -3612,13 +3955,13 @@ async def session_community_create(
     """
     MCP Tool: Create a new dynamically launched Deephaven Community session.
 
-    Creates a new Deephaven Community session by launching it via Docker or pip-installed
+    Creates a new Deephaven Community session by launching it via Docker or Python-launched
     Deephaven. The session is registered in the MCP server and will be automatically
     cleaned up when the MCP server shuts down.
 
     Launch Method Requirements:
     - Docker: Requires Docker daemon running (default method)
-    - Pip: Requires deephaven-server package installed (pip install "deephaven-mcp[local-server]")
+    - Python: Requires deephaven-server package installed (pip install "deephaven-mcp[local-server]")
 
     Terminology Note:
     - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
@@ -3638,12 +3981,12 @@ async def session_community_create(
         context (Context): The MCP context object.
         session_name (str): Unique name for the session. Must not conflict with existing sessions.
             Will be used to create session_id in format "community:dynamic:{session_name}".
-        launch_method (str | None): How to launch the session ("docker" or "pip", case-insensitive).
+        launch_method (str | None): How to launch the session ("docker" or "python", case-insensitive).
             - "docker": Uses Docker containers (requires Docker daemon running)
-            - "pip": Uses pip-installed deephaven-server (requires: pip install "deephaven-mcp[local-server]")
+            - "python": Uses Python-launched deephaven-server (requires: pip install "deephaven-mcp[local-server]")
             Defaults to configuration value or "docker".
         programming_language (str | None): Programming language ("Python" or "Groovy", case-insensitive).
-            Only applies to docker launch method - raises error if used with pip launch.
+            Only applies to docker launch method - raises error if used with python launch.
             Automatically selects the appropriate Docker image:
             - "Python" → ghcr.io/deephaven/server:latest
             - "Groovy" → ghcr.io/deephaven/server-slim:latest
@@ -3661,15 +4004,15 @@ async def session_community_create(
             For advanced users who want to use a custom image instead of standard Python/Groovy images.
             Cannot be specified together with programming_language (mutually exclusive).
             If neither docker_image nor programming_language is specified, defaults to Python image.
-            Raises error if used with pip launch method.
+            Raises error if used with python launch method.
         docker_memory_limit_gb (float | None): Container memory limit in GB (docker only).
-            Raises error if used with pip launch method.
+            Raises error if used with python launch method.
         docker_cpu_limit (float | None): Container CPU limit in cores (docker only).
-            Raises error if used with pip launch method.
+            Raises error if used with python launch method.
         docker_volumes (list[str] | None): Volume mounts in format ["host:container:mode"] (docker only).
-            Raises error if used with pip launch method.
+            Raises error if used with python launch method.
         heap_size_gb (int | None): JVM heap size in gigabytes (integer only, e.g., 4 for -Xmx4g).
-            Applies to both docker and pip launches.
+            Applies to both docker and python launches.
             Defaults to configuration value or 4.
         extra_jvm_args (list[str] | None): Additional JVM arguments as list of strings.
         environment_vars (dict[str, str] | None): Environment variables to set in the session.
@@ -3681,10 +4024,10 @@ async def session_community_create(
             - 'session_name' (str): Simple name provided by user
             - 'connection_url' (str): Base HTTP URL without authentication
             - 'auth_type' (str): "PSK" or "ANONYMOUS" (normalized to uppercase)
-            - 'launch_method' (str): "docker" or "pip" (normalized to lowercase)
+            - 'launch_method' (str): "docker" or "python" (normalized to lowercase)
             - 'port' (int): Port number where session is listening
             - 'container_id' (str, optional): Docker container ID (only for docker launch)
-            - 'process_id' (int, optional): Process ID of deephaven server (only for pip launch)
+            - 'process_id' (int, optional): Process ID of deephaven server (only for python launch)
             - 'error' (str, optional): Error message if creation failed. Omitted on success.
             - 'isError' (bool, optional): Present and True if this is an error response
 
@@ -3706,14 +4049,14 @@ async def session_community_create(
             "container_id": "a1b2c3d4..."
         }
 
-        Example Success Response (pip):
+        Example Success Response (python):
         {
             "success": True,
             "session_id": "community:dynamic:my-session",
             "session_name": "my-session",
             "connection_url": "http://localhost:45123",
             "auth_type": "PSK",
-            "launch_method": "pip",
+            "launch_method": "python",
             "port": 45123,
             "process_id": 98765
         }
@@ -3737,11 +4080,11 @@ async def session_community_create(
     Common Error Scenarios:
         - Session creation not configured: "Community session creation not configured in deephaven_mcp.json"
         - Session limit reached: "Session limit reached: X/Y sessions active"
-        - Docker param with pip: "'programming_language' parameter only applies to docker launch method, not 'pip'"
-        - Docker image with pip: "'docker_image' parameter only applies to docker launch method, not 'pip'"
-        - Docker resource with pip: "'docker_memory_limit_gb' parameter only applies to docker launch method, not 'pip'"
-        - Docker resource with pip: "'docker_cpu_limit' parameter only applies to docker launch method, not 'pip'"
-        - Docker resource with pip: "'docker_volumes' parameter only applies to docker launch method, not 'pip'"
+        - Docker param with python: "'programming_language' parameter only applies to docker launch method, not 'python'"
+        - Docker image with python: "'docker_image' parameter only applies to docker launch method, not 'python'"
+        - Docker resource with python: "'docker_memory_limit_gb' parameter only applies to docker launch method, not 'python'"
+        - Docker resource with python: "'docker_cpu_limit' parameter only applies to docker launch method, not 'python'"
+        - Docker resource with python: "'docker_volumes' parameter only applies to docker launch method, not 'python'"
         - Invalid parameters: "Cannot specify both 'programming_language' and 'docker_image' - use one or the other"
         - Unsupported language: "Unsupported programming_language: '{language}'. Must be 'Python' or 'Groovy'"
         - Invalid config language: "Invalid programming_language in config: '{language}'. Must be 'Python' or 'Groovy'"
@@ -3769,36 +4112,19 @@ async def session_community_create(
             context.request_context.lifespan_context["session_registry"]
         )
 
-        # Get configuration
-        config_data = await config_manager.get_config()
-        community_config = config_data.get("community", {})
-        session_creation_config = community_config.get("session_creation")
-
-        if not session_creation_config:
-            error_msg = (
-                "Community session creation not configured in deephaven_mcp.json"
-            )
-            _LOGGER.error(f"[mcp_systems_server:session_community_create] {error_msg}")
-            result["error"] = error_msg
-            result["isError"] = True
-            return result
-
-        # Get defaults from configuration
-        defaults = session_creation_config.get("defaults", {})
-        max_concurrent_sessions = session_creation_config.get(
-            "max_concurrent_sessions", DEFAULT_MAX_CONCURRENT_SESSIONS
+        # Get and validate configuration
+        defaults, max_concurrent_sessions, config_error = (
+            await _get_session_creation_config(config_manager)
         )
+        if config_error:
+            return config_error
 
         # Check session limit
-        current_count = await session_registry.count_added_sessions(
-            SystemType.COMMUNITY
+        limit_error = await _check_session_limit(
+            session_registry, max_concurrent_sessions
         )
-        if max_concurrent_sessions > 0 and current_count >= max_concurrent_sessions:
-            error_msg = f"Session limit reached: {current_count}/{max_concurrent_sessions} sessions active"
-            _LOGGER.error(f"[mcp_systems_server:session_community_create] {error_msg}")
-            result["error"] = error_msg
-            result["isError"] = True
-            return result
+        if limit_error:
+            return limit_error
 
         # Resolve parameters (tool args > config defaults > hardcoded defaults)
         resolved_launch_method = (
@@ -3808,91 +4134,24 @@ async def session_community_create(
             auth_type or defaults.get("auth_type", DEFAULT_AUTH_TYPE)
         ).upper()
 
-        # Validate docker-specific parameters only apply to docker launch method
-        if programming_language and resolved_launch_method != "docker":
-            error_msg = f"'programming_language' parameter only applies to docker launch method, not '{resolved_launch_method}'"
-            _LOGGER.error(f"[mcp_systems_server:session_community_create] {error_msg}")
-            result["error"] = error_msg
-            result["isError"] = True
-            return result
+        # Validate docker-specific parameters
+        validation_error = _validate_docker_only_params(
+            resolved_launch_method,
+            programming_language,
+            docker_image,
+            docker_memory_limit_gb,
+            docker_cpu_limit,
+            docker_volumes,
+        )
+        if validation_error:
+            return validation_error
 
-        if docker_image and resolved_launch_method != "docker":
-            error_msg = f"'docker_image' parameter only applies to docker launch method, not '{resolved_launch_method}'"
-            _LOGGER.error(f"[mcp_systems_server:session_community_create] {error_msg}")
-            result["error"] = error_msg
-            result["isError"] = True
-            return result
-
-        if docker_memory_limit_gb and resolved_launch_method != "docker":
-            error_msg = f"'docker_memory_limit_gb' parameter only applies to docker launch method, not '{resolved_launch_method}'"
-            _LOGGER.error(f"[mcp_systems_server:session_community_create] {error_msg}")
-            result["error"] = error_msg
-            result["isError"] = True
-            return result
-
-        if docker_cpu_limit and resolved_launch_method != "docker":
-            error_msg = f"'docker_cpu_limit' parameter only applies to docker launch method, not '{resolved_launch_method}'"
-            _LOGGER.error(f"[mcp_systems_server:session_community_create] {error_msg}")
-            result["error"] = error_msg
-            result["isError"] = True
-            return result
-
-        if docker_volumes and resolved_launch_method != "docker":
-            error_msg = f"'docker_volumes' parameter only applies to docker launch method, not '{resolved_launch_method}'"
-            _LOGGER.error(f"[mcp_systems_server:session_community_create] {error_msg}")
-            result["error"] = error_msg
-            result["isError"] = True
-            return result
-
-        # Validate mutually exclusive parameters
-        if programming_language and docker_image:
-            error_msg = "Cannot specify both 'programming_language' and 'docker_image' - use one or the other"
-            _LOGGER.error(f"[mcp_systems_server:session_community_create] {error_msg}")
-            result["error"] = error_msg
-            result["isError"] = True
-            return result
-
-        # Resolve docker image based on programming_language or explicit docker_image
-        if docker_image:
-            # Explicit docker_image takes priority (power user override)
-            resolved_docker_image = docker_image
-        elif programming_language:
-            # Map programming language to standard image
-            resolved_programming_language = programming_language
-            if resolved_programming_language.lower() == "python":
-                resolved_docker_image = DEFAULT_DOCKER_IMAGE_PYTHON
-            elif resolved_programming_language.lower() == "groovy":
-                resolved_docker_image = DEFAULT_DOCKER_IMAGE_GROOVY
-            else:
-                error_msg = f"Unsupported programming_language: '{programming_language}'. Must be 'Python' or 'Groovy'"
-                _LOGGER.error(
-                    f"[mcp_systems_server:session_community_create] {error_msg}"
-                )
-                result["error"] = error_msg
-                result["isError"] = True
-                return result
-        else:
-            # Use config default or fall back to language-based default
-            resolved_programming_language = defaults.get(
-                "programming_language", DEFAULT_PROGRAMMING_LANGUAGE
-            )
-            if resolved_programming_language.lower() == "python":
-                resolved_docker_image = defaults.get(
-                    "docker_image", DEFAULT_DOCKER_IMAGE_PYTHON
-                )
-            elif resolved_programming_language.lower() == "groovy":
-                resolved_docker_image = defaults.get(
-                    "docker_image", DEFAULT_DOCKER_IMAGE_GROOVY
-                )
-            else:
-                # Invalid language in config - raise error, don't silently fall back
-                error_msg = f"Invalid programming_language in config: '{resolved_programming_language}'. Must be 'Python' or 'Groovy'"
-                _LOGGER.error(
-                    f"[mcp_systems_server:session_community_create] {error_msg}"
-                )
-                result["error"] = error_msg
-                result["isError"] = True
-                return result
+        # Resolve docker image
+        resolved_docker_image, image_error = _resolve_docker_image(
+            programming_language, docker_image, defaults
+        )
+        if image_error:
+            return image_error
 
         resolved_heap_size_gb = heap_size_gb or defaults.get(
             "heap_size_gb", DEFAULT_HEAP_SIZE_GB
@@ -3920,29 +4179,10 @@ async def session_community_create(
             "environment_vars", {}
         )
 
-        # Handle auth token
-        resolved_auth_token = None
-        auto_generated_token = False
-        if resolved_auth_type == "PSK":
-            if auth_token:
-                resolved_auth_token = auth_token
-            elif "auth_token_env_var" in defaults:
-                env_var = defaults["auth_token_env_var"]
-                resolved_auth_token = os.environ.get(env_var)
-                if not resolved_auth_token:
-                    _LOGGER.warning(
-                        f"[mcp_systems_server:session_community_create] auth_token_env_var '{env_var}' not found in environment"
-                    )
-            elif "auth_token" in defaults:
-                resolved_auth_token = defaults["auth_token"]
-
-            # Auto-generate if still None
-            if not resolved_auth_token:
-                resolved_auth_token = generate_auth_token()
-                auto_generated_token = True
-                _LOGGER.debug(
-                    f"[mcp_systems_server:session_community_create] Auto-generated auth token for session '{session_name}'"
-                )
+        # Resolve auth token
+        resolved_auth_token, auto_generated_token = _resolve_auth_token(
+            resolved_auth_type, auth_token, defaults
+        )
 
         # Check for session name conflicts
         session_id = BaseItemManager.make_full_name(
@@ -3960,135 +4200,66 @@ async def session_community_create(
             f"(method: {resolved_launch_method}, auth: {resolved_auth_type})"
         )
 
-        # Find available port
-        port = find_available_port()
-        _LOGGER.debug(
-            f"[mcp_systems_server:session_community_create] Assigned port {port} to session '{session_name}'"
-        )
-
-        # Launch the session using launch_session convenience function
-        _LOGGER.info(
-            f"[mcp_systems_server:session_community_create] Launching {resolved_launch_method} session '{session_name}' on port {port}"
-        )
         # Get instance tracker from context for orphan tracking
         instance_tracker: InstanceTracker = context.request_context.lifespan_context[
             "instance_tracker"
         ]
 
-        launched_session = await launch_session(
-            launch_method=resolved_launch_method,
-            session_name=session_name,
-            port=port,
-            auth_token=resolved_auth_token,
-            heap_size_gb=resolved_heap_size_gb,
-            extra_jvm_args=resolved_extra_jvm_args,
-            environment_vars=resolved_environment_vars,
-            docker_image=resolved_docker_image,
-            docker_memory_limit_gb=resolved_docker_memory_limit,
-            docker_cpu_limit=resolved_docker_cpu_limit,
-            docker_volumes=resolved_docker_volumes,
-            instance_id=instance_tracker.instance_id,
+        # Launch session and wait for readiness
+        launched_session, port, launch_error = await _launch_process_and_wait_for_ready(
+            session_name,
+            cast(Literal["docker", "python"], resolved_launch_method),
+            resolved_auth_token,
+            resolved_heap_size_gb,
+            resolved_extra_jvm_args,
+            resolved_environment_vars,
+            resolved_docker_image,
+            resolved_docker_memory_limit,
+            resolved_docker_cpu_limit,
+            resolved_docker_volumes,
+            resolved_startup_timeout,
+            resolved_startup_interval,
+            resolved_startup_retries,
+            instance_tracker,
         )
-
-        # Wait for session to be ready
-        _LOGGER.info(
-            f"[mcp_systems_server:session_community_create] Waiting for session '{session_name}' to be ready"
-        )
-        is_ready = await launched_session.wait_until_ready(
-            timeout_seconds=resolved_startup_timeout,
-            check_interval_seconds=resolved_startup_interval,
-            max_retries=resolved_startup_retries,
-        )
-
-        if not is_ready:
-            # Cleanup failed launch
-            _LOGGER.error(
-                f"[mcp_systems_server:session_community_create] Session '{session_name}' failed to start within {resolved_startup_timeout}s"
-            )
-            try:
-                await launched_session.stop()
-            except Exception as e:
-                _LOGGER.warning(
-                    f"[mcp_systems_server:session_community_create] Failed to cleanup failed session: {e}"
-                )
-
-            error_msg = (
-                f"Session failed to start within {resolved_startup_timeout} seconds"
-            )
-            result["error"] = error_msg
-            result["isError"] = True
-            return result
-
-        # Create session configuration for CoreSession
-        session_config = {
-            "host": "localhost",
-            "port": port,
-            "auth_type": resolved_auth_type,
-        }
-        if resolved_auth_token:
-            session_config["auth_token"] = resolved_auth_token
-
-        # Create DynamicCommunitySessionManager
-        session_manager = DynamicCommunitySessionManager(
-            name=session_name,
-            config=session_config,
-            launched_session=launched_session,
-        )
-
-        # Track python process if applicable (for orphan cleanup)
-        if isinstance(launched_session, PythonLaunchedSession):
-            await instance_tracker.track_pip_process(
-                session_name, launched_session.process.pid
-            )
-
-        # Add to registry
-        await session_registry.add_session(session_manager)
-        _LOGGER.info(
-            f"[mcp_systems_server:session_community_create] Successfully created and registered session '{session_id}'"
-        )
-
-        # Log auth token prominently if auto-generated (similar to Jupyter)
-        if auto_generated_token and resolved_auth_token:
-            _LOGGER.warning("=" * 70)
-            _LOGGER.warning(
-                f"🔑 Session '{session_name}' Created - Browser Access Information:"
-            )
-            _LOGGER.warning(f"   Port: {port}")
-            _LOGGER.warning(f"   Base URL: {launched_session.connection_url}")
-            _LOGGER.warning(f"   Auth Token: {resolved_auth_token}")
-            _LOGGER.warning(
-                f"   Browser URL: {launched_session.connection_url}/?authToken={resolved_auth_token}"
-            )
-            _LOGGER.warning("")
-            _LOGGER.warning(
-                "   To retrieve credentials via MCP tool, enable credential_retrieval_enabled"
-            )
-            _LOGGER.warning("   in your deephaven_mcp.json configuration.")
-            _LOGGER.warning("=" * 70)
-
-        # Build success response
-        result.update(
-            {
-                "success": True,
-                "session_id": session_id,
-                "session_name": session_name,
-                "connection_url": launched_session.connection_url,
-                "auth_type": resolved_auth_type,
-                "launch_method": resolved_launch_method,
-                "port": port,
+        if launch_error or launched_session is None or port is None:
+            return launch_error or {
+                "success": False,
+                "error": "Session launch failed",
+                "isError": True,
             }
+
+        # Create and register session manager
+        await _register_session_manager(
+            session_name,
+            session_id,
+            port,
+            resolved_auth_type,
+            resolved_auth_token,
+            launched_session,
+            session_registry,
+            instance_tracker,
         )
 
-        # Note: auth_token and connection_url_with_auth are NOT included in response for security.
-        # Use session_community_credentials tool if programmatic access to credentials is needed.
-
-        # Add launch-method-specific details
-        if resolved_launch_method == "docker":
-            result["container_id"] = launched_session.container_id
-        elif resolved_launch_method == "python":
-            result["process_id"] = (
-                launched_session.process.pid if launched_session.process else None
+        # Log auto-generated credentials prominently
+        if auto_generated_token and resolved_auth_token:
+            _log_auto_generated_credentials(
+                session_name,
+                port,
+                launched_session.connection_url,
+                resolved_auth_token,
             )
+
+        # Build and return success response
+        return _build_success_response(
+            session_id,
+            session_name,
+            launched_session.connection_url,
+            resolved_auth_type,
+            resolved_launch_method,
+            port,
+            launched_session,
+        )
 
     except Exception as e:
         _LOGGER.error(
@@ -4236,7 +4407,7 @@ async def session_community_delete(
         ]
         if isinstance(session_manager, DynamicCommunitySessionManager):
             if isinstance(session_manager.launched_session, PythonLaunchedSession):
-                await instance_tracker.untrack_pip_process(session_name)
+                await instance_tracker.untrack_python_process(session_name)
 
         # Close the session (this will also stop the Docker container/python process)
         try:

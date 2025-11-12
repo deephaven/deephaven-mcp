@@ -7,7 +7,7 @@ This module provides low-level utilities for dynamically launched Deephaven sess
 - **Authentication token generation**: Create secure PSK (pre-shared key) tokens
 
 These utilities are primarily used by session launchers (DockerLaunchedSession,
-PipLaunchedSession) but can be imported independently for custom workflows requiring
+PythonLaunchedSession) but can be imported independently for custom workflows requiring
 dynamic port assignment or token generation.
 
 Note:

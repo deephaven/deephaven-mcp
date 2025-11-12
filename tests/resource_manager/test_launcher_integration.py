@@ -202,16 +202,16 @@ class TestDockerLauncherIntegration:
 
 
 @pytest.mark.integration
-class TestPipLauncherIntegration:
-    """Integration tests for pip launcher with real processes."""
+class TestPythonLauncherIntegration:
+    """Integration tests for python launcher with real processes."""
 
     @pytest.mark.asyncio
     @pytest.mark.timeout(300)  # 5 minute timeout (pip takes longer to start)
     @pytest.mark.skipif(
         not is_deephaven_available(), reason="deephaven command not in PATH"
     )
-    async def test_pip_launch_and_cleanup(self):
-        """Test actual pip process launch, health check, and cleanup.
+    async def test_python_launch_and_cleanup(self):
+        """Test actual python process launch, health check, and cleanup.
 
         Prerequisites:
         - deephaven-server must be installed: pip install deephaven-server
@@ -219,9 +219,9 @@ class TestPipLauncherIntegration:
         session = None
         port = find_available_port_locked()
         try:
-            # Launch a real pip process
+            # Launch a real python process
             session = await PythonLaunchedSession.launch(
-                session_name="integration-pip-test",
+                session_name="integration-python-test",
                 port=port,
                 auth_token="test-token-789",
                 heap_size_gb=2,

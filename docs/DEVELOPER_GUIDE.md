@@ -2687,8 +2687,8 @@ The `-s` flag disables pytest output capture, which is **required** because pyte
 # Docker integration tests only
 uv run pytest tests/resource_manager/test_launcher_integration.py::TestDockerLauncherIntegration -m integration -s
 
-# Pip integration tests only
-uv run pytest tests/resource_manager/test_launcher_integration.py::TestPipLauncherIntegration -m integration -s
+# Python integration tests only
+uv run pytest tests/resource_manager/test_launcher_integration.py::TestPythonLauncherIntegration -m integration -s
 
 # Orphan cleanup integration tests
 uv run pytest tests/resource_manager/test_launcher_integration.py::TestOrphanCleanupIntegration -m integration -s

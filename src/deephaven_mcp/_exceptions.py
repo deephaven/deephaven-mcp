@@ -234,7 +234,7 @@ class SessionLaunchError(SessionCreationError):
     """Exception raised when launching a Deephaven Community session fails.
 
     This exception is raised during the launch phase of dynamically created community sessions
-    (via Docker or pip). It represents failures in the actual process/container startup,
+    (via Docker or Python). It represents failures in the actual process/container startup,
     port allocation, health checking, or session readiness verification.
 
     This is a subclass of SessionCreationError, specifically for launch-related failures
@@ -242,7 +242,7 @@ class SessionLaunchError(SessionCreationError):
 
     Examples:
         - Docker container failed to start
-        - pip-installed Deephaven process failed to start
+        - Python-launched Deephaven process failed to start
         - Unable to find available port for session
         - Session health check failed or timed out
         - Container/process startup returned non-zero exit code
