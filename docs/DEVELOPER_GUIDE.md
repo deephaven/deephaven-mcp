@@ -311,6 +311,30 @@ Before proceeding with the Quick Start Guide, verify your setup:
    ```
    Save this as `deephaven_mcp.json` in your project directory.
 
+   > **Dynamic Community Session Creation (Optional):** To enable on-demand creation of Deephaven Community sessions, add session creation configuration. Choose your launch method:
+   >
+   > - **Docker (default):** Requires Docker installed and running. No additional Python packages needed.
+   >   ```json
+   >   "community": {
+   >     "session_creation": {
+   >       "max_concurrent_sessions": 5,
+   >       "defaults": {"launch_method": "docker"}
+   >     }
+   >   }
+   >   ```
+   >
+   > - **Python:** Faster startup, no Docker needed. Install with: `pip install "deephaven-mcp[local-server]"`
+   >   ```json
+   >   "community": {
+   >     "session_creation": {
+   >       "max_concurrent_sessions": 5,
+   >       "defaults": {"launch_method": "python"}
+   >     }
+   >   }
+   >   ```
+   >
+   > See [Community Session Creation Configuration](#community-session-creation-configuration) for all options.
+
 2. **Start a test Deephaven server in one terminal:**
    ```bash
    # For anonymous authentication (no MCP auth needed)

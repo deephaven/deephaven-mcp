@@ -296,6 +296,58 @@ class TestDockerLaunchedSessionLaunch:
                 )
 
     @pytest.mark.asyncio
+    async def test_launch_docker_daemon_not_running(self):
+        """Test Docker launch when daemon is not running."""
+
+        with patch("asyncio.create_subprocess_exec") as mock_subprocess:
+            mock_process = AsyncMock()
+            mock_process.returncode = 1
+            mock_process.communicate = AsyncMock(
+                return_value=(b"", b"Cannot connect to the Docker daemon at unix:///var/run/docker.sock")
+            )
+            mock_subprocess.return_value = mock_process
+
+            with pytest.raises(SessionLaunchError, match="Docker is not available"):
+                await DockerLaunchedSession.launch(
+                    session_name="test",
+                    port=10000,
+                    auth_token="token",
+                    heap_size_gb=4,
+                    extra_jvm_args=[],
+                    environment_vars={},
+                    docker_image="ghcr.io/deephaven/server:latest",
+                    docker_memory_limit_gb=None,
+                    docker_cpu_limit=None,
+                    docker_volumes=[],
+                )
+
+    @pytest.mark.asyncio
+    async def test_launch_docker_command_not_found(self):
+        """Test Docker launch when Docker is not installed."""
+
+        with patch("asyncio.create_subprocess_exec") as mock_subprocess:
+            mock_process = AsyncMock()
+            mock_process.returncode = 127
+            mock_process.communicate = AsyncMock(
+                return_value=(b"", b"docker: command not found")
+            )
+            mock_subprocess.return_value = mock_process
+
+            with pytest.raises(SessionLaunchError, match="Docker command not found"):
+                await DockerLaunchedSession.launch(
+                    session_name="test",
+                    port=10000,
+                    auth_token="token",
+                    heap_size_gb=4,
+                    extra_jvm_args=[],
+                    environment_vars={},
+                    docker_image="ghcr.io/deephaven/server:latest",
+                    docker_memory_limit_gb=None,
+                    docker_cpu_limit=None,
+                    docker_volumes=[],
+                )
+
+    @pytest.mark.asyncio
     async def test_launch_with_instance_id(self):
         """Test Docker launch with instance_id for orphan tracking (lines 443-444)."""
 

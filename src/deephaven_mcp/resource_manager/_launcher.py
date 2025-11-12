@@ -649,9 +649,32 @@ class DockerLaunchedSession(LaunchedSession):
 
             if process.returncode != 0:
                 error_msg = stderr.decode() if stderr else "Unknown error"
-                raise SessionLaunchError(
-                    f"Docker launch failed with return code {process.returncode}: {error_msg}"
-                )
+                
+                # Provide helpful guidance for common Docker issues
+                if "Cannot connect to the Docker daemon" in error_msg or "docker daemon" in error_msg.lower():
+                    raise SessionLaunchError(
+                        f"Docker is not available. Docker daemon is not running.\n"
+                        f"Options:\n"
+                        f"  1. Install/start Docker: https://docker.com/get-started\n"
+                        f"  2. Use Python launch method instead:\n"
+                        f"     - Install: pip install \"deephaven-mcp[local-server]\"\n"
+                        f"     - Configure: Set launch_method to \"python\" in deephaven_mcp.json\n"
+                        f"Original error: {error_msg}"
+                    )
+                elif "command not found" in error_msg.lower() or "no such file" in error_msg.lower():
+                    raise SessionLaunchError(
+                        f"Docker command not found. Docker is not installed.\n"
+                        f"Options:\n"
+                        f"  1. Install Docker: https://docker.com/get-started\n"
+                        f"  2. Use Python launch method instead:\n"
+                        f"     - Install: pip install \"deephaven-mcp[local-server]\"\n"
+                        f"     - Configure: Set launch_method to \"python\" in deephaven_mcp.json\n"
+                        f"Original error: {error_msg}"
+                    )
+                else:
+                    raise SessionLaunchError(
+                        f"Docker launch failed with return code {process.returncode}: {error_msg}"
+                    )
 
             container_id = stdout.decode().strip()
             if not container_id:
