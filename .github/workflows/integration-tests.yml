@@ -41,5 +41,5 @@ jobs:
 
       - name: Run integration tests
         run: |
-          # -s flag is REQUIRED to disable output capture for subprocess pipes
-          pytest -m integration -s -v --no-cov
+          # Enable INFO level logging to see subprocess output for debugging
+          pytest -m integration -v --no-cov --log-cli-level=INFO

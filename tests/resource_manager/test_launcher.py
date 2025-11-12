@@ -504,6 +504,8 @@ class TestPythonLaunchedSessionLaunch:
         with patch("asyncio.create_subprocess_exec") as mock_subprocess:
             mock_process = AsyncMock()
             mock_process.pid = 12345
+            mock_process.stdout = None  # No drain task needed for unit tests
+            mock_process.stderr = None  # No drain task needed for unit tests
             mock_subprocess.return_value = mock_process
 
             result = await PythonLaunchedSession.launch(
@@ -526,6 +528,8 @@ class TestPythonLaunchedSessionLaunch:
         with patch("asyncio.create_subprocess_exec") as mock_subprocess:
             mock_process = AsyncMock()
             mock_process.pid = 12345
+            mock_process.stdout = None
+            mock_process.stderr = None
             mock_subprocess.return_value = mock_process
 
             await PythonLaunchedSession.launch(
@@ -551,6 +555,8 @@ class TestPythonLaunchedSessionLaunch:
         with patch("asyncio.create_subprocess_exec") as mock_subprocess:
             mock_process = AsyncMock()
             mock_process.pid = 12345
+            mock_process.stdout = None
+            mock_process.stderr = None
             mock_subprocess.return_value = mock_process
 
             result = await PythonLaunchedSession.launch(
@@ -570,6 +576,45 @@ class TestPythonLaunchedSessionLaunch:
             assert call_kwargs["env"]["TEST_VAR"] == "test_value"
             assert call_kwargs["env"]["ANOTHER_VAR"] == "123"
             assert result.process == mock_process
+
+    @pytest.mark.asyncio
+    async def test_drain_tasks_coverage(self):
+        """Test that drain tasks are created and handle streams correctly."""
+        with patch("asyncio.create_subprocess_exec") as mock_subprocess:
+            mock_process = AsyncMock()
+            mock_process.pid = 12345
+
+            # Create real AsyncMock StreamReaders that behave like real streams
+            mock_stdout = AsyncMock()
+            mock_stderr = AsyncMock()
+
+            # Simulate readline returning data then empty (EOF)
+            mock_stdout.readline = AsyncMock(side_effect=[b"test output\n", b""])
+            # Simulate stderr raising exception to cover exception handler
+            mock_stderr.readline = AsyncMock(
+                side_effect=[b"test error\n", RuntimeError("Stream closed")]
+            )
+
+            mock_process.stdout = mock_stdout
+            mock_process.stderr = mock_stderr
+            mock_subprocess.return_value = mock_process
+
+            session = await PythonLaunchedSession.launch(
+                session_name="test",
+                port=10000,
+                auth_token="token",
+                heap_size_gb=4,
+                extra_jvm_args=[],
+                environment_vars={},
+            )
+
+            # Give drain tasks time to run and handle exception
+            await asyncio.sleep(0.1)
+
+            assert session.process == mock_process
+            # Verify readline was called (drain tasks ran)
+            assert mock_stdout.readline.called
+            assert mock_stderr.readline.called
 
     @pytest.mark.asyncio
     async def test_stop_terminates_process(self):
@@ -917,6 +962,8 @@ class TestPythonLauncherEdgeCases:
         with patch("asyncio.create_subprocess_exec") as mock_subprocess:
             mock_process = AsyncMock()
             mock_process.pid = 12345
+            mock_process.stdout = None
+            mock_process.stderr = None
             mock_subprocess.return_value = mock_process
 
             result = await PythonLaunchedSession.launch(
@@ -992,6 +1039,8 @@ class TestPythonLauncherEdgeCases:
 
             mock_process = AsyncMock()
             mock_process.pid = 12345
+            mock_process.stdout = None
+            mock_process.stderr = None
             mock_subprocess.return_value = mock_process
 
             await PythonLaunchedSession.launch(

@@ -2706,35 +2706,37 @@ Integration tests launch real Docker containers and python processes to verify e
 
 #### Running Integration Tests
 
-**CRITICAL:** Always use the `-s` flag when running integration tests:
-
 ```bash
-uv run pytest -m integration -s
+uv run pytest -m integration
 ```
-
-The `-s` flag disables pytest output capture, which is **required** because pytest's output capturing interferes with subprocess pipes, causing Deephaven JVM processes to abort with "Aborted!" errors.
 
 #### Running Specific Test Classes
 
 ```bash
 # Docker integration tests only
-uv run pytest tests/resource_manager/test_launcher_integration.py::TestDockerLauncherIntegration -m integration -s
+uv run pytest tests/resource_manager/test_launcher_integration.py::TestDockerLauncherIntegration -m integration
 
 # Python integration tests only
-uv run pytest tests/resource_manager/test_launcher_integration.py::TestPythonLauncherIntegration -m integration -s
+uv run pytest tests/resource_manager/test_launcher_integration.py::TestPythonLauncherIntegration -m integration
 
 # Orphan cleanup integration tests
-uv run pytest tests/resource_manager/test_launcher_integration.py::TestOrphanCleanupIntegration -m integration -s
+uv run pytest tests/resource_manager/test_launcher_integration.py::TestOrphanCleanupIntegration -m integration
 
 # Instance tracker integration tests
-uv run pytest tests/resource_manager/test_launcher_integration.py::TestInstanceTrackerIntegration -m integration -s
+uv run pytest tests/resource_manager/test_launcher_integration.py::TestInstanceTrackerIntegration -m integration
 ```
 
 #### Troubleshooting Integration Tests
 
-**Problem:** Tests fail with "Aborted!" error or process exits with code 1
+**Problem:** Tests fail and you need to see Deephaven subprocess output
 
-**Solution:** Make sure you're using the `-s` flag to disable output capture:
+**Solution:** Enable DEBUG logging to see all subprocess output:
+
+```bash
+uv run pytest -m integration --log-cli-level=DEBUG -v
+```
+
+Or use `-s` to see output directly in the terminal:
 
 ```bash
 uv run pytest -m integration -s

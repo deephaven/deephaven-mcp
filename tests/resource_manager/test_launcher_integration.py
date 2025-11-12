@@ -7,11 +7,13 @@ These tests actually run Docker containers and pip processes, so they:
 - Are slower than unit tests
 - Are marked with @pytest.mark.integration and skipped by default
 
-Run with: uv run pytest -m integration -s
+Run with: uv run pytest -m integration
 
-IMPORTANT: The -s flag is REQUIRED to disable pytest output capture.
-Pytest's output capturing interferes with subprocess pipes, causing
-deephaven processes to abort. Always use -s when running integration tests.
+Optional: Add -s to see subprocess output directly in terminal (for debugging):
+    uv run pytest -m integration -s
+
+Or enable DEBUG logging to see all subprocess output:
+    uv run pytest -m integration --log-cli-level=DEBUG -v
 
 Prerequisites:
 - Docker must be installed and running

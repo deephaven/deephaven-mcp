@@ -953,9 +953,13 @@ class PythonLaunchedSession(LaunchedSession):
         )
 
         # Launch process
+        # Note: stdin must be a PIPE (not DEVNULL) because the Deephaven server CLI
+        # calls input() in a loop. DEVNULL causes input() to raise EOFError immediately.
+        # We create a PIPE but never write to it, so input() blocks forever (as intended).
         try:
             process = await asyncio.create_subprocess_exec(
                 *cmd,
+                stdin=asyncio.subprocess.PIPE,  # input() will block forever on empty pipe
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env={**os.environ, **env},  # Merge with current environment
@@ -964,6 +968,36 @@ class PythonLaunchedSession(LaunchedSession):
             _LOGGER.info(
                 f"[_launcher:PythonLaunchedSession] Successfully launched process PID {process.pid}"
             )
+
+            # Start background tasks to drain stdout/stderr pipes
+            # This prevents the process from blocking when pipe buffers fill up
+            # Output is logged at DEBUG level for troubleshooting
+            async def drain_stream(
+                stream: asyncio.StreamReader, stream_name: str
+            ) -> None:
+                """Continuously read from stream and log output at DEBUG level."""
+                try:
+                    while True:
+                        line = await stream.readline()
+                        if not line:
+                            break
+                        # Log all subprocess output at DEBUG level
+                        # Enable DEBUG logging when troubleshooting Deephaven startup issues
+                        _LOGGER.debug(
+                            f"[PID {process.pid}] {stream_name}: {line.decode().rstrip()}"
+                        )
+                except Exception as e:
+                    # Stream closed, normal when process exits
+                    _LOGGER.debug(
+                        f"[PID {process.pid}] Stream {stream_name} closed: {e}"
+                    )
+
+            # Create background tasks (fire and forget)
+            # stdout/stderr are guaranteed to be StreamReader because we set PIPE above
+            if process.stdout:
+                asyncio.create_task(drain_stream(process.stdout, "stdout"))
+            if process.stderr:
+                asyncio.create_task(drain_stream(process.stderr, "stderr"))
 
             return cls(
                 host="localhost",
