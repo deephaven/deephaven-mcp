@@ -983,6 +983,14 @@ class PythonLaunchedSession(LaunchedSession):
         )
 
         try:
+            # Check if process has already exited
+            if self.process.returncode is not None:
+                _LOGGER.info(
+                    f"[_launcher:PythonLaunchedSession] Process PID {self.process.pid} already exited with code {self.process.returncode}"
+                )
+                self._stopped = True
+                return
+
             # Try graceful termination first
             self.process.terminate()
 
@@ -1006,6 +1014,12 @@ class PythonLaunchedSession(LaunchedSession):
             # Mark as stopped for idempotency
             self._stopped = True
 
+        except ProcessLookupError:
+            # Process already exited - this can happen if it crashed or was killed externally
+            _LOGGER.info(
+                f"[_launcher:PythonLaunchedSession] Process PID {self.process.pid} not found (already exited)"
+            )
+            self._stopped = True
         except Exception as e:
             raise SessionLaunchError(f"Failed to stop python session: {e}") from e
 

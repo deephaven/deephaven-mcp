@@ -9,7 +9,7 @@ one source file = one test file.
 """
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import aiohttp
 import pytest
@@ -647,6 +647,64 @@ class TestPythonLaunchedSessionLaunch:
 
             mock_process.terminate.assert_called_once()
             mock_process.kill.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_stop_process_already_exited(self):
+        """Test stop when process has already exited before stop() is called."""
+        mock_process = AsyncMock()
+        mock_process.returncode = 1  # Process already exited
+        mock_process.pid = 12345
+
+        session = PythonLaunchedSession(
+            host="localhost",
+            port=10000,
+            auth_type="anonymous",
+            auth_token=None,
+            process=mock_process,
+        )
+
+        await session.stop()
+
+        # Should not attempt to terminate/kill already-exited process
+        mock_process.terminate.assert_not_called()
+        mock_process.kill.assert_not_called()
+        mock_process.wait.assert_not_called()
+        assert session._stopped is True
+
+    @pytest.mark.asyncio
+    async def test_stop_handles_process_lookup_error(self):
+        """Test stop handles ProcessLookupError when process exits during terminate."""
+        mock_process = AsyncMock()
+        mock_process.returncode = None  # Appears running
+        mock_process.pid = 12345
+
+        # Make terminate() raise ProcessLookupError
+        def raise_process_lookup_error():
+            raise ProcessLookupError("Process not found")
+
+        mock_process.terminate = Mock(side_effect=raise_process_lookup_error)
+
+        session = PythonLaunchedSession(
+            host="localhost",
+            port=10000,
+            auth_type="anonymous",
+            auth_token=None,
+            process=mock_process,
+        )
+
+        # Should handle ProcessLookupError gracefully
+        with patch("deephaven_mcp.resource_manager._launcher._LOGGER") as mock_logger:
+            await session.stop()
+
+            mock_process.terminate.assert_called_once()
+            # Verify the logger was called inside the ProcessLookupError handler
+            # Should have exactly 2 calls: "Stopping" and "not found"
+            assert mock_logger.info.call_count == 2
+            assert "Stopping process PID" in mock_logger.info.call_args_list[0][0][0]
+            assert (
+                "not found (already exited)" in mock_logger.info.call_args_list[1][0][0]
+            )
+            assert session._stopped is True
 
     @pytest.mark.asyncio
     async def test_init_validates_none_process(self):
