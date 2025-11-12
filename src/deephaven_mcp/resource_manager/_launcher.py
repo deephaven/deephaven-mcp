@@ -335,6 +335,23 @@ class LaunchedSession(ABC):
         """
         pass  # pragma: no cover
 
+    def _check_process_crashed(self) -> bool:
+        """Check if Python process has crashed (for PythonLaunchedSession only).
+
+        Returns:
+            bool: True if process has crashed, False if still running or not applicable.
+        """
+        if hasattr(self, "process"):
+            # Poll to update returncode without blocking
+            self.process.poll()
+            if self.process.returncode is not None:
+                _LOGGER.error(
+                    f"[_launcher:LaunchedSession] Process terminated during health check "
+                    f"with exit code {self.process.returncode}"
+                )
+                return True
+        return False
+
     async def wait_until_ready(
         self,
         timeout_seconds: float = 60,
@@ -411,11 +428,7 @@ class LaunchedSession(ABC):
             )
 
             # For python sessions, check if process has crashed
-            if hasattr(self, "process") and self.process.returncode is not None:
-                _LOGGER.error(
-                    f"[_launcher:LaunchedSession] Process terminated during health check "
-                    f"with exit code {self.process.returncode}"
-                )
+            if self._check_process_crashed():
                 return False
 
             # Try to connect with retries
