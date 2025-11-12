@@ -98,7 +98,10 @@ from deephaven_mcp.client import (
     CoreSession,
 )
 
-from ._launcher import LaunchedSession
+from ._launcher import (
+    DockerLaunchedSession,
+    PythonLaunchedSession,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -1987,8 +1990,8 @@ class DynamicCommunitySessionManager(CommunitySessionManager):
         ```
 
     Attributes:
-        launched_session (LaunchedSession): The launched session that manages server lifecycle.
-            Can be DockerLaunchedSession or PythonLaunchedSession.
+        launched_session (DockerLaunchedSession | PythonLaunchedSession): The launched session
+            that manages server lifecycle.
 
     See Also:
         StaticCommunitySessionManager: For pre-existing servers from configuration
@@ -2001,7 +2004,7 @@ class DynamicCommunitySessionManager(CommunitySessionManager):
         self,
         name: str,
         config: dict[str, Any],
-        launched_session: LaunchedSession,
+        launched_session: DockerLaunchedSession | PythonLaunchedSession,
     ):
         """
         Initialize a DynamicCommunitySessionManager for a runtime-created session.
@@ -2011,8 +2014,8 @@ class DynamicCommunitySessionManager(CommunitySessionManager):
                 Used to construct full_name as "community:dynamic:{name}".
             config (dict[str, Any]): Configuration dictionary for CoreSession creation.
                 Must contain connection details matching the launched session (host, port, auth).
-            launched_session (LaunchedSession): The launched session that provides server
-                lifecycle management. Can be DockerLaunchedSession or PythonLaunchedSession.
+            launched_session (DockerLaunchedSession | PythonLaunchedSession): The launched
+                session that provides server lifecycle management.
 
         Note:
             The source parameter is automatically set to "dynamic" - callers do not need
@@ -2072,7 +2075,7 @@ class DynamicCommunitySessionManager(CommunitySessionManager):
         Returns:
             str | None: The Docker container ID if launch_method is "docker", otherwise None.
         """
-        if hasattr(self.launched_session, "container_id"):
+        if isinstance(self.launched_session, DockerLaunchedSession):
             return self.launched_session.container_id
         return None
 
@@ -2083,7 +2086,7 @@ class DynamicCommunitySessionManager(CommunitySessionManager):
         Returns:
             int | None: The system process ID if launch_method is "python", otherwise None.
         """
-        if hasattr(self.launched_session, "process") and self.launched_session.process:
+        if isinstance(self.launched_session, PythonLaunchedSession):
             return self.launched_session.process.pid
         return None
 

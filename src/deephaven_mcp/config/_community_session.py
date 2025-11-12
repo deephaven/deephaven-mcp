@@ -446,9 +446,14 @@ def validate_community_session_creation_config(
         # Note: Currently all types in _ALLOWED_SESSION_CREATION_FIELDS are single types (not tuples)
         # If tuple types are added in the future, add the tuple handling here
         if not isinstance(field_value, allowed_types):
+            type_name = (
+                allowed_types.__name__
+                if isinstance(allowed_types, type)
+                else " | ".join(t.__name__ for t in allowed_types)
+            )
             raise CommunitySessionConfigurationError(
                 f"Field '{field_name}' in session_creation config "
-                f"must be of type {allowed_types.__name__}, got {type(field_value).__name__}"
+                f"must be of type {type_name}, got {type(field_value).__name__}"
             )
 
     # Validate max_concurrent_sessions if present

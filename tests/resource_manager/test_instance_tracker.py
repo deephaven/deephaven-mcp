@@ -327,7 +327,9 @@ class TestCleanupOrphanedResources:
         assert not instance_file.exists()
 
     @pytest.mark.asyncio
-    async def test_cleanup_dead_instance_with_python_processes(self, temp_instances_dir):
+    async def test_cleanup_dead_instance_with_python_processes(
+        self, temp_instances_dir
+    ):
         """Test cleanup of python processes for a dead instance."""
         instance_id = "test-python-instance"
         instance_file = temp_instances_dir / f"{instance_id}.json"

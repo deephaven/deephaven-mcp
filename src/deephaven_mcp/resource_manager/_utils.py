@@ -58,7 +58,7 @@ def find_available_port() -> int:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.bind(("", 0))
             s.listen(1)
-            port = s.getsockname()[1]
+            port: int = s.getsockname()[1]
             _LOGGER.debug(f"[_utils:find_available_port] Found available port: {port}")
             return port
     except Exception as e:

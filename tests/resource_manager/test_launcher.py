@@ -303,7 +303,10 @@ class TestDockerLaunchedSessionLaunch:
             mock_process = AsyncMock()
             mock_process.returncode = 1
             mock_process.communicate = AsyncMock(
-                return_value=(b"", b"Cannot connect to the Docker daemon at unix:///var/run/docker.sock")
+                return_value=(
+                    b"",
+                    b"Cannot connect to the Docker daemon at unix:///var/run/docker.sock",
+                )
             )
             mock_subprocess.return_value = mock_process
 
@@ -991,7 +994,7 @@ class TestPythonLauncherEdgeCases:
     def test_find_deephaven_executable_custom_venv_no_deephaven(self):
         """Test _find_deephaven_executable when deephaven not found in custom venv."""
         from deephaven_mcp.resource_manager._launcher import _find_deephaven_executable
-        
+
         with (
             patch("deephaven_mcp.resource_manager._launcher.Path") as mock_path_class,
         ):
@@ -999,16 +1002,18 @@ class TestPythonLauncherEdgeCases:
             mock_venv_path = MagicMock()
             mock_venv_path.exists.return_value = True
             mock_venv_path.is_dir.return_value = True
-            
+
             # Create mock for deephaven executable - doesn't exist
             mock_deephaven_path = MagicMock()
             mock_deephaven_path.exists.return_value = False
-            
+
             # Setup truediv to return the path through "/bin" then to "deephaven"
             mock_bin_path = MagicMock()
-            mock_venv_path.__truediv__.side_effect = lambda x: mock_bin_path if x == "bin" else MagicMock()
+            mock_venv_path.__truediv__.side_effect = lambda x: (
+                mock_bin_path if x == "bin" else MagicMock()
+            )
             mock_bin_path.__truediv__.return_value = mock_deephaven_path
-            
+
             mock_path_class.return_value = mock_venv_path
 
             with pytest.raises(

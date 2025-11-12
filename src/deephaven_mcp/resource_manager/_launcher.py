@@ -32,7 +32,7 @@ Typical Usage:
         docker_cpu_limit=None,
         docker_volumes=[],  # Empty list for no volumes, or ["host:container:ro"]
     )
-    
+
     # Launch a Python session (uses MCP server's venv by default)
     session = await PythonLaunchedSession.launch(
         session_name="my-session",
@@ -84,11 +84,11 @@ _LOGGER = logging.getLogger(__name__)
 
 def _redact_auth_token_from_command(cmd: list[str], auth_token: str | None) -> str:
     """Redact authentication token from command list for safe logging.
-    
+
     Args:
         cmd (list[str]): Command as list of arguments.
         auth_token (str | None): PSK authentication token to redact, or None.
-        
+
     Returns:
         str: Command string with auth token replaced by [REDACTED] if present.
     """
@@ -104,15 +104,15 @@ def _build_jvm_args(
     auth_token: str | None,
 ) -> list[str]:
     """Build JVM arguments with authentication configuration.
-    
+
     This is a shared helper used by both Docker and Python launch methods to ensure
     consistent JVM configuration across launch methods.
-    
+
     Args:
         heap_size_gb (int): JVM heap size in gigabytes (e.g., 4 for -Xmx4g).
         extra_jvm_args (list[str]): Additional JVM arguments to append.
         auth_token (str | None): PSK authentication token, or None for anonymous auth.
-        
+
     Returns:
         list[str]: Complete list of JVM arguments including heap size, extra args, and auth config.
     """
@@ -178,14 +178,14 @@ def _find_deephaven_executable(custom_venv_path: str | None) -> str:
         deephaven_executable = python_executable.parent / "deephaven"
         pip_executable = python_executable.parent / "pip"
         venv_description = f"current venv at {python_executable.parent}"
-    
+
     # Check if deephaven executable exists
     if deephaven_executable.exists():
         _LOGGER.info(
             f"[_launcher:_find_deephaven_executable] Using deephaven from {venv_description}: {deephaven_executable}"
         )
         return str(deephaven_executable)
-    
+
     # Deephaven not found - always raise exception (never fall back to PATH)
     raise SessionLaunchError(
         f"'deephaven' command not found at: {deephaven_executable}\n"
@@ -614,7 +614,7 @@ class DockerLaunchedSession(LaunchedSession):
         docker_image: str,
     ) -> list[str]:
         """Build the Docker command with resource limits, volumes, and environment variables.
-        
+
         Args:
             session_name (str): Name for the Docker container (will be prefixed with "deephaven-mcp-").
             port (int): Host port to map to container's port 10000.
@@ -624,7 +624,7 @@ class DockerLaunchedSession(LaunchedSession):
             docker_volumes (list[str]): Volume mounts in format ["host:container:mode"].
             environment_vars (dict[str, str]): Environment variables to set in the container.
             docker_image (str): Docker image to use.
-            
+
         Returns:
             list[str]: Complete docker run command as list of arguments.
         """
@@ -679,13 +679,13 @@ class DockerLaunchedSession(LaunchedSession):
     @classmethod
     async def _launch_container(cls, cmd: list[str]) -> str:
         """Launch the Docker container and handle errors.
-        
+
         Args:
             cmd (list[str]): Complete docker run command as list of arguments.
-            
+
         Returns:
             str: Container ID of the launched container.
-            
+
         Raises:
             SessionLaunchError: If docker command fails or returns empty container ID.
         """
@@ -700,26 +700,32 @@ class DockerLaunchedSession(LaunchedSession):
 
             if process.returncode != 0:
                 error_msg = stderr.decode() if stderr else "Unknown error"
-                
+
                 # Provide helpful guidance for common Docker issues
-                if "Cannot connect to the Docker daemon" in error_msg or "docker daemon" in error_msg.lower():
+                if (
+                    "Cannot connect to the Docker daemon" in error_msg
+                    or "docker daemon" in error_msg.lower()
+                ):
                     raise SessionLaunchError(
                         f"Docker is not available. Docker daemon is not running.\n"
                         f"Options:\n"
                         f"  1. Install/start Docker: https://docker.com/get-started\n"
                         f"  2. Use Python launch method instead:\n"
                         f"     - Install: pip install deephaven-server\n"
-                        f"     - Configure: Set launch_method to \"python\" in deephaven_mcp.json\n"
+                        f'     - Configure: Set launch_method to "python" in deephaven_mcp.json\n'
                         f"Original error: {error_msg}"
                     )
-                elif "command not found" in error_msg.lower() or "no such file" in error_msg.lower():
+                elif (
+                    "command not found" in error_msg.lower()
+                    or "no such file" in error_msg.lower()
+                ):
                     raise SessionLaunchError(
                         f"Docker command not found. Docker is not installed.\n"
                         f"Options:\n"
                         f"  1. Install Docker: https://docker.com/get-started\n"
                         f"  2. Use Python launch method instead:\n"
                         f"     - Install: pip install deephaven-server\n"
-                        f"     - Configure: Set launch_method to \"python\" in deephaven_mcp.json\n"
+                        f'     - Configure: Set launch_method to "python" in deephaven_mcp.json\n'
                         f"Original error: {error_msg}"
                     )
                 else:
@@ -895,7 +901,7 @@ class PythonLaunchedSession(LaunchedSession):
         # Build JVM arguments with authentication (using shared helper for consistency with Docker)
         jvm_args = _build_jvm_args(heap_size_gb, extra_jvm_args, auth_token)
         jvm_args_str = " ".join(jvm_args)
-        
+
         # Log authentication configuration
         if auth_token:
             _LOGGER.debug(
@@ -1018,7 +1024,7 @@ async def launch_session(
     docker_volumes: list[str] | None = None,
     python_venv_path: str | None = None,
     instance_id: str | None = None,
-) -> LaunchedSession:
+) -> DockerLaunchedSession | PythonLaunchedSession:
     """
     Launch a Deephaven session using the specified method.
 

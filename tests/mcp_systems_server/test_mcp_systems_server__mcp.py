@@ -5723,7 +5723,9 @@ async def test_session_community_delete_python_session():
     assert result["session_id"] == "community:dynamic:python-session"
 
     # Verify untrack_python_process was called (line 4197)
-    mock_instance_tracker.untrack_python_process.assert_called_once_with("python-session")
+    mock_instance_tracker.untrack_python_process.assert_called_once_with(
+        "python-session"
+    )
 
     # Verify session was closed and removed
     mock_manager.close.assert_called_once()
@@ -7529,7 +7531,7 @@ async def test_session_community_create_missing_auth_token_env_var():
         context,
         session_name="test-session",
     )
-    
+
     assert result["success"] is False
     assert result["isError"] is True
     assert "MISSING_ENV_VAR" in result["error"]

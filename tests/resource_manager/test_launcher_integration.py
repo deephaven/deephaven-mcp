@@ -324,7 +324,10 @@ class TestPythonLauncherIntegration:
 
             # Verify connection URL is correct
             assert session.connection_url == f"http://localhost:{port}"
-            assert f"authToken=test-token-{test_suffix}" in session.connection_url_with_auth
+            assert (
+                f"authToken=test-token-{test_suffix}"
+                in session.connection_url_with_auth
+            )
 
             # Verify process is actually running
             assert session.process.returncode is None

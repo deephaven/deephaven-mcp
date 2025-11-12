@@ -65,6 +65,7 @@ from deephaven_mcp.resource_manager import (
     BaseItemManager,
     CombinedSessionRegistry,
     CommunitySessionManager,
+    DockerLaunchedSession,
     DynamicCommunitySessionManager,
     EnterpriseSessionManager,
     LaunchedSession,
@@ -3773,9 +3774,7 @@ def _resolve_auth_token(
             return token, False
         # If auth_token_env_var is explicitly configured but not set, this is an error
         error_msg = f"Environment variable '{env_var}' specified in auth_token_env_var is not set"
-        _LOGGER.error(
-            f"[mcp_systems_server:session_community_create] {error_msg}"
-        )
+        _LOGGER.error(f"[mcp_systems_server:session_community_create] {error_msg}")
         raise CommunitySessionConfigurationError(error_msg)
 
     # Check config default
@@ -3796,7 +3795,7 @@ async def _register_session_manager(
     port: int,
     resolved_auth_type: str,
     resolved_auth_token: str | None,
-    launched_session: LaunchedSession,
+    launched_session: DockerLaunchedSession | PythonLaunchedSession,
     session_registry: CombinedSessionRegistry,
     instance_tracker: InstanceTracker,
 ) -> None:
@@ -3846,7 +3845,9 @@ async def _launch_process_and_wait_for_ready(
     resolved_startup_interval: float,
     resolved_startup_retries: int,
     instance_tracker: InstanceTracker,
-) -> tuple[LaunchedSession | None, int | None, dict | None]:
+) -> tuple[
+    DockerLaunchedSession | PythonLaunchedSession | None, int | None, dict | None
+]:
     """Launch Docker container or Python process and wait for health check.
 
     Finds an available port, launches the session using the specified method,
@@ -4226,9 +4227,7 @@ async def session_community_create(
         )
         resolved_docker_cpu_limit = docker_cpu_limit or defaults.get("docker_cpu_limit")
         resolved_docker_volumes = docker_volumes or defaults.get("docker_volumes", [])
-        resolved_python_venv_path = python_venv_path or defaults.get(
-            "python_venv_path"
-        )
+        resolved_python_venv_path = python_venv_path or defaults.get("python_venv_path")
         resolved_extra_jvm_args = extra_jvm_args or defaults.get("extra_jvm_args", [])
         resolved_environment_vars = environment_vars or defaults.get(
             "environment_vars", {}
@@ -4756,14 +4755,15 @@ async def session_community_credentials(
         # Get credentials based on session type
         if is_dynamic:
             # Dynamic session - get from launched_session
+            dynamic_mgr = cast(DynamicCommunitySessionManager, mgr)
             auth_token = (
-                mgr.launched_session.auth_token
-                if mgr.launched_session.auth_token
+                dynamic_mgr.launched_session.auth_token
+                if dynamic_mgr.launched_session.auth_token
                 else ""
             )
-            connection_url = mgr.connection_url
-            connection_url_with_auth = mgr.connection_url_with_auth
-            auth_type = mgr.launched_session.auth_type.upper()
+            connection_url = dynamic_mgr.connection_url
+            connection_url_with_auth = dynamic_mgr.connection_url_with_auth
+            auth_type = dynamic_mgr.launched_session.auth_type.upper()
         else:
             # Static session - get from config
             server = mgr._config.get("server", "")
