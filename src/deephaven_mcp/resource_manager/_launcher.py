@@ -16,6 +16,7 @@ Key Features:
 - **Health checking** via wait_until_ready() with configurable timeouts and retries
 - **Graceful cleanup** with proper resource release
 - **Authentication support** via JVM system properties (PSK or anonymous)
+- **Custom venv support** for Python launch method to use different deephaven installations
 
 Typical Usage:
     # Launch a Docker session
@@ -31,6 +32,17 @@ Typical Usage:
         docker_cpu_limit=None,
         docker_volumes=[],  # Empty list for no volumes, or ["host:container:ro"]
     )
+    
+    # Launch a Python session (uses MCP server's venv by default)
+    session = await PythonLaunchedSession.launch(
+        session_name="my-session",
+        port=10000,
+        auth_token="secret",
+        heap_size_gb=4,
+        extra_jvm_args=[],
+        environment_vars={},
+        python_venv_path=None,  # Use MCP server's venv, or "/path/to/custom/venv"
+    )
 
     # Wait for it to be ready
     if await session.wait_until_ready():
@@ -43,7 +55,7 @@ Typical Usage:
 
 Or use the convenience function:
     session = await launch_session(
-        launch_method="docker",
+        launch_method="docker",  # or "python"
         session_name="my-session",
         port=10000,
         auth_token="secret",
@@ -51,6 +63,7 @@ Or use the convenience function:
         extra_jvm_args=[],
         environment_vars={},
         docker_image="ghcr.io/deephaven/server:latest",
+        python_venv_path=None,  # Only used with launch_method="python"
     )
 """
 
@@ -73,8 +86,8 @@ def _redact_auth_token_from_command(cmd: list[str], auth_token: str | None) -> s
     """Redact authentication token from command list for safe logging.
     
     Args:
-        cmd: Command as list of arguments.
-        auth_token: PSK authentication token to redact, or None.
+        cmd (list[str]): Command as list of arguments.
+        auth_token (str | None): PSK authentication token to redact, or None.
         
     Returns:
         str: Command string with auth token replaced by [REDACTED] if present.
@@ -96,9 +109,9 @@ def _build_jvm_args(
     consistent JVM configuration across launch methods.
     
     Args:
-        heap_size_gb: JVM heap size in gigabytes (e.g., 4 for -Xmx4g).
-        extra_jvm_args: Additional JVM arguments to append.
-        auth_token: PSK authentication token, or None for anonymous auth.
+        heap_size_gb (int): JVM heap size in gigabytes (e.g., 4 for -Xmx4g).
+        extra_jvm_args (list[str]): Additional JVM arguments to append.
+        auth_token (str | None): PSK authentication token, or None for anonymous auth.
         
     Returns:
         list[str]: Complete list of JVM arguments including heap size, extra args, and auth config.
@@ -116,31 +129,69 @@ def _build_jvm_args(
     return jvm_args
 
 
-def _find_deephaven_executable() -> str:
-    """
-    Find the deephaven executable in the current Python venv (private helper).
+def _find_deephaven_executable(custom_venv_path: str | None) -> str:
+    """Find the deephaven executable in a Python virtual environment (private helper).
 
-    This ensures we use the deephaven version from the same venv as the MCP server,
-    avoiding version mismatch issues and segfaults.
+    Locates the `deephaven` command within a Python virtual environment. By default,
+    uses the same venv as the MCP server to avoid version mismatches and segfaults.
+    Optionally accepts a custom venv path to use a different deephaven installation.
+
+    This function never falls back to PATH to ensure version consistency. If the
+    deephaven command is not found in the specified venv, it raises an error with
+    instructions on how to install it.
+
+    Args:
+        custom_venv_path (str | None): Path to a custom Python venv directory, or None.
+            If provided, will look for deephaven at {venv}/bin/deephaven.
+            If None, will look for deephaven in the current Python's venv at
+            {sys.executable parent}/deephaven.
 
     Returns:
-        str: Path to deephaven executable (absolute path from venv, or "deephaven" for PATH fallback).
+        str: Absolute path to the deephaven executable.
+
+    Raises:
+        SessionLaunchError: If custom_venv_path is provided but does not exist, is not
+            a directory, or if the deephaven command is not found at the expected location.
+            The error message includes installation instructions with the correct pip path.
 
     Note:
         This is a private helper function. Use PythonLaunchedSession.launch() for public API.
     """
-    # Check in the same venv as the current Python
-    python_executable = Path(sys.executable)
-    deephaven_executable = python_executable.parent / "deephaven"
-
+    # Determine venv path and construct deephaven executable path
+    if custom_venv_path:
+        # Custom venv: validate it exists and is a directory
+        venv_path = Path(custom_venv_path)
+        if not venv_path.exists():
+            raise SessionLaunchError(
+                f"Custom python_venv_path does not exist: {custom_venv_path}"
+            )
+        if not venv_path.is_dir():
+            raise SessionLaunchError(
+                f"Custom python_venv_path is not a directory: {custom_venv_path}"
+            )
+        deephaven_executable = venv_path / "bin" / "deephaven"
+        pip_executable = venv_path / "bin" / "pip"
+        venv_description = f"custom venv at {custom_venv_path}"
+    else:
+        # Current Python's venv: sys.executable is already in the bin directory
+        python_executable = Path(sys.executable)
+        deephaven_executable = python_executable.parent / "deephaven"
+        pip_executable = python_executable.parent / "pip"
+        venv_description = f"current venv at {python_executable.parent}"
+    
+    # Check if deephaven executable exists
     if deephaven_executable.exists():
+        _LOGGER.info(
+            f"[_launcher:_find_deephaven_executable] Using deephaven from {venv_description}: {deephaven_executable}"
+        )
         return str(deephaven_executable)
-
-    # Fall back to PATH
-    _LOGGER.warning(
-        f"deephaven not found in venv at {deephaven_executable}, falling back to PATH"
+    
+    # Deephaven not found - always raise exception (never fall back to PATH)
+    raise SessionLaunchError(
+        f"'deephaven' command not found at: {deephaven_executable}\n"
+        f"Install deephaven-server in {venv_description} using:\n"
+        f"  {pip_executable} install deephaven-server"
     )
-    return "deephaven"
 
 
 class LaunchedSession(ABC):
@@ -565,14 +616,14 @@ class DockerLaunchedSession(LaunchedSession):
         """Build the Docker command with resource limits, volumes, and environment variables.
         
         Args:
-            session_name: Name for the Docker container (will be prefixed with "deephaven-mcp-").
-            port: Host port to map to container's port 10000.
-            instance_id: MCP server instance ID for labeling containers (for orphan cleanup), or None.
-            docker_memory_limit_gb: Container memory limit in GB, or None for no limit.
-            docker_cpu_limit: Container CPU limit in cores, or None for no limit.
-            docker_volumes: Volume mounts in format ["host:container:mode"].
-            environment_vars: Environment variables to set in the container.
-            docker_image: Docker image to use.
+            session_name (str): Name for the Docker container (will be prefixed with "deephaven-mcp-").
+            port (int): Host port to map to container's port 10000.
+            instance_id (str | None): MCP server instance ID for labeling containers (for orphan cleanup), or None.
+            docker_memory_limit_gb (float | None): Container memory limit in GB, or None for no limit.
+            docker_cpu_limit (float | None): Container CPU limit in cores, or None for no limit.
+            docker_volumes (list[str]): Volume mounts in format ["host:container:mode"].
+            environment_vars (dict[str, str]): Environment variables to set in the container.
+            docker_image (str): Docker image to use.
             
         Returns:
             list[str]: Complete docker run command as list of arguments.
@@ -630,7 +681,7 @@ class DockerLaunchedSession(LaunchedSession):
         """Launch the Docker container and handle errors.
         
         Args:
-            cmd: Complete docker run command as list of arguments.
+            cmd (list[str]): Complete docker run command as list of arguments.
             
         Returns:
             str: Container ID of the launched container.
@@ -657,7 +708,7 @@ class DockerLaunchedSession(LaunchedSession):
                         f"Options:\n"
                         f"  1. Install/start Docker: https://docker.com/get-started\n"
                         f"  2. Use Python launch method instead:\n"
-                        f"     - Install: pip install \"deephaven-mcp[local-server]\"\n"
+                        f"     - Install: pip install deephaven-server\n"
                         f"     - Configure: Set launch_method to \"python\" in deephaven_mcp.json\n"
                         f"Original error: {error_msg}"
                     )
@@ -667,7 +718,7 @@ class DockerLaunchedSession(LaunchedSession):
                         f"Options:\n"
                         f"  1. Install Docker: https://docker.com/get-started\n"
                         f"  2. Use Python launch method instead:\n"
-                        f"     - Install: pip install \"deephaven-mcp[local-server]\"\n"
+                        f"     - Install: pip install deephaven-server\n"
                         f"     - Configure: Set launch_method to \"python\" in deephaven_mcp.json\n"
                         f"Original error: {error_msg}"
                     )
@@ -805,6 +856,7 @@ class PythonLaunchedSession(LaunchedSession):
         heap_size_gb: int,
         extra_jvm_args: list[str],
         environment_vars: dict[str, str],
+        python_venv_path: str | None = None,
     ) -> "PythonLaunchedSession":
         """
         Launch a Deephaven session using the python launch method.
@@ -815,7 +867,7 @@ class PythonLaunchedSession(LaunchedSession):
 
         Requirements:
             - The `deephaven-server` package must be installed (e.g., `pip install deephaven-server`)
-            - The `deephaven` executable must be available (checked in venv first, then PATH)
+            - The `deephaven` executable must be available in the venv
             - The specified port must be available
 
         Args:
@@ -825,13 +877,16 @@ class PythonLaunchedSession(LaunchedSession):
             heap_size_gb (int): JVM heap size in gigabytes (integer only, e.g., 2 for -Xmx2g).
             extra_jvm_args (list[str]): Additional JVM arguments.
             environment_vars (dict[str, str]): Environment variables to set (empty dict for none).
+            python_venv_path (str | None): Path to a custom Python venv directory, or None.
+                If provided, will use the deephaven installation from that venv.
+                If None, uses the same venv as the MCP server.
 
         Returns:
             PythonLaunchedSession: The launched session.
 
         Raises:
             SessionLaunchError: If launch fails (e.g., deephaven command not found,
-                port already in use, or server fails to start).
+                port already in use, server fails to start, or custom venv path is invalid).
         """
         _LOGGER.info(
             f"[_launcher:PythonLaunchedSession] Launching python session '{session_name}' on port {port}"
@@ -851,11 +906,8 @@ class PythonLaunchedSession(LaunchedSession):
                 "[_launcher:PythonLaunchedSession] Configured anonymous authentication"
             )
 
-        # Find deephaven executable in the same venv as the current Python
-        deephaven_cmd = _find_deephaven_executable()
-        _LOGGER.debug(
-            f"[_launcher:PythonLaunchedSession] Using deephaven executable: {deephaven_cmd}"
-        )
+        # Find deephaven executable (from custom venv or current venv)
+        deephaven_cmd = _find_deephaven_executable(python_venv_path)
 
         # Build command
         cmd = [
@@ -964,6 +1016,7 @@ async def launch_session(
     docker_memory_limit_gb: float | None = None,
     docker_cpu_limit: float | None = None,
     docker_volumes: list[str] | None = None,
+    python_venv_path: str | None = None,
     instance_id: str | None = None,
 ) -> LaunchedSession:
     """
@@ -984,14 +1037,15 @@ async def launch_session(
         docker_memory_limit_gb (float | None): Container memory limit in GB (docker only).
         docker_cpu_limit (float | None): Container CPU limit in cores (docker only).
         docker_volumes (list[str] | None): Volume mounts (docker only), or None for no volumes.
+        python_venv_path (str | None): Path to custom Python venv directory (python only).
         instance_id (str | None): MCP server instance ID for orphan tracking (docker only).
 
     Returns:
         LaunchedSession: The launched session (DockerLaunchedSession or PythonLaunchedSession).
 
     Raises:
-        ValueError: If launch_method is not supported, or if Docker-specific parameters
-            are provided when launch_method is "python".
+        ValueError: If launch_method is not supported, or if method-specific parameters
+            are provided with the wrong launch method.
         SessionLaunchError: If launch fails.
     """
     _LOGGER.debug(
@@ -1042,6 +1096,7 @@ async def launch_session(
             heap_size_gb=heap_size_gb,
             extra_jvm_args=extra_jvm_args,
             environment_vars=environment_vars,
+            python_venv_path=python_venv_path,
         )
     else:
         raise ValueError(f"Unsupported launch method: {launch_method}")

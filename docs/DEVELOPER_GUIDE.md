@@ -246,10 +246,11 @@ Choose **one** of the following launch methods for dynamically creating Deephave
   - **Best For**: Production, isolated environments, cross-platform consistency
 
 - **Python Launch Method**:
-  - **Requirement**: `deephaven-server` Python package (version 0.39 or later)
-  - **Installation**: `pip install "deephaven-mcp[local-server]"` or `pip install deephaven-server>=0.39`
+  - **Requirement**: `deephaven-server` Python package
+  - **Installation**: `pip install deephaven-server` (in MCP venv or a custom venv)
   - **Verification**: Run `deephaven server --help` to confirm the command is available
   - **Best For**: Development environments, faster startup, no Docker dependency
+  - **Custom Venv**: Use `python_venv_path` config parameter to specify a different Python environment
 
 **For Enterprise Systems (Optional)**
 - **Requirement**: Deephaven Enterprise (Core+) system(s) with accessible connection.json URL
@@ -323,12 +324,15 @@ Before proceeding with the Quick Start Guide, verify your setup:
    >   }
    >   ```
    >
-   > - **Python:** Faster startup, no Docker needed. Install with: `pip install "deephaven-mcp[local-server]"`
+   > - **Python:** Faster startup, no Docker needed. Install `deephaven-server` in your Python environment.
    >   ```json
    >   "community": {
    >     "session_creation": {
    >       "max_concurrent_sessions": 5,
-   >       "defaults": {"launch_method": "python"}
+   >       "defaults": {
+   >         "launch_method": "python",
+   >         "python_venv_path": null  // Optional: null uses MCP venv, or specify "/path/to/custom/venv"
+   >       }
    >     }
    >   }
    >   ```
@@ -556,13 +560,15 @@ All fields are optional. If the `session_creation` key is omitted entirely, dyna
 
 - **`defaults`** (object, optional): Default parameters for creating new community sessions. All fields are optional:
   - `launch_method` (string): Method to launch sessions (`"docker"` or `"python"`).
+  - `programming_language` (string): Programming language for Docker sessions (`"Python"` or `"Groovy"`). Docker only. Mutually exclusive with `docker_image`.
   - `auth_type` (string): Default authentication type for created sessions.
   - `auth_token` (string): Default authentication token. Use this OR `auth_token_env_var`, but not both.
   - `auth_token_env_var` (string): Environment variable for auth token. Use this OR `auth_token`, but not both.
-  - `docker_image` (string): Docker image to use for docker launch method.
+  - `docker_image` (string): Docker image to use for docker launch method. Mutually exclusive with `programming_language`.
   - `docker_memory_limit_gb` (float): Memory limit in GB for docker containers.
   - `docker_cpu_limit` (float): CPU limit for docker containers.
   - `docker_volumes` (list[string]): Volume mounts for docker containers (format: `["host:container:mode"]`).
+  - `python_venv_path` (string | null): Path to custom Python venv directory (python only). If null (default), uses same venv as MCP server. If path provided, uses deephaven-server from that venv.
   - `heap_size_gb` (integer): JVM heap size in GB (integer only, e.g., `4` for `-Xmx4g`).
   - `extra_jvm_args` (list[string]): Additional JVM arguments.
   - `environment_vars` (object): Environment variables for the session (key-value pairs).
@@ -583,9 +589,11 @@ The `launch_method` parameter determines how Deephaven Community sessions are st
 
 - **`"python"` (Python launch method)**:
   - **Requirement**: The `deephaven-server` Python package must be installed
-  - **Installation**: Install with `pip install "deephaven-mcp[local-server]"` or `pip install deephaven-server>=0.39`
+  - **Installation**: Install with `pip install deephaven-server` in MCP venv or custom venv
   - **Benefits**: No Docker dependency, lighter resource footprint, faster startup
-  - **Considerations**: Requires Python environment with deephaven-server package
+  - **Custom Venv Support**: Use `python_venv_path` parameter to specify a different Python environment
+    - If `null` (default): Uses same venv as MCP server
+    - If path provided: Uses deephaven-server from that venv
   - **Verification**: Run `deephaven server --help` to confirm the command is available
 
 > **💡 Tip**: For development environments, the python method is often faster and simpler. For production or isolated environments, the docker method provides better consistency and isolation.
@@ -1066,18 +1074,19 @@ On error:
 
 - `session_name` (required, string): Unique name for the session
 - `launch_method` (optional, string): How to launch the session: `"docker"` or `"python"` (default: from config or "docker")
+- `programming_language` (optional, string): Programming language for Docker sessions: `"Python"` or `"Groovy"` (default: from config or "Python"). Docker only. Mutually exclusive with `docker_image`. Automatically selects Docker image: Python → ghcr.io/deephaven/server:latest, Groovy → ghcr.io/deephaven/server-slim:latest. Raises error if used with python launch method.
 - `auth_type` (optional, string): Authentication type: `"PSK"` or `"Anonymous"` (default: from config or "PSK")
 - `auth_token` (optional, string): Pre-shared key for PSK authentication. If omitted with PSK auth, a secure token is auto-generated
-- `docker_image` (optional, string): Docker image to use (default: from config or "ghcr.io/deephaven/server:latest")
+- `docker_image` (optional, string): Custom Docker image to use (Docker only). Mutually exclusive with `programming_language`. If neither specified, defaults to Python image. Raises error if used with python launch method.
 - `docker_memory_limit_gb` (optional, float): Container memory limit in GB (Docker only)
 - `docker_cpu_limit` (optional, float): Container CPU limit in cores (Docker only)
 - `docker_volumes` (optional, array): Volume mounts in format `["host:container:mode"]` (Docker only)
-- `heap_size_gb` (optional, float): JVM heap size in gigabytes (default: from config or 4.0)
+- `python_venv_path` (optional, string): Path to custom Python venv directory (Python only). If provided, uses deephaven from that venv. If null (default), uses same venv as MCP server. Raises error if used with docker.
+- `heap_size_gb` (optional, integer): JVM heap size in gigabytes (default: from config or 4)
 - `extra_jvm_args` (optional, array): Additional JVM arguments
 - `environment_vars` (optional, object): Environment variables as key-value pairs
-- `startup_timeout_seconds` (optional, float): Maximum time to wait for session startup (default: from config or 60)
-- `startup_check_interval_seconds` (optional, float): Time between health checks (default: from config or 2)
-- `startup_retries` (optional, integer): Connection attempts per health check (default: from config or 3)
+
+**Note**: Startup parameters (`startup_timeout_seconds`, `startup_check_interval_seconds`, `startup_retries`) are configured via `deephaven_mcp.json` defaults only and are not exposed as tool parameters.
 
 **Returns**:
 
@@ -2693,7 +2702,7 @@ Integration tests launch real Docker containers and python processes to verify e
 
 - **Docker** must be installed and running
 - **Development dependencies** must be installed: `uv pip install -e ".[dev]"`
-  - This includes `deephaven-server>=0.39` which provides the `deephaven server` command needed for python integration tests
+  - This includes `deephaven-server` which provides the `deephaven server` command needed for python integration tests
 
 #### Running Integration Tests
 

@@ -657,15 +657,17 @@ class TestPythonLaunchedSessionLaunch:
                 process=None,
             )
 
-    def test_find_deephaven_executable_fallback_to_path(self):
-        """Test PATH fallback when deephaven not in venv (covers lines 93-96)."""
+    def test_find_deephaven_executable_not_found_raises_error(self):
+        """Test exception raised when deephaven not found in venv (no PATH fallback)."""
         from deephaven_mcp.resource_manager._launcher import _find_deephaven_executable
 
         with patch("sys.executable", "/nonexistent/python"):
             with patch("pathlib.Path.exists", return_value=False):
-                result = _find_deephaven_executable()
-                # Should fall back to "deephaven" (PATH lookup)
-                assert result == "deephaven"
+                with pytest.raises(
+                    SessionLaunchError,
+                    match="'deephaven' command not found at",
+                ):
+                    _find_deephaven_executable(None)
 
 
 # ============================================================================
@@ -914,6 +916,106 @@ class TestPythonLauncherEdgeCases:
 
         with pytest.raises(SessionLaunchError, match="Failed to stop python session"):
             await session.stop()
+
+    @pytest.mark.asyncio
+    async def test_launch_with_custom_venv_path(self):
+        """Test python launch with custom venv path."""
+        with (
+            patch("asyncio.create_subprocess_exec") as mock_subprocess,
+            patch("pathlib.Path.exists") as mock_exists,
+            patch("pathlib.Path.is_dir") as mock_is_dir,
+        ):
+            # Mock custom venv path validation
+            mock_exists.return_value = True
+            mock_is_dir.return_value = True
+
+            mock_process = AsyncMock()
+            mock_process.pid = 12345
+            mock_subprocess.return_value = mock_process
+
+            await PythonLaunchedSession.launch(
+                session_name="test",
+                port=10000,
+                auth_token="token",
+                heap_size_gb=4,
+                extra_jvm_args=[],
+                environment_vars={},
+                python_venv_path="/custom/venv",
+            )
+
+            # Verify subprocess was called with deephaven from custom venv
+            mock_subprocess.assert_called_once()
+            call_args = mock_subprocess.call_args[0]
+            # The command should use deephaven from custom venv
+            assert "/custom/venv/bin/deephaven" in call_args[0]
+
+    @pytest.mark.asyncio
+    async def test_launch_with_custom_venv_path_not_exists(self):
+        """Test python launch with custom venv path that doesn't exist."""
+        with pytest.raises(
+            SessionLaunchError, match="Custom python_venv_path does not exist"
+        ):
+            await PythonLaunchedSession.launch(
+                session_name="test",
+                port=10000,
+                auth_token="token",
+                heap_size_gb=4,
+                extra_jvm_args=[],
+                environment_vars={},
+                python_venv_path="/nonexistent/venv",
+            )
+
+    @pytest.mark.asyncio
+    async def test_launch_with_custom_venv_path_not_directory(self):
+        """Test python launch with custom venv path that is not a directory."""
+        with (
+            patch("pathlib.Path.exists") as mock_exists,
+            patch("pathlib.Path.is_dir") as mock_is_dir,
+        ):
+            mock_exists.return_value = True
+            mock_is_dir.return_value = False
+
+            with pytest.raises(
+                SessionLaunchError, match="Custom python_venv_path is not a directory"
+            ):
+                await PythonLaunchedSession.launch(
+                    session_name="test",
+                    port=10000,
+                    auth_token="token",
+                    heap_size_gb=4,
+                    extra_jvm_args=[],
+                    environment_vars={},
+                    python_venv_path="/some/file.txt",
+                )
+
+    def test_find_deephaven_executable_custom_venv_no_deephaven(self):
+        """Test _find_deephaven_executable when deephaven not found in custom venv."""
+        from deephaven_mcp.resource_manager._launcher import _find_deephaven_executable
+        
+        with (
+            patch("deephaven_mcp.resource_manager._launcher.Path") as mock_path_class,
+        ):
+            # Create mock for venv path - exists and is a directory
+            mock_venv_path = MagicMock()
+            mock_venv_path.exists.return_value = True
+            mock_venv_path.is_dir.return_value = True
+            
+            # Create mock for deephaven executable - doesn't exist
+            mock_deephaven_path = MagicMock()
+            mock_deephaven_path.exists.return_value = False
+            
+            # Setup truediv to return the path through "/bin" then to "deephaven"
+            mock_bin_path = MagicMock()
+            mock_venv_path.__truediv__.side_effect = lambda x: mock_bin_path if x == "bin" else MagicMock()
+            mock_bin_path.__truediv__.return_value = mock_deephaven_path
+            
+            mock_path_class.return_value = mock_venv_path
+
+            with pytest.raises(
+                SessionLaunchError,
+                match="'deephaven' command not found at",
+            ):
+                _find_deephaven_executable("/custom/venv")
 
 
 class TestDynamicManagerEdgeCases:

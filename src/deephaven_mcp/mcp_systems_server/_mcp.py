@@ -3644,19 +3644,35 @@ async def _check_session_limit(
     return None
 
 
-def _validate_docker_only_params(
+def _validate_launch_method_params(
     launch_method: str,
     programming_language: str | None,
     docker_image: str | None,
     docker_memory_limit_gb: float | None,
     docker_cpu_limit: float | None,
     docker_volumes: list[str] | None,
+    python_venv_path: str | None,
 ) -> dict | None:
-    """Validate that docker-specific parameters are only used with docker launch method.
+    """Validate that method-specific parameters are only used with their respective launch methods.
+
+    Ensures docker-only parameters are not used with python launch method,
+    python-only parameters are not used with docker launch method, and
+    mutually exclusive parameters are not used together.
+
+    Args:
+        launch_method (str): Launch method ("docker" or "python").
+        programming_language (str | None): Docker-only parameter.
+        docker_image (str | None): Docker-only parameter.
+        docker_memory_limit_gb (float | None): Docker-only parameter.
+        docker_cpu_limit (float | None): Docker-only parameter.
+        docker_volumes (list[str] | None): Docker-only parameter.
+        python_venv_path (str | None): Python-only parameter.
 
     Returns:
-        Error dict if validation fails, None if validation passes.
+        dict | None: Error dict with 'success', 'error', 'isError' keys if validation fails,
+            None if validation passes.
     """
+    # Docker-only parameters
     docker_only_params = [
         ("programming_language", programming_language),
         ("docker_image", docker_image),
@@ -3670,6 +3686,12 @@ def _validate_docker_only_params(
             error_msg = f"'{param_name}' parameter only applies to docker launch method, not '{launch_method}'"
             _LOGGER.error(f"[mcp_systems_server:session_community_create] {error_msg}")
             return {"success": False, "error": error_msg, "isError": True}
+
+    # Python-only parameters
+    if python_venv_path and launch_method != "python":
+        error_msg = f"'python_venv_path' parameter only applies to python launch method, not '{launch_method}'"
+        _LOGGER.error(f"[mcp_systems_server:session_community_create] {error_msg}")
+        return {"success": False, "error": error_msg, "isError": True}
 
     # Check mutual exclusivity
     if programming_language and docker_image:
@@ -3819,6 +3841,7 @@ async def _launch_process_and_wait_for_ready(
     resolved_docker_memory_limit: float | None,
     resolved_docker_cpu_limit: float | None,
     resolved_docker_volumes: list[str],
+    resolved_python_venv_path: str | None,
     resolved_startup_timeout: int,
     resolved_startup_interval: float,
     resolved_startup_retries: int,
@@ -3826,8 +3849,30 @@ async def _launch_process_and_wait_for_ready(
 ) -> tuple[LaunchedSession | None, int | None, dict | None]:
     """Launch Docker container or Python process and wait for health check.
 
+    Finds an available port, launches the session using the specified method,
+    and waits for it to become ready via HTTP health checks.
+
+    Args:
+        session_name (str): Name for the session.
+        resolved_launch_method (Literal["docker", "python"]): Launch method.
+        resolved_auth_token (str | None): PSK authentication token, or None for anonymous.
+        resolved_heap_size_gb (int): JVM heap size in gigabytes.
+        resolved_extra_jvm_args (list[str]): Additional JVM arguments.
+        resolved_environment_vars (dict[str, str]): Environment variables.
+        resolved_docker_image (str): Docker image (used only if docker launch).
+        resolved_docker_memory_limit (float | None): Docker memory limit in GB (docker only).
+        resolved_docker_cpu_limit (float | None): Docker CPU limit (docker only).
+        resolved_docker_volumes (list[str]): Docker volume mounts (docker only).
+        resolved_python_venv_path (str | None): Python venv path (python only).
+        resolved_startup_timeout (int): Health check timeout in seconds.
+        resolved_startup_interval (float): Health check interval in seconds.
+        resolved_startup_retries (int): Max retries per health check.
+        instance_tracker (InstanceTracker): Tracker for orphan cleanup.
+
     Returns:
-        Tuple of (launched_session, port, error_dict). On success, error_dict is None.
+        tuple[LaunchedSession | None, int | None, dict | None]: Tuple of
+            (launched_session, port, error_dict). On success, error_dict is None.
+            On failure, launched_session and port may be None.
     """
     port = find_available_port()
     _LOGGER.debug(
@@ -3850,6 +3895,7 @@ async def _launch_process_and_wait_for_ready(
         docker_memory_limit_gb=resolved_docker_memory_limit,
         docker_cpu_limit=resolved_docker_cpu_limit,
         docker_volumes=resolved_docker_volumes,
+        python_venv_path=resolved_python_venv_path,
         instance_id=instance_tracker.instance_id,
     )
 
@@ -3951,6 +3997,7 @@ async def session_community_create(
     docker_memory_limit_gb: float | None = None,
     docker_cpu_limit: float | None = None,
     docker_volumes: list[str] | None = None,
+    python_venv_path: str | None = None,
 ) -> dict:
     """
     MCP Tool: Create a new dynamically launched Deephaven Community session.
@@ -3961,7 +4008,7 @@ async def session_community_create(
 
     Launch Method Requirements:
     - Docker: Requires Docker daemon running (default method)
-    - Python: Requires deephaven-server package installed (pip install "deephaven-mcp[local-server]")
+    - Python: Requires deephaven-server package installed (pip install deephaven-server)
 
     Terminology Note:
     - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
@@ -3983,7 +4030,7 @@ async def session_community_create(
             Will be used to create session_id in format "community:dynamic:{session_name}".
         launch_method (str | None): How to launch the session ("docker" or "python", case-insensitive).
             - "docker": Uses Docker containers (requires Docker daemon running)
-            - "python": Uses Python-launched deephaven-server (requires: pip install "deephaven-mcp[local-server]")
+            - "python": Uses Python-launched deephaven-server (requires: pip install deephaven-server)
             Defaults to configuration value or "docker".
         programming_language (str | None): Programming language ("Python" or "Groovy", case-insensitive).
             Only applies to docker launch method - raises error if used with python launch.
@@ -4011,6 +4058,10 @@ async def session_community_create(
             Raises error if used with python launch method.
         docker_volumes (list[str] | None): Volume mounts in format ["host:container:mode"] (docker only).
             Raises error if used with python launch method.
+        python_venv_path (str | None): Path to custom Python venv directory (python only).
+            If provided, uses the deephaven installation from that venv (e.g., "/path/to/venv").
+            If None (default), uses the same venv as the MCP server.
+            Raises error if used with docker launch method.
         heap_size_gb (int | None): JVM heap size in gigabytes (integer only, e.g., 4 for -Xmx4g).
             Applies to both docker and python launches.
             Defaults to configuration value or 4.
@@ -4134,14 +4185,15 @@ async def session_community_create(
             auth_type or defaults.get("auth_type", DEFAULT_AUTH_TYPE)
         ).upper()
 
-        # Validate docker-specific parameters
-        validation_error = _validate_docker_only_params(
+        # Validate method-specific parameters
+        validation_error = _validate_launch_method_params(
             resolved_launch_method,
             programming_language,
             docker_image,
             docker_memory_limit_gb,
             docker_cpu_limit,
             docker_volumes,
+            python_venv_path,
         )
         if validation_error:
             return validation_error
@@ -4174,6 +4226,9 @@ async def session_community_create(
         )
         resolved_docker_cpu_limit = docker_cpu_limit or defaults.get("docker_cpu_limit")
         resolved_docker_volumes = docker_volumes or defaults.get("docker_volumes", [])
+        resolved_python_venv_path = python_venv_path or defaults.get(
+            "python_venv_path"
+        )
         resolved_extra_jvm_args = extra_jvm_args or defaults.get("extra_jvm_args", [])
         resolved_environment_vars = environment_vars or defaults.get(
             "environment_vars", {}
@@ -4217,6 +4272,7 @@ async def session_community_create(
             resolved_docker_memory_limit,
             resolved_docker_cpu_limit,
             resolved_docker_volumes,
+            resolved_python_venv_path,
             resolved_startup_timeout,
             resolved_startup_interval,
             resolved_startup_retries,

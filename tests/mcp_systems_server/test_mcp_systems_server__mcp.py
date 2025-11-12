@@ -6986,6 +6986,51 @@ async def test_session_community_create_validates_docker_volumes_with_python():
 
 
 @pytest.mark.asyncio
+async def test_session_community_create_validates_python_venv_path_with_docker():
+    """Test that python_venv_path parameter raises error with docker launch method."""
+    from deephaven_mcp.mcp_systems_server import _mcp as mcp_mod
+
+    mock_config_manager = MagicMock()
+    mock_session_registry = MagicMock()
+
+    mock_config_manager.get_config = AsyncMock(
+        return_value={
+            "community": {
+                "session_creation": {
+                    "defaults": {},
+                    "max_concurrent_sessions": 5,
+                }
+            }
+        }
+    )
+
+    mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
+
+    context = MockContext(
+        {
+            "config_manager": mock_config_manager,
+            "session_registry": mock_session_registry,
+            "instance_tracker": create_mock_instance_tracker(),
+        }
+    )
+
+    # Should raise validation error: python_venv_path only for python
+    result = await mcp_mod.session_community_create(
+        context,
+        session_name="test-invalid",
+        launch_method="docker",
+        python_venv_path="/path/to/custom/venv",  # Not valid with docker!
+    )
+
+    assert result["success"] is False
+    assert (
+        "'python_venv_path' parameter only applies to python launch method"
+        in result["error"]
+    )
+    assert result["isError"] is True
+
+
+@pytest.mark.asyncio
 async def test_session_community_create_validates_mutually_exclusive_params():
     """Test that programming_language and docker_image cannot both be specified."""
     from deephaven_mcp.mcp_systems_server import _mcp as mcp_mod

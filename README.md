@@ -11,6 +11,7 @@
 - [🔄 Quick Upgrade](#-quick-upgrade)
 - [Key Use Cases](#key-use-cases)
 - [Deephaven MCP Components](#deephaven-mcp-components)
+- [Available MCP Tools](#available-mcp-tools)
 - [Architecture Diagrams](#architecture-diagrams)
 - [Prerequisites](#prerequisites)
 - [Installation & Initial Setup](#installation--initial-setup)
@@ -85,13 +86,15 @@ Choose the installation that matches your needs:
 
 Connects to existing Community Core instances. If you have [Docker](https://www.docker.com/get-started/) installed on your system, you can also dynamically create Community Core sessions using Docker.
 
-**Add python-based Community Core session creation:**
+**For python-based Community Core session creation:**
+
+If you want to use the python launch method (no Docker required), install `deephaven-server`:
 
 ```bash
-.venv/bin/pip install "deephaven-mcp[local-server]"
+pip install deephaven-server
 ```
 
-Adds ability to dynamically create Community Core sessions using python (no Docker required). Installs `deephaven-server` package.
+This installs in the same venv as the MCP server. For advanced use cases with a separate venv, see the `python_venv_path` parameter in [Community Session Creation Configuration](#community-session-creation-configuration).
 
 **Add Enterprise support:**
 
@@ -99,15 +102,7 @@ Adds ability to dynamically create Community Core sessions using python (no Dock
 .venv/bin/pip install "deephaven-mcp[coreplus]"
 ```
 
-Adds ability to connect to Deephaven Enterprise systems (requires step 2).
-
-**Add both python-based sessions and Enterprise:**
-
-```bash
-.venv/bin/pip install "deephaven-mcp[local-server,coreplus]"
-```
-
-Combines both extras: python-based Community Core session creation and Enterprise support.
+Adds ability to connect to Deephaven Enterprise systems (requires step 2). If you also want python-based session creation, separately install `deephaven-server` as shown above.
 
 ### 4. Create Configuration File
 
@@ -138,7 +133,7 @@ Create a file called `deephaven_mcp.json` anywhere on your system:
 > chmod 600 deephaven_mcp.json
 > ```
 
-> **💡 Dynamic Sessions**: The `session_creation` section enables on-demand [Community Core](https://deephaven.io/community/) session creation. It requires `deephaven-mcp[local-server]` installation for the python method or [Docker](https://www.docker.com/get-started/) for the Docker method. See [Community Session Creation Configuration](#community-session-creation-configuration) for details.
+> **💡 Dynamic Sessions**: The `session_creation` section enables on-demand [Community Core](https://deephaven.io/community/) session creation. Requirements: `deephaven-server` (installed in any Python venv) for the python method, or [Docker](https://www.docker.com/get-started/) for the docker method. See [Community Session Creation Configuration](#community-session-creation-configuration) for details.
 
 ### 5. Configure Your AI Tool
 
@@ -214,6 +209,7 @@ For more upgrade options, see the detailed [Upgrading](#upgrading) section below
 ## Deephaven MCP Components
 
 ### Systems Server
+
 Manages and connects to multiple [Deephaven Community Core](https://deephaven.io/community/) sessions and [Deephaven Enterprise](https://deephaven.io/enterprise/) systems. This allows for unified control and interaction with your Deephaven instances from various client applications.
 
 **Key Capabilities:**
@@ -228,6 +224,50 @@ Manages and connects to multiple [Deephaven Community Core](https://deephaven.io
 - **Script Execution**: Run Python or Groovy scripts directly on Deephaven sessions
 - **Package Management**: Query installed Python packages in session environments
 - **Configuration Management**: Dynamically reload and refresh session configurations
+
+---
+
+## Available MCP Tools
+
+*Session Management:*
+
+- `sessions_list` - List all configured sessions
+- `session_details` - Get detailed session information
+- `mcp_reload` - Reload configuration and clear caches
+
+*Community Sessions:*
+
+- `session_community_create` - Dynamically launch Community Core sessions
+- `session_community_delete` - Delete dynamically created sessions
+- `session_community_credentials` - Retrieve session credentials
+
+*Enterprise Systems & Sessions:*
+
+- `enterprise_systems_status` - Get enterprise system status
+- `session_enterprise_create` - Create enterprise sessions
+- `session_enterprise_delete` - Delete enterprise sessions
+
+*Table Operations:*
+
+- `session_tables_list` - List available tables
+- `session_tables_schema` - Get table schema information
+- `session_table_data` - Retrieve table data with formatting options
+
+*Catalog Discovery (Enterprise):*
+
+- `catalog_tables_list` - List catalog tables
+- `catalog_namespaces_list` - Browse catalog namespaces
+- `catalog_tables_schema` - Get catalog table schemas
+- `catalog_table_sample` - Sample catalog table data
+
+*Execution & Packages:*
+
+- `session_script_run` - Execute Python/Groovy scripts
+- `session_pip_list` - Query installed packages
+
+> For detailed tool documentation with parameters and examples, see the [Developer & Contributor Guide](docs/DEVELOPER_GUIDE.md).
+
+---
 
 ### Docs Server
 Connects to Deephaven's documentation knowledge base via AI to answer questions about Deephaven features, APIs, and usage patterns. Ask questions in natural language and get specific answers with code examples and explanations.
@@ -523,8 +563,15 @@ The `session_creation` key enables dynamic creation of Deephaven Community Core 
 
 **Requirements by launch method:**
 
-- **Docker method** (`launch_method: "docker"`): Requires [Docker](https://www.docker.com/get-started/) installed. Works with base `deephaven-mcp` installation.
-- **Python method** (`launch_method: "python"`): Requires `deephaven-mcp[local-server]` installation (includes `deephaven-server` package). No Docker needed.
+- **Docker method** (`launch_method: "docker"`):
+  - Requires [Docker](https://www.docker.com/get-started/) installed and running
+  - Works with base `deephaven-mcp` installation (no additional packages needed)
+
+- **Python method** (`launch_method: "python"`):
+  - Requires `deephaven-server` installed in a Python environment
+  - **Default venv**: Uses same venv as MCP server
+  - **Custom venv**: Optionally specify a different venv via `python_venv_path` parameter
+  - No Docker needed
 
 | Field | Type | Required When | Description |
 |-------|------|---------------|-------------|
@@ -540,7 +587,8 @@ The `session_creation` key enables dynamic creation of Deephaven Community Core 
 | `session_creation.defaults.docker_memory_limit_gb` | float | Optional | Container memory limit in GB (Docker only, default: no limit) |
 | `session_creation.defaults.docker_cpu_limit` | float | Optional | Container CPU limit in cores (Docker only, default: no limit) |
 | `session_creation.defaults.docker_volumes` | array | Optional | Volume mounts in format `["host:container:mode"]` (Docker only, default: []) |
-| `session_creation.defaults.heap_size_gb` | float | Optional | JVM heap size in gigabytes (default: 4.0) |
+| `session_creation.defaults.python_venv_path` | string | Optional | Path to custom Python venv directory (Python only). If provided, uses deephaven from that venv. If null (default), uses same venv as MCP server. Raises error if used with docker. |
+| `session_creation.defaults.heap_size_gb` | integer | Optional | JVM heap size in gigabytes (default: 4) |
 | `session_creation.defaults.extra_jvm_args` | array | Optional | Additional JVM arguments (e.g., `["-XX:+UseG1GC"]`, default: []) |
 | `session_creation.defaults.environment_vars` | object | Optional | Environment variables as key-value pairs (default: {}) |
 | `session_creation.defaults.startup_timeout_seconds` | float | Optional | Maximum time to wait for session startup (default: 60) |
@@ -1405,9 +1453,11 @@ For IDE and AI assistant troubleshooting, refer to the official documentation fo
 
 We warmly welcome contributions to Deephaven MCP! Whether it's bug reports, feature suggestions, documentation improvements, or code contributions, your help is valued.
 
-*   **Reporting Issues:** Please use the [GitHub Issues](https://github.com/deephaven/deephaven-mcp/issues) tracker.
-*   **Contributing Guidelines:** See [CONTRIBUTING.md](CONTRIBUTING.md) for our contribution workflow and process.
-*   **Development Guidelines:** For details on setting up your development environment, coding standards, running tests, and the pull request process, please see our [Developer & Contributor Guide](docs/DEVELOPER_GUIDE.md).
+**Where to Start:**
+
+*   **Reporting Issues**: Found a bug or have a feature request? Open an issue on GitHub: [https://github.com/deephaven/deephaven-mcp/issues](https://github.com/deephaven/deephaven-mcp/issues)
+*   **Contributing Guide**: See our [Contributing Guide](CONTRIBUTING.md) and [Code of Conduct](CODE_OF_CONDUCT.md) for guidelines on how to get involved.
+*   **Development Guide**: Looking to contribute code? See the [Developer & Contributor Guide](docs/DEVELOPER_GUIDE.md) for setup instructions, architecture details, and development workflows.
 
 ---
 

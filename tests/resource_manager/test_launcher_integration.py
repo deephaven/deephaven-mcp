@@ -53,7 +53,7 @@ from deephaven_mcp.resource_manager._launcher import _find_deephaven_executable
 # Helper to check if deephaven command is available
 def is_deephaven_available() -> bool:
     """Check if deephaven command is available in the same venv as current Python."""
-    deephaven_cmd = _find_deephaven_executable()
+    deephaven_cmd = _find_deephaven_executable(None)
 
     # If it returned an absolute path, it exists
     if Path(deephaven_cmd).is_absolute():
@@ -210,8 +210,18 @@ class TestPythonLauncherIntegration:
     @pytest.mark.skipif(
         not is_deephaven_available(), reason="deephaven command not in PATH"
     )
-    async def test_python_launch_and_cleanup(self):
+    @pytest.mark.parametrize(
+        "python_venv_path,test_suffix",
+        [
+            (None, "default-venv"),
+            (str(Path(sys.executable).parent.parent), "custom-venv"),
+        ],
+        ids=["default_venv", "custom_venv"],
+    )
+    async def test_python_launch_and_cleanup(self, python_venv_path, test_suffix):
         """Test actual python process launch, health check, and cleanup.
+
+        Tests both default venv (None) and explicit custom venv path.
 
         Prerequisites:
         - deephaven-server must be installed: pip install deephaven-server
@@ -221,12 +231,13 @@ class TestPythonLauncherIntegration:
         try:
             # Launch a real python process
             session = await PythonLaunchedSession.launch(
-                session_name="integration-python-test",
+                session_name=f"integration-python-{test_suffix}",
                 port=port,
-                auth_token="test-token-789",
+                auth_token=f"test-token-{test_suffix}",
                 heap_size_gb=2,
                 extra_jvm_args=[],
                 environment_vars={},
+                python_venv_path=python_venv_path,
             )
 
             # Verify process was created
@@ -313,7 +324,7 @@ class TestPythonLauncherIntegration:
 
             # Verify connection URL is correct
             assert session.connection_url == f"http://localhost:{port}"
-            assert "authToken=test-token-789" in session.connection_url_with_auth
+            assert f"authToken=test-token-{test_suffix}" in session.connection_url_with_auth
 
             # Verify process is actually running
             assert session.process.returncode is None
@@ -375,7 +386,7 @@ class TestOrphanCleanupIntegration:
                         "instance_id": instance_id,
                         "pid": 99999999,  # Fake dead PID
                         "started_at": "2025-01-01T00:00:00Z",
-                        "pip_processes": {},
+                        "python_processes": {},
                     }
                 )
             )
@@ -437,12 +448,12 @@ class TestOrphanCleanupIntegration:
                     pass  # Best effort cleanup
 
     @pytest.mark.asyncio
-    @pytest.mark.timeout(300)  # 5 minute timeout (pip takes longer to start)
+    @pytest.mark.timeout(300)  # 5 minute timeout (python launch takes longer to start)
     @pytest.mark.skipif(
         not is_deephaven_available(), reason="deephaven command not in PATH"
     )
-    async def test_cleanup_orphaned_pip_process(self, tmp_path):
-        """Test that orphaned pip processes are actually cleaned up.
+    async def test_cleanup_orphaned_python_process(self, tmp_path):
+        """Test that orphaned python processes are actually cleaned up.
 
         Prerequisites:
         - deephaven-server must be installed: pip install deephaven-server
@@ -474,7 +485,7 @@ class TestOrphanCleanupIntegration:
             instances_dir = tmp_path / ".deephaven-mcp" / "instances"
             instances_dir.mkdir(parents=True, exist_ok=True)
 
-            # Create fake instance metadata with dead server PID but live pip process
+            # Create fake instance metadata with dead server PID but live python process
             instance_file = instances_dir / f"{instance_id}.json"
             import json
 
@@ -484,8 +495,8 @@ class TestOrphanCleanupIntegration:
                         "instance_id": instance_id,
                         "pid": 99999999,  # Fake dead server PID
                         "started_at": "2025-01-01T00:00:00Z",
-                        "pip_processes": {
-                            "test-session": process.pid  # Real pip process PID
+                        "python_processes": {
+                            "test-session": process.pid  # Real python process PID
                         },
                     }
                 )
@@ -538,8 +549,8 @@ class TestInstanceTrackerIntegration:
     @pytest.mark.skipif(
         not is_deephaven_available(), reason="deephaven command not in PATH"
     )
-    async def test_track_and_untrack_real_pip_process(self, tmp_path):
-        """Test tracking a real pip process through its lifecycle.
+    async def test_track_and_untrack_real_python_process(self, tmp_path):
+        """Test tracking a real python process through its lifecycle.
 
         Prerequisites:
         - deephaven-server must be installed: pip install deephaven-server
@@ -577,7 +588,7 @@ class TestInstanceTrackerIntegration:
             assert process.returncode is None
 
             # Track the process
-            await tracker.track_pip_process("test-session", process.pid)
+            await tracker.track_python_process("test-session", process.pid)
 
             # Verify process is tracked in metadata
             import json
@@ -589,15 +600,15 @@ class TestInstanceTrackerIntegration:
                 / f"{tracker.instance_id}.json"
             )
             data = json.loads(instance_file.read_text())
-            assert "test-session" in data["pip_processes"]
-            assert data["pip_processes"]["test-session"] == process.pid
+            assert "test-session" in data["python_processes"]
+            assert data["python_processes"]["test-session"] == process.pid
 
             # Untrack the process
-            await tracker.untrack_pip_process("test-session")
+            await tracker.untrack_python_process("test-session")
 
             # Verify process is no longer tracked
             data = json.loads(instance_file.read_text())
-            assert "test-session" not in data["pip_processes"]
+            assert "test-session" not in data["python_processes"]
 
             # Process should still be running (we just untracked it)
             assert process.returncode is None
