@@ -340,16 +340,17 @@ class LaunchedSession(ABC):
 
         Returns:
             bool: True if process has crashed, False if still running or not applicable.
+
+        Note:
+            asyncio.subprocess.Process automatically updates returncode when the
+            process exits, so we don't need to call poll() like subprocess.Popen.
         """
-        if hasattr(self, "process"):
-            # Poll to update returncode without blocking
-            self.process.poll()
-            if self.process.returncode is not None:
-                _LOGGER.error(
-                    f"[_launcher:LaunchedSession] Process terminated during health check "
-                    f"with exit code {self.process.returncode}"
-                )
-                return True
+        if hasattr(self, "process") and self.process.returncode is not None:
+            _LOGGER.error(
+                f"[_launcher:LaunchedSession] Process terminated during health check "
+                f"with exit code {self.process.returncode}"
+            )
+            return True
         return False
 
     async def wait_until_ready(
