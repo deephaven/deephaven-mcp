@@ -3741,6 +3741,113 @@ def _resolve_docker_image(
         return "", {"success": False, "error": error_msg, "isError": True}
 
 
+def _resolve_community_session_parameters(
+    launch_method: str | None,
+    programming_language: str | None,
+    auth_type: str | None,
+    auth_token: str | None,
+    heap_size_gb: int | None,
+    extra_jvm_args: list[str] | None,
+    environment_vars: dict[str, str] | None,
+    docker_image: str | None,
+    docker_memory_limit_gb: float | None,
+    docker_cpu_limit: float | None,
+    docker_volumes: list[str] | None,
+    python_venv_path: str | None,
+    defaults: dict,
+) -> tuple[dict[str, Any], dict | None]:
+    """Resolve all community session creation parameters from tool args, config defaults, and hardcoded defaults.
+
+    Returns:
+        Tuple of (resolved_params_dict, error_dict). error_dict is None on success.
+    """
+    # Resolve launch method and auth type
+    resolved_launch_method = (
+        launch_method or defaults.get("launch_method", DEFAULT_LAUNCH_METHOD)
+    ).lower()
+    resolved_auth_type = (
+        auth_type or defaults.get("auth_type", DEFAULT_AUTH_TYPE)
+    ).upper()
+
+    # Validate method-specific parameters
+    validation_error = _validate_launch_method_params(
+        resolved_launch_method,
+        programming_language,
+        docker_image,
+        docker_memory_limit_gb,
+        docker_cpu_limit,
+        docker_volumes,
+        python_venv_path,
+    )
+    if validation_error:
+        return {}, validation_error
+
+    # Resolve docker image (only for docker launch method)
+    if resolved_launch_method == "docker":
+        resolved_docker_image, image_error = _resolve_docker_image(
+            programming_language, docker_image, defaults
+        )
+        if image_error:
+            return {}, image_error
+    else:
+        # For python launch, ensure no docker image is set
+        resolved_docker_image = ""
+
+    # Resolve heap size
+    resolved_heap_size_gb = heap_size_gb or defaults.get(
+        "heap_size_gb", DEFAULT_HEAP_SIZE_GB
+    )
+
+    # Resolve startup parameters from config or defaults (not exposed as tool parameters)
+    resolved_startup_timeout = defaults.get(
+        "startup_timeout_seconds", DEFAULT_STARTUP_TIMEOUT_SECONDS
+    )
+    resolved_startup_interval = defaults.get(
+        "startup_check_interval_seconds", DEFAULT_STARTUP_CHECK_INTERVAL_SECONDS
+    )
+    resolved_startup_retries = defaults.get("startup_retries", DEFAULT_STARTUP_RETRIES)
+
+    # Resolve optional parameters based on launch method
+    if resolved_launch_method == "docker":
+        resolved_docker_memory_limit = docker_memory_limit_gb or defaults.get(
+            "docker_memory_limit_gb"
+        )
+        resolved_docker_cpu_limit = docker_cpu_limit or defaults.get("docker_cpu_limit")
+        resolved_docker_volumes = docker_volumes or defaults.get("docker_volumes", [])
+        resolved_python_venv_path = None
+    else:  # python
+        resolved_docker_memory_limit = None
+        resolved_docker_cpu_limit = None
+        resolved_docker_volumes = []
+        resolved_python_venv_path = python_venv_path or defaults.get("python_venv_path")
+
+    resolved_extra_jvm_args = extra_jvm_args or defaults.get("extra_jvm_args", [])
+    resolved_environment_vars = environment_vars or defaults.get("environment_vars", {})
+
+    # Resolve auth token
+    resolved_auth_token, auto_generated_token = _resolve_auth_token(
+        resolved_auth_type, auth_token, defaults
+    )
+
+    return {
+        "launch_method": resolved_launch_method,
+        "auth_type": resolved_auth_type,
+        "auth_token": resolved_auth_token,
+        "auto_generated_token": auto_generated_token,
+        "heap_size_gb": resolved_heap_size_gb,
+        "docker_image": resolved_docker_image,
+        "docker_memory_limit_gb": resolved_docker_memory_limit,
+        "docker_cpu_limit": resolved_docker_cpu_limit,
+        "docker_volumes": resolved_docker_volumes,
+        "python_venv_path": resolved_python_venv_path,
+        "extra_jvm_args": resolved_extra_jvm_args,
+        "environment_vars": resolved_environment_vars,
+        "startup_timeout_seconds": resolved_startup_timeout,
+        "startup_check_interval_seconds": resolved_startup_interval,
+        "startup_retries": resolved_startup_retries,
+    }, None
+
+
 def _resolve_auth_token(
     auth_type: str,
     auth_token: str | None,
@@ -4178,65 +4285,41 @@ async def session_community_create(
         if limit_error:
             return limit_error
 
-        # Resolve parameters (tool args > config defaults > hardcoded defaults)
-        resolved_launch_method = (
-            launch_method or defaults.get("launch_method", DEFAULT_LAUNCH_METHOD)
-        ).lower()
-        resolved_auth_type = (
-            auth_type or defaults.get("auth_type", DEFAULT_AUTH_TYPE)
-        ).upper()
-
-        # Validate method-specific parameters
-        validation_error = _validate_launch_method_params(
-            resolved_launch_method,
+        # Resolve all session parameters
+        params, params_error = _resolve_community_session_parameters(
+            launch_method,
             programming_language,
+            auth_type,
+            auth_token,
+            heap_size_gb,
+            extra_jvm_args,
+            environment_vars,
             docker_image,
             docker_memory_limit_gb,
             docker_cpu_limit,
             docker_volumes,
             python_venv_path,
+            defaults,
         )
-        if validation_error:
-            return validation_error
+        if params_error:
+            return params_error
 
-        # Resolve docker image
-        resolved_docker_image, image_error = _resolve_docker_image(
-            programming_language, docker_image, defaults
-        )
-        if image_error:
-            return image_error
-
-        resolved_heap_size_gb = heap_size_gb or defaults.get(
-            "heap_size_gb", DEFAULT_HEAP_SIZE_GB
-        )
-
-        # Resolve startup parameters from config or defaults (not exposed as tool parameters)
-        resolved_startup_timeout = defaults.get(
-            "startup_timeout_seconds", DEFAULT_STARTUP_TIMEOUT_SECONDS
-        )
-        resolved_startup_interval = defaults.get(
-            "startup_check_interval_seconds", DEFAULT_STARTUP_CHECK_INTERVAL_SECONDS
-        )
-        resolved_startup_retries = defaults.get(
-            "startup_retries", DEFAULT_STARTUP_RETRIES
-        )
-
-        # Resolve optional parameters
-        resolved_docker_memory_limit = docker_memory_limit_gb or defaults.get(
-            "docker_memory_limit_gb"
-        )
-        resolved_docker_cpu_limit = docker_cpu_limit or defaults.get("docker_cpu_limit")
-        resolved_docker_volumes = docker_volumes or defaults.get("docker_volumes", [])
-        resolved_python_venv_path = python_venv_path or defaults.get("python_venv_path")
-        resolved_extra_jvm_args = extra_jvm_args or defaults.get("extra_jvm_args", [])
-        resolved_environment_vars = environment_vars or defaults.get(
-            "environment_vars", {}
-        )
-
-        # Resolve auth token
-        resolved_auth_token, auto_generated_token = _resolve_auth_token(
-            resolved_auth_type, auth_token, defaults
-        )
+        # Extract resolved parameters
+        resolved_launch_method = params["launch_method"]
+        resolved_auth_type = params["auth_type"]
+        resolved_auth_token = params["auth_token"]
+        auto_generated_token = params["auto_generated_token"]
+        resolved_heap_size_gb = params["heap_size_gb"]
+        resolved_docker_image = params["docker_image"]
+        resolved_docker_memory_limit = params["docker_memory_limit_gb"]
+        resolved_docker_cpu_limit = params["docker_cpu_limit"]
+        resolved_docker_volumes = params["docker_volumes"]
+        resolved_python_venv_path = params["python_venv_path"]
+        resolved_extra_jvm_args = params["extra_jvm_args"]
+        resolved_environment_vars = params["environment_vars"]
+        resolved_startup_timeout = params["startup_timeout_seconds"]
+        resolved_startup_interval = params["startup_check_interval_seconds"]
+        resolved_startup_retries = params["startup_retries"]
 
         # Check for session name conflicts
         session_id = BaseItemManager.make_full_name(
