@@ -17,6 +17,8 @@ from deephaven_mcp.mcp_systems_server._mcp import (
     _check_session_limits,
     _generate_session_name_if_none,
     _get_system_config,
+    _normalize_auth_type,
+    _resolve_community_session_parameters,
     _resolve_session_parameters,
 )
 from deephaven_mcp.resource_manager import (
@@ -8121,3 +8123,159 @@ async def test_session_community_credentials_all_allows_both():
 
     assert result["success"] is True
     assert result["auth_token"] == "static_token_123"
+
+
+# ===== Test _normalize_auth_type Helper Function =====
+
+
+def test_normalize_auth_type_psk_uppercase():
+    """Test PSK shorthand normalization - uppercase."""
+    result, error = _normalize_auth_type("PSK")
+    assert error is None
+    assert result == "io.deephaven.authentication.psk.PskAuthenticationHandler"
+
+
+def test_normalize_auth_type_psk_lowercase():
+    """Test PSK shorthand normalization - lowercase."""
+    result, error = _normalize_auth_type("psk")
+    assert error is None
+    assert result == "io.deephaven.authentication.psk.PskAuthenticationHandler"
+
+
+def test_normalize_auth_type_psk_mixedcase():
+    """Test PSK shorthand normalization - mixed case."""
+    result, error = _normalize_auth_type("Psk")
+    assert error is None
+    assert result == "io.deephaven.authentication.psk.PskAuthenticationHandler"
+
+
+def test_normalize_auth_type_anonymous_uppercase():
+    """Test Anonymous shorthand normalization - uppercase."""
+    result, error = _normalize_auth_type("ANONYMOUS")
+    assert error is None
+    assert result == "Anonymous"
+
+
+def test_normalize_auth_type_anonymous_lowercase():
+    """Test Anonymous shorthand normalization - lowercase."""
+    result, error = _normalize_auth_type("anonymous")
+    assert error is None
+    assert result == "Anonymous"
+
+
+def test_normalize_auth_type_anonymous_proper_case():
+    """Test Anonymous shorthand normalization - proper case."""
+    result, error = _normalize_auth_type("Anonymous")
+    assert error is None
+    assert result == "Anonymous"
+
+
+def test_normalize_auth_type_basic_rejected():
+    """Test that Basic auth is rejected for dynamic sessions."""
+    result, error = _normalize_auth_type("Basic")
+    assert error is not None
+    assert "Basic authentication is not supported for dynamic sessions" in error
+    assert "requires database setup" in error
+
+
+def test_normalize_auth_type_basic_lowercase_rejected():
+    """Test that Basic auth (lowercase) is rejected."""
+    result, error = _normalize_auth_type("basic")
+    assert error is not None
+    assert "Basic authentication is not supported" in error
+
+
+def test_normalize_auth_type_basic_uppercase_rejected():
+    """Test that Basic auth (uppercase) is rejected."""
+    result, error = _normalize_auth_type("BASIC")
+    assert error is not None
+    assert "Basic authentication is not supported" in error
+
+
+def test_normalize_auth_type_psk_handler_wrong_case_rejected():
+    """Test that the Deephaven PSK handler with incorrect case is rejected."""
+    result, error = _normalize_auth_type(
+        "IO.DEEPHAVEN.AUTHENTICATION.PSK.PSKAUTHENTICATIONHANDLER"
+    )
+    assert error is not None
+    assert "Deephaven PSK handler with incorrect case" in error
+    assert "io.deephaven.authentication.psk.PskAuthenticationHandler" in error
+
+
+def test_normalize_auth_type_whitespace_rejected():
+    """Test that auth_type with whitespace is rejected."""
+    result, error = _normalize_auth_type(" PSK")
+    assert error is not None
+    assert "whitespace" in error
+
+
+def test_normalize_auth_type_trailing_whitespace_rejected():
+    """Test that auth_type with trailing whitespace is rejected."""
+    result, error = _normalize_auth_type("PSK ")
+    assert error is not None
+    assert "whitespace" in error
+
+
+def test_normalize_auth_type_full_class_name_preserved():
+    """Test that correct full class name is preserved."""
+    result, error = _normalize_auth_type(
+        "io.deephaven.authentication.psk.PskAuthenticationHandler"
+    )
+    assert error is None
+    assert result == "io.deephaven.authentication.psk.PskAuthenticationHandler"
+
+
+def test_normalize_auth_type_custom_authenticator_preserved():
+    """Test that custom authenticator class names are preserved."""
+    result, error = _normalize_auth_type("com.example.CustomAuthenticator")
+    assert error is None
+    assert result == "com.example.CustomAuthenticator"
+
+
+def test_normalize_auth_type_no_dots_preserved():
+    """Test that values without dots (non-class names) are preserved."""
+    result, error = _normalize_auth_type("CustomAuth")
+    assert error is None
+    assert result == "CustomAuth"
+
+
+def test_normalize_auth_type_anonymous_mixedcase():
+    """Test Anonymous shorthand normalization - various mixed cases."""
+    result, error = _normalize_auth_type("AnOnYmOuS")
+    assert error is None
+    assert result == "Anonymous"
+
+
+def test_normalize_auth_type_uppercase_custom_authenticator_allowed():
+    """Test that custom authenticators with uppercase names are allowed."""
+    result, error = _normalize_auth_type("COM.MYCOMPANY.CUSTOMAUTH")
+    assert error is None
+    assert result == "COM.MYCOMPANY.CUSTOMAUTH"
+
+
+def test_resolve_community_session_parameters_invalid_auth_type():
+    """Test _resolve_community_session_parameters with invalid auth_type returns error."""
+    # Call with invalid auth_type (Basic is not supported for dynamic sessions)
+    resolved_params, error = _resolve_community_session_parameters(
+        launch_method=None,
+        programming_language=None,
+        auth_type="Basic",  # This should trigger validation error
+        auth_token=None,
+        heap_size_gb=None,
+        extra_jvm_args=None,
+        environment_vars=None,
+        docker_image=None,
+        docker_memory_limit_gb=None,
+        docker_cpu_limit=None,
+        docker_volumes=None,
+        python_venv_path=None,
+        defaults={},
+    )
+    
+    # Should return empty dict and error dict
+    assert resolved_params == {}
+    assert error is not None
+    assert error["success"] is False
+    assert error["isError"] is True
+    assert "Invalid auth_type" in error["error"]
+    assert "Basic authentication is not supported" in error["error"]

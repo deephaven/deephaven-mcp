@@ -443,8 +443,9 @@ All fields within a session's configuration object are optional. If a field is o
 *   `port` (integer): Port number for the worker connection (e.g., `10000`).
 *   `auth_type` (string): Authentication method. Common values include:
     *   `"Anonymous"`: For connections requiring no authentication (default if omitted).
+    *   `"PSK"` or `"io.deephaven.authentication.psk.PskAuthenticationHandler"`: For Pre-Shared Key authentication. Both the shorthand `"PSK"` and full Java class name are accepted. See [PSK Authentication Configuration](#psk-authentication-configuration) below for detailed setup instructions.
     *   `"Basic"`: For username/password authentication. The `auth_token` must be in `"username:password"` format.
-    *   Custom authenticator strings (e.g., `"io.deephaven.authentication.psk.PskAuthenticationHandler"` for Pre-Shared Key authentication). The full Java class name is required. See [PSK Authentication Configuration](#psk-authentication-configuration) below for detailed setup instructions.
+    *   Custom authenticator strings: Full Java class names for custom authentication handlers.
 *   `auth_token` (string, optional): The authentication token. For `"Basic"` auth, this must be in `"username:password"` format. For custom authenticators, this should conform to the specific requirements of that authenticator. Ignored when `auth_type` is `"Anonymous"`. Use this OR `auth_token_env_var`, but not both.
 *   `auth_token_env_var` (string, optional): The name of an environment variable from which to read the authentication token. Use this OR `auth_token`, but not both. If specified, the token will be sourced from this environment variable.
 *   `never_timeout` (boolean): If `true`, the MCP server attempts to configure the session to this worker to prevent timeouts. Server-side settings might still enforce timeouts.
@@ -561,7 +562,7 @@ All fields are optional. If the `session_creation` key is omitted entirely, dyna
 - **`defaults`** (object, optional): Default parameters for creating new community sessions. All fields are optional:
   - `launch_method` (string): Method to launch sessions (`"docker"` or `"python"`).
   - `programming_language` (string): Programming language for Docker sessions (`"Python"` or `"Groovy"`). Docker only. Mutually exclusive with `docker_image`.
-  - `auth_type` (string): Default authentication type for created sessions.
+  - `auth_type` (string): Default authentication type for dynamically created sessions. Supported values: `"PSK"` (default), `"Anonymous"`, or full class name `"io.deephaven.authentication.psk.PskAuthenticationHandler"`. Case-insensitive for shorthand. Note: Basic auth is not supported for dynamic sessions (requires database setup).
   - `auth_token` (string): Default authentication token. Use this OR `auth_token_env_var`, but not both.
   - `auth_token_env_var` (string): Environment variable for auth token. Use this OR `auth_token`, but not both.
   - `docker_image` (string): Docker image to use for docker launch method. Mutually exclusive with `programming_language`.
@@ -611,7 +612,7 @@ When `credential_retrieval_enabled` is `true`, this tool retrieves connection cr
 - `connection_url` (string): Base URL without authentication
 - `connection_url_with_auth` (string): Full URL with auth token for browser
 - `auth_token` (string): Raw authentication token
-- `auth_type` (string): `"PSK"` or `"ANONYMOUS"`
+- `auth_type` (string): Authentication type (e.g., `"io.deephaven.authentication.psk.PskAuthenticationHandler"`, `"Anonymous"`)
 
 **Example Usage (via AI agent):**
 ```
@@ -1075,7 +1076,7 @@ On error:
 - `session_name` (required, string): Unique name for the session
 - `launch_method` (optional, string): How to launch the session: `"docker"` or `"python"` (default: from config or "docker")
 - `programming_language` (optional, string): Programming language for Docker sessions: `"Python"` or `"Groovy"` (default: from config or "Python"). Docker only. Mutually exclusive with `docker_image`. Automatically selects Docker image: Python → ghcr.io/deephaven/server:latest, Groovy → ghcr.io/deephaven/server-slim:latest. Raises error if used with python launch method.
-- `auth_type` (optional, string): Authentication type: `"PSK"` or `"Anonymous"` (default: from config or "PSK")
+- `auth_type` (optional, string): Authentication type: `"PSK"` or `"Anonymous"` (case-insensitive shorthand), or full class name `"io.deephaven.authentication.psk.PskAuthenticationHandler"` (default: `"io.deephaven.authentication.psk.PskAuthenticationHandler"`). Note: Basic auth is not supported for dynamic sessions.
 - `auth_token` (optional, string): Pre-shared key for PSK authentication. If omitted with PSK auth, a secure token is auto-generated
 - `docker_image` (optional, string): Custom Docker image to use (Docker only). Mutually exclusive with `programming_language`. If neither specified, defaults to Python image. Raises error if used with python launch method.
 - `docker_memory_limit_gb` (optional, float): Container memory limit in GB (Docker only)

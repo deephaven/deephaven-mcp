@@ -489,6 +489,13 @@ def test_session_creation_invalid_auth_type_generates_warning(caplog):
     assert "auth_type='InvalidAuth' which is not a commonly known value" in caplog.text
 
 
+def test_session_creation_programming_language_accepted():
+    """Test that programming_language is accepted in defaults."""
+    config = {"defaults": {"programming_language": "Python"}}
+    # Should not raise
+    validate_community_session_creation_config(config)
+
+
 def test_session_creation_auth_token_and_env_var_mutually_exclusive():
     """Test that auth_token and auth_token_env_var are mutually exclusive."""
     config = {

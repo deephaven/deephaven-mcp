@@ -547,7 +547,7 @@ You can include either section, both, or neither (empty file). Each section cont
 |-------|------|---------------|-------------|
 | `host` | string | Optional | Hostname or IP address of the Deephaven Community Core session (e.g., `"localhost"`) |
 | `port` | integer | Optional | Port number for the session connection (e.g., `10000`) |
-| `auth_type` | string | Optional | Authentication type: `"Anonymous"` (default), `"Basic"`, or custom authenticator strings |
+| `auth_type` | string | Optional | Authentication type: `"PSK"` (shorthand), `"Anonymous"` (default), `"Basic"`, or full class names like `"io.deephaven.authentication.psk.PskAuthenticationHandler"` |
 | `auth_token` | string | Optional | Authentication token. For `"Basic"` auth: `"username:password"` format. Mutually exclusive with `auth_token_env_var` |
 | `auth_token_env_var` | string | Optional | Environment variable name containing the auth token (e.g., `"MY_AUTH_TOKEN"`). More secure than hardcoding tokens |
 | `never_timeout` | boolean | Optional | If `true`, attempts to configure the session to never time out |
@@ -579,7 +579,7 @@ The `session_creation` key enables dynamic creation of Deephaven Community Core 
 | `session_creation.max_concurrent_sessions` | integer | Optional | Maximum concurrent sessions (default: 5). Set to 0 to disable session creation |
 | `session_creation.defaults` | object | Optional | Default parameters for new sessions |
 | `session_creation.defaults.launch_method` | string | Optional | How to launch sessions: `"docker"` or `"python"` (default: "docker") |
-| `session_creation.defaults.auth_type` | string | Optional | Authentication type: `"PSK"` or `"Anonymous"` (default: "PSK") |
+| `session_creation.defaults.auth_type` | string | Optional | Authentication type: `"PSK"` (default), `"Anonymous"`, or full class name `"io.deephaven.authentication.psk.PskAuthenticationHandler"`. Case-insensitive for shorthand. Basic auth not supported for dynamic sessions |
 | `session_creation.defaults.auth_token` | string | Optional | Pre-shared key for PSK auth. If omitted with PSK auth, a secure token is auto-generated |
 | `session_creation.defaults.auth_token_env_var` | string | Optional | Environment variable containing auth token. Mutually exclusive with `auth_token` |
 | `session_creation.defaults.programming_language` | string | Optional | Programming language for Docker sessions: `"Python"` or `"Groovy"` (default: "Python"). Docker only. Mutually exclusive with `docker_image`. See examples below. |

@@ -95,7 +95,7 @@ in the enterprise system configuration. Can be overridden per system in the conf
 DEFAULT_LAUNCH_METHOD = "docker"
 """Default launch method for community sessions when not specified in config."""
 
-DEFAULT_AUTH_TYPE = "PSK"
+DEFAULT_AUTH_TYPE = "io.deephaven.authentication.psk.PskAuthenticationHandler"
 """Default authentication type for community sessions when not specified in config."""
 
 DEFAULT_PROGRAMMING_LANGUAGE = "Python"
@@ -3765,9 +3765,15 @@ def _resolve_community_session_parameters(
     resolved_launch_method = (
         launch_method or defaults.get("launch_method", DEFAULT_LAUNCH_METHOD)
     ).lower()
-    resolved_auth_type = (
-        auth_type or defaults.get("auth_type", DEFAULT_AUTH_TYPE)
-    ).upper()
+    # Normalize auth_type to full class name for Deephaven client compatibility
+    raw_auth_type = auth_type or defaults.get("auth_type", DEFAULT_AUTH_TYPE)
+    resolved_auth_type, auth_error = _normalize_auth_type(raw_auth_type)
+    if auth_error:
+        return {}, {
+            "success": False,
+            "error": f"Invalid auth_type: {auth_error}",
+            "isError": True,
+        }
 
     # Validate method-specific parameters
     validation_error = _validate_launch_method_params(
@@ -3848,6 +3854,61 @@ def _resolve_community_session_parameters(
     }, None
 
 
+def _normalize_auth_type(auth_type: str) -> tuple[str, str | None]:
+    """Normalize shorthand auth types to full Deephaven class names.
+
+    Dynamic community sessions only support PSK and Anonymous authentication.
+    Basic auth requires database setup and is not suitable for dynamic sessions.
+    
+    Validation Rules:
+    - Rejects leading/trailing whitespace
+    - Rejects "Basic" authentication (case-insensitive)
+    - Detects and rejects incorrectly-cased Deephaven PSK handler
+    - Normalizes "PSK" → "io.deephaven.authentication.psk.PskAuthenticationHandler"
+    - Normalizes "ANONYMOUS" → "Anonymous" (canonical case)
+    - Preserves custom authenticator class names exactly as provided
+
+    Args:
+        auth_type (str): Authentication type, either shorthand ("PSK", "Anonymous") 
+            or full class name.
+
+    Returns:
+        tuple[str, str | None]: (normalized_auth_type, error_message).
+            - On success: (normalized_value, None)
+            - On failure: ("", error_message_string)
+    """
+    # Check for whitespace first (applies to all auth_type values)
+    if auth_type != auth_type.strip():
+        return (
+            "",
+            f"Invalid auth_type '{auth_type}': contains leading or trailing whitespace.",
+        )
+
+    auth_type_upper = auth_type.upper()
+
+    # Normalize shorthand to full class names (only PSK and Anonymous for dynamic sessions)
+    if auth_type_upper == "PSK":
+        return "io.deephaven.authentication.psk.PskAuthenticationHandler", None
+    elif auth_type_upper == "ANONYMOUS":
+        return "Anonymous", None
+    elif auth_type_upper == "BASIC":
+        return (
+            "",
+            "Basic authentication is not supported for dynamic sessions (requires database setup). Use 'PSK' or 'Anonymous'.",
+        )
+
+    # Check if it looks like the Deephaven PSK handler but with wrong case
+    if "." in auth_type and auth_type.upper() == "IO.DEEPHAVEN.AUTHENTICATION.PSK.PSKAUTHENTICATIONHANDLER":
+        if auth_type != "io.deephaven.authentication.psk.PskAuthenticationHandler":
+            return (
+                "",
+                f"Invalid auth_type '{auth_type}': appears to be the Deephaven PSK handler with incorrect case. Use 'io.deephaven.authentication.psk.PskAuthenticationHandler' or shorthand 'PSK'.",
+            )
+
+    # Already a valid value ("Anonymous", correct PSK handler, or custom authenticator) - preserve exact case
+    return auth_type, None
+
+
 def _resolve_auth_token(
     auth_type: str,
     auth_token: str | None,
@@ -3856,17 +3917,21 @@ def _resolve_auth_token(
     """Resolve authentication token, auto-generating if needed.
 
     Args:
-        auth_type: Authentication type (e.g., "PSK", "Anonymous").
-        auth_token: Explicit auth token parameter, or None.
-        defaults: Configuration defaults dictionary that may contain 'auth_token_env_var' or 'auth_token'.
+        auth_type (str): Normalized authentication type (should be full class name from _normalize_auth_type).
+        auth_token (str | None): Explicit auth token parameter, or None.
+        defaults (dict): Configuration defaults dictionary that may contain 'auth_token_env_var' or 'auth_token'.
 
     Returns:
-        Tuple of (resolved_token, was_auto_generated).
+        tuple[str | None, bool]: (resolved_token, was_auto_generated).
+            - (None, False) if auth_type doesn't require a token
+            - (token_string, False) if token was provided or from config
+            - (token_string, True) if token was auto-generated
 
     Raises:
         CommunitySessionConfigurationError: If auth_token_env_var is configured but the environment variable is not set.
     """
-    if auth_type != "PSK":
+    # Check if auth type requires a PSK token (must be exact match for full class name)
+    if auth_type != "io.deephaven.authentication.psk.PskAuthenticationHandler":
         return None, False
 
     # Check explicit parameter
@@ -4150,7 +4215,9 @@ async def session_community_create(
         auth_type (str | None): Authentication type ("PSK" or "Anonymous", case-insensitive).
             - "PSK": Pre-shared key authentication (recommended for security)
             - "Anonymous": No authentication required (less secure)
-            Defaults to configuration value or "PSK".
+            Note: Basic authentication is not supported for dynamic sessions (requires database setup).
+            Shorthand values are normalized to full Java class names internally.
+            Defaults to "io.deephaven.authentication.psk.PskAuthenticationHandler".
         auth_token (str | None): Pre-shared key for PSK authentication.
             If None and auth_type is PSK, a cryptographically secure token will be auto-generated.
             Auto-generated tokens are logged at WARNING level and included in response with
@@ -4182,7 +4249,8 @@ async def session_community_create(
             - 'session_id' (str): Full identifier in format "community:dynamic:{session_name}"
             - 'session_name' (str): Simple name provided by user
             - 'connection_url' (str): Base HTTP URL without authentication
-            - 'auth_type' (str): "PSK" or "ANONYMOUS" (normalized to uppercase)
+            - 'auth_type' (str): Normalized authentication type as full class name
+                (e.g., "io.deephaven.authentication.psk.PskAuthenticationHandler", "Anonymous", "Basic")
             - 'launch_method' (str): "docker" or "python" (normalized to lowercase)
             - 'port' (int): Port number where session is listening
             - 'container_id' (str, optional): Docker container ID (only for docker launch)
@@ -4202,7 +4270,7 @@ async def session_community_create(
             "session_id": "community:dynamic:my-session",
             "session_name": "my-session",
             "connection_url": "http://localhost:45123",
-            "auth_type": "PSK",
+            "auth_type": "io.deephaven.authentication.psk.PskAuthenticationHandler",
             "launch_method": "docker",
             "port": 45123,
             "container_id": "a1b2c3d4..."
@@ -4214,7 +4282,7 @@ async def session_community_create(
             "session_id": "community:dynamic:my-session",
             "session_name": "my-session",
             "connection_url": "http://localhost:45123",
-            "auth_type": "PSK",
+            "auth_type": "io.deephaven.authentication.psk.PskAuthenticationHandler",
             "launch_method": "python",
             "port": 45123,
             "process_id": 98765

@@ -50,12 +50,15 @@ _LOGGER = logging.getLogger(__name__)
 
 # Known auth_type values from Deephaven Python client documentation
 _KNOWN_AUTH_TYPES: set[str] = {
+    "PSK",  # Canonical shorthand for PSK authentication
     "Anonymous",  # Default, no authentication required
     "Basic",  # Requires username:password format in auth_token
-    "io.deephaven.authentication.psk.PskAuthenticationHandler",  # Requires auth_token
+    "io.deephaven.authentication.psk.PskAuthenticationHandler",  # Full PSK class name
 }
 """
 Set of commonly known auth_type values for Deephaven Python client.
+Includes both canonical shorthand forms (PSK, Anonymous, Basic) and full class names.
+Note: For config validation, these are case-sensitive canonical forms.
 Custom authenticator strings are also valid but not listed here.
 """
 
@@ -75,12 +78,21 @@ _ALLOWED_COMMUNITY_SESSION_FIELDS: dict[str, type | tuple[type, ...]] = {
 }
 """
 Dictionary of allowed community session configuration fields and their expected types.
+
+Maps field names to their allowed Python types. Fields with tuple values accept multiple
+types (union types). Used for validating static community session configurations.
+
 Type: dict[str, type | tuple[type, ...]]
 """
 
 _REQUIRED_FIELDS: list[str] = []
 """
-list[str]: List of required fields for each community session configuration dictionary.
+List of required fields for each community session configuration dictionary.
+
+Currently empty - all fields are optional for static community sessions.
+This allows maximum flexibility in configuration.
+
+Type: list[str]
 """
 
 
@@ -91,9 +103,11 @@ def redact_community_session_config(
     Redacts sensitive fields from a community session configuration dictionary.
 
     Creates a shallow copy of the input dictionary and redacts all sensitive fields:
-    - 'auth_token' (always redacted if present)
-    - 'tls_root_certs', 'client_cert_chain', 'client_private_key' (redacted if value is binary and redact_binary_values is True)
+    - 'auth_token': Always redacted if present
+    - 'tls_root_certs', 'client_cert_chain', 'client_private_key': Redacted only if value
+      is binary (bytes/bytearray) and redact_binary_values is True
 
+    Uses shallow copy for performance since nested structures are not expected in session configs.
     The original dictionary is not modified. Sensitive fields are replaced with the string "[REDACTED]".
 
     Args:
@@ -132,6 +146,10 @@ def redact_community_session_config(
 
 # Valid values for credential_retrieval_mode
 _VALID_CREDENTIAL_RETRIEVAL_MODES = {"none", "dynamic_only", "static_only", "all"}
+"""
+Valid values for security.community.credential_retrieval_mode configuration field.
+Controls which community session credentials can be retrieved via MCP tools.
+"""
 
 
 def validate_security_community_config(security_community_config: Any | None) -> None:
@@ -182,17 +200,20 @@ def validate_community_sessions_config(
     community_sessions_map: Any | None,
 ) -> None:
     """
-    Validate the overall 'community_sessions' part of the configuration, if present.
+    Validate the overall 'community.sessions' configuration section, if present.
 
-    If `community_sessions_map` is None (i.e., the 'community_sessions' key was absent
+    This validates the dictionary of static community sessions defined in the configuration.
+    If `community_sessions_map` is None (i.e., the 'community.sessions' key was absent
     from the main configuration), this function does nothing.
+    
     If `community_sessions_map` is provided, this checks that it's a dictionary
     and that each individual session configuration within it is valid.
     An empty dictionary is allowed, signifying no sessions are configured under this key.
 
     Args:
-        community_sessions_map (dict[str, Any] | None): The dictionary of community sessions
-            (e.g., config.get('community_sessions')). Can be None if the key is absent.
+        community_sessions_map (dict[str, Any] | None): The dictionary of static community sessions,
+            where keys are session names and values are session config dicts.
+            Can be None if the 'community.sessions' key is absent.
 
     Raises:
         CommunitySessionConfigurationError: If `community_sessions_map` is provided and is not a dict,
@@ -224,9 +245,6 @@ def _validate_field_types(session_name: str, config_item: dict[str, Any]) -> Non
     Args:
         session_name (str): The name of the community session being validated.
         config_item (dict[str, Any]): The configuration dictionary to validate.
-
-    Returns:
-        None
 
     Raises:
         CommunitySessionConfigurationError: If unknown fields are present or field types don't match expected types.
@@ -264,9 +282,6 @@ def _validate_auth_configuration(
         session_name (str): The name of the community session being validated.
         config_item (dict[str, Any]): The configuration dictionary to validate.
 
-    Returns:
-        None
-
     Raises:
         CommunitySessionConfigurationError: If both auth_token and auth_token_env_var are set.
     """
@@ -301,9 +316,6 @@ def validate_single_community_session_config(
         session_name (str): The name of the community session.
         config_item (dict[str, Any]): The configuration dictionary for the session.
 
-    Returns:
-        None
-
     Raises:
         CommunitySessionConfigurationError: If the configuration item is invalid (e.g., not a
             dictionary, unknown fields, wrong types, mutually exclusive fields like
@@ -327,19 +339,29 @@ def validate_single_community_session_config(
 
 # Session creation configuration constants
 _ALLOWED_LAUNCH_METHODS: set[str] = {"docker", "python"}
-"""Set of allowed launch methods for dynamic community session creation."""
+"""
+Set of allowed launch methods for dynamic community session creation.
+
+- 'docker': Launch Deephaven in a Docker container
+- 'python': Launch Deephaven using python subprocess with optional custom venv
+"""
 
 _ALLOWED_SESSION_CREATION_FIELDS: dict[str, type | tuple[type, ...]] = {
     "max_concurrent_sessions": int,
     "defaults": dict,
 }
-"""Dictionary of allowed session_creation configuration fields and their expected types."""
+"""
+Dictionary of allowed top-level session_creation configuration fields and their expected types.
+
+Used for validating the structure of the 'community.session_creation' config section.
+"""
 
 _ALLOWED_SESSION_CREATION_DEFAULTS: dict[str, type | tuple[type, ...]] = {
     "launch_method": str,
     "auth_type": str,
     "auth_token": (str, types.NoneType),
     "auth_token_env_var": (str, types.NoneType),
+    "programming_language": str,
     "docker_image": str,
     "docker_memory_limit_gb": (float, int, types.NoneType),
     "docker_cpu_limit": (float, int, types.NoneType),
@@ -352,7 +374,12 @@ _ALLOWED_SESSION_CREATION_DEFAULTS: dict[str, type | tuple[type, ...]] = {
     "startup_check_interval_seconds": (float, int),
     "startup_retries": int,
 }
-"""Dictionary of allowed session_creation.defaults fields and their expected types."""
+"""
+Dictionary of allowed session_creation.defaults fields and their expected types.
+
+These are default parameters used when dynamically creating new community sessions.
+All fields are optional - if not specified, system defaults are used.
+"""
 
 
 def redact_community_session_creation_config(
@@ -362,9 +389,11 @@ def redact_community_session_creation_config(
     Redacts sensitive fields from a session_creation configuration dictionary.
 
     Creates a deep copy of the input dictionary and redacts sensitive fields in the defaults section:
-    - 'auth_token' (always redacted if present in defaults)
+    - 'auth_token': Always redacted if present in defaults
 
+    Uses deep copy because session_creation configs may contain nested structures (defaults dict).
     The original dictionary is not modified. Sensitive fields are replaced with the string "[REDACTED]".
+    
     Note: auth_token_env_var is NOT redacted as it only contains the environment variable name,
     not the actual token value.
 
@@ -396,9 +425,9 @@ def validate_community_session_creation_config(
     session_creation_config: Any | None,
 ) -> None:
     """
-    Validate the 'session_creation' configuration for community sessions.
+    Validate the 'community.session_creation' configuration section.
 
-    This validates the configuration used for dynamically creating community sessions
+    This validates the configuration used for dynamically creating community sessions on demand
     via Docker or python-based Deephaven. Performs comprehensive validation including:
     - Type checking for all fields
     - Validation that max_concurrent_sessions is non-negative
@@ -411,8 +440,8 @@ def validate_community_session_creation_config(
       * String key/value validation for environment_vars dict
 
     Args:
-        session_creation_config (dict[str, Any] | None): The session_creation configuration.
-            Can be None if the key is absent (in which case validation is skipped).
+        session_creation_config (dict[str, Any] | None): The session_creation configuration dictionary.
+            Can be None if the 'community.session_creation' key is absent (validation is skipped).
 
     Raises:
         CommunitySessionConfigurationError: If the configuration is invalid, including:
@@ -473,11 +502,14 @@ def validate_community_session_creation_config(
 def _validate_defaults_field_types(defaults: dict[str, Any]) -> None:
     """Validate that all session creation defaults fields have correct types.
 
+    Checks each field in the defaults dictionary against _ALLOWED_SESSION_CREATION_DEFAULTS
+    to ensure the field is known and its value matches the expected type(s).
+
     Args:
-        defaults: The defaults dictionary to validate.
+        defaults (dict[str, Any]): The defaults dictionary to validate.
 
     Raises:
-        CommunitySessionConfigurationError: If field type is invalid.
+        CommunitySessionConfigurationError: If field type is invalid or field is unknown.
     """
     for field_name, field_value in defaults.items():
         if field_name not in _ALLOWED_SESSION_CREATION_DEFAULTS:
@@ -503,11 +535,16 @@ def _validate_defaults_field_types(defaults: dict[str, Any]) -> None:
 def _validate_defaults_enum_fields(defaults: dict[str, Any]) -> None:
     """Validate enum-like defaults fields (launch_method, auth_type).
 
+    Checks that launch_method is one of the allowed values and auth_type is a known value
+    (logs warning for custom authenticators). Also validates mutual exclusivity of
+    auth_token and auth_token_env_var.
+
     Args:
-        defaults: The defaults dictionary to validate.
+        defaults (dict[str, Any]): The defaults dictionary to validate.
 
     Raises:
-        CommunitySessionConfigurationError: If enum value is invalid.
+        CommunitySessionConfigurationError: If enum value is invalid or both auth_token
+            and auth_token_env_var are set.
     """
     if "launch_method" in defaults:
         launch_method = defaults["launch_method"]
@@ -520,7 +557,7 @@ def _validate_defaults_enum_fields(defaults: dict[str, Any]) -> None:
         auth_type = defaults["auth_type"]
         if auth_type not in _KNOWN_AUTH_TYPES:
             _LOGGER.warning(
-                f"[config:_validate_enum_fields] session_creation.defaults uses auth_type='{auth_type}' which is not a commonly known value. "
+                f"[config:_validate_defaults_enum_fields] session_creation.defaults uses auth_type='{auth_type}' which is not a commonly known value. "
                 f"Known values are: {', '.join(sorted(_KNOWN_AUTH_TYPES))}. Custom authenticators are also valid - if this is intentional, you can ignore this warning."
             )
 
@@ -535,11 +572,11 @@ def _validate_positive_number(field_name: str, value: float | int) -> None:
     """Validate a numeric field is positive.
 
     Args:
-        field_name: Name of the field being validated.
-        value: Numeric value to check.
+        field_name (str): Name of the field being validated.
+        value (float | int): Numeric value to check.
 
     Raises:
-        CommunitySessionConfigurationError: If value is not positive.
+        CommunitySessionConfigurationError: If value is not positive (must be > 0).
     """
     if value <= 0:
         raise CommunitySessionConfigurationError(
@@ -551,8 +588,8 @@ def _validate_string_list(field_name: str, items: list) -> None:
     """Validate a list contains only strings.
 
     Args:
-        field_name: Name of the field being validated.
-        items: List to check.
+        field_name (str): Name of the field being validated.
+        items (list): List to check.
 
     Raises:
         CommunitySessionConfigurationError: If list contains non-string items.
@@ -567,11 +604,15 @@ def _validate_string_list(field_name: str, items: list) -> None:
 def _validate_defaults_numeric_ranges(defaults: dict[str, Any]) -> None:
     """Validate numeric defaults fields are within valid ranges.
 
+    Checks that heap_size_gb, docker_memory_limit_gb, docker_cpu_limit, and timeout fields
+    are positive, and that startup_retries is non-negative.
+
     Args:
-        defaults: The defaults dictionary to validate.
+        defaults (dict[str, Any]): The defaults dictionary to validate.
 
     Raises:
-        CommunitySessionConfigurationError: If numeric value is out of range.
+        CommunitySessionConfigurationError: If numeric value is out of range (not positive
+            for size/timeout fields, or negative for retry count).
     """
     if "heap_size_gb" in defaults:
         _validate_positive_number("heap_size_gb", defaults["heap_size_gb"])
@@ -608,11 +649,15 @@ def _validate_defaults_numeric_ranges(defaults: dict[str, Any]) -> None:
 def _validate_defaults_collection_contents(defaults: dict[str, Any]) -> None:
     """Validate list and dict defaults fields contain correct types.
 
+    Checks that docker_volumes and extra_jvm_args lists contain only strings, and that
+    environment_vars dict has string keys and string values.
+
     Args:
-        defaults: The defaults dictionary to validate.
+        defaults (dict[str, Any]): The defaults dictionary to validate.
 
     Raises:
-        CommunitySessionConfigurationError: If collection contents are invalid.
+        CommunitySessionConfigurationError: If collection contents are invalid (non-string
+            items in lists, or non-string keys/values in environment_vars dict).
     """
     if "docker_volumes" in defaults:
         _validate_string_list("docker_volumes", defaults["docker_volumes"])
@@ -640,7 +685,7 @@ def _validate_session_creation_defaults(defaults: dict[str, Any]) -> None:
     validation category: field types, enum values, numeric ranges, and collection contents.
 
     Args:
-        defaults: The defaults dictionary from session_creation configuration.
+        defaults (dict[str, Any]): The defaults dictionary from session_creation configuration.
 
     Raises:
         CommunitySessionConfigurationError: If any validation check fails.

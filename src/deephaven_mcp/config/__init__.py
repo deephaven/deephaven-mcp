@@ -48,9 +48,9 @@ The configuration file must be a JSON object. It may contain the following top-l
               - `host` (str): Hostname or IP address of the community server.
               - `port` (int): Port number for the community server connection.
               - `auth_type` (str): Authentication type. Common values include:
+                  * "PSK" or "io.deephaven.authentication.psk.PskAuthenticationHandler": Pre-shared key authentication (shorthand and full class name).
                   * "Anonymous": Default, no authentication required.
                   * "Basic": HTTP Basic authentication (requires username:password format in auth_token).
-                  * "io.deephaven.authentication.psk.PskAuthenticationHandler": Pre-shared key authentication.
                   * Custom authenticator strings are also valid.
               - `auth_token` (str, optional): The direct authentication token or password. May be empty if `auth_type` is "Anonymous". Use this OR `auth_token_env_var`, but not both.
               - `auth_token_env_var` (str, optional): The name of an environment variable from which to read the authentication token. Use this OR `auth_token`, but not both.
@@ -72,7 +72,7 @@ The configuration file must be a JSON object. It may contain the following top-l
               - `max_concurrent_sessions` (int, optional): Maximum number of concurrent dynamically created sessions. Set to 0 to disable dynamic session creation.
               - `defaults` (dict, optional): Default parameters for creating new community sessions:
                   * `launch_method` (str, optional): Method to launch sessions ("docker" or "python").
-                  * `auth_type` (str, optional): Default authentication type for created sessions.
+                  * `auth_type` (str, optional): Default authentication type for dynamically created sessions. Supported: "PSK" (default), "Anonymous", or full class name. Case-insensitive for shorthand. Note: Basic auth not supported for dynamic sessions.
                   * `auth_token` (str, optional): Default authentication token. Use this OR `auth_token_env_var`, but not both.
                   * `auth_token_env_var` (str, optional): Environment variable for auth token. Use this OR `auth_token`, but not both.
                   * `docker_image` (str, optional): Docker image to use for docker launch method.
@@ -634,9 +634,6 @@ def get_config_path() -> str:
     """
     Retrieve the configuration file path from the DH_MCP_CONFIG_FILE environment variable.
 
-    Args:
-        None
-
     Returns:
         str: The absolute or relative path to the Deephaven MCP configuration JSON file.
 
@@ -750,9 +747,6 @@ def _log_config_summary(config: dict[str, Any]) -> None:
     Args:
         config (dict[str, Any]): The loaded and validated configuration dictionary.
 
-    Returns:
-        None
-
     Example:
         >>> config = {'community': {'sessions': {'local': {'auth_token': 'secret'}}}}
         >>> _log_config_summary(config)
@@ -788,15 +782,12 @@ def _validate_unknown_keys(
     will cause validation to fail with a detailed error message.
 
     Args:
-        data (dict[str, Any]): The configuration dictionary section to validate
-        path (tuple[str, ...]): The current path tuple for error reporting context
-        valid_keys (set[str]): Set of allowed key names at this path level
-
-    Returns:
-        None
+        data (dict[str, Any]): The configuration dictionary section to validate.
+        path (tuple[str, ...]): The current path tuple for error reporting context.
+        valid_keys (set[str]): Set of allowed key names at this path level.
 
     Raises:
-        ConfigurationError: If any unknown keys are found in the data
+        ConfigurationError: If any unknown keys are found in the data.
     """
     unknown_keys = set(data.keys()) - valid_keys
     if unknown_keys:
@@ -816,15 +807,12 @@ def _validate_required_keys(
     validation to fail with a detailed error message listing all missing keys.
 
     Args:
-        data (dict[str, Any]): The configuration dictionary section to validate
-        path (tuple[str, ...]): The current path tuple for error reporting context
-        required_keys (set[str]): Set of key names that must be present at this path level
-
-    Returns:
-        None
+        data (dict[str, Any]): The configuration dictionary section to validate.
+        path (tuple[str, ...]): The current path tuple for error reporting context.
+        required_keys (set[str]): Set of key names that must be present at this path level.
 
     Raises:
-        ConfigurationError: If any required keys are missing from the data
+        ConfigurationError: If any required keys are missing from the data.
     """
     missing_keys = required_keys - set(data.keys())
     if missing_keys:
@@ -848,16 +836,13 @@ def _validate_key_type_and_value(
        and EnterpriseSystemConfigurationError as ConfigurationError)
 
     Args:
-        key (str): The configuration key being validated
-        value (Any): The value to validate
-        spec (_ConfigPathSpec): The configuration path specification containing type and validator
-        path (tuple[str, ...]): The parent path tuple (will be combined with key to form current_path)
-
-    Returns:
-        None
+        key (str): The configuration key being validated.
+        value (Any): The value to validate.
+        spec (_ConfigPathSpec): The configuration path specification containing type and validator.
+        path (tuple[str, ...]): The parent path tuple (will be combined with key to form current_path).
 
     Raises:
-        ConfigurationError: If validation fails for type or specialized validation
+        ConfigurationError: If validation fails for type or specialized validation.
     """
     current_path = path + (key,)
 
@@ -923,15 +908,12 @@ def _validate_section(data: dict[str, Any], path: tuple[str, ...]) -> None:
     only if nested schema paths exist for the current path.
 
     Args:
-        data (dict[str, Any]): The dictionary containing configuration data to validate
-        path (tuple[str, ...]): The current path tuple representing the location in the config
-
-    Returns:
-        None
+        data (dict[str, Any]): The dictionary containing configuration data to validate.
+        path (tuple[str, ...]): The current path tuple representing the location in the config.
 
     Raises:
         ConfigurationError: If validation fails for any reason (unknown keys, missing required keys,
-                           type mismatches, or specialized validation failures)
+                           type mismatches, or specialized validation failures).
     """
     # Get specs for the current path level
     current_specs = {
@@ -1001,9 +983,9 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
                     - 'host' (str): Hostname or IP address of the community server.
                     - 'port' (int): Port number for the community server connection.
                     - 'auth_type' (str): Authentication type. Common values include:
+                        * "PSK" or "io.deephaven.authentication.psk.PskAuthenticationHandler": Pre-shared key authentication (shorthand and full class name).
                         * "Anonymous": Default, no authentication required.
                         * "Basic": HTTP Basic authentication (requires username:password format in auth_token).
-                        * "io.deephaven.authentication.psk.PskAuthenticationHandler": Pre-shared key authentication.
                         * Custom authenticator strings are also valid.
                     - 'auth_token' (str, optional): The direct authentication token or password. May be empty if `auth_type` is "Anonymous". Use this OR `auth_token_env_var`, but not both.
                     - 'auth_token_env_var' (str, optional): The name of an environment variable from which to read the authentication token. Use this OR `auth_token`, but not both.
