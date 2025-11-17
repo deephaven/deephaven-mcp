@@ -26,6 +26,7 @@ __all__ = [
     "validate_single_enterprise_system",
     "redact_enterprise_system_config",
     "redact_enterprise_systems_map",
+    "DEFAULT_CONNECTION_TIMEOUT_SECONDS",
 ]
 
 import logging
@@ -35,6 +36,14 @@ from deephaven_mcp._exceptions import EnterpriseSystemConfigurationError
 
 _LOGGER = logging.getLogger(__name__)
 
+# Default timeout for enterprise system connections
+DEFAULT_CONNECTION_TIMEOUT_SECONDS = 10.0
+"""Default timeout in seconds for establishing connections to enterprise systems.
+
+This value is used when 'connection_timeout' is not specified in the enterprise
+system configuration. It provides a reasonable default that prevents indefinite
+hanging while allowing sufficient time for typical connection establishment.
+"""
 
 _BASE_ENTERPRISE_SYSTEM_FIELDS: dict[str, type | tuple[type, ...]] = {
     "connection_json_url": str,

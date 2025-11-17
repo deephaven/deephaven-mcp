@@ -98,6 +98,9 @@ from deephaven_mcp.client import (
     CorePlusSessionFactory,
     CoreSession,
 )
+from deephaven_mcp.config._enterprise_system import (
+    DEFAULT_CONNECTION_TIMEOUT_SECONDS,
+)
 
 from ._launcher import (
     DockerLaunchedSession,
@@ -2826,7 +2829,7 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
         lazy initialization when get() is first invoked.
 
         Implementation:
-            1. Extracts `connection_timeout` from config (defaults to 10.0 seconds)
+            1. Extracts `connection_timeout` from config (defaults to DEFAULT_CONNECTION_TIMEOUT_SECONDS)
             2. Calls CorePlusSessionFactory.from_config() with timeout wrapper
             3. Logs creation progress (DEBUG) and completion (INFO)
             4. Handles timeout errors with appropriate logging and exception
@@ -2855,15 +2858,15 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
             - This method is marked @override to implement BaseItemManager abstract method
             - Do not call directly - use get() for proper caching and error handling
             - Timeout can be configured via 'connection_timeout' in config (int or float)
-            - Default timeout is 10.0 seconds if not specified
+            - Default timeout is DEFAULT_CONNECTION_TIMEOUT_SECONDS
 
         See Also:
             BaseItemManager.get(): Public method triggering lazy initialization
             CorePlusSessionFactory.from_config(): Underlying factory creation method
             EnterpriseSessionManager._create_item(): Session-level creation counterpart
         """
-        # Extract timeout from config (default to 10 seconds if not specified)
-        timeout = self._config.get("connection_timeout", 10.0)
+        # Extract timeout from config (uses DEFAULT_CONNECTION_TIMEOUT_SECONDS if not specified)
+        timeout = self._config.get("connection_timeout", DEFAULT_CONNECTION_TIMEOUT_SECONDS)
         
         _LOGGER.debug(
             f"[{self.__class__.__name__}] Creating enterprise factory for '{self.full_name}' (timeout: {timeout}s)"
