@@ -241,46 +241,41 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
         """
         async with self._lock:
             if self._initialized:  # Follow base registry pattern
-                _LOGGER.warning("[%s] already initialized", self.__class__.__name__)
+                _LOGGER.warning(f"[{self.__class__.__name__}] already initialized")
                 return
 
-            _LOGGER.info("[%s] initializing...", self.__class__.__name__)
+            _LOGGER.info(f"[{self.__class__.__name__}] initializing...")
 
             # Initialize community session registry
             self._community_registry = CommunitySessionRegistry()
             await self._community_registry.initialize(config_manager)
             _LOGGER.debug(
-                "[%s] initialized community session registry", self.__class__.__name__
+                f"[{self.__class__.__name__}] initialized community session registry"
             )
 
             # Initialize enterprise session factory registry
             self._enterprise_registry = CorePlusSessionFactoryRegistry()
             await self._enterprise_registry.initialize(config_manager)
             _LOGGER.debug(
-                "[%s] initialized enterprise session factory registry",
-                self.__class__.__name__,
+                f"[{self.__class__.__name__}] initialized enterprise session factory registry"
             )
 
             # Load static community sessions into _items
-            _LOGGER.debug("[%s] loading community sessions", self.__class__.__name__)
+            _LOGGER.debug(f"[{self.__class__.__name__}] loading community sessions")
             community_sessions = await self._community_registry.get_all()
             _LOGGER.debug(
-                "[%s] loading %d community sessions",
-                self.__class__.__name__,
-                len(community_sessions),
+                f"[{self.__class__.__name__}] loading {len(community_sessions)} community sessions"
             )
 
             for name, session in community_sessions.items():
                 _LOGGER.debug(
-                    "[%s] loading community session '%s'", self.__class__.__name__, name
+                    f"[{self.__class__.__name__}] loading community session '{name}'"
                 )
                 # Use the session's full_name (which is properly encoded) as the key
                 self._items[session.full_name] = session
 
             _LOGGER.debug(
-                "[%s] loaded %d community sessions",
-                self.__class__.__name__,
-                len(community_sessions),
+                f"[{self.__class__.__name__}] loaded {len(community_sessions)} community sessions"
             )
 
             # Mark as initialized before updating enterprise sessions since they check initialization
@@ -289,11 +284,10 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             # Update enterprise sessions from controller clients
             await self._update_enterprise_sessions()
             _LOGGER.debug(
-                "[%s] populated enterprise sessions from controllers",
-                self.__class__.__name__,
+                f"[{self.__class__.__name__}] populated enterprise sessions from controllers"
             )
 
-            _LOGGER.info("[%s] initialization complete", self.__class__.__name__)
+            _LOGGER.info(f"[{self.__class__.__name__}] initialization complete")
 
     @override
     async def _load_items(self, config_manager: ConfigManager) -> None:
@@ -453,18 +447,13 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
                         "Controller client ping returned False, indicating authentication issue"
                     )
                 _LOGGER.debug(
-                    "[%s] using cached controller client for factory '%s'",
-                    self.__class__.__name__,
-                    factory_name,
+                    f"[{self.__class__.__name__}] using cached controller client for factory '{factory_name}'"
                 )
                 return client
             except Exception as e:
                 # If there's any error, close the old client and create a new one
                 _LOGGER.warning(
-                    "[%s] controller client for factory '%s' is dead: %s. Releasing reference to dead controller client.",
-                    self.__class__.__name__,
-                    factory_name,
-                    e,
+                    f"[{self.__class__.__name__}] controller client for factory '{factory_name}' is dead: {e}. Releasing reference to dead controller client."
                 )
 
                 # Remove the dead client from cache
@@ -472,9 +461,7 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
 
         # Create a new controller client
         _LOGGER.debug(
-            "[%s] creating new controller client for factory '%s'",
-            self.__class__.__name__,
-            factory_name,
+            f"[{self.__class__.__name__}] creating new controller client for factory '{factory_name}'"
         )
         factory_instance = await factory.get()
         client = factory_instance.controller_client
@@ -517,9 +504,7 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
                 )
                 self._items[session_manager.full_name] = session_manager
                 _LOGGER.debug(
-                    "[%s] created and stored EnterpriseSessionManager for '%s'",
-                    self.__class__.__name__,
-                    session_manager.full_name,
+                    f"[{self.__class__.__name__}] created and stored EnterpriseSessionManager for '{session_manager.full_name}'"
                 )
 
     async def _close_stale_enterprise_sessions(self, stale_keys: set[str]) -> None:
@@ -563,9 +548,7 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             factory_name: The name of the factory to remove sessions for.
         """
         _LOGGER.warning(
-            "[%s] removing all sessions for offline factory '%s'",
-            self.__class__.__name__,
-            factory_name,
+            f"[{self.__class__.__name__}] removing all sessions for offline factory '{factory_name}'"
         )
 
         # Find all sessions for this factory and remove them
@@ -573,10 +556,7 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
         await self._close_stale_enterprise_sessions(keys_to_remove)
 
         _LOGGER.info(
-            "[%s] removed %d sessions for offline factory '%s'",
-            self.__class__.__name__,
-            len(keys_to_remove),
-            factory_name,
+            f"[{self.__class__.__name__}] removed {len(keys_to_remove)} sessions for offline factory '{factory_name}'"
         )
 
     async def _update_sessions_for_factory(
@@ -609,9 +589,7 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
                 to allow proper error handling by the caller.
         """
         _LOGGER.info(
-            "[%s] updating enterprise sessions for factory '%s'",
-            self.__class__.__name__,
-            factory_name,
+            f"[{self.__class__.__name__}] updating enterprise sessions for factory '{factory_name}'"
         )
 
         try:
@@ -622,10 +600,7 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             session_info = await controller_client.map()
         except DeephavenConnectionError as e:
             _LOGGER.warning(
-                "[%s] failed to connect to factory '%s': %s",
-                self.__class__.__name__,
-                factory_name,
-                e,
+                f"[{self.__class__.__name__}] failed to connect to factory '{factory_name}': {e}"
             )
             # If we can't connect to the factory, remove all sessions for it
             await self._remove_all_sessions_for_factory(factory_name)
@@ -636,19 +611,12 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             si.config.pb.name for si in session_info.values()
         ]
         _LOGGER.debug(
-            "[%s] factory '%s' reports %d sessions: %s",
-            self.__class__.__name__,
-            factory_name,
-            len(session_names_from_controller),
-            session_names_from_controller,
+            f"[{self.__class__.__name__}] factory '{factory_name}' reports {len(session_names_from_controller)} sessions: {session_names_from_controller}"
         )
 
         existing_keys = self._find_session_keys_for_factory(factory_name)
         _LOGGER.debug(
-            "[%s] factory '%s' has %d existing sessions in registry",
-            self.__class__.__name__,
-            factory_name,
-            len(existing_keys),
+            f"[{self.__class__.__name__}] factory '{factory_name}' has {len(existing_keys)} existing sessions in registry"
         )
 
         controller_keys = {
@@ -664,29 +632,19 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
         }
         if new_session_names:
             _LOGGER.debug(
-                "[%s] factory '%s' adding %d new sessions: %s",
-                self.__class__.__name__,
-                factory_name,
-                len(new_session_names),
-                list(new_session_names),
+                f"[{self.__class__.__name__}] factory '{factory_name}' adding {len(new_session_names)} new sessions: {list(new_session_names)}"
             )
         self._add_new_enterprise_sessions(factory, factory_name, new_session_names)
 
         stale_keys = existing_keys - controller_keys
         if stale_keys:
             _LOGGER.debug(
-                "[%s] factory '%s' removing %d stale sessions: %s",
-                self.__class__.__name__,
-                factory_name,
-                len(stale_keys),
-                list(stale_keys),
+                f"[{self.__class__.__name__}] factory '{factory_name}' removing {len(stale_keys)} stale sessions: {list(stale_keys)}"
             )
         await self._close_stale_enterprise_sessions(stale_keys)
 
         _LOGGER.info(
-            "[%s] enterprise session update complete for factory '%s'",
-            self.__class__.__name__,
-            factory_name,
+            f"[{self.__class__.__name__}] enterprise session update complete for factory '{factory_name}'"
         )
 
     async def _update_enterprise_sessions(self) -> None:
@@ -700,25 +658,23 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             InternalError: If the registry has not been initialized.
             Exception: Any exception from factory session updates.
         """
-        _LOGGER.info("[%s] Updating enterprise sessions", self.__class__.__name__)
+        _LOGGER.info(f"[{self.__class__.__name__}] Updating enterprise sessions")
         self._check_initialized()
 
-        _LOGGER.debug("[%s] Getting all factories", self.__class__.__name__)
+        _LOGGER.debug(f"[{self.__class__.__name__}] Getting all factories")
         # We know this is initialized at this point, so it's safe to cast
         factories = await cast(
             CorePlusSessionFactoryRegistry, self._enterprise_registry
         ).get_all()
-        _LOGGER.debug("[%s] Got %d factories", self.__class__.__name__, len(factories))
+        _LOGGER.debug(f"[{self.__class__.__name__}] Got {len(factories)} factories")
 
         for factory_name, factory in factories.items():
             _LOGGER.debug(
-                "[%s] Updating sessions for factory '%s'",
-                self.__class__.__name__,
-                factory_name,
+                f"[{self.__class__.__name__}] Updating sessions for factory '{factory_name}'"
             )
             await self._update_sessions_for_factory(factory, factory_name)
 
-        _LOGGER.info("[%s] Updated enterprise sessions", self.__class__.__name__)
+        _LOGGER.info(f"[{self.__class__.__name__}] Updated enterprise sessions")
 
     @override
     async def get(self, name: str) -> BaseItemManager:
@@ -848,12 +804,11 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             # Update enterprise sessions before retrieving (lock is already held)
             # This also checks initialization status
             _LOGGER.info(
-                "[%s] Updating enterprise sessions before retrieving",
-                self.__class__.__name__,
+                f"[{self.__class__.__name__}] Updating enterprise sessions before retrieving"
             )
             await self._update_enterprise_sessions()
 
-            _LOGGER.info("[%s] Returning all sessions", self.__class__.__name__)
+            _LOGGER.info(f"[{self.__class__.__name__}] Returning all sessions")
             return self._items.copy()
 
     async def add_session(self, manager: BaseItemManager) -> None:
@@ -907,9 +862,7 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             self._added_sessions.add(session_id)
 
             _LOGGER.debug(
-                "[%s] added session '%s' to registry",
-                self.__class__.__name__,
-                session_id,
+                f"[{self.__class__.__name__}] added session '{session_id}' to registry"
             )
 
     async def remove_session(self, session_id: str) -> BaseItemManager | None:
@@ -967,9 +920,7 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
                 self._added_sessions.discard(session_id)
 
                 _LOGGER.debug(
-                    "[%s] removed session '%s' from registry",
-                    self.__class__.__name__,
-                    session_id,
+                    f"[{self.__class__.__name__}] removed session '{session_id}' from registry"
                 )
             return removed_manager
 
@@ -1123,20 +1074,18 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
                     f"{self.__class__.__name__} not initialized. Call 'await initialize()' after construction."
                 )
 
-            _LOGGER.info("[%s] closing...", self.__class__.__name__)
+            _LOGGER.info(f"[{self.__class__.__name__}] closing...")
 
             # Close community registry
             if self._community_registry is not None:
                 try:
                     await self._community_registry.close()
                     _LOGGER.debug(
-                        "[%s] closed community registry", self.__class__.__name__
+                        f"[{self.__class__.__name__}] closed community registry"
                     )
                 except Exception as e:
                     _LOGGER.error(
-                        "[%s] error closing community registry: %s",
-                        self.__class__.__name__,
-                        e,
+                        f"[{self.__class__.__name__}] error closing community registry: {e}"
                     )
 
             # Close enterprise registry
@@ -1144,22 +1093,18 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
                 try:
                     await self._enterprise_registry.close()
                     _LOGGER.debug(
-                        "[%s] closed enterprise registry", self.__class__.__name__
+                        f"[{self.__class__.__name__}] closed enterprise registry"
                     )
                 except Exception as e:
                     _LOGGER.error(
-                        "[%s] error closing enterprise registry: %s",
-                        self.__class__.__name__,
-                        e,
+                        f"[{self.__class__.__name__}] error closing enterprise registry: {e}"
                     )
 
             # Log that we're releasing controller clients
             # (Note: CorePlusControllerClient doesn't have a close() method; clients are managed by the CorePlus system)
             for factory_name, _ in list(self._controller_clients.items()):
                 _LOGGER.debug(
-                    "[%s] releasing controller client for factory '%s'",
-                    self.__class__.__name__,
-                    factory_name,
+                    f"[{self.__class__.__name__}] releasing controller client for factory '{factory_name}'"
                 )
 
             # Clear the controller clients dictionary
@@ -1172,9 +1117,7 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             session_count = len(self._added_sessions)
             self._added_sessions.clear()
             _LOGGER.debug(
-                "[%s] cleared session tracking (%d sessions)",
-                self.__class__.__name__,
-                session_count,
+                f"[{self.__class__.__name__}] cleared session tracking ({session_count} sessions)"
             )
 
-            _LOGGER.info("[%s] closed", self.__class__.__name__)
+            _LOGGER.info(f"[{self.__class__.__name__}] closed")

@@ -90,6 +90,7 @@ else:
 from deephaven_mcp._exceptions import (
     AuthenticationError,
     ConfigurationError,
+    DeephavenConnectionError,
     SessionCreationError,
 )
 from deephaven_mcp.client import (
@@ -515,7 +516,7 @@ class BaseItemManager(Generic[T], ABC):
 
         full_name = self.make_full_name(system_type, source, name)
         _LOGGER.info(
-            "[%s] Initialized manager for '%s'", self.__class__.__name__, full_name
+            f"[{self.__class__.__name__}] Initialized manager for '{full_name}'"
         )
 
     @abstractmethod
@@ -874,20 +875,16 @@ class BaseItemManager(Generic[T], ABC):
         """
         if self._item_cache:
             _LOGGER.debug(
-                "[%s] Cache hit for '%s'", self.__class__.__name__, self.full_name
+                f"[{self.__class__.__name__}] Cache hit for '{self.full_name}'"
             )
             return self._item_cache
 
         _LOGGER.info(
-            "[%s] Cache miss - creating new item for '%s'...",
-            self.__class__.__name__,
-            self.full_name,
+            f"[{self.__class__.__name__}] Cache miss - creating new item for '{self.full_name}'..."
         )
         self._item_cache = await self._create_item()
         _LOGGER.info(
-            "[%s] Successfully created and cached new item for '%s'",
-            self.__class__.__name__,
-            self.full_name,
+            f"[{self.__class__.__name__}] Successfully created and cached new item for '{self.full_name}'"
         )
         return self._item_cache
 
@@ -963,16 +960,12 @@ class BaseItemManager(Generic[T], ABC):
             close(): Clean up and invalidate the cached resource
         """
         _LOGGER.debug(
-            "[%s] Getting managed item for '%s'",
-            self.__class__.__name__,
-            self.full_name,
+            f"[{self.__class__.__name__}] Getting managed item for '{self.full_name}'"
         )
         async with self._lock:
             result = await self._get_unlocked()
             _LOGGER.debug(
-                "[%s] Successfully retrieved managed item for '%s'",
-                self.__class__.__name__,
-                self.full_name,
+                f"[{self.__class__.__name__}] Successfully retrieved managed item for '{self.full_name}'"
             )
             return result
 
@@ -1094,10 +1087,7 @@ class BaseItemManager(Generic[T], ABC):
                 return (ResourceLivenessStatus.MISCONFIGURED, str(e))
         except Exception as e:
             _LOGGER.warning(
-                "[%s] Liveness check failed for %s: %s",
-                self.__class__.__name__,
-                self.full_name,
-                e,
+                f"[{self.__class__.__name__}] Liveness check failed for {self.full_name}: {e}"
             )
             return (ResourceLivenessStatus.UNKNOWN, str(e))
 
@@ -1207,21 +1197,14 @@ class BaseItemManager(Generic[T], ABC):
         """
         mode = "provisioning" if ensure_item else "cached-only"
         _LOGGER.debug(
-            "[%s] Checking liveness status (%s mode) for '%s'",
-            self.__class__.__name__,
-            mode,
-            self.full_name,
+            f"[{self.__class__.__name__}] Checking liveness status ({mode} mode) for '{self.full_name}'"
         )
 
         async with self._lock:
             status, detail = await self._liveness_status_unlocked(ensure_item)
+            detail_suffix = f" ({detail})" if detail else ""
             _LOGGER.info(
-                "[%s] Liveness check (%s mode) for '%s': %s%s",
-                self.__class__.__name__,
-                mode,
-                self.full_name,
-                status.name,
-                f" ({detail})" if detail else "",
+                f"[{self.__class__.__name__}] Liveness check ({mode} mode) for '{self.full_name}': {status.value}{detail_suffix}"
             )
             return status, detail
 
@@ -1435,78 +1418,54 @@ class BaseItemManager(Generic[T], ABC):
             AsyncClosable: Protocol that managed resources must implement
         """
         _LOGGER.debug(
-            "[%s] Starting close operation for '%s'",
-            self.__class__.__name__,
-            self.full_name,
+            f"[{self.__class__.__name__}] Starting close operation for '{self.full_name}'"
         )
 
         async with self._lock:
             if self._item_cache:
                 _LOGGER.debug(
-                    "[%s] Found cached item for '%s', checking liveness before close",
-                    self.__class__.__name__,
-                    self.full_name,
+                    f"[{self.__class__.__name__}] Found cached item for '{self.full_name}', checking liveness before close"
                 )
                 try:
                     # Check liveness using the unlocked method since we already hold the lock
                     if await self._is_alive_unlocked():
                         _LOGGER.info(
-                            "[%s] Closing live item for '%s'",
-                            self.__class__.__name__,
-                            self.full_name,
+                            f"[{self.__class__.__name__}] Closing live item for '{self.full_name}'"
                         )
                         await self._item_cache.close()
                         _LOGGER.info(
-                            "[%s] Successfully closed item for '%s'",
-                            self.__class__.__name__,
-                            self.full_name,
+                            f"[{self.__class__.__name__}] Successfully closed item for '{self.full_name}'"
                         )
                     else:
                         _LOGGER.debug(
-                            "[%s] Item for '%s' is not alive, skipping close",
-                            self.__class__.__name__,
-                            self.full_name,
+                            f"[{self.__class__.__name__}] Item for '{self.full_name}' is not alive, skipping close"
                         )
                 except Exception as e:
                     # If liveness check fails, still try to close the item
                     _LOGGER.warning(
-                        "[%s] Liveness check failed during close for %s: %s",
-                        self.__class__.__name__,
-                        self.full_name,
-                        e,
+                        f"[{self.__class__.__name__}] Liveness check failed during close for {self.full_name}: {e}"
                     )
                     try:
                         _LOGGER.info(
-                            "[%s] Attempting to close item despite liveness check failure for '%s'",
-                            self.__class__.__name__,
-                            self.full_name,
+                            f"[{self.__class__.__name__}] Attempting to close item despite liveness check failure for '{self.full_name}'"
                         )
                         await self._item_cache.close()
                         _LOGGER.info(
-                            "[%s] Successfully closed item for '%s' despite earlier liveness failure",
-                            self.__class__.__name__,
-                            self.full_name,
+                            f"[{self.__class__.__name__}] Successfully closed item for '{self.full_name}' despite earlier liveness failure"
                         )
                     except Exception as close_e:
                         # Log close failures but continue cleanup
                         _LOGGER.warning(
-                            "[%s] Failed to close item for %s: %s",
-                            self.__class__.__name__,
-                            self.full_name,
-                            close_e,
+                            f"[{self.__class__.__name__}] Failed to close item for {self.full_name}: {close_e}"
                         )
             else:
                 _LOGGER.debug(
-                    "[%s] No cached item to close for '%s'",
-                    self.__class__.__name__,
-                    self.full_name,
+                    f"[{self.__class__.__name__}] No cached item to close for '{self.full_name}'"
                 )
 
             self._item_cache = None
             _LOGGER.debug(
-                "[%s] Cleared cache for '%s', close operation complete",
-                self.__class__.__name__,
-                self.full_name,
+                f"[{self.__class__.__name__}] Cleared cache for '{self.full_name}', close operation complete"
             )
 
 
@@ -1786,17 +1745,12 @@ class CommunitySessionManager(BaseItemManager[CoreSession]):
         """
         try:
             _LOGGER.info(
-                "[%s] Creating community session for %s",
-                self.__class__.__name__,
-                self.full_name,
+                f"[{self.__class__.__name__}] Creating community session for {self.full_name}"
             )
             return await CoreSession.from_config(self._config)
         except Exception as e:
             _LOGGER.error(
-                "[%s] Failed to create community session for %s: %s",
-                self.__class__.__name__,
-                self.full_name,
-                e,
+                f"[{self.__class__.__name__}] Failed to create community session for {self.full_name}: {e}"
             )
             raise SessionCreationError(
                 f"Failed to create session for community worker {self._name}: {e}"
@@ -2404,99 +2358,51 @@ class EnterpriseSessionManager(BaseItemManager[CorePlusSession]):
 
     @override
     async def _create_item(self) -> CorePlusSession:
-        """Create and initialize a new Deephaven Enterprise session using the injected creation function.
+        """Create a Deephaven Core+ session using the injected creation function.
 
-        This method implements the abstract _create_item() method from BaseItemManager
-        to provide Enterprise-specific session creation using the injectable creation
-        function pattern. It is called automatically during lazy initialization when
-        get() is first invoked on an uninitialized manager.
+        This method implements the abstract _create_item() from BaseItemManager to provide
+        Core+ (Enterprise) specific session creation using the injectable creation function
+        pattern. Called automatically during lazy initialization when get() is first invoked.
 
-        Function-Based Creation Process:
-            The method performs these steps:
-            1. **Invoke Creation Function**: Calls the provided creation function with source and name
-            2. **Function Execution**: The creation function handles all Enterprise-specific logic
-            3. **Authentication & Setup**: Function performs auth, config retrieval, connection setup
-            4. **Session Initialization**: Function returns fully initialized CorePlusSession
-            5. **Error Handling**: Wraps any creation function failures in SessionCreationError
+        Implementation:
+            1. Logs creation attempt (INFO level)
+            2. Calls self._creation_function(self._source, self._name)
+            3. Returns the CorePlusSession instance created by the function
+            4. Catches any exceptions and wraps them in SessionCreationError with logging
 
-        Creation Function Flexibility:
-            The injected function provides maximum flexibility for Enterprise scenarios:
-            - **Authentication Methods**: SAML, OAuth, custom Enterprise protocols
-            - **Configuration Sources**: Databases, vaults, config services, files
-            - **Factory Integration**: CorePlusSessionFactory or custom factory patterns
-            - **Dynamic Logic**: Runtime-determined creation parameters and strategies
-            - **Environment Adaptation**: Different creation logic per deployment environment
+        The creation function is responsible for all session creation logic including
+        authentication, configuration retrieval, and connection establishment.
 
-        Performance Characteristics:
-            Performance depends entirely on the provided creation function:
-            - **Simple Functions**: Fast creation for basic Enterprise setups
-            - **Complex Auth**: Slower for SAML/OAuth with multiple round trips
-            - **Config Retrieval**: Variable depending on configuration source performance
-            - **Network Operations**: May involve multiple network calls for Enterprise setup
-            - **Typical Duration**: Highly variable from 100ms to several seconds
-
-        Error Scenarios and Handling:
-            Various failure modes are wrapped in SessionCreationError:
-            - **Function Exceptions**: Any exception from the creation function
-            - **Authentication Failures**: Enterprise auth protocol failures
-            - **Configuration Errors**: Missing or invalid configuration data
-            - **Network Issues**: Connectivity problems during session establishment
-            - **Permission Errors**: Access control or authorization failures
-            - **Resource Exhaustion**: Enterprise server unable to create sessions
-
-        Exception Wrapping Strategy:
-            All creation function exceptions are caught and re-raised as SessionCreationError:
-            - **Preserves Cause**: Original exception available via __cause__ attribute
-            - **Adds Context**: Error message includes manager identity and Enterprise context
-            - **Consistent Interface**: All callers receive uniform exception type
-            - **Detailed Logging**: Full error details logged for Enterprise troubleshooting
-
-        Function Parameter Passing:
-            The creation function is called with the exact parameters from construction:
-            - **source**: The configuration source identifier from __init__
-            - **name**: The manager name from __init__
-            - **No Modification**: Parameters are passed through unchanged
-            - **Function Responsibility**: Creation function interprets parameters as needed
-
-        Thread Safety:
-            This method is fully thread-safe and can be called concurrently,
-            though the BaseItemManager ensures only one creation attempt occurs
-            per manager instance at a time.
+        Args:
+            None (uses self._creation_function, self._source, and self._name from __init__)
 
         Returns:
-            CorePlusSession: A fully initialized and connected Deephaven Enterprise session
-                ready for use. The session will have completed all required authentication
-                and initialization, and its is_alive() method should return True.
+            CorePlusSession: Initialized Core+ session ready for use. The session's
+                is_alive() method should return True.
 
         Raises:
-            SessionCreationError: If the creation function fails for any reason. The error
-                message will include context about the failure, and the original
-                exception will be available via the __cause__ attribute.
+            SessionCreationError: If the creation function fails for any reason.
+                Original exception is preserved via __cause__ attribute and logged.
 
-        Implementation Notes:
-            This method is marked with @override to indicate it implements the abstract
-            method from BaseItemManager. It must not be called directly - use get()
-            instead to ensure proper caching and error handling.
+        Notes:
+            - This method is marked @override to implement BaseItemManager abstract method
+            - Do not call directly - use get() for proper caching and error handling
+            - Creation function is called with exact (source, name) parameters from __init__
+            - All exceptions from creation function are wrapped in SessionCreationError
 
         See Also:
-            BaseItemManager.get(): The public method that triggers lazy initialization
-            SessionCreationError: The exception type raised on creation failures
-            CorePlusSession: The Enterprise session type returned by creation functions
-            CorePlusSessionFactory: Common factory that can be used with this manager
+            BaseItemManager.get(): Public method triggering lazy initialization
+            CorePlusSession: The Core+ session type returned by creation functions
+            CorePlusSessionFactory: Common factory usable with this manager
         """
         try:
             _LOGGER.info(
-                "[%s] Creating enterprise session for %s using creation function",
-                self.__class__.__name__,
-                self.full_name,
+                f"[{self.__class__.__name__}] Creating enterprise session for {self.full_name} using creation function"
             )
             return await self._creation_function(self._source, self._name)
         except Exception as e:
             _LOGGER.error(
-                "[%s] Failed to create enterprise session for %s: %s",
-                self.__class__.__name__,
-                self.full_name,
-                e,
+                f"[{self.__class__.__name__}] Failed to create enterprise session for {self.full_name}: {e}"
             )
             raise SessionCreationError(
                 f"Failed to create enterprise session for {self._name}: {e}"
@@ -2913,102 +2819,74 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
 
     @override
     async def _create_item(self) -> CorePlusSessionFactory:
-        """Create and initialize a new Deephaven Enterprise session factory from stored configuration.
+        """Create and initialize a Deephaven Core+ session factory from configuration.
 
-        This method implements the abstract _create_item() method from BaseItemManager
-        to provide Enterprise-specific factory creation using the configuration dictionary
-        approach. It is called automatically during lazy initialization when get() is
-        first invoked on an uninitialized manager.
+        This method implements the abstract _create_item() from BaseItemManager to provide
+        Core+ (Enterprise) specific factory creation. It is called automatically during
+        lazy initialization when get() is first invoked.
 
-        Configuration-Driven Creation Process:
-            The method performs comprehensive factory creation:
-            1. **Configuration Validation**: Validates the stored config dictionary structure
-            2. **Authentication Setup**: Configures Enterprise authentication from config
-            3. **Connection Establishment**: Establishes connections to Enterprise servers
-            4. **Factory Initialization**: Creates and initializes the CorePlusSessionFactory
-            5. **Readiness Verification**: Confirms factory is ready to create sessions
+        Implementation:
+            1. Extracts `connection_timeout` from config (defaults to 10.0 seconds)
+            2. Calls CorePlusSessionFactory.from_config() with timeout wrapper
+            3. Logs creation progress (DEBUG) and completion (INFO)
+            4. Handles timeout errors with appropriate logging and exception
 
-        Factory Creation Complexity:
-            Enterprise factory creation involves multiple steps:
-            - **Server Connection**: Establishing secure connections to Enterprise infrastructure
-            - **Authentication Protocol**: Implementing complex Enterprise auth (SAML, OAuth, etc.)
-            - **Configuration Parsing**: Processing nested configuration parameters
-            - **Resource Allocation**: Setting up connection pools and resource management
-            - **Validation Checks**: Ensuring all factory components are properly configured
+        Timeout Behavior:
+            The configurable timeout prevents indefinite hanging when connecting to
+            unreachable or slow Core+ systems. If the timeout expires, a
+            DeephavenConnectionError is raised with a descriptive message.
 
-        Configuration Processing:
-            The stored configuration dictionary is processed comprehensively:
-            - **Server Settings**: URL, port, timeout, and connection parameters
-            - **Authentication Config**: Credentials, tokens, certificates, and auth protocols
-            - **Factory Options**: Connection pooling, caching, retry policies
-            - **Enterprise Features**: Multi-tenancy, workspace, and security settings
-            - **Performance Tuning**: Resource limits, optimization flags, and tuning parameters
-
-        Performance Characteristics:
-            Factory creation is an expensive operation involving:
-            - **Network Operations**: Multiple round trips to Enterprise servers
-            - **Authentication Overhead**: Complex Enterprise auth protocol handshakes
-            - **Configuration Validation**: Comprehensive parameter validation and setup
-            - **Resource Allocation**: Connection pool setup and resource initialization
-            - **Typical Duration**: Can range from 1-10 seconds depending on complexity
-
-        Error Scenarios and Handling:
-            Various failure modes can occur during factory creation:
-            - **Configuration Errors**: Invalid, missing, or malformed configuration parameters
-            - **Authentication Failures**: Invalid credentials, expired tokens, or auth protocol errors
-            - **Network Issues**: Connectivity problems to Enterprise servers
-            - **Permission Errors**: Insufficient privileges for factory creation
-            - **Resource Exhaustion**: Enterprise server unable to allocate factory resources
-            - **Version Compatibility**: Enterprise server version incompatibility issues
-
-        Enterprise Authentication Integration:
-            Factory creation handles complex Enterprise authentication:
-            - **SAML Integration**: Full SAML authentication protocol support
-            - **OAuth Flows**: OAuth 2.0 and OpenID Connect integration
-            - **Certificate-Based**: X.509 certificate authentication
-            - **Custom Protocols**: Support for Enterprise-specific auth mechanisms
-            - **Token Management**: Secure token storage and refresh capabilities
-
-        Factory Capabilities After Creation:
-            The created factory provides comprehensive session creation capabilities:
-            - **Session Creation**: Ability to create multiple CorePlusSession instances
-            - **Authentication Sharing**: Reuse authentication across created sessions
-            - **Connection Pooling**: Efficient connection reuse for session creation
-            - **Configuration Consistency**: All sessions created with consistent config
-            - **Health Monitoring**: Factory-level health monitoring via ping() method
-
-        Thread Safety:
-            This method is fully thread-safe and can be called concurrently,
-            though the BaseItemManager ensures only one creation attempt occurs
-            per manager instance at a time.
+        Args:
+            None (uses self._config stored configuration dictionary)
 
         Returns:
-            CorePlusSessionFactory: A fully initialized and configured Deephaven Enterprise
-                session factory ready for creating CorePlusSession instances. The factory
-                will have completed all authentication, connection setup, and configuration
-                validation, and its ping() method should return success.
+            CorePlusSessionFactory: Initialized Core+ session factory ready to create
+                CorePlusSession instances. The factory's ping() method can be used to
+                verify health.
 
         Raises:
-            Exception: Various exceptions can be raised during factory creation:
-                - **ConfigurationError**: Invalid or incomplete configuration parameters
-                - **AuthenticationError**: Authentication setup or credential validation failures
-                - **ConnectionError**: Network connectivity issues to Enterprise servers
-                - **PermissionError**: Insufficient privileges for factory creation
-                - **ResourceError**: Enterprise server resource allocation failures
-                - **CompatibilityError**: Version or protocol compatibility issues
+            DeephavenConnectionError: If connection times out after the configured duration.
+                Includes timeout value and troubleshooting guidance in the error message.
+            AuthenticationError: If Core+ authentication fails (raised by from_config).
+            ConfigurationError: If configuration is invalid (raised by from_config).
+            Exception: Other errors from CorePlusSessionFactory.from_config().
 
-        Implementation Notes:
-            This method is marked with @override to indicate it implements the abstract
-            method from BaseItemManager. It must not be called directly - use get()
-            instead to ensure proper caching, error handling, and lifecycle management.
+        Notes:
+            - This method is marked @override to implement BaseItemManager abstract method
+            - Do not call directly - use get() for proper caching and error handling
+            - Timeout can be configured via 'connection_timeout' in config (int or float)
+            - Default timeout is 10.0 seconds if not specified
 
         See Also:
-            BaseItemManager.get(): The public method that triggers lazy initialization
-            CorePlusSessionFactory: The Enterprise factory type created by this method
-            CorePlusSessionFactory.ping(): Health check method for created factories
+            BaseItemManager.get(): Public method triggering lazy initialization
+            CorePlusSessionFactory.from_config(): Underlying factory creation method
             EnterpriseSessionManager._create_item(): Session-level creation counterpart
         """
-        return await CorePlusSessionFactory.from_config(self._config)
+        # Extract timeout from config (default to 10 seconds if not specified)
+        timeout = self._config.get("connection_timeout", 10.0)
+        
+        _LOGGER.debug(
+            f"[{self.__class__.__name__}] Creating enterprise factory for '{self.full_name}' (timeout: {timeout}s)"
+        )
+        
+        # Wrap factory creation with timeout to prevent hanging on unreachable systems
+        try:
+            factory = await asyncio.wait_for(
+                CorePlusSessionFactory.from_config(self._config),
+                timeout=timeout
+            )
+            _LOGGER.info(
+                f"[{self.__class__.__name__}] Successfully created enterprise factory for '{self.full_name}'"
+            )
+            return factory
+        except asyncio.TimeoutError:
+            _LOGGER.error(
+                f"[{self.__class__.__name__}] Connection to enterprise system '{self.full_name}' timed out after {timeout} seconds"
+            )
+            raise DeephavenConnectionError(
+                f"Connection to enterprise system timed out after {timeout} seconds. "
+                f"Check connection_json_url and network connectivity."
+            )
 
     @override
     async def _check_liveness(

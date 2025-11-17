@@ -1101,3 +1101,134 @@ def test_validate_optional_fields_ignores_missing():
     }
     # Should not raise exception
     _validate_optional_fields("test_system", config)
+
+
+# === Connection Timeout Validation Tests ===
+
+
+def test_connection_timeout_valid_int():
+    """Test connection_timeout with valid integer value."""
+    config = {
+        "test_system": {
+            "connection_json_url": "https://test.example.com/iris/connection.json",
+            "auth_type": "password",
+            "username": "user",
+            "password": "pass",
+            "connection_timeout": 5,
+        }
+    }
+    validate_enterprise_systems_config(config)
+
+
+def test_connection_timeout_valid_float():
+    """Test connection_timeout with valid float value."""
+    config = {
+        "test_system": {
+            "connection_json_url": "https://test.example.com/iris/connection.json",
+            "auth_type": "password",
+            "username": "user",
+            "password": "pass",
+            "connection_timeout": 10.5,
+        }
+    }
+    validate_enterprise_systems_config(config)
+
+
+def test_connection_timeout_missing_is_valid():
+    """Test that missing connection_timeout is valid (it's optional)."""
+    config = {
+        "test_system": {
+            "connection_json_url": "https://test.example.com/iris/connection.json",
+            "auth_type": "password",
+            "username": "user",
+            "password": "pass",
+        }
+    }
+    validate_enterprise_systems_config(config)
+
+
+def test_connection_timeout_zero_invalid():
+    """Test connection_timeout with zero value (invalid)."""
+    config = {
+        "test_system": {
+            "connection_json_url": "https://test.example.com/iris/connection.json",
+            "auth_type": "password",
+            "username": "user",
+            "password": "pass",
+            "connection_timeout": 0,
+        }
+    }
+    with pytest.raises(
+        EnterpriseSystemConfigurationError,
+        match=r"'connection_timeout' for enterprise system 'test_system' must be positive, but got 0",
+    ):
+        validate_enterprise_systems_config(config)
+
+
+def test_connection_timeout_negative_invalid():
+    """Test connection_timeout with negative value (invalid)."""
+    config = {
+        "test_system": {
+            "connection_json_url": "https://test.example.com/iris/connection.json",
+            "auth_type": "password",
+            "username": "user",
+            "password": "pass",
+            "connection_timeout": -5,
+        }
+    }
+    with pytest.raises(
+        EnterpriseSystemConfigurationError,
+        match=r"'connection_timeout' for enterprise system 'test_system' must be positive, but got -5",
+    ):
+        validate_enterprise_systems_config(config)
+
+
+def test_connection_timeout_wrong_type_string():
+    """Test connection_timeout with wrong type (string instead of number)."""
+    config = {
+        "test_system": {
+            "connection_json_url": "https://test.example.com/iris/connection.json",
+            "auth_type": "password",
+            "username": "user",
+            "password": "pass",
+            "connection_timeout": "10",
+        }
+    }
+    with pytest.raises(
+        EnterpriseSystemConfigurationError,
+        match=r"Optional field 'connection_timeout' for enterprise system 'test_system' must be one of types \(int, float\), but got str",
+    ):
+        validate_enterprise_systems_config(config)
+
+
+def test_connection_timeout_wrong_type_bool():
+    """Test connection_timeout with wrong type (bool)."""
+    config = {
+        "test_system": {
+            "connection_json_url": "https://test.example.com/iris/connection.json",
+            "auth_type": "password",
+            "username": "user",
+            "password": "pass",
+            "connection_timeout": True,
+        }
+    }
+    # Bool is rejected by our custom validation even though it's a subclass of int
+    with pytest.raises(
+        EnterpriseSystemConfigurationError,
+        match=r"'connection_timeout' for enterprise system 'test_system' must be a number \(int or float\), but got bool",
+    ):
+        validate_enterprise_systems_config(config)
+
+
+def test_connection_timeout_very_small_float_valid():
+    """Test connection_timeout with very small positive float (edge case)."""
+    config = {
+        "test_system": {
+            "connection_json_url": "https://test.example.com/iris/connection.json",
+            "auth_type": "password",
+            "username": "user",
+            "password": "pass",
+            "connection_timeout": 0.01,
+        }
+    }
+    validate_enterprise_systems_config(config)
