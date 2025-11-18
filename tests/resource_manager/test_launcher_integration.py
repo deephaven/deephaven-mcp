@@ -27,7 +27,6 @@ import asyncio
 import logging
 import os
 import shutil
-import signal
 import sys
 import threading
 import time
@@ -397,8 +396,6 @@ class TestOrphanCleanupIntegration:
             )
 
             # Temporarily override Path.home() to use tmp_path
-            import deephaven_mcp.resource_manager._instance_tracker as tracker_mod
-
             original_home = Path.home
 
             def mock_home():
@@ -629,4 +626,4 @@ class TestInstanceTrackerIntegration:
                     process.kill()
                     await process.wait()
                 except Exception:
-                    pass
+                    pass  # Best effort cleanup

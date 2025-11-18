@@ -4,7 +4,6 @@ Unit tests for community utility functions.
 Tests port allocation and authentication token generation utilities.
 """
 
-import socket
 from unittest.mock import patch
 
 import pytest
