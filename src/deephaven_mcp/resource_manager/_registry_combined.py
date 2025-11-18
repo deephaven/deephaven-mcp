@@ -39,9 +39,10 @@ Usage:
     ```
 """
 
+import asyncio
 import logging
 import sys
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, NamedTuple, cast
 
 if TYPE_CHECKING:
     from typing_extensions import override  # pragma: no cover
@@ -50,7 +51,12 @@ elif sys.version_info >= (3, 12):
 else:
     from typing_extensions import override  # pragma: no cover
 
-from deephaven_mcp._exceptions import DeephavenConnectionError, InternalError
+from deephaven_mcp._exceptions import (
+    DeephavenConnectionError,
+    InternalError,
+    InvalidSessionNameError,
+    RegistryItemNotFoundError,
+)
 from deephaven_mcp.client import CorePlusControllerClient, CorePlusSession
 from deephaven_mcp.config import ConfigManager
 
@@ -63,6 +69,22 @@ from ._registry import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+
+class _FactorySessionChanges(NamedTuple):
+    """Changes needed for a factory's sessions.
+
+    Attributes:
+        factory (CorePlusSessionFactoryManager): The factory manager instance.
+        factory_name (str): Name of the factory.
+        session_names_to_add (set[str]): Set of bare session names to create.
+        session_keys_to_remove (set[str]): Set of full session keys to remove.
+    """
+
+    factory: CorePlusSessionFactoryManager
+    factory_name: str
+    session_names_to_add: set[str]
+    session_keys_to_remove: set[str]
 
 
 class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
@@ -132,9 +154,10 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
         session, including lazy initialization and proper cleanup.
 
         Args:
-            factory: The CorePlusSessionFactoryManager instance that will create the session.
-            factory_name: The string identifier for the factory (used as the session's 'source').
-            session_name: The name of the persistent query session to connect to.
+            factory (CorePlusSessionFactoryManager): The CorePlusSessionFactoryManager instance
+                that will create the session.
+            factory_name (str): The string identifier for the factory (used as the session's 'source').
+            session_name (str): The name of the persistent query session to connect to.
 
         Returns:
             EnterpriseSessionManager: A new manager that provides access to the enterprise session.
@@ -228,7 +251,7 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
         multiple times will only perform the initialization once.
 
         Args:
-            config_manager: The configuration manager containing session
+            config_manager (ConfigManager): The configuration manager containing session
                 and factory configurations for both community and enterprise environments.
 
         Raises:
@@ -241,46 +264,41 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
         """
         async with self._lock:
             if self._initialized:  # Follow base registry pattern
-                _LOGGER.warning("[%s] already initialized", self.__class__.__name__)
+                _LOGGER.warning(f"[{self.__class__.__name__}] already initialized")
                 return
 
-            _LOGGER.info("[%s] initializing...", self.__class__.__name__)
+            _LOGGER.info(f"[{self.__class__.__name__}] initializing...")
 
             # Initialize community session registry
             self._community_registry = CommunitySessionRegistry()
             await self._community_registry.initialize(config_manager)
             _LOGGER.debug(
-                "[%s] initialized community session registry", self.__class__.__name__
+                f"[{self.__class__.__name__}] initialized community session registry"
             )
 
             # Initialize enterprise session factory registry
             self._enterprise_registry = CorePlusSessionFactoryRegistry()
             await self._enterprise_registry.initialize(config_manager)
             _LOGGER.debug(
-                "[%s] initialized enterprise session factory registry",
-                self.__class__.__name__,
+                f"[{self.__class__.__name__}] initialized enterprise session factory registry"
             )
 
             # Load static community sessions into _items
-            _LOGGER.debug("[%s] loading community sessions", self.__class__.__name__)
+            _LOGGER.debug(f"[{self.__class__.__name__}] loading community sessions")
             community_sessions = await self._community_registry.get_all()
             _LOGGER.debug(
-                "[%s] loading %d community sessions",
-                self.__class__.__name__,
-                len(community_sessions),
+                f"[{self.__class__.__name__}] loading {len(community_sessions)} community sessions"
             )
 
             for name, session in community_sessions.items():
                 _LOGGER.debug(
-                    "[%s] loading community session '%s'", self.__class__.__name__, name
+                    f"[{self.__class__.__name__}] loading community session '{name}'"
                 )
                 # Use the session's full_name (which is properly encoded) as the key
                 self._items[session.full_name] = session
 
             _LOGGER.debug(
-                "[%s] loaded %d community sessions",
-                self.__class__.__name__,
-                len(community_sessions),
+                f"[{self.__class__.__name__}] loaded {len(community_sessions)} community sessions"
             )
 
             # Mark as initialized before updating enterprise sessions since they check initialization
@@ -289,18 +307,17 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             # Update enterprise sessions from controller clients
             await self._update_enterprise_sessions()
             _LOGGER.debug(
-                "[%s] populated enterprise sessions from controllers",
-                self.__class__.__name__,
+                f"[{self.__class__.__name__}] populated enterprise sessions from controllers"
             )
 
-            _LOGGER.info("[%s] initialization complete", self.__class__.__name__)
+            _LOGGER.info(f"[{self.__class__.__name__}] initialization complete")
 
     @override
     async def _load_items(self, config_manager: ConfigManager) -> None:
         """Raise an error as this method should not be called directly.
 
         Args:
-            config_manager: The configuration manager (unused in this implementation).
+            config_manager (ConfigManager): The configuration manager (unused in this implementation).
 
         Raises:
             InternalError: Always raised to indicate this method should not be used.
@@ -427,19 +444,20 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
         client can still communicate with the controller before reusing it.
 
         Args:
-            factory: The CorePlusSessionFactoryManager instance used to create controller clients
-                if needed.
-            factory_name: The name of the factory, used as a key in the controller client cache
-                and for logging purposes.
+            factory (CorePlusSessionFactoryManager): The CorePlusSessionFactoryManager instance
+                used to create controller clients if needed.
+            factory_name (str): The name of the factory, used as a key in the controller client
+                cache and for logging purposes.
 
         Returns:
             CorePlusControllerClient: A healthy controller client for the factory, either from
                 cache or newly created.
 
         Raises:
-            Exception: Any exception during controller client creation or health checking is
-                logged but not propagated, as this method will attempt recovery by creating
-                a new client.
+            Exception: Exceptions during health checking of cached clients are caught and
+                handled by recreating the client. Exceptions during new client creation
+                (from factory.get() or accessing controller_client property) are propagated
+                to the caller.
         """
         # Check if we have a cached controller client
         if factory_name in self._controller_clients:
@@ -453,18 +471,13 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
                         "Controller client ping returned False, indicating authentication issue"
                     )
                 _LOGGER.debug(
-                    "[%s] using cached controller client for factory '%s'",
-                    self.__class__.__name__,
-                    factory_name,
+                    f"[{self.__class__.__name__}] using cached controller client for factory '{factory_name}'"
                 )
                 return client
             except Exception as e:
                 # If there's any error, close the old client and create a new one
                 _LOGGER.warning(
-                    "[%s] controller client for factory '%s' is dead: %s. Releasing reference to dead controller client.",
-                    self.__class__.__name__,
-                    factory_name,
-                    e,
+                    f"[{self.__class__.__name__}] controller client for factory '{factory_name}' is dead: {e}. Releasing reference to dead controller client."
                 )
 
                 # Remove the dead client from cache
@@ -472,9 +485,7 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
 
         # Create a new controller client
         _LOGGER.debug(
-            "[%s] creating new controller client for factory '%s'",
-            self.__class__.__name__,
-            factory_name,
+            f"[{self.__class__.__name__}] creating new controller client for factory '{factory_name}'"
         )
         factory_instance = await factory.get()
         client = factory_instance.controller_client
@@ -496,16 +507,22 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
         created with a closure that connects to the persistent query session through
         the factory.
 
+        The method is idempotent - if a session already exists in the registry, it will
+        not be recreated. This prevents duplicate session managers and preserves existing
+        session state when updates occur.
+
         Session keys are constructed using BaseItemManager.make_full_name with the format:
-        SystemType.ENTERPRISE:factory_name:session_name
+        "enterprise:<factory_name>:<session_name>"
         This ensures consistent key formatting throughout the registry for storage,
         retrieval, and existence checks. The colon-separated format is used across
         all registry operations.
 
         Args:
-            factory: The CorePlusSessionFactoryManager to create sessions from.
-            factory_name: The name of the factory (used as the session source).
-            session_names: Set of session names to create managers for.
+            factory (CorePlusSessionFactoryManager): The CorePlusSessionFactoryManager to create
+                sessions from.
+            factory_name (str): The name of the factory (used as the session source).
+            session_names (set[str]): Set of bare session names to create managers for (without
+                the "enterprise:<factory_name>:" prefix).
         """
         for session_name in session_names:
             key = BaseItemManager.make_full_name(
@@ -517,9 +534,7 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
                 )
                 self._items[session_manager.full_name] = session_manager
                 _LOGGER.debug(
-                    "[%s] created and stored EnterpriseSessionManager for '%s'",
-                    self.__class__.__name__,
-                    session_manager.full_name,
+                    f"[{self.__class__.__name__}] created and stored EnterpriseSessionManager for '{session_manager.full_name}'"
                 )
 
     async def _close_stale_enterprise_sessions(self, stale_keys: set[str]) -> None:
@@ -529,8 +544,18 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
         on the enterprise controller. It removes them from the registry first to
         prevent further access, then attempts to close the session managers gracefully.
 
+        The removal happens before closure to ensure that even if closing fails (e.g.,
+        network errors, timeouts), the stale session is no longer accessible through
+        the registry. This prevents usage of sessions that no longer exist on the controller.
+
         Args:
-            stale_keys: Set of fully qualified session keys to close and remove.
+            stale_keys (set[str]): Set of fully qualified session keys to close and remove.
+                Keys should be in the format "enterprise:<factory_name>:<session_name>".
+
+        Raises:
+            Exception: Any exception during session closure will propagate to the caller.
+                Since sessions are removed from the registry before closure, failures during
+                close operations do not leave the registry in an inconsistent state.
         """
         for key in stale_keys:
             # Remove the manager from the registry first. This ensures that even if
@@ -544,11 +569,18 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
     def _find_session_keys_for_factory(self, factory_name: str) -> set[str]:
         """Find all session keys associated with a specific factory.
 
+        This method searches for all sessions in self._items that belong to the specified
+        factory by matching the key prefix pattern. Enterprise session keys follow the format
+        "enterprise:<factory_name>:<session_name>", so we can identify all sessions for a
+        factory by checking the prefix.
+
         Args:
-            factory_name: The name of the factory to find sessions for.
+            factory_name (str): The name of the factory to find sessions for.
 
         Returns:
-            set[str]: A set of session keys for the specified factory.
+            set[str]: A set of fully qualified session keys (e.g., "enterprise:factory1:session1")
+                for all sessions belonging to the specified factory. Returns empty set if no
+                sessions found.
         """
         prefix = BaseItemManager.make_full_name(SystemType.ENTERPRISE, factory_name, "")
         return {k for k in self._items if k.startswith(prefix)}
@@ -560,12 +592,10 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
         removes them from the registry, and properly cleans up the session resources.
 
         Args:
-            factory_name: The name of the factory to remove sessions for.
+            factory_name (str): The name of the factory to remove sessions for.
         """
         _LOGGER.warning(
-            "[%s] removing all sessions for offline factory '%s'",
-            self.__class__.__name__,
-            factory_name,
+            f"[{self.__class__.__name__}] removing all sessions for offline factory '{factory_name}'"
         )
 
         # Find all sessions for this factory and remove them
@@ -573,45 +603,36 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
         await self._close_stale_enterprise_sessions(keys_to_remove)
 
         _LOGGER.info(
-            "[%s] removed %d sessions for offline factory '%s'",
-            self.__class__.__name__,
-            len(keys_to_remove),
-            factory_name,
+            f"[{self.__class__.__name__}] removed {len(keys_to_remove)} sessions for offline factory '{factory_name}'"
         )
 
-    async def _update_sessions_for_factory(
+    async def _calculate_factory_session_changes(
         self, factory: CorePlusSessionFactoryManager, factory_name: str
-    ) -> None:
+    ) -> _FactorySessionChanges:
         """
-        Update the sessions for a single enterprise factory.
+        Calculate session changes needed for a single enterprise factory.
 
-        This method attempts to connect to the factory's controller client to retrieve
-        the current list of available sessions. It then synchronizes the registry by:
-        - Adding new sessions that are present on the controller but not in the registry
-        - Removing stale sessions that are no longer present on the controller
-
-        The synchronization process ensures the registry accurately reflects the current
-        state of sessions available on the enterprise controller, providing a consistent
-        view for clients accessing the registry.
+        This method queries the factory's controller to retrieve available sessions,
+        then calculates what needs to be added or removed. It returns the information
+        needed to apply changes, without modifying self._items or creating session objects.
 
         If a DeephavenConnectionError occurs (e.g., the system is offline or unreachable),
-        all sessions for that factory will be removed from the registry and their resources
-        cleaned up. Only connection-related exceptions trigger this removal; all other
-        exceptions are propagated to the caller for visibility and debugging.
+        returns empty new sessions and all existing sessions as removals.
 
         Args:
-            factory (CorePlusSessionFactoryManager): The factory manager to update sessions for.
-            factory_name (str): The name of the factory being updated, used for logging and
-                session identification.
+            factory (CorePlusSessionFactoryManager): The factory manager to query.
+            factory_name (str): The name of the factory being updated.
+
+        Returns:
+            _FactorySessionChanges: Named tuple containing the factory, factory name,
+                session names to add, and session keys to remove.
 
         Raises:
             Exception: Any non-connection exceptions during session discovery are propagated
                 to allow proper error handling by the caller.
         """
         _LOGGER.info(
-            "[%s] updating enterprise sessions for factory '%s'",
-            self.__class__.__name__,
-            factory_name,
+            f"[{self.__class__.__name__}] updating enterprise sessions for factory '{factory_name}'"
         )
 
         try:
@@ -622,33 +643,23 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             session_info = await controller_client.map()
         except DeephavenConnectionError as e:
             _LOGGER.warning(
-                "[%s] failed to connect to factory '%s': %s",
-                self.__class__.__name__,
-                factory_name,
-                e,
+                f"[{self.__class__.__name__}] failed to connect to factory '{factory_name}': {e}"
             )
-            # If we can't connect to the factory, remove all sessions for it
-            await self._remove_all_sessions_for_factory(factory_name)
-            return
+            # If we can't connect, return no new sessions and all existing sessions as removals
+            existing_keys = self._find_session_keys_for_factory(factory_name)
+            return _FactorySessionChanges(factory, factory_name, set(), existing_keys)
 
         # If we successfully connected, proceed with normal session update
         session_names_from_controller = [
             si.config.pb.name for si in session_info.values()
         ]
         _LOGGER.debug(
-            "[%s] factory '%s' reports %d sessions: %s",
-            self.__class__.__name__,
-            factory_name,
-            len(session_names_from_controller),
-            session_names_from_controller,
+            f"[{self.__class__.__name__}] factory '{factory_name}' reports {len(session_names_from_controller)} sessions: {session_names_from_controller}"
         )
 
         existing_keys = self._find_session_keys_for_factory(factory_name)
         _LOGGER.debug(
-            "[%s] factory '%s' has %d existing sessions in registry",
-            self.__class__.__name__,
-            factory_name,
-            len(existing_keys),
+            f"[{self.__class__.__name__}] factory '{factory_name}' has {len(existing_keys)} existing sessions in registry"
         )
 
         controller_keys = {
@@ -664,74 +675,166 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
         }
         if new_session_names:
             _LOGGER.debug(
-                "[%s] factory '%s' adding %d new sessions: %s",
-                self.__class__.__name__,
-                factory_name,
-                len(new_session_names),
-                list(new_session_names),
+                f"[{self.__class__.__name__}] factory '{factory_name}' calculated {len(new_session_names)} new sessions: {list(new_session_names)}"
             )
-        self._add_new_enterprise_sessions(factory, factory_name, new_session_names)
 
+        # Identify removals
         stale_keys = existing_keys - controller_keys
         if stale_keys:
             _LOGGER.debug(
-                "[%s] factory '%s' removing %d stale sessions: %s",
-                self.__class__.__name__,
-                factory_name,
-                len(stale_keys),
-                list(stale_keys),
+                f"[{self.__class__.__name__}] factory '{factory_name}' calculated {len(stale_keys)} stale sessions: {list(stale_keys)}"
             )
-        await self._close_stale_enterprise_sessions(stale_keys)
 
         _LOGGER.info(
-            "[%s] enterprise session update complete for factory '%s'",
-            self.__class__.__name__,
-            factory_name,
+            f"[{self.__class__.__name__}] calculated session changes for factory '{factory_name}'"
         )
 
-    async def _update_enterprise_sessions(self) -> None:
-        """Update enterprise sessions by querying all factories and syncing sessions.
+        return _FactorySessionChanges(
+            factory, factory_name, new_session_names, stale_keys
+        )
 
-        This method iterates through all registered enterprise factories and updates
-        their sessions by querying their controller clients. It ensures the registry
-        has the most current view of available enterprise sessions.
+    async def _apply_factory_session_changes(
+        self, changes: _FactorySessionChanges
+    ) -> None:
+        """Apply factory session changes to the registry.
+
+        This helper method applies the changes calculated by _calculate_factory_session_changes
+        to the registry's internal state. It modifies self._items by creating new session
+        managers for new sessions and removing stale session managers.
+
+        This method performs writes to the registry state and must be called serially (not
+        in parallel) to maintain thread safety. It is typically called from
+        _update_enterprise_sessions after parallel calculation of changes.
+
+        Args:
+            changes (_FactorySessionChanges): _FactorySessionChanges containing the factory,
+                factory name, session names to add, and session keys to remove.
+
+        Raises:
+            Exception: Any exception during session creation or closure will propagate to
+                the caller. These are typically collected into an ExceptionGroup by
+                _update_enterprise_sessions for proper error reporting.
+        """
+        if changes.session_names_to_add:
+            _LOGGER.debug(
+                f"[{self.__class__.__name__}] Adding {len(changes.session_names_to_add)} sessions for factory '{changes.factory_name}'"
+            )
+            self._add_new_enterprise_sessions(
+                changes.factory, changes.factory_name, changes.session_names_to_add
+            )
+
+        if changes.session_keys_to_remove:
+            _LOGGER.debug(
+                f"[{self.__class__.__name__}] Removing {len(changes.session_keys_to_remove)} sessions for factory '{changes.factory_name}'"
+            )
+            await self._close_stale_enterprise_sessions(changes.session_keys_to_remove)
+
+    async def _update_enterprise_sessions(
+        self, factory_name: str | None = None
+    ) -> None:
+        """Update enterprise sessions for one or all factories.
+
+        This method queries enterprise factories to retrieve and sync their sessions.
+        Queries run in parallel for performance. Connection errors are logged and
+        treated as offline factories (sessions removed). Other exceptions are collected
+        and raised together as an ExceptionGroup.
+
+        Args:
+            factory_name (str | None): Optional factory name to update. If None, updates all factories.
+
+        Thread Safety:
+            This method MUST be called while holding self._lock. Changes are applied
+            serially to self._items after parallel queries complete.
 
         Raises:
             InternalError: If the registry has not been initialized.
-            Exception: Any exception from factory session updates.
+            RegistryItemNotFoundError: If factory_name is provided but not found in the registry.
+            ExceptionGroup: If any factory update fails with a non-connection exception.
+                Contains all exceptions from failed factories.
         """
-        _LOGGER.info("[%s] Updating enterprise sessions", self.__class__.__name__)
         self._check_initialized()
 
-        _LOGGER.debug("[%s] Getting all factories", self.__class__.__name__)
-        # We know this is initialized at this point, so it's safe to cast
-        factories = await cast(
-            CorePlusSessionFactoryRegistry, self._enterprise_registry
-        ).get_all()
-        _LOGGER.debug("[%s] Got %d factories", self.__class__.__name__, len(factories))
-
-        for factory_name, factory in factories.items():
+        # Get factory or factories to update
+        registry = cast(CorePlusSessionFactoryRegistry, self._enterprise_registry)
+        if factory_name is not None:
+            # Update single factory
             _LOGGER.debug(
-                "[%s] Updating sessions for factory '%s'",
-                self.__class__.__name__,
-                factory_name,
+                f"[{self.__class__.__name__}] Updating sessions for factory '{factory_name}'"
             )
-            await self._update_sessions_for_factory(factory, factory_name)
+            factory = await registry.get(factory_name)
+            factories = {factory_name: factory}
+        else:
+            # Update all factories
+            _LOGGER.info(
+                f"[{self.__class__.__name__}] Updating enterprise sessions for all factories"
+            )
+            factories = await registry.get_all()
+            _LOGGER.debug(f"[{self.__class__.__name__}] Got {len(factories)} factories")
 
-        _LOGGER.info("[%s] Updated enterprise sessions", self.__class__.__name__)
+        if not factories:
+            _LOGGER.info(f"[{self.__class__.__name__}] No factories to update")
+            return
+
+        # Run all factory queries concurrently (read-only, fully safe)
+        tasks = [
+            self._calculate_factory_session_changes(factory, fname)
+            for fname, factory in factories.items()
+        ]
+
+        # Capture all exceptions to report them together
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Collect exceptions and apply successful changes serially (THREAD SAFE)
+        exceptions = []
+        for fname, result in zip(factories.keys(), results, strict=False):
+            if isinstance(result, Exception):
+                _LOGGER.error(
+                    f"[{self.__class__.__name__}] Factory '{fname}' calculation failed: {result}",
+                    exc_info=result,
+                )
+                exceptions.append(result)
+            else:
+                # result is a _FactorySessionChanges named tuple
+                try:
+                    await self._apply_factory_session_changes(
+                        cast(_FactorySessionChanges, result)
+                    )
+                except Exception as e:
+                    _LOGGER.error(
+                        f"[{self.__class__.__name__}] Factory '{fname}' application failed: {e}",
+                        exc_info=e,
+                    )
+                    exceptions.append(e)
+
+        # Raise ExceptionGroup if any factory failed
+        if exceptions:
+            raise ExceptionGroup(
+                f"Factory update(s) failed for {factory_name if factory_name else 'one or more factories'}",
+                exceptions,
+            )
+
+        # Log completion
+        if factory_name is not None:
+            _LOGGER.info(
+                f"[{self.__class__.__name__}] Updated sessions for factory '{factory_name}'"
+            )
+        else:
+            _LOGGER.info(
+                f"[{self.__class__.__name__}] Updated enterprise sessions for all factories"
+            )
 
     @override
     async def get(self, name: str) -> BaseItemManager:
         """Retrieve a specific session manager from the registry by its fully qualified name.
 
         This method provides access to any session manager (community or enterprise)
-        by its fully qualified name. Before retrieving the item, it updates the enterprise
-        sessions to ensure that the registry has the latest information about available
-        enterprise sessions from all controller clients.
+        by its fully qualified name. For enterprise sessions, it updates only the
+        specific factory's sessions (not all factories) to ensure fresh data while
+        minimizing unnecessary network calls.
 
-        The registry will automatically discover and add new enterprise sessions if they
-        have been created since the last update, ensuring you get access to the most
-        current session state.
+        For enterprise sessions, the registry queries only the relevant factory's
+        controller to discover new sessions or detect removed sessions, ensuring you
+        get current state without querying all factories.
 
         Name Format:
             The name must be a fully qualified identifier following the format:
@@ -752,9 +855,9 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
 
         Raises:
             InternalError: If the registry has not been initialized via initialize().
-            KeyError: If no session manager with the given name is found in the registry
+            RegistryItemNotFoundError: If no session manager with the given name is found in the registry
                 after updating enterprise sessions.
-            Exception: If any error occurs while updating enterprise sessions from controllers.
+            ExceptionGroup: If any factory updates fail with non-connection exceptions.
 
         Thread Safety:
             This method is coroutine-safe and can be called concurrently.
@@ -771,16 +874,26 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
         """
         async with self._lock:
 
-            # Check initialization and raise KeyError if item not found
+            # Check initialization and raise RegistryItemNotFoundError if item not found
             # (avoid calling super().get() which would try to acquire the lock again)
             self._check_initialized()
 
-            # Update enterprise sessions before retrieving (lock is already held)
-            # This also checks initialization status
-            await self._update_enterprise_sessions()
+            # For enterprise sessions, update only the specific factory (not all)
+            # For community sessions, no update needed (static config)
+            try:
+                system_type, source, _ = BaseItemManager.parse_full_name(name)
+                if system_type == SystemType.ENTERPRISE:
+                    await self._update_enterprise_sessions(factory_name=source)
+            except InvalidSessionNameError:
+                # Expected: Malformed session name, continue to session RegistryItemNotFoundError below
+                pass
+            except RegistryItemNotFoundError:
+                # Expected: Registry item (factory) not found/offline, continue to session RegistryItemNotFoundError below
+                pass
+            # ExceptionGroup NOT caught → real bugs propagate
 
             if name not in self._items:
-                raise KeyError(
+                raise RegistryItemNotFoundError(
                     f"No item with name '{name}' found in {self.__class__.__name__}"
                 )
 
@@ -813,8 +926,8 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
 
         Raises:
             InternalError: If the registry has not been initialized via initialize().
-            Exception: If any error occurs while updating enterprise sessions from
-                controller clients (network errors, authentication failures, etc.).
+            ExceptionGroup: If any factory updates fail with non-connection exceptions during
+                the enterprise session update. Contains all exceptions from failed factories.
 
         Thread Safety:
             This method is coroutine-safe and can be called concurrently.
@@ -848,12 +961,11 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             # Update enterprise sessions before retrieving (lock is already held)
             # This also checks initialization status
             _LOGGER.info(
-                "[%s] Updating enterprise sessions before retrieving",
-                self.__class__.__name__,
+                f"[{self.__class__.__name__}] Updating enterprise sessions before retrieving"
             )
             await self._update_enterprise_sessions()
 
-            _LOGGER.info("[%s] Returning all sessions", self.__class__.__name__)
+            _LOGGER.info(f"[{self.__class__.__name__}] Returning all sessions")
             return self._items.copy()
 
     async def add_session(self, manager: BaseItemManager) -> None:
@@ -907,9 +1019,7 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             self._added_sessions.add(session_id)
 
             _LOGGER.debug(
-                "[%s] added session '%s' to registry",
-                self.__class__.__name__,
-                session_id,
+                f"[{self.__class__.__name__}] added session '{session_id}' to registry"
             )
 
     async def remove_session(self, session_id: str) -> BaseItemManager | None:
@@ -967,9 +1077,7 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
                 self._added_sessions.discard(session_id)
 
                 _LOGGER.debug(
-                    "[%s] removed session '%s' from registry",
-                    self.__class__.__name__,
-                    session_id,
+                    f"[{self.__class__.__name__}] removed session '{session_id}' from registry"
                 )
             return removed_manager
 
@@ -1035,8 +1143,8 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
                         else:
                             # Session no longer exists, mark for cleanup
                             stale_sessions.append(session_id)
-                except ValueError:
-                    # Invalid session ID format, mark for cleanup
+                except InvalidSessionNameError:
+                    # Expected: Invalid session ID format, mark for cleanup
                     stale_sessions.append(session_id)
 
             # Clean up stale sessions
@@ -1123,20 +1231,18 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
                     f"{self.__class__.__name__} not initialized. Call 'await initialize()' after construction."
                 )
 
-            _LOGGER.info("[%s] closing...", self.__class__.__name__)
+            _LOGGER.info(f"[{self.__class__.__name__}] closing...")
 
             # Close community registry
             if self._community_registry is not None:
                 try:
                     await self._community_registry.close()
                     _LOGGER.debug(
-                        "[%s] closed community registry", self.__class__.__name__
+                        f"[{self.__class__.__name__}] closed community registry"
                     )
                 except Exception as e:
                     _LOGGER.error(
-                        "[%s] error closing community registry: %s",
-                        self.__class__.__name__,
-                        e,
+                        f"[{self.__class__.__name__}] error closing community registry: {e}"
                     )
 
             # Close enterprise registry
@@ -1144,22 +1250,18 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
                 try:
                     await self._enterprise_registry.close()
                     _LOGGER.debug(
-                        "[%s] closed enterprise registry", self.__class__.__name__
+                        f"[{self.__class__.__name__}] closed enterprise registry"
                     )
                 except Exception as e:
                     _LOGGER.error(
-                        "[%s] error closing enterprise registry: %s",
-                        self.__class__.__name__,
-                        e,
+                        f"[{self.__class__.__name__}] error closing enterprise registry: {e}"
                     )
 
             # Log that we're releasing controller clients
             # (Note: CorePlusControllerClient doesn't have a close() method; clients are managed by the CorePlus system)
             for factory_name, _ in list(self._controller_clients.items()):
                 _LOGGER.debug(
-                    "[%s] releasing controller client for factory '%s'",
-                    self.__class__.__name__,
-                    factory_name,
+                    f"[{self.__class__.__name__}] releasing controller client for factory '{factory_name}'"
                 )
 
             # Clear the controller clients dictionary
@@ -1172,9 +1274,7 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             session_count = len(self._added_sessions)
             self._added_sessions.clear()
             _LOGGER.debug(
-                "[%s] cleared session tracking (%d sessions)",
-                self.__class__.__name__,
-                session_count,
+                f"[{self.__class__.__name__}] cleared session tracking ({session_count} sessions)"
             )
 
-            _LOGGER.info("[%s] closed", self.__class__.__name__)
+            _LOGGER.info(f"[{self.__class__.__name__}] closed")

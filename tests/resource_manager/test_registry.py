@@ -108,11 +108,16 @@ async def test_get_returns_item(registry, mock_base_config_manager):
 
 
 @pytest.mark.asyncio
-async def test_get_unknown_raises_key_error(registry, mock_base_config_manager):
-    """Test that get() raises KeyError for an unknown item."""
+async def test_get_unknown_raises_registry_item_not_found(
+    registry, mock_base_config_manager
+):
+    """Test that get() raises RegistryItemNotFoundError for an unknown item."""
+    from deephaven_mcp._exceptions import RegistryItemNotFoundError
+
     await registry.initialize(mock_base_config_manager)
     with pytest.raises(
-        KeyError, match="No item with name 'unknown' found in ConcreteRegistry"
+        RegistryItemNotFoundError,
+        match="No item with name 'unknown' found in ConcreteRegistry",
     ):
         await registry.get("unknown")
 
@@ -149,7 +154,9 @@ async def test_get_all_returns_copy(registry, mock_base_config_manager):
     all_items["new_item"] = MockItem("new")
 
     # Original registry should be unchanged
-    with pytest.raises(KeyError):
+    from deephaven_mcp._exceptions import RegistryItemNotFoundError
+
+    with pytest.raises(RegistryItemNotFoundError):
         await registry.get("new_item")
 
     # Getting all items again should not include our modification
@@ -265,13 +272,15 @@ async def test_community_registry_get_returns_manager(
 
 
 @pytest.mark.asyncio
-async def test_community_registry_get_unknown_raises_key_error(
+async def test_community_registry_get_unknown_raises_registry_item_not_found(
     community_session_registry, mock_community_config_manager
 ):
-    """Test that get() for an unknown worker raises KeyError."""
+    """Test that get() for an unknown worker raises RegistryItemNotFoundError."""
+    from deephaven_mcp._exceptions import RegistryItemNotFoundError
+
     await community_session_registry.initialize(mock_community_config_manager)
     with pytest.raises(
-        KeyError,
+        RegistryItemNotFoundError,
         match="No item with name 'unknown_worker' found in CommunitySessionRegistry",
     ):
         await community_session_registry.get("unknown_worker")
@@ -378,11 +387,13 @@ async def test_factory_registry_creation(mock_factory_config_manager):
 
 @pytest.mark.asyncio
 async def test_factory_registry_get_nonexistent(mock_factory_config_manager):
-    """Test that getting a non-existent manager raises a KeyError."""
+    """Test that getting a non-existent manager raises RegistryItemNotFoundError."""
+    from deephaven_mcp._exceptions import RegistryItemNotFoundError
+
     registry = CorePlusSessionFactoryRegistry()
     await registry.initialize(mock_factory_config_manager)
 
-    with pytest.raises(KeyError):
+    with pytest.raises(RegistryItemNotFoundError):
         await registry.get("nonexistent")
 
 

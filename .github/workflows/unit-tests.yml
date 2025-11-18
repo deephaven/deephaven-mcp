@@ -5,6 +5,7 @@ on:
     branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
+  workflow_dispatch:  # Allow manual trigger
 
 jobs:
   test-python-community:
@@ -34,7 +35,6 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pytest pytest-cov coverage
           pip install .[test]
 
       - name: Run tests with coverage
@@ -93,7 +93,6 @@ jobs:
       - name: Install dependencies
         run: |
           .venv/bin/python -m pip install --upgrade pip
-          .venv/bin/pip install pytest pytest-cov coverage
           .venv/bin/pip install .[test]
 
       - name: Install Core Plus wheel

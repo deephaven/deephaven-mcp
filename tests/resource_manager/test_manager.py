@@ -14,7 +14,10 @@ from deephaven_mcp.resource_manager import (
     BaseItemManager,
     CommunitySessionManager,
     CorePlusSessionFactoryManager,
+    DockerLaunchedSession,
+    DynamicCommunitySessionManager,
     EnterpriseSessionManager,
+    PythonLaunchedSession,
     ResourceLivenessStatus,
     SystemType,
 )
@@ -336,9 +339,24 @@ async def test_close_logs_on_liveness_failure(monkeypatch, caplog):
 
 
 @pytest.mark.asyncio
+async def test_static_community_session_manager_has_correct_source():
+    """Test that StaticCommunitySessionManager sets source to 'config'."""
+    from deephaven_mcp.resource_manager import StaticCommunitySessionManager, SystemType
+
+    manager = StaticCommunitySessionManager("test-session", {"server": "localhost"})
+
+    assert manager.source == "config"
+    assert manager.system_type == SystemType.COMMUNITY
+    assert manager.full_name == "community:config:test-session"
+    assert manager.name == "test-session"
+
+
+@pytest.mark.asyncio
 async def test_community_session_manager_check_liveness_offline(monkeypatch):
     """Covers line 1698: CommunitySessionManager._check_liveness returns OFFLINE if is_alive() is False."""
-    mgr = CommunitySessionManager("test", {"server": "foo"})
+    from deephaven_mcp.resource_manager import StaticCommunitySessionManager
+
+    mgr = StaticCommunitySessionManager("test", {"server": "foo"})
     mock_session = Mock()
     mock_session.is_alive = AsyncMock(return_value=False)
     result = await mgr._check_liveness(mock_session)
@@ -383,8 +401,10 @@ class TestCommunitySessionManager:
     @patch("deephaven_mcp.client.CoreSession.from_config")
     async def test_create_item(self, mock_from_config):
         """Test that _create_item correctly calls CoreSession.from_config."""
+        from deephaven_mcp.resource_manager import StaticCommunitySessionManager
+
         mock_from_config.return_value = "mock_session"
-        manager = CommunitySessionManager(
+        manager = StaticCommunitySessionManager(
             name="test_community",
             config={"host": "localhost"},
         )
@@ -396,8 +416,10 @@ class TestCommunitySessionManager:
     @patch("deephaven_mcp.client.CoreSession.from_config")
     async def test_create_item_raises_exception(self, mock_from_config):
         """Test that _create_item raises SessionCreationError on failure."""
+        from deephaven_mcp.resource_manager import StaticCommunitySessionManager
+
         mock_from_config.side_effect = Exception("Connection failed")
-        manager = CommunitySessionManager(
+        manager = StaticCommunitySessionManager(
             name="test_community",
             config={},
         )
@@ -407,7 +429,9 @@ class TestCommunitySessionManager:
     @pytest.mark.asyncio
     async def test_check_liveness(self):
         """Test that _check_liveness correctly calls the session's is_alive method."""
-        manager = CommunitySessionManager(
+        from deephaven_mcp.resource_manager import StaticCommunitySessionManager
+
+        manager = StaticCommunitySessionManager(
             name="test_community",
             config={},
         )
@@ -743,6 +767,31 @@ class TestCorePlusSessionFactoryManager:
         mock_from_config.assert_awaited_once_with(config)
 
     @pytest.mark.asyncio
+    @patch(
+        "deephaven_mcp.client.CorePlusSessionFactory.from_config",
+        new_callable=AsyncMock,
+    )
+    async def test_create_item_timeout(self, mock_from_config):
+        """Test that _create_item raises DeephavenConnectionError on timeout."""
+        from deephaven_mcp._exceptions import DeephavenConnectionError
+
+        # Simulate a timeout by making from_config hang
+        async def slow_operation(config):
+            await asyncio.sleep(20)  # Longer than default timeout
+
+        mock_from_config.side_effect = slow_operation
+
+        config = {"host": "unreachable", "connection_timeout": 0.1}
+        manager = CorePlusSessionFactoryManager(name="test_factory", config=config)
+
+        with pytest.raises(
+            DeephavenConnectionError, match="timed out after 0.1 seconds"
+        ):
+            await manager._create_item()
+
+        mock_from_config.assert_awaited_once_with(config)
+
+    @pytest.mark.asyncio
     async def test_check_liveness(self):
         """Test that _check_liveness correctly calls the item's ping method."""
         mock_factory = AsyncMock(spec=client.CorePlusSessionFactory)
@@ -764,3 +813,266 @@ class TestCorePlusSessionFactoryManager:
             "Ping returned False",
         )
         mock_factory.ping.assert_awaited_once()
+
+
+class TestDynamicCommunitySessionManager:
+    """Tests for DynamicCommunitySessionManager class."""
+
+    def test_init_stores_launched_session(self):
+        """Test that __init__ stores the launched session."""
+        launched_session = DockerLaunchedSession(
+            host="localhost",
+            port=10000,
+            auth_type="psk",
+            auth_token="test-token",
+            container_id="test_container",
+        )
+        config = {"host": "localhost", "port": 10000}
+
+        manager = DynamicCommunitySessionManager(
+            name="test-session",
+            config=config,
+            launched_session=launched_session,
+        )
+
+        assert manager.launched_session == launched_session
+        assert manager.launched_session.auth_token == "test-token"
+
+    def test_to_dict_returns_session_info_docker(self):
+        """Test that to_dict returns comprehensive session information for Docker."""
+        launched_session = DockerLaunchedSession(
+            host="localhost",
+            port=10000,
+            auth_type="psk",
+            auth_token="test-token",
+            container_id="test_container",
+        )
+        config = {"host": "localhost", "port": 10000, "auth_type": "PSK"}
+
+        manager = DynamicCommunitySessionManager(
+            name="test-session",
+            config=config,
+            launched_session=launched_session,
+        )
+
+        result = manager.to_dict()
+
+        assert result["connection_url"] == "http://localhost:10000"
+        # Note: connection_url_with_auth removed from to_dict() for security
+        assert result["port"] == 10000
+        assert result["container_id"] == "test_container"
+        assert "process_id" not in result
+        assert result["auth_type"] == "PSK"
+        assert result["launch_method"] == "docker"
+
+    def test_to_dict_with_pip_process(self):
+        """Test that to_dict correctly identifies pip launch method."""
+        mock_process = MagicMock()
+        mock_process.pid = 12345
+        launched_session = PythonLaunchedSession(
+            host="localhost",
+            port=10000,
+            auth_type="anonymous",
+            auth_token=None,
+            process=mock_process,
+        )
+        config = {"host": "localhost", "port": 10000}
+
+        manager = DynamicCommunitySessionManager(
+            name="test-session",
+            config=config,
+            launched_session=launched_session,
+        )
+
+        result = manager.to_dict()
+
+        assert result["launch_method"] == "python"
+        assert result["process_id"] == 12345
+        assert "container_id" not in result
+
+    def test_to_dict_without_auth_token(self):
+        """Test that to_dict handles missing auth token."""
+        launched_session = DockerLaunchedSession(
+            host="localhost",
+            port=10000,
+            auth_type="anonymous",
+            auth_token=None,
+            container_id="test_container",
+        )
+        config = {"host": "localhost", "port": 10000}
+
+        manager = DynamicCommunitySessionManager(
+            name="test-session",
+            config=config,
+            launched_session=launched_session,
+        )
+
+        result = manager.to_dict()
+
+        assert result["connection_url"] == "http://localhost:10000"
+        # Note: connection_url_with_auth removed from to_dict() for security
+
+    def test_to_dict_with_anonymous_auth(self):
+        """Test that to_dict handles Anonymous auth type."""
+        launched_session = DockerLaunchedSession(
+            host="localhost",
+            port=10000,
+            auth_type="anonymous",
+            auth_token=None,
+            container_id="test_container",
+        )
+        config = {"host": "localhost", "port": 10000, "auth_type": "Anonymous"}
+
+        manager = DynamicCommunitySessionManager(
+            name="test-session",
+            config=config,
+            launched_session=launched_session,
+        )
+
+        result = manager.to_dict()
+
+        assert result["auth_type"] == "ANONYMOUS"
+        # Note: connection_url_with_auth removed from to_dict() for security
+
+    @pytest.mark.asyncio
+    async def test_close_success(self):
+        """Test successful close."""
+        launched_session = DockerLaunchedSession(
+            host="localhost",
+            port=10000,
+            auth_type="anonymous",
+            auth_token=None,
+            container_id="test_container",
+        )
+        config = {"host": "localhost", "port": 10000}
+
+        manager = DynamicCommunitySessionManager(
+            name="test-session",
+            config=config,
+            launched_session=launched_session,
+        )
+
+        # Mock parent close and session stop
+        with patch.object(
+            manager.__class__.__bases__[0], "close", new_callable=AsyncMock
+        ) as mock_parent_close:
+            with patch.object(
+                launched_session, "stop", new_callable=AsyncMock
+            ) as mock_stop:
+                await manager.close()
+
+                mock_stop.assert_called_once()
+                mock_parent_close.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_close_handles_parent_close_error(self):
+        """Test close handles parent close errors."""
+        launched_session = DockerLaunchedSession(
+            host="localhost",
+            port=10000,
+            auth_type="anonymous",
+            auth_token=None,
+            container_id="test_container",
+        )
+        config = {"host": "localhost", "port": 10000}
+
+        manager = DynamicCommunitySessionManager(
+            name="test-session",
+            config=config,
+            launched_session=launched_session,
+        )
+
+        # Mock parent close to raise error
+        with patch.object(
+            manager.__class__.__bases__[0], "close", new_callable=AsyncMock
+        ) as mock_parent_close:
+            mock_parent_close.side_effect = Exception("Parent close failed")
+            with patch.object(
+                launched_session, "stop", new_callable=AsyncMock
+            ) as mock_stop:
+                # Should not raise, just log warning
+                await manager.close()
+
+                # Session stop should still be called
+                mock_stop.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_close_handles_session_stop_error(self):
+        """Test close handles session stop errors."""
+        launched_session = DockerLaunchedSession(
+            host="localhost",
+            port=10000,
+            auth_type="anonymous",
+            auth_token=None,
+            container_id="test_container",
+        )
+        config = {"host": "localhost", "port": 10000}
+
+        manager = DynamicCommunitySessionManager(
+            name="test-session",
+            config=config,
+            launched_session=launched_session,
+        )
+
+        # Mock parent close and session stop
+        with patch.object(
+            manager.__class__.__bases__[0], "close", new_callable=AsyncMock
+        ) as mock_parent_close:
+            with patch.object(
+                launched_session, "stop", new_callable=AsyncMock
+            ) as mock_stop:
+                mock_stop.side_effect = Exception("Stop failed")
+                # Should not raise, just log error
+                await manager.close()
+
+                mock_stop.assert_called_once()
+                # Parent close should still be called
+                mock_parent_close.assert_called_once()
+
+    def test_properties(self):
+        """Test all property accessors."""
+        mock_process = MagicMock()
+        mock_process.pid = 12345
+
+        launched_session = PythonLaunchedSession(
+            host="testhost",
+            port=10000,
+            auth_type="anonymous",
+            auth_token=None,
+            process=mock_process,
+        )
+        config = {"host": "testhost", "port": 10000}
+
+        manager = DynamicCommunitySessionManager(
+            name="test-session",
+            config=config,
+            launched_session=launched_session,
+        )
+
+        assert manager.connection_url == "http://testhost:10000"
+        assert (
+            manager.connection_url_with_auth == "http://testhost:10000"
+        )  # anonymous, no token
+        assert manager.port == 10000
+        assert manager.launch_method == "python"
+        assert manager.container_id is None
+        assert manager.process_id == 12345
+
+    def test_process_id_none_when_no_process(self):
+        """Test process_id returns None when there's no process."""
+        launched_session = DockerLaunchedSession(
+            host="testhost",
+            port=10000,
+            auth_type="anonymous",
+            auth_token=None,
+            container_id="test_container",
+        )
+        config = {"host": "testhost", "port": 10000}
+
+        manager = DynamicCommunitySessionManager(
+            name="test-session",
+            config=config,
+            launched_session=launched_session,
+        )
+
+        assert manager.process_id is None

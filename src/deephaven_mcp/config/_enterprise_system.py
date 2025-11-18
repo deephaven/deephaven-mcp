@@ -26,6 +26,7 @@ __all__ = [
     "validate_single_enterprise_system",
     "redact_enterprise_system_config",
     "redact_enterprise_systems_map",
+    "DEFAULT_CONNECTION_TIMEOUT_SECONDS",
 ]
 
 import logging
@@ -35,6 +36,14 @@ from deephaven_mcp._exceptions import EnterpriseSystemConfigurationError
 
 _LOGGER = logging.getLogger(__name__)
 
+# Default timeout for enterprise system connections
+DEFAULT_CONNECTION_TIMEOUT_SECONDS = 10.0
+"""Default timeout in seconds for establishing connections to enterprise systems.
+
+This value is used when 'connection_timeout' is not specified in the enterprise
+system configuration. It provides a reasonable default that prevents indefinite
+hanging while allowing sufficient time for typical connection establishment.
+"""
 
 _BASE_ENTERPRISE_SYSTEM_FIELDS: dict[str, type | tuple[type, ...]] = {
     "connection_json_url": str,
@@ -44,6 +53,10 @@ _BASE_ENTERPRISE_SYSTEM_FIELDS: dict[str, type | tuple[type, ...]] = {
 
 _OPTIONAL_ENTERPRISE_SYSTEM_FIELDS: dict[str, type | tuple[type, ...]] = {
     "session_creation": dict,  # Optional session creation configuration (max_concurrent_sessions, defaults)
+    "connection_timeout": (
+        int,
+        float,
+    ),  # Optional timeout in seconds for initial connection
 }
 """Defines optional fields that can be included in enterprise system configurations."""
 
@@ -160,6 +173,7 @@ def validate_enterprise_systems_config(enterprise_systems_map: Any | None) -> No
             - private_key_path (str): Path to private key file
 
     Optional Fields (per system):
+        - connection_timeout (int | float): Timeout in seconds for initial connection (default: 10.0)
         - session_creation (dict): Session creation defaults and limits
             - max_concurrent_sessions (int): Session limit (0 = disabled, >0 = limit)
             - defaults (dict): Default session parameters (heap_size_gb, server, etc.)
@@ -259,7 +273,8 @@ def validate_single_enterprise_system(system_name: str, config: Any) -> None:
         2. Authentication type validation and field collection
         3. Authentication-specific field validation
         4. Authentication logic consistency validation
-        5. Session creation configuration validation (if present)
+        5. Connection timeout validation (if present)
+        6. Session creation configuration validation (if present)
 
     Required Base Fields:
         - connection_json_url (str): URL to Core+ connection.json endpoint
@@ -274,6 +289,7 @@ def validate_single_enterprise_system(system_name: str, config: Any) -> None:
             - private_key_path (str): Filesystem path to private key file
 
     Optional Configuration:
+        - connection_timeout (int | float > 0): Timeout in seconds for initial connection (default: 10.0)
         - session_creation (dict): Session management settings
             - max_concurrent_sessions (int ≥ 0): 0=disabled, >0=limit
             - defaults (dict): Default session parameters
@@ -291,6 +307,7 @@ def validate_single_enterprise_system(system_name: str, config: Any) -> None:
             - Invalid auth_type value (not 'password' or 'private_key')
             - Missing authentication-specific fields (username, password info, key path)
             - Invalid authentication field combinations (both password and password_env_var)
+            - Invalid connection_timeout (non-positive or wrong type)
             - Invalid session_creation configuration
             - Field type mismatches (wrong data types)
 
@@ -320,6 +337,7 @@ def validate_single_enterprise_system(system_name: str, config: Any) -> None:
         system_name, config, auth_type, all_allowed_fields
     )
     _validate_enterprise_system_auth_type_logic(system_name, config, auth_type)
+    _validate_enterprise_system_connection_timeout(system_name, config)
     _validate_enterprise_system_session_creation(system_name, config)
 
     _LOGGER.debug(
@@ -608,6 +626,40 @@ def _validate_enterprise_system_auth_type_logic(
             raise EnterpriseSystemConfigurationError(msg)
 
 
+def _validate_enterprise_system_connection_timeout(
+    system_name: str, config: dict[str, Any]
+) -> None:
+    """Validate the optional connection_timeout configuration field.
+
+    Validates that if connection_timeout is specified, it is a positive number
+    (int or float, but not bool). A timeout of 0 or negative values are invalid.
+
+    Args:
+        system_name (str): The name of the enterprise system being validated.
+        config (dict[str, Any]): The configuration dictionary for the system.
+
+    Raises:
+        EnterpriseSystemConfigurationError: If connection_timeout is present but
+            not a positive number (int or float > 0), or if it's a bool.
+    """
+    if "connection_timeout" not in config:
+        return  # Field is optional
+
+    timeout = config["connection_timeout"]
+
+    # Validate type (reject bool even though it's technically a subclass of int)
+    if isinstance(timeout, bool) or not isinstance(timeout, int | float):
+        msg = f"'connection_timeout' for enterprise system '{system_name}' must be a number (int or float), but got {type(timeout).__name__}."
+        _LOGGER.error(f"[config:_validate_enterprise_system_connection_timeout] {msg}")
+        raise EnterpriseSystemConfigurationError(msg)
+
+    # Validate value is positive
+    if timeout <= 0:
+        msg = f"'connection_timeout' for enterprise system '{system_name}' must be positive, but got {timeout}."
+        _LOGGER.error(f"[config:_validate_enterprise_system_connection_timeout] {msg}")
+        raise EnterpriseSystemConfigurationError(msg)
+
+
 def _validate_enterprise_system_session_creation(
     system_name: str, config: dict[str, Any]
 ) -> None:
@@ -659,9 +711,7 @@ def _validate_enterprise_system_session_creation(
             raise EnterpriseSystemConfigurationError(msg)
 
         # Optional field validations
-        _validate_optional_session_default(
-            system_name, defaults, "heap_size_gb", (int, float)
-        )
+        _validate_optional_session_default(system_name, defaults, "heap_size_gb", int)
         _validate_optional_session_default(
             system_name, defaults, "auto_delete_timeout", int
         )

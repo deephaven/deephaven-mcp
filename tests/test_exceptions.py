@@ -13,6 +13,7 @@ from deephaven_mcp._exceptions import (
     ResourceError,
     SessionCreationError,
     SessionError,
+    SessionLaunchError,
     UnsupportedOperationError,
 )
 
@@ -91,6 +92,11 @@ class TestExceptionParameterized:
             # Specialized exceptions with additional inheritance
             (SessionCreationError, [SessionError, McpError], "session creation error"),
             (
+                SessionLaunchError,
+                [SessionCreationError, SessionError, McpError],
+                "session launch error",
+            ),
+            (
                 CommunitySessionConfigurationError,
                 [ConfigurationError, McpError],
                 "community session configuration error",
@@ -152,6 +158,8 @@ class TestExceptionModule:
             # Session exceptions
             "SessionError",
             "SessionCreationError",
+            "SessionLaunchError",
+            "InvalidSessionNameError",
             # Authentication exceptions
             "AuthenticationError",
             # Query exceptions
@@ -160,6 +168,7 @@ class TestExceptionModule:
             "DeephavenConnectionError",
             # Resource exceptions
             "ResourceError",
+            "RegistryItemNotFoundError",
             # Configuration exceptions
             "ConfigurationError",
             "CommunitySessionConfigurationError",

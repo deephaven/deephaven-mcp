@@ -11,8 +11,10 @@ def test_imports_and_all():
         CommunitySessionRegistry,
         CorePlusSessionFactoryManager,
         CorePlusSessionFactoryRegistry,
+        DynamicCommunitySessionManager,
         EnterpriseSessionManager,
         ResourceLivenessStatus,
+        StaticCommunitySessionManager,
     )
 
     # __all__ should be defined and contain all the public symbols
@@ -22,12 +24,20 @@ def test_imports_and_all():
         "BaseItemManager",
         "CombinedSessionRegistry",
         "CommunitySessionManager",
+        "StaticCommunitySessionManager",
+        "DynamicCommunitySessionManager",
         "EnterpriseSessionManager",
         "CorePlusSessionFactoryManager",
         "CommunitySessionRegistry",
         "CorePlusSessionFactoryRegistry",
         "ResourceLivenessStatus",
         "SystemType",
+        "LaunchedSession",
+        "DockerLaunchedSession",
+        "PythonLaunchedSession",
+        "launch_session",
+        "find_available_port",
+        "generate_auth_token",
     ]
     assert sorted(mod.__all__) == sorted(expected_all)
 

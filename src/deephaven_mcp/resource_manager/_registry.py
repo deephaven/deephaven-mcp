@@ -40,10 +40,15 @@ from deephaven_mcp._exceptions import (
     ConfigurationError,
     InternalError,
     MissingEnterprisePackageError,
+    RegistryItemNotFoundError,
 )
 from deephaven_mcp.client import is_enterprise_available
 
-from ._manager import CommunitySessionManager, CorePlusSessionFactoryManager
+from ._manager import (
+    CommunitySessionManager,
+    CorePlusSessionFactoryManager,
+    StaticCommunitySessionManager,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -137,13 +142,13 @@ class BaseRegistry(abc.ABC, Generic[T]):
 
         Raises:
             InternalError: If the registry has not been initialized.
-            KeyError: If no item with the given name exists in the registry.
+            RegistryItemNotFoundError: If no item with the given name exists in the registry.
         """
         async with self._lock:
             self._check_initialized()
 
             if name not in self._items:
-                raise KeyError(
+                raise RegistryItemNotFoundError(
                     f"No item with name '{name}' found in {self.__class__.__name__}"
                 )
 
@@ -232,7 +237,7 @@ class CommunitySessionRegistry(BaseRegistry[CommunitySessionManager]):
                 self.__class__.__name__,
                 session_name,
             )
-            self._items[session_name] = CommunitySessionManager(
+            self._items[session_name] = StaticCommunitySessionManager(
                 session_name, session_config
             )
 

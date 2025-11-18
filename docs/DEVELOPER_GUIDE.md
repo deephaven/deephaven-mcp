@@ -22,6 +22,12 @@ This repository houses the Python-based [Model Context Protocol (MCP)](https://m
     - [About This Project](#about-this-project)
     - [Key Features](#key-features)
     - [System Architecture](#system-architecture)
+  - [Prerequisites](#prerequisites)
+    - [Required for All Users](#required-for-all-users)
+    - [Systems Server Prerequisites](#systems-server-prerequisites)
+    - [Docs Server Prerequisites (Only If Using Docs Server)](#docs-server-prerequisites-only-if-using-docs-server)
+    - [Development Prerequisites (Contributors Only)](#development-prerequisites-contributors-only)
+    - [Quick Verification Checklist](#quick-verification-checklist)
   - [Quick Start Guide](#quick-start-guide)
     - [Systems Server Quick Start](#systems-server-quick-start)
     - [Docs Server Quick Start](#docs-server-quick-start)
@@ -33,6 +39,9 @@ This repository houses the Python-based [Model Context Protocol (MCP)](https://m
           - [Environment Variables](#environment-variables)
           - [File Structure Overview](#file-structure-overview)
       - [Systems Sessions Configuration](#systems-sessions-configuration)
+    - [Security Configuration](#security-configuration)
+      - [Community Session Credential Retrieval](#community-session-credential-retrieval)
+      - [Community Session Creation Configuration](#community-session-creation-configuration)
       - [Enterprise Server Configuration](#enterprise-server-configuration)
       - [Running the Systems Server](#running-the-systems-server)
         - [CLI Arguments](#cli-arguments)
@@ -41,25 +50,29 @@ This repository houses the Python-based [Model Context Protocol (MCP)](https://m
       - [Systems Server Tools](#systems-server-tools)
       - [Error Handling](#error-handling)
       - [MCP Tools](#mcp-tools)
-        - [System Tools](#system-tools)
-          - [`mcp_reload`](#mcp_reload)
-          - [`enterprise_systems_status`](#enterprise_systems_status)
-        - [Session Management Tools](#session-management-tools)
-          - [`session_enterprise_create`](#session_enterprise_create)
-          - [`session_enterprise_delete`](#session_enterprise_delete)
-          - [`sessions_list`](#sessions_list)
-          - [`session_details`](#session_details)
-        - [Enterprise Catalog Tools](#enterprise-catalog-tools)
-          - [`catalog_tables_list`](#catalog_tables_list)
-          - [`catalog_namespaces_list`](#catalog_namespaces_list)
-          - [`catalog_tables_schema`](#catalog_tables_schema)
-          - [`catalog_table_sample`](#catalog_table_sample)
-        - [Session Data Tools](#session-data-tools)
-          - [`session_tables_schema`](#session_tables_schema)
-          - [`session_tables_list`](#session_tables_list)
-          - [`session_table_data`](#session_table_data)
-          - [`session_script_run`](#session_script_run)
-          - [`session_pip_list`](#session_pip_list)
+    - [System Tools](#system-tools)
+        - [`mcp_reload`](#mcp_reload)
+        - [`enterprise_systems_status`](#enterprise_systems_status)
+      - [Enterprise Session Tools](#enterprise-session-tools)
+        - [`session_enterprise_create`](#session_enterprise_create)
+        - [`session_enterprise_delete`](#session_enterprise_delete)
+      - [Community Session Tools](#community-session-tools)
+        - [`session_community_create`](#session_community_create)
+        - [`session_community_delete`](#session_community_delete)
+        - [`session_community_credentials`](#session_community_credentials)
+      - [General Session Tools](#general-session-tools)
+        - [`sessions_list`](#sessions_list)
+        - [`session_details`](#session_details)
+        - [`catalog_tables_list`](#catalog_tables_list)
+        - [`catalog_namespaces_list`](#catalog_namespaces_list)
+        - [`catalog_tables_schema`](#catalog_tables_schema)
+        - [`catalog_table_sample`](#catalog_table_sample)
+    - [Session Data Tools](#session-data-tools)
+        - [`session_tables_schema`](#session_tables_schema)
+        - [`session_script_run`](#session_script_run)
+        - [`session_pip_list`](#session_pip_list)
+        - [`session_table_data`](#session_table_data)
+        - [`session_tables_list`](#session_tables_list)
       - [Systems Server Test Components](#systems-server-test-components)
         - [Test Server](#test-server)
         - [Test Client](#test-client)
@@ -105,6 +118,13 @@ This repository houses the Python-based [Model Context Protocol (MCP)](https://m
       - [HTTP Transport Stress Testing](#http-transport-stress-testing)
       - [Usage Example](#usage-example)
       - [Arguments](#arguments)
+  - [Testing](#testing)
+    - [Unit Tests](#unit-tests)
+    - [Integration Tests](#integration-tests)
+      - [Prerequisites](#prerequisites-1)
+      - [Running Integration Tests](#running-integration-tests)
+      - [Running Specific Test Classes](#running-specific-test-classes)
+      - [Troubleshooting Integration Tests](#troubleshooting-integration-tests)
   - [Troubleshooting](#troubleshooting)
     - [Common Issues](#common-issues)
     - [Common Errors \& Solutions](#common-errors--solutions)
@@ -192,6 +212,86 @@ graph TD
 
 The MCP Docs Server processes natural language questions about Deephaven documentation using LLM capabilities via the Inkeep API.
 
+## Prerequisites
+
+Before using the Deephaven MCP servers, ensure you have the following prerequisites installed and configured:
+
+### Required for All Users
+
+**Python 3.11 or Later**
+- **Requirement**: [Python](https://www.python.org/) 3.11+ is required to run both MCP servers
+- **Installation**: Download from [python.org](https://www.python.org/downloads/) or use your system's package manager
+- **Verification**: Run `python --version` to confirm Python 3.11 or later is installed
+
+**Configuration File**
+- **Requirement**: A JSON configuration file (typically named `deephaven_mcp.json`) for the Systems Server
+- **Location**: Can be placed anywhere on your system, specified via the `DH_MCP_CONFIG_FILE` environment variable
+- **Details**: See [Core Configuration File](#core-configuration-file-deephaven_mcpjson) for complete schema and examples
+
+### Systems Server Prerequisites
+
+**For Static Community Sessions**
+- **Requirement**: Access to running Deephaven Community Core instance(s)
+- **Configuration**: Connection details (host, port, auth) specified in `deephaven_mcp.json`
+- **More Info**: See [Systems Sessions Configuration](#systems-sessions-configuration)
+
+**For Dynamic Community Sessions (Optional)**
+
+Choose **one** of the following launch methods for dynamically creating Deephaven sessions:
+
+- **Docker Launch Method**:
+  - **Requirement**: [Docker](https://www.docker.com/get-started/) installed and running
+  - **Installation**: No additional Python packages required beyond base `deephaven-mcp`
+  - **Verification**: Run `docker ps` to confirm Docker daemon is accessible
+  - **Best For**: Production, isolated environments, cross-platform consistency
+
+- **Python Launch Method**:
+  - **Requirement**: `deephaven-server` Python package
+  - **Installation**: `pip install deephaven-server` (in MCP venv or a custom venv)
+  - **Verification**: Run `deephaven server --help` to confirm the command is available
+  - **Best For**: Development environments, faster startup, no Docker dependency
+  - **Custom Venv**: Use `python_venv_path` config parameter to specify a different Python environment
+
+**For Enterprise Systems (Optional)**
+- **Requirement**: Deephaven Enterprise (Core+) system(s) with accessible connection.json URL
+- **Installation**: `pip install "deephaven-mcp[coreplus]"` to install Core+ client dependencies
+- **Configuration**: Enterprise system details specified in `deephaven_mcp.json`
+- **More Info**: See [Enterprise Server Configuration](#enterprise-server-configuration) and [Core+ Client Development Setup](#core-client-development-setup)
+
+### Docs Server Prerequisites (Only If Using Docs Server)
+
+> **Note**: These prerequisites are only required if you plan to develop the MCP Docs Server. Most users only need the Systems Server and can skip this section.
+
+**Inkeep API Key**
+- **Requirement**: Valid API key from [Inkeep](https://inkeep.com/) for documentation Q&A
+- **Configuration**: Set via `INKEEP_API_KEY` environment variable (required)
+- **Obtaining**: Contact Inkeep or visit [inkeep.com](https://inkeep.com/) to obtain an API key
+
+### Development Prerequisites (Contributors Only)
+
+**Development Tools**
+- **Required**: Git, Python 3.11+, virtual environment tool (`venv` or `uv`)
+- **Recommended**: [`uv`](https://github.com/astral-sh/uv) for faster package management
+- **Installation**: See [UV.md](UV.md) for project-specific uv setup and workflows, or the [uv installation guide](https://github.com/astral-sh/uv#installation) for general installation
+
+**Testing Requirements**
+- **Unit Tests**: Development dependencies installed via `pip install -e ".[dev]"`
+- **Integration Tests**: 
+  - Docker must be installed and running (for Docker integration tests)
+  - `deephaven-server` package installed (for python integration tests)
+- **More Info**: See [Testing](#testing) section
+
+### Quick Verification Checklist
+
+Before proceeding with the Quick Start Guide, verify your setup:
+
+- ✅ Python 3.11+ installed: `python --version`
+- ✅ Configuration file created (for Systems Server): `deephaven_mcp.json`
+- ✅ Environment variable set (for Systems Server): `export DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json`
+- ✅ Inkeep API key set (for Docs Server): `export INKEEP_API_KEY=your-key`
+- ✅ Docker running (for docker launch method): `docker ps`
+- ✅ OR deephaven-server installed (for python launch method): `deephaven server --help`
+
 ## Quick Start Guide
 
 ### Systems Server Quick Start
@@ -211,6 +311,33 @@ The MCP Docs Server processes natural language questions about Deephaven documen
    }
    ```
    Save this as `deephaven_mcp.json` in your project directory.
+
+   > **Dynamic Community Session Creation (Optional):** To enable on-demand creation of Deephaven Community sessions, add session creation configuration. Choose your launch method:
+   >
+   > - **Docker (default):** Requires Docker installed and running. No additional Python packages needed.
+   >   ```json
+   >   "community": {
+   >     "session_creation": {
+   >       "max_concurrent_sessions": 5,
+   >       "defaults": {"launch_method": "docker"}
+   >     }
+   >   }
+   >   ```
+   >
+   > - **Python:** Faster startup, no Docker needed. Install `deephaven-server` in your Python environment.
+   >   ```json
+   >   "community": {
+   >     "session_creation": {
+   >       "max_concurrent_sessions": 5,
+   >       "defaults": {
+   >         "launch_method": "python",
+   >         "python_venv_path": null  // Optional: null uses MCP venv, or specify "/path/to/custom/venv"
+   >       }
+   >     }
+   >   }
+   >   ```
+   >
+   > See [Community Session Creation Configuration](#community-session-creation-configuration) for all options.
 
 2. **Start a test Deephaven server in one terminal:**
    ```bash
@@ -316,8 +443,9 @@ All fields within a session's configuration object are optional. If a field is o
 *   `port` (integer): Port number for the worker connection (e.g., `10000`).
 *   `auth_type` (string): Authentication method. Common values include:
     *   `"Anonymous"`: For connections requiring no authentication (default if omitted).
+    *   `"PSK"` or `"io.deephaven.authentication.psk.PskAuthenticationHandler"`: For Pre-Shared Key authentication. Both the shorthand `"PSK"` and full Java class name are accepted. See [PSK Authentication Configuration](#psk-authentication-configuration) below for detailed setup instructions.
     *   `"Basic"`: For username/password authentication. The `auth_token` must be in `"username:password"` format.
-    *   Custom authenticator strings (e.g., `"io.deephaven.authentication.psk.PskAuthenticationHandler"` for Pre-Shared Key authentication). The full Java class name is required. See [PSK Authentication Configuration](#psk-authentication-configuration) below for detailed setup instructions.
+    *   Custom authenticator strings: Full Java class names for custom authentication handlers.
 *   `auth_token` (string, optional): The authentication token. For `"Basic"` auth, this must be in `"username:password"` format. For custom authenticators, this should conform to the specific requirements of that authenticator. Ignored when `auth_type` is `"Anonymous"`. Use this OR `auth_token_env_var`, but not both.
 *   `auth_token_env_var` (string, optional): The name of an environment variable from which to read the authentication token. Use this OR `auth_token`, but not both. If specified, the token will be sourced from this environment variable.
 *   `never_timeout` (boolean): If `true`, the MCP server attempts to configure the session to this worker to prevent timeouts. Server-side settings might still enforce timeouts.
@@ -362,6 +490,191 @@ All fields within a session's configuration object are optional. If a field is o
 }
 ```
 
+### Security Configuration
+
+The top-level `security` section in `deephaven_mcp.json` contains security-related settings for all session types. This section makes security decisions explicit and easy to audit.
+
+#### Community Session Credential Retrieval
+
+The `session_community_credentials` MCP tool allows programmatic retrieval of authentication credentials for community sessions. This is **disabled by default** for security.
+
+**Configuration:** `security.community.credential_retrieval_mode`
+
+Controls which community session credentials can be retrieved via the MCP tool. This setting applies to:
+- **Static sessions**: Pre-configured in `community.sessions`
+- **Dynamic sessions**: Created on-demand via `session_community_create`
+
+**Valid modes:**
+
+- **`"none"`** (default): Credential retrieval disabled for all sessions
+  - Most secure option
+  - Tool returns error with instructions to enable
+  
+- **`"dynamic_only"`**: Only auto-generated tokens (dynamic sessions)
+  - Allows retrieval for sessions created via `session_community_create`
+  - Denies retrieval for pre-configured static sessions
+  - **Recommended**: Users typically need dynamic tokens but already have static credentials
+  
+- **`"static_only"`**: Only pre-configured tokens (static sessions)
+  - Allows retrieval for sessions from `community.sessions`
+  - Denies retrieval for dynamically created sessions
+  - **Rare use case**: Static credentials are already in your config file
+  
+- **`"all"`**: Both dynamic and static session credentials
+  - Maximum convenience, minimum security
+  - Only enable if you fully understand the security implications
+
+**Security Considerations:**
+- Credentials are returned in plain text
+- All retrieval attempts are logged for audit
+- Consider: Do AI agents really need access to credentials you already have?
+- Recommendation: Use `"dynamic_only"` if needed, `"none"` otherwise
+
+**Example Configuration:**
+
+```json
+{
+  "security": {
+    "community": {
+      "credential_retrieval_mode": "dynamic_only"
+    }
+  },
+  "community": {
+    "sessions": { /* static sessions */ },
+    "session_creation": { /* dynamic session config */ }
+  }
+}
+```
+
+#### Community Session Creation Configuration
+
+This section details the configuration for dynamically creating Deephaven Community sessions on demand via the `session_community_create` MCP tool. Configuration is specified under the `"community"` → `"session_creation"` key in `deephaven_mcp.json`.
+
+**Session Creation Configuration Fields:**
+
+All fields are optional. If the `session_creation` key is omitted entirely, dynamic session creation is not available.
+
+- **`max_concurrent_sessions`** (integer, optional): 
+  - Maximum number of concurrent dynamically created sessions.
+  - Set to 0 to disable dynamic session creation entirely.
+  - Used for resource management and safety.
+
+- **`defaults`** (object, optional): Default parameters for creating new community sessions. All fields are optional:
+  - `launch_method` (string): Method to launch sessions (`"docker"` or `"python"`).
+  - `programming_language` (string): Programming language for Docker sessions (`"Python"` or `"Groovy"`). Docker only. Mutually exclusive with `docker_image`.
+  - `auth_type` (string): Default authentication type for dynamically created sessions. Supported values: `"PSK"` (default), `"Anonymous"`, or full class name `"io.deephaven.authentication.psk.PskAuthenticationHandler"`. Case-insensitive for shorthand. Note: Basic auth is not supported for dynamic sessions (requires database setup).
+  - `auth_token` (string): Default authentication token. Use this OR `auth_token_env_var`, but not both.
+  - `auth_token_env_var` (string): Environment variable for auth token. Use this OR `auth_token`, but not both.
+  - `docker_image` (string): Docker image to use for docker launch method. Mutually exclusive with `programming_language`.
+  - `docker_memory_limit_gb` (float): Memory limit in GB for docker containers.
+  - `docker_cpu_limit` (float): CPU limit for docker containers.
+  - `docker_volumes` (list[string]): Volume mounts for docker containers (format: `["host:container:mode"]`).
+  - `python_venv_path` (string | null): Path to custom Python venv directory (python only). If null (default), uses same venv as MCP server. If path provided, uses deephaven-server from that venv.
+  - `heap_size_gb` (integer): JVM heap size in GB (integer only, e.g., `4` for `-Xmx4g`).
+  - `extra_jvm_args` (list[string]): Additional JVM arguments.
+  - `environment_vars` (object): Environment variables for the session (key-value pairs).
+  - `startup_timeout_seconds` (number): Timeout for session startup.
+  - `startup_check_interval_seconds` (number): Interval between startup health checks.
+  - `startup_retries` (integer): Number of startup retry attempts.
+
+**Launch Method Requirements:**
+
+The `launch_method` parameter determines how Deephaven Community sessions are started. Each method has specific prerequisites:
+
+- **`"docker"` (Docker launch method)**:
+  - **Requirement**: [Docker](https://www.docker.com/get-started/) must be installed and running on the host system
+  - **Installation**: Works with the base `deephaven-mcp` installation (no additional Python packages required)
+  - **Benefits**: Isolated environments, easy cleanup, consistent across platforms
+  - **Considerations**: Requires Docker daemon, higher resource overhead
+  - **Verification**: Run `docker ps` to confirm Docker is accessible
+
+- **`"python"` (Python launch method)**:
+  - **Requirement**: The `deephaven-server` Python package must be installed
+  - **Installation**: Install with `pip install deephaven-server` in MCP venv or custom venv
+  - **Benefits**: No Docker dependency, lighter resource footprint, faster startup
+  - **Custom Venv Support**: Use `python_venv_path` parameter to specify a different Python environment
+    - If `null` (default): Uses same venv as MCP server
+    - If path provided: Uses deephaven-server from that venv
+  - **Verification**: Run `deephaven server --help` to confirm the command is available
+
+> **💡 Tip**: For development environments, the python method is often faster and simpler. For production or isolated environments, the docker method provides better consistency and isolation.
+
+**MCP Tool: `session_community_credentials`**
+
+When `credential_retrieval_enabled` is `true`, this tool retrieves connection credentials for both static and dynamic Community sessions.
+
+**Arguments:**
+- `session_id` (string): Full session ID
+  - For static sessions: `"community:config:session-name"`
+  - For dynamic sessions: `"community:dynamic:session-name"`
+
+**Returns:**
+- `connection_url` (string): Base URL without authentication
+- `connection_url_with_auth` (string): Full URL with auth token for browser
+- `auth_token` (string): Raw authentication token
+- `auth_type` (string): Authentication type (e.g., `"io.deephaven.authentication.psk.PskAuthenticationHandler"`, `"Anonymous"`)
+
+**Example Usage (via AI agent):**
+```
+User: "Get me the browser URL for my-analysis session"
+AI: [calls session_community_credentials with session_id="community:dynamic:my-analysis"]
+AI: "Here's your browser URL: http://localhost:45123/?authToken=abc123..."
+
+User: "What's the URL for my static local-dev session?"
+AI: [calls session_community_credentials with session_id="community:config:local-dev"]
+AI: "Here's the URL: http://localhost:10000/?authToken=your-token"
+```
+
+**Security Notes:**
+- All credential retrievals are logged for audit
+- Credentials are returned in plain text
+- Only use for legitimate browser access needs
+- Consider security implications before enabling
+
+**Alternative: Console Logging**
+
+If `credential_retrieval_mode` is `"none"` (default), credentials are still accessible via console output. When a session is created with an auto-generated token, connection information is logged:
+
+```
+======================================================================
+🔑 Session 'my-analysis' Created - Browser Access Information:
+   Port: 45123
+   Base URL: http://localhost:45123
+   Auth Token: abc123xyz789...
+   Browser URL: http://localhost:45123/?authToken=abc123xyz789
+
+   To retrieve credentials via MCP tool, set security.community.credential_retrieval_mode
+   in your deephaven_mcp.json configuration.
+======================================================================
+```
+
+This is similar to how Jupyter displays tokens when starting a notebook server.
+
+**Example Configuration:**
+
+```json
+{
+  "security": {
+    "community": {
+      "credential_retrieval_mode": "dynamic_only"
+    }
+  },
+  "community": {
+    "session_creation": {
+      "max_concurrent_sessions": 5,
+      "defaults": {
+        "launch_method": "docker",
+        "auth_type": "PSK",
+        "heap_size_gb": 4,
+        "extra_jvm_args": ["-XX:+UseG1GC"],
+        "docker_image": "ghcr.io/deephaven/server:latest",
+        "docker_memory_limit_gb": 8.0
+      }
+    }
+  }
+}
+```
+
 #### Enterprise Server Configuration
 
 The `deephaven_mcp.json` file can also optionally include a top-level key named `"enterprise"` to configure connections to Deephaven Enterprise instances. This key holds a dictionary where each entry maps a custom system name (e.g., `"prod_cluster"`, `"data_science_env"`) to its specific configuration object.
@@ -384,7 +697,7 @@ If the `"enterprise"` key is present, it must be a dictionary. Each individual e
 
 - Optional Worker Creation Configuration:
   - `session_creation` (object, **optional**): Configuration for creating enterprise workers on this system. If omitted, worker creation tools will not be available for this system.
-    - `max_concurrent_workers` (integer, **optional, default: 5**): Maximum number of concurrent workers that can be created on this system. Set to 0 to disable worker creation. Used for resource management and safety.
+    - `max_concurrent_sessions` (integer, **optional, default: 5**): Maximum number of concurrent sessions that can be created on this system. Set to 0 to disable session creation. Used for resource management and safety.
     - `defaults` (object, **optional**): Default values for worker creation parameters. All fields are optional - if omitted, Deephaven server defaults are used.
       - `heap_size_gb` (float, **optional**): Default JVM heap size in gigabytes for new workers.
       - `programming_language` (string, **optional**): Default programming language for new workers ("Python" or "Groovy", default: "Python"). Creates configuration_transformer internally.
@@ -418,7 +731,7 @@ If the `"enterprise"` key is present, it must be a dictionary. Each individual e
         "username": "test_user",
         "password_env_var": "STAGING_PASSWORD",
         "session_creation": {
-          "max_concurrent_workers": 3,
+          "max_concurrent_sessions": 3,
           "defaults": {
             "heap_size_gb": 4.0,
             "programming_language": "Python",
@@ -431,7 +744,7 @@ If the `"enterprise"` key is present, it must be a dictionary. Each individual e
         "auth_type": "private_key",
         "private_key_path": "/secure/keys/analytics_service_account.pem",
         "session_creation": {
-          "max_concurrent_workers": 5,
+          "max_concurrent_sessions": 5,
           "defaults": {
             "heap_size_gb": 8.0,
             "programming_language": "Groovy",
@@ -578,7 +891,7 @@ This consistent format makes error handling and response parsing more predictabl
 
 #### MCP Tools
 
-The Systems Server provides 15 MCP tools organized into four categories:
+The Systems Server provides 18 MCP tools organized into four categories:
 
 **Quick Reference:**
 
@@ -588,6 +901,9 @@ The Systems Server provides 15 MCP tools organized into four categories:
 | [`enterprise_systems_status`](#enterprise_systems_status) | System | Check status of enterprise systems | No |
 | [`sessions_list`](#sessions_list) | Session Management | List all active sessions | No |
 | [`session_details`](#session_details) | Session Management | Get detailed session information | No |
+| [`session_community_create`](#session_community_create) | Session Management | Create new community session | No |
+| [`session_community_delete`](#session_community_delete) | Session Management | Delete community session | No |
+| [`session_community_credentials`](#session_community_credentials) | Session Management | Get community session credentials | No |
 | [`session_enterprise_create`](#session_enterprise_create) | Session Management | Create new enterprise session | Yes |
 | [`session_enterprise_delete`](#session_enterprise_delete) | Session Management | Delete enterprise session | Yes |
 | [`catalog_tables_list`](#catalog_tables_list) | Catalog Tools | List catalog table entries | Yes |
@@ -671,6 +987,8 @@ On error:
 
 **Description**: This tool provides comprehensive status information about all configured enterprise systems. Status values include "ONLINE", "OFFLINE", "UNAUTHORIZED", "MISCONFIGURED", or "UNKNOWN". Sensitive configuration fields are redacted for security.
 
+#### Enterprise Session Tools
+
 ##### `session_enterprise_create`
 
 **Purpose**: Create a new enterprise session on a specified enterprise system.
@@ -746,6 +1064,126 @@ On error:
 ```
 
 **Description**: This tool permanently terminates an enterprise session and removes it from the session registry. The session cannot be recovered after deletion. Use with caution as any unsaved work in the session will be lost.
+
+#### Community Session Tools
+
+##### `session_community_create`
+
+**Purpose**: Create a new dynamically launched Deephaven Community session via Docker or python.
+
+**Parameters**:
+
+- `session_name` (required, string): Unique name for the session
+- `launch_method` (optional, string): How to launch the session: `"docker"` or `"python"` (default: from config or "docker")
+- `programming_language` (optional, string): Programming language for Docker sessions: `"Python"` or `"Groovy"` (default: from config or "Python"). Docker only. Mutually exclusive with `docker_image`. Automatically selects Docker image: Python → ghcr.io/deephaven/server:latest, Groovy → ghcr.io/deephaven/server-slim:latest. Raises error if used with python launch method.
+- `auth_type` (optional, string): Authentication type: `"PSK"` or `"Anonymous"` (case-insensitive shorthand), or full class name `"io.deephaven.authentication.psk.PskAuthenticationHandler"` (default: `"io.deephaven.authentication.psk.PskAuthenticationHandler"`). Note: Basic auth is not supported for dynamic sessions.
+- `auth_token` (optional, string): Pre-shared key for PSK authentication. If omitted with PSK auth, a secure token is auto-generated
+- `docker_image` (optional, string): Custom Docker image to use (Docker only). Mutually exclusive with `programming_language`. If neither specified, defaults to Python image. Raises error if used with python launch method.
+- `docker_memory_limit_gb` (optional, float): Container memory limit in GB (Docker only)
+- `docker_cpu_limit` (optional, float): Container CPU limit in cores (Docker only)
+- `docker_volumes` (optional, array): Volume mounts in format `["host:container:mode"]` (Docker only)
+- `python_venv_path` (optional, string): Path to custom Python venv directory (Python only). If provided, uses deephaven from that venv. If null (default), uses same venv as MCP server. Raises error if used with docker.
+- `heap_size_gb` (optional, integer): JVM heap size in gigabytes (default: from config or 4)
+- `extra_jvm_args` (optional, array): Additional JVM arguments
+- `environment_vars` (optional, object): Environment variables as key-value pairs
+
+**Note**: Startup parameters (`startup_timeout_seconds`, `startup_check_interval_seconds`, `startup_retries`) are configured via `deephaven_mcp.json` defaults only and are not exposed as tool parameters.
+
+**Returns**:
+
+```json
+{
+  "success": true,
+  "session_id": "community:dynamic:my-session",
+  "session_name": "my-session",
+  "connection_url": "http://localhost:45123",
+  "connection_url_with_auth": "http://localhost:45123/?authToken=abc123...",
+  "auth_type": "PSK",
+  "auth_token": "abc123...",
+  "launch_method": "docker",
+  "port": 45123,
+  "container_id": "a1b2c3d4..."
+}
+```
+
+On error:
+
+```json
+{
+  "success": false,
+  "error": "Session limit reached: 5/5 sessions active",
+  "isError": true
+}
+```
+
+**Description**: This tool dynamically creates a new Deephaven Community session by launching it via Docker or python-based Deephaven. The session is registered in the MCP server and will be automatically cleaned up when the MCP server shuts down. Auto-generated PSK tokens are logged at WARNING level for visibility. Parameter resolution follows the priority: tool parameter → config default → hardcoded default.
+
+##### `session_community_delete`
+
+**Purpose**: Delete a dynamically created Deephaven Community session.
+
+**Parameters**:
+
+- `session_name` (required, string): Name of the session to delete (must be a dynamically created session)
+
+**Returns**:
+
+```json
+{
+  "success": true,
+  "session_id": "community:dynamic:my-session",
+  "session_name": "my-session"
+}
+```
+
+On error:
+
+```json
+{
+  "success": false,
+  "error": "Session 'community:dynamic:nonexistent' not found",
+  "isError": true
+}
+```
+
+**Description**: This tool deletes a community session that was created via `session_community_create`. It stops the underlying Docker container or python process and removes the session from the registry. Only dynamically created sessions (source='dynamic') can be deleted - static sessions from configuration cannot be deleted. This operation is irreversible.
+
+##### `session_community_credentials`
+
+**Purpose**: Retrieve authentication credentials for a community session.
+
+**Parameters**:
+
+- `session_id` (required, string): The session ID in format `community:{source}:{session_name}`
+
+**Returns**:
+
+```json
+{
+  "success": true,
+  "session_id": "community:dynamic:my-session",
+  "auth_type": "PSK",
+  "auth_token": "your-secure-token-123",
+  "connection_url": "http://localhost:45123",
+  "browser_url": "http://localhost:45123/?authToken=your-secure-token-123"
+}
+```
+
+On error:
+
+```json
+{
+  "success": false,
+  "error": "Credential retrieval is disabled. Set security.community.credential_retrieval_mode in config.",
+  "isError": true
+}
+```
+
+**Description**: This tool retrieves connection credentials for community sessions, allowing AI agents or users to obtain the authentication token and connection URLs needed to access a session via browser or API. This functionality is **disabled by default** for security and must be explicitly enabled via the `security.community.credential_retrieval_mode` configuration setting. The retrieval mode can be set to allow credentials for dynamic sessions only (`"dynamic_only"`), static sessions only (`"static_only"`), all sessions (`"all"`), or none (`"none"`, the default).
+
+**Security Note**: When enabled, this tool provides access to authentication credentials. Use appropriate access controls and consider the security implications for your environment.
+
+#### General Session Tools
 
 ##### `sessions_list`
 
@@ -1817,8 +2255,8 @@ Both servers can be used programmatically within Python applications:
 # Import the server components
 from deephaven_mcp.mcp_systems_server import mcp_server, run_server
 
-# Use the MCP tools directly (synchronous)
-from deephaven_mcp.mcp_systems_server._mcp import refresh, enterprise_systems_status, list_sessions, get_session_details, table_schemas, run_script, pip_packages
+# Use the MCP tools directly (all tools are async)
+from deephaven_mcp.mcp_systems_server._mcp import mcp_reload, enterprise_systems_status, sessions_list, session_details, session_tables_schema, session_script_run, session_pip_list
 
 # Example: Get status of all enterprise systems
 result = enterprise_systems_status(context)  # Requires MCP context
@@ -2236,6 +2674,90 @@ uv run scripts/mcp_docs_stress_http.py \
 - `--max-response-time`: Maximum allowed response time in seconds (default: 1)
 
 The script will create multiple concurrent connections and send requests to the specified SSE endpoint, reporting errors and response times. It will print "PASSED" if the test completes without exceeding the error threshold, or "FAILED" with the reason if the error threshold is reached.
+
+---
+
+## Testing
+
+### Unit Tests
+
+Unit tests are fast and require no external dependencies. They run automatically on every commit.
+
+Run all unit tests:
+
+```bash
+uv run pytest tests/ -v
+```
+
+Run tests for a specific module:
+
+```bash
+uv run pytest tests/resource_manager/ -v
+```
+
+### Integration Tests
+
+Integration tests launch real Docker containers and python processes to verify end-to-end functionality with actual Deephaven instances.
+
+#### Prerequisites
+
+- **Docker** must be installed and running
+- **Development dependencies** must be installed: `uv pip install -e ".[dev]"`
+  - This includes `deephaven-server` which provides the `deephaven server` command needed for python integration tests
+
+#### Running Integration Tests
+
+```bash
+uv run pytest -m integration
+```
+
+#### Running Specific Test Classes
+
+```bash
+# Docker integration tests only
+uv run pytest tests/resource_manager/test_launcher_integration.py::TestDockerLauncherIntegration -m integration
+
+# Python integration tests only
+uv run pytest tests/resource_manager/test_launcher_integration.py::TestPythonLauncherIntegration -m integration
+
+# Orphan cleanup integration tests
+uv run pytest tests/resource_manager/test_launcher_integration.py::TestOrphanCleanupIntegration -m integration
+
+# Instance tracker integration tests
+uv run pytest tests/resource_manager/test_launcher_integration.py::TestInstanceTrackerIntegration -m integration
+```
+
+#### Troubleshooting Integration Tests
+
+**Problem:** Tests fail and you need to see Deephaven subprocess output
+
+**Solution:** Enable DEBUG logging to see all subprocess output:
+
+```bash
+uv run pytest -m integration --log-cli-level=DEBUG -v
+```
+
+Or use `-s` to see output directly in the terminal:
+
+```bash
+uv run pytest -m integration -s
+```
+
+**Problem:** Docker tests fail with connection errors
+
+**Solution:** Ensure Docker daemon is running:
+
+```bash
+docker ps
+```
+
+**Problem:** Python integration tests are skipped
+
+**Solution:** The python tests require `deephaven-server` which is included in dev dependencies. Reinstall:
+
+```bash
+uv pip install -e ".[dev]"
+```
 
 ---
 
