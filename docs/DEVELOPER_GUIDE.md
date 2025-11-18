@@ -125,6 +125,9 @@ This repository houses the Python-based [Model Context Protocol (MCP)](https://m
       - [Running Integration Tests](#running-integration-tests)
       - [Running Specific Test Classes](#running-specific-test-classes)
       - [Troubleshooting Integration Tests](#troubleshooting-integration-tests)
+    - [Venv Installation Tests](#venv-installation-tests)
+      - [Running Tests](#running-tests)
+      - [CI Integration](#ci-integration)
   - [Troubleshooting](#troubleshooting)
     - [Common Issues](#common-issues)
     - [Common Errors \& Solutions](#common-errors--solutions)
@@ -2758,6 +2761,41 @@ docker ps
 ```bash
 uv pip install -e ".[dev]"
 ```
+
+### Venv Installation Tests
+
+Tests verify that the `deephaven_coreplus_client` wheel installs correctly in both pip and uv virtual environments.
+
+#### Running Tests
+
+```bash
+# Test both pip and uv installations (default)
+./scripts/venv_install_test.sh
+
+# Test only pip installations
+./scripts/venv_install_test.sh --pip
+
+# Test only uv installations
+./scripts/venv_install_test.sh --uv
+
+# Test with specific Python version
+./scripts/venv_install_test.sh --python python3.12
+
+# Test latest version from GCS
+./scripts/venv_install_test.sh --latest
+
+# Keep venvs for debugging
+./scripts/venv_install_test.sh --keep-venvs
+```
+
+#### CI Integration
+
+The `venv-install-tests` workflow runs on changes to:
+- `ops/artifacts/**` (new wheel uploads)
+- `bin/dev_manage_coreplus_client.sh`
+- `scripts/venv_install_test.sh`
+
+Tests run on Ubuntu and macOS with supported Python versions.
 
 ---
 
