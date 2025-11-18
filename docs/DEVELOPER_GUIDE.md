@@ -2769,18 +2769,23 @@ Tests verify that the `deephaven_coreplus_client` wheel installs correctly in bo
 #### Running Tests
 
 ```bash
-# Test both pip and uv installations
+# Test both pip and uv installations (default)
 ./scripts/venv_install_test.sh
+
+# Test only pip installations
+./scripts/venv_install_test.sh --pip
+
+# Test only uv installations
+./scripts/venv_install_test.sh --uv
 
 # Test with specific Python version
 ./scripts/venv_install_test.sh --python python3.12
 
+# Test latest version from GCS
+./scripts/venv_install_test.sh --latest
+
 # Keep venvs for debugging
 ./scripts/venv_install_test.sh --keep-venvs
-
-# Skip specific tests
-./scripts/venv_install_test.sh --skip-uv
-./scripts/venv_install_test.sh --skip-pip
 ```
 
 #### CI Integration

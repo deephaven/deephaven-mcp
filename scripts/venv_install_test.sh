@@ -244,7 +244,7 @@ create_venv() {
         return 1
       fi
       echo "📦 Creating uv virtual environment..."
-      if ! uv venv "$venv_path" --quiet; then
+      if ! uv venv "$venv_path"; then
         print_error "Failed to create uv venv"
         return 1
       fi
@@ -394,7 +394,7 @@ print_summary() {
       
       if [[ "$venv_enabled" == "false" ]]; then
         echo "  ${venv_type} + ${source}: SKIPPED"
-      elif [[ " ${FAILED_TESTS[@]:-} " =~ " ${test_label} " ]]; then
+      elif [[ " ${FAILED_TESTS[@]+"${FAILED_TESTS[@]}"} " =~ " ${test_label} " ]]; then
         print_error "${test_label}: FAILED"
       else
         print_success "${test_label}: PASSED"
