@@ -53,7 +53,10 @@ _BASE_ENTERPRISE_SYSTEM_FIELDS: dict[str, type | tuple[type, ...]] = {
 
 _OPTIONAL_ENTERPRISE_SYSTEM_FIELDS: dict[str, type | tuple[type, ...]] = {
     "session_creation": dict,  # Optional session creation configuration (max_concurrent_sessions, defaults)
-    "connection_timeout": (int, float),  # Optional timeout in seconds for initial connection
+    "connection_timeout": (
+        int,
+        float,
+    ),  # Optional timeout in seconds for initial connection
 }
 """Defines optional fields that can be included in enterprise system configurations."""
 
@@ -643,21 +646,17 @@ def _validate_enterprise_system_connection_timeout(
         return  # Field is optional
 
     timeout = config["connection_timeout"]
-    
+
     # Validate type (reject bool even though it's technically a subclass of int)
-    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
+    if isinstance(timeout, bool) or not isinstance(timeout, int | float):
         msg = f"'connection_timeout' for enterprise system '{system_name}' must be a number (int or float), but got {type(timeout).__name__}."
-        _LOGGER.error(
-            f"[config:_validate_enterprise_system_connection_timeout] {msg}"
-        )
+        _LOGGER.error(f"[config:_validate_enterprise_system_connection_timeout] {msg}")
         raise EnterpriseSystemConfigurationError(msg)
-    
+
     # Validate value is positive
     if timeout <= 0:
         msg = f"'connection_timeout' for enterprise system '{system_name}' must be positive, but got {timeout}."
-        _LOGGER.error(
-            f"[config:_validate_enterprise_system_connection_timeout] {msg}"
-        )
+        _LOGGER.error(f"[config:_validate_enterprise_system_connection_timeout] {msg}")
         raise EnterpriseSystemConfigurationError(msg)
 
 

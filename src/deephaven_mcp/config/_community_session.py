@@ -205,7 +205,7 @@ def validate_community_sessions_config(
     This validates the dictionary of static community sessions defined in the configuration.
     If `community_sessions_map` is None (i.e., the 'community.sessions' key was absent
     from the main configuration), this function does nothing.
-    
+
     If `community_sessions_map` is provided, this checks that it's a dictionary
     and that each individual session configuration within it is valid.
     An empty dictionary is allowed, signifying no sessions are configured under this key.
@@ -393,7 +393,7 @@ def redact_community_session_creation_config(
 
     Uses deep copy because session_creation configs may contain nested structures (defaults dict).
     The original dictionary is not modified. Sensitive fields are replaced with the string "[REDACTED]".
-    
+
     Note: auth_token_env_var is NOT redacted as it only contains the environment variable name,
     not the actual token value.
 

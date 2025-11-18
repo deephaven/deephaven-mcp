@@ -3859,7 +3859,7 @@ def _normalize_auth_type(auth_type: str) -> tuple[str, str | None]:
 
     Dynamic community sessions only support PSK and Anonymous authentication.
     Basic auth requires database setup and is not suitable for dynamic sessions.
-    
+
     Validation Rules:
     - Rejects leading/trailing whitespace
     - Rejects "Basic" authentication (case-insensitive)
@@ -3869,7 +3869,7 @@ def _normalize_auth_type(auth_type: str) -> tuple[str, str | None]:
     - Preserves custom authenticator class names exactly as provided
 
     Args:
-        auth_type (str): Authentication type, either shorthand ("PSK", "Anonymous") 
+        auth_type (str): Authentication type, either shorthand ("PSK", "Anonymous")
             or full class name.
 
     Returns:
@@ -3898,7 +3898,11 @@ def _normalize_auth_type(auth_type: str) -> tuple[str, str | None]:
         )
 
     # Check if it looks like the Deephaven PSK handler but with wrong case
-    if "." in auth_type and auth_type.upper() == "IO.DEEPHAVEN.AUTHENTICATION.PSK.PSKAUTHENTICATIONHANDLER":
+    if (
+        "." in auth_type
+        and auth_type.upper()
+        == "IO.DEEPHAVEN.AUTHENTICATION.PSK.PSKAUTHENTICATIONHANDLER"
+    ):
         if auth_type != "io.deephaven.authentication.psk.PskAuthenticationHandler":
             return (
                 "",

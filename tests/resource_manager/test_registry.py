@@ -108,13 +108,16 @@ async def test_get_returns_item(registry, mock_base_config_manager):
 
 
 @pytest.mark.asyncio
-async def test_get_unknown_raises_registry_item_not_found(registry, mock_base_config_manager):
+async def test_get_unknown_raises_registry_item_not_found(
+    registry, mock_base_config_manager
+):
     """Test that get() raises RegistryItemNotFoundError for an unknown item."""
     from deephaven_mcp._exceptions import RegistryItemNotFoundError
-    
+
     await registry.initialize(mock_base_config_manager)
     with pytest.raises(
-        RegistryItemNotFoundError, match="No item with name 'unknown' found in ConcreteRegistry"
+        RegistryItemNotFoundError,
+        match="No item with name 'unknown' found in ConcreteRegistry",
     ):
         await registry.get("unknown")
 
@@ -152,6 +155,7 @@ async def test_get_all_returns_copy(registry, mock_base_config_manager):
 
     # Original registry should be unchanged
     from deephaven_mcp._exceptions import RegistryItemNotFoundError
+
     with pytest.raises(RegistryItemNotFoundError):
         await registry.get("new_item")
 
@@ -273,7 +277,7 @@ async def test_community_registry_get_unknown_raises_registry_item_not_found(
 ):
     """Test that get() for an unknown worker raises RegistryItemNotFoundError."""
     from deephaven_mcp._exceptions import RegistryItemNotFoundError
-    
+
     await community_session_registry.initialize(mock_community_config_manager)
     with pytest.raises(
         RegistryItemNotFoundError,
@@ -385,7 +389,7 @@ async def test_factory_registry_creation(mock_factory_config_manager):
 async def test_factory_registry_get_nonexistent(mock_factory_config_manager):
     """Test that getting a non-existent manager raises RegistryItemNotFoundError."""
     from deephaven_mcp._exceptions import RegistryItemNotFoundError
-    
+
     registry = CorePlusSessionFactoryRegistry()
     await registry.initialize(mock_factory_config_manager)
 

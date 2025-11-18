@@ -774,19 +774,21 @@ class TestCorePlusSessionFactoryManager:
     async def test_create_item_timeout(self, mock_from_config):
         """Test that _create_item raises DeephavenConnectionError on timeout."""
         from deephaven_mcp._exceptions import DeephavenConnectionError
-        
+
         # Simulate a timeout by making from_config hang
         async def slow_operation(config):
             await asyncio.sleep(20)  # Longer than default timeout
-        
+
         mock_from_config.side_effect = slow_operation
-        
+
         config = {"host": "unreachable", "connection_timeout": 0.1}
         manager = CorePlusSessionFactoryManager(name="test_factory", config=config)
-        
-        with pytest.raises(DeephavenConnectionError, match="timed out after 0.1 seconds"):
+
+        with pytest.raises(
+            DeephavenConnectionError, match="timed out after 0.1 seconds"
+        ):
             await manager._create_item()
-        
+
         mock_from_config.assert_awaited_once_with(config)
 
     @pytest.mark.asyncio

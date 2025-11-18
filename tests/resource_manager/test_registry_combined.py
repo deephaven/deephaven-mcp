@@ -954,7 +954,7 @@ class TestGetAndGetAll:
     async def test_get_item_not_found(self, initialized_registry):
         """Test that get raises RegistryItemNotFoundError when item not found."""
         from deephaven_mcp._exceptions import RegistryItemNotFoundError
-        
+
         # Community session - no update should happen
         with pytest.raises(RegistryItemNotFoundError):
             await initialized_registry.get("community:source:nonexistent")
@@ -973,7 +973,9 @@ class TestGetAndGetAll:
         assert item == mock_item
 
     @pytest.mark.asyncio
-    async def test_get_enterprise_session_triggers_factory_update(self, initialized_registry):
+    async def test_get_enterprise_session_triggers_factory_update(
+        self, initialized_registry
+    ):
         """Test that getting an enterprise session updates only that factory."""
         # Mock the update method
         initialized_registry._update_enterprise_sessions = AsyncMock()
@@ -987,7 +989,9 @@ class TestGetAndGetAll:
 
         # Verify item was returned and only factory1 was updated
         assert item == mock_item
-        initialized_registry._update_enterprise_sessions.assert_awaited_once_with(factory_name="factory1")
+        initialized_registry._update_enterprise_sessions.assert_awaited_once_with(
+            factory_name="factory1"
+        )
 
     @pytest.mark.asyncio
     async def test_get_all_success(self, initialized_registry):
@@ -1353,10 +1357,12 @@ class TestConnectionErrorHandling:
             # Verify it returned correct values
             assert changes.session_names_to_add == set()
             assert changes.session_keys_to_remove == {key1, key2}
-            
+
             # Apply the removals to verify cleanup works
-            await initialized_registry._close_stale_enterprise_sessions(changes.session_keys_to_remove)
-            
+            await initialized_registry._close_stale_enterprise_sessions(
+                changes.session_keys_to_remove
+            )
+
             # Verify sessions were closed and removed
             mock_session1.close.assert_awaited_once()
             mock_session2.close.assert_awaited_once()
@@ -1430,12 +1436,17 @@ class TestConnectionErrorHandling:
 
         async def mock_update_factory(factory, factory_name):
             """Mock that tracks when each factory update is called."""
-            from deephaven_mcp.resource_manager._registry_combined import _FactorySessionChanges
+            from deephaven_mcp.resource_manager._registry_combined import (
+                _FactorySessionChanges,
+            )
+
             call_order.append(f"start_{factory_name}")
             # Simulate some async work
             await asyncio.sleep(0.01)
             call_order.append(f"end_{factory_name}")
-            return _FactorySessionChanges(factory, factory_name, set(), set())  # Return empty changes
+            return _FactorySessionChanges(
+                factory, factory_name, set(), set()
+            )  # Return empty changes
 
         with patch.object(
             initialized_registry,
@@ -1447,9 +1458,7 @@ class TestConnectionErrorHandling:
         # Verify all factories were called
         assert len(call_order) == 6
         # All starts should happen before any ends (parallel execution)
-        start_indices = [
-            i for i, x in enumerate(call_order) if x.startswith("start_")
-        ]
+        start_indices = [i for i, x in enumerate(call_order) if x.startswith("start_")]
         end_indices = [i for i, x in enumerate(call_order) if x.startswith("end_")]
         # In parallel execution, all starts happen first, then all ends
         assert max(start_indices) < min(end_indices)
@@ -1479,11 +1488,16 @@ class TestConnectionErrorHandling:
 
         async def mock_update_factory(factory, factory_name):
             """Mock that simulates connection error for factory2."""
-            from deephaven_mcp.resource_manager._registry_combined import _FactorySessionChanges
+            from deephaven_mcp.resource_manager._registry_combined import (
+                _FactorySessionChanges,
+            )
+
             await asyncio.sleep(0.01)
             if factory_name != "factory2":
                 completed_factories.append(factory_name)
-            return _FactorySessionChanges(factory, factory_name, set(), set())  # Return empty changes
+            return _FactorySessionChanges(
+                factory, factory_name, set(), set()
+            )  # Return empty changes
 
         with patch.object(
             initialized_registry,
@@ -1517,11 +1531,16 @@ class TestConnectionErrorHandling:
 
         async def mock_update_factory(factory, factory_name):
             """Mock that raises ValueError for factory2."""
-            from deephaven_mcp.resource_manager._registry_combined import _FactorySessionChanges
+            from deephaven_mcp.resource_manager._registry_combined import (
+                _FactorySessionChanges,
+            )
+
             await asyncio.sleep(0.01)
             if factory_name == "factory2":
                 raise ValueError(f"Test error from {factory_name}")
-            return _FactorySessionChanges(factory, factory_name, set(), set())  # Return empty changes for successful factories
+            return _FactorySessionChanges(
+                factory, factory_name, set(), set()
+            )  # Return empty changes for successful factories
 
         with patch.object(
             initialized_registry,
@@ -1531,7 +1550,7 @@ class TestConnectionErrorHandling:
             # Bulk update should raise ExceptionGroup with the failure
             with pytest.raises(ExceptionGroup) as exc_info:
                 await initialized_registry._update_enterprise_sessions()
-            
+
             # Verify the ExceptionGroup contains the ValueError
             assert len(exc_info.value.exceptions) == 1
             assert isinstance(exc_info.value.exceptions[0], ValueError)
@@ -1562,8 +1581,10 @@ class TestConnectionErrorHandling:
         ):
             # Single-factory update should raise ExceptionGroup
             with pytest.raises(ExceptionGroup) as exc_info:
-                await initialized_registry._update_enterprise_sessions(factory_name="factory1")
-            
+                await initialized_registry._update_enterprise_sessions(
+                    factory_name="factory1"
+                )
+
             # Verify the ExceptionGroup contains the ValueError
             assert len(exc_info.value.exceptions) == 1
             assert isinstance(exc_info.value.exceptions[0], ValueError)
@@ -1590,28 +1611,42 @@ class TestUpdateEnterpriseFactorySessions:
             "_calculate_factory_session_changes",
             AsyncMock(return_value=None),  # Will be set below
         ) as mock_update:
-            from deephaven_mcp.resource_manager._registry_combined import _FactorySessionChanges
-            mock_update.return_value = _FactorySessionChanges(mock_factory, factory_name, set(), set())
-            await initialized_registry._update_enterprise_sessions(factory_name=factory_name)
+            from deephaven_mcp.resource_manager._registry_combined import (
+                _FactorySessionChanges,
+            )
+
+            mock_update.return_value = _FactorySessionChanges(
+                mock_factory, factory_name, set(), set()
+            )
+            await initialized_registry._update_enterprise_sessions(
+                factory_name=factory_name
+            )
 
             # Verify only the specific factory was updated
             mock_update.assert_awaited_once_with(mock_factory, factory_name)
             # Verify we called get() not get_all()
-            initialized_registry._enterprise_registry.get.assert_awaited_once_with(factory_name)
+            initialized_registry._enterprise_registry.get.assert_awaited_once_with(
+                factory_name
+            )
 
     @pytest.mark.asyncio
     async def test_update_single_factory_not_found(self, initialized_registry):
         """Test that RegistryItemNotFoundError is raised for non-existent factory."""
         from deephaven_mcp._exceptions import RegistryItemNotFoundError
-        
+
         # Mock enterprise registry get() to raise RegistryItemNotFoundError (like the real registry does)
         initialized_registry._enterprise_registry.get = AsyncMock(
-            side_effect=RegistryItemNotFoundError("No item with name 'nonexistent' found")
+            side_effect=RegistryItemNotFoundError(
+                "No item with name 'nonexistent' found"
+            )
         )
 
         # Try to update non-existent factory - RegistryItemNotFoundError should be caught gracefully
         # The exception is expected and handled, so get() should return RegistryItemNotFoundError for the session
-        with pytest.raises(RegistryItemNotFoundError, match="No item with name 'enterprise:nonexistent:session' found"):
+        with pytest.raises(
+            RegistryItemNotFoundError,
+            match="No item with name 'enterprise:nonexistent:session' found",
+        ):
             await initialized_registry.get("enterprise:nonexistent:session")
 
     @pytest.mark.asyncio
@@ -1640,26 +1675,33 @@ class TestUpdateEnterpriseFactorySessions:
         initialized_registry._items[key] = mock_session
 
         # Mock _calculate_factory_session_changes to return empty changes (connection errors handled internally)
-        from deephaven_mcp.resource_manager._registry_combined import _FactorySessionChanges
+        from deephaven_mcp.resource_manager._registry_combined import (
+            _FactorySessionChanges,
+        )
+
         with patch.object(
             initialized_registry,
             "_calculate_factory_session_changes",
-            AsyncMock(return_value=_FactorySessionChanges(mock_factory, factory_name, set(), set())),
+            AsyncMock(
+                return_value=_FactorySessionChanges(
+                    mock_factory, factory_name, set(), set()
+                )
+            ),
         ):
             # This should not raise - connection errors are handled internally
-            await initialized_registry._update_enterprise_sessions(factory_name=factory_name)
+            await initialized_registry._update_enterprise_sessions(
+                factory_name=factory_name
+            )
 
     @pytest.mark.asyncio
     async def test_update_enterprise_sessions_no_factories(self, initialized_registry):
         """Test update when no factories are configured (empty registry)."""
         # Mock enterprise registry to return empty dict
-        initialized_registry._enterprise_registry.get_all = AsyncMock(
-            return_value={}
-        )
+        initialized_registry._enterprise_registry.get_all = AsyncMock(return_value={})
 
         # Should log and return early without error
         await initialized_registry._update_enterprise_sessions()
-        
+
         # Verify early return - no items should be added
         assert len(initialized_registry._items) == 0
 
@@ -1668,8 +1710,10 @@ class TestUpdateEnterpriseFactorySessions:
         self, initialized_registry
     ):
         """Test that application failures are collected in ExceptionGroup."""
-        from deephaven_mcp.resource_manager._registry_combined import _FactorySessionChanges
-        
+        from deephaven_mcp.resource_manager._registry_combined import (
+            _FactorySessionChanges,
+        )
+
         mock_factory1 = MagicMock(spec=CorePlusSessionFactoryManager)
         mock_factory2 = MagicMock(spec=CorePlusSessionFactoryManager)
 
@@ -1682,9 +1726,13 @@ class TestUpdateEnterpriseFactorySessions:
         )
 
         # Mock _calculate_factory_session_changes to succeed for both
-        changes1 = _FactorySessionChanges(mock_factory1, "factory1", {"session1"}, set())
-        changes2 = _FactorySessionChanges(mock_factory2, "factory2", {"session2"}, set())
-        
+        changes1 = _FactorySessionChanges(
+            mock_factory1, "factory1", {"session1"}, set()
+        )
+        changes2 = _FactorySessionChanges(
+            mock_factory2, "factory2", {"session2"}, set()
+        )
+
         with patch.object(
             initialized_registry,
             "_calculate_factory_session_changes",
@@ -1693,14 +1741,14 @@ class TestUpdateEnterpriseFactorySessions:
             # Mock _apply_factory_session_changes to fail for factory1
             original_apply = initialized_registry._apply_factory_session_changes
             call_count = [0]
-            
+
             async def failing_apply(changes):
                 call_count[0] += 1
                 if call_count[0] == 1:  # First call fails
                     raise RuntimeError("Application failed for factory1")
                 # Second call succeeds
                 await original_apply(changes)
-            
+
             with patch.object(
                 initialized_registry,
                 "_apply_factory_session_changes",
@@ -1709,17 +1757,22 @@ class TestUpdateEnterpriseFactorySessions:
                 # Should raise ExceptionGroup containing the application error
                 with pytest.raises(ExceptionGroup) as exc_info:
                     await initialized_registry._update_enterprise_sessions()
-                
+
                 # Verify the exception group contains our application error
                 assert len(exc_info.value.exceptions) == 1
                 assert isinstance(exc_info.value.exceptions[0], RuntimeError)
-                assert "Application failed for factory1" in str(exc_info.value.exceptions[0])
+                assert "Application failed for factory1" in str(
+                    exc_info.value.exceptions[0]
+                )
 
     @pytest.mark.asyncio
     async def test_get_with_invalid_session_name(self, initialized_registry):
         """Test get() with malformed session name catches InvalidSessionNameError."""
-        from deephaven_mcp._exceptions import InvalidSessionNameError, RegistryItemNotFoundError
-        
+        from deephaven_mcp._exceptions import (
+            InvalidSessionNameError,
+            RegistryItemNotFoundError,
+        )
+
         # Mock parse_full_name to raise InvalidSessionNameError
         with patch.object(
             BaseItemManager,

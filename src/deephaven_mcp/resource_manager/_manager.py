@@ -2867,30 +2867,31 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
             EnterpriseSessionManager._create_item(): Session-level creation counterpart
         """
         # Extract timeout from config (uses DEFAULT_CONNECTION_TIMEOUT_SECONDS if not specified)
-        timeout = self._config.get("connection_timeout", DEFAULT_CONNECTION_TIMEOUT_SECONDS)
-        
+        timeout = self._config.get(
+            "connection_timeout", DEFAULT_CONNECTION_TIMEOUT_SECONDS
+        )
+
         _LOGGER.debug(
             f"[{self.__class__.__name__}] Creating enterprise factory for '{self.full_name}' (timeout: {timeout}s)"
         )
-        
+
         # Wrap factory creation with timeout to prevent hanging on unreachable systems
         try:
             factory = await asyncio.wait_for(
-                CorePlusSessionFactory.from_config(self._config),
-                timeout=timeout
+                CorePlusSessionFactory.from_config(self._config), timeout=timeout
             )
             _LOGGER.info(
                 f"[{self.__class__.__name__}] Successfully created enterprise factory for '{self.full_name}'"
             )
             return factory
-        except asyncio.TimeoutError:
+        except TimeoutError as e:
             _LOGGER.error(
                 f"[{self.__class__.__name__}] Connection to enterprise system '{self.full_name}' timed out after {timeout} seconds"
             )
             raise DeephavenConnectionError(
                 f"Connection to enterprise system timed out after {timeout} seconds. "
                 f"Check connection_json_url and network connectivity."
-            )
+            ) from e
 
     @override
     async def _check_liveness(

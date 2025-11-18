@@ -8271,7 +8271,7 @@ def test_resolve_community_session_parameters_invalid_auth_type():
         python_venv_path=None,
         defaults={},
     )
-    
+
     # Should return empty dict and error dict
     assert resolved_params == {}
     assert error is not None

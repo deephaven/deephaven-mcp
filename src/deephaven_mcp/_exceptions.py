@@ -181,7 +181,7 @@ class SessionError(McpError):
 
     This exception serves as a base class for more specific session-related exceptions
     and can be used directly for general session errors that don't fit specific categories.
-    
+
     Use SessionError for errors with existing, already-initialized sessions, such as:
     - Session connections cannot be closed properly
     - Session enters an invalid or unexpected state
