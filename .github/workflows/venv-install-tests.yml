@@ -1,0 +1,49 @@
+name: Venv Install Tests
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "ops/artifacts/**"
+      - "bin/dev_manage_coreplus_client.sh"
+      - "scripts/venv_install_test.sh"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "ops/artifacts/**"
+      - "bin/dev_manage_coreplus_client.sh"
+      - "scripts/venv_install_test.sh"
+  workflow_dispatch:
+
+jobs:
+  test-installations:
+    name: Test ${{ matrix.os }} Python ${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python-version: ["3.11", "3.12", "3.13"]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Install coreutils (macOS)
+        if: runner.os == 'macOS'
+        run: brew install coreutils
+
+      - name: Run venv install tests
+        run: ./scripts/venv_install_test.sh --python python${{ matrix.python-version }}
