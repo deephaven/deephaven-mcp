@@ -1,3 +1,6 @@
+# Tests enterprise client wheel installation in both pip and uv virtual environments.
+# Validates that dev_manage_coreplus_client.sh correctly handles both venv types,
+# addressing user-reported issues with uv venv compatibility.
 name: Venv Install Tests
 
 on:
@@ -7,13 +10,15 @@ on:
       - "ops/artifacts/**"
       - "bin/dev_manage_coreplus_client.sh"
       - "scripts/venv_install_test.sh"
+      - ".github/workflows/venv-install-tests.yml"
   pull_request:
     branches: ["main"]
     paths:
       - "ops/artifacts/**"
       - "bin/dev_manage_coreplus_client.sh"
       - "scripts/venv_install_test.sh"
-  workflow_dispatch:
+      - ".github/workflows/venv-install-tests.yml"
+  workflow_dispatch:  # Allow manual trigger
 
 jobs:
   test-installations:
@@ -41,9 +46,8 @@ jobs:
           curl -LsSf https://astral.sh/uv/install.sh | sh
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
-      - name: Install coreutils (macOS)
-        if: runner.os == 'macOS'
-        run: brew install coreutils
-
-      - name: Run venv install tests
-        run: ./scripts/venv_install_test.sh --python python${{ matrix.python-version }}
+      - name: Run venv installation tests (pip + uv, archive only)
+        run: |
+          # Test both pip and uv venvs with local wheel file
+          # Note: --latest and --version tests skipped (require GCS access)
+          ./scripts/venv_install_test.sh --pip --uv --archive --python python${{ matrix.python-version }}
