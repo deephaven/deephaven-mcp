@@ -91,6 +91,7 @@ from deephaven_mcp._exceptions import (
     AuthenticationError,
     ConfigurationError,
     DeephavenConnectionError,
+    InvalidSessionNameError,
     SessionCreationError,
 )
 from deephaven_mcp.client import (
@@ -442,7 +443,7 @@ class BaseItemManager(Generic[T], ABC):
             tuple[str, str, str]: (system_type, source, name)
 
         Raises:
-            ValueError: If full_name is not in the expected format
+            InvalidSessionNameError: If full_name is not in the expected format
 
         Example:
             ```python
@@ -454,7 +455,7 @@ class BaseItemManager(Generic[T], ABC):
         """
         parts = full_name.split(":", 2)
         if len(parts) != 3 or not all(part for part in parts):
-            raise ValueError(
+            raise InvalidSessionNameError(
                 f"Invalid full_name format: '{full_name}'. "
                 f"Expected format: 'system_type:source:name'"
             )

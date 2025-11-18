@@ -159,6 +159,7 @@ class TestExceptionModule:
             "SessionError",
             "SessionCreationError",
             "SessionLaunchError",
+            "InvalidSessionNameError",
             # Authentication exceptions
             "AuthenticationError",
             # Query exceptions
@@ -167,6 +168,7 @@ class TestExceptionModule:
             "DeephavenConnectionError",
             # Resource exceptions
             "ResourceError",
+            "RegistryItemNotFoundError",
             # Configuration exceptions
             "ConfigurationError",
             "CommunitySessionConfigurationError",

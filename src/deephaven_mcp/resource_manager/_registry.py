@@ -40,6 +40,7 @@ from deephaven_mcp._exceptions import (
     ConfigurationError,
     InternalError,
     MissingEnterprisePackageError,
+    RegistryItemNotFoundError,
 )
 from deephaven_mcp.client import is_enterprise_available
 
@@ -141,13 +142,13 @@ class BaseRegistry(abc.ABC, Generic[T]):
 
         Raises:
             InternalError: If the registry has not been initialized.
-            KeyError: If no item with the given name exists in the registry.
+            RegistryItemNotFoundError: If no item with the given name exists in the registry.
         """
         async with self._lock:
             self._check_initialized()
 
             if name not in self._items:
-                raise KeyError(
+                raise RegistryItemNotFoundError(
                     f"No item with name '{name}' found in {self.__class__.__name__}"
                 )
 

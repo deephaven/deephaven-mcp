@@ -9,13 +9,13 @@ system to signal recoverable or expected problems, allowing callers to implement
 recovery or reporting strategies.
 
 Exception Hierarchy:
-    - Base exceptions: McpError (base for all MCP exceptions), InternalError (extends McpError and RuntimeError)
-    - Session exceptions: SessionError (extends McpError), SessionCreationError (extends SessionError), SessionLaunchError (extends SessionCreationError)
+    - Base exceptions: McpError (base for all MCP exceptions), InternalError (extends McpError and RuntimeError), UnsupportedOperationError (extends McpError), MissingEnterprisePackageError (extends InternalError)
+    - Session exceptions: SessionError (extends McpError), SessionCreationError (extends SessionError), SessionLaunchError (extends SessionCreationError), InvalidSessionNameError (extends SessionError and ValueError)
     - Authentication exceptions: AuthenticationError (extends McpError)
     - Query exceptions: QueryError (extends McpError)
     - Connection exceptions: DeephavenConnectionError (extends McpError)
-    - Resource exceptions: ResourceError (extends McpError)
-    - Configuration exceptions: ConfigurationError (extends McpError), CommunitySessionConfigurationError, EnterpriseSystemConfigurationError
+    - Resource exceptions: ResourceError (extends McpError), RegistryItemNotFoundError (extends ResourceError and KeyError)
+    - Configuration exceptions: ConfigurationError (extends McpError), CommunitySessionConfigurationError (extends ConfigurationError), EnterpriseSystemConfigurationError (extends ConfigurationError)
 
 Usage Example:
     ```python
@@ -46,6 +46,7 @@ __all__ = [
     "SessionCreationError",
     "SessionError",
     "SessionLaunchError",
+    "InvalidSessionNameError",
     # Authentication exceptions
     "AuthenticationError",
     # Query exceptions
@@ -54,6 +55,7 @@ __all__ = [
     "DeephavenConnectionError",
     # Resource exceptions
     "ResourceError",
+    "RegistryItemNotFoundError",
     # Configuration exceptions
     "ConfigurationError",
     "CommunitySessionConfigurationError",
@@ -101,8 +103,6 @@ class InternalError(McpError, RuntimeError):
     - System invariants are broken
     - Unrecoverable implementation bugs occur
 
-
-
     Examples:
         ```python
         if unexpected_internal_state:
@@ -134,8 +134,8 @@ class MissingEnterprisePackageError(InternalError):
         """Initialize the exception with an optional custom message.
 
         Args:
-            message: Optional custom message. If not provided, uses a default
-                    message about the missing deephaven-coreplus-client package.
+            message (str | None): Optional custom message. If not provided, uses a default
+                message about the missing deephaven-coreplus-client package.
         """
         if message is None:
             message = "Core+ features are not available (deephaven-coreplus-client Python package not installed)"
@@ -147,8 +147,8 @@ class MissingEnterprisePackageError(InternalError):
         """Return a prominently formatted error message.
 
         Returns:
-            A formatted error message with clear visual separation and
-            actionable instructions for resolving the issue.
+            str: A formatted error message with clear visual separation and
+                actionable instructions for resolving the issue.
         """
         separator = "=" * 80
         return f"""
@@ -181,46 +181,55 @@ class SessionError(McpError):
 
     This exception serves as a base class for more specific session-related exceptions
     and can be used directly for general session errors that don't fit specific categories.
-    SessionError is typically raised when operations on an existing session fail, such as
-    when closing a session, checking session status, or performing operations with an
-    invalid session state.
+    
+    Use SessionError for errors with existing, already-initialized sessions, such as:
+    - Session connections cannot be closed properly
+    - Session enters an invalid or unexpected state
+    - Session operations timeout
+    - Session resource allocation fails after initialization
 
-    Examples:
-        - Session connections cannot be closed properly
-        - Session enters an invalid or unexpected state
-        - Session operations timeout
-        - Session resource allocation fails after initialization
+    For session initialization and creation failures, use SessionCreationError instead.
+    For session name parsing failures, use InvalidSessionNameError instead.
 
-    Note:
-        If the error occurs specifically during session creation, use SessionCreationError instead.
+    Usage:
+        ```python
+        try:
+            await session.close()
+        except SessionError as e:
+            logger.error(f"Session operation failed: {e}")
+            # Implement cleanup or recovery logic
+        ```
     """
 
     pass
 
 
 class SessionCreationError(SessionError):
-    """
-    Exception raised when a Deephaven Session cannot be created.
+    """Exception raised when a Deephaven session cannot be created or initialized.
 
-    Raised by session management code when a new session cannot be instantiated due to
-    configuration errors, resource exhaustion, authentication failures, or other recoverable
-    problems. This error is intended to be caught by callers that can handle or report
-    session creation failures gracefully.
+    This exception is raised during the session creation and initialization phase, before
+    the session is fully operational. It indicates that a new session could not be instantiated
+    due to configuration errors, resource issues, authentication failures, or other problems
+    that prevent successful session startup.
 
-    This exception is a subclass of SessionError, providing a more specific error type
-    for initialization and creation phase issues, as opposed to problems with existing sessions.
+    This is distinct from SessionError, which applies to failures with already-running sessions.
+    Use SessionCreationError for problems that occur during the creation process itself.
 
-    Examples:
-        - Failed to create a new worker for a session
-        - Unable to connect to a persistent query
-        - Failed to establish a session connection
-        - Missing required session parameters
-        - Session initialization script failed
+    Common causes include:
+    - Failed to create a new worker for a session
+    - Unable to connect to a persistent query
+    - Failed to establish initial session connection
+    - Missing required session parameters
+    - Session initialization script failed
+    - Authentication failed during session startup
+
+    For dynamic session launch failures (Docker/Python process startup), use the more
+    specific SessionLaunchError subclass instead.
 
     Usage:
         ```python
         try:
-            session = session_manager.connect_to_new_worker()
+            session = await session_manager.connect_to_new_worker()
         except SessionCreationError as e:
             logger.error(f"Failed to create session: {e}")
             # Implement fallback or retry logic
@@ -255,6 +264,42 @@ class SessionLaunchError(SessionCreationError):
         except SessionLaunchError as e:
             logger.error(f"Failed to launch session: {e}")
             # Implement cleanup or retry logic
+        ```
+    """
+
+    pass
+
+
+class InvalidSessionNameError(SessionError, ValueError):
+    """Exception raised when a session name cannot be parsed or is malformed.
+
+    This exception is raised when attempting to parse a session name that does not
+    follow the expected format: `system_type:source:name` (e.g., "enterprise:factory1:session1"
+    or "community:local:worker1").
+
+    Multiple Inheritance:
+        Inherits from both SessionError (for MCP-specific error handling) and ValueError
+        (to indicate invalid input format), allowing callers to catch it as either type
+        depending on their error handling strategy.
+
+    This is an expected exception that should be caught when:
+    - Session name parsing is optional or may fail gracefully
+    - Handling user-provided session names that might be incorrectly formatted
+    - Validating session identifiers from external sources
+
+    Common causes include:
+    - Session name missing required colons (separators)
+    - Session name with too few or too many components
+    - Session name with empty components (e.g., "enterprise::session1")
+    - Session name with invalid system type
+
+    Usage:
+        ```python
+        try:
+            system_type, source, name = BaseItemManager.parse_full_name(session_id)
+        except InvalidSessionNameError as e:
+            logger.warning(f"Invalid session name format: {e}")
+            # Handle malformed session name gracefully
         ```
     """
 
@@ -336,21 +381,25 @@ class DeephavenConnectionError(McpError):
     """Exception raised when connection to a Deephaven service fails.
 
     This exception represents failures to establish or maintain connections to
-    Deephaven services, such as network issues, service unavailability, or
-    connection timeouts. Note that this is distinct from Python's built-in
-    ConnectionError to avoid naming conflicts.
+    Deephaven services. It wraps lower-level network errors and provides a consistent
+    interface for connection-related failures across the Deephaven MCP codebase.
 
-    This exception wraps lower-level connection errors from Python's standard library
-    and networking packages. It provides a consistent interface for connection-related
-    failures across the Deephaven MCP codebase.
+    This is distinct from Python's built-in ConnectionError to avoid naming conflicts
+    and to provide MCP-specific error handling capabilities.
 
-    Examples:
-        - Network connectivity issues
-        - Server not responding
-        - Connection timeout
-        - Server unreachable
-        - Connection reset or terminated
-        - TLS/SSL connection failures
+    Common causes include:
+    - Network connectivity issues
+    - Server not responding or unreachable
+    - Connection timeout
+    - Connection reset or terminated unexpectedly
+    - TLS/SSL connection failures
+    - DNS resolution failures
+
+    Error Handling Strategy:
+        DeephavenConnectionError is often treated as an expected, recoverable error
+        in production environments where services may be temporarily unavailable.
+        Many MCP operations handle this exception internally and log warnings rather
+        than propagating it, treating offline services as gracefully degraded state.
 
     Usage:
         ```python
@@ -358,7 +407,7 @@ class DeephavenConnectionError(McpError):
             manager = CorePlusSessionManager.from_url("https://example.com/iris/connection.json")
             await manager.ping()
         except DeephavenConnectionError as e:
-            logger.error(f"Cannot connect to Deephaven server: {e}")
+            logger.warning(f"Cannot connect to Deephaven server: {e}")
             # Implement connection retry or fallback logic
         ```
 
@@ -405,6 +454,47 @@ class ResourceError(McpError):
     pass
 
 
+class RegistryItemNotFoundError(ResourceError, KeyError):
+    """Exception raised when an item is not found in a registry.
+
+    This exception is raised by registry `get()` methods when attempting to retrieve
+    an item by name that does not exist in the registry. This can occur for session
+    factories, community sessions, or other registry-managed resources.
+
+    Multiple Inheritance:
+        Inherits from both ResourceError (for MCP resource handling) and KeyError
+        (to indicate missing key/identifier), allowing callers to catch it as either
+        type depending on their error handling strategy.
+
+    This is an expected exception that should be caught when:
+    - Registry lookups may legitimately fail (e.g., optional resources)
+    - Services may be temporarily unavailable or offline
+    - Configuration changes may have removed items
+    - Names may come from untrusted or user-provided sources
+
+    This distinguishes expected "item not found" scenarios from actual coding bugs
+    that might also raise generic KeyError elsewhere in the codebase.
+
+    Common causes include:
+    - Item removed from configuration file
+    - Item name misspelled or incorrectly formatted
+    - Item not yet discovered during initialization
+    - Factory or session offline and removed from active registry
+    - Stale reference to previously-existing item
+
+    Usage:
+        ```python
+        try:
+            factory = await registry.get(factory_name)
+        except RegistryItemNotFoundError as e:
+            logger.warning(f"Registry item not available: {e}")
+            # Handle missing item gracefully (e.g., skip, use default, retry)
+        ```
+    """
+
+    pass
+
+
 # Configuration Exceptions
 
 
@@ -416,16 +506,22 @@ class ConfigurationError(McpError):
     It represents user configuration mistakes or invalid configuration states that prevent
     the system from operating correctly.
 
-    Unlike InternalError, which indicates bugs in the code, ConfigurationError indicates
-    problems with user-provided configuration data that can be corrected by updating
-    the configuration files or environment variables.
+    Key Distinction:
+        ConfigurationError indicates problems with user-provided configuration data
+        (files, environment variables) that can be corrected by the user. This is
+        distinct from InternalError, which indicates bugs in the MCP code itself.
 
-    Examples:
+    Use more specific subclasses when possible:
+        - CommunitySessionConfigurationError: For community session configuration issues
+        - EnterpriseSystemConfigurationError: For enterprise system configuration issues
+
+    Common causes include:
         - Invalid JSON syntax in configuration files
         - Missing required configuration fields
-        - Invalid configuration field values
+        - Invalid configuration field values or types
         - Conflicting configuration settings
         - Configuration referencing unavailable features
+        - Environment variables not set or incorrectly formatted
 
     Usage:
         ```python
@@ -441,18 +537,24 @@ class ConfigurationError(McpError):
 
 
 class CommunitySessionConfigurationError(ConfigurationError):
-    """Raised when a community session's configuration cannot be retrieved or is invalid.
+    """Raised when community session configuration is invalid.
 
-    This exception is raised when there are problems with community session configuration
-    data, such as invalid session parameters, missing required fields, or conflicting
-    configuration values in the community sessions section of the configuration file.
+    This exception is raised during validation of community session configuration
+    data from the `deephaven_mcp.json` configuration file. It indicates that
+    session parameters are missing, invalid, or conflicting in the `community_sessions`
+    section of the configuration.
 
-    Examples:
-        - Invalid host or port values
+    Community sessions are statically configured Deephaven Community (Core) instances
+    that the MCP server connects to. Configuration errors prevent these sessions from
+    being initialized and registered.
+
+    Common causes include:
+        - Invalid host or port values (wrong type, out of range)
         - Missing required authentication parameters
-        - Conflicting authentication methods specified
-        - Invalid session timeout values
-        - Malformed session configuration objects
+        - Conflicting authentication methods specified (e.g., both PSK and anonymous)
+        - Invalid session timeout or connection parameter values
+        - Malformed session configuration objects (wrong structure)
+        - Session names that conflict with reserved keywords
 
     Usage:
         ```python
@@ -460,7 +562,7 @@ class CommunitySessionConfigurationError(ConfigurationError):
             session_config = validate_community_session_config(config_data)
         except CommunitySessionConfigurationError as e:
             logger.error(f"Community session configuration error: {e}")
-            # Guide user to fix community session configuration
+            # Guide user to fix community session configuration in deephaven_mcp.json
         ```
     """
 
@@ -468,18 +570,25 @@ class CommunitySessionConfigurationError(ConfigurationError):
 
 
 class EnterpriseSystemConfigurationError(ConfigurationError):
-    """Custom exception for errors in enterprise system configuration.
+    """Raised when enterprise system configuration is invalid.
 
-    This exception is raised when there are problems with enterprise system configuration
-    data, such as invalid connection parameters, authentication configuration errors,
-    or missing required enterprise-specific settings.
+    This exception is raised during validation of enterprise system (Deephaven Core+)
+    configuration data from the `deephaven_mcp.json` configuration file. It indicates
+    that connection parameters, authentication settings, or other enterprise-specific
+    configuration is missing, invalid, or conflicting in the `enterprise.systems` section.
 
-    Examples:
-        - Invalid connection URLs
-        - Missing or invalid authentication credentials
-        - Conflicting authentication methods
+    Enterprise systems are Deephaven Core+ (CorePlus) deployments with controller
+    clients that the MCP server connects to. Configuration errors prevent these systems
+    from being initialized and their session factories from being registered.
+
+    Common causes include:
+        - Invalid or malformed connection_json_url
+        - Missing or invalid authentication credentials (username, password, private_key)
+        - Conflicting authentication methods (e.g., both password and private_key)
         - Invalid TLS/SSL configuration
-        - Missing required enterprise system parameters
+        - Missing required enterprise system parameters (auth_type, connection_json_url)
+        - Invalid worker creation parameters (max_concurrent_workers)
+        - Malformed session creation configuration objects
 
     Usage:
         ```python
@@ -487,7 +596,7 @@ class EnterpriseSystemConfigurationError(ConfigurationError):
             enterprise_config = validate_enterprise_system_config(system_name, config_data)
         except EnterpriseSystemConfigurationError as e:
             logger.error(f"Enterprise system configuration error for {system_name}: {e}")
-            # Guide user to fix enterprise system configuration
+            # Guide user to fix enterprise system configuration in deephaven_mcp.json
         ```
     """
 
@@ -498,20 +607,30 @@ class UnsupportedOperationError(McpError):
     """Exception raised when an operation is not supported in the current context.
 
     This exception is raised when a method or operation is called in a context where
-    it cannot be executed, such as when a Python-specific operation is attempted on
-    a non-Python session, or when a feature is not available for the current session type.
+    it cannot be executed. This typically occurs when attempting to use features that
+    require specific session types, programming languages, or environments that are
+    not available in the current context.
 
-    Examples:
-        - Python-specific operations on non-Python sessions
-        - Enterprise features on community sessions
-        - Operations requiring specific programming languages or environments
+    Common scenarios include:
+        - Python-specific operations attempted on Groovy sessions
+        - Enterprise (Core+) features attempted on Community sessions
+        - Language-specific operations (e.g., pip packages) on non-Python sessions
+        - Operations requiring specific capabilities not available in current environment
         - Features not yet implemented for certain session types
+        - Platform-specific operations attempted on unsupported platforms
 
     Usage:
         ```python
         if session.programming_language != "python":
-            raise UnsupportedOperationError("This operation requires a Python session")
+            raise UnsupportedOperationError(
+                f"This operation requires a Python session, but session uses {session.programming_language}"
+            )
         ```
+
+    Note:
+        This is distinct from NotImplementedError, which indicates planned but unimplemented
+        features. UnsupportedOperationError indicates operations that are fundamentally
+        incompatible with the current context.
     """
 
     pass
