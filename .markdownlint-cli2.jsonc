@@ -1,0 +1,21 @@
+{
+  "config": {
+    "default": true,
+    // MD013: Line length - disabled because URLs and tables can't be wrapped
+    "MD013": false,
+    // MD033: Inline HTML - allow specific elements needed in docs
+    "MD033": {
+      "allowed_elements": ["br", "div"]
+    }
+  },
+  "globs": [
+    "**/*.md"
+  ],
+  "ignores": [
+    "**/venv*/**",
+    "**/.venv*/**",
+    "**/TEST*/**",
+    "**/node_modules/**",
+    "**/.terraform/**"
+  ]
+}
