@@ -979,40 +979,40 @@ If you want AI agents to retrieve credentials programmatically, you can enable t
 
 1. **Edit your `deephaven_mcp.json`:**
 
-```json
-{
-  "security": {
-    "community": {
-      "credential_retrieval_mode": "dynamic_only"
-    }
-  },
-  "community": {
-    "session_creation": {
-      "defaults": {
-        "launch_method": "docker",
-        "heap_size_gb": 4
-      }
-    }
-  }
-}
-```
+   ```json
+   {
+     "security": {
+       "community": {
+         "credential_retrieval_mode": "dynamic_only"
+       }
+     },
+     "community": {
+       "session_creation": {
+         "defaults": {
+           "launch_method": "docker",
+           "heap_size_gb": 4
+         }
+       }
+     }
+   }
+   ```
 
-**Valid `credential_retrieval_mode` values:**
+   **Valid `credential_retrieval_mode` values:**
 
-- **`"none"`** (default): Credential retrieval disabled for all sessions (most secure)
-- **`"dynamic_only"`**: Only auto-generated tokens from dynamically created sessions (recommended for development)
-- **`"static_only"`**: Only pre-configured tokens from static sessions in your config
-- **`"all"`**: Both dynamic and static session credentials
+   - **`"none"`** (default): Credential retrieval disabled for all sessions (most secure)
+   - **`"dynamic_only"`**: Only auto-generated tokens from dynamically created sessions (recommended for development)
+   - **`"static_only"`**: Only pre-configured tokens from static sessions in your config
+   - **`"all"`**: Both dynamic and static session credentials
 
 2. **Use the tool:**
 
-Ask your AI assistant: *"Get me the browser URL for session 'my-analysis'"*
+   Ask your AI assistant: *"Get me the browser URL for session 'my-analysis'"*
 
-The AI will use `session_community_credentials` to retrieve the authenticated URL.
+   The AI will use `session_community_credentials` to retrieve the authenticated URL.
 
-> **🔒 SECURITY WARNING**
->
-> This tool exposes sensitive credentials. Only enable credential retrieval if the MCP server is running locally and you understand the security implications. **NEVER** enable when accessible over untrusted networks.
+   > **🔒 SECURITY WARNING**
+   >
+   > This tool exposes sensitive credentials. Only enable credential retrieval if the MCP server is running locally and you understand the security implications. **NEVER** enable when accessible over untrusted networks.
 
 ---
 
