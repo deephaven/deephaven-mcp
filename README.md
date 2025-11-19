@@ -1004,7 +1004,7 @@ If you want AI agents to retrieve credentials programmatically, you can enable t
 - **`"static_only"`**: Only pre-configured tokens from static sessions in your config
 - **`"all"`**: Both dynamic and static session credentials
 
-1. **Use the tool:**
+2. **Use the tool:**
 
 Ask your AI assistant: *"Get me the browser URL for session 'my-analysis'"*
 
