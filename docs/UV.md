@@ -41,31 +41,37 @@
 ## Installing `uv`
 
 To install `uv`, run:
+
 ```sh
 pip install uv
 ```
+
 Or see the [uv installation guide](https://github.com/astral-sh/uv#installation) for other options and the latest instructions.
 
 ### Creating a Virtual Environment with `uv`
 
 Once [`uv`](https://github.com/astral-sh/uv) is installed, it's highly recommended to create and use a virtual environment for your project. This isolates dependencies and ensures consistency.
 
-1.  **Create a virtual environment (e.g., named `.venv`) with a specific Python version:**
-    
+1. **Create a virtual environment (e.g., named `.venv`) with a specific Python version:**
+
     Use the `-p` option to specify your desired Python interpreter (e.g., Python 3.11, 3.12, 3.13, or a full path to an executable):
+
     ```sh
     uv venv .venv -p 3.11
     ```
+
     Replace `3.11` with your target Python version or path.
 
-2.  **Activate the virtual environment (optional):**
-    
+2. **Activate the virtual environment (optional):**
+
     [`uv`](https://github.com/astral-sh/uv) commands (like `uv pip install ...` or `uv run ...`) automatically detect and use the `.venv` directory without requiring activation. However, if you prefer to use commands directly without the `uv` prefix, you can activate the environment:
+
     ```sh
     source .venv/bin/activate  # On Unix/macOS
     # or
     .venv\Scripts\activate  # On Windows
     ```
+
     After activation, you can use `python`, `pip`, `pytest`, etc. directly.
 
 ---
@@ -83,6 +89,7 @@ uv pip install ".[dev]"
 ```sh
 uv sync
 ```
+
 This will install all dependencies to exactly match your lock file(s) for reproducible environments.
 
 ### 3. Running Servers and Scripts
@@ -132,11 +139,13 @@ uv run scripts/mcp_docs_stress_sse.py --sse-url "http://localhost:8000/sse"
 
 1. Update your `pyproject.toml` as needed.
 2. Run:
+
     ```sh
     uv pip install ".[dev]" --upgrade
     uv pip freeze > requirements.txt  # Optional: update requirements.txt for reference
     uv lock  # Regenerate lock file if needed (see uv docs)
     ```
+
 3. Commit both `pyproject.toml` and `uv.lock` to version control.
 
 ---
@@ -251,15 +260,15 @@ A: Yes! See the example above.
 
 ## Troubleshooting
 
-| Problem                              | Solution                                                                |
-|--------------------------------------|-------------------------------------------------------------------------|
-| Command not found: uv                | Run `pip install uv`                                                    |
-| Missing env var error                | Check your shell or `.env` file                                         |
-| Port already in use                  | Change with `--port` or set `PORT` env var                              |
-| API key errors                       | Verify `INKEEP_API_KEY` or `OPENAI_API_KEY` is set and valid            |
-| Dependency mismatch                  | Run `uv sync`                                                           |
-| Lock file out of date                | Run `uv lock` or `uv pip install ".[dev]" --upgrade`                      |
-| Permission denied for .env file      | Ensure correct file permissions                                         |
+| Problem                              | Solution                                                                 |
+|--------------------------------------|--------------------------------------------------------------------------|
+| Command not found: uv                | Run `pip install uv`                                                     |
+| Missing env var error                | Check your shell or `.env` file                                          |
+| Port already in use                  | Change with `--port` or set `PORT` env var                               |
+| API key errors                       | Verify `INKEEP_API_KEY` or `OPENAI_API_KEY` is set and valid             |
+| Dependency mismatch                  | Run `uv sync`                                                            |
+| Lock file out of date                | Run `uv lock` or `uv pip install ".[dev]" --upgrade`                     |
+| Permission denied for .env file      | Ensure correct file permissions                                          |
 
 ---
 

@@ -8,15 +8,18 @@ This directory contains the Dockerfile and docker-compose.yml for building and r
 ## Usage
 
 ### Build the Docker Image
-```
+
+```sh
 docker build -f ops/docker/mcp-docs/Dockerfile -t mcp-docs:latest .
 ```
 
 ### Run with Docker Compose
-```
+
+```sh
 docker compose -f ops/docker/mcp-docs/docker-compose.yml up
 ```
 
 ## Notes
+
 - The build context is the repo root, so all code/assets are accessible to the Dockerfile.
 - Update the GitHub Actions workflow to use [`ops/docker/mcp-docs/Dockerfile`](Dockerfile).

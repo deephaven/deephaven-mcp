@@ -3,15 +3,22 @@
     "default": true,
     // MD013: Line length - disabled because URLs and tables can't be wrapped
     "MD013": false,
+    // MD028: No blank lines in blockquotes - disabled, blank lines improve readability for multi-paragraph blockquotes
+    "MD028": false,
     // MD033: Inline HTML - allow specific elements needed in docs
     "MD033": {
       "allowed_elements": ["br", "div"]
-    }
+    },
+    // MD036: Emphasis as heading - disabled, linter is inconsistent and bold labels are acceptable documentation style
+    "MD036": false,
+    // MD060: Table column style - disabled, table alignment is too tedious to maintain manually
+    "MD060": false
   },
   "globs": [
     "**/*.md"
   ],
   "ignores": [
+    "**/.windsurf/**",
     "**/venv*/**",
     "**/.venv*/**",
     "**/TEST*/**",
