@@ -70,10 +70,10 @@ This repository houses the Python-based [Model Context Protocol (MCP)](https://m
         - [`catalog_table_sample`](#catalog_table_sample)
     - [Session Data Tools](#session-data-tools)
       - [`session_tables_schema`](#session_tables_schema)
-      - [`session_script_run`](#session_script_run)
-      - [`session_pip_list`](#session_pip_list)
-      - [`session_table_data`](#session_table_data)
-      - [`session_tables_list`](#session_tables_list)
+        - [`session_script_run`](#session_script_run)
+        - [`session_pip_list`](#session_pip_list)
+        - [`session_table_data`](#session_table_data)
+        - [`session_tables_list`](#session_tables_list)
       - [Systems Server Test Components](#systems-server-test-components)
         - [Systems Test Server](#systems-test-server)
         - [Systems Test Client](#systems-test-client)
@@ -2576,11 +2576,11 @@ deephaven-mcp/
 │       ├── mcp_systems_server/ # Source for the Systems MCP server
 │       ├── resource_manager/   # Resource (session, etc.) management
 │       ├── sessions/           # Session management components
-│       ├── **init**.py
+│       ├── __init__.py
 │       ├── _exceptions.py      # Custom exception classes
-│       ├──_logging.py         # Logging configuration
+│       ├── _logging.py         # Logging configuration
 │       ├── _monkeypatch.py     # Runtime patches
-│       ├──_version.py         # Version information
+│       ├── _version.py         # Version information
 │       ├── io.py               # I/O utilities
 │       ├── openai.py           # OpenAI client integration
 │       └── queries.py          # Query management
