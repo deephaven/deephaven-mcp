@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Deephaven MCP pre-commit script
-# - Sort imports, format code, lint, and type-check
+# - Sort imports, format code, lint, type-check, and validate markdown
 # - Run from the project root
 
 # Sort imports with isort
@@ -19,5 +19,8 @@ uv run pydocstyle src
 
 # Run static type checking with mypy
 uv run mypy src/
+
+# Lint markdown files with markdownlint
+npx --yes markdownlint-cli2 --fix
 
 echo "Pre-commit checks passed!"
