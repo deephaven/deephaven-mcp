@@ -22,7 +22,7 @@ jobs:
         run: pip install uv
 
       - name: Install dependencies
-        run: uv pip install ".[dev]" --system
+        run: uv pip install ".[lint]" --system
 
       - name: Run isort (check only)
         run: uv run isort src tests --check-only --diff --skip _version.py --skip .venv

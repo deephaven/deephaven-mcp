@@ -22,7 +22,7 @@ jobs:
         run: pip install uv
 
       - name: Install dependencies
-        run: uv pip install ".[dev]" --system
+        run: uv pip install ".[lint]" --system
 
       - name: Run Black (check only)
         run: uv run black src tests --check --diff --exclude '(_version.py|.venv)'

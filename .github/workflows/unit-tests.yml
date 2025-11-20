@@ -71,8 +71,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          lfs: true
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
@@ -87,32 +85,13 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pip-
 
-      - name: Create virtual environment
-        run: python -m venv .venv
-
-      - name: Install dependencies
+      - name: Install dependencies with enterprise support
         run: |
-          .venv/bin/python -m pip install --upgrade pip
-          .venv/bin/pip install .[test]
-
-      - name: Install Core Plus wheel
-        run: |
-          # Install the Core Plus wheel using the dev management script (tolerant of filename changes)
-          wheel_file=$(ls ops/artifacts/deephaven_coreplus_client*.whl | head -n1)
-          echo "Installing Core Plus wheel: $wheel_file"
-          if [ -z "$wheel_file" ]; then
-            echo "ERROR: No Core Plus wheel file found in ops/artifacts/"
-            exit 1
-          fi
-          echo "Wheel file SHA256: $(sha256sum "$wheel_file" | cut -d' ' -f1)"
-          echo "DEBUG: Current directory: $(pwd)"
-          echo "DEBUG: Venv exists: $([ -d .venv ] && echo 'yes' || echo 'no')"
-          echo "DEBUG: Script exists: $([ -f ./bin/dev_manage_coreplus_client.sh ] && echo 'yes' || echo 'no')"
-          echo "DEBUG: Running command: ./bin/dev_manage_coreplus_client.sh install-wheel --venv .venv --wheel-file $wheel_file"
-          ./bin/dev_manage_coreplus_client.sh install-wheel --venv .venv --wheel-file "$wheel_file"
+          python -m pip install --upgrade pip
+          pip install ".[test,enterprise]"
 
       - name: Run tests with coverage
-        run: .venv/bin/pytest
+        run: pytest
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v4
@@ -122,7 +101,7 @@ jobs:
 
       - name: Fail if any file has <90% coverage (except _version.py)
         run: |
-          .venv/bin/coverage report -m | tee coverage.txt
+          coverage report -m | tee coverage.txt
           awk '
             NR > 2 && $1 !~ /_version\.py/ && $1 ~ /\.py/ {
               cov = $4

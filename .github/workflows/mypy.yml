@@ -22,7 +22,7 @@ jobs:
         run: pip install uv
 
       - name: Install dependencies
-        run: uv pip install ".[dev]" --system
+        run: uv pip install ".[lint]" --system
 
       - name: Run mypy
         run: uv run mypy src --exclude _version.py --exclude .venv
