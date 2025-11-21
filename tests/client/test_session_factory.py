@@ -897,7 +897,7 @@ async def test_from_url_success(monkeypatch):
             },
         ),
     ):
-        result = CorePlusSessionFactory.from_url("http://fake")
+        result = await CorePlusSessionFactory.from_url("http://fake")
         assert isinstance(result, CorePlusSessionFactory)
         assert result.wrapped == instance
 
@@ -908,7 +908,7 @@ async def test_from_url_not_enterprise(monkeypatch):
     monkeypatch.setattr("deephaven_mcp.client._base.is_enterprise_available", False)
     with patch("deephaven_mcp.client._session_factory.is_enterprise_available", False):
         with pytest.raises(exc.InternalError):
-            CorePlusSessionFactory.from_url("http://fake")
+            await CorePlusSessionFactory.from_url("http://fake")
 
 
 @pytest.mark.asyncio
@@ -939,7 +939,7 @@ async def test_from_url_connection_error(monkeypatch):
         ),
     ):
         with pytest.raises(exc.DeephavenConnectionError):
-            CorePlusSessionFactory.from_url("http://fake")
+            await CorePlusSessionFactory.from_url("http://fake")
 
 
 # --- Coverage for unreachable error/warning branches in from_config ---
@@ -1140,7 +1140,7 @@ async def test_from_url_when_enterprise_not_available(monkeypatch):
 
     # Should raise MissingEnterprisePackageError when enterprise not available
     with pytest.raises(exc.MissingEnterprisePackageError) as excinfo:
-        sm_mod.CorePlusSessionFactory.from_url(
+        await sm_mod.CorePlusSessionFactory.from_url(
             "https://example.com/iris/connection.json"
         )
 
