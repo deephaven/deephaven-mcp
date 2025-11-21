@@ -2719,7 +2719,7 @@ async def test_session_table_data_table_not_found():
 # All functionality is now tested by session_tables_schema tests
 
 
-# === create_enterprise_session ===
+# === session_enterprise_create ===
 
 
 @pytest.mark.asyncio
@@ -3142,7 +3142,7 @@ async def test_session_enterprise_create_disabled_by_zero_max_workers():
     assert result["isError"] is True
 
 
-# === delete_enterprise_session ===
+# === session_enterprise_delete ===
 
 
 @pytest.mark.asyncio
@@ -3459,7 +3459,7 @@ def test_resolve_session_parameters():
     assert result["programming_language"] == "Python"  # Built-in default
 
 
-# === create_enterprise_session tests ===
+# === session_enterprise_create tests ===
 
 
 @pytest.mark.asyncio
@@ -3723,7 +3723,7 @@ async def test_session_enterprise_create_system_not_found_v2():
     assert "Enterprise system 'nonexistent-system' not found" in result["error"]
 
 
-# === delete_enterprise_session tests ===
+# === session_enterprise_delete tests ===
 
 
 @pytest.mark.asyncio

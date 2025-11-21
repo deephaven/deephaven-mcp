@@ -273,7 +273,7 @@ async def mcp_reload(context: Context) -> dict:
     - Check 'success' field to verify reload completed
     - Sessions will be automatically recreated with new configuration on next use
     - Operation is atomic and thread-safe
-    - WARNING: All active sessions will be cleared, including those created with create_enterprise_session
+    - WARNING: All active sessions will be cleared, including those created with session_enterprise_create and session_community_create
     - Use carefully - any work in active sessions will be lost
 
     Args:
@@ -3059,7 +3059,7 @@ async def session_enterprise_create(
     context: Context,
     system_name: str,
     session_name: str | None = None,
-    heap_size_gb: int | None = None,
+    heap_size_gb: float | int | None = None,
     programming_language: str | None = None,
     auto_delete_timeout: int | None = None,
     server: str | None = None,
@@ -3092,7 +3092,7 @@ async def session_enterprise_create(
     - Use this tool only when you need to create a new session
     - Check 'success' field and use returned 'session_id' for subsequent operations
     - Sessions have resource limits and may auto-delete after timeout periods
-    - Use delete_enterprise_session tool to clean up when done
+    - Use session_enterprise_delete tool to clean up when done
 
     Args:
         context (Context): The MCP context object.
@@ -3100,7 +3100,7 @@ async def session_enterprise_create(
             Must match a configured enterprise system name.
         session_name (str | None): Name for the new session. If None, auto-generates
             a timestamp-based name like "mcp-{username}-20241126-1130".
-        heap_size_gb (int | None): JVM heap size in gigabytes (integer only, e.g., 8 for -Xmx8g). If None, uses
+        heap_size_gb (float | int | None): JVM heap size in gigabytes (e.g., 8 or 2.5 for -Xmx8g or -Xmx2.5g). If None, uses
             config default or Deephaven default.
         programming_language (str | None): Programming language for the session.
             Supported values: "Python" (default) or "Groovy". If None, uses config default or "Python".
@@ -3164,20 +3164,20 @@ async def session_enterprise_create(
 
     Example Usage:
         # Create session with auto-generated name and all defaults
-        Tool: create_enterprise_session
+        Tool: session_enterprise_create
         Parameters: {
             "system_name": "prod-analytics"
         }
 
         # Create session with custom name
-        Tool: create_enterprise_session
+        Tool: session_enterprise_create
         Parameters: {
             "system_name": "prod-analytics",
             "session_name": "my-analysis-session"
         }
 
         # Create session with custom heap size and timeout
-        Tool: create_enterprise_session
+        Tool: session_enterprise_create
         Parameters: {
             "system_name": "prod-analytics",
             "session_name": "large-data-session",
@@ -3186,7 +3186,7 @@ async def session_enterprise_create(
         }
 
         # Create Groovy session with custom JVM args
-        Tool: create_enterprise_session
+        Tool: session_enterprise_create
         Parameters: {
             "system_name": "prod-analytics",
             "programming_language": "Groovy",
@@ -3194,14 +3194,14 @@ async def session_enterprise_create(
         }
 
         # Create session with environment variables
-        Tool: create_enterprise_session
+        Tool: session_enterprise_create
         Parameters: {
             "system_name": "prod-analytics",
             "extra_environment_vars": ["VAR1=/mnt/data", "VAR2=DEBUG"]
         }
 
         # Create session with specific server and permissions
-        Tool: create_enterprise_session
+        Tool: session_enterprise_create
         Parameters: {
             "system_name": "prod-analytics",
             "server": "server-east-1",
@@ -3233,7 +3233,7 @@ async def session_enterprise_create(
 
         # Get enterprise system configuration
         system_config, error_response = await _get_system_config(
-            "create_enterprise_session", config_manager, system_name
+            "session_enterprise_create", config_manager, system_name
         )
         if error_response:
             result.update(error_response)
@@ -3371,7 +3371,7 @@ async def session_enterprise_create(
 
 
 def _resolve_session_parameters(
-    heap_size_gb: int | None,
+    heap_size_gb: float | int | None,
     auto_delete_timeout: int | None,
     server: str | None,
     engine: str | None,
@@ -3387,7 +3387,7 @@ def _resolve_session_parameters(
     """Resolve session parameters with priority: tool param -> config default -> API default.
 
     Args:
-        heap_size_gb (int | None): Tool parameter value for JVM heap size in GB (integer only).
+        heap_size_gb (float | int | None): Tool parameter value for JVM heap size in GB (e.g., 8 or 2.5).
         auto_delete_timeout (int | None): Tool parameter value for session timeout in seconds.
         server (str | None): Tool parameter value for target server.
         engine (str | None): Tool parameter value for engine type.
@@ -3515,7 +3515,7 @@ async def session_enterprise_delete(
 
         # Verify enterprise system exists in configuration
         _, error_response = await _get_system_config(
-            "delete_enterprise_session", config_manager, system_name
+            "session_enterprise_delete", config_manager, system_name
         )
         if error_response:
             result.update(error_response)
@@ -3786,7 +3786,7 @@ def _resolve_community_session_parameters(
     programming_language: str | None,
     auth_type: str | None,
     auth_token: str | None,
-    heap_size_gb: int | None,
+    heap_size_gb: float | int | None,
     extra_jvm_args: list[str] | None,
     environment_vars: dict[str, str] | None,
     docker_image: str | None,
@@ -3806,7 +3806,7 @@ def _resolve_community_session_parameters(
         programming_language (str | None): Programming language ("Python" or "Groovy"), or None to use default
         auth_type (str | None): Authentication type (shorthand or full class name), or None to use default
         auth_token (str | None): Authentication token, or None to auto-generate for PSK auth
-        heap_size_gb (int | None): JVM heap size in GB, or None to use default
+        heap_size_gb (float | int | None): JVM heap size in GB (e.g., 4 or 2.5), or None to use default
         extra_jvm_args (list[str] | None): Additional JVM arguments, or None to use default
         environment_vars (dict[str, str] | None): Environment variables, or None to use default
         docker_image (str | None): Docker image name (docker only), or None to auto-select based on language
@@ -3824,7 +3824,7 @@ def _resolve_community_session_parameters(
                 - auth_type (str): Normalized auth type (full class name)
                 - auth_token (str | None): Resolved or generated auth token
                 - auto_generated_token (bool): True if token was auto-generated
-                - heap_size_gb (int): Resolved heap size
+                - heap_size_gb (float | int): Resolved heap size
                 - docker_image (str): Resolved docker image (empty for python launch)
                 - docker_memory_limit_gb (float | None): Resolved memory limit
                 - docker_cpu_limit (float | None): Resolved CPU limit
@@ -4112,7 +4112,7 @@ async def _launch_process_and_wait_for_ready(
     session_name: str,
     resolved_launch_method: Literal["docker", "python"],
     resolved_auth_token: str | None,
-    resolved_heap_size_gb: int,
+    resolved_heap_size_gb: float | int,
     resolved_extra_jvm_args: list[str],
     resolved_environment_vars: dict[str, str],
     resolved_docker_image: str,
@@ -4136,7 +4136,7 @@ async def _launch_process_and_wait_for_ready(
         session_name (str): Name for the session.
         resolved_launch_method (Literal["docker", "python"]): Launch method.
         resolved_auth_token (str | None): PSK authentication token, or None for anonymous.
-        resolved_heap_size_gb (int): JVM heap size in gigabytes.
+        resolved_heap_size_gb (float | int): JVM heap size in gigabytes (e.g., 4 or 2.5).
         resolved_extra_jvm_args (list[str]): Additional JVM arguments.
         resolved_environment_vars (dict[str, str]): Environment variables.
         resolved_docker_image (str): Docker image (used only if docker launch).
@@ -4270,7 +4270,7 @@ async def session_community_create(
     programming_language: str | None = None,
     auth_type: str | None = None,
     auth_token: str | None = None,
-    heap_size_gb: int | None = None,
+    heap_size_gb: float | int | None = None,
     extra_jvm_args: list[str] | None = None,
     environment_vars: dict[str, str] | None = None,
     docker_image: str | None = None,
@@ -4346,7 +4346,7 @@ async def session_community_create(
             If provided, uses the deephaven installation from that venv (e.g., "/path/to/venv").
             If None (default), uses the same venv as the MCP server.
             Raises error if used with docker launch method.
-        heap_size_gb (int | None): JVM heap size in gigabytes (integer only, e.g., 4 for -Xmx4g).
+        heap_size_gb (float | int | None): JVM heap size in gigabytes (e.g., 4 or 2.5 for -Xmx4g or -Xmx2.5g).
             Applies to both docker and python launches.
             Defaults to configuration value or 4.
         extra_jvm_args (list[str] | None): Additional JVM arguments as list of strings.

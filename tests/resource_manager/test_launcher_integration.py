@@ -339,6 +339,197 @@ class TestPythonLauncherIntegration:
 
 
 @pytest.mark.integration
+class TestFloatHeapSizeIntegration:
+    """Integration tests for floating point heap_size_gb support."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(300)  # 5 minute timeout
+    async def test_docker_launch_with_float_heap_size(self):
+        """Test Docker container launch with floating point heap size."""
+        session = None
+        port = find_available_port_locked()
+        _LOGGER.info(
+            f"[Integration Test] Allocated port {port} for float heap Docker test"
+        )
+        try:
+            # Launch Docker container with float heap_size_gb
+            _LOGGER.info(
+                f"[Integration Test] Launching Docker container with float heap (2.5 GB) on port {port}"
+            )
+            session = await DockerLaunchedSession.launch(
+                session_name="integration-float-heap-test",
+                port=port,
+                auth_token="test-token-float",
+                heap_size_gb=2.5,  # Float value
+                extra_jvm_args=[],
+                environment_vars={},
+                docker_image="ghcr.io/deephaven/server:latest",
+                docker_memory_limit_gb=4.0,
+                docker_cpu_limit=None,
+                docker_volumes=[],
+                instance_id=None,
+            )
+
+            # Verify container was created
+            assert session is not None
+            assert session.container_id
+            assert len(session.container_id) > 0
+            assert session.port == port
+            assert session.launch_method == "docker"
+
+            # Wait for session to be ready (health check)
+            _LOGGER.info(
+                f"[Integration Test] Container {session.container_id[:12]} started with float heap, waiting for health check"
+            )
+            ready = await session.wait_until_ready(
+                timeout_seconds=60, check_interval_seconds=2
+            )
+            assert (
+                ready
+            ), f"Docker container with float heap_size_gb failed to become ready within 60s"
+            _LOGGER.info(
+                f"[Integration Test] Container {session.container_id[:12]} with float heap is ready"
+            )
+
+            # Verify connection URL is correct
+            assert session.connection_url == f"http://localhost:{port}"
+            assert "psk=test-token-float" in session.connection_url_with_auth
+
+        finally:
+            # Clean up
+            if session:
+                _LOGGER.info(
+                    f"[Integration Test] Cleaning up float heap container {session.container_id[:12]}"
+                )
+                await session.stop()
+                _LOGGER.info(
+                    f"[Integration Test] Float heap container cleanup complete"
+                )
+
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(300)  # 5 minute timeout
+    @pytest.mark.skipif(
+        not is_deephaven_available(), reason="deephaven command not in PATH"
+    )
+    async def test_python_launch_with_float_heap_size(self):
+        """Test Python launch with floating point heap size.
+
+        Prerequisites:
+        - deephaven-server must be installed: pip install deephaven-server
+        """
+        session = None
+        port = find_available_port_locked()
+        _LOGGER.info(
+            f"[Integration Test] Allocated port {port} for float heap Python test"
+        )
+        try:
+            # Launch Python process with float heap_size_gb
+            _LOGGER.info(
+                f"[Integration Test] Launching Python process with float heap (1.5 GB) on port {port}"
+            )
+            session = await PythonLaunchedSession.launch(
+                session_name="integration-float-heap-python",
+                port=port,
+                auth_token="test-token-python-float",
+                heap_size_gb=1.5,  # Float value
+                extra_jvm_args=[],
+                environment_vars={},
+                python_venv_path=None,
+            )
+
+            # Verify process was created
+            assert session is not None
+            assert session.process is not None
+            assert session.process.pid > 0
+            assert session.port == port
+            assert session.launch_method == "python"
+
+            # Check if process is still running before health check
+            _LOGGER.info(
+                f"[Integration Test] Process PID {session.process.pid} launched with float heap, checking status"
+            )
+            await asyncio.sleep(0.5)
+            if session.process.returncode is not None:
+                # Process crashed immediately - capture error output
+                stderr_data = ""
+                stdout_data = ""
+                try:
+                    if session.process.stderr:
+                        stderr_bytes = await asyncio.wait_for(
+                            session.process.stderr.read(), timeout=1.0
+                        )
+                        stderr_data = stderr_bytes.decode() if stderr_bytes else ""
+                    if session.process.stdout:
+                        stdout_bytes = await asyncio.wait_for(
+                            session.process.stdout.read(), timeout=1.0
+                        )
+                        stdout_data = stdout_bytes.decode() if stdout_bytes else ""
+                except Exception as e:
+                    stderr_data = f"Could not read output: {e}"
+                pytest.fail(
+                    f"Process with float heap_size_gb exited immediately with code {session.process.returncode}\n"
+                    f"=== FULL STDOUT ===\n{stdout_data}\n"
+                    f"=== FULL STDERR ===\n{stderr_data}"
+                )
+
+            # Wait for session to be ready (health check)
+            _LOGGER.info(
+                f"[Integration Test] Starting health check for PID {session.process.pid} with float heap"
+            )
+            ready = await session.wait_until_ready(
+                timeout_seconds=240, check_interval_seconds=5
+            )
+
+            # If health check failed, capture stderr for debugging
+            if not ready:
+                _LOGGER.error(
+                    f"[Integration Test] Health check failed for float heap! Process returncode: {session.process.returncode}"
+                )
+                stderr_output = ""
+                stdout_output = ""
+
+                if session.process.stderr:
+                    try:
+                        stderr_bytes = await asyncio.wait_for(
+                            session.process.stderr.read(), timeout=2.0
+                        )
+                        stderr_output = stderr_bytes.decode()
+                    except Exception as e:
+                        stderr_output = f"Could not read stderr: {e}"
+
+                if session.process.stdout:
+                    try:
+                        stdout_bytes = await asyncio.wait_for(
+                            session.process.stdout.read(), timeout=2.0
+                        )
+                        stdout_output = stdout_bytes.decode()
+                    except Exception as e:
+                        stdout_output = f"Could not read stdout: {e}"
+
+                pytest.fail(
+                    f"Python session with float heap_size_gb failed to become ready within 240s.\n"
+                    f"Process returncode: {session.process.returncode}\n"
+                    f"=== FULL STDOUT ===\n{stdout_output}\n"
+                    f"=== FULL STDERR ===\n{stderr_output}"
+                )
+
+            # Verify connection URL is correct
+            assert session.connection_url == f"http://localhost:{port}"
+            assert "psk=test-token-python-float" in session.connection_url_with_auth
+
+            # Verify process is actually running
+            assert session.process.returncode is None
+
+            _LOGGER.info(f"[Integration Test] Python process with float heap is ready")
+
+        finally:
+            # Clean up
+            if session:
+                await session.stop()
+                await asyncio.sleep(1)
+
+
+@pytest.mark.integration
 class TestOrphanCleanupIntegration:
     """Integration tests for cleanup of orphaned Docker/pip processes."""
 

@@ -79,7 +79,8 @@ The configuration file must be a JSON object. It may contain the following top-l
                   * `docker_memory_limit_gb` (float, optional): Memory limit in GB for docker containers.
                   * `docker_cpu_limit` (float, optional): CPU limit for docker containers.
                   * `docker_volumes` (list[str], optional): Volume mounts for docker containers.
-                  * `heap_size_gb` (int, optional): JVM heap size in GB (integer only, e.g., 4 for -Xmx4g).
+                  * `heap_size_gb` (int | float, optional): JVM heap size in GB (e.g., 4 or 2.5).
+                    Integer values use 'g' suffix (e.g., 4 → -Xmx4g). Float values converted to MB (e.g., 2.5 → -Xmx2560m).
                   * `extra_jvm_args` (list[str], optional): Additional JVM arguments.
                   * `environment_vars` (dict[str, str], optional): Environment variables for the session.
                   * `startup_timeout_seconds` (int | float, optional): Timeout for session startup.
@@ -115,7 +116,8 @@ The configuration file must be a JSON object. It may contain the following top-l
                 - `session_creation` (dict, optional): Configuration for creating enterprise sessions.
                     * `max_concurrent_sessions` (int, optional): Maximum concurrent sessions (default: 5). Set to 0 to disable session creation.
                     * `defaults` (dict, optional): Default parameters for session creation:
-                        - `heap_size_gb` (int, optional): Default JVM heap size in GB (integer only, e.g., 4 for -Xmx4g).
+                        - `heap_size_gb` (int | float, optional): Default JVM heap size in GB (e.g., 4 or 2.5).
+                          Integer values use 'g' suffix (e.g., 4 → -Xmx4g). Float values converted to MB (e.g., 2.5 → -Xmx2560m).
                         - `auto_delete_timeout` (int, optional): Session auto-delete timeout in seconds (API default: 600).
                         - `server` (str, optional): Default server for sessions.
                         - `engine` (str, optional): Default engine type (API default: "DeephavenCommunity").

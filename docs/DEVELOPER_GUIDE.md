@@ -629,7 +629,7 @@ All fields are optional. If the `session_creation` key is omitted entirely, dyna
   - `docker_cpu_limit` (float): CPU limit for docker containers.
   - `docker_volumes` (list[string]): Volume mounts for docker containers (format: `["host:container:mode"]`).
   - `python_venv_path` (string | null): Path to custom Python venv directory (python only). If null (default), uses same venv as MCP server. If path provided, uses deephaven-server from that venv.
-  - `heap_size_gb` (integer): JVM heap size in GB (integer only, e.g., `4` for `-Xmx4g`).
+  - `heap_size_gb` (float | int): JVM heap size in GB (e.g., 4 or 2.5). Integer values use 'g' suffix (4 → `-Xmx4g`). Float values converted to MB (2.5 → `-Xmx2560m`).
   - `extra_jvm_args` (list[string]): Additional JVM arguments.
   - `environment_vars` (object): Environment variables for the session (key-value pairs).
   - `startup_timeout_seconds` (number): Timeout for session startup.
@@ -762,7 +762,7 @@ If the `"enterprise"` key is present, it must be a dictionary. Each individual e
   - `session_creation` (object, **optional**): Configuration for creating enterprise workers on this system. If omitted, worker creation tools will not be available for this system.
     - `max_concurrent_sessions` (integer, **optional, default: 5**): Maximum number of concurrent sessions that can be created on this system. Set to 0 to disable session creation. Used for resource management and safety.
     - `defaults` (object, **optional**): Default values for worker creation parameters. All fields are optional - if omitted, Deephaven server defaults are used.
-      - `heap_size_gb` (float, **optional**): Default JVM heap size in gigabytes for new workers.
+      - `heap_size_gb` (float | int, **optional**): Default JVM heap size in gigabytes for new workers (e.g., 4 or 2.5). Enterprise library handles conversion internally.
       - `programming_language` (string, **optional**): Default programming language for new workers ("Python" or "Groovy", default: "Python"). Creates configuration_transformer internally.
       - `auto_delete_timeout` (integer, **optional**): Default auto-deletion timeout in seconds for idle workers (API default: 600).
       - `server` (string, **optional**): Default target server/environment name where workers will be created.
@@ -1069,7 +1069,7 @@ On error:
 
 - `system_name` (required, string): Name of the enterprise system to create the session on
 - `session_name` (optional, string): Custom name for the session. If not provided, an auto-generated name will be used
-- `heap_size_gb` (optional, float): JVM heap size in gigabytes for the session
+- `heap_size_gb` (optional, float | int): JVM heap size in gigabytes for the session (e.g., 4 or 2.5). Enterprise library handles conversion internally
 - `programming_language` (optional, string): Programming language for the session ("Python" or "Groovy")
 - `auto_delete_timeout` (optional, integer): Auto-deletion timeout in seconds for idle sessions
 - `server` (optional, string): Target server/environment name where the session will be created
@@ -1155,7 +1155,7 @@ On error:
 - `docker_cpu_limit` (optional, float): Container CPU limit in cores (Docker only)
 - `docker_volumes` (optional, array): Volume mounts in format `["host:container:mode"]` (Docker only)
 - `python_venv_path` (optional, string): Path to custom Python venv directory (Python only). If provided, uses deephaven from that venv. If null (default), uses same venv as MCP server. Raises error if used with docker.
-- `heap_size_gb` (optional, integer): JVM heap size in gigabytes (default: from config or 4)
+- `heap_size_gb` (optional, float | int): JVM heap size in gigabytes (e.g., 4 or 2.5, default: from config or 4). Integer values use 'g' suffix (4 → `-Xmx4g`). Float values converted to MB (2.5 → `-Xmx2560m`)
 - `extra_jvm_args` (optional, array): Additional JVM arguments
 - `environment_vars` (optional, object): Environment variables as key-value pairs
 

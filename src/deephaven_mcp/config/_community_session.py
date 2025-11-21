@@ -367,7 +367,7 @@ _ALLOWED_SESSION_CREATION_DEFAULTS: dict[str, type | tuple[type, ...]] = {
     "docker_cpu_limit": (float, int, types.NoneType),
     "docker_volumes": list,
     "python_venv_path": (str, types.NoneType),
-    "heap_size_gb": int,
+    "heap_size_gb": (int, float),
     "extra_jvm_args": list,
     "environment_vars": dict,
     "startup_timeout_seconds": (float, int),

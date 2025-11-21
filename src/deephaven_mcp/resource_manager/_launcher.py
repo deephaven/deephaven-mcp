@@ -99,7 +99,7 @@ def _redact_auth_token_from_command(cmd: list[str], auth_token: str | None) -> s
 
 
 def _build_jvm_args(
-    heap_size_gb: int,
+    heap_size_gb: float | int,
     extra_jvm_args: list[str],
     auth_token: str | None,
 ) -> list[str]:
@@ -108,15 +108,29 @@ def _build_jvm_args(
     This is a shared helper used by both Docker and Python launch methods to ensure
     consistent JVM configuration across launch methods.
 
+    Note: JVM does not support decimal values with 'g' suffix (e.g., -Xmx2.5g is invalid).
+    Float values are converted to integer megabytes for compatibility.
+
     Args:
-        heap_size_gb (int): JVM heap size in gigabytes (e.g., 4 for -Xmx4g).
+        heap_size_gb (float | int): JVM heap size in gigabytes (e.g., 4 or 2.5).
+            Integer values use 'g' suffix (e.g., 4 → -Xmx4g).
+            Float values converted to MB (e.g., 2.5 → -Xmx2560m).
         extra_jvm_args (list[str]): Additional JVM arguments to append.
         auth_token (str | None): PSK authentication token, or None for anonymous auth.
 
     Returns:
         list[str]: Complete list of JVM arguments including heap size, extra args, and auth config.
     """
-    jvm_args = [f"-Xmx{heap_size_gb}g"]
+    # JVM doesn't support decimal values with 'g' suffix (e.g., -Xmx2.5g is invalid)
+    # Convert float GB to integer MB for compatibility
+    if isinstance(heap_size_gb, float) and not heap_size_gb.is_integer():
+        # Float with decimal part: convert to MB (e.g., 2.5 GB = 2560 MB)
+        heap_mb = int(heap_size_gb * 1024)
+        jvm_args = [f"-Xmx{heap_mb}m"]
+    else:
+        # Integer or float that's a whole number: use GB (e.g., 4.0 or 4 → -Xmx4g)
+        heap_gb = int(heap_size_gb)
+        jvm_args = [f"-Xmx{heap_gb}g"]
     jvm_args.extend(extra_jvm_args)
 
     if auth_token:
@@ -532,7 +546,7 @@ class DockerLaunchedSession(LaunchedSession):
         session_name: str,
         port: int,
         auth_token: str | None,
-        heap_size_gb: int,
+        heap_size_gb: float | int,
         extra_jvm_args: list[str],
         environment_vars: dict[str, str],
         docker_image: str,
@@ -556,7 +570,9 @@ class DockerLaunchedSession(LaunchedSession):
             session_name (str): Name for the Docker container (will be prefixed with "deephaven-mcp-").
             port (int): Port to bind the session to.
             auth_token (str | None): Authentication token (PSK) for the session, or None for anonymous.
-            heap_size_gb (int): JVM heap size in gigabytes (integer only, e.g., 2 for -Xmx2g).
+            heap_size_gb (float | int): JVM heap size in gigabytes.
+                Integer values use 'g' suffix (e.g., 4 → -Xmx4g).
+                Float values converted to MB (e.g., 2.5 → -Xmx2560m).
             extra_jvm_args (list[str]): Additional JVM arguments (empty list for none).
             environment_vars (dict[str, str]): Environment variables to set (empty dict for none).
             docker_image (str): Docker image to use (e.g., "ghcr.io/deephaven/server:latest").
@@ -873,7 +889,7 @@ class PythonLaunchedSession(LaunchedSession):
         session_name: str,
         port: int,
         auth_token: str | None,
-        heap_size_gb: int,
+        heap_size_gb: float | int,
         extra_jvm_args: list[str],
         environment_vars: dict[str, str],
         python_venv_path: str | None = None,
@@ -894,7 +910,9 @@ class PythonLaunchedSession(LaunchedSession):
             session_name (str): Name for the session (used in logging).
             port (int): Port to bind the session to.
             auth_token (str | None): Authentication token (PSK) for the session, or None for anonymous.
-            heap_size_gb (int): JVM heap size in gigabytes (integer only, e.g., 2 for -Xmx2g).
+            heap_size_gb (float | int): JVM heap size in gigabytes.
+                Integer values use 'g' suffix (e.g., 4 → -Xmx4g).
+                Float values converted to MB (e.g., 2.5 → -Xmx2560m).
             extra_jvm_args (list[str]): Additional JVM arguments.
             environment_vars (dict[str, str]): Environment variables to set (empty dict for none).
             python_venv_path (str | None): Path to a custom Python venv directory, or None.
@@ -1077,7 +1095,7 @@ async def launch_session(
     session_name: str,
     port: int,
     auth_token: str | None,
-    heap_size_gb: int,
+    heap_size_gb: float | int,
     extra_jvm_args: list[str],
     environment_vars: dict[str, str],
     docker_image: str = "",
@@ -1098,7 +1116,9 @@ async def launch_session(
         session_name (str): Name for the session.
         port (int): Port to bind the session to.
         auth_token (str | None): Authentication token (PSK) for the session, or None for anonymous.
-        heap_size_gb (int): JVM heap size in gigabytes (integer only, e.g., 2 for -Xmx2g).
+        heap_size_gb (float | int): JVM heap size in gigabytes.
+                Integer values use 'g' suffix (e.g., 4 → -Xmx4g).
+                Float values converted to MB (e.g., 2.5 → -Xmx2560m).
         extra_jvm_args (list[str]): Additional JVM arguments.
         environment_vars (dict[str, str]): Environment variables to set.
         docker_image (str): Docker image to use (docker only).
