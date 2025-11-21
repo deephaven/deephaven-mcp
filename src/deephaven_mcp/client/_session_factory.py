@@ -26,7 +26,7 @@ Example:
     # Create a Core+ session factory connected to a server
     async def main():
         # Create a session factory using the from_url classmethod
-        manager = CorePlusSessionFactory.from_url("https://myserver.example.com/iris/connection.json")
+        manager = await CorePlusSessionFactory.from_url("https://myserver.example.com/iris/connection.json")
 
         # Authenticate
         await manager.password("username", "password")
@@ -60,6 +60,7 @@ Note:
 import asyncio
 import io
 import logging
+import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, cast
 
@@ -174,7 +175,6 @@ class CorePlusSessionFactory(
             In most cases, you should use the class factory methods instead of this constructor:
             - Use from_url() when you have a connection URL to the Deephaven server
             - Use from_config() when you have a configuration dictionary
-            - Use from_json() when you have a JSON configuration file
 
             These factory methods handle initialization details, dependency management, and
             error handling for you in a more convenient way than direct instantiation.
@@ -227,42 +227,39 @@ class CorePlusSessionFactory(
             ) from e
 
     @classmethod
-    def from_url(cls, url: str) -> "CorePlusSessionFactory":
+    async def from_url(cls, url: str) -> "CorePlusSessionFactory":
         """Create a CorePlusSessionFactory connected to a Deephaven server specified by URL.
 
         This is the recommended and most convenient way to create a CorePlusSessionFactory when you
-        have a URL to a Deephaven server. The method handles all the necessary setup:
+        know the connection.json URL of your Deephaven server. This method handles the entire
+        connection setup process automatically, so you only need to provide the URL and then
+        authenticate.
 
-        1. Validates and parses the provided URL
-        2. Establishes initial connection information to the Deephaven server
-        3. Creates and configures the underlying SessionManager
-        4. Wraps the SessionManager in a CorePlusSessionFactory for asynchronous access
+        The connection.json file is a JSON document served by Deephaven servers that contains
+        connection metadata including endpoints and supported features. This method downloads and
+        parses that file to establish the initial connection.
 
-        The method automatically loads the required enterprise dependencies and handles
-        initialization details and error conditions, making it much simpler than manually
-        creating the session manager.
+        After creating the factory, you must authenticate before you can use other methods like
+        connect_to_new_worker() or connect_to_persistent_query(). Use one of the authentication
+        methods (password, private_key, or saml) depending on how your Deephaven server is
+        configured.
 
         Args:
-            url: The connection URL for the Deephaven server. This should point to a
-                connection.json file that describes how to connect to the server,
-                typically in the format "https://<server>/iris/connection.json".
-                Both HTTP and HTTPS protocols are supported, though HTTPS is strongly
-                recommended for production environments. The connection.json file contains
-                server endpoints and configuration details necessary for establishing
-                connections to various services.
+            url (str): The URL to the Deephaven server's connection.json file. This is typically in
+                the format: https://your-server:port/iris/connection.json
+                For example: "https://deephaven.example.com:10000/iris/connection.json"
 
         Returns:
-            CorePlusSessionFactory: A new, initialized factory instance connected to the specified
-                server. Note that the returned factory is not yet authenticated; you must call one
-                of the authentication methods (password(), private_key(), or saml()) before using
-                other methods like connect_to_new_worker().
+            CorePlusSessionFactory: A new factory instance connected to the specified server,
+                ready for authentication. You can then authenticate and create sessions.
 
         Raises:
-            ModuleNotFoundError: If the required enterprise dependencies are not installed.
-            ValueError: If the URL is malformed or cannot be parsed.
-            ConnectionError: If the connection.json file cannot be accessed or downloaded.
-            JsonDecodeError: If the connection.json file contains invalid JSON.
-            ConfigurationError: If the connection configuration is invalid or incomplete.
+            MissingEnterprisePackageError: If the deephaven-coreplus-client package is not
+                installed. This package is required for Enterprise functionality and must be
+                installed separately from the base deephaven-mcp package.
+            DeephavenConnectionError: If unable to connect to the server at the specified URL.
+                Common causes include network issues, incorrect URL, server not running, or
+                firewall blocking the connection.
 
         Example:
             ```python
@@ -271,7 +268,7 @@ class CorePlusSessionFactory(
 
             async def connect_to_server():
                 # Create the factory pointing to a Deephaven server
-                factory = CorePlusSessionFactory.from_url(
+                factory = await CorePlusSessionFactory.from_url(
                     "https://example.deephaven.io/iris/connection.json"
                 )
 
@@ -293,18 +290,28 @@ class CorePlusSessionFactory(
         else:
             from deephaven_enterprise.client.session_manager import SessionManager
 
+            _LOGGER.debug(
+                f"[CorePlusSessionFactory:from_url] Creating SessionManager for URL: {url}"
+            )
+            start_time = time.monotonic()
             try:
-                _LOGGER.debug(
-                    f"[CorePlusSessionFactory:from_url] Creating SessionManager for URL: {url}"
-                )
-                return cls(SessionManager(url))
+                # Run the blocking SessionManager constructor in a background thread so
+                # that this method is cancellable and doesn't block the event loop.
+                manager = await asyncio.to_thread(SessionManager, url)
             except Exception as e:
+                elapsed = time.monotonic() - start_time
                 _LOGGER.error(
-                    f"[CorePlusSessionFactory:from_url] Failed to create SessionManager with URL {url}: {e}"
+                    f"[CorePlusSessionFactory:from_url] Failed to create SessionManager with URL {url} after {elapsed:.2f}s: {e}"
                 )
                 raise DeephavenConnectionError(
-                    f"Failed to establish connection to Deephaven at {url}: {e}"
+                    f"Failed to establish connection to Deephaven at {url} after {elapsed:.2f}s: {e}"
                 ) from e
+
+            elapsed = time.monotonic() - start_time
+            _LOGGER.info(
+                f"[CorePlusSessionFactory:from_url] Successfully created SessionManager for URL {url} in {elapsed:.2f}s"
+            )
+            return cls(manager)
 
     @classmethod
     async def from_config(cls, worker_cfg: dict[str, Any]) -> "CorePlusSessionFactory":
@@ -345,7 +352,7 @@ class CorePlusSessionFactory(
             * No additional fields required, but SAML must be configured on server
 
         Args:
-            worker_cfg: Configuration dictionary for the enterprise system connection.
+            worker_cfg (dict[str, Any]): Configuration dictionary for the enterprise system connection.
                 Must contain the required fields as described above.
 
         Returns:
@@ -431,15 +438,25 @@ class CorePlusSessionFactory(
         )
         from deephaven_enterprise.client.session_manager import SessionManager
 
+        start_time = time.monotonic()
         try:
-            manager = SessionManager(url)
+            # Run the blocking SessionManager constructor in a background thread so
+            # that Enterprise factory creation obeys the configured connection_timeout
+            # enforced by asyncio.wait_for in CorePlusSessionFactoryManager.
+            manager = await asyncio.to_thread(SessionManager, url)
         except Exception as e:
+            elapsed = time.monotonic() - start_time
             _LOGGER.error(
-                f"[CorePlusSessionFactory:from_config] Failed to create SessionManager with URL {url}: {e}"
+                f"[CorePlusSessionFactory:from_config] Failed to create SessionManager with URL {url} after {elapsed:.2f}s: {e}"
             )
             raise DeephavenConnectionError(
-                f"Failed to establish connection to Deephaven at {url}: {e}"
+                f"Failed to establish connection to Deephaven at {url} after {elapsed:.2f}s: {e}"
             ) from e
+
+        elapsed = time.monotonic() - start_time
+        _LOGGER.info(
+            f"[CorePlusSessionFactory:from_config] Successfully created SessionManager from config (url={url}, auth_type={auth_type}) in {elapsed:.2f}s"
+        )
 
         instance = cls(manager)
 
@@ -525,9 +542,9 @@ class CorePlusSessionFactory(
             from deephaven_mcp.client import CorePlusSessionFactory
 
             # Create a session factory
-            factory = CorePlusSessionFactory.from_url("https://example.com/iris/connection.json")
+            factory = await CorePlusSessionFactory.from_url("https://example.com/iris/connection.json")
             # Authenticate
-            factory.password("username", "password")
+            await factory.password("username", "password")
 
             # Access the auth client property
             auth = factory.auth_client
@@ -571,9 +588,9 @@ class CorePlusSessionFactory(
             from deephaven_mcp.client import CorePlusSessionFactory
 
             # Create a session factory
-            factory = CorePlusSessionFactory.from_url("https://example.com/iris/connection.json")
+            factory = await CorePlusSessionFactory.from_url("https://example.com/iris/connection.json")
             # Authenticate
-            factory.password("username", "password")
+            await factory.password("username", "password")
 
             # Access the controller client property
             controller = factory.controller_client
@@ -619,7 +636,7 @@ class CorePlusSessionFactory(
 
             async def main():
                 # Create and authenticate the factory
-                factory = CorePlusSessionFactory.from_url("https://example.com/iris/connection.json")
+                factory = await CorePlusSessionFactory.from_url("https://example.com/iris/connection.json")
                 await factory.password("username", "password")
 
                 # Use the factory...
@@ -709,49 +726,49 @@ class CorePlusSessionFactory(
 
         Args:
             # Worker identification
-            name: Optional name for the worker process. If None (default), an auto-generated name based
+            name (str | None): Optional name for the worker process. If None (default), an auto-generated name based
                 on the current timestamp will be used. A descriptive name can make it easier to
                 identify your worker in monitoring tools and logs.
 
             # Resource configuration
-            heap_size_gb: JVM heap size in gigabytes (integer only, e.g., 8 for -Xmx8g). Determines the maximum amount of memory available
+            heap_size_gb (int | None): JVM heap size in gigabytes (e.g., 8 for -Xmx8g). Determines the maximum amount of memory available
                 to the worker process. Larger values are necessary for processing larger datasets, but
                 require more system resources. If None (default), the server's default heap size is used.
-            server: Specific server to run the worker on. If None (default), the server will be chosen
+            server (str | None): Specific server to run the worker on. If None (default), the server will be chosen
                 automatically from available resources. Useful for targeting specific hardware configurations.
-            extra_jvm_args: Additional JVM arguments to configure the worker's Java Virtual Machine.
+            extra_jvm_args (list[str] | None): Additional JVM arguments to configure the worker's Java Virtual Machine.
                 Examples include garbage collection settings ("-XX:+UseG1GC"), memory settings, or
                 custom Java properties. If None (default), only standard JVM arguments are used.
-            extra_environment_vars: Environment variables to set for the worker process.
+            extra_environment_vars (list[str] | None): Environment variables to set for the worker process.
                 Format as ["NAME=value", ...]. Useful for configuring system properties, paths,
                 or feature flags. If None (default), the standard environment is used.
-            engine: Engine type that determines the worker's capabilities and behavior.
+            engine (str): Engine type that determines the worker's capabilities and behavior.
                 Defaults to "DeephavenCommunity". Other options may include enterprise engines
                 with additional features depending on your Deephaven installation.
 
             # Lifecycle management
-            auto_delete_timeout: Number of seconds of inactivity before the worker is automatically
+            auto_delete_timeout (int | None): Number of seconds of inactivity before the worker is automatically
                 terminated and cleaned up. Defaults to 600 (10 minutes). Set to None to prevent
                 auto-deletion (not recommended for production use as it can lead to resource leaks).
                 Set to 0 for immediate cleanup when the session disconnects.
-            timeout_seconds: Maximum time in seconds to wait for the worker to start before raising
+            timeout_seconds (float): Maximum time in seconds to wait for the worker to start before raising
                 an exception. Defaults to 60 seconds. Increase for slower environments or when
                 creating workers with complex initialization processes.
 
             # Access controls
-            admin_groups: List of user groups that have administrative permissions for this worker.
+            admin_groups (list[str] | None): List of user groups that have administrative permissions for this worker.
                 Admins can modify, restart, or terminate the worker. If None (default), only the
                 creator has admin privileges.
-            viewer_groups: List of user groups that have read-only access to this worker.
+            viewer_groups (list[str] | None): List of user groups that have read-only access to this worker.
                 Viewers can connect to the worker and view its data but cannot modify it.
                 If None (default), only the creator has viewing privileges.
 
             # Advanced configuration
-            configuration_transformer: Optional function that takes and returns a configuration dictionary.
+            configuration_transformer (Callable[..., Any] | None): Optional function that takes and returns a configuration dictionary.
                 This allows for advanced customization of the worker configuration beyond what the
                 standard parameters provide. The function signature should be:
                 `(config: dict) -> dict`. Use with caution as it may override other settings.
-            session_arguments: Additional keyword arguments to pass to the pydeephaven.Session constructor.
+            session_arguments (dict[str, Any] | None): Additional keyword arguments to pass to the pydeephaven.Session constructor.
                 These parameters control session behavior rather than worker configuration.
                 Common options include `disable_open_table_listener` or `chunk_size`.
 
@@ -801,7 +818,7 @@ class CorePlusSessionFactory(
                 # Create a high-memory worker with custom settings
                 session = await factory.connect_to_new_worker(
                     name="analytics_worker_v2",
-                    heap_size_gb=16.0,
+                    heap_size_gb=16,
                     auto_delete_timeout=1800,  # 30 minutes
                     extra_jvm_args=[
                         "-XX:+UseG1GC",
@@ -902,15 +919,15 @@ class CorePlusSessionFactory(
         is wrapped in a CorePlusSession for consistent behavior with other MCP client interfaces.
 
         Args:
-            name: The name of the persistent query (worker) to connect to. This is the human-readable
+            name (str | None): The name of the persistent query (worker) to connect to. This is the human-readable
                 identifier specified when the worker was created. Either name or serial must be provided,
                 but not both. Names are typically easier to use in interactive scenarios and when the
                 worker was created with a custom name.
-            serial: The unique serial number of the persistent query to connect to. Serial numbers are
+            serial (CorePlusQuerySerial | None): The unique serial number of the persistent query to connect to. Serial numbers are
                 system-assigned unique identifiers that remain constant throughout a worker's lifetime.
                 Either name or serial must be provided, but not both. Using serial is more reliable when
                 names might be reused or when precise worker identification is critical.
-            session_arguments: A dictionary of additional arguments to pass to the underlying
+            session_arguments (dict[str, Any] | None): A dictionary of additional arguments to pass to the underlying
                 pydeephaven.Session constructor. This allows customization of session behavior
                 such as setting chunk_size for data transfer or configuring query processing options.
                 Common options include `disable_open_table_listener` or `chunk_size`.
@@ -1043,7 +1060,7 @@ class CorePlusSessionFactory(
         to find and remove the specified key from the server's key store.
 
         Args:
-            public_key_text: The complete text of the public key to delete, exactly as it was
+            public_key_text (str): The complete text of the public key to delete, exactly as it was
                 uploaded. This should include the full key string including any key type prefix
                 (e.g., "ssh-rsa AAAA...") and comment suffix if present. The key text must match
                 exactly what was registered in the system for successful deletion.
@@ -1124,12 +1141,12 @@ class CorePlusSessionFactory(
         running it in a separate thread to avoid blocking the event loop.
 
         Args:
-            user: The username to authenticate with. This must be a valid user registered
+            user (str): The username to authenticate with. This must be a valid user registered
                 with the Deephaven server. Case sensitivity depends on the server's authentication
                 configuration.
-            password: The user's password for authentication. Authentication is secure and
+            password (str): The user's password for authentication. Authentication is secure and
                 passwords are never stored in memory longer than necessary.
-            effective_user: The user to operate as after authentication. Defaults to None, which
+            effective_user (str | None): The user to operate as after authentication. Defaults to None, which
                 means the authenticated user will be used. This parameter enables authentication
                 as one user but performing operations as another (requires appropriate permissions,
                 typically admin or impersonation rights).
@@ -1265,7 +1282,7 @@ class CorePlusSessionFactory(
         running it in a separate thread to avoid blocking the event loop.
 
         Args:
-            file: Either a string containing the path to a file with the private key produced by
+            file (str | io.StringIO): Either a string containing the path to a file with the private key produced by
                 the Deephaven generate-iris-keys tool, or alternatively an io.StringIO instance
                 containing the key data directly. If an io.StringIO is provided, it may be closed
                 after this method is called as the contents are read fully before returning.
@@ -1404,7 +1421,7 @@ class CorePlusSessionFactory(
 
             async def authenticate_with_saml():
                 # Create the session manager
-                manager = CorePlusSessionFactory.from_url("https://myserver.example.com/iris/connection.json")
+                manager = await CorePlusSessionFactory.from_url("https://myserver.example.com/iris/connection.json")
 
                 # Authenticate using SAML - this may open a browser window for SSO login
                 await manager.saml()
@@ -1430,7 +1447,7 @@ class CorePlusSessionFactory(
             )
         except ConnectionError as e:
             _LOGGER.error(
-                f"Failed to connect to authentication server or SAML provider: {e}"
+                f"[CorePlusSessionFactory:saml] Failed to connect to authentication server or SAML provider: {e}"
             )
             raise DeephavenConnectionError(
                 f"Failed to connect to authentication server or SAML provider: {e}"
@@ -1467,7 +1484,7 @@ class CorePlusSessionFactory(
         running it in a separate thread to avoid blocking the event loop.
 
         Args:
-            public_key_text: The full text representation of the public key to upload. This should be
+            public_key_text (str): The full text representation of the public key to upload. This should be
                 the complete PEM-encoded public key, including the header and footer lines
                 (e.g., "-----BEGIN PUBLIC KEY-----" and "-----END PUBLIC KEY-----").
 
@@ -1493,7 +1510,7 @@ class CorePlusSessionFactory(
 
             async def register_public_key():
                 # Create factory and authenticate
-                factory = CorePlusSessionFactory.from_url("https://server.example.com/iris/connection.json")
+                factory = await CorePlusSessionFactory.from_url("https://server.example.com/iris/connection.json")
                 await factory.password("username", "password")
 
                 # Read public key from file

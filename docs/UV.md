@@ -213,11 +213,9 @@ uv run ruff check src --fix --exclude _version.py --exclude .venv
 uv run mypy src/
 ```
 
-**Pre-commit hooks:**
+**Pre-commit Code quality checks:**
 
 ```sh
-uv pip install pre-commit
-pre-commit install
 bin/precommit.sh
 ```
 

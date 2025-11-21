@@ -52,6 +52,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+
 # Testing (coverage, etc.)
 test = [
     "pytest>=8.0.0",           # Test framework
@@ -62,9 +63,8 @@ test = [
     "deephaven-server>=0.39",  # Deephaven server for integration tests
 ]
 
-dev = [
-    "deephaven-mcp[test]",     # Include all test dependencies
-    
+# Code quality tools (linting, formatting, type checking)
+lint = [
     # Code formatting and style tools
     "black>=24.0.0",           # Code formatter
     "ruff>=0.1.0",             # Linter and code quality tool
@@ -75,13 +75,21 @@ dev = [
     "mypy>=1.6.0",             # Static type checker
     "types-aiofiles",          # Type stubs for aiofiles
     "typing_extensions>=4.3.0", # Typing backports for type checking
-
-    # Development and CI
-    "pre-commit>=3.4.0",       # Git hooks management
 ]
-coreplus = [
-    # TODO: get deephaven-coreplus-client on PyPI
-    # "deephaven-coreplus-client"  # Not on PyPI; installed via the dev_manage_coreplus_client.sh script.
+
+# Community Core session creation (python launch method)
+community = [
+    "deephaven-server>=0.39",  # Deephaven Community Core server for python-based session creation
+]
+
+# Enterprise support (Deephaven Core+)
+enterprise = [
+    "deephaven-coreplus-client",  # Client for Deephaven Enterprise (Core+) systems
+]
+
+# Full development environment (all features + tools)
+dev = [
+    "deephaven-mcp[test,community,enterprise,lint]",  # All features and tools
 ]
 
 [project.urls]

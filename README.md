@@ -7,20 +7,20 @@
 ## Table of Contents
 
 - [Overview](#overview)
+- [Key Use Cases](#key-use-cases)
 - [🚀 Quick Start](#-quick-start)
 - [🔄 Quick Upgrade](#-quick-upgrade)
-- [Key Use Cases](#key-use-cases)
 - [Deephaven MCP Components](#deephaven-mcp-components)
 - [Available MCP Tools](#available-mcp-tools)
 - [Architecture Diagrams](#architecture-diagrams)
 - [Prerequisites](#prerequisites)
 - [Installation & Initial Setup](#installation--initial-setup)
-- [Upgrading](#upgrading)
-- [Configuring `deephaven_mcp.json`](#configuring-deephaven_mcpjson)
-- [Environment Variables](#environment-variables)
-- [Browser Access to Created Sessions](#browser-access-to-created-sessions)
+- [Configuration](#configuration)
+  - [Configuring `deephaven_mcp.json`](#configuring-deephaven_mcpjson)
+  - [Environment Variables](#environment-variables)
+  - [Browser Access to Created Sessions](#browser-access-to-created-sessions)
+  - [Applying Configuration Changes](#applying-configuration-changes)
 - [AI Tool Setup](#ai-tool-setup)
-- [Applying Configuration Changes](#applying-configuration-changes)
 - [Troubleshooting](#troubleshooting)
 - [Advanced Usage](#advanced-usage)
 - [Contributing](#contributing)
@@ -48,66 +48,68 @@ Deephaven MCP implements the [Model Context Protocol (MCP) standard](https://spe
 
 ---
 
+## Key Use Cases
+
+- **AI-Assisted Development**: Integrate Deephaven with LLM-powered development tools (e.g., [Claude Desktop](https://www.anthropic.com/claude), [GitHub Copilot](https://github.com/features/copilot)) for AI-assisted data exploration, code generation, and analysis.
+- **Multi-Environment Management**: Programmatically manage and query multiple Deephaven Community Core and Enterprise deployments from a single interface.
+- **Interactive Documentation**: Quickly find information and examples from Deephaven documentation using natural language queries.
+- **Script Automation**: Execute Python or Groovy scripts across multiple Deephaven sessions for data processing workflows.
+- **Schema Discovery**: Automatically retrieve and analyze table schemas from connected Deephaven instances.
+- **Environment Monitoring**: Monitor session health, package versions, and system status across your Deephaven infrastructure.
+
+---
+
 ## 🚀 Quick Start
 
 **Get up and running in 5 minutes!** This quickstart assumes you have a local Deephaven Community Core instance running on `localhost:10000`. If you don't have one, [download and start Deephaven Community Core](https://deephaven.io/core/docs/getting-started/quickstart/) first.
 
 ### 1. Create Virtual Environment
 
+**Using `uv` (recommended):**
+
+```bash
+uv venv .venv -p 3.11
+```
+
+**Using standard `venv`:**
+
 ```bash
 python3.11 -m venv .venv
 ```
 
-> **Note:** Replace `python3.11` with any supported Python version (3.11, 3.12, or 3.13).
+> Replace `3.11` / `python3.11` with any supported Python version (3.11, 3.12, or 3.13).
 
-### 2. Install CorePlus Client Wheel (optional, Enterprise only)
+### 2. Install Deephaven MCP
 
-**Skip this step if you only need Community Core support.**
+For most users, installing with both Community + Enterprise support is the best default.
 
-If you need Enterprise systems support, first download the installation script, then install the `deephaven-coreplus-client` wheel (obtain from your Deephaven Enterprise administrator):
-
-```bash
-# Download the installation script
-curl -O https://raw.githubusercontent.com/deephaven/deephaven-mcp/main/bin/dev_manage_coreplus_client.sh
-chmod +x dev_manage_coreplus_client.sh
-
-# Install the CorePlus wheel
-./dev_manage_coreplus_client.sh install-wheel --venv .venv --wheel-file /path/to/deephaven_coreplus_client-X.Y.Z-py3-none-any.whl
-```
-
-### 3. Install Deephaven MCP and Dependencies
-
-Choose the installation that matches your needs:
-
-**Basic installation:**
+**Using `uv` (recommended):**
 
 ```bash
-.venv/bin/pip install deephaven-mcp
+uv pip install "deephaven-mcp[community,enterprise]"
 ```
 
-Connects to existing Community Core instances. If you have [Docker](https://www.docker.com/get-started/) installed on your system, you can also dynamically create Community Core sessions using Docker.
-
-**For python-based Community Core session creation:**
-
-If you want to use the python launch method (no Docker required), install `deephaven-server`:
+**Using standard `pip`:**
 
 ```bash
-pip install deephaven-server
+.venv/bin/pip install "deephaven-mcp[community,enterprise]"
 ```
 
-This installs in the same venv as the MCP server. For advanced use cases with a separate venv, see the `python_venv_path` parameter in [Community Session Creation Configuration](#community-session-creation-configuration).
+**Optional Dependencies:**
 
-**Add Enterprise support:**
+| Extra | Use when |
+|-------|----------|
+| `[community]` | You want to create Community Core sessions using python (no Docker) |
+| `[enterprise]` | You need to connect to Deephaven Enterprise (Core+) systems |
+| `[test]` | You want to run the test suite |
+| `[lint]` | You only need code quality tools (linting, formatting, type checking) |
+| `[dev]` | You're developing/contributing to this project (includes everything) |
 
-```bash
-.venv/bin/pip install "deephaven-mcp[coreplus]"
-```
+> For more details and additional installation methods, see [Installation & Initial Setup](#installation--initial-setup).
 
-Adds ability to connect to Deephaven Enterprise systems (requires step 2). If you also want python-based session creation, separately install `deephaven-server` as shown above.
+### 3. Create Configuration File
 
-### 4. Create Configuration File
-
-Create a file called `deephaven_mcp.json` anywhere on your system:
+Create a file called [`deephaven_mcp.json`](#configuring-deephaven_mcpjson) anywhere on your system:
 
 ```json
 {
@@ -137,7 +139,7 @@ Create a file called `deephaven_mcp.json` anywhere on your system:
 
 > **💡 Dynamic Sessions**: The `session_creation` section enables on-demand [Community Core](https://deephaven.io/community/) session creation. Requirements: `deephaven-server` (installed in any Python venv) for the python method, or [Docker](https://www.docker.com/get-started/) for the docker method. See [Community Session Creation Configuration](#community-session-creation-configuration) for details.
 
-### 5. Configure Your AI Tool
+### 4. Configure Your AI Tool
 
 **For Claude Desktop**, open **Claude Desktop** → **Settings** → **Developer** → **Edit Config** and add:
 
@@ -165,7 +167,7 @@ Create a file called `deephaven_mcp.json` anywhere on your system:
 
 **For other tools**, see the [detailed setup instructions](#setup-instructions-by-tool) below.
 
-### 6. Try It Out
+### 5. Try It Out
 
 Restart your AI tool and try asking:
 
@@ -183,28 +185,29 @@ Restart your AI tool and try asking:
 
 **Already have `deephaven-mcp` installed?** Here's how to upgrade:
 
-### 1. Remove the old virtual environment
+**Using `uv`:**
 
 ```bash
-rm -rf .venv
+uv pip install --upgrade deephaven-mcp
 ```
 
-### 2. Reinstall with the latest version
+**Using standard `pip`:**
 
-Repeat the [🚀 Quick Start](#-quick-start) steps 1-3 above to reinstall with the latest version.
+```bash
+.venv/bin/pip install --upgrade deephaven-mcp
+```
 
-For more upgrade options, see the detailed [Upgrading](#upgrading) section below.
+**To upgrade with optional dependencies:**
 
----
+```bash
+# uv
+uv pip install --upgrade "deephaven-mcp[community,enterprise]"
 
-## Key Use Cases
+# pip
+.venv/bin/pip install --upgrade "deephaven-mcp[community,enterprise]"
+```
 
-- **AI-Assisted Development**: Integrate Deephaven with LLM-powered development tools (e.g., [Claude Desktop](https://www.anthropic.com/claude), [GitHub Copilot](https://github.com/features/copilot)) for AI-assisted data exploration, code generation, and analysis.
-- **Multi-Environment Management**: Programmatically manage and query multiple Deephaven Community Core and Enterprise deployments from a single interface.
-- **Interactive Documentation**: Quickly find information and examples from Deephaven documentation using natural language queries.
-- **Script Automation**: Execute Python or Groovy scripts across multiple Deephaven sessions for data processing workflows.
-- **Schema Discovery**: Automatically retrieve and analyze table schemas from connected Deephaven instances.
-- **Environment Monitoring**: Monitor session health, package versions, and system status across your Deephaven infrastructure.
+After upgrading, restart your AI tool for changes to take effect.
 
 ---
 
@@ -273,7 +276,7 @@ Manages and connects to multiple [Deephaven Community Core](https://deephaven.io
 
 ### Docs Server
 
-Connects to Deephaven's documentation knowledge base via AI to answer questions about Deephaven features, APIs, and usage patterns. Ask questions in natural language and get specific answers with code examples and explanations.
+Connects to Deephaven's documentation knowledge base via [Inkeep](https://inkeep.com/) AI to answer questions about Deephaven features, APIs, and usage patterns. Ask questions in natural language and get specific answers with code examples and explanations.
 
 ---
 
@@ -326,146 +329,67 @@ graph TD
 
 ## Installation & Initial Setup
 
-The recommended way to install `deephaven-mcp` is from PyPI. This provides the latest stable release and is suitable for most users.
+> **⚡ Quick Path**: For a fast getting-started experience, see the [🚀 Quick Start](#-quick-start) guide above. This section provides additional installation details and alternative methods.
 
-### Installing from PyPI
+The recommended way to install `deephaven-mcp` is from PyPI, which provides the latest stable release.
 
-Choose one of the following Python environment and package management tools:
+### Installation Methods
 
-#### Option A: Using `uv` (Fast, Recommended)
+#### Using `uv` (Fast, Recommended)
 
-1. **Install `uv` (if not already installed):**
-    You can install `uv` using `pip`:
+[`uv`](https://github.com/astral-sh/uv) is a high-performance Python package manager. For detailed [`uv`](https://github.com/astral-sh/uv) workflows and project-specific setup, see the [`uv` documentation](docs/UV.md).
 
-    ```sh
-    pip install uv
-    ```
+**Install uv:**
 
-    For more information on `uv`, see the official [GitHub project](https://github.com/astral-sh/uv) or the local [`uv` documentation](docs/UV.md).
+```sh
+pip install uv
+```
 
-2. **Create a virtual environment with your desired Python version:**
+**Create environment and install:**
 
-    [uv](docs/UV.md) works best when operating within a virtual environment. To create one (e.g., named `.venv`) using a specific Python interpreter (e.g., Python 3.11), run:
+```sh
+# Create virtual environment with Python 3.11+
+uv venv .venv -p 3.11
 
-    ```sh
-    uv venv .venv -p 3.11 
-    ```
+# Install deephaven-mcp (choose your extras)
+uv pip install deephaven-mcp                           # Basic
+uv pip install "deephaven-mcp[community]"              # + Python session creation
+uv pip install "deephaven-mcp[enterprise]"             # + Enterprise support
+uv pip install "deephaven-mcp[community,enterprise]"   # Both
+```
 
-    Replace `3.11` with your target Python version (e.g., `3.12`) or the full path to a Python executable.
+#### Using Standard `pip` and `venv`
 
-3. **Install the CorePlus client wheel (optional, Enterprise systems only):**
+**Create environment and install:**
 
-    **Skip this step if you only need Community Core support.**
+```sh
+# Create virtual environment
+python3.11 -m venv .venv
 
-    If you need Enterprise systems support, the `deephaven-coreplus-client` wheel must be installed first. This wheel is not available on PyPI and must be obtained from your Deephaven Enterprise administrator.
+# Install deephaven-mcp (choose your extras)
+.venv/bin/pip install deephaven-mcp                           # Basic
+.venv/bin/pip install "deephaven-mcp[community]"              # + Python session creation
+.venv/bin/pip install "deephaven-mcp[enterprise]"             # + Enterprise support
+.venv/bin/pip install "deephaven-mcp[community,enterprise]"   # Both
+```
 
-    Once you have the wheel file, install it using the provided script:
+**Optional Dependency Reference:**
 
-    ```sh
-    ./bin/dev_manage_coreplus_client.sh install-wheel --venv .venv --wheel-file /path/to/deephaven_coreplus_client-X.Y.Z-py3-none-any.whl
-    ```
-
-    Replace `/path/to/deephaven_coreplus_client-X.Y.Z-py3-none-any.whl` with the actual path to the wheel file provided by your administrator. The script handles dependency version conflicts automatically.
-
-4. **Install `deephaven-mcp`:**
-
-    This command installs `deephaven-mcp` and its dependencies into the virtual environment.
-
-    ```sh
-    # For Community Core only (most users)
-    uv pip install deephaven-mcp
-    
-    # For Enterprise systems (if you completed step 3)
-    uv pip install "deephaven-mcp[coreplus]"
-    ```
-
-#### Option B: Using Standard `pip` and `venv`
-
-1. **Create a virtual environment** (e.g., named `.venv`):
-
-    ```sh
-    python -m venv .venv
-    ```
-
-2. **Install the CorePlus client wheel (optional, Enterprise systems only):**
-
-    **Skip this step if you only need Community Core support.**
-
-    If you need Enterprise systems support, the `deephaven-coreplus-client` wheel must be installed first. This wheel is not available on PyPI and must be obtained from your Deephaven Enterprise administrator.
-
-    Once you have the wheel file, install it using the provided script:
-
-    ```sh
-    ./bin/dev_manage_coreplus_client.sh --venv .venv install-wheel --wheel-file /path/to/deephaven_coreplus_client-X.Y.Z-py3-none-any.whl
-    ```
-
-    Replace `/path/to/deephaven_coreplus_client-X.Y.Z-py3-none-any.whl` with the actual path to the wheel file provided by your administrator. The script handles dependency version conflicts automatically.
-
-3. **Install `deephaven-mcp`**:
-
-    This command installs `deephaven-mcp` and its dependencies into the virtual environment.
-
-    **For Community Core only (most users):**
-
-    ```sh
-    .venv/bin/pip install deephaven-mcp
-    ```
-
-    **For Enterprise systems (if you completed step 2):**
-
-    ```sh
-    .venv/bin/pip install "deephaven-mcp[coreplus]"
-    ```
+| Extra | Provides |
+|-------|----------|
+| `[community]` | Python-based Community Core session creation (no Docker) |
+| `[enterprise]` | Deephaven Enterprise (Core+) system connectivity |
+| `[test]` | Testing framework and utilities |
+| `[lint]` | Code quality tools (linting, formatting, type checking) |
+| `[dev]` | Full development environment (all of the above) |
 
 ---
 
-## Upgrading
+## Configuration
 
-### Recommended: Recreate Virtual Environment
+This section covers all aspects of configuring Deephaven MCP, from defining your sessions and systems to setting environment variables and managing browser access.
 
-The simplest and most reliable way to upgrade is to delete your virtual environment and recreate it:
-
-```bash
-# Remove the old virtual environment
-rm -rf .venv
-```
-
-Then follow the installation steps again:
-
-- For quickstart users: Repeat steps 1-3 from the [Quick Start](#-quick-start) section
-- For detailed installation: Follow the [Installing from PyPI](#installing-from-pypi) instructions
-
-This approach ensures:
-
-- Clean installation with no dependency conflicts
-- Correct CorePlus wheel version for Enterprise users
-- No leftover packages from previous versions
-
-After recreating the environment, restart your AI tool to use the new version.
-
-### Alternative: In-Place Upgrade
-
-If you prefer to upgrade without recreating the virtual environment:
-
-**For Community Core only:**
-
-```bash
-.venv/bin/pip install --upgrade deephaven-mcp
-```
-
-**For Enterprise systems:**
-
-```bash
-.venv/bin/pip install --upgrade "deephaven-mcp[coreplus]"
-```
-
-> **⚠️ Note for Enterprise Users**: When upgrading in-place, ensure your CorePlus client wheel version matches your Enterprise server version. Contact your Deephaven Enterprise administrator for the correct wheel version.
-
-After upgrading, restart your AI tool to use the new version.
-
----
-
-## Configuring `deephaven_mcp.json`
+### Configuring `deephaven_mcp.json`
 
 This section explains how to configure the [Deephaven MCP Systems Server](#systems-server) to connect to and manage your [Deephaven Community Core](https://deephaven.io/community/) instances and [Deephaven Enterprise](https://deephaven.io/enterprise/) systems. This involves creating a [systems session definition file](#the-deephaven_mcpjson-file) and understanding how the server locates this file.
 
@@ -919,38 +843,28 @@ When launched by an LLM tool, the [MCP Systems Server](#systems-server-architect
 
 ---
 
-## Environment Variables
-
-The following environment variables can be used to configure the behavior of the Deephaven MCP Systems Server.
+### Environment Variables
 
 > **⚠️ Security Warning**: Environment variables containing sensitive information like API keys and authentication tokens should be handled securely and never committed to version control.
 
-### Core Configuration
+#### Systems Server Environment Variables
 
-- **`DH_MCP_CONFIG_FILE`**: Path to your `deephaven_mcp.json` configuration file
+- **`DH_MCP_CONFIG_FILE`**: Path to your [`deephaven_mcp.json`](#configuring-deephaven_mcpjson) configuration file
   - Example: `DH_MCP_CONFIG_FILE=/path/to/your/deephaven_mcp.json`
   - Default: Looks for `deephaven_mcp.json` in the current directory
-
-- **`PORT`**: Port number for the MCP server
-  - Example: `PORT=8000`
-  - Default: `8000`
-
-### Authentication
-
-- **Environment variables for `auth_token_env_var`**: Any environment variable specified in your `deephaven_mcp.json` configuration's `auth_token_env_var` field will be used to source authentication tokens
-  - Example: If config specifies `"auth_token_env_var": "MY_AUTH_TOKEN"`, then `MY_AUTH_TOKEN=username:password`
-  - Note: This is a more secure alternative to hardcoding tokens in configuration files
-
-### Debugging and Logging
 
 - **`PYTHONLOGLEVEL`**: Controls the verbosity of logging output
   - Values: `DEBUG`, `INFO`, `WARNING`, `ERROR`
   - Example: `PYTHONLOGLEVEL=DEBUG`
   - Default: `INFO`
 
+- **Custom authentication variables**: Any environment variable specified in your [`deephaven_mcp.json`](#configuring-deephaven_mcpjson) configuration's `auth_token_env_var` field will be used to source authentication tokens
+  - Example: If config specifies `"auth_token_env_var": "MY_AUTH_TOKEN"`, then `MY_AUTH_TOKEN=username:password`
+  - Note: This is a more secure alternative to hardcoding tokens in configuration files
+
 ---
 
-## Browser Access to Created Sessions
+### Browser Access to Created Sessions
 
 When you create a Deephaven session via the MCP tools, you may want to access it through a web browser. By default, authentication credentials are not returned through MCP tools for security.
 
@@ -977,7 +891,7 @@ You can copy this URL directly into your browser.
 
 If you want AI agents to retrieve credentials programmatically, you can enable the `session_community_credentials` tool in your configuration:
 
-1. **Edit your `deephaven_mcp.json`:**
+1. **Edit your [`deephaven_mcp.json`](#configuring-deephaven_mcpjson):**
 
    ```json
    {
@@ -1013,6 +927,26 @@ If you want AI agents to retrieve credentials programmatically, you can enable t
    > **🔒 SECURITY WARNING**
    >
    > This tool exposes sensitive credentials. Only enable credential retrieval if the MCP server is running locally and you understand the security implications. **NEVER** enable when accessible over untrusted networks.
+
+---
+
+### Applying Configuration Changes
+
+After creating or modifying your MCP configuration, you must restart your IDE or AI assistant for the changes to take effect.
+
+#### Restart and Verify
+
+1. **Restart your tool** completely (Claude Desktop, VS Code, Cursor, etc.)
+2. **Check MCP server status** in your tool's interface - you should see `deephaven-systems` and `deephaven-docs` listed
+3. **Test the connection** by asking your AI assistant:
+
+   ```text
+   Are the Deephaven MCP servers working? Can you list any available sessions?
+   ```
+
+   Your AI assistant should connect to both servers and respond with information about Deephaven capabilities and available sessions.
+
+If the servers don't appear or you encounter errors, see the [Troubleshooting](#troubleshooting) section.
 
 ---
 
@@ -1244,26 +1178,6 @@ Configure the file with your Deephaven servers:
 
 ---
 
-## Applying Configuration Changes
-
-After creating or modifying your MCP configuration, you must restart your IDE or AI assistant for the changes to take effect.
-
-### Restart and Verify
-
-1. **Restart your tool** completely (Claude Desktop, VS Code, Cursor, etc.)
-2. **Check MCP server status** in your tool's interface - you should see `deephaven-systems` and `deephaven-docs` listed
-3. **Test the connection** by asking your AI assistant:
-
-   ```text
-   Are the Deephaven MCP servers working? Can you list any available sessions?
-   ```
-
-   Your AI assistant should connect to both servers and respond with information about Deephaven capabilities and available sessions.
-
-If the servers don't appear or you encounter errors, see the [Troubleshooting](#troubleshooting) section.
-
----
-
 ## Troubleshooting
 
 This section provides comprehensive guidance for diagnosing and resolving common issues with Deephaven MCP setup and operation. Issues are organized by category, starting with the most frequently encountered problems.
@@ -1283,12 +1197,11 @@ Before diving into detailed troubleshooting, try these common solutions:
 |-------|----------------------|----------|
 | `spawn uv ENOENT` | IDE/AI assistant logs | Use full path to [`uv`](docs/UV.md) |
 | `Connection failed` | MCP server logs | Check internet connection and server URLs |
-| `Config not found` | MCP server startup | Verify full path to `deephaven_mcp.json` |
+| `Config not found` | MCP server startup | Verify full path to [`deephaven_mcp.json`](#configuring-deephaven_mcpjson) |
 | `Permission denied` | Command execution | Ensure [`uv`](docs/UV.md) executable has proper permissions |
 | `Python version error` | Virtual environment | Verify supported Python version is installed and accessible |
 | `JSON parse error` | IDE/AI assistant logs | Fix JSON syntax errors in configuration files |
 | `Module not found: deephaven_mcp` | MCP server logs | Ensure virtual environment is activated and dependencies installed |
-| `Port already in use` | Server startup logs | Change `PORT` environment variable or kill conflicting process |
 | `Invalid session_id format` | MCP tool responses | Use format: `{type}:{source}:{session_name}` |
 
 ### JSON Configuration Issues
@@ -1306,7 +1219,7 @@ Before diving into detailed troubleshooting, try these common solutions:
   - Verify files exist at the specified paths
 
 - **Environment Variable Issues:**
-  - `DH_MCP_CONFIG_FILE` must point to valid `deephaven_mcp.json` file
+  - `DH_MCP_CONFIG_FILE` must point to valid [`deephaven_mcp.json`](#configuring-deephaven_mcpjson) file
   - Environment variables in `env` block must use correct names
   - Sensitive values should use environment variables, not hardcoded strings
 
@@ -1314,10 +1227,10 @@ Before diving into detailed troubleshooting, try these common solutions:
 
 - **LLM Tool Can't Connect / Server Not Found:**
   - Verify all paths in your LLM tool's JSON configuration are **absolute and correct**
-  - Ensure `DH_MCP_CONFIG_FILE` environment variable is correctly set in the JSON config and points to a valid worker file
-  - Ensure any [Deephaven Community Core](https://deephaven.io/community/) sessions you intend to use (as defined in `deephaven_mcp.json`) are running and accessible from the [MCP Systems Server](#systems-server-architecture)'s environment
+  - Ensure `DH_MCP_CONFIG_FILE` environment variable is correctly set in the JSON config and points to a valid [`deephaven_mcp.json`](#configuring-deephaven_mcpjson) file
+  - Ensure any [Deephaven Community Core](https://deephaven.io/community/) sessions you intend to use (as defined in [`deephaven_mcp.json`](#configuring-deephaven_mcpjson)) are running and accessible from the [MCP Systems Server](#systems-server-architecture)'s environment
   - Check for typos in server names, commands, or arguments in the JSON config
-  - Validate the syntax of your JSON configurations (`mcpServers` object in the LLM tool, and `deephaven_mcp.json`) using a [JSON validator tool](https://jsonlint.com/) or your IDE's linting features
+  - Validate the syntax of your JSON configurations (`mcpServers` object in the LLM tool, and [`deephaven_mcp.json`](#configuring-deephaven_mcpjson)) using a [JSON validator tool](https://jsonlint.com/) or your IDE's linting features
   - Set `PYTHONLOGLEVEL=DEBUG` in the `env` block of your JSON config to get more detailed logs from the MCP servers
 
 ### Network and Firewall Issues
@@ -1353,11 +1266,6 @@ Before diving into detailed troubleshooting, try these common solutions:
   - Ensure your virtual environment uses the correct Python version
 
 ### Server and Environment Issues
-
-- **Port Conflicts:**
-  - **Symptom:** Server fails to start with "port already in use" error
-  - **Solution:** Change `PORT` environment variable or kill conflicting process
-  - **Default ports:** 8000 (streamable-http), check your specific configuration
 
 - **Server Startup Failures:**
   - **Python Errors:** Check server logs for Python tracebacks and ensure dependencies are installed correctly

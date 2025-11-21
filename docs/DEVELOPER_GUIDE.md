@@ -28,6 +28,7 @@ This repository houses the Python-based [Model Context Protocol (MCP)](https://m
     - [Systems Server Prerequisites](#systems-server-prerequisites)
     - [Docs Server Prerequisites (Only If Using Docs Server)](#docs-server-prerequisites-only-if-using-docs-server)
     - [Development Prerequisites (Contributors Only)](#development-prerequisites-contributors-only)
+  - [Optional Dependencies](#optional-dependencies)
     - [Quick Verification Checklist](#quick-verification-checklist)
   - [Quick Start Guide](#quick-start-guide)
     - [Systems Server Quick Start](#systems-server-quick-start)
@@ -107,7 +108,6 @@ This repository houses the Python-based [Model Context Protocol (MCP)](https://m
       - [Docs Server Example](#docs-server-example)
   - [Development](#development)
     - [Development Workflow](#development-workflow)
-    - [Core+ Client Development Setup](#core-client-development-setup)
     - [Advanced Development Techniques](#advanced-development-techniques)
     - [Development Commands](#development-commands)
       - [Code Quality \& Pre-commit Checks](#code-quality--pre-commit-checks)
@@ -129,9 +129,6 @@ This repository houses the Python-based [Model Context Protocol (MCP)](https://m
       - [Running Integration Tests](#running-integration-tests)
       - [Running Specific Test Classes](#running-specific-test-classes)
       - [Troubleshooting Integration Tests](#troubleshooting-integration-tests)
-    - [Venv Installation Tests](#venv-installation-tests)
-      - [Running Tests](#running-tests)
-      - [CI Integration](#ci-integration)
   - [Troubleshooting](#troubleshooting)
     - [Common Issues](#common-issues)
     - [Common Errors \& Solutions](#common-errors--solutions)
@@ -268,9 +265,9 @@ Choose **one** of the following launch methods for dynamically creating Deephave
 **For Enterprise Systems (Optional)**
 
 - **Requirement**: Deephaven Enterprise (Core+) system(s) with accessible connection.json URL
-- **Installation**: `pip install "deephaven-mcp[coreplus]"` to install Core+ client dependencies
+- **Installation**: `pip install "deephaven-mcp[enterprise]"` (installs `deephaven-coreplus-client` from PyPI)
 - **Configuration**: Enterprise system details specified in `deephaven_mcp.json`
-- **More Info**: See [Enterprise Server Configuration](#enterprise-server-configuration) and [Core+ Client Development Setup](#core-client-development-setup)
+- **More Info**: See [Enterprise Server Configuration](#enterprise-server-configuration) and [Development Workflow](#development-workflow)
 
 ### Docs Server Prerequisites (Only If Using Docs Server)
 
@@ -297,6 +294,37 @@ Choose **one** of the following launch methods for dynamically creating Deephave
   - Docker must be installed and running (for Docker integration tests)
   - `deephaven-server` package installed (for python integration tests)
 - **More Info**: See [Testing](#testing) section
+
+## Optional Dependencies
+
+The `deephaven-mcp` package provides optional dependency groups (extras) to tailor the installation to your specific needs:
+
+| Extra | Purpose | Install Command |
+|-------|---------|-----------------|
+| `[community]` | Python-based Community Core session creation (no Docker required) | `pip install "deephaven-mcp[community]"` |
+| `[enterprise]` | Connect to Deephaven Enterprise (Core+) systems | `pip install "deephaven-mcp[enterprise]"` |
+| `[test]` | Run unit and integration tests | `pip install "deephaven-mcp[test]"` |
+| `[lint]` | Code quality tools (linting, formatting, type checking) | `pip install "deephaven-mcp[lint]"` |
+| `[dev]` | Full development environment with all features | `pip install "deephaven-mcp[dev]"` |
+
+**Common Installation Patterns:**
+
+```bash
+# Basic installation (connect to existing instances)
+pip install deephaven-mcp
+
+# With python session creation for Community Core
+pip install "deephaven-mcp[community]"
+
+# With Enterprise support
+pip install "deephaven-mcp[enterprise]"
+
+# Both Community + Enterprise
+pip install "deephaven-mcp[community,enterprise]"
+
+# Full development environment (includes all features)
+pip install -e ".[dev]"
+```
 
 ### Quick Verification Checklist
 
@@ -2391,7 +2419,15 @@ Both servers expose their tools through FastMCP, following the Model Context Pro
    uv pip install -e ".[dev]"
    ```
 
-   > [`uv`](https://github.com/astral-sh/uv) is a fast Python package installer and resolver, but you can also use regular `pip install -e .` if preferred.
+   The `[dev]` extra installs everything: all tests, linting tools, Community Core support, and Enterprise (Core+) support.
+
+   > **Tip:** Regenerate the entire environment in one line:
+   >
+   > ```sh
+   > rm -rf .venv && uv venv -p 3.12 && uv pip install -e ".[dev]"
+   > ```
+
+   > [`uv`](https://github.com/astral-sh/uv) is a fast Python package installer and resolver, but you can also use regular `pip install -e ".[dev]"` if preferred.
 
 4. **Run the test server** (in one terminal):
 
@@ -2410,46 +2446,6 @@ Both servers expose their tools through FastMCP, following the Model Context Pro
    ```
 
 6. **Use the MCP Inspector or test client** to validate your changes.
-
-### Core+ Client Development Setup
-
-These steps outline how to set up a development environment specifically for working with the Deephaven Core+ client wheel:
-
-1. **Create a Python 3.12 virtual environment:**
-
-    ```sh
-    uv venv .venv -p 3.12
-    ```
-
-    *Ensure Python 3.11 to 3.13 is used, as per project requirements.*
-
-2. **Install the Core+ client wheel:**
-    Run the management script to download and install the client wheel into your venv.
-
-    ```sh
-    ./bin/dev_manage_coreplus_client.sh --venv .venv install
-    ```
-
-    *This script is used because the `deephaven-coreplus-client` wheel is not available on PyPI and needs to be fetched from a specific location. The script also, crucially, manages `grpcio` dependency versioning by ensuring that if `grpcio` is already installed, its version is pinned during the client installation to prevent conflicts, and it uses binary-only installs to avoid build issues.*
-
-3. **Install project development and Core+ dependencies:**
-    Install the main project's development dependencies along with the `coreplus` extra.
-
-    ```sh
-    uv pip install -e ".[dev,coreplus]"
-    ```
-
-    *This ensures your environment has all necessary tools for general `deephaven-mcp` development, plus the packages specified in the `coreplus` extra.*
-
-After these steps, your virtual environment will be configured for Core+ client development.
-
-> **Tip:** You can generate or regenerate the entire Core+ development environment in one line:
->
-> ```sh
-> rm -rf .venv && uv venv -p 3.12 && ./bin/dev_manage_coreplus_client.sh --venv .venv install && uv pip install ".[dev,coreplus]"
-> ```
->
-> This will remove any existing virtual environment, create a new one, install the Core+ client, and set up all project dependencies in a single command.
 
 ### Advanced Development Techniques
 
@@ -2488,16 +2484,6 @@ After these steps, your virtual environment will be configured for Core+ client 
   
   > [mypy](https://mypy.readthedocs.io/) provides static type checking for Python code.
 
-- **Pre-commit Hooks:**
-  For automatic linting and formatting before each commit using [pre-commit](https://pre-commit.com/):
-
-  ```sh
-  uv pip install pre-commit
-  pre-commit install
-  ```
-  
-  > This sets up Git hooks that automatically run code formatters and linters before each commit.
-
 ### Development Commands
 
 #### Code Quality & Pre-commit Checks
@@ -2513,7 +2499,7 @@ To help maintain a consistent and high-quality codebase, the [`bin/precommit.sh`
 | pydocstyle   | Docstring style/linting                        | `uv run pydocstyle src`             | PEP 257 docstrings |
 | markdownlint | Lint and format markdown documentation         | `npx --yes markdownlint-cli2 --fix` | Markdown style, consistency |
 
-The script will run all of these tools (plus tests) in order. If any step fails, the script will stop and print an error. Fix the reported issues and rerun the script until it completes successfully. Only commit code that passes all pre-commit checks.
+The script will run all of these tools in order. If any step fails, the script will stop and print an error. Fix the reported issues and rerun the script until it completes successfully. Only commit code that passes all code quality checks.
 
 **Docstring policy:**
 
@@ -2601,7 +2587,7 @@ deephaven-mcp/
 ├── docs/                     # Project documentation
 ├── ops/                      # Operations (Docker, Terraform)
 ├── .github/                  # GitHub Actions workflows
-├── bin/                      # Executable scripts (e.g., pre-commit)
+├── bin/                      # Executable scripts (e.g., precommit.sh)
 ├── pyproject.toml            # Project definition and dependencies
 ├── README.md                 # Main project README
 ├── LICENSE
@@ -2864,42 +2850,6 @@ docker ps
 ```sh
 uv pip install -e ".[dev]"
 ```
-
-### Venv Installation Tests
-
-Tests verify that the `deephaven_coreplus_client` wheel installs correctly in both pip and uv virtual environments.
-
-#### Running Tests
-
-```sh
-# Test both pip and uv installations (default)
-./scripts/venv_install_test.sh
-
-# Test only pip installations
-./scripts/venv_install_test.sh --pip
-
-# Test only uv installations
-./scripts/venv_install_test.sh --uv
-
-# Test with specific Python version
-./scripts/venv_install_test.sh --python python3.12
-
-# Test latest version from GCS
-./scripts/venv_install_test.sh --latest
-
-# Keep venvs for debugging
-./scripts/venv_install_test.sh --keep-venvs
-```
-
-#### CI Integration
-
-The `venv-install-tests` workflow runs on changes to:
-
-- `ops/artifacts/**` (new wheel uploads)
-- `bin/dev_manage_coreplus_client.sh`
-- `scripts/venv_install_test.sh`
-
-Tests run on Ubuntu and macOS with supported Python versions.
 
 ---
 
