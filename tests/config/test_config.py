@@ -1900,7 +1900,7 @@ async def test_config_invalid_json_error(monkeypatch):
         await cm.clear_config_cache()
 
         with pytest.raises(
-            ConfigurationError, match="Invalid JSON in configuration file"
+            ConfigurationError, match="Invalid JSON/JSON5 in configuration file"
         ):
             await cm.get_config()
 
@@ -1953,7 +1953,6 @@ async def test_config_validation_error_in_load_and_validate(monkeypatch):
 @pytest.mark.asyncio
 async def test_json_formatting_error_in_log_config_summary(monkeypatch, caplog):
     """Test JSON formatting error handling in _log_config_summary."""
-    import json
     from unittest.mock import AsyncMock, MagicMock, patch
 
     from deephaven_mcp.config import ConfigManager
@@ -1972,12 +1971,12 @@ async def test_json_formatting_error_in_log_config_summary(monkeypatch, caplog):
     mock_async_context_manager.__aenter__.return_value = mock_file_object
     mock_file_object.read.return_value = valid_config_json
 
-    # Mock json.dumps to raise an error (simulating non-serializable config)
-    def mock_json_dumps(*args, **kwargs):
+    # Mock json5.dumps to raise an error (simulating non-serializable config)
+    def mock_json5_dumps(*args, **kwargs):
         raise TypeError("Object is not JSON serializable")
 
     with patch("aiofiles.open", mock_aiofiles_open):
-        with patch("json.dumps", side_effect=mock_json_dumps):
+        with patch("json5.dumps", side_effect=mock_json5_dumps):
             cm = ConfigManager()
             await cm.clear_config_cache()
             with caplog.at_level("WARNING"):
@@ -2017,3 +2016,267 @@ async def test_config_validation_error_in_load_and_validate(monkeypatch):
             ConfigurationError, match="Error loading configuration file"
         ):
             await cm.get_config()
+
+
+# --- JSON5 support tests ---
+@pytest.mark.asyncio
+async def test_json5_with_single_line_comments(monkeypatch):
+    """Test loading JSON5 configuration with single-line (//) comments."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from deephaven_mcp.config import ConfigManager
+
+    # JSON5 with single-line comments
+    json5_content = """{
+        // This is a comment about the community section
+        "community": {
+            "sessions": {
+                // Local development session
+                "local": {
+                    "host": "localhost",  // Server hostname
+                    "port": 10000         // Server port
+                }
+            }
+        }
+    }"""
+
+    monkeypatch.setenv("DH_MCP_CONFIG_FILE", "/fake/path/config.json5")
+
+    # Mock aiofiles.open
+    mock_aiofiles_open = MagicMock()
+    mock_async_context_manager = AsyncMock()
+    mock_file_object = AsyncMock()
+
+    mock_aiofiles_open.return_value = mock_async_context_manager
+    mock_async_context_manager.__aenter__.return_value = mock_file_object
+    mock_file_object.read.return_value = json5_content
+
+    with patch("aiofiles.open", mock_aiofiles_open):
+        cm = ConfigManager()
+        await cm.clear_config_cache()
+        config = await cm.get_config()
+
+    # Verify the config was parsed correctly
+    assert "community" in config
+    assert "sessions" in config["community"]
+    assert "local" in config["community"]["sessions"]
+    assert config["community"]["sessions"]["local"]["host"] == "localhost"
+    assert config["community"]["sessions"]["local"]["port"] == 10000
+
+
+@pytest.mark.asyncio
+async def test_json5_with_multi_line_comments(monkeypatch):
+    """Test loading JSON5 configuration with multi-line (/* */) comments."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from deephaven_mcp.config import ConfigManager
+
+    # JSON5 with multi-line comments
+    json5_content = """{
+        /* 
+         * Enterprise configuration section
+         * Contains all enterprise systems
+         */
+        "enterprise": {
+            "systems": {
+                /* Production system configuration */
+                "prod": {
+                    "connection_json_url": "https://prod.example.com",
+                    "auth_type": "password",
+                    "username": "admin",
+                    "password": "secret"
+                }
+            }
+        }
+    }"""
+
+    monkeypatch.setenv("DH_MCP_CONFIG_FILE", "/fake/path/config.json5")
+
+    # Mock aiofiles.open
+    mock_aiofiles_open = MagicMock()
+    mock_async_context_manager = AsyncMock()
+    mock_file_object = AsyncMock()
+
+    mock_aiofiles_open.return_value = mock_async_context_manager
+    mock_async_context_manager.__aenter__.return_value = mock_file_object
+    mock_file_object.read.return_value = json5_content
+
+    with patch("aiofiles.open", mock_aiofiles_open):
+        cm = ConfigManager()
+        await cm.clear_config_cache()
+        config = await cm.get_config()
+
+    # Verify the config was parsed correctly
+    assert "enterprise" in config
+    assert "systems" in config["enterprise"]
+    assert "prod" in config["enterprise"]["systems"]
+    assert config["enterprise"]["systems"]["prod"]["auth_type"] == "password"
+
+
+@pytest.mark.asyncio
+async def test_json5_with_mixed_comments(monkeypatch):
+    """Test loading JSON5 configuration with both single-line and multi-line comments."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from deephaven_mcp.config import ConfigManager
+
+    # JSON5 with mixed comment styles
+    json5_content = """{
+        /* Community configuration */
+        "community": {
+            // Session definitions
+            "sessions": {
+                "local": {
+                    "host": "localhost",
+                    "port": 10000  // Default port
+                }
+            },
+            /* 
+             * Session creation defaults
+             */
+            "session_creation": {
+                // Maximum concurrent sessions
+                "max_concurrent_sessions": 5
+            }
+        }
+    }"""
+
+    monkeypatch.setenv("DH_MCP_CONFIG_FILE", "/fake/path/config.json5")
+
+    # Mock aiofiles.open
+    mock_aiofiles_open = MagicMock()
+    mock_async_context_manager = AsyncMock()
+    mock_file_object = AsyncMock()
+
+    mock_aiofiles_open.return_value = mock_async_context_manager
+    mock_async_context_manager.__aenter__.return_value = mock_file_object
+    mock_file_object.read.return_value = json5_content
+
+    with patch("aiofiles.open", mock_aiofiles_open):
+        cm = ConfigManager()
+        await cm.clear_config_cache()
+        config = await cm.get_config()
+
+    # Verify the config was parsed correctly
+    assert "community" in config
+    assert config["community"]["sessions"]["local"]["port"] == 10000
+    assert config["community"]["session_creation"]["max_concurrent_sessions"] == 5
+
+
+@pytest.mark.asyncio
+async def test_json5_standard_json_still_works(monkeypatch):
+    """Test that standard JSON (without comments) still works correctly with json5 parser."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from deephaven_mcp.config import ConfigManager
+
+    # Standard JSON without comments
+    json_content = """{
+        "community": {
+            "sessions": {
+                "local": {
+                    "host": "localhost",
+                    "port": 10000
+                }
+            }
+        }
+    }"""
+
+    monkeypatch.setenv("DH_MCP_CONFIG_FILE", "/fake/path/config.json")
+
+    # Mock aiofiles.open
+    mock_aiofiles_open = MagicMock()
+    mock_async_context_manager = AsyncMock()
+    mock_file_object = AsyncMock()
+
+    mock_aiofiles_open.return_value = mock_async_context_manager
+    mock_async_context_manager.__aenter__.return_value = mock_file_object
+    mock_file_object.read.return_value = json_content
+
+    with patch("aiofiles.open", mock_aiofiles_open):
+        cm = ConfigManager()
+        await cm.clear_config_cache()
+        config = await cm.get_config()
+
+    # Verify the config was parsed correctly
+    assert "community" in config
+    assert config["community"]["sessions"]["local"]["host"] == "localhost"
+    assert config["community"]["sessions"]["local"]["port"] == 10000
+
+
+@pytest.mark.asyncio
+async def test_json5_invalid_syntax_raises_error(monkeypatch):
+    """Test that invalid JSON5 syntax raises ConfigurationError."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from deephaven_mcp._exceptions import ConfigurationError
+    from deephaven_mcp.config import ConfigManager
+
+    # Invalid JSON with unclosed bracket
+    invalid_json5 = """{
+        "community": {
+            "sessions": {
+                "local": {
+                    "host": "localhost"
+                }
+            // Missing closing bracket
+        }
+    }"""
+
+    monkeypatch.setenv("DH_MCP_CONFIG_FILE", "/fake/path/config.json5")
+
+    # Mock aiofiles.open
+    mock_aiofiles_open = MagicMock()
+    mock_async_context_manager = AsyncMock()
+    mock_file_object = AsyncMock()
+
+    mock_aiofiles_open.return_value = mock_async_context_manager
+    mock_async_context_manager.__aenter__.return_value = mock_file_object
+    mock_file_object.read.return_value = invalid_json5
+
+    with patch("aiofiles.open", mock_aiofiles_open):
+        cm = ConfigManager()
+        await cm.clear_config_cache()
+
+        with pytest.raises(ConfigurationError, match="Invalid JSON/JSON5"):
+            await cm.get_config()
+
+
+@pytest.mark.asyncio
+async def test_json5_trailing_commas_support(monkeypatch):
+    """Test that JSON5 allows trailing commas."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from deephaven_mcp.config import ConfigManager
+
+    # JSON5 with trailing commas
+    json5_content = """{
+        "community": {
+            "sessions": {
+                "local": {
+                    "host": "localhost",
+                    "port": 10000,
+                },
+            },
+        }
+    }"""
+
+    monkeypatch.setenv("DH_MCP_CONFIG_FILE", "/fake/path/config.json5")
+
+    # Mock aiofiles.open
+    mock_aiofiles_open = MagicMock()
+    mock_async_context_manager = AsyncMock()
+    mock_file_object = AsyncMock()
+
+    mock_aiofiles_open.return_value = mock_async_context_manager
+    mock_async_context_manager.__aenter__.return_value = mock_file_object
+    mock_file_object.read.return_value = json5_content
+
+    with patch("aiofiles.open", mock_aiofiles_open):
+        cm = ConfigManager()
+        await cm.clear_config_cache()
+        config = await cm.get_config()
+
+    # Verify the config was parsed correctly despite trailing commas
+    assert "community" in config
+    assert config["community"]["sessions"]["local"]["host"] == "localhost"

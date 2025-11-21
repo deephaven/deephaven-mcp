@@ -111,20 +111,25 @@ uv pip install "deephaven-mcp[community,enterprise]"
 
 Create a file called [`deephaven_mcp.json`](#configuring-deephaven_mcpjson) anywhere on your system:
 
-```json
+```json5
 {
+  // Community Core session configurations
   "community": {
     "sessions": {
+      // "local" is a custom name - use any name you want for your sessions
       "local": {
-        "host": "localhost",
-        "port": 10000,
+        "host": "localhost",           // Server hostname or IP address
+        "port": 10000,                 // Deephaven gRPC port (default: 10000)
+        // Full authentication handler class name (can also use "PSK" shorthand)
         "auth_type": "io.deephaven.authentication.psk.PskAuthenticationHandler",
-        "auth_token": "YOUR_PASSWORD_HERE"
+        "auth_token": "YOUR_PASSWORD_HERE"  // Must match your Deephaven server token
       }
     },
+    // Optional: Enable MCP tools for creating/deleting sessions on-demand
+    // Useful for temporary workspaces and dynamic testing environments
     "session_creation": {
       "defaults": {
-        "launch_method": "python"
+        "launch_method": "python"     // "python" or "docker"
       }
     }
   }
@@ -397,6 +402,12 @@ This section explains how to configure the [Deephaven MCP Systems Server](#syste
 
 This file tells the MCP Systems Server how to connect to your Deephaven instances. You'll create this file to define your connections to either Community Core sessions or Enterprise systems (or both).
 
+**File Format**: The configuration file supports both standard JSON and JSON5 formats:
+
+- Single-line comments: `// This is a comment`
+- Multi-line comments: `/* This is a multi-line comment */`
+- Trailing commas are also supported
+
 The configuration file supports two main sections:
 
 - **`"community"`**: For connecting to Community Core session instances
@@ -416,13 +427,15 @@ You can include either section, both, or neither (empty file). Each section cont
 
 **Anonymous authentication (simplest):**
 
-```json
+```json5
 {
   "community": {
     "sessions": {
+      // No authentication required - use only for local development!
+      // When auth_type is omitted, defaults to "Anonymous"
       "my_local_server": {
-        "host": "localhost",
-        "port": 10000
+        "host": "localhost",  // Deephaven server address
+        "port": 10000          // Default Deephaven port (gRPC)
       }
     }
   }
@@ -431,15 +444,17 @@ You can include either section, both, or neither (empty file). Each section cont
 
 **PSK authentication:**
 
-```json
+```json5
 {
   "community": {
     "sessions": {
       "psk_server": {
         "host": "localhost",
         "port": 10000,
+        // Pre-Shared Key authentication (most common for production)
+        // Can use "PSK" shorthand or full class name shown here
         "auth_type": "io.deephaven.authentication.psk.PskAuthenticationHandler",
-        "auth_token": "your-shared-secret-key"
+        "auth_token": "your-shared-secret-key"  // Token configured on server
       }
     }
   }
@@ -448,15 +463,17 @@ You can include either section, both, or neither (empty file). Each section cont
 
 **Basic authentication with environment variable:**
 
-```json
+```json5
 {
   "community": {
     "sessions": {
       "prod_session": {
-        "host": "deephaven-prod.example.com",
+        "host": "deephaven-prod.example.com",  // Remote server
         "port": 10000,
-        "auth_type": "Basic",
-        "auth_token_env_var": "DH_AUTH_TOKEN"
+        "auth_type": "Basic",  // HTTP Basic authentication
+        // More secure: read credentials from environment variable
+        // Set in shell: export DH_AUTH_TOKEN="username:password"
+        "auth_token_env_var": "DH_AUTH_TOKEN"  // Must be in "user:pass" format
       }
     }
   }
@@ -465,17 +482,19 @@ You can include either section, both, or neither (empty file). Each section cont
 
 **TLS/SSL configuration:**
 
-```json
+```json5
 {
   "community": {
     "sessions": {
       "secure_tls_session": {
         "host": "secure.deephaven.example.com",
-        "port": 443,
-        "use_tls": true,
-        "tls_root_certs": "/path/to/ca.pem",
-        "client_cert_chain": "/path/to/client-cert.pem",
-        "client_private_key": "/path/to/client-key.pem"
+        "port": 443,  // Standard HTTPS port (use 10000 for non-TLS)
+        "use_tls": true,  // Enable SSL/TLS encryption
+        // Optional: Custom CA certificate for server verification
+        "tls_root_certs": "/absolute/path/to/ca.pem",  // Must be absolute path!
+        // Optional: Mutual TLS (mTLS) for client authentication
+        "client_cert_chain": "/absolute/path/to/client-cert.pem",
+        "client_private_key": "/absolute/path/to/client-key.pem"
       }
     }
   }
@@ -604,15 +623,17 @@ The `session_creation` key enables dynamic creation of Deephaven Community Core 
 
 **Password authentication (direct):**
 
-```json
+```json5
 {
   "enterprise": {
     "systems": {
+      // "dev_enterprise_system" is a custom name - use any name you like
       "dev_enterprise_system": {
+        // Enterprise server provides this URL (typically ends with /iris/connection.json)
         "connection_json_url": "https://dev-enterprise.example.com/iris/connection.json",
-        "auth_type": "password",
+        "auth_type": "password",  // Username/password authentication
         "username": "admin",
-        "password": "your-password-here"
+        "password": "your-password-here"  // ⚠️ Consider password_env_var for security!
       }
     }
   }
@@ -621,7 +642,7 @@ The `session_creation` key enables dynamic creation of Deephaven Community Core 
 
 **Password authentication (environment variable):**
 
-```json
+```json5
 {
   "enterprise": {
     "systems": {
@@ -629,6 +650,8 @@ The `session_creation` key enables dynamic creation of Deephaven Community Core 
         "connection_json_url": "https://my-enterprise.example.com/iris/connection.json",
         "auth_type": "password",
         "username": "admin",
+        // ✅ RECOMMENDED: Read password from environment variable
+        // Set in shell: export DH_ENTERPRISE_PASSWORD="your-password"
         "password_env_var": "DH_ENTERPRISE_PASSWORD"
       }
     }
@@ -638,14 +661,16 @@ The `session_creation` key enables dynamic creation of Deephaven Community Core 
 
 **Private key authentication:**
 
-```json
+```json5
 {
   "enterprise": {
     "systems": {
       "saml_enterprise": {
         "connection_json_url": "https://enterprise.example.com/iris/connection.json",
+        // Private key authentication (commonly used with SAML/SSO setups)
+        // Your IT/security team typically provides the private key file
         "auth_type": "private_key",
-        "private_key_path": "/path/to/your/private_key.pem"
+        "private_key_path": "/absolute/path/to/your/private_key.pem"  // Must be absolute!
       }
     }
   }
@@ -664,11 +689,7 @@ The `enterprise` key contains a `"systems"` dictionary mapping custom system nam
 | `password` | string | `auth_type` = `"password"` | Password (use `password_env_var` instead for security) |
 | `password_env_var` | string | `auth_type` = `"password"` | Environment variable containing the password (recommended) |
 | `private_key_path` | string | `auth_type` = `"private_key"` | Absolute path to private key file |
-| `use_tls` | boolean | Optional | Enable TLS encryption for connections (default: false) |
-| `tls_root_certs` | string | Optional | Absolute path to custom TLS root certificate bundle file |
-| `tls_verify_server_cert` | boolean | Optional | Verify server TLS certificate (default: true when TLS enabled) |
-| `client_cert_chain` | string | Optional | Absolute path to client certificate chain file for mutual TLS |
-| `client_private_key` | string | Optional | Absolute path to client private key file for mutual TLS |
+| `connection_timeout` | integer \| float | Optional | Timeout in seconds for establishing connection to Enterprise system (default: 10.0) |
 | `session_creation` | object | Optional | Configuration for creating enterprise sessions. If omitted, session creation tools are unavailable |
 | `session_creation.max_concurrent_sessions` | integer | Optional | Maximum concurrent sessions (default: 5). Set to 0 to disable session creation |
 | `session_creation.defaults` | object | Optional | Default parameters for new sessions |
@@ -748,15 +769,20 @@ The `security.community.credential_retrieval_mode` setting controls whether and 
 
 Here's a complete example showing both Community and Enterprise configurations:
 
-```json
+```json5
 {
+  /* ====================================
+   * Community Core Session Configurations
+   * ==================================== */
   "community": {
     "sessions": {
+      // Local development - no authentication
       "my_local_deephaven": {
         "host": "localhost",
         "port": 10000,
-        "session_type": "python"
+        "session_type": "python"  // "python" or "groovy" - sets query language
       },
+      // Staging environment - PSK authentication
       "psk_authenticated_session": {
         "host": "localhost",
         "port": 10001,
@@ -764,61 +790,74 @@ Here's a complete example showing both Community and Enterprise configurations:
         "auth_token": "your-shared-secret-key",
         "session_type": "python"
       },
+      // Production - Basic auth with TLS
       "basic_auth_session": {
         "host": "secure.deephaven.example.com",
         "port": 10002,
         "auth_type": "Basic",
-        "auth_token": "username:password",
+        "auth_token": "username:password",  // ⚠️ Better: use auth_token_env_var!
         "use_tls": true,
-        "tls_root_certs": "/path/to/community_root.crt"
+        "tls_root_certs": "/path/to/community_root.crt"  // Absolute path
       }
     },
+    /* Dynamic session creation configuration
+     * Enables on-demand session creation via MCP tools */
     "session_creation": {
-      "max_concurrent_sessions": 5,
+      "max_concurrent_sessions": 5,  // Maximum number of concurrent dynamic sessions
       "defaults": {
-        "launch_method": "docker",
-        "auth_type": "PSK",
-        "docker_image": "ghcr.io/deephaven/server:latest",
-        "docker_memory_limit_gb": null,
-        "docker_cpu_limit": null,
-        "docker_volumes": [],
-        "heap_size_gb": 4.0,
-        "extra_jvm_args": [],
-        "environment_vars": {},
-        "startup_timeout_seconds": 60,
-        "startup_check_interval_seconds": 2,
-        "startup_retries": 3
+        "launch_method": "docker",  // "docker" or "python"
+        "auth_type": "PSK",  // Auto-generate PSK tokens for security
+        "docker_image": "ghcr.io/deephaven/server:latest",  // Docker image to use
+        "docker_memory_limit_gb": null,  // null = no limit, or specify GB (e.g., 8.0)
+        "docker_cpu_limit": null,  // null = no limit, or specify cores (e.g., 2.0)
+        "docker_volumes": [],  // Empty = no mounts, or add paths like ["/data:/data"]
+        "heap_size_gb": 4.0,  // JVM heap size (4GB works for most cases)
+        "extra_jvm_args": [],  // Custom JVM flags if needed
+        "environment_vars": {},  // Custom environment variables
+        "startup_timeout_seconds": 60,  // How long to wait for session to start
+        "startup_check_interval_seconds": 2,  // How often to check if ready
+        "startup_retries": 3  // Number of restart attempts on failure
       }
     }
   },
+  /* ====================================
+   * Enterprise System Configurations
+   * ==================================== */
   "enterprise": {
     "systems": {
+      // "prod_cluster" is a custom name - use whatever makes sense for your setup
       "prod_cluster": {
         "connection_json_url": "https://prod.enterprise.example.com/iris/connection.json",
         "auth_type": "password",
         "username": "your_username",
-        "password_env_var": "ENTERPRISE_PASSWORD",
+        "password_env_var": "ENTERPRISE_PASSWORD",  // ✅ Read from environment (secure)
+        // Enable dynamic Enterprise session creation
         "session_creation": {
-          "max_concurrent_sessions": 3,
+          "max_concurrent_sessions": 3,  // Lower limit for production stability
           "defaults": {
-            "heap_size_gb": 8.0,
-            "programming_language": "Groovy",
-            "auto_delete_timeout": 3600,
-            "server": "gpu-server-1",
-            "engine": "DeephavenCommunity",
+            "heap_size_gb": 8.0,  // Larger heap for production workloads
+            "programming_language": "Groovy",  // "Python" or "Groovy"
+            "auto_delete_timeout": 3600,  // Auto-delete idle sessions after 1 hour
+            "server": "gpu-server-1",  // Target specific Enterprise server/node
+            "engine": "DeephavenCommunity",  // Engine type (check with your admin)
+            // Performance tuning: G1GC with 200ms pause target
             "extra_jvm_args": ["-XX:+UseG1GC", "-XX:MaxGCPauseMillis=200"],
+            // Custom environment for your workflows (format: "KEY=value")
             "extra_environment_vars": ["PYTHONPATH=/custom/libs", "LOG_LEVEL=DEBUG"],
+            // Access control: Who can admin vs view the session
             "admin_groups": ["deephaven-admins", "data-team-leads"],
             "viewer_groups": ["analysts", "data-scientists"],
-            "timeout_seconds": 120.0,
+            "timeout_seconds": 120.0,  // Wait up to 2 minutes for session startup
+            // Custom args passed to pydeephaven.Session (advanced)
             "session_arguments": {"custom_setting": "example_value"}
           }
         }
       },
+      // Separate data science environment - private key auth (SAML)
       "data_science_env": {
         "connection_json_url": "https://data-science.enterprise.example.com/iris/connection.json",
         "auth_type": "private_key",
-        "private_key_path": "/path/to/your/private_key.pem"
+        "private_key_path": "/path/to/your/private_key.pem"  // From your IT team
       }
     }
   }

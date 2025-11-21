@@ -1,8 +1,9 @@
 """
 Async Deephaven MCP configuration management.
 
-This module provides async functions to load, validate, and manage configuration for Deephaven MCP from a JSON file.
+This module provides async functions to load, validate, and manage configuration for Deephaven MCP from a JSON or JSON5 file.
 Configuration is loaded from a file specified by the DH_MCP_CONFIG_FILE environment variable using native async file I/O (aiofiles).
+The configuration file supports both standard JSON and JSON5 formats. JSON5 allows single-line (//) and multi-line (/* */) comments, trailing commas, and other JSON5 features.
 
 Features:
     - Coroutine-safe, cached loading of configuration using asyncio.Lock.
@@ -13,7 +14,8 @@ Features:
 
 Configuration Schema:
 ---------------------
-The configuration file must be a JSON object. It may contain the following top-level keys:
+The configuration file must be a JSON or JSON5 object. JSON5 allows single-line (//) and multi-line (/* */) comments, trailing commas, and other JSON5 features.
+It may contain the following top-level keys:
 
   - `security` (dict, optional):
       A dictionary containing security-related configuration for all session types.
@@ -220,7 +222,7 @@ Usage Patterns:
 
 Environment Variables:
 ---------------------
-- `DH_MCP_CONFIG_FILE`: Path to the Deephaven MCP configuration JSON file.
+- `DH_MCP_CONFIG_FILE`: Path to the Deephaven MCP configuration JSON or JSON5 file.
 
 Security:
 ---------
@@ -258,7 +260,6 @@ __all__ = [
 
 import asyncio
 import copy
-import json
 import logging
 import os
 from collections.abc import Callable, Sequence
@@ -266,6 +267,7 @@ from dataclasses import dataclass
 from typing import Any, cast
 
 import aiofiles
+import json5
 
 from deephaven_mcp._exceptions import (
     CommunitySessionConfigurationError,
@@ -591,7 +593,7 @@ async def _load_config_from_file(config_path: str) -> dict[str, Any]:
         ConfigurationError: For any of the following conditions:
             - File not found (FileNotFoundError)
             - Permission denied (PermissionError)
-            - Invalid JSON syntax (json.JSONDecodeError)
+            - Invalid JSON/JSON5 syntax (ValueError)
             - Any other I/O error (Exception)
 
     Example:
@@ -601,7 +603,7 @@ async def _load_config_from_file(config_path: str) -> dict[str, Any]:
     try:
         async with aiofiles.open(config_path) as f:
             content = await f.read()
-        return cast(dict[str, Any], json.loads(content))
+        return cast(dict[str, Any], json5.loads(content))
     except FileNotFoundError:
         _LOGGER.error(
             f"[_load_config_from_file] Configuration file not found: {config_path}"
@@ -616,12 +618,12 @@ async def _load_config_from_file(config_path: str) -> dict[str, Any]:
         raise ConfigurationError(
             f"Permission denied when trying to read configuration file: {config_path}"
         ) from None
-    except json.JSONDecodeError as e:
+    except ValueError as e:
         _LOGGER.error(
-            f"[_load_config_from_file] Invalid JSON in configuration file {config_path}: {e}"
+            f"[_load_config_from_file] Invalid JSON/JSON5 in configuration file {config_path}: {e}"
         )
         raise ConfigurationError(
-            f"Invalid JSON in configuration file {config_path}: {e}"
+            f"Invalid JSON/JSON5 in configuration file {config_path}: {e}"
         ) from e
     except Exception as e:
         _LOGGER.error(
@@ -761,7 +763,7 @@ def _log_config_summary(config: dict[str, Any]) -> None:
 
     # Log the redacted config as formatted JSON
     try:
-        formatted_config = json.dumps(redacted_config, indent=2, sort_keys=True)
+        formatted_config = json5.dumps(redacted_config, indent=2, sort_keys=True)
         _LOGGER.info(
             f"[ConfigManager:get_config] Loaded configuration:\n{formatted_config}"
         )
