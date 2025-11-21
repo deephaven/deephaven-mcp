@@ -65,35 +65,31 @@ Deephaven MCP implements the [Model Context Protocol (MCP) standard](https://spe
 
 ### 1. Create Virtual Environment
 
+**Using `uv` (recommended):**
+
+```bash
+uv venv .venv -p 3.11
+```
+
+**Using standard `venv`:**
+
 ```bash
 python3.11 -m venv .venv
 ```
 
-> **Note:** Replace `python3.11` with any supported Python version (3.11, 3.12, or 3.13).
+> Replace `3.11` / `python3.11` with any supported Python version (3.11, 3.12, or 3.13).
 
 ### 2. Install Deephaven MCP
 
-Choose the installation that matches your needs:
+For most users, installing with both Community + Enterprise support is the best default.
 
-**Basic** - connect to existing Community Core instances:
-
-```bash
-.venv/bin/pip install deephaven-mcp
-```
-
-**Community** - adds python-based session creation (no Docker required):
+**Using `uv` (recommended):**
 
 ```bash
-.venv/bin/pip install "deephaven-mcp[community]"
+uv pip install "deephaven-mcp[community,enterprise]"
 ```
 
-**Enterprise** - connect to Deephaven Enterprise (Core+) systems:
-
-```bash
-.venv/bin/pip install "deephaven-mcp[enterprise]"
-```
-
-**Both Community + Enterprise**:
+**Using standard `pip`:**
 
 ```bash
 .venv/bin/pip install "deephaven-mcp[community,enterprise]"
@@ -109,7 +105,7 @@ Choose the installation that matches your needs:
 | `[lint]` | You only need code quality tools (linting, formatting, type checking) |
 | `[dev]` | You're developing/contributing to this project (includes everything) |
 
-> **💡 Note**: The basic installation can still create Community Core sessions using Docker if you have [Docker](https://www.docker.com/get-started/) installed on your system.
+> For more details and additional installation methods, see [Installation & Initial Setup](#installation--initial-setup).
 
 ### 3. Create Configuration File
 
