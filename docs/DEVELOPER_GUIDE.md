@@ -137,6 +137,7 @@ This repository houses the Python-based [Model Context Protocol (MCP)](https://m
     - [Deephaven API Reference](#deephaven-api-reference)
     - [Tools \& Related Projects](#tools--related-projects)
     - [Contributing](#contributing)
+    - [Community \& Support](#community--support)
   - [License](#license)
 
 ---
@@ -344,13 +345,14 @@ Before proceeding with the Quick Start Guide, verify your setup:
 1. **Set up worker configuration:**
    Create a JSON configuration file for your Deephaven MCP:
 
-   ```json
+   ```json5
    {
      "community": {
        "sessions": {
+         // Connect to a local Deephaven Community instance
          "local_session": {
-           "host": "localhost",
-           "port": 10000
+           "host": "localhost",  // Deephaven server address
+           "port": 10000         // Default Deephaven port
          }
        }
      }
@@ -466,7 +468,15 @@ Key architectural features include:
 
 ##### Core Configuration File (`deephaven_mcp.json`)
 
-The Deephaven MCP Systems Server relies on a JSON configuration file (conventionally named `deephaven_mcp.json`, though any name can be used) to define the Deephaven instances it can connect to and manage. This configuration is crucial for the server to operate correctly.
+The Deephaven MCP Systems Server relies on a JSON or JSON5 configuration file (conventionally named `deephaven_mcp.json`, though any name can be used) to define the Deephaven instances it can connect to and manage. This configuration is crucial for the server to operate correctly.
+
+**File Format**: The configuration file supports both standard JSON and JSON5 formats:
+
+- Single-line comments: `// This is a comment`
+- Multi-line comments: `/* This is a multi-line comment */`
+- Trailing commas are also supported
+
+This allows you to add documentation directly in your configuration file to explain connection details, authentication choices, or other configuration decisions.
 
 ###### Environment Variables
 
@@ -512,7 +522,7 @@ All fields within a session's configuration object are optional. If a field is o
 - `client_cert_chain` (string, optional): Absolute path to a PEM file containing the client's TLS certificate chain. Used for client-side certificate authentication (mTLS).
 - `client_private_key` (string, optional): Absolute path to a PEM file containing the client's private key, corresponding to the `client_cert_chain`. Used for mTLS.
 
-**Example `deephaven_mcp.json`:**
+**Example `deephaven_mcp.json` (standard JSON):**
 
 ```json
 {
@@ -542,6 +552,48 @@ All fields within a session's configuration object are optional. If a field is o
         "client_cert_chain": "/path/to/client_cert_and_chain.pem",
         "client_private_key": "/path/to/client_private_key.pem"
       }
+    }
+  }
+}
+```
+
+**Example with JSON5 (JSON with Comments):**
+
+```json5
+{
+  /* Community Core session configurations */
+  "community": {
+    "sessions": {
+      // Local development environment - no authentication
+      "my_local_deephaven": {
+        "host": "localhost",
+        "port": 10000,
+        "session_type": "python"
+      },
+      // Staging environment with PSK authentication
+      "psk_authenticated_session": {
+        "host": "localhost",
+        "port": 10001,
+        "auth_type": "io.deephaven.authentication.psk.PskAuthenticationHandler",
+        "auth_token": "your-shared-secret-key",  // Consider using auth_token_env_var instead
+        "session_type": "python"
+      },
+      /* Production environment with full TLS and mTLS
+       * Uses Basic auth with credentials from environment variable
+       * Never times out for long-running operations
+       */
+      "basic_auth_worker": {
+        "host": "secure.deephaven.example.com",
+        "port": 10002,
+        "auth_type": "Basic",
+        "auth_token_env_var": "MY_BASIC_AUTH_ENV_VAR",  // More secure than hardcoding
+        "never_timeout": true,
+        "session_type": "groovy",
+        "use_tls": true,
+        "tls_root_certs": "/path/to/trusted_cas.pem",
+        "client_cert_chain": "/path/to/client_cert_and_chain.pem",
+        "client_private_key": "/path/to/client_private_key.pem",
+      },  // Trailing comma supported in JSON5
     }
   }
 }
@@ -758,6 +810,9 @@ If the `"enterprise"` key is present, it must be a dictionary. Each individual e
   - If `auth_type` is `"private_key"`:
     - `private_key_path` (string, **required**): The absolute file system path to the private key file (e.g., a `.pem` file).
 
+- Optional Connection Settings:
+  - `connection_timeout` (integer | float, **optional, default: 10.0**): Timeout in seconds for establishing connection to the Enterprise system.
+
 - Optional Worker Creation Configuration:
   - `session_creation` (object, **optional**): Configuration for creating enterprise workers on this system. If omitted, worker creation tools will not be available for this system.
     - `max_concurrent_sessions` (integer, **optional, default: 5**): Maximum number of concurrent sessions that can be created on this system. Set to 0 to disable session creation. Used for resource management and safety.
@@ -776,8 +831,9 @@ If the `"enterprise"` key is present, it must be a dictionary. Each individual e
 
 **Example `deephaven_mcp.json` with Enterprise Systems and Worker Creation:**
 
-```json
+```json5
 {
+  // Community Core session for local development
   "community": {
     "sessions": {
       "local_dev": {
@@ -786,39 +842,48 @@ If the `"enterprise"` key is present, it must be a dictionary. Each individual e
       }
     }
   },
+  /* ====================================
+   * Enterprise Systems Configuration
+   * ==================================== */
   "enterprise": {
     "systems": {
+      // Staging environment - password authentication
       "staging_env": {
         "connection_json_url": "https://staging.internal/iris/connection.json",
         "auth_type": "password",
         "username": "test_user",
-        "password_env_var": "STAGING_PASSWORD",
+        "password_env_var": "STAGING_PASSWORD",  // Read password from environment
         "session_creation": {
-          "max_concurrent_sessions": 3,
+          "max_concurrent_sessions": 3,  // Limit for staging environment
           "defaults": {
-            "heap_size_gb": 4.0,
-            "programming_language": "Python",
-            "auto_delete_timeout": 1800,
+            "heap_size_gb": 4.0,  // Moderate heap for testing
+            "programming_language": "Python",  // Default to Python
+            "auto_delete_timeout": 1800,  // Auto-delete after 30 minutes
           }
         }
       },
+      // Analytics system - private key authentication (SAML)
       "analytics_private_key_auth": {
         "connection_json_url": "https://analytics.dept.com/iris/connection.json",
         "auth_type": "private_key",
         "private_key_path": "/secure/keys/analytics_service_account.pem",
         "session_creation": {
-          "max_concurrent_sessions": 5,
+          "max_concurrent_sessions": 5,  // Higher limit for production
           "defaults": {
-            "heap_size_gb": 8.0,
-            "programming_language": "Groovy",
-            "auto_delete_timeout": 3600,
-            "server": "gpu-server-1",
-            "engine": "DeephavenCommunity",
+            "heap_size_gb": 8.0,  // Larger heap for production workloads
+            "programming_language": "Groovy",  // Groovy for this system
+            "auto_delete_timeout": 3600,  // Auto-delete after 1 hour
+            "server": "gpu-server-1",  // Route to GPU-enabled server
+            "engine": "DeephavenCommunity",  // Engine type
+            // JVM tuning for performance
             "extra_jvm_args": ["-XX:+UseG1GC", "-XX:MaxGCPauseMillis=200"],
+            // Custom environment for analytics workflows
             "extra_environment_vars": ["PYTHONPATH=/custom/libs", "LOG_LEVEL=DEBUG"],
+            // Access control lists
             "admin_groups": ["deephaven-admins", "data-team-leads"],
             "viewer_groups": ["analysts", "data-scientists"],
-            "timeout_seconds": 120.0,
+            "timeout_seconds": 120.0,  // Session startup timeout
+            // Custom arguments passed to pydeephaven.Session
             "session_arguments": {"custom_setting": "example_value"}
           }
         }
@@ -2982,6 +3047,11 @@ uv pip install -e ".[dev]"
 - [Contributing Guidelines](../CONTRIBUTING.md) - Guide for making contributions to the project
 - [GitHub Issues](https://github.com/deephaven/deephaven-mcp/issues) - Report bugs or request features
 - [Pull Requests](https://github.com/deephaven/deephaven-mcp/pulls) - View open changes and contribute your own
+
+### Community & Support
+
+- [Deephaven Community Slack](https://deephaven.io/slack) - Join the community for questions, discussions, and support
+- [Deephaven Community Forums](https://github.com/deephaven/deephaven-core/discussions) - GitHub discussions for Deephaven Core
 
 ## License
 
