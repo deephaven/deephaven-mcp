@@ -801,9 +801,7 @@ def test_session_creation_valid_heap_size_float():
             "username": "user",
             "password": "pass",
             "session_creation": {
-                "defaults": {
-                    "heap_size_gb": 2.5  # Float value should be valid
-                }
+                "defaults": {"heap_size_gb": 2.5}  # Float value should be valid
             },
         }
     }

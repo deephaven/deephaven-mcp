@@ -958,7 +958,7 @@ class TestDockerLauncherEdgeCases:
             # Verify the subprocess was called
             mock_subprocess.assert_called_once()
             args = mock_subprocess.call_args[0]
-            
+
             # Find the START_OPTS environment variable
             start_opts_found = False
             for i, arg in enumerate(args):
@@ -967,11 +967,15 @@ class TestDockerLauncherEdgeCases:
                     if env_arg.startswith("START_OPTS="):
                         start_opts = env_arg.split("=", 1)[1]
                         # Should contain -Xmx2560m (2.5 GB = 2560 MB)
-                        assert "-Xmx2560m" in start_opts, f"Expected -Xmx2560m in START_OPTS, got: {start_opts}"
+                        assert (
+                            "-Xmx2560m" in start_opts
+                        ), f"Expected -Xmx2560m in START_OPTS, got: {start_opts}"
                         start_opts_found = True
                         break
-            
-            assert start_opts_found, "START_OPTS environment variable not found in docker command"
+
+            assert (
+                start_opts_found
+            ), "START_OPTS environment variable not found in docker command"
 
     @pytest.mark.asyncio
     async def test_stop_exception_handling(self):

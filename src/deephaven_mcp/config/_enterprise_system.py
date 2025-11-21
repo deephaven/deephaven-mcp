@@ -711,7 +711,9 @@ def _validate_enterprise_system_session_creation(
             raise EnterpriseSystemConfigurationError(msg)
 
         # Optional field validations
-        _validate_optional_session_default(system_name, defaults, "heap_size_gb", (int, float))
+        _validate_optional_session_default(
+            system_name, defaults, "heap_size_gb", (int, float)
+        )
         _validate_optional_session_default(
             system_name, defaults, "auto_delete_timeout", int
         )

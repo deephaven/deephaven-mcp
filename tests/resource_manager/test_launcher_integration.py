@@ -348,7 +348,9 @@ class TestFloatHeapSizeIntegration:
         """Test Docker container launch with floating point heap size."""
         session = None
         port = find_available_port_locked()
-        _LOGGER.info(f"[Integration Test] Allocated port {port} for float heap Docker test")
+        _LOGGER.info(
+            f"[Integration Test] Allocated port {port} for float heap Docker test"
+        )
         try:
             # Launch Docker container with float heap_size_gb
             _LOGGER.info(
@@ -400,7 +402,9 @@ class TestFloatHeapSizeIntegration:
                     f"[Integration Test] Cleaning up float heap container {session.container_id[:12]}"
                 )
                 await session.stop()
-                _LOGGER.info(f"[Integration Test] Float heap container cleanup complete")
+                _LOGGER.info(
+                    f"[Integration Test] Float heap container cleanup complete"
+                )
 
     @pytest.mark.asyncio
     @pytest.mark.timeout(300)  # 5 minute timeout
@@ -415,7 +419,9 @@ class TestFloatHeapSizeIntegration:
         """
         session = None
         port = find_available_port_locked()
-        _LOGGER.info(f"[Integration Test] Allocated port {port} for float heap Python test")
+        _LOGGER.info(
+            f"[Integration Test] Allocated port {port} for float heap Python test"
+        )
         try:
             # Launch Python process with float heap_size_gb
             _LOGGER.info(
@@ -514,9 +520,7 @@ class TestFloatHeapSizeIntegration:
             # Verify process is actually running
             assert session.process.returncode is None
 
-            _LOGGER.info(
-                f"[Integration Test] Python process with float heap is ready"
-            )
+            _LOGGER.info(f"[Integration Test] Python process with float heap is ready")
 
         finally:
             # Clean up
