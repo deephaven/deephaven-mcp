@@ -13,6 +13,8 @@ trigger: always_on
    - 'Deephaven Enterprise', 'Deephaven Core+', and 'Deephaven CorePlus' are interchangeable names for the same product
    - In Deephaven, "schema" and "meta table" refer to the same concept - the table's column definitions including names, types, and properties.
    - In Deephaven, "catalog" and "database" are interchangeable terms - the catalog is the database of available tables.
+   - 'DHC' is shorthand for Deephaven Community (also called 'Core')
+   - 'DHE' is shorthand for Deephaven Enterprise (also called 'Core+')
 6. All MCP tools in src/deephaven_mcp/mcp_systems_server/ or a subdirectory decorated with `@mcp_server.tool()` that return tabular data with a `format` parameter must include a "**Format Accuracy for AI Agents** (based on empirical research)" section immediately after the main tool description and before the "Terminology Note" section, with this exact wording:
     - markdown-kv: 61% accuracy (highest comprehension, more tokens)
     - markdown-table: 55% accuracy (good balance)
