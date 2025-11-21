@@ -933,6 +933,47 @@ class TestDockerLauncherEdgeCases:
             mock_subprocess.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_launch_with_float_heap_size(self):
+        """Test Docker launch with float heap_size_gb converts to MB."""
+
+        with patch("asyncio.create_subprocess_exec") as mock_subprocess:
+            mock_process = AsyncMock()
+            mock_process.returncode = 0
+            mock_process.communicate = AsyncMock(return_value=(b"container_id\n", b""))
+            mock_subprocess.return_value = mock_process
+
+            await DockerLaunchedSession.launch(
+                session_name="test",
+                port=10000,
+                auth_token="token",
+                heap_size_gb=2.5,  # Float value should convert to 2560m
+                extra_jvm_args=[],
+                environment_vars={},
+                docker_image="ghcr.io/deephaven/server:latest",
+                docker_memory_limit_gb=None,
+                docker_cpu_limit=None,
+                docker_volumes=[],
+            )
+
+            # Verify the subprocess was called
+            mock_subprocess.assert_called_once()
+            args = mock_subprocess.call_args[0]
+            
+            # Find the START_OPTS environment variable
+            start_opts_found = False
+            for i, arg in enumerate(args):
+                if arg == "-e" and i + 1 < len(args):
+                    env_arg = args[i + 1]
+                    if env_arg.startswith("START_OPTS="):
+                        start_opts = env_arg.split("=", 1)[1]
+                        # Should contain -Xmx2560m (2.5 GB = 2560 MB)
+                        assert "-Xmx2560m" in start_opts, f"Expected -Xmx2560m in START_OPTS, got: {start_opts}"
+                        start_opts_found = True
+                        break
+            
+            assert start_opts_found, "START_OPTS environment variable not found in docker command"
+
+    @pytest.mark.asyncio
     async def test_stop_exception_handling(self):
         """Test Docker stop exception handling."""
         session = DockerLaunchedSession(

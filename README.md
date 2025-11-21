@@ -531,7 +531,7 @@ The `session_creation` key enables dynamic creation of Deephaven Community Core 
 | `session_creation.defaults.docker_cpu_limit` | float | Optional | Container CPU limit in cores (Docker only, default: no limit) |
 | `session_creation.defaults.docker_volumes` | array | Optional | Volume mounts in format `["host:container:mode"]` (Docker only, default: []) |
 | `session_creation.defaults.python_venv_path` | string | Optional | Path to custom Python venv directory (Python only). If provided, uses deephaven from that venv. If null (default), uses same venv as MCP server. Raises error if used with docker. |
-| `session_creation.defaults.heap_size_gb` | integer | Optional | JVM heap size in gigabytes (default: 4) |
+| `session_creation.defaults.heap_size_gb` | float \| int | Optional | JVM heap size in gigabytes (e.g., 4 or 2.5, default: 4). Integer values use 'g' suffix (4 → `-Xmx4g`). Float values converted to MB (2.5 → `-Xmx2560m`) |
 | `session_creation.defaults.extra_jvm_args` | array | Optional | Additional JVM arguments (e.g., `["-XX:+UseG1GC"]`, default: []) |
 | `session_creation.defaults.environment_vars` | object | Optional | Environment variables as key-value pairs (default: {}) |
 | `session_creation.defaults.startup_timeout_seconds` | float | Optional | Maximum time to wait for session startup (default: 60) |
@@ -672,7 +672,7 @@ The `enterprise` key contains a `"systems"` dictionary mapping custom system nam
 | `session_creation` | object | Optional | Configuration for creating enterprise sessions. If omitted, session creation tools are unavailable |
 | `session_creation.max_concurrent_sessions` | integer | Optional | Maximum concurrent sessions (default: 5). Set to 0 to disable session creation |
 | `session_creation.defaults` | object | Optional | Default parameters for new sessions |
-| `session_creation.defaults.heap_size_gb` | float | Optional | Default JVM heap size in gigabytes for new sessions |
+| `session_creation.defaults.heap_size_gb` | float \| int | Optional | Default JVM heap size in gigabytes for new sessions (e.g., 4 or 2.5). Enterprise library handles conversion internally |
 | `session_creation.defaults.programming_language` | string | Optional | Default programming language for new sessions ("Python" or "Groovy", default: "Python") |
 | `session_creation.defaults.auto_delete_timeout` | integer | Optional | Default auto-deletion timeout in seconds for idle sessions (API default: 600) |
 | `session_creation.defaults.server` | string | Optional | Default target server/environment name where sessions will be created |

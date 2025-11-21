@@ -781,15 +781,34 @@ def test_session_creation_invalid_heap_size_wrong_type():
             "username": "user",
             "password": "pass",
             "session_creation": {
-                "defaults": {"heap_size_gb": "invalid"}  # Should be int
+                "defaults": {"heap_size_gb": "invalid"}  # Should be int or float
             },
         }
     }
     with pytest.raises(
         EnterpriseSystemConfigurationError,
-        match=r"Field 'heap_size_gb' in session_creation defaults for enterprise system 'test_system' must be of type int, but got str\.",
+        match=r"Field 'heap_size_gb' in session_creation defaults for enterprise system 'test_system' must be one of types \(int, float\), but got str\.",
     ):
         validate_enterprise_systems_config(config)
+
+
+def test_session_creation_valid_heap_size_float():
+    """Test session_creation validation accepts float heap_size_gb."""
+    config = {
+        "test_system": {
+            "connection_json_url": "https://test.example.com/iris/connection.json",
+            "auth_type": "password",
+            "username": "user",
+            "password": "pass",
+            "session_creation": {
+                "defaults": {
+                    "heap_size_gb": 2.5  # Float value should be valid
+                }
+            },
+        }
+    }
+    # Should not raise - float is now valid
+    validate_enterprise_systems_config(config)
 
 
 def test_session_creation_invalid_extra_jvm_args_wrong_type():
