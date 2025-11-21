@@ -3733,23 +3733,23 @@ def _resolve_docker_image(
     defaults: dict,
 ) -> tuple[str, dict | None]:
     """Resolve docker image from programming language or explicit image parameter.
-    
+
     This function implements the following priority for Docker image selection:
     1. Explicit docker_image parameter (highest priority)
     2. Auto-select based on programming_language parameter
     3. Auto-select based on programming_language from config defaults
     4. Use docker_image from config defaults (if language-based selection not applicable)
-    
+
     Args:
         programming_language (str | None): Programming language ("Python" or "Groovy"), or None
         docker_image (str | None): Explicit Docker image name, or None for auto-selection
         defaults (dict): Configuration defaults that may contain 'programming_language' or 'docker_image'
-    
+
     Returns:
         tuple[str, dict | None]: Two-element tuple:
             - First element: Resolved Docker image name (empty string on error)
             - Second element: Error dict with 'success', 'error', 'isError' keys, or None on success
-            
+
     Note:
         Returns error if programming_language (param or config) is not "Python" or "Groovy" (case-insensitive).
     """
@@ -3797,10 +3797,10 @@ def _resolve_community_session_parameters(
     defaults: dict,
 ) -> tuple[dict[str, Any], dict | None]:
     """Resolve all community session creation parameters from tool args, config defaults, and hardcoded defaults.
-    
+
     This function implements the parameter resolution priority: tool parameter > config default > hardcoded default.
     It validates parameters, normalizes values, and returns a complete set of resolved parameters for session creation.
-    
+
     Args:
         launch_method (str | None): Launch method ("docker" or "python"), or None to use default
         programming_language (str | None): Programming language ("Python" or "Groovy"), or None to use default
@@ -3815,7 +3815,7 @@ def _resolve_community_session_parameters(
         docker_volumes (list[str] | None): Docker volume mounts (docker only), or None to use default
         python_venv_path (str | None): Python venv path (python only), or None to use default
         defaults (dict): Configuration defaults from deephaven_mcp.json
-    
+
     Returns:
         tuple[dict[str, Any], dict | None]: Two-element tuple:
             - First element: Dict of resolved parameters with keys:
@@ -3870,7 +3870,7 @@ def _resolve_community_session_parameters(
     resolved_programming_language = programming_language or defaults.get(
         "programming_language", DEFAULT_PROGRAMMING_LANGUAGE
     )
-    
+
     # Resolve docker image (only for docker launch method)
     if resolved_launch_method == "docker":
         resolved_docker_image, image_error = _resolve_docker_image(
@@ -4061,11 +4061,11 @@ async def _register_session_manager(
     instance_tracker: InstanceTracker,
 ) -> None:
     """Create session manager object and register it in the session registry.
-    
+
     This helper function creates a DynamicCommunitySessionManager with the appropriate
     configuration and registers it in the combined session registry. It also tracks
     Python-launched processes for orphan cleanup.
-    
+
     Args:
         session_name (str): Simple session name (not full session_id)
         session_id (str): Full session identifier in format "community:dynamic:{session_name}"

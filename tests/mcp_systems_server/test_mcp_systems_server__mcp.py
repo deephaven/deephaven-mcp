@@ -7551,9 +7551,7 @@ async def test_session_details_to_dict_exception():
     mock_launched_session.port = 10000
     mock_launched_session.launch_method = "docker"
     mock_launched_session.connection_url = "http://localhost:10000"
-    mock_launched_session.connection_url_with_auth = (
-        "http://localhost:10000/?psk=test"
-    )
+    mock_launched_session.connection_url_with_auth = "http://localhost:10000/?psk=test"
     mock_launched_session.container_id = "abc123"
     mock_launched_session.auth_type = "psk"
     mock_launched_session.auth_token = "test"
@@ -8291,7 +8289,7 @@ def test_resolve_community_session_parameters_invalid_auth_type():
 @pytest.mark.asyncio
 async def test_session_community_create_groovy_session_type_in_config():
     """Regression test: Verify programming_language='Groovy' results in session_type='groovy'.
-    
+
     This test ensures programming_language is properly passed through to the
     session configuration. Previously, the parameter was used for Docker image
     selection but not included in the session config, causing all sessions to
@@ -8317,7 +8315,9 @@ async def test_session_community_create_groovy_session_type_in_config():
     mock_launched_session.port = 10000
     mock_launched_session.launch_method = "docker"
     mock_launched_session.connection_url = "http://localhost:10000"
-    mock_launched_session.connection_url_with_auth = "http://localhost:10000/?psk=test_token"
+    mock_launched_session.connection_url_with_auth = (
+        "http://localhost:10000/?psk=test_token"
+    )
     mock_launched_session.container_id = "test_container"
     mock_launched_session.auth_type = "psk"
     mock_launched_session.auth_token = "test_token"
@@ -8333,11 +8333,24 @@ async def test_session_community_create_groovy_session_type_in_config():
         return manager
 
     with (
-        patch("deephaven_mcp.mcp_systems_server._mcp.launch_session") as mock_launch_session,
-        patch("deephaven_mcp.mcp_systems_server._mcp.find_available_port", return_value=10000),
-        patch("deephaven_mcp.mcp_systems_server._mcp.generate_auth_token", return_value="test_token"),
-        patch.object(mock_launched_session, "wait_until_ready", new=AsyncMock(return_value=True)),
-        patch("deephaven_mcp.mcp_systems_server._mcp.DynamicCommunitySessionManager", side_effect=capture_manager_init),
+        patch(
+            "deephaven_mcp.mcp_systems_server._mcp.launch_session"
+        ) as mock_launch_session,
+        patch(
+            "deephaven_mcp.mcp_systems_server._mcp.find_available_port",
+            return_value=10000,
+        ),
+        patch(
+            "deephaven_mcp.mcp_systems_server._mcp.generate_auth_token",
+            return_value="test_token",
+        ),
+        patch.object(
+            mock_launched_session, "wait_until_ready", new=AsyncMock(return_value=True)
+        ),
+        patch(
+            "deephaven_mcp.mcp_systems_server._mcp.DynamicCommunitySessionManager",
+            side_effect=capture_manager_init,
+        ),
     ):
         mock_launch_session.return_value = mock_launched_session
 
@@ -8360,14 +8373,18 @@ async def test_session_community_create_groovy_session_type_in_config():
 
         # CRITICAL: Verify session_config includes session_type='groovy'
         assert captured_config is not None, "Session config was not captured"
-        assert "session_type" in captured_config, "session_type missing from session config"
-        assert captured_config["session_type"] == "groovy", (
-            f"Expected session_type='groovy', got '{captured_config['session_type']}'"
-        )
+        assert (
+            "session_type" in captured_config
+        ), "session_type missing from session config"
+        assert (
+            captured_config["session_type"] == "groovy"
+        ), f"Expected session_type='groovy', got '{captured_config['session_type']}'"
 
         # Also verify the Docker image is correct
         call_kwargs = mock_launch_session.call_args.kwargs
-        assert "slim" in call_kwargs["docker_image"], "Groovy should use slim Docker image"
+        assert (
+            "slim" in call_kwargs["docker_image"]
+        ), "Groovy should use slim Docker image"
 
 
 @pytest.mark.asyncio
@@ -8393,7 +8410,9 @@ async def test_session_community_create_python_session_type_in_config():
     mock_launched_session.port = 10000
     mock_launched_session.launch_method = "docker"
     mock_launched_session.connection_url = "http://localhost:10000"
-    mock_launched_session.connection_url_with_auth = "http://localhost:10000/?psk=test_token"
+    mock_launched_session.connection_url_with_auth = (
+        "http://localhost:10000/?psk=test_token"
+    )
     mock_launched_session.container_id = "test_container"
     mock_launched_session.auth_type = "psk"
     mock_launched_session.auth_token = "test_token"
@@ -8408,11 +8427,24 @@ async def test_session_community_create_python_session_type_in_config():
         return manager
 
     with (
-        patch("deephaven_mcp.mcp_systems_server._mcp.launch_session") as mock_launch_session,
-        patch("deephaven_mcp.mcp_systems_server._mcp.find_available_port", return_value=10000),
-        patch("deephaven_mcp.mcp_systems_server._mcp.generate_auth_token", return_value="test_token"),
-        patch.object(mock_launched_session, "wait_until_ready", new=AsyncMock(return_value=True)),
-        patch("deephaven_mcp.mcp_systems_server._mcp.DynamicCommunitySessionManager", side_effect=capture_manager_init),
+        patch(
+            "deephaven_mcp.mcp_systems_server._mcp.launch_session"
+        ) as mock_launch_session,
+        patch(
+            "deephaven_mcp.mcp_systems_server._mcp.find_available_port",
+            return_value=10000,
+        ),
+        patch(
+            "deephaven_mcp.mcp_systems_server._mcp.generate_auth_token",
+            return_value="test_token",
+        ),
+        patch.object(
+            mock_launched_session, "wait_until_ready", new=AsyncMock(return_value=True)
+        ),
+        patch(
+            "deephaven_mcp.mcp_systems_server._mcp.DynamicCommunitySessionManager",
+            side_effect=capture_manager_init,
+        ),
     ):
         mock_launch_session.return_value = mock_launched_session
 
@@ -8460,7 +8492,9 @@ async def test_session_community_create_default_session_type_in_config():
     mock_launched_session.port = 10000
     mock_launched_session.launch_method = "docker"
     mock_launched_session.connection_url = "http://localhost:10000"
-    mock_launched_session.connection_url_with_auth = "http://localhost:10000/?psk=test_token"
+    mock_launched_session.connection_url_with_auth = (
+        "http://localhost:10000/?psk=test_token"
+    )
     mock_launched_session.container_id = "test_container"
     mock_launched_session.auth_type = "psk"
     mock_launched_session.auth_token = "test_token"
@@ -8475,11 +8509,24 @@ async def test_session_community_create_default_session_type_in_config():
         return manager
 
     with (
-        patch("deephaven_mcp.mcp_systems_server._mcp.launch_session") as mock_launch_session,
-        patch("deephaven_mcp.mcp_systems_server._mcp.find_available_port", return_value=10000),
-        patch("deephaven_mcp.mcp_systems_server._mcp.generate_auth_token", return_value="test_token"),
-        patch.object(mock_launched_session, "wait_until_ready", new=AsyncMock(return_value=True)),
-        patch("deephaven_mcp.mcp_systems_server._mcp.DynamicCommunitySessionManager", side_effect=capture_manager_init),
+        patch(
+            "deephaven_mcp.mcp_systems_server._mcp.launch_session"
+        ) as mock_launch_session,
+        patch(
+            "deephaven_mcp.mcp_systems_server._mcp.find_available_port",
+            return_value=10000,
+        ),
+        patch(
+            "deephaven_mcp.mcp_systems_server._mcp.generate_auth_token",
+            return_value="test_token",
+        ),
+        patch.object(
+            mock_launched_session, "wait_until_ready", new=AsyncMock(return_value=True)
+        ),
+        patch(
+            "deephaven_mcp.mcp_systems_server._mcp.DynamicCommunitySessionManager",
+            side_effect=capture_manager_init,
+        ),
     ):
         mock_launch_session.return_value = mock_launched_session
 
