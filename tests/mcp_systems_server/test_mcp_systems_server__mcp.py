@@ -5402,7 +5402,7 @@ async def test_session_community_create_success():
     mock_launched_session.launch_method = "docker"
     mock_launched_session.connection_url = "http://localhost:10000"
     mock_launched_session.connection_url_with_auth = (
-        "http://localhost:10000/?authToken=test_token"
+        "http://localhost:10000/?psk=test_token"
     )
     mock_launched_session.container_id = "test_container"
     mock_launched_session.auth_type = "psk"
@@ -5504,7 +5504,7 @@ async def test_session_community_create_sessions_disabled():
     mock_launched_session.launch_method = "docker"
     mock_launched_session.connection_url = "http://localhost:10000"
     mock_launched_session.connection_url_with_auth = (
-        "http://localhost:10000/?authToken=test_token"
+        "http://localhost:10000/?psk=test_token"
     )
     mock_launched_session.container_id = "test_container"
     mock_launched_session.auth_type = "psk"
@@ -5830,7 +5830,7 @@ class TestSessionCommunityCreateComplete:
         mock_launched_session.launch_method = "docker"
         mock_launched_session.connection_url = "http://localhost:10000"
         mock_launched_session.connection_url_with_auth = (
-            "http://localhost:10000/?authToken=test_token"
+            "http://localhost:10000/?psk=test_token"
         )
         mock_launched_session.container_id = "test"
         mock_launched_session.auth_type = "psk"
@@ -5898,7 +5898,7 @@ class TestSessionCommunityCreateComplete:
         mock_launched_session.launch_method = "docker"
         mock_launched_session.connection_url = "http://localhost:10000"
         mock_launched_session.connection_url_with_auth = (
-            "http://localhost:10000/?authToken=test_token"
+            "http://localhost:10000/?psk=test_token"
         )
         mock_launched_session.container_id = "test"
         mock_launched_session.auth_type = "psk"
@@ -5965,7 +5965,7 @@ class TestSessionCommunityCreateComplete:
         mock_launched_session.launch_method = "docker"
         mock_launched_session.connection_url = "http://localhost:10000"
         mock_launched_session.connection_url_with_auth = (
-            "http://localhost:10000/?authToken=test_token"
+            "http://localhost:10000/?psk=test_token"
         )
         mock_launched_session.container_id = "test"
         mock_launched_session.auth_type = "psk"
@@ -6065,7 +6065,7 @@ class TestSessionCommunityCreateComplete:
         mock_launched_session.launch_method = "docker"
         mock_launched_session.connection_url = "http://localhost:10000"
         mock_launched_session.connection_url_with_auth = (
-            "http://localhost:10000/?authToken=test_token"
+            "http://localhost:10000/?psk=test_token"
         )
         mock_launched_session.container_id = "test"
         mock_launched_session.auth_type = "psk"
@@ -6450,7 +6450,7 @@ class TestRemainingEdgeCases:
         mock_launched_session.launch_method = "docker"
         mock_launched_session.connection_url = "http://localhost:10000"
         mock_launched_session.connection_url_with_auth = (
-            "http://localhost:10000/?authToken=test_token"
+            "http://localhost:10000/?psk=test_token"
         )
         mock_launched_session.container_id = "test"
         mock_launched_session.auth_type = "psk"
@@ -6553,7 +6553,7 @@ class TestSessionDetailsDynamicCommunity:
         mock_launched_session.launch_method = "docker"
         mock_launched_session.connection_url = "http://localhost:10000"
         mock_launched_session.connection_url_with_auth = (
-            "http://localhost:10000/?authToken=abc123"
+            "http://localhost:10000/?psk=abc123"
         )
         mock_launched_session.container_id = "de18601a1657"
         mock_launched_session.auth_type = "psk"
@@ -7232,7 +7232,7 @@ async def test_session_community_create_explicit_docker_image():
     mock_launched_session.launch_method = "docker"
     mock_launched_session.connection_url = "http://localhost:10000"
     mock_launched_session.connection_url_with_auth = (
-        "http://localhost:10000/?authToken=test_token"
+        "http://localhost:10000/?psk=test_token"
     )
     mock_launched_session.container_id = "test"
     mock_launched_session.auth_type = "psk"
@@ -7302,7 +7302,7 @@ async def test_session_community_create_groovy_programming_language():
     mock_launched_session.launch_method = "docker"
     mock_launched_session.connection_url = "http://localhost:10000"
     mock_launched_session.connection_url_with_auth = (
-        "http://localhost:10000/?authToken=test_token"
+        "http://localhost:10000/?psk=test_token"
     )
     mock_launched_session.container_id = "test"
     mock_launched_session.auth_type = "psk"
@@ -7413,7 +7413,7 @@ async def test_session_community_create_groovy_from_config_defaults():
     mock_launched_session.launch_method = "docker"
     mock_launched_session.connection_url = "http://localhost:10000"
     mock_launched_session.connection_url_with_auth = (
-        "http://localhost:10000/?authToken=test_token"
+        "http://localhost:10000/?psk=test_token"
     )
     mock_launched_session.container_id = "test"
     mock_launched_session.auth_type = "psk"
@@ -7552,7 +7552,7 @@ async def test_session_details_to_dict_exception():
     mock_launched_session.launch_method = "docker"
     mock_launched_session.connection_url = "http://localhost:10000"
     mock_launched_session.connection_url_with_auth = (
-        "http://localhost:10000/?authToken=test"
+        "http://localhost:10000/?psk=test"
     )
     mock_launched_session.container_id = "abc123"
     mock_launched_session.auth_type = "psk"
@@ -7687,7 +7687,7 @@ async def test_session_community_credentials_dynamic_success():
     mock_launched_session.launch_method = "docker"
     mock_launched_session.connection_url = "http://localhost:10000"
     mock_launched_session.connection_url_with_auth = (
-        "http://localhost:10000/?authToken=test_auth_token_123"
+        "http://localhost:10000/?psk=test_auth_token_123"
     )
     mock_launched_session.container_id = "test_container_id"
 
@@ -7714,7 +7714,7 @@ async def test_session_community_credentials_dynamic_success():
     assert result["connection_url"] == "http://localhost:10000"
     assert (
         result["connection_url_with_auth"]
-        == "http://localhost:10000/?authToken=test_auth_token_123"
+        == "http://localhost:10000/?psk=test_auth_token_123"
     )
     assert result["auth_token"] == "test_auth_token_123"
     assert result["auth_type"] == "PSK"
@@ -7891,7 +7891,7 @@ async def test_session_community_credentials_static_session():
     assert result["connection_url"] == "http://localhost:10000"
     assert (
         result["connection_url_with_auth"]
-        == "http://localhost:10000/?authToken=static_token_123"
+        == "http://localhost:10000/?psk=static_token_123"
     )
     assert result["auth_token"] == "static_token_123"
     assert result["auth_type"] == "PSK"
@@ -8056,7 +8056,7 @@ async def test_session_community_credentials_static_only_denies_dynamic():
     mock_launched_session.launch_method = "docker"
     mock_launched_session.connection_url = "http://localhost:10000"
     mock_launched_session.connection_url_with_auth = (
-        "http://localhost:10000/?authToken=test_auth_token_123"
+        "http://localhost:10000/?psk=test_auth_token_123"
     )
     mock_launched_session.container_id = "test_container_id"
 

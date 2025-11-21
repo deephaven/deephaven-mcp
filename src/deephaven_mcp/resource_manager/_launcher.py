@@ -294,8 +294,8 @@ class LaunchedSession(ABC):
         For anonymous authentication, this returns the base URL without modifications.
 
         Returns:
-            str: For PSK auth: URL with ?authToken=<token> appended (e.g.,
-                "http://localhost:10000/?authToken=abc123").
+            str: For PSK auth: URL with ?psk=<token> appended (e.g.,
+                "http://localhost:10000/?psk=abc123").
                 For anonymous auth: Base URL without auth parameters (e.g.,
                 "http://localhost:10000").
 
@@ -308,7 +308,7 @@ class LaunchedSession(ABC):
             >>> session.auth_type
             'psk'
             >>> session.connection_url_with_auth
-            'http://localhost:10000/?authToken=secret123'
+            'http://localhost:10000/?psk=secret123'
             >>>
             >>> # Anonymous authentication
             >>> session.auth_type
@@ -318,7 +318,7 @@ class LaunchedSession(ABC):
         """
         if self.auth_type == "psk":
             # auth_token is guaranteed to exist for PSK (validated in __init__)
-            return f"{self.connection_url}/?authToken={self.auth_token}"
+            return f"{self.connection_url}/?psk={self.auth_token}"
         return self.connection_url
 
     @abstractmethod

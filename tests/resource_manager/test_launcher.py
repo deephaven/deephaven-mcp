@@ -141,7 +141,7 @@ class TestDockerLaunchedSession:
         )
         assert (
             session.connection_url_with_auth
-            == "http://localhost:10000/?authToken=secret_token"
+            == "http://localhost:10000/?psk=secret_token"
         )
 
     def test_connection_url_with_auth_anonymous(self):

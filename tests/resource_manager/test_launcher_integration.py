@@ -133,7 +133,7 @@ class TestDockerLauncherIntegration:
 
             # Verify connection URL is correct
             assert session.connection_url == f"http://localhost:{port}"
-            assert "authToken=test-token-123" in session.connection_url_with_auth
+            assert "psk=test-token-123" in session.connection_url_with_auth
 
         finally:
             # Clean up - stop and remove container
@@ -326,7 +326,7 @@ class TestPythonLauncherIntegration:
             # Verify connection URL is correct
             assert session.connection_url == f"http://localhost:{port}"
             assert (
-                f"authToken=test-token-{test_suffix}"
+                f"psk=test-token-{test_suffix}"
                 in session.connection_url_with_auth
             )
 

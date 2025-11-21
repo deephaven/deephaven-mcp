@@ -4150,7 +4150,7 @@ def _log_auto_generated_credentials(
     _LOGGER.warning(f"   Port: {port}")
     _LOGGER.warning(f"   Base URL: {connection_url}")
     _LOGGER.warning(f"   Auth Token: {auth_token}")
-    _LOGGER.warning(f"   Browser URL: {connection_url}/?authToken={auth_token}")
+    _LOGGER.warning(f"   Browser URL: {connection_url}/?psk={auth_token}")
     _LOGGER.warning("")
     _LOGGER.warning(
         "   To retrieve credentials via MCP tool, enable credential_retrieval_enabled"
@@ -4754,7 +4754,7 @@ async def session_community_credentials(
                 Format: "http://host:port" or "https://host:port"
                 Example: "http://localhost:45123"
             - connection_url_with_auth (str): Complete browser-ready URL including auth token if applicable.
-                For PSK: Base URL + "/?authToken={token}"
+                For PSK: Base URL + "/?psk={token}"
                 For ANONYMOUS: Same as connection_url (no auth parameter needed)
 
         On Failure (success=False):
@@ -4768,7 +4768,7 @@ async def session_community_credentials(
             "auth_type": "PSK",
             "auth_token": "abc123xyz789...",
             "connection_url": "http://localhost:45123",
-            "connection_url_with_auth": "http://localhost:45123/?authToken=abc123xyz789"
+            "connection_url_with_auth": "http://localhost:45123/?psk=abc123xyz789"
         }
 
     Example Success Response (ANONYMOUS Authentication):
@@ -4928,7 +4928,7 @@ async def session_community_credentials(
             # Build connection URL with auth if token exists
             connection_url = server
             if auth_token:
-                connection_url_with_auth = f"{server}/?authToken={auth_token}"
+                connection_url_with_auth = f"{server}/?psk={auth_token}"
             else:
                 connection_url_with_auth = server
 

@@ -680,11 +680,11 @@ When `credential_retrieval_enabled` is `true`, this tool retrieves connection cr
 ```text
 User: "Get me the browser URL for my-analysis session"
 AI: [calls session_community_credentials with session_id="community:dynamic:my-analysis"]
-AI: "Here's your browser URL: http://localhost:45123/?authToken=abc123..."
+AI: "Here's your browser URL: http://localhost:45123/?psk=abc123..."
 
 User: "What's the URL for my static local-dev session?"
 AI: [calls session_community_credentials with session_id="community:config:local-dev"]
-AI: "Here's the URL: http://localhost:10000/?authToken=your-token"
+AI: "Here's the URL: http://localhost:10000/?psk=your-token"
 ```
 
 **Security Notes:**
@@ -704,7 +704,7 @@ If `credential_retrieval_mode` is `"none"` (default), credentials are still acce
    Port: 45123
    Base URL: http://localhost:45123
    Auth Token: abc123xyz789...
-   Browser URL: http://localhost:45123/?authToken=abc123xyz789
+   Browser URL: http://localhost:45123/?psk=abc123xyz789
 
    To retrieve credentials via MCP tool, set security.community.credential_retrieval_mode
    in your deephaven_mcp.json configuration.
@@ -1169,7 +1169,7 @@ On error:
   "session_id": "community:dynamic:my-session",
   "session_name": "my-session",
   "connection_url": "http://localhost:45123",
-  "connection_url_with_auth": "http://localhost:45123/?authToken=abc123...",
+  "connection_url_with_auth": "http://localhost:45123/?psk=abc123...",
   "auth_type": "PSK",
   "auth_token": "abc123...",
   "launch_method": "docker",
@@ -1237,7 +1237,7 @@ On error:
   "auth_type": "PSK",
   "auth_token": "your-secure-token-123",
   "connection_url": "http://localhost:45123",
-  "browser_url": "http://localhost:45123/?authToken=your-secure-token-123"
+  "browser_url": "http://localhost:45123/?psk=your-secure-token-123"
 }
 ```
 

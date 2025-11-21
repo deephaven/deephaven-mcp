@@ -878,7 +878,7 @@ When a session is created with an auto-generated token, the connection informati
    Port: 45123
    Base URL: http://localhost:45123
    Auth Token: abc123xyz789...
-   Browser URL: http://localhost:45123/?authToken=abc123xyz789
+   Browser URL: http://localhost:45123/?psk=abc123xyz789
 
    To retrieve credentials via MCP tool, set security.community.credential_retrieval_mode
    in your deephaven_mcp.json configuration.
