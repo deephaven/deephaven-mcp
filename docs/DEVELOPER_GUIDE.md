@@ -137,6 +137,7 @@ This repository houses the Python-based [Model Context Protocol (MCP)](https://m
     - [Deephaven API Reference](#deephaven-api-reference)
     - [Tools \& Related Projects](#tools--related-projects)
     - [Contributing](#contributing)
+    - [Community \& Support](#community--support)
   - [License](#license)
 
 ---
@@ -808,6 +809,9 @@ If the `"enterprise"` key is present, it must be a dictionary. Each individual e
     - **OR** `password_env_var` (string): The name of an environment variable that holds the password. Using an environment variable is recommended. If the `password` field is used directly, its value will be redacted in application logs.
   - If `auth_type` is `"private_key"`:
     - `private_key_path` (string, **required**): The absolute file system path to the private key file (e.g., a `.pem` file).
+
+- Optional Connection Settings:
+  - `connection_timeout` (integer | float, **optional, default: 10.0**): Timeout in seconds for establishing connection to the Enterprise system.
 
 - Optional Worker Creation Configuration:
   - `session_creation` (object, **optional**): Configuration for creating enterprise workers on this system. If omitted, worker creation tools will not be available for this system.
@@ -3043,6 +3047,11 @@ uv pip install -e ".[dev]"
 - [Contributing Guidelines](../CONTRIBUTING.md) - Guide for making contributions to the project
 - [GitHub Issues](https://github.com/deephaven/deephaven-mcp/issues) - Report bugs or request features
 - [Pull Requests](https://github.com/deephaven/deephaven-mcp/pulls) - View open changes and contribute your own
+
+### Community & Support
+
+- [Deephaven Community Slack](https://deephaven.io/slack) - Join the community for questions, discussions, and support
+- [Deephaven Community Forums](https://github.com/deephaven/deephaven-core/discussions) - GitHub discussions for Deephaven Core
 
 ## License
 

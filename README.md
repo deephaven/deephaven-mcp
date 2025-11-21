@@ -44,7 +44,7 @@ Most data tools force you to choose: **fast** or **real-time**. With Deephaven's
 - **Enterprise Ready**: Battle-tested on Wall Street for over a decade, now available for your team
 - **Zero Learning Curve**: Write queries as if working with static tables -— real-time updates happen automatically
 
-Deephaven MCP implements the [Model Context Protocol (MCP) standard](https://spec.modelcontextprotocol.io/) to provide seamless integration between [Deephaven Community Core](https://deephaven.io/community/) and [Deephaven Enterprise](https://deephaven.io/enterprise/) systems and your AI development workflow. Perfect for data scientists, engineers, analysts, business users, and anyone who wants to harness real-time data—regardless of programming experience. Let AI generate the code while you focus on insights.
+Deephaven MCP implements the [Model Context Protocol (MCP)](https://spec.modelcontextprotocol.io/) standard using [FastMCP](https://github.com/jlowin/fastmcp) to provide seamless integration between [Deephaven Community Core](https://deephaven.io/community/) and [Deephaven Enterprise](https://deephaven.io/enterprise/) systems and your AI development workflow. Perfect for data scientists, engineers, analysts, business users, and anyone who wants to harness real-time data—regardless of programming experience. Let AI generate the code while you focus on insights.
 
 ---
 
@@ -320,7 +320,7 @@ graph TD
 
 ## Prerequisites
 
-- **Python**: Version 3.11 or later. ([Download Python](https://www.python.org/downloads/))
+- **Python**: Version 3.11, 3.12, or 3.13. ([Download Python](https://www.python.org/downloads/))
 - **Docker (Optional)**: Required for Docker-based community session creation. ([Download Docker](https://www.docker.com/get-started/))
 - **Access to Deephaven systems:** To use the [MCP Systems Server](#systems-server-architecture), you will need one or more of the following:
   - **[Deephaven Community Core](https://deephaven.io/community/) instance(s):** For development and personal use.
@@ -336,7 +336,7 @@ graph TD
 
 > **⚡ Quick Path**: For a fast getting-started experience, see the [🚀 Quick Start](#-quick-start) guide above. This section provides additional installation details and alternative methods.
 
-The recommended way to install `deephaven-mcp` is from PyPI, which provides the latest stable release.
+The recommended way to install `deephaven-mcp` is from [PyPI](https://pypi.org/project/deephaven-mcp/), which provides the latest stable release.
 
 ### Installation Methods
 
@@ -414,6 +414,8 @@ The configuration file supports two main sections:
 - **`"enterprise"`**: For connecting to Enterprise systems
 
 You can include either section, both, or neither (empty file). Each section contains connection details specific to that type of Deephaven system.
+
+> **🔒 Security Note:** For controlling access to session credentials, see the [Security Configuration](#security-configuration) section below.
 
 ### Community Core Configuration
 
@@ -504,6 +506,8 @@ You can include either section, both, or neither (empty file). Each section cont
 #### Community Configuration Fields
 
 *All community session fields are optional. Default values are applied by the server if a field is omitted.*
+
+> 💡 **See Examples Above:** For complete configuration examples, refer to [Community Examples](#community-examples).
 
 | Field | Type | Required When | Description |
 |-------|------|---------------|-------------|
@@ -680,6 +684,8 @@ The `session_creation` key enables dynamic creation of Deephaven Community Core 
 #### Enterprise Configuration Fields
 
 The `enterprise` key contains a `"systems"` dictionary mapping custom system names to their configuration objects.
+
+> 💡 **See Examples Above:** For complete configuration examples, refer to [Enterprise Examples](#enterprise-examples).
 
 | Field | Type | Required When | Description |
 |-------|------|---------------|-------------|
@@ -1328,7 +1334,8 @@ Before diving into detailed troubleshooting, try these common solutions:
 ### Deephaven Session Configuration Issues
 
 - **Session Connection Failures:**
-  - Verify your `deephaven_mcp.json` file syntax and content (see [the `deephaven_mcp.json` file](#the-deephaven_mcpjson-file))
+  - Verify your `deephaven_mcp.json` file syntax and content - see [Community Configuration](#community-core-configuration) or [Enterprise Configuration](#enterprise-system-configuration)
+  - Check the [Environment Variables](#environment-variables) section for required environment variables
   - Ensure target [Deephaven Community Core](https://deephaven.io/community/) instances are running and network-accessible
   - Check that the MCP Systems Server process has read permissions for the configuration file
 
@@ -1338,9 +1345,10 @@ Before diving into detailed troubleshooting, try these common solutions:
   - Avoid special characters or spaces in session names
 
 - **Authentication Problems:**
-  - **Community sessions:** Verify connection URLs and any required authentication
-  - **Enterprise sessions:** Check authentication tokens and certificate paths
-  - **Environment variables:** Ensure sensitive credentials are properly set
+  - **Community sessions:** Verify connection URLs and authentication - see [Community Configuration Fields](#community-configuration-fields)
+  - **Enterprise sessions:** Check authentication tokens and certificate paths - see [Enterprise Configuration Fields](#enterprise-configuration-fields)
+  - **Environment variables:** Ensure sensitive credentials are properly set - see [Environment Variables](#environment-variables)
+  - **Credential retrieval:** Check [Security Configuration](#security-configuration) for credential access settings
 
 ### Platform-Specific Issues
 
@@ -1427,6 +1435,10 @@ For IDE and AI assistant troubleshooting, refer to the official documentation fo
 
 - **Detailed Server APIs and Tools:** For in-depth information about the tools exposed by the [Systems Server](#systems-server) (e.g., [`mcp_reload`](docs/DEVELOPER_GUIDE.md#mcp_reload), [`session_tables_schema`](docs/DEVELOPER_GUIDE.md#session_tables_schema)) and the [Docs Server](#docs-server) ([`docs_chat`](docs/DEVELOPER_GUIDE.md#docs_chat)), refer to the [Developer & Contributor Guide](docs/DEVELOPER_GUIDE.md).
 - **`uv` Workflow:** For more details on using `uv` for project management, see [docs/UV.md](docs/UV.md).
+- **Deephaven Documentation:**
+  - [Deephaven Documentation](https://deephaven.io/docs/)
+  - [Deephaven Community Core Python API Reference](https://deephaven.io/core/pydoc/)
+  - [Deephaven Enterprise Python API Reference](https://docs.deephaven.io/pycoreplus/latest/worker/)
 
 ---
 
