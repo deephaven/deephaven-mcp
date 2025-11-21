@@ -3708,10 +3708,26 @@ def _resolve_docker_image(
     docker_image: str | None,
     defaults: dict,
 ) -> tuple[str, dict | None]:
-    """Resolve docker image from programming language or explicit image.
-
+    """Resolve docker image from programming language or explicit image parameter.
+    
+    This function implements the following priority for Docker image selection:
+    1. Explicit docker_image parameter (highest priority)
+    2. Auto-select based on programming_language parameter
+    3. Auto-select based on programming_language from config defaults
+    4. Use docker_image from config defaults (if language-based selection not applicable)
+    
+    Args:
+        programming_language (str | None): Programming language ("Python" or "Groovy"), or None
+        docker_image (str | None): Explicit Docker image name, or None for auto-selection
+        defaults (dict): Configuration defaults that may contain 'programming_language' or 'docker_image'
+    
     Returns:
-        Tuple of (resolved_docker_image, error_dict). error_dict is None on success.
+        tuple[str, dict | None]: Two-element tuple:
+            - First element: Resolved Docker image name (empty string on error)
+            - Second element: Error dict with 'success', 'error', 'isError' keys, or None on success
+            
+    Note:
+        Returns error if programming_language (param or config) is not "Python" or "Groovy" (case-insensitive).
     """
     if docker_image:
         return docker_image, None
@@ -3757,9 +3773,45 @@ def _resolve_community_session_parameters(
     defaults: dict,
 ) -> tuple[dict[str, Any], dict | None]:
     """Resolve all community session creation parameters from tool args, config defaults, and hardcoded defaults.
-
+    
+    This function implements the parameter resolution priority: tool parameter > config default > hardcoded default.
+    It validates parameters, normalizes values, and returns a complete set of resolved parameters for session creation.
+    
+    Args:
+        launch_method (str | None): Launch method ("docker" or "python"), or None to use default
+        programming_language (str | None): Programming language ("Python" or "Groovy"), or None to use default
+        auth_type (str | None): Authentication type (shorthand or full class name), or None to use default
+        auth_token (str | None): Authentication token, or None to auto-generate for PSK auth
+        heap_size_gb (int | None): JVM heap size in GB, or None to use default
+        extra_jvm_args (list[str] | None): Additional JVM arguments, or None to use default
+        environment_vars (dict[str, str] | None): Environment variables, or None to use default
+        docker_image (str | None): Docker image name (docker only), or None to auto-select based on language
+        docker_memory_limit_gb (float | None): Docker memory limit in GB (docker only), or None for no limit
+        docker_cpu_limit (float | None): Docker CPU limit (docker only), or None for no limit
+        docker_volumes (list[str] | None): Docker volume mounts (docker only), or None to use default
+        python_venv_path (str | None): Python venv path (python only), or None to use default
+        defaults (dict): Configuration defaults from deephaven_mcp.json
+    
     Returns:
-        Tuple of (resolved_params_dict, error_dict). error_dict is None on success.
+        tuple[dict[str, Any], dict | None]: Two-element tuple:
+            - First element: Dict of resolved parameters with keys:
+                - launch_method (str): Resolved launch method (lowercase)
+                - programming_language (str): Resolved programming language
+                - auth_type (str): Normalized auth type (full class name)
+                - auth_token (str | None): Resolved or generated auth token
+                - auto_generated_token (bool): True if token was auto-generated
+                - heap_size_gb (int): Resolved heap size
+                - docker_image (str): Resolved docker image (empty for python launch)
+                - docker_memory_limit_gb (float | None): Resolved memory limit
+                - docker_cpu_limit (float | None): Resolved CPU limit
+                - docker_volumes (list[str]): Resolved volume mounts
+                - python_venv_path (str | None): Resolved venv path
+                - extra_jvm_args (list[str]): Resolved JVM args
+                - environment_vars (dict[str, str]): Resolved environment variables
+                - startup_timeout_seconds (int): Resolved startup timeout
+                - startup_check_interval_seconds (float): Resolved check interval
+                - startup_retries (int): Resolved retry count
+            - Second element: Error dict with 'success', 'error', 'isError' keys, or None on success
     """
     # Resolve launch method and auth type
     resolved_launch_method = (
@@ -3788,6 +3840,13 @@ def _resolve_community_session_parameters(
     if validation_error:
         return {}, validation_error
 
+    # Resolve programming_language for both launch methods
+    # This determines both the Docker image selection (for docker) and the session's
+    # programming_language property (via session_type in session config)
+    resolved_programming_language = programming_language or defaults.get(
+        "programming_language", DEFAULT_PROGRAMMING_LANGUAGE
+    )
+    
     # Resolve docker image (only for docker launch method)
     if resolved_launch_method == "docker":
         resolved_docker_image, image_error = _resolve_docker_image(
@@ -3837,6 +3896,7 @@ def _resolve_community_session_parameters(
 
     return {
         "launch_method": resolved_launch_method,
+        "programming_language": resolved_programming_language,
         "auth_type": resolved_auth_type,
         "auth_token": resolved_auth_token,
         "auto_generated_token": auto_generated_token,
@@ -3969,18 +4029,37 @@ async def _register_session_manager(
     session_name: str,
     session_id: str,
     port: int,
+    programming_language: str,
     resolved_auth_type: str,
     resolved_auth_token: str | None,
     launched_session: DockerLaunchedSession | PythonLaunchedSession,
     session_registry: CombinedSessionRegistry,
     instance_tracker: InstanceTracker,
 ) -> None:
-    """Create session manager object and register it in the session registry."""
+    """Create session manager object and register it in the session registry.
+    
+    This helper function creates a DynamicCommunitySessionManager with the appropriate
+    configuration and registers it in the combined session registry. It also tracks
+    Python-launched processes for orphan cleanup.
+    
+    Args:
+        session_name (str): Simple session name (not full session_id)
+        session_id (str): Full session identifier in format "community:dynamic:{session_name}"
+        port (int): Port number where the session is listening
+        programming_language (str): Programming language for the session (e.g., "Python", "Groovy")
+        resolved_auth_type (str): Normalized authentication type (full class name)
+        resolved_auth_token (str | None): Authentication token if applicable
+        launched_session (DockerLaunchedSession | PythonLaunchedSession): The launched session object
+        session_registry (CombinedSessionRegistry): Registry to add the session to
+        instance_tracker (InstanceTracker): Tracker for orphan process cleanup
+    """
     # Create session configuration
+    # Note: session_type must be lowercase to match CoreSession.from_config expectations
     session_config = {
         "host": "localhost",
         "port": port,
         "auth_type": resolved_auth_type,
+        "session_type": programming_language.lower(),  # CoreSession uses this for programming_language property
     }
     if resolved_auth_token:
         session_config["auth_token"] = resolved_auth_token
@@ -4378,6 +4457,7 @@ async def session_community_create(
 
         # Extract resolved parameters
         resolved_launch_method = params["launch_method"]
+        resolved_programming_language = params["programming_language"]
         resolved_auth_type = params["auth_type"]
         resolved_auth_token = params["auth_token"]
         auto_generated_token = params["auto_generated_token"]
@@ -4406,7 +4486,7 @@ async def session_community_create(
 
         _LOGGER.info(
             f"[mcp_systems_server:session_community_create] Creating session '{session_name}' "
-            f"(method: {resolved_launch_method}, auth: {resolved_auth_type})"
+            f"(method: {resolved_launch_method}, language: {resolved_programming_language}, auth: {resolved_auth_type})"
         )
 
         # Get instance tracker from context for orphan tracking
@@ -4444,6 +4524,7 @@ async def session_community_create(
             session_name,
             session_id,
             port,
+            resolved_programming_language,
             resolved_auth_type,
             resolved_auth_token,
             launched_session,

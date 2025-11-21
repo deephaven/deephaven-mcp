@@ -8279,3 +8279,226 @@ def test_resolve_community_session_parameters_invalid_auth_type():
     assert error["isError"] is True
     assert "Invalid auth_type" in error["error"]
     assert "Basic authentication is not supported" in error["error"]
+
+
+# =============================================================================
+# Regression tests for programming_language bug fix
+# Bug: programming_language parameter was lost during session creation,
+# causing Groovy sessions to report as Python when queried via session_details
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_session_community_create_groovy_session_type_in_config():
+    """Regression test: Verify programming_language='Groovy' results in session_type='groovy'.
+    
+    This test ensures programming_language is properly passed through to the
+    session configuration. Previously, the parameter was used for Docker image
+    selection but not included in the session config, causing all sessions to
+    default to Python.
+    """
+    mock_config_manager = MagicMock()
+    mock_session_registry = MagicMock()
+
+    community_config = {
+        "session_creation": {
+            "max_concurrent_sessions": 5,
+            "defaults": {},
+        }
+    }
+
+    full_config = {"community": community_config}
+    mock_config_manager.get_config = AsyncMock(return_value=full_config)
+    mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
+    mock_session_registry.add_session = AsyncMock()
+    mock_session_registry.get_all = AsyncMock(return_value={})
+
+    mock_launched_session = MagicMock(spec=DockerLaunchedSession)
+    mock_launched_session.port = 10000
+    mock_launched_session.launch_method = "docker"
+    mock_launched_session.connection_url = "http://localhost:10000"
+    mock_launched_session.connection_url_with_auth = "http://localhost:10000/?psk=test_token"
+    mock_launched_session.container_id = "test_container"
+    mock_launched_session.auth_type = "psk"
+    mock_launched_session.auth_token = "test_token"
+
+    # Capture the session_config passed to DynamicCommunitySessionManager
+    captured_config = None
+
+    def capture_manager_init(name, config, launched_session):
+        nonlocal captured_config
+        captured_config = config
+        manager = MagicMock()
+        manager.full_name = f"community:dynamic:{name}"
+        return manager
+
+    with (
+        patch("deephaven_mcp.mcp_systems_server._mcp.launch_session") as mock_launch_session,
+        patch("deephaven_mcp.mcp_systems_server._mcp.find_available_port", return_value=10000),
+        patch("deephaven_mcp.mcp_systems_server._mcp.generate_auth_token", return_value="test_token"),
+        patch.object(mock_launched_session, "wait_until_ready", new=AsyncMock(return_value=True)),
+        patch("deephaven_mcp.mcp_systems_server._mcp.DynamicCommunitySessionManager", side_effect=capture_manager_init),
+    ):
+        mock_launch_session.return_value = mock_launched_session
+
+        context = MockContext(
+            {
+                "config_manager": mock_config_manager,
+                "session_registry": mock_session_registry,
+                "instance_tracker": create_mock_instance_tracker(),
+            }
+        )
+
+        # Create session with Groovy programming language
+        result = await mcp_mod.session_community_create(
+            context,
+            session_name="groovy-session",
+            programming_language="Groovy",
+        )
+
+        assert result["success"] is True
+
+        # CRITICAL: Verify session_config includes session_type='groovy'
+        assert captured_config is not None, "Session config was not captured"
+        assert "session_type" in captured_config, "session_type missing from session config"
+        assert captured_config["session_type"] == "groovy", (
+            f"Expected session_type='groovy', got '{captured_config['session_type']}'"
+        )
+
+        # Also verify the Docker image is correct
+        call_kwargs = mock_launch_session.call_args.kwargs
+        assert "slim" in call_kwargs["docker_image"], "Groovy should use slim Docker image"
+
+
+@pytest.mark.asyncio
+async def test_session_community_create_python_session_type_in_config():
+    """Regression test: Verify programming_language='Python' results in session_type='python'."""
+    mock_config_manager = MagicMock()
+    mock_session_registry = MagicMock()
+
+    community_config = {
+        "session_creation": {
+            "max_concurrent_sessions": 5,
+            "defaults": {},
+        }
+    }
+
+    full_config = {"community": community_config}
+    mock_config_manager.get_config = AsyncMock(return_value=full_config)
+    mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
+    mock_session_registry.add_session = AsyncMock()
+    mock_session_registry.get_all = AsyncMock(return_value={})
+
+    mock_launched_session = MagicMock(spec=DockerLaunchedSession)
+    mock_launched_session.port = 10000
+    mock_launched_session.launch_method = "docker"
+    mock_launched_session.connection_url = "http://localhost:10000"
+    mock_launched_session.connection_url_with_auth = "http://localhost:10000/?psk=test_token"
+    mock_launched_session.container_id = "test_container"
+    mock_launched_session.auth_type = "psk"
+    mock_launched_session.auth_token = "test_token"
+
+    captured_config = None
+
+    def capture_manager_init(name, config, launched_session):
+        nonlocal captured_config
+        captured_config = config
+        manager = MagicMock()
+        manager.full_name = f"community:dynamic:{name}"
+        return manager
+
+    with (
+        patch("deephaven_mcp.mcp_systems_server._mcp.launch_session") as mock_launch_session,
+        patch("deephaven_mcp.mcp_systems_server._mcp.find_available_port", return_value=10000),
+        patch("deephaven_mcp.mcp_systems_server._mcp.generate_auth_token", return_value="test_token"),
+        patch.object(mock_launched_session, "wait_until_ready", new=AsyncMock(return_value=True)),
+        patch("deephaven_mcp.mcp_systems_server._mcp.DynamicCommunitySessionManager", side_effect=capture_manager_init),
+    ):
+        mock_launch_session.return_value = mock_launched_session
+
+        context = MockContext(
+            {
+                "config_manager": mock_config_manager,
+                "session_registry": mock_session_registry,
+                "instance_tracker": create_mock_instance_tracker(),
+            }
+        )
+
+        # Create session with Python programming language (explicit)
+        result = await mcp_mod.session_community_create(
+            context,
+            session_name="python-session",
+            programming_language="Python",
+        )
+
+        assert result["success"] is True
+        assert captured_config is not None
+        assert "session_type" in captured_config
+        assert captured_config["session_type"] == "python"
+
+
+@pytest.mark.asyncio
+async def test_session_community_create_default_session_type_in_config():
+    """Regression test: Verify omitting programming_language defaults to Python."""
+    mock_config_manager = MagicMock()
+    mock_session_registry = MagicMock()
+
+    community_config = {
+        "session_creation": {
+            "max_concurrent_sessions": 5,
+            "defaults": {},  # No default programming_language
+        }
+    }
+
+    full_config = {"community": community_config}
+    mock_config_manager.get_config = AsyncMock(return_value=full_config)
+    mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
+    mock_session_registry.add_session = AsyncMock()
+    mock_session_registry.get_all = AsyncMock(return_value={})
+
+    mock_launched_session = MagicMock(spec=DockerLaunchedSession)
+    mock_launched_session.port = 10000
+    mock_launched_session.launch_method = "docker"
+    mock_launched_session.connection_url = "http://localhost:10000"
+    mock_launched_session.connection_url_with_auth = "http://localhost:10000/?psk=test_token"
+    mock_launched_session.container_id = "test_container"
+    mock_launched_session.auth_type = "psk"
+    mock_launched_session.auth_token = "test_token"
+
+    captured_config = None
+
+    def capture_manager_init(name, config, launched_session):
+        nonlocal captured_config
+        captured_config = config
+        manager = MagicMock()
+        manager.full_name = f"community:dynamic:{name}"
+        return manager
+
+    with (
+        patch("deephaven_mcp.mcp_systems_server._mcp.launch_session") as mock_launch_session,
+        patch("deephaven_mcp.mcp_systems_server._mcp.find_available_port", return_value=10000),
+        patch("deephaven_mcp.mcp_systems_server._mcp.generate_auth_token", return_value="test_token"),
+        patch.object(mock_launched_session, "wait_until_ready", new=AsyncMock(return_value=True)),
+        patch("deephaven_mcp.mcp_systems_server._mcp.DynamicCommunitySessionManager", side_effect=capture_manager_init),
+    ):
+        mock_launch_session.return_value = mock_launched_session
+
+        context = MockContext(
+            {
+                "config_manager": mock_config_manager,
+                "session_registry": mock_session_registry,
+                "instance_tracker": create_mock_instance_tracker(),
+            }
+        )
+
+        # Create session WITHOUT specifying programming_language
+        result = await mcp_mod.session_community_create(
+            context,
+            session_name="default-session",
+        )
+
+        assert result["success"] is True
+        assert captured_config is not None
+        assert "session_type" in captured_config
+        # Should default to Python
+        assert captured_config["session_type"] == "python"
