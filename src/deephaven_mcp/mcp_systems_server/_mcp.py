@@ -265,6 +265,8 @@ async def mcp_reload(context: Context) -> dict:
     - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
     - 'Deephaven Community' and 'Deephaven Core' are interchangeable names for the same product
     - 'Deephaven Enterprise', 'Deephaven Core+', and 'Deephaven CorePlus' are interchangeable names for the same product
+    - 'DHC' is shorthand for Deephaven Community (also called 'Core')
+    - 'DHE' is shorthand for Deephaven Enterprise (also called 'Core+')
 
     AI Agent Usage:
     - Use this tool after making configuration file changes
@@ -342,6 +344,8 @@ async def enterprise_systems_status(
     - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
     - 'Deephaven Community' and 'Deephaven Core' are interchangeable names for the same product
     - 'Deephaven Enterprise', 'Deephaven Core+', and 'Deephaven CorePlus' are interchangeable names for the same product
+    - 'DHC' is shorthand for Deephaven Community (also called 'Core')
+    - 'DHE' is shorthand for Deephaven Enterprise (also called 'Core+')
 
     The tool supports two operational modes:
     1. Default mode (attempt_to_connect=False): Quick status check of existing connections
@@ -474,6 +478,8 @@ async def sessions_list(context: Context) -> dict:
     - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
     - 'Deephaven Community' and 'Deephaven Core' are interchangeable names for the same product
     - 'Deephaven Enterprise', 'Deephaven Core+', and 'Deephaven CorePlus' are interchangeable names for the same product
+    - 'DHC' is shorthand for Deephaven Community (also called 'Core')
+    - 'DHE' is shorthand for Deephaven Enterprise (also called 'Core+')
 
     AI Agent Usage:
     - Use this to discover available sessions before calling other session-based tools
@@ -898,6 +904,8 @@ async def session_details(
     - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
     - 'Deephaven Community' and 'Deephaven Core' are interchangeable names for the same product
     - 'Deephaven Enterprise', 'Deephaven Core+', and 'Deephaven CorePlus' are interchangeable names for the same product
+    - 'DHC' is shorthand for Deephaven Community (also called 'Core')
+    - 'DHE' is shorthand for Deephaven Enterprise (also called 'Core+')
 
     AI Agent Usage:
     - Use attempt_to_connect=False (default) for quick status checks
@@ -1094,6 +1102,8 @@ async def session_tables_schema(
     - 'Schema' and 'meta table' are interchangeable terms - both refer to table metadata
     - The schema describes the structure and properties of columns in a table
     - 'Session' and 'worker' are interchangeable terms for a running Deephaven instance
+    - 'DHC' is shorthand for Deephaven Community (also called 'Core')
+    - 'DHE' is shorthand for Deephaven Enterprise (also called 'Core+')
 
     Table Rendering:
     - **This tool returns TABULAR METADATA that MUST be displayed as a table to users**
@@ -1256,6 +1266,8 @@ async def session_tables_list(context: Context, session_id: str) -> dict:
     - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
     - 'Deephaven Community' and 'Deephaven Core' are interchangeable names for the same product
     - 'Deephaven Enterprise', 'Deephaven Core+', and 'Deephaven CorePlus' are interchangeable names for the same product
+    - 'DHC' is shorthand for Deephaven Community (also called 'Core')
+    - 'DHE' is shorthand for Deephaven Enterprise (also called 'Core+')
 
     AI Agent Usage:
     - Use this for quick table discovery when you don't need schema details
@@ -1632,6 +1644,8 @@ async def session_table_data(
     - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
     - 'Deephaven Community' and 'Deephaven Core' are interchangeable names for the same product
     - 'Deephaven Enterprise', 'Deephaven Core+', and 'Deephaven CorePlus' are interchangeable names for the same product
+    - 'DHC' is shorthand for Deephaven Community (also called 'Core')
+    - 'DHE' is shorthand for Deephaven Enterprise (also called 'Core+')
 
     Args:
         context (Context): The MCP context object, required by MCP protocol but not actively used.
@@ -1970,6 +1984,8 @@ async def catalog_tables_list(
     - 'ENTERPRISE' sessions run Deephaven Enterprise (also called 'Core+' or 'CorePlus')
     - This tool only works with enterprise sessions; community sessions do not have catalog tables
     - 'Catalog' and 'database' are interchangeable terms - the catalog is the database of available tables
+    - 'DHC' is shorthand for Deephaven Community (also called 'Core')
+    - 'DHE' is shorthand for Deephaven Enterprise (also called 'Core+')
 
     Table Rendering:
     - **This tool returns TABULAR CATALOG DATA that MUST be displayed as a table to users**
@@ -2185,6 +2201,8 @@ async def catalog_namespaces_list(
     - This tool only works with enterprise sessions; community sessions do not have catalog tables
     - 'Namespace' refers to a data domain or organizational grouping of tables
     - 'Catalog' and 'database' are interchangeable terms - the catalog is the database of available tables
+    - 'DHC' is shorthand for Deephaven Community (also called 'Core')
+    - 'DHE' is shorthand for Deephaven Enterprise (also called 'Core+')
 
     Table Rendering:
     - **This tool returns TABULAR NAMESPACE DATA that MUST be displayed as a table to users**
@@ -2319,6 +2337,8 @@ async def catalog_tables_schema(
     - 'Namespace' refers to a data domain or organizational grouping of tables in the catalog
     - 'Catalog' and 'database' are interchangeable terms - the catalog is the database of available tables
     - 'Schema' and 'meta table' are interchangeable terms - both refer to table metadata
+    - 'DHC' is shorthand for Deephaven Community (also called 'Core')
+    - 'DHE' is shorthand for Deephaven Enterprise (also called 'Core+')
 
     Table Rendering:
     - **This tool returns TABULAR SCHEMA METADATA that MUST be displayed as a table to users**
@@ -2646,6 +2666,8 @@ async def catalog_table_sample(
     - This tool only works with enterprise sessions; community sessions do not have catalog tables
     - 'Namespace' refers to a data domain or organizational grouping of tables in the catalog
     - 'Catalog' and 'database' are interchangeable terms - the catalog is the database of available tables
+    - 'DHC' is shorthand for Deephaven Community (also called 'Core')
+    - 'DHE' is shorthand for Deephaven Enterprise (also called 'Core+')
 
     Table Rendering:
     - **This tool returns TABULAR SAMPLE DATA that MUST be displayed as a table to users**
@@ -3422,6 +3444,8 @@ async def session_enterprise_delete(
     - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
     - 'Deephaven Community' and 'Deephaven Core' are interchangeable names for the same product
     - 'Deephaven Enterprise', 'Deephaven Core+', and 'Deephaven CorePlus' are interchangeable names for the same product
+    - 'DHC' is shorthand for Deephaven Community (also called 'Core')
+    - 'DHE' is shorthand for Deephaven Enterprise (also called 'Core+')
 
     AI Agent Usage:
     - Use this tool to clean up sessions when no longer needed
@@ -4270,6 +4294,8 @@ async def session_community_create(
     - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
     - 'Deephaven Community' and 'Deephaven Core' are interchangeable names for the same product
     - 'COMMUNITY' sessions run Deephaven Community (also called 'Core')
+    - 'DHC' is shorthand for Deephaven Community (also called 'Core')
+    - 'DHE' is shorthand for Deephaven Enterprise (also called 'Core+')
 
     AI Agent Usage:
     - Use this tool to create temporary Deephaven sessions for data analysis
@@ -4579,6 +4605,8 @@ async def session_community_delete(
     - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
     - 'Deephaven Community' and 'Deephaven Core' are interchangeable names for the same product
     - 'COMMUNITY' sessions run Deephaven Community (also called 'Core')
+    - 'DHC' is shorthand for Deephaven Community (also called 'Core')
+    - 'DHE' is shorthand for Deephaven Enterprise (also called 'Core+')
 
     AI Agent Usage:
     - Use this tool to clean up sessions when no longer needed to free resources
