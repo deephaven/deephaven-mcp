@@ -633,8 +633,8 @@ The `session_creation` key enables dynamic creation of Deephaven Community Core 
     "systems": {
       // "dev_enterprise_system" is a custom name - use any name you like
       "dev_enterprise_system": {
-        // Enterprise server provides this URL (typically ends with /iris/connection.json)
-        "connection_json_url": "https://dev-enterprise.example.com/iris/connection.json",
+        // Enterprise server provides this URL (for envoy on port 8000, and typically ends with /iris/connection.json)
+        "connection_json_url": "https://dev-enterprise.example.com:8000/iris/connection.json",
         "auth_type": "password",  // Username/password authentication
         "username": "admin",
         "password": "your-password-here"  // ⚠️ Consider password_env_var for security!
@@ -651,7 +651,7 @@ The `session_creation` key enables dynamic creation of Deephaven Community Core 
   "enterprise": {
     "systems": {
       "my_enterprise_system": {
-        "connection_json_url": "https://my-enterprise.example.com/iris/connection.json",
+        "connection_json_url": "https://my-enterprise.example.com:8000/iris/connection.json",
         "auth_type": "password",
         "username": "admin",
         // ✅ RECOMMENDED: Read password from environment variable
@@ -670,7 +670,7 @@ The `session_creation` key enables dynamic creation of Deephaven Community Core 
   "enterprise": {
     "systems": {
       "saml_enterprise": {
-        "connection_json_url": "https://enterprise.example.com/iris/connection.json",
+        "connection_json_url": "https://enterprise.example.com:8000/iris/connection.json",
         // Private key authentication (commonly used with SAML/SSO setups)
         // Your IT/security team typically provides the private key file
         "auth_type": "private_key",
