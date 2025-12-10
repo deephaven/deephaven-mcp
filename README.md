@@ -68,8 +68,9 @@ Deephaven MCP implements the [Model Context Protocol (MCP)](https://spec.modelco
 **Using `uv` (recommended):**
 
 Pick a suitable project directory for your venv.
+
 ```bash
-$name_of_your_venv=".venv"
+name_of_your_venv=".venv"
 uv venv $name_of_your_venv -p 3.11
 ```
 
@@ -85,9 +86,9 @@ python3.11 -m venv .venv
 
 For most users, installing with both Community + Enterprise support is the best default.
 
-No servers (docs or community/enterprise) are strictly required. The MCP server will fallback to searching the public docs when nothing else is available. For optimal experience, it is recommended to at least have docs access (open without credentials).
+These instructions cover the installation of the Deephaven MCP system server, which enables AI agents to interact with Deephaven Community and Enterprise systems.
 
-To allow worker connections to interact with live data, a server with community or enterprise support is needed.
+Note: The Deephaven MCP docs server is hosted by Deephaven and requires no installation.
 
 **Using `uv` (recommended):**
 
@@ -1167,7 +1168,7 @@ Create or edit an MCP configuration file:
 
 ### VS Code (GitHub Copilot)
 
-To add MCP servers to your workspace, run the **MCP: Add Server** command from the Command Palette(Cmd-Shift-P), then select **Workspace Settings** to create the `.vscode/mcp.json` file. Alternatively, create `.vscode/mcp.json` manually in your project root.
+To add MCP servers to your workspace, run the **MCP: Add Server** command from the Command Palette (Cmd-Shift-P), then select **Workspace Settings** to create the `.vscode/mcp.json` file. Alternatively, create `.vscode/mcp.json` manually in your project root.
 
 Configure your servers:
 
@@ -1192,6 +1193,7 @@ Configure your servers:
   }
 }
 ```
+
 You will see the mcp servers listed in the Extensions sidebar under "MCP Servers". (Collapse the sections for extensions to install to have the mcp servers easily visible.)
 
 **Additional Resources:**
