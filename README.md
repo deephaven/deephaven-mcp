@@ -67,8 +67,11 @@ Deephaven MCP implements the [Model Context Protocol (MCP)](https://spec.modelco
 
 **Using `uv` (recommended):**
 
+Pick a suitable project directory for your venv.
+
 ```bash
-uv venv .venv -p 3.11
+name_of_your_venv=".venv"
+uv venv $name_of_your_venv -p 3.11
 ```
 
 **Using standard `venv`:**
@@ -82,6 +85,10 @@ python3.11 -m venv .venv
 ### 2. Install Deephaven MCP
 
 For most users, installing with both Community + Enterprise support is the best default.
+
+These instructions cover the installation of the Deephaven MCP system server, which enables AI agents to interact with Deephaven Community and Enterprise systems.
+
+Note: The Deephaven MCP docs server is hosted by Deephaven and requires no installation.
 
 **Using `uv` (recommended):**
 
@@ -174,7 +181,9 @@ Create a file called [`deephaven_mcp.json`](#configuring-deephaven_mcpjson) anyw
 
 ### 5. Try It Out
 
-Restart your AI tool and try asking:
+Restart your AI tool (or IDE). This will start your mcp servers from the installation in the venv you have supplied, located from the configuration supplied.
+
+Confirm the setup is working by asking:
 
 > "List my Deephaven sessions and show me the tables in the local session"
 
@@ -353,8 +362,9 @@ pip install uv
 **Create environment and install:**
 
 ```sh
-# Create virtual environment with Python 3.11+
-uv venv .venv -p 3.11
+# Create virtual environment with Python 3.11+, in a chosen project directory
+name_of_your_venv=".venv"
+uv venv $name_of_your_venv -p 3.11
 
 # Install deephaven-mcp (choose your extras)
 uv pip install deephaven-mcp                           # Basic
@@ -633,8 +643,8 @@ The `session_creation` key enables dynamic creation of Deephaven Community Core 
     "systems": {
       // "dev_enterprise_system" is a custom name - use any name you like
       "dev_enterprise_system": {
-        // Enterprise server provides this URL (typically ends with /iris/connection.json)
-        "connection_json_url": "https://dev-enterprise.example.com/iris/connection.json",
+        // Enterprise server provides this URL (for envoy on port 8000, and typically ends with /iris/connection.json)
+        "connection_json_url": "https://dev-enterprise.example.com:8000/iris/connection.json",
         "auth_type": "password",  // Username/password authentication
         "username": "admin",
         "password": "your-password-here"  // ⚠️ Consider password_env_var for security!
@@ -651,7 +661,7 @@ The `session_creation` key enables dynamic creation of Deephaven Community Core 
   "enterprise": {
     "systems": {
       "my_enterprise_system": {
-        "connection_json_url": "https://my-enterprise.example.com/iris/connection.json",
+        "connection_json_url": "https://my-enterprise.example.com:8000/iris/connection.json",
         "auth_type": "password",
         "username": "admin",
         // ✅ RECOMMENDED: Read password from environment variable
@@ -670,7 +680,7 @@ The `session_creation` key enables dynamic creation of Deephaven Community Core 
   "enterprise": {
     "systems": {
       "saml_enterprise": {
-        "connection_json_url": "https://enterprise.example.com/iris/connection.json",
+        "connection_json_url": "https://enterprise.example.com:8000/iris/connection.json",
         // Private key authentication (commonly used with SAML/SSO setups)
         // Your IT/security team typically provides the private key file
         "auth_type": "private_key",
@@ -1014,7 +1024,9 @@ All AI tools that support MCP use the same core configuration format: a JSON obj
 
 Here's the standard `mcpServers` configuration for Deephaven. It works for both [`uv`](./docs/UV.md) and `pip` installations.
 
-> **⚙️ Important**: All paths in the following examples must be **absolute paths**. Replace `/full/path/to/your/` with the correct absolute path to your project directory.
+Note: you will not start these mcpServers directly. When configuration is supplied to your AI Tool, the servers will be started via that tool.
+
+> **⚙️ Important**: All paths in the following examples must be **absolute paths**. Replace `/full/path/to/your/` with the correct absolute path to your project directory (where the venv was setup).
 
 ```json
 "mcpServers": {
@@ -1156,7 +1168,7 @@ Create or edit an MCP configuration file:
 
 ### VS Code (GitHub Copilot)
 
-To add MCP servers to your workspace, run the **MCP: Add Server** command from the Command Palette, then select **Workspace Settings** to create the `.vscode/mcp.json` file. Alternatively, create `.vscode/mcp.json` manually in your project root.
+To add MCP servers to your workspace, run the **MCP: Add Server** command from the Command Palette (Cmd-Shift-P), then select **Workspace Settings** to create the `.vscode/mcp.json` file. Alternatively, create `.vscode/mcp.json` manually in your project root.
 
 Configure your servers:
 
@@ -1181,6 +1193,8 @@ Configure your servers:
   }
 }
 ```
+
+You will see the mcp servers listed in the Extensions sidebar under "MCP Servers". (Collapse the sections for extensions to install to have the mcp servers easily visible.)
 
 **Additional Resources:**
 
