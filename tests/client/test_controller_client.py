@@ -58,7 +58,7 @@ def dummy_controller_client():
     client.wait_for_change = MagicMock()
     client.get_serial_for_name = MagicMock(return_value="serial")
     client.add_query = MagicMock(return_value="serial")
-    client.make_temporary_config = MagicMock(return_value="config")
+    client.make_pq_config = MagicMock(return_value="config")
     client.subscribe = MagicMock(return_value=None)
     return client
 
@@ -350,26 +350,99 @@ async def test_add_query_other_error(
 
 
 @pytest.mark.asyncio
-async def test_make_temporary_config_success(
+async def test_make_pq_config_success(
     coreplus_controller_client, dummy_controller_client, controller_client_mod
 ):
-    dummy_controller_client.make_temporary_config.return_value = "config"
+    dummy_controller_client.make_pq_config.return_value = "config"
     # Patch CorePlusQueryConfig to a dummy class for test
     with patch.object(
         controller_client_mod, "CorePlusQueryConfig", autospec=True
     ) as mock_cfg:
         mock_cfg.return_value.config = "config"
-        result = await coreplus_controller_client.make_temporary_config("name", 1.0)
+        result = await coreplus_controller_client.make_pq_config("name", 1.0)
         assert hasattr(result, "config")
 
 
 @pytest.mark.asyncio
-async def test_make_temporary_config_error(
+async def test_make_pq_config_error(
     coreplus_controller_client, dummy_controller_client
 ):
     dummy_controller_client.make_temporary_config.side_effect = RuntimeError("config creation failed")
     with pytest.raises(RuntimeError):
-        await coreplus_controller_client.make_temporary_config("name", 1.0)
+        await coreplus_controller_client.make_pq_config("name", 1.0)
+
+
+@pytest.mark.asyncio
+async def test_make_pq_config_mutually_exclusive_scripts(
+    coreplus_controller_client
+):
+    """Test that script_body and script_path are mutually exclusive."""
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        await coreplus_controller_client.make_pq_config(
+            "name", 1.0, script_body="code", script_path="path/to/script.py"
+        )
+
+
+@pytest.mark.asyncio
+async def test_make_pq_config_with_all_parameters(
+    coreplus_controller_client, dummy_controller_client, controller_client_mod
+):
+    """Test that all config parameters are applied correctly with script_body."""
+    mock_config = MagicMock()
+    dummy_controller_client.make_temporary_config.return_value = mock_config
+    
+    with patch.object(
+        controller_client_mod, "CorePlusQueryConfig", autospec=True
+    ) as mock_cfg:
+        result = await coreplus_controller_client.make_pq_config(
+            name="test-pq",
+            heap_size_gb=8.0,
+            script_body="print('hello')",
+            programming_language="Python",
+            configuration_type="RunAndDone",
+            enabled=False,
+            schedule=["SchedulerType=Daily", "StartTime=08:00:00"],
+            restart_users="RU_ADMIN",
+            extra_class_path=["/opt/libs/custom.jar"],
+            init_timeout_nanos=5000000000,
+            jvm_profile="large-memory",
+            python_virtual_environment="my-venv",
+        )
+        
+        # Verify all parameters were applied to config
+        assert mock_config.scriptLanguage == "Python"
+        assert mock_config.scriptBody == "print('hello')"
+        assert mock_config.configurationType == "RunAndDone"
+        assert mock_config.enabled == False
+        assert mock_config.restartUsers == "RU_ADMIN"
+        mock_config.extraClassPath.extend.assert_called_once_with(["/opt/libs/custom.jar"])
+        mock_config.scheduling.extend.assert_called_once_with(["SchedulerType=Daily", "StartTime=08:00:00"])
+        assert mock_config.initTimeoutNanos == 5000000000
+        assert mock_config.jvmProfile == "large-memory"
+        assert mock_config.pythonVirtualEnvironment == "my-venv"
+
+
+@pytest.mark.asyncio
+async def test_make_pq_config_with_script_path(
+    coreplus_controller_client, dummy_controller_client, controller_client_mod
+):
+    """Test that script_path parameter is applied correctly."""
+    mock_config = MagicMock()
+    dummy_controller_client.make_temporary_config.return_value = mock_config
+    
+    with patch.object(
+        controller_client_mod, "CorePlusQueryConfig", autospec=True
+    ) as mock_cfg:
+        result = await coreplus_controller_client.make_pq_config(
+            name="test-pq",
+            heap_size_gb=8.0,
+            script_path="IrisQueries/groovy/analytics.groovy",
+            programming_language="Groovy",
+        )
+        
+        # Verify script_path was applied
+        assert mock_config.scriptPath == "IrisQueries/groovy/analytics.groovy"
+        assert mock_config.scriptLanguage == "Groovy"
 
 
 @pytest.mark.asyncio

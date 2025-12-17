@@ -92,8 +92,8 @@ class CorePlusControllerClient(
         session_factory = await CorePlusSessionFactory.from_url("https://deephaven-server:10000")
         controller_client = await session_factory.create_controller_client()
 
-        # Create a temporary query configuration and add it
-        config = await controller_client.make_temporary_config("my-worker", heap_size_gb=2.0)
+        # Create a query configuration and add it
+        config = await controller_client.make_pq_config("my-worker", heap_size_gb=2.0)
         serial = await controller_client.add_query(config)
 
         # Start the query and wait for it to initialize
@@ -297,7 +297,7 @@ class CorePlusControllerClient(
 
         This method looks up a query by its name and returns the corresponding serial number.
         Query names are human-readable identifiers specified when creating the query (e.g., in
-        the make_temporary_config method), while serial numbers are system-assigned unique
+        the make_pq_config method), while serial numbers are system-assigned unique
         identifiers used for most controller operations.
 
         This method is particularly useful when you want to reference a query by its human-readable
@@ -504,7 +504,7 @@ class CorePlusControllerClient(
             query_config: The query configuration to add. This CorePlusQueryConfig object defines
                         parameters such as heap size, server placement, engine type, and other
                         settings that control how the query will be created and executed.
-                        Consider using make_temporary_config() to create a properly configured
+                        Consider using make_pq_config() to create a properly configured
                         configuration object.
 
         Returns:
@@ -543,38 +543,61 @@ class CorePlusControllerClient(
             )
             raise QueryError(f"Failed to create query: {e}") from e
 
-    async def make_temporary_config(
+    async def make_pq_config(
         self,
         name: str,
         heap_size_gb: float | int,
+        script_body: str | None = None,
+        script_path: str | None = None,
+        programming_language: str = "Python",
+        configuration_type: str = "Script",
+        enabled: bool = True,
+        schedule: list[str] | None = None,
         server: str | None = None,
-        extra_jvm_args: list[str] | None = None,
-        extra_environment_vars: list[str] | None = None,
         engine: str = "DeephavenCommunity",
+        jvm_profile: str | None = None,
+        extra_jvm_args: list[str] | None = None,
+        extra_class_path: list[str] | None = None,
+        python_virtual_environment: str | None = None,
+        extra_environment_vars: list[str] | None = None,
+        init_timeout_nanos: int | None = None,
         auto_delete_timeout: int | None = 600,
         admin_groups: list[str] | None = None,
         viewer_groups: list[str] | None = None,
+        restart_users: str | None = None,
     ) -> CorePlusQueryConfig:
-        """Create a configuration for a temporary, private worker for interactive use.
+        """Create a persistent query configuration.
 
-        This method simplifies the creation of a temporary query that functions as a private,
-        interactive console for a user. The resulting worker is configured with the
-        DeephavenCommunity engine by default and has an auto-delete timeout to ensure
-        it is cleaned up after a period of inactivity.
+        Creates an in-memory PQ configuration object that can be customized with script content,
+        scheduling, resource settings, and access controls. The configuration is not persisted
+        until passed to add_query().
 
         Args:
-            name: The name of the temporary query. This is used for identification.
+            name: The name of the persistent query. This is used for identification.
             heap_size_gb: The heap size of the worker in gigabytes (e.g., 8 or 2.5).
                 The enterprise library handles JVM configuration internally.
+            script_body: The inline script code to execute. Mutually exclusive with script_path.
+            script_path: Path to script file in Git repository. Mutually exclusive with script_body.
+            programming_language: Script language - "Python" or "Groovy", case-insensitive (default: "Python").
+            configuration_type: Query type (default: "Script"). Common values: "Script", "RunAndDone".
+            enabled: Whether the query is enabled (default: True).
+            schedule: Scheduling configuration as list of "Key=Value" strings (e.g.,
+                ["SchedulerType=...", "StartTime=08:00:00", "StopTime=18:00:00"]).
             server: The specific server to run the worker on. If None, the controller
                 will choose a suitable server.
-            extra_jvm_args: A list of extra JVM arguments to pass to the worker.
-            extra_environment_vars: A list of extra environment variables for the worker.
             engine: The engine to use for the worker. Defaults to "DeephavenCommunity".
+            jvm_profile: Named JVM profile configured in controller (e.g., "large-memory").
+            extra_jvm_args: A list of extra JVM arguments to pass to the worker.
+            extra_class_path: Additional classpath entries to prepend to worker's classpath.
+            python_virtual_environment: Named Python virtual environment for Core+ workers.
+            extra_environment_vars: A list of extra environment variables for the worker.
+            init_timeout_nanos: Initialization timeout in nanoseconds.
             auto_delete_timeout: The timeout in seconds for auto-deletion of the query
                 after it becomes idle. Defaults to 600 seconds (10 minutes).
             admin_groups: A list of user groups that will have admin access to the query.
             viewer_groups: A list of user groups that will have viewer access to the query.
+            restart_users: Who can restart the query. Values: "RU_ADMIN", "RU_ADMIN_AND_VIEWERS",
+                "RU_VIEWERS_WHEN_DOWN". Defaults to controller setting.
 
         Returns:
             CorePlusQueryConfig: The configuration object for the temporary worker.
@@ -585,8 +608,13 @@ class CorePlusControllerClient(
             QueryError: If configuration creation fails for any other reason.
         """
         _LOGGER.debug(
-            f"[CorePlusControllerClient:make_temporary_config] Creating temporary config for name='{name}', heap_size_gb={heap_size_gb}"
+            f"[CorePlusControllerClient:make_pq_config] Creating PQ config for name='{name}', heap_size_gb={heap_size_gb}"
         )
+        
+        # Validate mutually exclusive parameters
+        if script_body is not None and script_path is not None:
+            raise ValueError("script_body and script_path are mutually exclusive - specify only one")
+        
         try:
             config = await asyncio.to_thread(
                 self.wrapped.make_temporary_config,
@@ -600,13 +628,37 @@ class CorePlusControllerClient(
                 admin_groups,
                 viewer_groups,
             )
+            
+            # Apply additional configuration parameters directly to protobuf
+            config.scriptLanguage = programming_language
+            if script_body is not None:
+                config.scriptBody = script_body
+            if script_path is not None:
+                config.scriptPath = script_path
+            if configuration_type != "Script":
+                config.configurationType = configuration_type
+            if not enabled:
+                config.enabled = enabled
+            if restart_users is not None:
+                config.restartUsers = restart_users
+            if extra_class_path:
+                config.extraClassPath.extend(extra_class_path)
+            if schedule:
+                config.scheduling.extend(schedule)
+            if init_timeout_nanos is not None:
+                config.initTimeoutNanos = init_timeout_nanos
+            if jvm_profile is not None:
+                config.jvmProfile = jvm_profile
+            if python_virtual_environment is not None:
+                config.pythonVirtualEnvironment = python_virtual_environment
+            
             _LOGGER.debug(
-                f"[CorePlusControllerClient:make_temporary_config] Successfully created config for '{name}'"
+                f"[CorePlusControllerClient:make_pq_config] Successfully created config for '{name}'"
             )
             return CorePlusQueryConfig(config)
         except Exception as e:
             _LOGGER.error(
-                f"[CorePlusControllerClient:make_temporary_config] Failed to create config for '{name}': {e}"
+                f"[CorePlusControllerClient:make_pq_config] Failed to create config for '{name}': {e}"
             )
             raise
 

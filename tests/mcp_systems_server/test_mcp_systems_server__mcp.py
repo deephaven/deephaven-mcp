@@ -9066,7 +9066,7 @@ async def test_pq_create_success():
     # Mock controller methods
     mock_config = MagicMock()
     mock_config.pb = MagicMock()  # Add pb attribute for scriptLanguage setting
-    mock_controller.make_temporary_config = AsyncMock(return_value=mock_config)
+    mock_controller.make_pq_config = AsyncMock(return_value=mock_config)
     mock_controller.add_query = AsyncMock(return_value=12345)
 
     # Mock config
@@ -9116,7 +9116,7 @@ async def test_pq_create_success_groovy():
     # Mock controller methods
     mock_config = MagicMock()
     mock_config.pb = MagicMock()
-    mock_controller.make_temporary_config = AsyncMock(return_value=mock_config)
+    mock_controller.make_pq_config = AsyncMock(return_value=mock_config)
     mock_controller.add_query = AsyncMock(return_value=12345)
 
     # Mock config

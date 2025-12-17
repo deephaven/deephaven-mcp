@@ -3710,6 +3710,30 @@ def _validate_timeout(timeout_seconds: int, function_name: str) -> int:
     return timeout_seconds
 
 
+def _normalize_programming_language(language: str) -> str:
+    """Normalize and validate programming language string.
+    
+    Args:
+        language: Programming language string (case-insensitive)
+    
+    Returns:
+        Normalized language string ("Python" or "Groovy")
+    
+    Raises:
+        ValueError: If language is not "Python" or "Groovy" (case-insensitive)
+    """
+    lang_lower = language.lower()
+    if lang_lower == "python":
+        return "Python"
+    elif lang_lower == "groovy":
+        return "Groovy"
+    else:
+        raise ValueError(
+            f"Invalid programming_language: '{language}'. "
+            "Must be 'Python' or 'Groovy' (case-insensitive)."
+        )
+
+
 @mcp_server.tool()
 async def pq_name_to_id(
     context: Context,
@@ -4109,14 +4133,24 @@ async def pq_create(
     system_name: str,
     pq_name: str,
     heap_size_gb: float | int,
+    script_body: str | None = None,
+    script_path: str | None = None,
     programming_language: str = "Python",
-    auto_delete_timeout: int | None = 600,
+    configuration_type: str = "Script",
+    enabled: bool = True,
+    schedule: list[str] | None = None,
     server: str | None = None,
     engine: str = "DeephavenCommunity",
+    jvm_profile: str | None = None,
     extra_jvm_args: list[str] | None = None,
+    extra_class_path: list[str] | None = None,
+    python_virtual_environment: str | None = None,
     extra_environment_vars: list[str] | None = None,
+    init_timeout_nanos: int | None = None,
+    auto_delete_timeout: int | None = 600,
     admin_groups: list[str] | None = None,
     viewer_groups: list[str] | None = None,
+    restart_users: str | None = None,
 ) -> dict:
     """MCP Tool: Create a new persistent query on an enterprise system.
 
@@ -4134,20 +4168,61 @@ async def pq_create(
     - Serial number is returned for subsequent operations
     - Use programming_language to select "Python" or "Groovy"
     - auto_delete_timeout controls automatic cleanup (seconds)
+    - Specify code via script_body (inline) OR script_path (Git) - not both
+    - For batch jobs, use configuration_type="RunAndDone"
+    - Use schedule parameter for automated start/stop times
+
+    Script Source Options:
+    - script_body: Inline Python/Groovy code as a string
+    - script_path: Path to script in Git repository (e.g., "IrisQueries/groovy/analytics.groovy")
+    - These are mutually exclusive - specify only one
+    - If neither is specified, PQ starts as empty interactive session
+
+    Configuration Types:
+    - "Script": Standard live interactive query (default, runs continuously)
+    - "RunAndDone": Batch query that executes once and terminates automatically
+    - Other types exist (Merge, Import, etc.) but are specialized
+
+    Scheduling Format (list of "Key=Value" strings):
+    - Common daily schedule example:
+      ["SchedulerType=com.illumon.iris.controller.IrisQuerySchedulerDaily",
+       "StartTime=08:00:00", "StopTime=18:00:00", "TimeZone=America/New_York"]
+    - StartTime/StopTime format: HH:MM:SS (24-hour)
+    - TimeZone: Standard timezone identifiers (e.g., "America/New_York", "UTC")
+    - Scheduler types:
+      * IrisQuerySchedulerDaily - Daily execution
+      * IrisQuerySchedulerContinuous - Continuous running
+      * IrisQuerySchedulerMonthly - Monthly execution
+    - If omitted, PQ must be started/stopped manually
+
+    Restart Permissions:
+    - "RU_ADMIN": Only administrators can restart (most restrictive)
+    - "RU_ADMIN_AND_VIEWERS": Both admins and viewers can restart
+    - "RU_VIEWERS_WHEN_DOWN": Admins always; viewers only when query is down
 
     Args:
         context: MCP context object
         system_name: Name of the enterprise system
         pq_name: Human-readable name for the PQ
         heap_size_gb: JVM heap size in GB (e.g., 8.0 or 16)
+        script_body: Inline script code to execute (mutually exclusive with script_path)
+        script_path: Path to script in Git repository (mutually exclusive with script_body)
         programming_language: Script language - "Python" or "Groovy", case-insensitive (default: "Python")
-        auto_delete_timeout: Seconds of inactivity before auto-deletion (default: 600)
+        configuration_type: Query type - "Script" (live) or "RunAndDone" (batch), default: "Script"
+        enabled: Whether query can be executed (default: True)
+        schedule: Scheduling config as ["Key=Value", ...] (e.g., ["SchedulerType=...", "StartTime=08:00:00"])
         server: Specific server to run on (None = controller chooses)
         engine: Worker engine type (default: "DeephavenCommunity")
+        jvm_profile: Named JVM profile from controller config (e.g., "large-memory")
         extra_jvm_args: Additional JVM arguments
+        extra_class_path: Additional classpath entries to prepend (e.g., ["/opt/libs/custom.jar"])
+        python_virtual_environment: Named Python venv for Core+ workers
         extra_environment_vars: Environment variables as ["KEY=value", ...]
+        init_timeout_nanos: Initialization timeout in nanoseconds
+        auto_delete_timeout: Seconds of inactivity before auto-deletion (default: 600)
         admin_groups: Groups with admin access
         viewer_groups: Groups with viewer access
+        restart_users: Who can restart - "RU_ADMIN", "RU_ADMIN_AND_VIEWERS", "RU_VIEWERS_WHEN_DOWN"
 
     Returns:
         Success response:
@@ -4199,38 +4274,31 @@ async def pq_create(
         # Get controller client
         controller = factory.controller_client
 
-        # Normalize and validate programming language (case-insensitive)
-        lang_lower = programming_language.lower()
-        if lang_lower == "python":
-            normalized_lang = "Python"
-        elif lang_lower == "groovy":
-            normalized_lang = "Groovy"
-        else:
-            error_msg = f"Invalid programming_language: '{programming_language}'. Must be 'Python' or 'Groovy' (case-insensitive)"
-            _LOGGER.error(f"[mcp_systems_server:pq_create] {error_msg}")
-            result["error"] = error_msg
-            result["isError"] = True
-            return result
+        # Normalize and validate programming language
+        normalized_lang = _normalize_programming_language(programming_language)
 
         # Create PQ configuration
-        pq_config = await controller.make_temporary_config(
+        pq_config = await controller.make_pq_config(
             name=pq_name,
             heap_size_gb=heap_size_gb,
+            script_body=script_body,
+            script_path=script_path,
+            programming_language=normalized_lang,
+            configuration_type=configuration_type,
+            enabled=enabled,
+            schedule=schedule,
             server=server,
-            extra_jvm_args=extra_jvm_args,
-            extra_environment_vars=extra_environment_vars,
             engine=engine,
+            jvm_profile=jvm_profile,
+            extra_jvm_args=extra_jvm_args,
+            extra_class_path=extra_class_path,
+            python_virtual_environment=python_virtual_environment,
+            extra_environment_vars=extra_environment_vars,
+            init_timeout_nanos=init_timeout_nanos,
             auto_delete_timeout=auto_delete_timeout,
             admin_groups=admin_groups,
             viewer_groups=viewer_groups,
-        )
-
-        # Set the script language via configuration transformer pattern
-        # (make_temporary_config hardcodes to Python, so we must override)
-        pq_config.pb.scriptLanguage = normalized_lang
-
-        _LOGGER.debug(
-            f"[mcp_systems_server:pq_create] Set scriptLanguage={normalized_lang} for PQ '{pq_name}'"
+            restart_users=restart_users,
         )
 
         # Add the PQ to controller
