@@ -8682,7 +8682,7 @@ async def test_pq_name_to_id_exception():
     """Test pq_name_to_id when exception occurs."""
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock()
-    
+
     mock_config_manager.get_config = AsyncMock(side_effect=RuntimeError("Config error"))
 
     context = MockContext(
@@ -8752,7 +8752,9 @@ async def test_pq_list_success():
     assert pq1["state"] == "RUNNING"
     assert pq1["heap_size_gb"] == 8.0
     assert "session_id" in pq1  # Running PQ should have session_id
-    assert pq1["session_id"] == "enterprise:test-system:analytics"  # session_id uses name
+    assert (
+        pq1["session_id"] == "enterprise:test-system:analytics"
+    )  # session_id uses name
 
     pq2 = result["pqs"][1]
     assert pq2["pq_id"] == "enterprise:test-system:12346"
@@ -8789,7 +8791,7 @@ async def test_pq_list_exception():
     """Test pq_list when exception occurs."""
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock()
-    
+
     mock_config_manager.get_config = AsyncMock(side_effect=RuntimeError("Config error"))
 
     context = MockContext(
@@ -8839,9 +8841,7 @@ async def test_pq_details_success_by_name():
         }
     )
 
-    result = await mcp_mod.pq_details(
-        context, pq_id="enterprise:test-system:12345"
-    )
+    result = await mcp_mod.pq_details(context, pq_id="enterprise:test-system:12345")
 
     # Verify success
     assert result["success"] is True
@@ -8888,9 +8888,7 @@ async def test_pq_details_success_by_serial():
         }
     )
 
-    result = await mcp_mod.pq_details(
-        context, pq_id="enterprise:test-system:12345"
-    )
+    result = await mcp_mod.pq_details(context, pq_id="enterprise:test-system:12345")
 
     # Verify success
     assert result["success"] is True
@@ -8920,9 +8918,7 @@ async def test_pq_details_not_found():
     mock_factory.controller_client = mock_controller
 
     # Mock controller to raise exception when getting PQ
-    mock_controller.get = AsyncMock(
-        side_effect=Exception("PQ not found")
-    )
+    mock_controller.get = AsyncMock(side_effect=Exception("PQ not found"))
 
     # Mock config
     full_config = {"enterprise": {"systems": {"test-system": {}}}}
@@ -8935,9 +8931,7 @@ async def test_pq_details_not_found():
         }
     )
 
-    result = await mcp_mod.pq_details(
-        context, pq_id="enterprise:test-system:99999"
-    )
+    result = await mcp_mod.pq_details(context, pq_id="enterprise:test-system:99999")
 
     assert result["success"] is False
     assert "error" in result
@@ -8991,7 +8985,7 @@ async def test_pq_details_exception():
     """Test pq_details when exception occurs."""
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock()
-    
+
     mock_config_manager.get_config = AsyncMock(side_effect=RuntimeError("Config error"))
 
     context = MockContext(
@@ -9214,7 +9208,7 @@ async def test_pq_create_exception():
     """Test pq_create when exception occurs."""
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock()
-    
+
     mock_config_manager.get_config = AsyncMock(side_effect=RuntimeError("Config error"))
 
     context = MockContext(
@@ -9265,9 +9259,7 @@ async def test_pq_delete_success_by_name():
         }
     )
 
-    result = await mcp_mod.pq_delete(
-        context, pq_id="enterprise:test-system:12345"
-    )
+    result = await mcp_mod.pq_delete(context, pq_id="enterprise:test-system:12345")
 
     # Verify success
     assert result["success"] is True
@@ -9323,7 +9315,7 @@ async def test_pq_delete_exception():
     """Test pq_delete when exception occurs."""
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock()
-    
+
     mock_config_manager.get_config = AsyncMock(side_effect=RuntimeError("Config error"))
 
     context = MockContext(
@@ -9374,9 +9366,7 @@ async def test_pq_start_success():
         }
     )
 
-    result = await mcp_mod.pq_start(
-        context, pq_id="enterprise:test-system:12345"
-    )
+    result = await mcp_mod.pq_start(context, pq_id="enterprise:test-system:12345")
 
     # Verify success
     assert result["success"] is True
@@ -9438,7 +9428,7 @@ async def test_pq_start_exception():
     """Test pq_start when exception occurs."""
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock()
-    
+
     mock_config_manager.get_config = AsyncMock(side_effect=RuntimeError("Config error"))
 
     context = MockContext(
@@ -9489,9 +9479,7 @@ async def test_pq_stop_success():
         }
     )
 
-    result = await mcp_mod.pq_stop(
-        context, pq_id="enterprise:test-system:12345"
-    )
+    result = await mcp_mod.pq_stop(context, pq_id="enterprise:test-system:12345")
 
     # Verify success - now returns list format
     assert result["success"] is True
@@ -9629,7 +9617,7 @@ async def test_pq_stop_exception():
     """Test pq_stop when exception occurs."""
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock()
-    
+
     mock_config_manager.get_config = AsyncMock(side_effect=RuntimeError("Config error"))
 
     context = MockContext(
@@ -9680,9 +9668,7 @@ async def test_pq_restart_success():
         }
     )
 
-    result = await mcp_mod.pq_restart(
-        context, pq_id="enterprise:test-system:12345"
-    )
+    result = await mcp_mod.pq_restart(context, pq_id="enterprise:test-system:12345")
 
     # Verify success - now returns list format
     assert result["success"] is True
@@ -9767,7 +9753,7 @@ async def test_pq_restart_exception():
     """Test pq_restart when exception occurs."""
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock()
-    
+
     mock_config_manager.get_config = AsyncMock(side_effect=RuntimeError("Config error"))
 
     context = MockContext(
@@ -9820,8 +9806,7 @@ async def test_pq_stop_multiple():
     )
 
     result = await mcp_mod.pq_stop(
-        context, 
-        pq_id=["enterprise:test-system:12345", "enterprise:test-system:67890"]
+        context, pq_id=["enterprise:test-system:12345", "enterprise:test-system:67890"]
     )
 
     # Verify success
@@ -9874,8 +9859,7 @@ async def test_pq_restart_multiple():
     )
 
     result = await mcp_mod.pq_restart(
-        context, 
-        pq_id=["enterprise:test-system:12345", "enterprise:test-system:67890"]
+        context, pq_id=["enterprise:test-system:12345", "enterprise:test-system:67890"]
     )
 
     # Verify success
@@ -9906,8 +9890,7 @@ async def test_pq_stop_different_systems_error():
     )
 
     result = await mcp_mod.pq_stop(
-        context,
-        pq_id=["enterprise:system1:12345", "enterprise:system2:67890"]
+        context, pq_id=["enterprise:system1:12345", "enterprise:system2:67890"]
     )
 
     # Verify error
@@ -9930,8 +9913,7 @@ async def test_pq_restart_different_systems_error():
     )
 
     result = await mcp_mod.pq_restart(
-        context,
-        pq_id=["enterprise:system1:12345", "enterprise:system2:67890"]
+        context, pq_id=["enterprise:system1:12345", "enterprise:system2:67890"]
     )
 
     # Verify error
@@ -9968,6 +9950,7 @@ def test_parse_pq_id_success():
 def test_validate_timeout_excessive(caplog):
     """Test _validate_timeout with timeout exceeding safe limit."""
     import logging
+
     caplog.set_level(logging.WARNING)
     result = mcp_mod._validate_timeout(400, "test_function")
     assert result == 400

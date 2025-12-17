@@ -13,7 +13,7 @@ Tools Provided:
     Configuration and System Management:
     - mcp_reload: Reload configuration and clear all sessions atomically.
     - enterprise_systems_status: List all enterprise (Core+) systems with their status and configuration details.
-    
+
     Session Management:
     - sessions_list: List all sessions (community and enterprise) with basic metadata.
     - session_details: Get detailed information about a specific session.
@@ -22,22 +22,22 @@ Tools Provided:
     - session_community_credentials: SECURITY SENSITIVE - Retrieve connection credentials for browser access (disabled by default, requires security.community.credential_retrieval_mode configuration).
     - session_enterprise_create: Create a new enterprise session with configurable parameters and resource limits.
     - session_enterprise_delete: Delete an existing enterprise session and clean up resources.
-    
+
     Session Table Operations:
     - session_tables_list: Retrieve names of all tables in a session (lightweight alternative to session_tables_schema).
     - session_tables_schema: Retrieve full metadata schemas for one or more tables from a session (requires session_id).
     - session_table_data: Retrieve table data with flexible formatting (json-row, json-column, csv) and optional row limiting for safe access to large tables.
-    
+
     Session Script and Package Management:
     - session_script_run: Execute a script on a specified Deephaven session (requires session_id).
     - session_pip_list: Retrieve all installed pip packages (name and version) from a specified Deephaven session using importlib.metadata, returned as a list of dicts.
-    
+
     Catalog Operations (Enterprise Core+ Only):
     - catalog_tables_list: Retrieve catalog table entries from enterprise (Core+) sessions with optional filtering by namespace or table name patterns.
     - catalog_namespaces_list: Retrieve distinct namespaces from enterprise (Core+) catalog for efficient discovery of data domains.
     - catalog_tables_schema: Retrieve full schemas for catalog tables in enterprise (Core+) sessions with flexible filtering by namespace, table names, or custom filters.
     - catalog_table_sample: Retrieve sample data from a catalog table in enterprise (Core+) sessions with flexible formatting and row limiting for safe previewing.
-    
+
     Persistent Query (PQ) Management (Enterprise Core+ Only):
     - pq_name_to_id: Convert a PQ name to its canonical pq_id for use with other PQ tools.
     - pq_list: List all persistent queries on an enterprise system with their status and configuration.
@@ -71,7 +71,6 @@ from mcp.server.fastmcp import Context, FastMCP
 from deephaven_mcp import queries
 from deephaven_mcp._exceptions import (
     CommunitySessionConfigurationError,
-    QueryError,
     UnsupportedOperationError,
 )
 from deephaven_mcp.client import BaseSession, CorePlusSession
@@ -3642,18 +3641,18 @@ async def session_enterprise_delete(
 
 def _parse_pq_id(pq_id: str) -> tuple[str, int]:
     """Parse a pq_id into system_name and serial.
-    
+
     Args:
-        pq_id: Format 'enterprise:{system_name}:{serial}'
-    
+        pq_id (str): PQ identifier in format 'enterprise:{system_name}:{serial}'
+
     Returns:
-        Tuple of (system_name, serial)
-    
+        tuple[str, int]: Tuple of (system_name, serial)
+
     Raises:
-        ValueError: If pq_id format is invalid
+        ValueError: If pq_id format is invalid or serial is not an integer
     """
-    parts = pq_id.split(':')
-    if len(parts) != 3 or parts[0] != 'enterprise':
+    parts = pq_id.split(":")
+    if len(parts) != 3 or parts[0] != "enterprise":
         raise ValueError(
             f"Invalid pq_id format: '{pq_id}'. "
             "Expected format: 'enterprise:{{system_name}}:{{serial}}'"
@@ -3664,44 +3663,44 @@ def _parse_pq_id(pq_id: str) -> tuple[str, int]:
         raise ValueError(
             f"Invalid pq_id format: '{pq_id}'. "
             f"Serial must be an integer, got: '{parts[2]}'"
-        )
+        ) from None
     return parts[1], serial
 
 
 def _make_pq_id(system_name: str, serial: int) -> str:
     """Construct a pq_id from system_name and serial.
-    
+
     Args:
-        system_name: Name of the enterprise system
-        serial: PQ serial number
-    
+        system_name (str): Name of the enterprise system
+        serial (int): PQ serial number
+
     Returns:
-        PQ identifier in format 'enterprise:{system_name}:{serial}'
+        str: PQ identifier in format 'enterprise:{system_name}:{serial}'
     """
     return f"enterprise:{system_name}:{serial}"
 
 
 # MCP-safe timeout limits
 MAX_MCP_SAFE_TIMEOUT = 60  # Conservative limit to prevent client timeouts
-DEFAULT_PQ_TIMEOUT = 30    # Default for PQ lifecycle operations
+DEFAULT_PQ_TIMEOUT = 30  # Default for PQ lifecycle operations
 
 
 def _validate_timeout(timeout_seconds: int, function_name: str) -> int:
     """Validate timeout is reasonable for MCP operations.
-    
+
     Args:
-        timeout_seconds: Requested timeout in seconds
-        function_name: Name of calling function for logging
-    
+        timeout_seconds (int): Requested timeout in seconds
+        function_name (str): Name of calling function for logging
+
     Returns:
-        The validated timeout value
+        int: The validated timeout value (returns input value, logs warning if excessive)
     """
     # TODO: Test behavior of timeout_seconds <= 0 with actual Enterprise controller.
     #       In some controller methods (get, get_serial_for_name), timeout=0 means
     #       "no wait" / immediate return. Behavior for start_and_wait, stop_and_wait,
     #       and restart_query is undocumented. May be: immediate check, error, or
     #       undefined. Needs empirical testing to determine if we should validate/reject.
-    
+
     if timeout_seconds > MAX_MCP_SAFE_TIMEOUT:
         _LOGGER.warning(
             f"[mcp_systems_server:{function_name}] Timeout {timeout_seconds}s exceeds "
@@ -3712,13 +3711,13 @@ def _validate_timeout(timeout_seconds: int, function_name: str) -> int:
 
 def _normalize_programming_language(language: str) -> str:
     """Normalize and validate programming language string.
-    
+
     Args:
-        language: Programming language string (case-insensitive)
-    
+        language (str): Programming language string (case-insensitive)
+
     Returns:
-        Normalized language string ("Python" or "Groovy")
-    
+        str: Normalized language string ("Python" or "Groovy")
+
     Raises:
         ValueError: If language is not "Python" or "Groovy" (case-insensitive)
     """
@@ -3899,9 +3898,7 @@ async def pq_list(
             "isError": True
         }
     """
-    _LOGGER.info(
-        f"[mcp_systems_server:pq_list] Invoked: system_name={system_name!r}"
-    )
+    _LOGGER.info(f"[mcp_systems_server:pq_list] Invoked: system_name={system_name!r}")
 
     result: dict[str, object] = {"success": False}
 
@@ -3938,7 +3935,7 @@ async def pq_list(
         for serial, pq_info in pq_map.items():
             pq_name = pq_info.config.pb.name
             pq_id = _make_pq_id(system_name, serial)
-            
+
             pq_data = {
                 "pq_id": pq_id,
                 "serial": serial,
@@ -3961,11 +3958,13 @@ async def pq_list(
             f"[mcp_systems_server:pq_list] Found {len(pqs)} PQs on system '{system_name}'"
         )
 
-        result.update({
-            "success": True,
-            "system_name": system_name,
-            "pqs": pqs,
-        })
+        result.update(
+            {
+                "success": True,
+                "system_name": system_name,
+                "pqs": pqs,
+            }
+        )
 
     except Exception as e:
         _LOGGER.error(
@@ -4032,9 +4031,7 @@ async def pq_details(
             "isError": True
         }
     """
-    _LOGGER.info(
-        f"[mcp_systems_server:pq_details] Invoked: pq_id={pq_id!r}"
-    )
+    _LOGGER.info(f"[mcp_systems_server:pq_details] Invoked: pq_id={pq_id!r}")
 
     result: dict[str, object] = {"success": False}
 
@@ -4105,9 +4102,9 @@ async def pq_details(
             pq_data["session_id"] = session_id
 
             # Add worker connection details if available
-            if hasattr(pq_info.state.pb, 'worker_host'):
+            if hasattr(pq_info.state.pb, "worker_host"):
                 pq_data["worker_host"] = pq_info.state.pb.worker_host
-            if hasattr(pq_info.state.pb, 'worker_port'):
+            if hasattr(pq_info.state.pb, "worker_port"):
                 pq_data["worker_port"] = pq_info.state.pb.worker_port
 
         _LOGGER.info(
@@ -4184,16 +4181,28 @@ async def pq_create(
     - Other types exist (Merge, Import, etc.) but are specialized
 
     Scheduling Format (list of "Key=Value" strings):
-    - Common daily schedule example:
+    - SchedulerType: Use full qualified Java class name (required if scheduling)
+    - Time format: HH:MM:SS (24-hour) for all time fields
+    - TimeZone: Standard timezone identifiers (e.g., "America/New_York", "UTC")
+    - Empty list [] or None: No automatic scheduling (manual start/stop only)
+    
+    Daily Scheduler:
       ["SchedulerType=com.illumon.iris.controller.IrisQuerySchedulerDaily",
        "StartTime=08:00:00", "StopTime=18:00:00", "TimeZone=America/New_York"]
-    - StartTime/StopTime format: HH:MM:SS (24-hour)
-    - TimeZone: Standard timezone identifiers (e.g., "America/New_York", "UTC")
-    - Scheduler types:
-      * IrisQuerySchedulerDaily - Daily execution
-      * IrisQuerySchedulerContinuous - Continuous running
-      * IrisQuerySchedulerMonthly - Monthly execution
-    - If omitted, PQ must be started/stopped manually
+      - Required: SchedulerType, StartTime, StopTime
+      - Optional: TimeZone (defaults to server timezone)
+    
+    Continuous Scheduler:
+      ["SchedulerType=com.illumon.iris.controller.IrisQuerySchedulerContinuous"]
+      - Required: SchedulerType only
+      - Runs continuously without stop times
+    
+    Monthly Scheduler:
+      ["SchedulerType=com.illumon.iris.controller.IrisQuerySchedulerMonthly",
+       "DayOfMonth=1", "StartTime=00:00:00", "TimeZone=UTC"]
+      - Required: SchedulerType, DayOfMonth, StartTime
+      - Optional: TimeZone, StopTime
+      - DayOfMonth: 1-31 (or last day if month has fewer days)
 
     Restart Permissions:
     - "RU_ADMIN": Only administrators can restart (most restrictive)
@@ -4311,14 +4320,16 @@ async def pq_create(
             f"[mcp_systems_server:pq_create] Created PQ '{pq_name}' with serial {serial}, pq_id='{pq_id}'"
         )
 
-        result.update({
-            "success": True,
-            "pq_id": pq_id,
-            "serial": serial,
-            "name": pq_name,
-            "state": "UNINITIALIZED",
-            "message": f"PQ '{pq_name}' created successfully with serial {serial}",
-        })
+        result.update(
+            {
+                "success": True,
+                "pq_id": pq_id,
+                "serial": serial,
+                "name": pq_name,
+                "state": "UNINITIALIZED",
+                "message": f"PQ '{pq_name}' created successfully with serial {serial}",
+            }
+        )
 
     except Exception as e:
         _LOGGER.error(
@@ -4369,9 +4380,7 @@ async def pq_delete(
             "isError": True
         }
     """
-    _LOGGER.info(
-        f"[mcp_systems_server:pq_delete] Invoked: pq_id={pq_id!r}"
-    )
+    _LOGGER.info(f"[mcp_systems_server:pq_delete] Invoked: pq_id={pq_id!r}")
 
     result: dict[str, object] = {"success": False}
 
@@ -4411,14 +4420,14 @@ async def pq_delete(
         # Delete the PQ (serial already from pq_id)
         await controller.delete_query(serial)
 
-        _LOGGER.info(
-            f"[mcp_systems_server:pq_delete] Deleted PQ with serial {serial}"
-        )
+        _LOGGER.info(f"[mcp_systems_server:pq_delete] Deleted PQ with serial {serial}")
 
-        result.update({
-            "success": True,
-            "message": f"PQ with serial {serial} deleted successfully",
-        })
+        result.update(
+            {
+                "success": True,
+                "message": f"PQ with serial {serial} deleted successfully",
+            }
+        )
 
     except Exception as e:
         _LOGGER.error(
@@ -4636,7 +4645,7 @@ async def pq_stop(
     try:
         # Normalize to list
         pq_ids = [pq_id] if isinstance(pq_id, str) else pq_id
-        
+
         if not pq_ids:
             result["error"] = "At least one pq_id must be provided"
             result["isError"] = True
@@ -4702,23 +4711,25 @@ async def pq_stop(
             pq_info = await controller.get(serial)
             pq_name = pq_info.config.pb.name
             state_name = pq_info.state.pb.state_enum_name
-            stopped_pqs.append({
-                "pq_id": pid,
-                "serial": serial,
-                "name": pq_name,
-                "state": state_name,
-            })
+            stopped_pqs.append(
+                {
+                    "pq_id": pid,
+                    "serial": serial,
+                    "name": pq_name,
+                    "state": state_name,
+                }
+            )
 
-        _LOGGER.info(
-            f"[mcp_systems_server:pq_stop] Stopped {len(stopped_pqs)} PQ(s)"
-        )
+        _LOGGER.info(f"[mcp_systems_server:pq_stop] Stopped {len(stopped_pqs)} PQ(s)")
 
         # Always return consistent format with list
-        result.update({
-            "success": True,
-            "stopped": stopped_pqs,
-            "message": f"Stopped {len(stopped_pqs)} PQ(s)",
-        })
+        result.update(
+            {
+                "success": True,
+                "stopped": stopped_pqs,
+                "message": f"Stopped {len(stopped_pqs)} PQ(s)",
+            }
+        )
 
     except Exception as e:
         _LOGGER.error(
@@ -4802,7 +4813,7 @@ async def pq_restart(
     try:
         # Normalize to list
         pq_ids = [pq_id] if isinstance(pq_id, str) else pq_id
-        
+
         if not pq_ids:
             result["error"] = "At least one pq_id must be provided"
             result["isError"] = True
@@ -4858,11 +4869,13 @@ async def pq_restart(
         for pid, serial in parsed_pqs:
             pq_info = await controller.get(serial)
             pq_name = pq_info.config.pb.name
-            restarted_pqs.append({
-                "pq_id": pid,
-                "serial": serial,
-                "name": pq_name,
-            })
+            restarted_pqs.append(
+                {
+                    "pq_id": pid,
+                    "serial": serial,
+                    "name": pq_name,
+                }
+            )
 
         # Validate timeout
         validated_timeout = _validate_timeout(timeout_seconds, "pq_restart")
@@ -4876,11 +4889,13 @@ async def pq_restart(
         )
 
         # Always return consistent format with list
-        result.update({
-            "success": True,
-            "restarted": restarted_pqs,
-            "message": f"Restarted {len(restarted_pqs)} PQ(s)",
-        })
+        result.update(
+            {
+                "success": True,
+                "restarted": restarted_pqs,
+                "message": f"Restarted {len(restarted_pqs)} PQ(s)",
+            }
+        )
 
     except Exception as e:
         _LOGGER.error(

@@ -37,7 +37,7 @@ See Also:
 import asyncio
 import logging
 from collections.abc import Iterable
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     import deephaven_enterprise.client.controller  # pragma: no cover
@@ -228,7 +228,9 @@ class CorePlusControllerClient(
             _LOGGER.error(
                 f"[CorePlusControllerClient:subscribe] Failed to subscribe to query state: {e}"
             )
-            raise QueryError(f"Failed to subscribe to persistent query state: {e}") from e
+            raise QueryError(
+                f"Failed to subscribe to persistent query state: {e}"
+            ) from e
 
     # ===========================================================================
     # Query State Management
@@ -543,6 +545,59 @@ class CorePlusControllerClient(
             )
             raise QueryError(f"Failed to create query: {e}") from e
 
+    def _apply_pq_config_parameters(  # noqa: C901
+        self,
+        config: Any,
+        programming_language: str,
+        script_body: str | None,
+        script_path: str | None,
+        configuration_type: str,
+        enabled: bool,
+        restart_users: str | None,
+        extra_class_path: list[str] | None,
+        schedule: list[str] | None,
+        init_timeout_nanos: int | None,
+        jvm_profile: str | None,
+        python_virtual_environment: str | None,
+    ) -> None:
+        """Apply additional configuration parameters to protobuf config.
+
+        Args:
+            config (Any): The protobuf config object to modify
+            programming_language (str): Normalized programming language ("Python" or "Groovy")
+            script_body (str | None): Inline script code, or None if not specified
+            script_path (str | None): Path to script file in Git repository, or None if not specified
+            configuration_type (str): Query type ("Script", "RunAndDone", etc.)
+            enabled (bool): Whether query is enabled
+            restart_users (str | None): Restart permission setting, or None to use controller default
+            extra_class_path (list[str] | None): Additional classpath entries, or None if not specified
+            schedule (list[str] | None): Scheduling configuration as "Key=Value" strings, or None if not specified
+            init_timeout_nanos (int | None): Initialization timeout in nanoseconds, or None to use default
+            jvm_profile (str | None): Named JVM profile, or None if not specified
+            python_virtual_environment (str | None): Named Python venv, or None if not specified
+        """
+        config.scriptLanguage = programming_language
+        if script_body is not None:
+            config.scriptBody = script_body
+        if script_path is not None:
+            config.scriptPath = script_path
+        if configuration_type != "Script":
+            config.configurationType = configuration_type
+        if not enabled:
+            config.enabled = enabled
+        if restart_users is not None:
+            config.restartUsers = restart_users
+        if extra_class_path:
+            config.extraClassPath.extend(extra_class_path)
+        if schedule:
+            config.scheduling.extend(schedule)
+        if init_timeout_nanos is not None:
+            config.initTimeoutNanos = init_timeout_nanos
+        if jvm_profile is not None:
+            config.jvmProfile = jvm_profile
+        if python_virtual_environment is not None:
+            config.pythonVirtualEnvironment = python_virtual_environment
+
     async def make_pq_config(
         self,
         name: str,
@@ -600,7 +655,7 @@ class CorePlusControllerClient(
                 "RU_VIEWERS_WHEN_DOWN". Defaults to controller setting.
 
         Returns:
-            CorePlusQueryConfig: The configuration object for the temporary worker.
+            CorePlusQueryConfig: The configuration object for the persistent query.
 
         Raises:
             ValueError: If invalid parameters are provided.
@@ -610,11 +665,13 @@ class CorePlusControllerClient(
         _LOGGER.debug(
             f"[CorePlusControllerClient:make_pq_config] Creating PQ config for name='{name}', heap_size_gb={heap_size_gb}"
         )
-        
+
         # Validate mutually exclusive parameters
         if script_body is not None and script_path is not None:
-            raise ValueError("script_body and script_path are mutually exclusive - specify only one")
-        
+            raise ValueError(
+                "script_body and script_path are mutually exclusive - specify only one"
+            )
+
         try:
             config = await asyncio.to_thread(
                 self.wrapped.make_temporary_config,
@@ -628,30 +685,22 @@ class CorePlusControllerClient(
                 admin_groups,
                 viewer_groups,
             )
-            
-            # Apply additional configuration parameters directly to protobuf
-            config.scriptLanguage = programming_language
-            if script_body is not None:
-                config.scriptBody = script_body
-            if script_path is not None:
-                config.scriptPath = script_path
-            if configuration_type != "Script":
-                config.configurationType = configuration_type
-            if not enabled:
-                config.enabled = enabled
-            if restart_users is not None:
-                config.restartUsers = restart_users
-            if extra_class_path:
-                config.extraClassPath.extend(extra_class_path)
-            if schedule:
-                config.scheduling.extend(schedule)
-            if init_timeout_nanos is not None:
-                config.initTimeoutNanos = init_timeout_nanos
-            if jvm_profile is not None:
-                config.jvmProfile = jvm_profile
-            if python_virtual_environment is not None:
-                config.pythonVirtualEnvironment = python_virtual_environment
-            
+
+            self._apply_pq_config_parameters(
+                config,
+                programming_language,
+                script_body,
+                script_path,
+                configuration_type,
+                enabled,
+                restart_users,
+                extra_class_path,
+                schedule,
+                init_timeout_nanos,
+                jvm_profile,
+                python_virtual_environment,
+            )
+
             _LOGGER.debug(
                 f"[CorePlusControllerClient:make_pq_config] Successfully created config for '{name}'"
             )
