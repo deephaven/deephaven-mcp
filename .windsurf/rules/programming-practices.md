@@ -23,3 +23,4 @@ trigger: always_on
     - xml: 45% accuracy
     - csv: 44% accuracy (lowest comprehension, fewest tokens)
 7. When moving or removing files, use the git version of the command when appropriate to maintain history.
+8. A python file named <file>.py should have a single test file named test_<file>.py.  An exception is made for integration tests which are named test_<file>_integration.py.

@@ -59,6 +59,7 @@ def dummy_controller_client():
     client.get_serial_for_name = MagicMock(return_value="serial")
     client.add_query = MagicMock(return_value="serial")
     client.make_temporary_config = MagicMock(return_value="config")
+    client.subscribe = MagicMock(return_value=None)
     return client
 
 
@@ -69,6 +70,8 @@ def coreplus_controller_client(dummy_controller_client, controller_client_mod):
 
 @pytest.mark.asyncio
 async def test_map_success(coreplus_controller_client, dummy_controller_client):
+    # Simulate successful subscription
+    coreplus_controller_client._subscribed = True
     dummy_controller_client.map.return_value = {"serial": "info"}
     with patch(
         "deephaven_mcp.client._controller_client.CorePlusQuerySerial",
@@ -86,6 +89,7 @@ async def test_map_success(coreplus_controller_client, dummy_controller_client):
 async def test_map_connection_error(
     coreplus_controller_client, dummy_controller_client
 ):
+    coreplus_controller_client._subscribed = True
     dummy_controller_client.map.side_effect = ConnectionError("fail")
     with pytest.raises(DeephavenConnectionError):
         await coreplus_controller_client.map()
@@ -93,6 +97,7 @@ async def test_map_connection_error(
 
 @pytest.mark.asyncio
 async def test_map_other_error(coreplus_controller_client, dummy_controller_client):
+    coreplus_controller_client._subscribed = True
     dummy_controller_client.map.side_effect = Exception("fail")
     with pytest.raises(QueryError):
         await coreplus_controller_client.map()
@@ -243,6 +248,7 @@ async def test_wait_for_change_other_error(
 async def test_get_serial_for_name_success(
     coreplus_controller_client, dummy_controller_client
 ):
+    coreplus_controller_client._subscribed = True
     dummy_controller_client.get_serial_for_name.return_value = "serial"
     result = await coreplus_controller_client.get_serial_for_name("name")
     assert result == "serial"
@@ -252,6 +258,7 @@ async def test_get_serial_for_name_success(
 async def test_get_serial_for_name_timeout(
     coreplus_controller_client, dummy_controller_client
 ):
+    coreplus_controller_client._subscribed = True
     dummy_controller_client.get_serial_for_name.side_effect = TimeoutError("timeout")
     with pytest.raises(TimeoutError):
         await coreplus_controller_client.get_serial_for_name("name")
@@ -261,6 +268,7 @@ async def test_get_serial_for_name_timeout(
 async def test_get_serial_for_name_value_error(
     coreplus_controller_client, dummy_controller_client
 ):
+    coreplus_controller_client._subscribed = True
     dummy_controller_client.get_serial_for_name.side_effect = ValueError("bad")
     with pytest.raises(ValueError):
         await coreplus_controller_client.get_serial_for_name("name")
@@ -270,6 +278,7 @@ async def test_get_serial_for_name_value_error(
 async def test_get_serial_for_name_connection_error(
     coreplus_controller_client, dummy_controller_client
 ):
+    coreplus_controller_client._subscribed = True
     dummy_controller_client.get_serial_for_name.side_effect = ConnectionError("fail")
     with pytest.raises(DeephavenConnectionError):
         await coreplus_controller_client.get_serial_for_name("name")
@@ -279,6 +288,7 @@ async def test_get_serial_for_name_connection_error(
 async def test_get_serial_for_name_other_error(
     coreplus_controller_client, dummy_controller_client
 ):
+    coreplus_controller_client._subscribed = True
     dummy_controller_client.get_serial_for_name.side_effect = Exception("fail")
     with pytest.raises(QueryError):
         await coreplus_controller_client.get_serial_for_name("name")
@@ -351,6 +361,15 @@ async def test_make_temporary_config_success(
         mock_cfg.return_value.config = "config"
         result = await coreplus_controller_client.make_temporary_config("name", 1.0)
         assert hasattr(result, "config")
+
+
+@pytest.mark.asyncio
+async def test_make_temporary_config_error(
+    coreplus_controller_client, dummy_controller_client
+):
+    dummy_controller_client.make_temporary_config.side_effect = RuntimeError("config creation failed")
+    with pytest.raises(RuntimeError):
+        await coreplus_controller_client.make_temporary_config("name", 1.0)
 
 
 @pytest.mark.asyncio
@@ -543,3 +562,70 @@ async def test_stop_and_wait_other_error(
     dummy_controller_client.stop_and_wait.side_effect = Exception("fail")
     with pytest.raises(QueryError):
         await coreplus_controller_client.stop_and_wait("serial")
+
+
+@pytest.mark.asyncio
+async def test_subscribe_success(coreplus_controller_client, dummy_controller_client):
+    await coreplus_controller_client.subscribe()
+    dummy_controller_client.subscribe.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_subscribe_connection_error(
+    coreplus_controller_client, dummy_controller_client
+):
+    dummy_controller_client.subscribe.side_effect = ConnectionError("fail")
+    with pytest.raises(DeephavenConnectionError):
+        await coreplus_controller_client.subscribe()
+
+
+@pytest.mark.asyncio
+async def test_subscribe_other_error(
+    coreplus_controller_client, dummy_controller_client
+):
+    dummy_controller_client.subscribe.side_effect = Exception("fail")
+    with pytest.raises(QueryError):
+        await coreplus_controller_client.subscribe()
+
+
+@pytest.mark.asyncio
+async def test_subscribe_idempotent(coreplus_controller_client, dummy_controller_client):
+    """Test that calling subscribe() multiple times is safe and only subscribes once."""
+    # First call should actually subscribe
+    await coreplus_controller_client.subscribe()
+    dummy_controller_client.subscribe.assert_called_once()
+
+    # Second call should be a no-op
+    await coreplus_controller_client.subscribe()
+    # Still only called once
+    dummy_controller_client.subscribe.assert_called_once()
+
+    # Third call should also be a no-op
+    await coreplus_controller_client.subscribe()
+    dummy_controller_client.subscribe.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_map_without_subscribe_raises_internal_error(
+    coreplus_controller_client, dummy_controller_client
+):
+    """Test that calling map() without subscribe() raises InternalError."""
+    from deephaven_mcp._exceptions import InternalError
+
+    with pytest.raises(InternalError) as exc_info:
+        await coreplus_controller_client.map()
+    assert "subscribe() must be called before map()" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_get_serial_for_name_without_subscribe_raises_internal_error(
+    coreplus_controller_client, dummy_controller_client
+):
+    """Test that calling get_serial_for_name() without subscribe() raises InternalError."""
+    from deephaven_mcp._exceptions import InternalError
+
+    with pytest.raises(InternalError) as exc_info:
+        await coreplus_controller_client.get_serial_for_name("test")
+    assert "subscribe() must be called before get_serial_for_name()" in str(
+        exc_info.value
+    )

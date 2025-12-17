@@ -506,6 +506,7 @@ class TestControllerClientCaching:
         mock_factory = MagicMock(spec=CorePlusSessionFactoryManager)
         mock_factory_instance = MagicMock()
         mock_client = MagicMock(spec=CorePlusControllerClient)
+        mock_client.subscribe = AsyncMock()
 
         # Mock successful client creation
         mock_factory.get = AsyncMock(return_value=mock_factory_instance)
@@ -517,9 +518,10 @@ class TestControllerClientCaching:
             mock_factory, "test_factory"
         )
 
-        # Verify client was created and cached
+        # Verify client was created, subscribed, and cached
         mock_factory.get.assert_awaited_once()
         assert mock_factory_instance.controller_client == mock_client
+        mock_client.subscribe.assert_awaited_once()
         assert client == mock_client
         assert combined_registry._controller_clients["test_factory"] == mock_client
         assert client == mock_client
@@ -565,6 +567,7 @@ class TestControllerClientCaching:
         )
         mock_factory_instance = MagicMock()
         mock_new_client = MagicMock(spec=CorePlusControllerClient)
+        mock_new_client.subscribe = AsyncMock()
 
         # Pre-populate cache with a dead client
         combined_registry._controller_clients["test_factory"] = mock_old_client
@@ -579,8 +582,9 @@ class TestControllerClientCaching:
             mock_factory, "test_factory"
         )
 
-        # Verify new client was created and old client was replaced
+        # Verify new client was created, subscribed, and old client was replaced
         mock_factory.get.assert_awaited_once()
+        mock_new_client.subscribe.assert_awaited_once()
         # Access the controller_client property
         assert client == mock_new_client
         assert combined_registry._controller_clients["test_factory"] == mock_new_client
@@ -596,6 +600,7 @@ class TestControllerClientCaching:
         mock_factory_instance = MagicMock()
         mock_old_client = MagicMock(spec=CorePlusControllerClient)
         mock_new_client = MagicMock(spec=CorePlusControllerClient)
+        mock_new_client.subscribe = AsyncMock()
 
         # Pre-populate cache with a dead client
         combined_registry._controller_clients["test_factory"] = mock_old_client
@@ -614,8 +619,9 @@ class TestControllerClientCaching:
             mock_factory, "test_factory"
         )
 
-        # Verify new client was created
+        # Verify new client was created and subscribed
         mock_factory.get.assert_awaited_once()
+        mock_new_client.subscribe.assert_awaited_once()
 
         # Verify cache was updated
         assert combined_registry._controller_clients["test_factory"] == mock_new_client

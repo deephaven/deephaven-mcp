@@ -237,6 +237,7 @@ Manages and connects to multiple [Deephaven Community Core](https://deephaven.io
 - **Community Session Creation**: Dynamically launch new Community Core sessions via Docker or python with configurable resources
 - **Enterprise Systems**: Connect to and manage Deephaven Enterprise (Core+) deployments
 - **Enterprise Session Creation**: Create and delete enterprise sessions with configurable resources and limits
+- **Persistent Query Management**: Full lifecycle management of enterprise persistent queries (PQs) - create, start, stop, restart, and delete long-running worker sessions
 - **Catalog Discovery**: Browse enterprise catalog at table and namespace levels to discover available data sources
 - **Table Discovery**: Lightweight table name listing and comprehensive schema retrieval for both session and catalog tables
 - **Table Operations**: Retrieve table schemas, metadata, and actual data with flexible formatting options
@@ -265,6 +266,16 @@ Manages and connects to multiple [Deephaven Community Core](https://deephaven.io
 - `enterprise_systems_status` - Get enterprise system status
 - `session_enterprise_create` - Create enterprise sessions
 - `session_enterprise_delete` - Delete enterprise sessions
+
+*Persistent Query (PQ) Management:*
+
+- `pq_list` - List all persistent queries on a system
+- `pq_details` - Get detailed PQ information
+- `pq_create` - Create new persistent queries
+- `pq_start` - Start persistent queries
+- `pq_stop` - Stop running persistent queries
+- `pq_restart` - Restart persistent queries
+- `pq_delete` - Delete persistent queries
 
 *Table Operations:*
 
