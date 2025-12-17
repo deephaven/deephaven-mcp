@@ -4185,18 +4185,18 @@ async def pq_create(
     - Time format: HH:MM:SS (24-hour) for all time fields
     - TimeZone: Standard timezone identifiers (e.g., "America/New_York", "UTC")
     - Empty list [] or None: No automatic scheduling (manual start/stop only)
-    
+
     Daily Scheduler:
       ["SchedulerType=com.illumon.iris.controller.IrisQuerySchedulerDaily",
        "StartTime=08:00:00", "StopTime=18:00:00", "TimeZone=America/New_York"]
       - Required: SchedulerType, StartTime, StopTime
       - Optional: TimeZone (defaults to server timezone)
-    
+
     Continuous Scheduler:
       ["SchedulerType=com.illumon.iris.controller.IrisQuerySchedulerContinuous"]
       - Required: SchedulerType only
       - Runs continuously without stop times
-    
+
     Monthly Scheduler:
       ["SchedulerType=com.illumon.iris.controller.IrisQuerySchedulerMonthly",
        "DayOfMonth=1", "StartTime=00:00:00", "TimeZone=UTC"]
