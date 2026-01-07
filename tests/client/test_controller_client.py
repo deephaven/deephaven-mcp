@@ -562,7 +562,10 @@ async def test_make_pq_config_permanent_query_clears_scheduling(
         mock_scheduling.__delitem__.assert_called_once_with(slice(None))
         # Verify all continuous scheduling parameters were appended
         append_calls = [call[0][0] for call in mock_scheduling.append.call_args_list]
-        assert "SchedulerType=com.illumon.iris.controller.IrisQuerySchedulerContinuous" in append_calls
+        assert (
+            "SchedulerType=com.illumon.iris.controller.IrisQuerySchedulerContinuous"
+            in append_calls
+        )
         assert "StartTime=00:00:00" in append_calls
         assert "DailyRestart=false" in append_calls
         assert "SchedulingDisabled=false" in append_calls

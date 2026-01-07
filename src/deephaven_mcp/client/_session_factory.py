@@ -312,10 +312,10 @@ class CorePlusSessionFactory(
                 f"[CorePlusSessionFactory:from_url] Successfully created SessionManager for URL {url} in {elapsed:.2f}s"
             )
             instance = cls(manager)
-            
+
             # Subscribe to controller client for persistent query operations
             await instance._controller_client.subscribe()
-            
+
             return instance
 
     @classmethod
@@ -511,7 +511,7 @@ class CorePlusSessionFactory(
 
         # Subscribe to controller client for persistent query operations
         await instance._controller_client.subscribe()
-        
+
         _LOGGER.info(
             f"[CorePlusSessionFactory:from_config] Successfully created and authenticated SessionManager from config (auth_type={auth_type})"
         )

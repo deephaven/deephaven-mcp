@@ -74,8 +74,11 @@ from deephaven_mcp._exceptions import (
     UnsupportedOperationError,
 )
 from deephaven_mcp.client import BaseSession, CorePlusSession
-from deephaven_mcp.client._protobuf import CorePlusQueryConfig, CorePlusQueryState
-from deephaven_mcp.client._base import is_enterprise_available
+from deephaven_mcp.client._protobuf import (
+    CorePlusQueryConfig,
+    CorePlusQuerySerial,
+    CorePlusQueryState,
+)
 
 # Import protobuf enum classes for proper enum name resolution
 # Use try-except since proto module may not be available even if enterprise package is
@@ -723,15 +726,15 @@ async def _get_session_liveness_info(
     It can optionally attempt to connect to the session to verify its actual status.
 
     Args:
-        mgr: Session manager for the target session
-        session_id: Session identifier for logging purposes
-        attempt_to_connect: Whether to attempt connecting to verify status
+        mgr (BaseItemManager): Session manager for the target session
+        session_id (str): Session identifier for logging purposes
+        attempt_to_connect (bool): Whether to attempt connecting to verify status
 
     Returns:
-        tuple: A 3-tuple containing:
+        tuple[bool, str, str | None]: A 3-tuple containing:
             - available (bool): Whether the session is available and responsive
             - liveness_status (str): Status classification ("ONLINE", "OFFLINE", etc.)
-            - liveness_detail (str): Detailed explanation of the status
+            - liveness_detail (str | None): Detailed explanation of the status
     """
     try:
         status, detail = await mgr.liveness_status(ensure_item=attempt_to_connect)
@@ -797,9 +800,9 @@ async def _get_session_programming_language(
     immediately without attempting to connect.
 
     Args:
-        mgr: Session manager for the target session
-        session_id: Session identifier for logging purposes
-        available: Whether the session is available (pre-checked)
+        mgr (BaseItemManager): Session manager for the target session
+        session_id (str): Session identifier for logging purposes
+        available (bool): Whether the session is available (pre-checked)
 
     Returns:
         str | None: The programming language name (e.g., "python") or None if
@@ -826,21 +829,20 @@ async def _get_session_versions(
     mgr: BaseItemManager, session_id: str, available: bool
 ) -> tuple[str | None, str | None]:
     """
-    Get Deephaven version information.
+    Get Deephaven version information from a session.
 
-    This function retrieves both community (Core) and enterprise (Core+/CorePlus)
-    version information from the session. If the session is not available, it returns
-    (None, None) immediately without attempting to connect.
+    Retrieves both community (Core) and enterprise (Core+) version information.
+    Returns (None, None) immediately without connecting if the session is unavailable.
 
     Args:
-        mgr: Session manager for the target session
-        session_id: Session identifier for logging purposes
-        available: Whether the session is available (pre-checked)
+        mgr (BaseItemManager): Session manager for the target session
+        session_id (str): Session identifier for logging purposes
+        available (bool): Whether the session is available (pre-checked)
 
     Returns:
-        tuple: A 2-tuple containing:
+        tuple[str | None, str | None]: A 2-tuple containing:
             - community_version (str | None): Deephaven Community/Core version (e.g., "0.24.0")
-            - enterprise_version (str | None): Deephaven Enterprise/Core+/CorePlus version
+            - enterprise_version (str | None): Deephaven Enterprise/Core+ version
                                               (e.g., "0.24.0") or None if not enterprise
     """
     if not available:
@@ -1498,7 +1500,9 @@ async def session_script_run(
             f"[mcp_systems_server:session_script_run] Failed for session: '{session_id}', error: {e!r}",
             exc_info=True,
         )
-        result["error"] = f"Script execution failed for session '{session_id}': {type(e).__name__}: {e}"
+        result["error"] = (
+            f"Script execution failed for session '{session_id}': {type(e).__name__}: {e}"
+        )
         result["isError"] = True
     return result
 
@@ -1598,7 +1602,9 @@ async def session_pip_list(context: Context, session_id: str) -> dict:
             f"[mcp_systems_server:session_pip_list] Failed for session: '{session_id}', error: {e!r}",
             exc_info=True,
         )
-        result["error"] = f"Failed to list pip packages for session '{session_id}': {type(e).__name__}: {e}"
+        result["error"] = (
+            f"Failed to list pip packages for session '{session_id}': {type(e).__name__}: {e}"
+        )
         result["isError"] = True
     return result
 
@@ -1849,7 +1855,9 @@ async def session_table_data(
         _LOGGER.error(
             f"[mcp_systems_server:session_table_data] Invalid format parameter: {e!r}"
         )
-        result["error"] = f"Invalid format parameter for table '{table_name}': {type(e).__name__}: {e}"
+        result["error"] = (
+            f"Invalid format parameter for table '{table_name}': {type(e).__name__}: {e}"
+        )
         result["isError"] = True
 
     except Exception as e:
@@ -1858,7 +1866,9 @@ async def session_table_data(
             f"table '{table_name}': {e!r}",
             exc_info=True,
         )
-        result["error"] = f"Failed to get data from table '{table_name}' in session '{session_id}': {type(e).__name__}: {e}"
+        result["error"] = (
+            f"Failed to get data from table '{table_name}' in session '{session_id}': {type(e).__name__}: {e}"
+        )
         result["isError"] = True
 
     return result
@@ -1957,7 +1967,9 @@ async def _get_catalog_data(
         _LOGGER.error(
             f"[mcp_systems_server:{tool_name}] Session '{session_id}' is not an enterprise session: {e!r}"
         )
-        result["error"] = f"Session '{session_id}' does not support this operation: {type(e).__name__}: {e}"
+        result["error"] = (
+            f"Session '{session_id}' does not support this operation: {type(e).__name__}: {e}"
+        )
         result["isError"] = True
 
     except ValueError as e:
@@ -1973,7 +1985,9 @@ async def _get_catalog_data(
             f"[mcp_systems_server:{tool_name}] Failed for session '{session_id}': {e!r}",
             exc_info=True,
         )
-        result["error"] = f"Catalog operation failed for session '{session_id}': {type(e).__name__}: {e}"
+        result["error"] = (
+            f"Catalog operation failed for session '{session_id}': {type(e).__name__}: {e}"
+        )
         result["isError"] = True
 
     return result
@@ -3037,31 +3051,23 @@ async def _check_session_id_available(
 async def _get_system_config(
     function_name: str, config_manager: ConfigManager, system_name: str
 ) -> tuple[dict, dict | None]:
-    """Get system config from configuration and validate system exists.
+    """Get enterprise system configuration and validate it exists.
 
-    Retrieves the configuration for the specified enterprise system. Returns both
-    the system configuration and any error that occurred during retrieval. This is
-    a common validation step used by enterprise session management functions.
+    Retrieves the configuration for the specified enterprise system from the config manager.
+    This is a common validation step used by enterprise session management functions.
 
     Args:
         function_name (str): Name of the calling function for logging purposes.
-            Used to create contextual log messages.
         config_manager (ConfigManager): ConfigManager instance to retrieve configuration.
-        system_name (str): Name of the enterprise system to look up in the configuration.
+        system_name (str): Name of the enterprise system to look up.
 
     Returns:
         tuple[dict, dict | None]: A tuple containing (system_config, error_dict):
-            - system_config (dict): The enterprise system configuration dict if found,
-              or an empty dict {} if the system is not found.
-            - error_dict (dict | None): Error response dict with 'error' and 'isError'
-              keys if the system is not found, or None if successful.
+            - system_config (dict): The enterprise system configuration if found, or empty dict {} if not found.
+            - error_dict (dict | None): Error response with 'error' and 'isError' keys if system not found, or None on success.
 
-            Success case: ({"url": "...", "username": "...", ...}, None)
-            Error case: ({}, {"error": "Enterprise system 'X' not found...", "isError": True})
-
-    Raises:
-        Exception: May raise exceptions for unexpected errors such as issues reading
-            the configuration file or invalid configuration structure.
+            Success: ({"url": "...", "username": "...", ...}, None)
+            Error: ({}, {"error": "Enterprise system 'X' not found...", "isError": True})
 
     Example:
         >>> config_mgr = ConfigManager()
@@ -3327,7 +3333,9 @@ async def session_enterprise_create(
         programming_lang = resolved_config["programming_language"]
         if programming_lang and programming_lang.lower() != "python":
 
-            def language_transformer(config: CorePlusQueryConfig) -> CorePlusQueryConfig:
+            def language_transformer(
+                config: CorePlusQueryConfig,
+            ) -> CorePlusQueryConfig:
                 config.pb.scriptLanguage = programming_lang
                 return config
 
@@ -3397,7 +3405,9 @@ async def session_enterprise_create(
             f"'{session_name}' on system '{system_name}': {e!r}",
             exc_info=True,
         )
-        result["error"] = f"Failed to create enterprise session '{session_name}' on system '{system_name}': {type(e).__name__}: {e}"
+        result["error"] = (
+            f"Failed to create enterprise session '{session_name}' on system '{system_name}': {type(e).__name__}: {e}"
+        )
         result["isError"] = True
 
     return result
@@ -3642,7 +3652,9 @@ async def session_enterprise_delete(
             f"'{session_name}' from system '{system_name}': {e!r}",
             exc_info=True,
         )
-        result["error"] = f"Failed to delete enterprise session '{session_name}' from system '{system_name}': {type(e).__name__}: {e}"
+        result["error"] = (
+            f"Failed to delete enterprise session '{session_name}' from system '{system_name}': {type(e).__name__}: {e}"
+        )
         result["isError"] = True
 
     return result
@@ -3653,14 +3665,14 @@ async def session_enterprise_delete(
 # =============================================================================
 
 
-def _parse_pq_id(pq_id: str) -> tuple[str, int]:
+def _parse_pq_id(pq_id: str) -> tuple[str, CorePlusQuerySerial]:
     """Parse a pq_id into system_name and serial.
 
     Args:
         pq_id (str): PQ identifier in format 'enterprise:{system_name}:{serial}'
 
     Returns:
-        tuple[str, int]: Tuple of (system_name, serial)
+        tuple[str, CorePlusQuerySerial]: Tuple of (system_name, serial)
 
     Raises:
         ValueError: If pq_id format is invalid or serial is not an integer
@@ -3672,21 +3684,21 @@ def _parse_pq_id(pq_id: str) -> tuple[str, int]:
             "Expected format: 'enterprise:{{system_name}}:{{serial}}'"
         )
     try:
-        serial = int(parts[2])
+        serial_int = int(parts[2])
     except ValueError:
         raise ValueError(
             f"Invalid pq_id format: '{pq_id}'. "
             f"Serial must be an integer, got: '{parts[2]}'"
         ) from None
-    return parts[1], serial
+    return parts[1], CorePlusQuerySerial(serial_int)
 
 
-def _make_pq_id(system_name: str, serial: int) -> str:
+def _make_pq_id(system_name: str, serial: CorePlusQuerySerial) -> str:
     """Construct a pq_id from system_name and serial.
 
     Args:
         system_name (str): Name of the enterprise system
-        serial (int): PQ serial number
+        serial (CorePlusQuerySerial): PQ serial number
 
     Returns:
         str: PQ identifier in format 'enterprise:{system_name}:{serial}'
@@ -3725,29 +3737,29 @@ def _validate_timeout(timeout_seconds: int, function_name: str) -> int:
 
 def _format_pq_config(config: CorePlusQueryConfig) -> dict:
     """Format PersistentQueryConfigMessage into MCP-compatible dictionary.
-    
+
     Extracts ALL 38 fields from PersistentQueryConfigMessage protobuf and formats them
     for MCP API responses. Applies consistent field naming (snake_case) and converts
     empty/zero values to None for optional fields to produce cleaner JSON.
-    
+
     Protobuf reference:
     https://docs.deephaven.io/protodoc/latest/#io.deephaven.proto.persistent_query.PersistentQueryConfigMessage
-    
+
     Field transformations:
     - Empty strings → None for optional string fields
     - Zero values → None for optional timestamp fields
     - Repeated fields → Python lists
     - Enum values → Stringified
     - camelCase protobuf names → snake_case API names
-    
+
     Args:
         config (CorePlusQueryConfig): Wrapper around PersistentQueryConfigMessage protobuf
-        
+
     Returns:
         dict: All 38 config fields formatted for MCP API, with optional fields converted to None when empty
     """
     pb = config.pb
-    
+
     # Get restartUsers enum name using protobuf enum class Name() method
     # Handle unknown enum values (server may have newer proto than client)
     restart_users = pb.restartUsers
@@ -3757,8 +3769,8 @@ def _format_pq_config(config: CorePlusQueryConfig) -> dict:
         except ValueError:
             restart_users_str = f"UNKNOWN_RESTART_USERS_{restart_users}"
     else:
-        restart_users_str = str(restart_users) 
-    
+        restart_users_str = str(restart_users)
+
     return {
         "serial": pb.serial,
         "version": pb.version,
@@ -3779,41 +3791,55 @@ def _format_pq_config(config: CorePlusQueryConfig) -> dict:
         "script_path": pb.scriptPath if pb.scriptPath else None,
         "script_language": pb.scriptLanguage,
         "configuration_type": pb.configurationType,
-        "type_specific_fields_json": pb.typeSpecificFieldsJson if pb.typeSpecificFieldsJson else None,
+        "type_specific_fields_json": (
+            pb.typeSpecificFieldsJson if pb.typeSpecificFieldsJson else None
+        ),
         "scheduling": list(pb.scheduling),
         "timeout_nanos": pb.timeoutNanos if pb.timeoutNanos else None,
         "jvm_profile": pb.jvmProfile if pb.jvmProfile else None,
-        "last_modified_by_authenticated": pb.lastModifiedByAuthenticated if pb.lastModifiedByAuthenticated else None,
-        "last_modified_by_effective": pb.lastModifiedByEffective if pb.lastModifiedByEffective else None,
-        "last_modified_time_nanos": pb.lastModifiedTimeNanos if pb.lastModifiedTimeNanos else None,
+        "last_modified_by_authenticated": (
+            pb.lastModifiedByAuthenticated if pb.lastModifiedByAuthenticated else None
+        ),
+        "last_modified_by_effective": (
+            pb.lastModifiedByEffective if pb.lastModifiedByEffective else None
+        ),
+        "last_modified_time_nanos": (
+            pb.lastModifiedTimeNanos if pb.lastModifiedTimeNanos else None
+        ),
         "completed_status": pb.completedStatus if pb.completedStatus else None,
-        "expiration_time_nanos": pb.expirationTimeNanos if pb.expirationTimeNanos else None,
+        "expiration_time_nanos": (
+            pb.expirationTimeNanos if pb.expirationTimeNanos else None
+        ),
         "kubernetes_control": pb.kubernetesControl if pb.kubernetesControl else None,
         "worker_kind": pb.workerKind,
         "created_time_nanos": pb.createdTimeNanos if pb.createdTimeNanos else None,
         "replica_count": pb.replicaCount,
         "spare_count": pb.spareCount,
         "assignment_policy": pb.assignmentPolicy if pb.assignmentPolicy else None,
-        "assignment_policy_params": pb.assignmentPolicyParams if pb.assignmentPolicyParams else None,
+        "assignment_policy_params": (
+            pb.assignmentPolicyParams if pb.assignmentPolicyParams else None
+        ),
         "additional_memory_gb": pb.additionalMemoryGb,
         "python_control": pb.pythonControl if pb.pythonControl else None,
-        "generic_worker_control": pb.genericWorkerControl if pb.genericWorkerControl else None,
+        "generic_worker_control": (
+            pb.genericWorkerControl if pb.genericWorkerControl else None
+        ),
     }
 
 
-def _format_named_string_list(nsl) -> dict:
+def _format_named_string_list(nsl: Any) -> dict:
     """Format NamedStringList protobuf into dict.
-    
+
     Protobuf reference:
     https://docs.deephaven.io/protodoc/latest/#io.deephaven.proto.controller_common.NamedStringList
-    
+
     NamedStringList fields (2 total):
     - name (string)
     - values (repeated string)
-    
+
     Args:
         nsl: NamedStringList protobuf object
-        
+
     Returns:
         dict: Formatted named string list with snake_case keys
     """
@@ -3823,12 +3849,12 @@ def _format_named_string_list(nsl) -> dict:
     }
 
 
-def _format_column_definition(col) -> dict:
+def _format_column_definition(col: Any) -> dict:
     """Format ColumnDefinitionMessage protobuf into dict.
-    
+
     Protobuf reference:
     https://docs.deephaven.io/protodoc/latest/#io.deephaven.proto.common.ColumnDefinitionMessage
-    
+
     ColumnDefinitionMessage fields (9 total):
     - name (string)
     - dataType (string)
@@ -3839,10 +3865,10 @@ def _format_column_definition(col) -> dict:
     - codec (string)
     - codecArgs (string)
     - objectWidthBytes (int32)
-    
+
     Args:
         col: ColumnDefinitionMessage protobuf object
-        
+
     Returns:
         dict: Formatted column definition with snake_case keys
     """
@@ -3859,21 +3885,21 @@ def _format_column_definition(col) -> dict:
     }
 
 
-def _format_table_definition(td) -> dict:
+def _format_table_definition(td: Any) -> dict:
     """Format TableDefinitionMessage protobuf into dict.
-    
+
     Protobuf reference:
     https://docs.deephaven.io/protodoc/latest/#io.deephaven.proto.common.TableDefinitionMessage
-    
+
     TableDefinitionMessage fields (4 total):
     - namespace (string, optional)
     - tableName (string, optional)
     - columns (repeated ColumnDefinitionMessage)
     - storageType (StorageTypeEnum, optional)
-    
+
     Args:
         td: TableDefinitionMessage protobuf object
-        
+
     Returns:
         dict: Formatted table definition with snake_case keys
     """
@@ -3886,21 +3912,21 @@ def _format_table_definition(td) -> dict:
     }
 
 
-def _format_exported_object_info(obj) -> dict:
+def _format_exported_object_info(obj: Any) -> dict:
     """Format ExportedObjectInfoMessage protobuf into dict.
-    
+
     Protobuf reference:
     https://docs.deephaven.io/protodoc/latest/#io.deephaven.proto.persistent_query.ExportedObjectInfoMessage
-    
+
     ExportedObjectInfoMessage fields (4 total):
     - name (string)
     - type (ExportedObjectTypeEnum)
     - tableDefinition (TableDefinitionMessage)
     - originalType (string)
-    
+
     Args:
         obj: ExportedObjectInfoMessage protobuf object
-        
+
     Returns:
         dict: Formatted exported object info with snake_case keys
     """
@@ -3912,10 +3938,12 @@ def _format_exported_object_info(obj) -> dict:
             obj_type = ExportedObjectTypeEnum.Name(obj_type)
         except ValueError:
             obj_type = f"UNKNOWN_EXPORTED_TYPE_{obj_type}"
-    
+
     # Format tableDefinition if present
-    table_def = _format_table_definition(obj.tableDefinition) if obj.tableDefinition else None
-    
+    table_def = (
+        _format_table_definition(obj.tableDefinition) if obj.tableDefinition else None
+    )
+
     return {
         "name": obj.name,
         "type": obj_type,
@@ -3924,19 +3952,19 @@ def _format_exported_object_info(obj) -> dict:
     }
 
 
-def _format_worker_protocol(wp) -> dict:
+def _format_worker_protocol(wp: Any) -> dict:
     """Format WorkerProtocolMessage protobuf into dict.
-    
+
     Protobuf reference:
     https://docs.deephaven.io/protodoc/latest/#io.deephaven.proto.persistent_query.WorkerProtocolMessage
-    
+
     WorkerProtocolMessage fields (2 total):
     - name (string)
     - port (int32)
-    
+
     Args:
         wp: WorkerProtocolMessage protobuf object
-        
+
     Returns:
         dict: Formatted worker protocol with snake_case keys
     """
@@ -3946,12 +3974,12 @@ def _format_worker_protocol(wp) -> dict:
     }
 
 
-def _format_connection_details(cd) -> dict:
+def _format_connection_details(cd: Any) -> dict:
     """Format ProcessorConnectionDetailsMessage protobuf into dict.
-    
+
     Protobuf reference:
     https://docs.deephaven.io/protodoc/latest/#io.deephaven.proto.persistent_query.ProcessorConnectionDetailsMessage
-    
+
     ProcessorConnectionDetailsMessage fields (8 total):
     - protocols (repeated WorkerProtocolMessage)
     - workerName (string)
@@ -3961,10 +3989,10 @@ def _format_connection_details(cd) -> dict:
     - grpcUrl (string)
     - staticUrl (string)
     - enterpriseWebSocketUrl (string)
-    
+
     Args:
         cd: ProcessorConnectionDetailsMessage protobuf object
-        
+
     Returns:
         dict: Formatted connection details with snake_case keys
     """
@@ -3981,20 +4009,20 @@ def _format_connection_details(cd) -> dict:
     }
 
 
-def _format_exception_details(ed) -> dict:
+def _format_exception_details(ed: Any) -> dict:
     """Format ExceptionDetailsMessage protobuf into dict.
-    
+
     Protobuf reference:
     https://docs.deephaven.io/protodoc/latest/#io.deephaven.proto.common.ExceptionDetailsMessage
-    
+
     ExceptionDetailsMessage fields (3 total):
     - errorMessage (string)
     - stackTrace (string)
     - shortCauses (string)
-    
+
     Args:
         ed: ExceptionDetailsMessage protobuf object
-        
+
     Returns:
         dict: Formatted exception details with snake_case keys
     """
@@ -4007,15 +4035,15 @@ def _format_exception_details(ed) -> dict:
 
 def _format_pq_state(state: CorePlusQueryState | None) -> dict | None:
     """Format PersistentQueryStateMessage into MCP-compatible dictionary.
-    
+
     Extracts ALL 25 fields from PersistentQueryStateMessage protobuf and formats them
     for MCP API responses. Applies consistent field naming (snake_case) and converts
     empty/zero values to None for optional fields to produce cleaner JSON. Returns None
     if state is not available.
-    
+
     Protobuf reference:
     https://docs.deephaven.io/protodoc/latest/#io.deephaven.proto.persistent_query.PersistentQueryStateMessage
-    
+
     PersistentQueryStateMessage fields (25 total):
     - serial (int64)
     - version (int64)
@@ -4042,35 +4070,41 @@ def _format_pq_state(state: CorePlusQueryState | None) -> dict | None:
     - lastFailureTimeNanos (int64)
     - replicaSlot (int32)
     - statusDetails (string)
-    
+
     Args:
         state (CorePlusQueryState | None): CorePlusQueryState wrapper around PersistentQueryStateMessage protobuf,
                                           or None if no state available
-        
+
     Returns:
-        dict | None: All 25 state fields formatted for MCP API, with optional fields converted 
+        dict | None: All 25 state fields formatted for MCP API, with optional fields converted
                     to None when empty, or None if state not available
     """
     if state is None:
         return None
-    
+
     pb = state.pb
-    
+
     # Format tableGroups using helper function
     table_groups = [_format_named_string_list(g) for g in pb.tableGroups]
-    
+
     # Format scopeTypes using helper function
     scope_types = [_format_exported_object_info(obj) for obj in pb.scopeTypes]
-    
+
     # Format connectionDetails using helper function
-    connection_details = _format_connection_details(pb.connectionDetails) if pb.connectionDetails else None
-    
+    connection_details = (
+        _format_connection_details(pb.connectionDetails)
+        if pb.connectionDetails
+        else None
+    )
+
     # Format exceptionDetails using helper function
-    exception_details = _format_exception_details(pb.exceptionDetails) if pb.exceptionDetails else None
-    
+    exception_details = (
+        _format_exception_details(pb.exceptionDetails) if pb.exceptionDetails else None
+    )
+
     # Use the wrapper's status property which properly converts enum to name via ControllerClient
     status_str = state.status.name
-    
+
     result = {
         "serial": pb.serial,
         "version": pb.version,
@@ -4098,46 +4132,50 @@ def _format_pq_state(state: CorePlusQueryState | None) -> dict | None:
         "replica_slot": pb.replicaSlot,
         "status_details": pb.statusDetails or None,
     }
-    
+
     return result
 
 
 def _format_pq_replicas(replicas: list[CorePlusQueryState]) -> list[dict]:
     """Format list of replica PersistentQueryStateMessage objects.
-    
+
     Applies _format_pq_state to each replica in the list, filtering out None entries.
     Replicas are additional running instances of a persistent query for high availability.
-    
+
     Args:
         replicas (list[CorePlusQueryState]): List of CorePlusQueryState wrappers for replica states
-        
+
     Returns:
-        list[dict]: List of formatted replica state dictionaries (36 fields each), or empty list 
+        list[dict]: List of formatted replica state dictionaries (36 fields each), or empty list
                    if no replicas provided
     """
     if not replicas:
         return []
-    
-    return [_format_pq_state(replica) for replica in replicas if replica is not None]
+
+    formatted = [
+        _format_pq_state(replica) for replica in replicas if replica is not None
+    ]
+    return [f for f in formatted if f is not None]
 
 
 def _format_pq_spares(spares: list[CorePlusQueryState]) -> list[dict]:
     """Format list of spare PersistentQueryStateMessage objects.
-    
+
     Applies _format_pq_state to each spare in the list, filtering out None entries.
     Spares are pre-initialized worker instances ready to take over if the primary fails.
-    
+
     Args:
         spares (list[CorePlusQueryState]): List of CorePlusQueryState wrappers for spare states
-        
+
     Returns:
-        list[dict]: List of formatted spare state dictionaries (36 fields each), or empty list 
+        list[dict]: List of formatted spare state dictionaries (36 fields each), or empty list
                    if no spares provided
     """
     if not spares:
         return []
-    
-    return [_format_pq_state(spare) for spare in spares if spare is not None]
+
+    formatted = [_format_pq_state(spare) for spare in spares if spare is not None]
+    return [f for f in formatted if f is not None]
 
 
 def _normalize_programming_language(language: str) -> str:
@@ -4269,7 +4307,9 @@ async def pq_name_to_id(
             f"[mcp_systems_server:pq_name_to_id] Failed to convert PQ name '{pq_name}' on system '{system_name}': {e!r}",
             exc_info=True,
         )
-        result["error"] = f"Failed to convert PQ name '{pq_name}' to ID on system '{system_name}': {type(e).__name__}: {e}"
+        result["error"] = (
+            f"Failed to convert PQ name '{pq_name}' to ID on system '{system_name}': {type(e).__name__}: {e}"
+        )
         result["isError"] = True
 
     return result
@@ -4380,10 +4420,10 @@ async def pq_list(
         pqs = []
         for serial, pq_info in pq_map.items():
             config_pb = pq_info.config.pb
-            state_pb = pq_info.state.pb
+            state_pb = pq_info.state.pb if pq_info.state else None
             pq_name = config_pb.name
             pq_id = _make_pq_id(system_name, serial)
-            status = pq_info.state.status.name
+            status = pq_info.state.status.name if pq_info.state else "UNKNOWN"
 
             pq_data = {
                 "pq_id": pq_id,
@@ -4400,7 +4440,7 @@ async def pq_list(
                 "admin_groups": list(config_pb.adminGroups),
                 "viewer_groups": list(config_pb.viewerGroups),
                 "is_scheduled": bool(config_pb.scheduling),
-                "num_failures": state_pb.numFailures,
+                "num_failures": state_pb.numFailures if state_pb else 0,
             }
 
             # Add session_id if PQ is running (session_id uses name, not serial)
@@ -4429,7 +4469,9 @@ async def pq_list(
             f"[mcp_systems_server:pq_list] Failed to list PQs on system '{system_name}': {e!r}",
             exc_info=True,
         )
-        result["error"] = f"Failed to list PQs on system '{system_name}': {type(e).__name__}: {e}"
+        result["error"] = (
+            f"Failed to list PQs on system '{system_name}': {type(e).__name__}: {e}"
+        )
         result["isError"] = True
 
     return result
@@ -4648,7 +4690,7 @@ async def pq_details(
     result: dict[str, object] = {"success": False}
 
     try:
-        # Parse pq_id
+        # Parse pq_id to get system name and serial
         try:
             system_name, serial = _parse_pq_id(pq_id)
         except ValueError as e:
@@ -4683,21 +4725,21 @@ async def pq_details(
         # Get all PQs from controller (ensures subscription is ready)
         # Then extract the specific PQ by serial
         pq_map = await controller.map()
-        
+
         if serial not in pq_map:
             error_msg = f"PQ with serial {serial} not found on system '{system_name}'"
             _LOGGER.error(f"[mcp_systems_server:pq_details] {error_msg}")
             result["error"] = error_msg
             result["isError"] = True
             return result
-        
+
         pq_info = pq_map[serial]
 
         # Format response
         # NOTE: pq_info is PersistentQueryInfoMessage
         # Protobuf docs: https://docs.deephaven.io/protodoc/latest/#io.deephaven.proto.persistent_query.PersistentQueryInfoMessage
         pq_name = pq_info.config.pb.name
-        state_name = pq_info.state.status.name
+        state_name = pq_info.state.status.name if pq_info.state else "UNKNOWN"
 
         pq_data = {
             "success": True,
@@ -4729,7 +4771,9 @@ async def pq_details(
             f"[mcp_systems_server:pq_details] Failed to get PQ details: {e!r}",
             exc_info=True,
         )
-        result["error"] = f"Failed to get PQ details for '{pq_id}': {type(e).__name__}: {e}"
+        result["error"] = (
+            f"Failed to get PQ details for '{pq_id}': {type(e).__name__}: {e}"
+        )
         result["isError"] = True
 
     return result
@@ -4952,7 +4996,9 @@ async def pq_create(
         )
         # Provide descriptive error message with exception type
         error_msg = str(e) if str(e) else repr(e)
-        result["error"] = f"Failed to create PQ '{pq_name}': {type(e).__name__}: {error_msg}"
+        result["error"] = (
+            f"Failed to create PQ '{pq_name}': {type(e).__name__}: {error_msg}"
+        )
         result["isError"] = True
 
     return result
@@ -5001,7 +5047,7 @@ async def pq_delete(
     result: dict[str, object] = {"success": False}
 
     try:
-        # Parse pq_id
+        # Parse pq_id to get system name and serial
         try:
             system_name, serial = _parse_pq_id(pq_id)
         except ValueError as e:
@@ -5068,7 +5114,7 @@ async def pq_start(
     The start command is sent to the controller, then this method polls the PQ state
     until it reaches RUNNING (passing through INITIALIZING) or the timeout expires.
 
-    **Critical for AI Agents**: 
+    **Critical for AI Agents**:
     - If timeout is reached, this returns an error BUT the PQ continues starting in the background
     - After a timeout error, use pq_details to check if the PQ eventually reached RUNNING state
     - Initialization time varies: simple sessions ~5-15s, large heap/complex scripts ~30-60s
@@ -5118,7 +5164,7 @@ async def pq_start(
     result: dict[str, object] = {"success": False}
 
     try:
-        # Parse pq_id
+        # Parse pq_id to get system name and serial
         try:
             system_name, serial = _parse_pq_id(pq_id)
         except ValueError as e:
@@ -5159,7 +5205,7 @@ async def pq_start(
         # Get updated PQ info
         pq_info = await controller.get(serial)
         pq_name = pq_info.config.pb.name
-        state_name = pq_info.state.status.name
+        state_name = pq_info.state.status.name if pq_info.state else "UNKNOWN"
 
         _LOGGER.info(
             f"[mcp_systems_server:pq_start] Started PQ '{pq_name}' (serial: {serial}), state: {state_name}"
@@ -5205,7 +5251,7 @@ async def pq_stop(
     Gracefully stops one or more running PQs, waiting for them to transition to STOPPED state.
     When multiple pq_ids are provided, stop commands are sent concurrently for efficiency,
     but this method waits for ALL PQs to stop (or timeout) before returning.
-    
+
     **Important**: All pq_ids must be from the same enterprise system - mixing systems returns error.
 
     **Important**: If the timeout is reached, a timeout error is returned but the
@@ -5218,7 +5264,7 @@ async def pq_stop(
 
     AI Agent Usage:
     - Use pq_id from pq_list to identify PQs
-    - If you only have PQ names, use pq_name_to_id to look up pq_ids first
+    - If you only have PQ names, use pq_name_to_id to look up the pq_ids first
     - Single PQ: pass string "enterprise:system:12345"
     - Multiple PQs: pass list ["enterprise:system:12345", "enterprise:system:67890"]
     - Response always contains list in 'stopped' field, even for single PQ
@@ -5298,6 +5344,12 @@ async def pq_stop(
                 result["isError"] = True
                 return result
 
+        # Ensure system_name is set (required for type safety)
+        if system_name is None:  # pragma: no cover
+            result["error"] = "No valid pq_ids provided"
+            result["isError"] = True
+            return result
+
         # Get config and session registry
         config_manager: ConfigManager = context.request_context.lifespan_context[
             "config_manager"
@@ -5336,7 +5388,7 @@ async def pq_stop(
         for pid, serial in parsed_pqs:
             pq_info = await controller.get(serial)
             pq_name = pq_info.config.pb.name
-            state_name = pq_info.state.status.name
+            state_name = pq_info.state.status.name if pq_info.state else "UNKNOWN"
             stopped_pqs.append(
                 {
                     "pq_id": pid,
@@ -5465,6 +5517,12 @@ async def pq_restart(
                 result["error"] = f"Invalid pq_id '{pid}': {type(e).__name__}: {e}"
                 result["isError"] = True
                 return result
+
+        # Ensure system_name is set (required for type safety)
+        if system_name is None:  # pragma: no cover
+            result["error"] = "No valid pq_ids provided"
+            result["isError"] = True
+            return result
 
         # Get config and session registry
         config_manager: ConfigManager = context.request_context.lifespan_context[
@@ -6503,7 +6561,9 @@ async def session_community_create(
             f"[mcp_systems_server:session_community_create] Failed to create session '{session_name}': {e!r}",
             exc_info=True,
         )
-        result["error"] = f"Failed to create community session '{session_name}': {type(e).__name__}: {e}"
+        result["error"] = (
+            f"Failed to create community session '{session_name}': {type(e).__name__}: {e}"
+        )
         result["isError"] = True
 
     return result
@@ -6703,7 +6763,9 @@ async def session_community_delete(
             f"[mcp_systems_server:session_community_delete] Failed to delete session '{session_name}': {e!r}",
             exc_info=True,
         )
-        result["error"] = f"Failed to delete community session '{session_name}': {type(e).__name__}: {e}"
+        result["error"] = (
+            f"Failed to delete community session '{session_name}': {type(e).__name__}: {e}"
+        )
         result["isError"] = True
 
     return result
