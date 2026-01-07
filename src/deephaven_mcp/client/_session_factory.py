@@ -157,7 +157,7 @@ class CorePlusSessionFactory(
         servers, or any environment where non-blocking operations are important.
 
         Args:
-            session_manager: The SessionManager instance to wrap. Must be an instance
+            session_manager (deephaven_enterprise.client.session_manager.SessionManager): The SessionManager instance to wrap. Must be an instance
                            of deephaven_enterprise.client.session_manager.SessionManager.
                            This should be a properly initialized session manager with valid
                            connection information, though it does not need to be authenticated
@@ -311,7 +311,12 @@ class CorePlusSessionFactory(
             _LOGGER.info(
                 f"[CorePlusSessionFactory:from_url] Successfully created SessionManager for URL {url} in {elapsed:.2f}s"
             )
-            return cls(manager)
+            instance = cls(manager)
+            
+            # Subscribe to controller client for persistent query operations
+            await instance._controller_client.subscribe()
+            
+            return instance
 
     @classmethod
     async def from_config(cls, worker_cfg: dict[str, Any]) -> "CorePlusSessionFactory":
@@ -504,6 +509,9 @@ class CorePlusSessionFactory(
                 f"[CorePlusSessionFactory:from_config] Auth type '{auth_type}' is not supported for automatic authentication. Returning unauthenticated manager."
             )
 
+        # Subscribe to controller client for persistent query operations
+        await instance._controller_client.subscribe()
+        
         _LOGGER.info(
             f"[CorePlusSessionFactory:from_config] Successfully created and authenticated SessionManager from config (auth_type={auth_type})"
         )
@@ -569,6 +577,10 @@ class CorePlusSessionFactory(
         Key capabilities of the controller client include:
         - Listing, filtering, and searching for persistent queries/workers across the server
         - Retrieving detailed information about any worker (memory usage, uptime, tables, etc.)
+        - Creating, starting, stopping, and deleting persistent queries
+        - Managing worker resources and configurations
+        - Monitoring query state and health
+
         Returns:
             CorePlusControllerClient: A client for interacting with the Deephaven controller service.
                 This client provides methods for administrative operations such as listing
@@ -688,7 +700,7 @@ class CorePlusSessionFactory(
             See https://deephaven.atlassian.net/browse/DH-19984 for tracking.
 
         Args:
-            session: The raw session object from the enterprise system
+            session (pydeephaven.Session): The raw session object from the enterprise system
 
         Returns:
             str: The programming language (e.g., "python", "groovy")
@@ -725,12 +737,9 @@ class CorePlusSessionFactory(
         in a CorePlusSession for consistent behavior across the API.
 
         Args:
-            # Worker identification
             name (str | None): Optional name for the worker process. If None (default), an auto-generated name based
                 on the current timestamp will be used. A descriptive name can make it easier to
                 identify your worker in monitoring tools and logs.
-
-            # Resource configuration
             heap_size_gb (int | None): JVM heap size in gigabytes (e.g., 8 for -Xmx8g). Determines the maximum amount of memory available
                 to the worker process. Larger values are necessary for processing larger datasets, but
                 require more system resources. If None (default), the server's default heap size is used.
@@ -745,8 +754,6 @@ class CorePlusSessionFactory(
             engine (str): Engine type that determines the worker's capabilities and behavior.
                 Defaults to "DeephavenCommunity". Other options may include enterprise engines
                 with additional features depending on your Deephaven installation.
-
-            # Lifecycle management
             auto_delete_timeout (int | None): Number of seconds of inactivity before the worker is automatically
                 terminated and cleaned up. Defaults to 600 (10 minutes). Set to None to prevent
                 auto-deletion (not recommended for production use as it can lead to resource leaks).
@@ -754,16 +761,12 @@ class CorePlusSessionFactory(
             timeout_seconds (float): Maximum time in seconds to wait for the worker to start before raising
                 an exception. Defaults to 60 seconds. Increase for slower environments or when
                 creating workers with complex initialization processes.
-
-            # Access controls
             admin_groups (list[str] | None): List of user groups that have administrative permissions for this worker.
                 Admins can modify, restart, or terminate the worker. If None (default), only the
                 creator has admin privileges.
             viewer_groups (list[str] | None): List of user groups that have read-only access to this worker.
                 Viewers can connect to the worker and view its data but cannot modify it.
                 If None (default), only the creator has viewing privileges.
-
-            # Advanced configuration
             configuration_transformer (Callable[..., Any] | None): Optional function that takes and returns a configuration dictionary.
                 This allows for advanced customization of the worker configuration beyond what the
                 standard parameters provide. The function signature should be:

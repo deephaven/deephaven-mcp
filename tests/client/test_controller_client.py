@@ -297,8 +297,17 @@ async def test_get_serial_for_name_other_error(
 @pytest.mark.asyncio
 async def test_add_query_success(coreplus_controller_client, dummy_controller_client):
     dummy_controller_client.add_query.return_value = "serial"
+    # Set up query_config.pb with all fields accessed by logging
     query_config = MagicMock()
-    query_config.config = "config"
+    query_config.pb.name = "test-query"
+    query_config.pb.heapSizeGb = 8.0
+    query_config.pb.scriptLanguage = "Python"
+    query_config.pb.configurationType = "Script"
+    query_config.pb.enabled = True
+    query_config.pb.scriptCode = "print('hello')"
+    query_config.pb.scriptPath = ""
+    query_config.pb.serverName = ""
+    query_config.pb.workerKind = "DeephavenCommunity"
     result = await coreplus_controller_client.add_query(query_config)
     assert result == "serial"
 
@@ -411,7 +420,7 @@ async def test_make_pq_config_with_all_parameters(
 
         # Verify all parameters were applied to config
         assert mock_config.scriptLanguage == "Python"
-        assert mock_config.scriptBody == "print('hello')"
+        assert mock_config.scriptCode == "print('hello')"
         assert mock_config.configurationType == "RunAndDone"
         assert mock_config.enabled == False
         assert mock_config.restartUsers == "RU_ADMIN"
@@ -447,6 +456,116 @@ async def test_make_pq_config_with_script_path(
         # Verify script_path was applied
         assert mock_config.scriptPath == "IrisQueries/groovy/analytics.groovy"
         assert mock_config.scriptLanguage == "Groovy"
+
+
+@pytest.mark.asyncio
+async def test_make_pq_config_none_defaults_preserve_config(
+    coreplus_controller_client, dummy_controller_client, controller_client_mod
+):
+    """Test that None parameters don't override make_temporary_config defaults."""
+    mock_config = MagicMock()
+    # Set up some default values that make_temporary_config would have set
+    mock_config.scriptLanguage = "Groovy"
+    mock_config.configurationType = "InteractiveConsole"
+    mock_config.enabled = False
+    dummy_controller_client.make_temporary_config.return_value = mock_config
+
+    with patch.object(
+        controller_client_mod, "CorePlusQueryConfig", autospec=True
+    ) as mock_cfg:
+        # Call with minimal parameters - None defaults should NOT override
+        result = await coreplus_controller_client.make_pq_config(
+            name="test-pq",
+            heap_size_gb=8.0,
+            # Not passing programming_language, configuration_type, enabled
+            # so they should remain as set by make_temporary_config
+        )
+
+        # Verify the original values were preserved (not overwritten)
+        assert mock_config.scriptLanguage == "Groovy"
+        assert mock_config.configurationType == "InteractiveConsole"
+        assert mock_config.enabled == False
+
+
+@pytest.mark.asyncio
+async def test_make_pq_config_auto_delete_timeout_passed_to_make_temporary_config(
+    coreplus_controller_client, dummy_controller_client, controller_client_mod
+):
+    """Test that auto_delete_timeout is passed to make_temporary_config."""
+    mock_config = MagicMock()
+    dummy_controller_client.make_temporary_config.return_value = mock_config
+
+    with patch.object(
+        controller_client_mod, "CorePlusQueryConfig", autospec=True
+    ) as mock_cfg:
+        await coreplus_controller_client.make_pq_config(
+            name="test-pq",
+            heap_size_gb=8.0,
+            auto_delete_timeout=300,  # 5 minutes
+        )
+
+        # Verify auto_delete_timeout was passed to make_temporary_config
+        dummy_controller_client.make_temporary_config.assert_called_once()
+        call_args = dummy_controller_client.make_temporary_config.call_args
+        # auto_delete_timeout is the 7th positional arg (after name, heap, server, extra_jvm_args, extra_env_vars, engine)
+        assert call_args[0][6] == 300
+
+
+@pytest.mark.asyncio
+async def test_make_pq_config_enabled_true_is_applied(
+    coreplus_controller_client, dummy_controller_client, controller_client_mod
+):
+    """Test that enabled=True is explicitly applied to config."""
+    mock_config = MagicMock()
+    mock_config.enabled = False  # Default from make_temporary_config
+    dummy_controller_client.make_temporary_config.return_value = mock_config
+
+    with patch.object(
+        controller_client_mod, "CorePlusQueryConfig", autospec=True
+    ) as mock_cfg:
+        await coreplus_controller_client.make_pq_config(
+            name="test-pq",
+            heap_size_gb=8.0,
+            enabled=True,  # Explicitly set to True
+        )
+
+        # Verify enabled=True was applied (overriding the mock's False default)
+        assert mock_config.enabled == True
+
+
+@pytest.mark.asyncio
+async def test_make_pq_config_permanent_query_clears_scheduling(
+    coreplus_controller_client, dummy_controller_client, controller_client_mod
+):
+    """Test that permanent queries (auto_delete_timeout=None) clear temporary scheduling."""
+    mock_config = MagicMock()
+    mock_scheduling = MagicMock()
+    mock_config.scheduling = mock_scheduling
+    dummy_controller_client.make_temporary_config.return_value = mock_config
+
+    with patch.object(
+        controller_client_mod, "CorePlusQueryConfig", autospec=True
+    ) as mock_cfg:
+        await coreplus_controller_client.make_pq_config(
+            name="test-pq",
+            heap_size_gb=8.0,
+            auto_delete_timeout=None,  # Permanent query
+        )
+
+        # Verify make_temporary_config was called with a default timeout (600)
+        dummy_controller_client.make_temporary_config.assert_called_once()
+        call_args = dummy_controller_client.make_temporary_config.call_args
+        # auto_delete_timeout is the 7th positional arg
+        assert call_args[0][6] == 600  # Default timeout used for creation
+
+        # Verify scheduling was cleared and set to continuous for permanent query
+        mock_scheduling.__delitem__.assert_called_once_with(slice(None))
+        # Verify all continuous scheduling parameters were appended
+        append_calls = [call[0][0] for call in mock_scheduling.append.call_args_list]
+        assert "SchedulerType=com.illumon.iris.controller.IrisQuerySchedulerContinuous" in append_calls
+        assert "StartTime=00:00:00" in append_calls
+        assert "DailyRestart=false" in append_calls
+        assert "SchedulingDisabled=false" in append_calls
 
 
 @pytest.mark.asyncio

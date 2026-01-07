@@ -468,11 +468,11 @@ async def test_session_enterprise_create_auto_name_no_username_and_language_tran
         mock_factory.connect_to_new_worker.assert_called_once()
         assert captured_config_transformer is not None
 
-        # Test the language transformer to cover lines 1669-1670
+        # Test the language transformer - now accesses config.pb.scriptLanguage
         mock_config = MagicMock()
         result_config = captured_config_transformer(mock_config)
         assert result_config is mock_config
-        assert mock_config.scriptLanguage == "Groovy"
+        assert mock_config.pb.scriptLanguage == "Groovy"
 
         # Verify session was added using add_session method - check the call was made
         session_id = f"enterprise:no-user-system:mcp-session-20241126-1500"
@@ -8557,14 +8557,96 @@ async def test_session_community_create_default_session_type_in_config():
 
 
 def create_mock_pq_info(serial, name, state="RUNNING", heap_size=8.0):
-    """Helper to create mock PQ info object."""
+    """Helper to create mock PQ info object.
+    
+    Creates a mock PersistentQueryInfoMessage for testing.
+    Protobuf docs: https://docs.deephaven.io/protodoc/20240517/#io.deephaven.proto.persistent_query.PersistentQueryInfoMessage
+    
+    Note: Python protobuf keeps camelCase field names from .proto files (e.g., heapSizeGb not heap_size_gb)
+    """
     mock_pq_info = MagicMock()
+    # Basic config fields
+    mock_pq_info.config.pb.serial = serial
+    mock_pq_info.config.pb.version = 1
     mock_pq_info.config.pb.name = name
-    mock_pq_info.config.pb.heap_size = heap_size
-    mock_pq_info.config.pb.engine = "DeephavenCommunity"
-    mock_pq_info.state.pb.state_enum_name = state
-    mock_pq_info.state.pb.worker_host = "worker-01.example.com"
-    mock_pq_info.state.pb.worker_port = 10000
+    mock_pq_info.config.pb.owner = "test_user"
+    mock_pq_info.config.pb.enabled = True
+    # Resource fields
+    mock_pq_info.config.pb.heapSizeGb = heap_size
+    mock_pq_info.config.pb.bufferPoolToHeapRatio = 0.0
+    mock_pq_info.config.pb.detailedGCLoggingEnabled = False
+    mock_pq_info.config.pb.extraJvmArguments = []
+    mock_pq_info.config.pb.extraEnvironmentVariables = []
+    mock_pq_info.config.pb.classPathAdditions = []
+    # Execution fields
+    mock_pq_info.config.pb.serverName = ""
+    mock_pq_info.config.pb.adminGroups = []
+    mock_pq_info.config.pb.viewerGroups = []
+    
+    # restartUsers - handled by RestartUsersEnum.Name() which is patched in tests
+    mock_pq_info.config.pb.restartUsers = 0
+    # Script fields
+    mock_pq_info.config.pb.scriptCode = ""
+    mock_pq_info.config.pb.scriptPath = ""
+    mock_pq_info.config.pb.scriptLanguage = "Python"
+    mock_pq_info.config.pb.configurationType = "Script"
+    mock_pq_info.config.pb.typeSpecificFieldsJson = ""
+    # Scheduling/timeout
+    mock_pq_info.config.pb.scheduling = []
+    mock_pq_info.config.pb.timeoutNanos = 0
+    # Advanced config
+    mock_pq_info.config.pb.jvmProfile = ""
+    mock_pq_info.config.pb.pythonControl = ""
+    mock_pq_info.config.pb.genericWorkerControl = ""
+    # Metadata fields
+    mock_pq_info.config.pb.lastModifiedByAuthenticated = ""
+    mock_pq_info.config.pb.lastModifiedByEffective = ""
+    mock_pq_info.config.pb.lastModifiedTimeNanos = 0
+    mock_pq_info.config.pb.createdTimeNanos = 0
+    mock_pq_info.config.pb.completedStatus = ""
+    mock_pq_info.config.pb.expirationTimeNanos = 0
+    # Kubernetes/worker fields
+    mock_pq_info.config.pb.kubernetesControl = ""
+    mock_pq_info.config.pb.workerKind = "DeephavenCommunity"
+    mock_pq_info.config.pb.replicaCount = 0
+    mock_pq_info.config.pb.spareCount = 0
+    mock_pq_info.config.pb.assignmentPolicy = ""
+    mock_pq_info.config.pb.assignmentPolicyParams = ""
+    mock_pq_info.config.pb.additionalMemoryGb = 0.0
+    # State - primary instance with ALL 25 protobuf fields
+    # status is accessed via wrapper's status.name property
+    mock_pq_info.state.status.name = state
+    mock_pq_info.state.pb.serial = serial
+    mock_pq_info.state.pb.version = 1
+    mock_pq_info.state.pb.initializationStartNanos = 1734467100000000000 if state in ["RUNNING", "INITIALIZING"] else 0
+    mock_pq_info.state.pb.initializationCompleteNanos = 1734467150000000000 if state in ["RUNNING", "INITIALIZING"] else 0
+    mock_pq_info.state.pb.lastUpdateNanos = 1734467200000000000
+    mock_pq_info.state.pb.dispatcherHost = "dispatcher.example.com" if state in ["RUNNING", "INITIALIZING"] else ""
+    mock_pq_info.state.pb.tableGroups = []
+    mock_pq_info.state.pb.scopeTypes = []
+    mock_pq_info.state.pb.connectionDetails = None
+    mock_pq_info.state.pb.exceptionDetails = None
+    mock_pq_info.state.pb.typeSpecificStateJson = ""
+    mock_pq_info.state.pb.lastAuthenticatedUser = ""
+    mock_pq_info.state.pb.lastEffectiveUser = ""
+    mock_pq_info.state.pb.scriptLoaderStateJson = ""
+    mock_pq_info.state.pb.hasProgress = False
+    mock_pq_info.state.pb.progressValue = 0
+    mock_pq_info.state.pb.progressMessage = ""
+    mock_pq_info.state.pb.engineVersion = ""
+    mock_pq_info.state.pb.dispatcherPort = 8080 if state in ["RUNNING", "INITIALIZING"] else 0
+    mock_pq_info.state.pb.shouldStopNanos = 0
+    mock_pq_info.state.pb.numFailures = 0
+    mock_pq_info.state.pb.lastFailureTimeNanos = 0
+    mock_pq_info.state.pb.replicaSlot = 0
+    mock_pq_info.state.pb.statusDetails = ""
+    
+    # Replicas list (empty by default)
+    mock_pq_info.replicas = []
+    
+    # Spares list (empty by default)
+    mock_pq_info.spares = []
+    
     return mock_pq_info
 
 
@@ -8701,6 +8783,983 @@ async def test_pq_name_to_id_exception():
     assert result["isError"] is True
 
 
+@patch('deephaven_mcp.mcp_systems_server._mcp.RestartUsersEnum')
+def test_format_pq_config(mock_restart_enum):
+    """Test _format_pq_config helper function with all field transformations."""
+    # Set up RestartUsersEnum.Name() to return proper names
+    mock_restart_enum.Name.side_effect = lambda x: {0: "RU_UNSPECIFIED", 1: "RU_ADMIN", 2: "RU_ALL"}.get(x, f"RU_UNKNOWN_{x}")
+    
+    # Create mock config with all fields populated
+    mock_config = MagicMock()
+    mock_pb = MagicMock()
+    
+    # Basic fields
+    mock_pb.serial = 12345
+    mock_pb.version = 5
+    mock_pb.name = "test_query"
+    mock_pb.owner = "test_owner"
+    mock_pb.enabled = True
+    
+    # Resource fields
+    mock_pb.heapSizeGb = 8.0
+    mock_pb.bufferPoolToHeapRatio = 0.25
+    mock_pb.detailedGCLoggingEnabled = True
+    
+    # List fields
+    mock_pb.extraJvmArguments = ["-XX:+UseG1GC", "-Xmx8g"]
+    mock_pb.extraEnvironmentVariables = ["VAR1=value1", "VAR2=value2"]
+    mock_pb.classPathAdditions = ["/custom/libs"]
+    
+    # Execution fields
+    mock_pb.serverName = "QueryServer_1"  # Non-empty -> kept
+    mock_pb.adminGroups = ["admins", "data-team"]
+    mock_pb.viewerGroups = ["analysts"]
+    
+    # restartUsers - RestartUsersEnum.Name() is patched at function level
+    # Value 1 = RU_ADMIN in our mock
+    mock_pb.restartUsers = 1
+    
+    # Script fields
+    mock_pb.scriptCode = ""  # Empty -> None
+    mock_pb.scriptPath = "/scripts/test.py"
+    mock_pb.scriptLanguage = "Python"
+    mock_pb.configurationType = "Script"
+    mock_pb.typeSpecificFieldsJson = ""  # Empty -> None
+    
+    # Scheduling/timeout
+    mock_pb.scheduling = ["SchedulerType=Daily", "StartTime=08:00:00"]
+    mock_pb.timeoutNanos = 300000000000
+    
+    # Advanced config
+    mock_pb.jvmProfile = "large-memory"
+    
+    # Metadata fields
+    mock_pb.lastModifiedByAuthenticated = "admin_user"
+    mock_pb.lastModifiedByEffective = "admin_user"
+    mock_pb.lastModifiedTimeNanos = 1734467200000000000
+    mock_pb.completedStatus = ""  # Empty -> None
+    mock_pb.expirationTimeNanos = 0  # 0 -> None
+    
+    # Kubernetes/worker fields
+    mock_pb.kubernetesControl = ""  # Empty -> None
+    mock_pb.workerKind = "DeephavenCommunity"
+    mock_pb.createdTimeNanos = 1734380800000000000
+    mock_pb.replicaCount = 2
+    mock_pb.spareCount = 1
+    mock_pb.assignmentPolicy = "RoundRobin"
+    mock_pb.assignmentPolicyParams = ""  # Empty -> None
+    mock_pb.additionalMemoryGb = 2.0
+    mock_pb.pythonControl = ""  # Empty -> None
+    mock_pb.genericWorkerControl = ""  # Empty -> None
+    
+    mock_config.pb = mock_pb
+    
+    # Call the helper
+    result = mcp_mod._format_pq_config(mock_config)
+    
+    # Verify all 38 fields are present
+    assert len(result) == 38
+    
+    # Basic fields
+    assert result["serial"] == 12345
+    assert result["version"] == 5
+    assert result["name"] == "test_query"
+    assert result["owner"] == "test_owner"
+    assert result["enabled"] is True
+    
+    # Resource fields
+    assert result["heap_size_gb"] == 8.0
+    assert result["buffer_pool_to_heap_ratio"] == 0.25
+    assert result["detailed_gc_logging_enabled"] is True
+    
+    # List conversions
+    assert result["extra_jvm_arguments"] == ["-XX:+UseG1GC", "-Xmx8g"]
+    assert result["extra_environment_variables"] == ["VAR1=value1", "VAR2=value2"]
+    assert result["class_path_additions"] == ["/custom/libs"]
+    assert result["admin_groups"] == ["admins", "data-team"]
+    assert result["viewer_groups"] == ["analysts"]
+    assert result["scheduling"] == ["SchedulerType=Daily", "StartTime=08:00:00"]
+    
+    # Execution fields
+    assert result["server_name"] == "QueryServer_1"
+    assert result["restart_users"] == "RU_ADMIN"
+    
+    # Script fields
+    assert result["script_code"] is None  # Empty -> None
+    assert result["script_path"] == "/scripts/test.py"
+    assert result["script_language"] == "Python"
+    assert result["configuration_type"] == "Script"
+    assert result["type_specific_fields_json"] is None  # Empty -> None
+    
+    # Timeout
+    assert result["timeout_nanos"] == 300000000000
+    
+    # Advanced config
+    assert result["jvm_profile"] == "large-memory"
+    
+    # Metadata fields
+    assert result["last_modified_by_authenticated"] == "admin_user"
+    assert result["last_modified_by_effective"] == "admin_user"
+    assert result["last_modified_time_nanos"] == 1734467200000000000
+    assert result["completed_status"] is None  # Empty -> None
+    assert result["expiration_time_nanos"] is None  # 0 -> None
+    
+    # Kubernetes/worker fields
+    assert result["kubernetes_control"] is None  # Empty -> None
+    assert result["worker_kind"] == "DeephavenCommunity"
+    assert result["created_time_nanos"] == 1734380800000000000
+    assert result["replica_count"] == 2
+    assert result["spare_count"] == 1
+    assert result["assignment_policy"] == "RoundRobin"
+    assert result["assignment_policy_params"] is None  # Empty -> None
+    assert result["additional_memory_gb"] == 2.0
+    assert result["python_control"] is None  # Empty -> None
+    assert result["generic_worker_control"] is None  # Empty -> None
+
+
+@patch('deephaven_mcp.mcp_systems_server._mcp.RestartUsersEnum')
+def test_format_pq_config_unknown_enum_fallback(mock_restart_enum):
+    """Test _format_pq_config handles unknown enum values gracefully (version mismatch)."""
+    # Simulate server sending an enum value unknown to client's proto definition
+    mock_restart_enum.Name.side_effect = ValueError("Enum has no name defined for value 99")
+    
+    mock_config = MagicMock()
+    mock_pb = MagicMock()
+    mock_pb.serial = 12345
+    mock_pb.version = 1
+    mock_pb.name = "test"
+    mock_pb.owner = "owner"
+    mock_pb.enabled = True
+    mock_pb.heapSizeGb = 8.0
+    mock_pb.bufferPoolToHeapRatio = 0.0
+    mock_pb.detailedGCLoggingEnabled = False
+    mock_pb.extraJvmArguments = []
+    mock_pb.extraEnvironmentVariables = []
+    mock_pb.classPathAdditions = []
+    mock_pb.serverName = ""
+    mock_pb.adminGroups = []
+    mock_pb.viewerGroups = []
+    mock_pb.restartUsers = 99  # Unknown enum value from newer server
+    mock_pb.scriptCode = ""
+    mock_pb.scriptPath = ""
+    mock_pb.scriptLanguage = "Python"
+    mock_pb.configurationType = "Script"
+    mock_pb.typeSpecificFieldsJson = ""
+    mock_pb.scheduling = []
+    mock_pb.timeoutNanos = 0
+    mock_pb.jvmProfile = ""
+    mock_pb.lastModifiedByAuthenticated = ""
+    mock_pb.lastModifiedByEffective = ""
+    mock_pb.lastModifiedTimeNanos = 0
+    mock_pb.completedStatus = ""
+    mock_pb.expirationTimeNanos = 0
+    mock_pb.kubernetesControl = ""
+    mock_pb.workerKind = "DeephavenCommunity"
+    mock_pb.createdTimeNanos = 0
+    mock_pb.replicaCount = 0
+    mock_pb.spareCount = 0
+    mock_pb.assignmentPolicy = ""
+    mock_pb.assignmentPolicyParams = ""
+    mock_pb.additionalMemoryGb = 0.0
+    mock_pb.pythonControl = ""
+    mock_pb.genericWorkerControl = ""
+    mock_config.pb = mock_pb
+    
+    result = mcp_mod._format_pq_config(mock_config)
+    
+    # Should return fallback string for unknown enum
+    assert result["restart_users"] == "UNKNOWN_RESTART_USERS_99"
+
+
+# ============================================================================
+# Tests for protobuf formatting helper functions
+# ============================================================================
+
+def test_format_named_string_list():
+    """Test _format_named_string_list formats NamedStringList correctly."""
+    mock_nsl = MagicMock()
+    mock_nsl.name = "my_group"
+    mock_nsl.values = ["value1", "value2", "value3"]
+    
+    result = mcp_mod._format_named_string_list(mock_nsl)
+    
+    assert result["name"] == "my_group"
+    assert result["values"] == ["value1", "value2", "value3"]
+
+
+def test_format_named_string_list_empty():
+    """Test _format_named_string_list handles empty values list."""
+    mock_nsl = MagicMock()
+    mock_nsl.name = "empty_group"
+    mock_nsl.values = []
+    
+    result = mcp_mod._format_named_string_list(mock_nsl)
+    
+    assert result["name"] == "empty_group"
+    assert result["values"] == []
+
+
+def test_format_worker_protocol():
+    """Test _format_worker_protocol formats WorkerProtocolMessage correctly."""
+    mock_wp = MagicMock()
+    mock_wp.name = "grpc"
+    mock_wp.port = 9000
+    
+    result = mcp_mod._format_worker_protocol(mock_wp)
+    
+    assert result["name"] == "grpc"
+    assert result["port"] == 9000
+
+
+def test_format_worker_protocol_with_zero_port():
+    """Test _format_worker_protocol handles zero port value."""
+    mock_wp = MagicMock()
+    mock_wp.name = "http"
+    mock_wp.port = 0
+    
+    result = mcp_mod._format_worker_protocol(mock_wp)
+    
+    assert result["name"] == "http"
+    assert result["port"] == 0
+
+
+def test_format_column_definition():
+    """Test _format_column_definition formats ColumnDefinitionMessage correctly."""
+    mock_col = MagicMock()
+    mock_col.name = "my_column"
+    mock_col.dataType = "int64"
+    mock_col.componentType = "java.lang.Long"
+    mock_col.columnType = 1
+    mock_col.isVarSizeString = False
+    mock_col.encoding = 2
+    mock_col.codec = "lz4"
+    mock_col.codecArgs = "level=5"
+    mock_col.objectWidthBytes = 8
+    
+    result = mcp_mod._format_column_definition(mock_col)
+    
+    assert result["name"] == "my_column"
+    assert result["data_type"] == "int64"
+    assert result["component_type"] == "java.lang.Long"
+    assert result["column_type"] == 1
+    assert result["is_var_size_string"] is False
+    assert result["encoding"] == 2
+    assert result["codec"] == "lz4"
+    assert result["codec_args"] == "level=5"
+    assert result["object_width_bytes"] == 8
+
+
+def test_format_column_definition_with_empty_values():
+    """Test _format_column_definition handles empty values correctly."""
+    mock_col = MagicMock()
+    mock_col.name = "sparse_column"
+    mock_col.dataType = ""
+    mock_col.componentType = ""
+    mock_col.columnType = 0
+    mock_col.isVarSizeString = True
+    mock_col.encoding = 0
+    mock_col.codec = ""
+    mock_col.codecArgs = ""
+    mock_col.objectWidthBytes = 0
+    
+    result = mcp_mod._format_column_definition(mock_col)
+    
+    assert result["name"] == "sparse_column"
+    assert result["data_type"] is None
+    assert result["component_type"] is None
+    assert result["column_type"] is None
+    assert result["is_var_size_string"] is True
+    assert result["encoding"] is None
+    assert result["codec"] is None
+    assert result["codec_args"] is None
+    assert result["object_width_bytes"] is None
+
+
+def test_format_table_definition():
+    """Test _format_table_definition formats TableDefinitionMessage correctly."""
+    mock_col = MagicMock()
+    mock_col.name = "id"
+    mock_col.dataType = "int"
+    mock_col.componentType = ""
+    mock_col.columnType = 1
+    mock_col.isVarSizeString = False
+    mock_col.encoding = 0
+    mock_col.codec = ""
+    mock_col.codecArgs = ""
+    mock_col.objectWidthBytes = 0
+    
+    mock_td = MagicMock()
+    mock_td.namespace = "my_namespace"
+    mock_td.tableName = "my_table"
+    mock_td.columns = [mock_col]
+    mock_td.storageType = 1
+    
+    result = mcp_mod._format_table_definition(mock_td)
+    
+    assert result["namespace"] == "my_namespace"
+    assert result["table_name"] == "my_table"
+    assert result["storage_type"] == 1
+    assert len(result["columns"]) == 1
+    assert result["columns"][0]["name"] == "id"
+
+
+def test_format_table_definition_with_empty_values():
+    """Test _format_table_definition handles empty values correctly."""
+    mock_td = MagicMock()
+    mock_td.namespace = ""
+    mock_td.tableName = ""
+    mock_td.columns = []
+    mock_td.storageType = 0
+    
+    result = mcp_mod._format_table_definition(mock_td)
+    
+    assert result["namespace"] is None
+    assert result["table_name"] is None
+    assert result["columns"] == []
+    assert result["storage_type"] is None
+
+
+@patch('deephaven_mcp.mcp_systems_server._mcp.ExportedObjectTypeEnum')
+def test_format_exported_object_info(mock_exported_enum):
+    """Test _format_exported_object_info formats ExportedObjectInfoMessage correctly."""
+    mock_exported_enum.Name.side_effect = lambda x: {1: "EOT_TABLE"}.get(x, f"EOT_UNKNOWN_{x}")
+    
+    mock_obj = MagicMock()
+    mock_obj.name = "my_table"
+    mock_obj.type = 1
+    mock_obj.tableDefinition = None
+    mock_obj.originalType = "io.deephaven.db.tables.Table"
+    
+    result = mcp_mod._format_exported_object_info(mock_obj)
+    
+    assert result["name"] == "my_table"
+    assert result["type"] == "EOT_TABLE"
+    assert result["table_definition"] is None
+    assert result["original_type"] == "io.deephaven.db.tables.Table"
+
+
+@patch('deephaven_mcp.mcp_systems_server._mcp.ExportedObjectTypeEnum')
+def test_format_exported_object_info_with_table_definition(mock_exported_enum):
+    """Test _format_exported_object_info includes nested tableDefinition."""
+    mock_exported_enum.Name.side_effect = lambda x: {1: "EOT_TABLE"}.get(x, f"EOT_UNKNOWN_{x}")
+    
+    mock_col = MagicMock()
+    mock_col.name = "id"
+    mock_col.dataType = "int"
+    mock_col.componentType = ""
+    mock_col.columnType = 0
+    mock_col.isVarSizeString = False
+    mock_col.encoding = 0
+    mock_col.codec = ""
+    mock_col.codecArgs = ""
+    mock_col.objectWidthBytes = 0
+    
+    mock_td = MagicMock()
+    mock_td.namespace = "ns"
+    mock_td.tableName = "tbl"
+    mock_td.columns = [mock_col]
+    mock_td.storageType = 1
+    
+    mock_obj = MagicMock()
+    mock_obj.name = "my_table"
+    mock_obj.type = 1
+    mock_obj.tableDefinition = mock_td
+    mock_obj.originalType = ""
+    
+    result = mcp_mod._format_exported_object_info(mock_obj)
+    
+    assert result["name"] == "my_table"
+    assert result["type"] == "EOT_TABLE"
+    assert result["table_definition"] is not None
+    assert result["table_definition"]["namespace"] == "ns"
+    assert result["original_type"] is None
+
+
+def test_format_connection_details():
+    """Test _format_connection_details formats ProcessorConnectionDetailsMessage correctly."""
+    mock_protocol = MagicMock()
+    mock_protocol.name = "grpc"
+    mock_protocol.port = 9000
+    
+    mock_cd = MagicMock()
+    mock_cd.protocols = [mock_protocol]
+    mock_cd.workerName = "worker-1"
+    mock_cd.processInfoId = "pid-123"
+    mock_cd.processorHost = "host.example.com"
+    mock_cd.envoyPrefix = "/envoy"
+    mock_cd.grpcUrl = "grpc://localhost:10000"
+    mock_cd.staticUrl = "http://static.example.com"
+    mock_cd.enterpriseWebSocketUrl = "wss://ws.example.com"
+    
+    result = mcp_mod._format_connection_details(mock_cd)
+    
+    assert result["protocols"] == [{"name": "grpc", "port": 9000}]
+    assert result["worker_name"] == "worker-1"
+    assert result["process_info_id"] == "pid-123"
+    assert result["processor_host"] == "host.example.com"
+    assert result["envoy_prefix"] == "/envoy"
+    assert result["grpc_url"] == "grpc://localhost:10000"
+    assert result["static_url"] == "http://static.example.com"
+    assert result["enterprise_web_socket_url"] == "wss://ws.example.com"
+
+
+def test_format_connection_details_with_empty_values():
+    """Test _format_connection_details handles empty values correctly."""
+    mock_cd = MagicMock()
+    mock_cd.protocols = []
+    mock_cd.workerName = ""
+    mock_cd.processInfoId = ""
+    mock_cd.processorHost = ""
+    mock_cd.envoyPrefix = ""
+    mock_cd.grpcUrl = ""
+    mock_cd.staticUrl = ""
+    mock_cd.enterpriseWebSocketUrl = ""
+    
+    result = mcp_mod._format_connection_details(mock_cd)
+    
+    assert result["protocols"] == []
+    assert result["worker_name"] is None
+    assert result["process_info_id"] is None
+    assert result["processor_host"] is None
+    assert result["envoy_prefix"] is None
+    assert result["grpc_url"] is None
+    assert result["static_url"] is None
+    assert result["enterprise_web_socket_url"] is None
+
+
+def test_format_exception_details():
+    """Test _format_exception_details formats ExceptionDetailsMessage correctly."""
+    mock_ed = MagicMock()
+    mock_ed.errorMessage = "Something went wrong"
+    mock_ed.stackTrace = "at line 1\nat line 2"
+    mock_ed.shortCauses = "Error cause"
+    
+    result = mcp_mod._format_exception_details(mock_ed)
+    
+    assert result["error_message"] == "Something went wrong"
+    assert result["stack_trace"] == "at line 1\nat line 2"
+    assert result["short_causes"] == "Error cause"
+
+
+def test_format_exception_details_with_empty_values():
+    """Test _format_exception_details handles empty values correctly."""
+    mock_ed = MagicMock()
+    mock_ed.errorMessage = ""
+    mock_ed.stackTrace = ""
+    mock_ed.shortCauses = ""
+    
+    result = mcp_mod._format_exception_details(mock_ed)
+    
+    assert result["error_message"] is None
+    assert result["stack_trace"] is None
+    assert result["short_causes"] is None
+
+
+def test_format_pq_state_with_none():
+    """Test _format_pq_state returns None when state is None."""
+    result = mcp_mod._format_pq_state(None)
+    assert result is None
+
+
+@patch('deephaven_mcp.mcp_systems_server._mcp.ExportedObjectTypeEnum')
+def test_format_pq_state_unknown_enum_fallback(mock_exported_enum):
+    """Test _format_pq_state handles unknown enum values gracefully (version mismatch)."""
+    # Simulate server sending an enum value unknown to client's proto definition
+    mock_exported_enum.Name.side_effect = ValueError("Enum has no name defined for value 10")
+    
+    mock_state = MagicMock()
+    mock_pb = MagicMock()
+    mock_state.status.name = "RUNNING"
+    mock_pb.serial = 12345
+    mock_pb.version = 1
+    mock_pb.initializationStartNanos = 0
+    mock_pb.initializationCompleteNanos = 0
+    mock_pb.lastUpdateNanos = 0
+    mock_pb.dispatcherHost = ""
+    mock_pb.tableGroups = []
+    
+    # scopeTypes with unknown enum value
+    # ExportedObjectInfoMessage has: name, type (enum), tableDefinition, originalType
+    mock_obj = MagicMock()
+    mock_obj.name = "unknown_object"
+    mock_obj.type = 10  # Unknown enum value from newer server
+    mock_obj.tableDefinition = None
+    mock_obj.originalType = "some.unknown.Type"
+    mock_pb.scopeTypes = [mock_obj]
+    
+    mock_pb.connectionDetails = None
+    mock_pb.exceptionDetails = None
+    mock_pb.typeSpecificStateJson = ""
+    mock_pb.lastAuthenticatedUser = ""
+    mock_pb.lastEffectiveUser = ""
+    mock_pb.scriptLoaderStateJson = ""
+    mock_pb.hasProgress = False
+    mock_pb.progressValue = 0
+    mock_pb.progressMessage = ""
+    mock_pb.engineVersion = ""
+    mock_pb.dispatcherPort = 0
+    mock_pb.shouldStopNanos = 0
+    mock_pb.numFailures = 0
+    mock_pb.lastFailureTimeNanos = 0
+    mock_pb.replicaSlot = 0
+    mock_pb.statusDetails = ""
+    mock_state.pb = mock_pb
+    
+    result = mcp_mod._format_pq_state(mock_state)
+    
+    # Should return fallback string for unknown enum
+    assert result["scope_types"] == [{"name": "unknown_object", "type": "UNKNOWN_EXPORTED_TYPE_10", "table_definition": None, "original_type": "some.unknown.Type"}]
+
+
+@patch('deephaven_mcp.mcp_systems_server._mcp.ExportedObjectTypeEnum')
+def test_format_pq_state_with_table_definition(mock_exported_enum):
+    """Test _format_pq_state properly formats tableDefinition in scopeTypes."""
+    mock_exported_enum.Name.side_effect = lambda x: {1: "EOT_TABLE"}.get(x, f"EOT_UNKNOWN_{x}")
+    
+    mock_state = MagicMock()
+    mock_pb = MagicMock()
+    mock_state.status.name = "RUNNING"
+    mock_pb.serial = 12345
+    mock_pb.version = 1
+    mock_pb.initializationStartNanos = 0
+    mock_pb.initializationCompleteNanos = 0
+    mock_pb.lastUpdateNanos = 0
+    mock_pb.dispatcherHost = ""
+    mock_pb.tableGroups = []
+    
+    # scopeTypes with tableDefinition
+    # TableDefinitionMessage has: namespace, tableName, columns (repeated), storageType
+    mock_col = MagicMock()
+    mock_col.name = "id"
+    mock_col.dataType = "int"
+    mock_col.componentType = ""
+    mock_col.columnType = 1
+    mock_col.isVarSizeString = False
+    mock_col.encoding = 0
+    mock_col.codec = ""
+    mock_col.codecArgs = ""
+    mock_col.objectWidthBytes = 0
+    
+    mock_table_def = MagicMock()
+    mock_table_def.namespace = "my_namespace"
+    mock_table_def.tableName = "my_table"
+    mock_table_def.columns = [mock_col]
+    mock_table_def.storageType = 1
+    
+    mock_obj = MagicMock()
+    mock_obj.name = "table_with_def"
+    mock_obj.type = 1
+    mock_obj.tableDefinition = mock_table_def
+    mock_obj.originalType = "io.deephaven.db.tables.Table"
+    mock_pb.scopeTypes = [mock_obj]
+    
+    mock_pb.connectionDetails = None
+    mock_pb.exceptionDetails = None
+    mock_pb.typeSpecificStateJson = ""
+    mock_pb.lastAuthenticatedUser = ""
+    mock_pb.lastEffectiveUser = ""
+    mock_pb.scriptLoaderStateJson = ""
+    mock_pb.hasProgress = False
+    mock_pb.progressValue = 0
+    mock_pb.progressMessage = ""
+    mock_pb.engineVersion = ""
+    mock_pb.dispatcherPort = 0
+    mock_pb.shouldStopNanos = 0
+    mock_pb.numFailures = 0
+    mock_pb.lastFailureTimeNanos = 0
+    mock_pb.replicaSlot = 0
+    mock_pb.statusDetails = ""
+    mock_state.pb = mock_pb
+    
+    result = mcp_mod._format_pq_state(mock_state)
+    
+    # Verify tableDefinition is properly formatted
+    assert len(result["scope_types"]) == 1
+    scope_type = result["scope_types"][0]
+    assert scope_type["name"] == "table_with_def"
+    assert scope_type["type"] == "EOT_TABLE"
+    assert scope_type["original_type"] == "io.deephaven.db.tables.Table"
+    
+    table_def = scope_type["table_definition"]
+    assert table_def["namespace"] == "my_namespace"
+    assert table_def["table_name"] == "my_table"
+    assert table_def["storage_type"] == 1
+    assert len(table_def["columns"]) == 1
+    
+    col = table_def["columns"][0]
+    assert col["name"] == "id"
+    assert col["data_type"] == "int"
+    assert col["component_type"] is None
+    assert col["column_type"] == 1
+    assert col["is_var_size_string"] is False
+
+
+@patch('deephaven_mcp.mcp_systems_server._mcp.ExportedObjectTypeEnum')
+def test_format_pq_state_with_all_fields(mock_exported_enum):
+    """Test _format_pq_state extracts all 25 fields from protobuf."""
+    # Set up ExportedObjectTypeEnum.Name() to return proper names
+    mock_exported_enum.Name.side_effect = lambda x: {1: "EOT_TABLE"}.get(x, f"EOT_UNKNOWN_{x}")
+    
+    mock_state = MagicMock()
+    mock_pb = MagicMock()
+    
+    # Set all 25 protobuf fields
+    mock_pb.serial = 12345
+    mock_pb.version = 1
+    
+    # Set up status using wrapper's status.name property
+    mock_state.status.name = "RUNNING"
+    mock_pb.initializationStartNanos = 1734467100000000000
+    mock_pb.initializationCompleteNanos = 1734467150000000000
+    mock_pb.lastUpdateNanos = 1734467200000000000
+    mock_pb.dispatcherHost = "dispatcher.example.com"
+    
+    # tableGroups - repeated NamedStringList
+    # NamedStringList has: name (string), values (repeated string)
+    mock_group = MagicMock()
+    mock_group.name = "group1"
+    mock_group.values = ["table1", "table2"]
+    mock_pb.tableGroups = [mock_group]
+    
+    # scopeTypes - repeated ExportedObjectInfoMessage
+    # ExportedObjectTypeEnum.Name() is patched at the test function level
+    # ExportedObjectInfoMessage has: name, type (enum), tableDefinition, originalType
+    mock_obj1 = MagicMock()
+    mock_obj1.name = "table1"
+    mock_obj1.type = 1  # enum as int - will be converted via ExportedObjectTypeEnum.Name()
+    mock_obj1.tableDefinition = None
+    mock_obj1.originalType = "io.deephaven.db.tables.Table"
+    
+    mock_obj2 = MagicMock()
+    mock_obj2.name = "table2"
+    mock_obj2.type = 1  # enum as int
+    mock_obj2.tableDefinition = None
+    mock_obj2.originalType = ""
+    mock_pb.scopeTypes = [mock_obj1, mock_obj2]
+    
+    # connectionDetails - optional ProcessorConnectionDetailsMessage
+    # Uses protocols (repeated WorkerProtocolMessage)
+    # WorkerProtocolMessage has: name (string), port (int32)
+    # ProcessorConnectionDetailsMessage has: protocols, workerName, processInfoId, processorHost, envoyPrefix, grpcUrl, staticUrl, enterpriseWebSocketUrl
+    mock_protocol = MagicMock()
+    mock_protocol.name = "grpc"
+    mock_protocol.port = 9000
+    mock_pb.connectionDetails = MagicMock()
+    mock_pb.connectionDetails.protocols = [mock_protocol]
+    mock_pb.connectionDetails.workerName = "worker-1"
+    mock_pb.connectionDetails.processInfoId = "pid-123"
+    mock_pb.connectionDetails.processorHost = "processor.example.com"
+    mock_pb.connectionDetails.envoyPrefix = "/envoy"
+    mock_pb.connectionDetails.grpcUrl = "grpc://localhost:10000"
+    mock_pb.connectionDetails.staticUrl = "http://static.example.com"
+    mock_pb.connectionDetails.enterpriseWebSocketUrl = "wss://ws.example.com"
+    
+    # exceptionDetails - optional ExceptionDetailsMessage
+    # ExceptionDetailsMessage has: errorMessage, stackTrace, shortCauses
+    mock_pb.exceptionDetails = MagicMock()
+    mock_pb.exceptionDetails.errorMessage = "RuntimeError: Test error"
+    mock_pb.exceptionDetails.stackTrace = "at line 1\nat line 2"
+    mock_pb.exceptionDetails.shortCauses = "Test error"
+    
+    mock_pb.typeSpecificStateJson = '{"key": "value"}'
+    mock_pb.lastAuthenticatedUser = "user1"
+    mock_pb.lastEffectiveUser = "user1-effective"
+    mock_pb.scriptLoaderStateJson = '{"loader": "state"}'
+    mock_pb.hasProgress = True
+    mock_pb.progressValue = 75
+    mock_pb.progressMessage = "Processing..."
+    mock_pb.engineVersion = "1.2.3"
+    mock_pb.dispatcherPort = 8080
+    mock_pb.shouldStopNanos = 1734467300000000000
+    mock_pb.numFailures = 2
+    mock_pb.lastFailureTimeNanos = 1734467250000000000
+    mock_pb.replicaSlot = 1
+    mock_pb.statusDetails = "Running normally"
+    
+    mock_state.pb = mock_pb
+    
+    result = mcp_mod._format_pq_state(mock_state)
+    
+    # Verify all 25 fields
+    assert result["serial"] == 12345
+    assert result["version"] == 1
+    assert result["status"] == "RUNNING"
+    assert result["initialization_start_nanos"] == 1734467100000000000
+    assert result["initialization_complete_nanos"] == 1734467150000000000
+    assert result["last_update_nanos"] == 1734467200000000000
+    assert result["dispatcher_host"] == "dispatcher.example.com"
+    # table_groups now returns list of dicts with name and values
+    assert result["table_groups"] == [{"name": "group1", "values": ["table1", "table2"]}]
+    assert result["scope_types"] == [
+        {"name": "table1", "type": "EOT_TABLE", "table_definition": None, "original_type": "io.deephaven.db.tables.Table"},
+        {"name": "table2", "type": "EOT_TABLE", "table_definition": None, "original_type": None}
+    ]
+    # connection_details now has protocols list and all 8 fields
+    assert result["connection_details"]["protocols"] == [{"name": "grpc", "port": 9000}]
+    assert result["connection_details"]["worker_name"] == "worker-1"
+    assert result["connection_details"]["process_info_id"] == "pid-123"
+    assert result["connection_details"]["processor_host"] == "processor.example.com"
+    assert result["connection_details"]["envoy_prefix"] == "/envoy"
+    assert result["connection_details"]["grpc_url"] == "grpc://localhost:10000"
+    assert result["connection_details"]["static_url"] == "http://static.example.com"
+    assert result["connection_details"]["enterprise_web_socket_url"] == "wss://ws.example.com"
+    # exception_details now has stack_trace
+    assert result["exception_details"] == {"error_message": "RuntimeError: Test error", "stack_trace": "at line 1\nat line 2", "short_causes": "Test error"}
+    assert result["type_specific_state_json"] == '{"key": "value"}'
+    assert result["last_authenticated_user"] == "user1"
+    assert result["last_effective_user"] == "user1-effective"
+    assert result["script_loader_state_json"] == '{"loader": "state"}'
+    assert result["has_progress"] is True
+    assert result["progress_value"] == 75
+    assert result["progress_message"] == "Processing..."
+    assert result["engine_version"] == "1.2.3"
+    assert result["dispatcher_port"] == 8080
+    assert result["should_stop_nanos"] == 1734467300000000000
+    assert result["num_failures"] == 2
+    assert result["last_failure_time_nanos"] == 1734467250000000000
+    assert result["replica_slot"] == 1
+    assert result["status_details"] == "Running normally"
+
+
+def test_format_pq_state_with_empty_connection_details():
+    """Test _format_pq_state handles empty protocols list in connectionDetails."""
+    mock_state = MagicMock()
+    mock_pb = MagicMock()
+    
+    mock_pb.serial = 99999
+    mock_pb.version = 2
+    mock_pb.status.name = "FAILED"
+    mock_pb.initializationStartNanos = 0
+    mock_pb.initializationCompleteNanos = 0
+    mock_pb.lastUpdateNanos = 1734467200000000000
+    mock_pb.dispatcherHost = ""
+    mock_pb.tableGroups = []
+    mock_pb.scopeTypes = []
+    
+    # connectionDetails exists but protocols list is empty
+    # Use correct camelCase field names from protobuf
+    mock_connection = MagicMock()
+    mock_connection.protocols = []  # Empty protocols list
+    mock_connection.workerName = ""
+    mock_connection.processInfoId = ""
+    mock_connection.processorHost = ""
+    mock_connection.envoyPrefix = ""
+    mock_connection.grpcUrl = ""
+    mock_connection.staticUrl = ""
+    mock_connection.enterpriseWebSocketUrl = ""
+    mock_pb.connectionDetails = mock_connection
+    
+    # exceptionDetails with empty values
+    mock_exception = MagicMock()
+    mock_exception.errorMessage = ""
+    mock_exception.stackTrace = ""
+    mock_exception.shortCauses = ""
+    mock_pb.exceptionDetails = mock_exception
+    
+    mock_pb.typeSpecificStateJson = ""
+    mock_pb.lastAuthenticatedUser = ""
+    mock_pb.lastEffectiveUser = ""
+    mock_pb.scriptLoaderStateJson = ""
+    mock_pb.hasProgress = False
+    mock_pb.progressValue = 0
+    mock_pb.progressMessage = ""
+    mock_pb.engineVersion = ""
+    mock_pb.dispatcherPort = 0
+    mock_pb.shouldStopNanos = 0
+    mock_pb.numFailures = 0
+    mock_pb.lastFailureTimeNanos = 0
+    mock_pb.replicaSlot = 0
+    mock_pb.statusDetails = ""
+    
+    mock_state.pb = mock_pb
+    
+    result = mcp_mod._format_pq_state(mock_state)
+    
+    assert result is not None
+    assert result["serial"] == 99999
+    # Empty protocols list means protocols is empty list
+    assert result["connection_details"]["protocols"] == []
+    assert result["connection_details"]["worker_name"] is None
+    assert result["exception_details"] == {"error_message": None, "stack_trace": None, "short_causes": None}
+
+
+def test_format_pq_replicas_empty():
+    """Test _format_pq_replicas returns empty list for empty input."""
+    result = mcp_mod._format_pq_replicas([])
+    assert result == []
+
+
+def test_format_pq_replicas_with_data():
+    """Test _format_pq_replicas formats replica states correctly."""
+    mock_replica1 = MagicMock()
+    mock_replica1.pb.serial = 12345
+    mock_replica1.pb.version = 1
+    
+    # Set up status using wrapper's status.name property
+    mock_replica1.status.name = "RUNNING"
+    mock_replica1.pb.initializationStartNanos = 1734467100000000000
+    mock_replica1.pb.initializationCompleteNanos = 1734467150000000000
+    mock_replica1.pb.lastUpdateNanos = 1734467200000000000
+    mock_replica1.pb.dispatcherHost = "dispatcher.example.com"
+    mock_replica1.pb.tableGroups = []
+    mock_replica1.pb.scopeTypes = []
+    mock_replica1.pb.connectionDetails = None
+    mock_replica1.pb.exceptionDetails = None
+    mock_replica1.pb.typeSpecificStateJson = ""
+    mock_replica1.pb.lastAuthenticatedUser = ""
+    mock_replica1.pb.lastEffectiveUser = ""
+    mock_replica1.pb.scriptLoaderStateJson = ""
+    mock_replica1.pb.hasProgress = False
+    mock_replica1.pb.progressValue = 0
+    mock_replica1.pb.progressMessage = ""
+    mock_replica1.pb.engineVersion = ""
+    mock_replica1.pb.dispatcherPort = 8080
+    mock_replica1.pb.shouldStopNanos = 0
+    mock_replica1.pb.numFailures = 0
+    mock_replica1.pb.lastFailureTimeNanos = 0
+    mock_replica1.pb.replicaSlot = 1
+    mock_replica1.pb.statusDetails = ""
+    
+    result = mcp_mod._format_pq_replicas([mock_replica1])
+    
+    assert len(result) == 1
+    assert result[0]["serial"] == 12345
+    assert result[0]["replica_slot"] == 1
+    assert result[0]["status"] == "RUNNING"
+
+
+def test_format_pq_replicas_filters_none():
+    """Test _format_pq_replicas filters out None entries."""
+    mock_replica = MagicMock()
+    mock_replica.pb.serial = 12345
+    mock_replica.pb.version = 1
+    
+    # Set up status using wrapper's status.name property
+    mock_replica.status.name = "RUNNING"
+    mock_replica.pb.initializationStartNanos = 0
+    mock_replica.pb.initializationCompleteNanos = 0
+    mock_replica.pb.lastUpdateNanos = 0
+    mock_replica.pb.dispatcherHost = ""
+    mock_replica.pb.tableGroups = []
+    mock_replica.pb.scopeTypes = []
+    mock_replica.pb.connectionDetails = None
+    mock_replica.pb.exceptionDetails = None
+    mock_replica.pb.typeSpecificStateJson = ""
+    mock_replica.pb.lastAuthenticatedUser = ""
+    mock_replica.pb.lastEffectiveUser = ""
+    mock_replica.pb.scriptLoaderStateJson = ""
+    mock_replica.pb.hasProgress = False
+    mock_replica.pb.progressValue = 0
+    mock_replica.pb.progressMessage = ""
+    mock_replica.pb.engineVersion = ""
+    mock_replica.pb.dispatcherPort = 0
+    mock_replica.pb.shouldStopNanos = 0
+    mock_replica.pb.numFailures = 0
+    mock_replica.pb.lastFailureTimeNanos = 0
+    mock_replica.pb.replicaSlot = 0
+    mock_replica.pb.statusDetails = ""
+    mock_replica.pb.killTime = 0
+    mock_replica.pb.assignedWorkerGroupId = 0
+    mock_replica.pb.configId = ""
+    
+    result = mcp_mod._format_pq_replicas([mock_replica, None])
+    assert len(result) == 1
+
+
+def test_format_pq_spares_empty():
+    """Test _format_pq_spares returns empty list for empty input."""
+    result = mcp_mod._format_pq_spares([])
+    assert result == []
+
+
+def test_format_pq_spares_with_data():
+    """Test _format_pq_spares formats spare states correctly."""
+    mock_spare = MagicMock()
+    mock_spare.pb.serial = 12345
+    mock_spare.pb.version = 1
+    
+    # Set up status using wrapper's status.name property
+    mock_spare.status.name = "INITIALIZING"
+    mock_spare.pb.initializationStartNanos = 1734467150000000000
+    mock_spare.pb.initializationCompleteNanos = 1734467200000000000
+    mock_spare.pb.lastUpdateNanos = 1734467250000000000
+    mock_spare.pb.dispatcherHost = "dispatcher.example.com"
+    mock_spare.pb.tableGroups = []
+    mock_spare.pb.scopeTypes = []
+    mock_spare.pb.connectionDetails = None
+    mock_spare.pb.exceptionDetails = None
+    mock_spare.pb.typeSpecificStateJson = ""
+    mock_spare.pb.lastAuthenticatedUser = ""
+    mock_spare.pb.lastEffectiveUser = ""
+    mock_spare.pb.scriptLoaderStateJson = ""
+    mock_spare.pb.hasProgress = False
+    mock_spare.pb.progressValue = 0
+    mock_spare.pb.progressMessage = ""
+    mock_spare.pb.engineVersion = ""
+    mock_spare.pb.dispatcherPort = 8080
+    mock_spare.pb.shouldStopNanos = 0
+    mock_spare.pb.numFailures = 0
+    mock_spare.pb.lastFailureTimeNanos = 0
+    mock_spare.pb.replicaSlot = 2
+    mock_spare.pb.statusDetails = ""
+    
+    result = mcp_mod._format_pq_spares([mock_spare])
+    
+    assert len(result) == 1
+    assert result[0]["serial"] == 12345
+    assert result[0]["status"] == "INITIALIZING"
+    assert result[0]["replica_slot"] == 2
+
+
+def test_format_pq_spares_filters_none():
+    """Test _format_pq_spares filters out None entries."""
+    mock_spare = MagicMock()
+    mock_spare.pb.serial = 12345
+    mock_spare.pb.version = 1
+    
+    # Set up status using wrapper's status.name property
+    mock_spare.status.name = "INITIALIZING"
+    mock_spare.pb.initializationStartNanos = 0
+    mock_spare.pb.initializationCompleteNanos = 0
+    mock_spare.pb.lastUpdateNanos = 0
+    mock_spare.pb.dispatcherHost = ""
+    mock_spare.pb.tableGroups = []
+    mock_spare.pb.scopeTypes = []
+    mock_spare.pb.connectionDetails = None
+    mock_spare.pb.exceptionDetails = None
+    mock_spare.pb.typeSpecificStateJson = ""
+    mock_spare.pb.lastAuthenticatedUser = ""
+    mock_spare.pb.lastEffectiveUser = ""
+    mock_spare.pb.scriptLoaderStateJson = ""
+    mock_spare.pb.hasProgress = False
+    mock_spare.pb.progressValue = 0
+    mock_spare.pb.progressMessage = ""
+    mock_spare.pb.engineVersion = ""
+    mock_spare.pb.dispatcherPort = 0
+    mock_spare.pb.shouldStopNanos = 0
+    mock_spare.pb.numFailures = 0
+    mock_spare.pb.lastFailureTimeNanos = 0
+    mock_spare.pb.replicaSlot = 0
+    mock_spare.pb.statusDetails = ""
+    mock_spare.pb.flightSessionId = ""
+    mock_spare.pb.sessionToken = ""
+    mock_spare.pb.tokenExpirationTime = 0
+    mock_spare.pb.queryInfoJson = ""
+    mock_spare.pb.tempQueryId = 0
+    mock_spare.pb.totalMemoryMB = 0
+    mock_spare.pb.grpcAddress = ""
+    mock_spare.pb.flightAddress = ""
+    mock_spare.pb.httpPort = 0
+    mock_spare.pb.lastActivityTime = 0
+    mock_spare.pb.assignedDispatcherId = 0
+    mock_spare.pb.killTime = 0
+    mock_spare.pb.assignedWorkerGroupId = 0
+    mock_spare.pb.configId = ""
+    
+    result = mcp_mod._format_pq_spares([None, mock_spare])
+    assert len(result) == 1
+
+
 @pytest.mark.asyncio
 async def test_pq_list_success():
     """Test successful PQ listing."""
@@ -8744,23 +9803,43 @@ async def test_pq_list_success():
     assert result["system_name"] == "test-system"
     assert len(result["pqs"]) == 2
 
-    # Verify PQ data
+    # Verify PQ1 summary data (trimmed response - no full config/state_details)
     pq1 = result["pqs"][0]
     assert pq1["pq_id"] == "enterprise:test-system:12345"
     assert pq1["serial"] == 12345
     assert pq1["name"] == "analytics"
-    assert pq1["state"] == "RUNNING"
+    assert pq1["status"] == "RUNNING"
+    assert pq1["enabled"] is True
+    assert pq1["owner"] == "test_user"
     assert pq1["heap_size_gb"] == 8.0
+    assert pq1["worker_kind"] == "DeephavenCommunity"
+    assert pq1["configuration_type"] == "Script"
+    assert pq1["script_language"] == "Python"
+    assert pq1["server_name"] is None  # Empty string -> None
+    assert pq1["admin_groups"] == []
+    assert pq1["viewer_groups"] == []
+    assert pq1["is_scheduled"] is False
+    assert pq1["num_failures"] == 0
     assert "session_id" in pq1  # Running PQ should have session_id
-    assert (
-        pq1["session_id"] == "enterprise:test-system:analytics"
-    )  # session_id uses name
+    assert pq1["session_id"] == "enterprise:test-system:analytics"  # session_id uses name
+    
+    # Verify trimmed response does NOT include full config/state_details/replicas/spares
+    assert "config" not in pq1
+    assert "state_details" not in pq1
+    assert "replicas" not in pq1
+    assert "spares" not in pq1
 
+    # Verify PQ2 summary data
     pq2 = result["pqs"][1]
     assert pq2["pq_id"] == "enterprise:test-system:12346"
-    assert pq2["serial"] == 12346
     assert pq2["name"] == "reporting"
-    assert pq2["state"] == "STOPPED"
+    assert pq2["status"] == "STOPPED"
+    assert pq2["enabled"] is True
+    assert pq2["owner"] == "test_user"
+    assert pq2["heap_size_gb"] == 4.0
+    assert pq2["worker_kind"] == "DeephavenCommunity"
+    assert pq2["configuration_type"] == "Script"
+    assert pq2["script_language"] == "Python"
     assert "session_id" not in pq2  # Stopped PQ should not have session_id
 
 
@@ -8809,8 +9888,14 @@ async def test_pq_list_exception():
 
 
 @pytest.mark.asyncio
-async def test_pq_details_success_by_name():
+@patch('deephaven_mcp.mcp_systems_server._mcp.RestartUsersEnum')
+@patch('deephaven_mcp.mcp_systems_server._mcp.ExportedObjectTypeEnum')
+async def test_pq_details_success_by_name(mock_exported_enum, mock_restart_enum):
     """Test successful PQ details retrieval using pq_id."""
+    # Set up enum mocks
+    mock_restart_enum.Name.side_effect = lambda x: {0: "RU_ADMIN", 1: "RU_ALL"}.get(x, f"RU_UNKNOWN_{x}")
+    mock_exported_enum.Name.side_effect = lambda x: {1: "EOT_TABLE"}.get(x, f"EOT_UNKNOWN_{x}")
+    
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock()
     mock_enterprise_registry = MagicMock()
@@ -8826,9 +9911,9 @@ async def test_pq_details_success_by_name():
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
 
-    # Mock controller methods (no more get_serial_for_name)
+    # Mock controller.map() to return PQ map (pq_details uses map() to ensure subscription is ready)
     mock_pq_info = create_mock_pq_info(12345, "analytics", "RUNNING", 8.0)
-    mock_controller.get = AsyncMock(return_value=mock_pq_info)
+    mock_controller.map = AsyncMock(return_value={12345: mock_pq_info})
 
     # Mock config
     full_config = {"enterprise": {"systems": {"test-system": {}}}}
@@ -8851,8 +9936,87 @@ async def test_pq_details_success_by_name():
     assert result["state"] == "RUNNING"
     assert "session_id" in result
     assert result["session_id"] == "enterprise:test-system:analytics"
-    assert result["worker_host"] == "worker-01.example.com"
-    assert result["worker_port"] == 10000
+    
+    # Verify comprehensive config fields from PersistentQueryConfigMessage
+    config = result["config"]
+    # Basic fields
+    assert config["serial"] == 12345
+    assert config["version"] == 1
+    assert config["owner"] == "test_user"
+    assert config["enabled"] is True
+    # Resource fields
+    assert config["heap_size_gb"] == 8.0
+    assert config["buffer_pool_to_heap_ratio"] == 0.0
+    assert config["detailed_gc_logging_enabled"] is False
+    assert config["worker_kind"] == "DeephavenCommunity"
+    # Script fields
+    assert config["script_language"] == "Python"
+    assert config["configuration_type"] == "Script"
+    assert config["type_specific_fields_json"] is None
+    assert config["server_name"] is None
+    assert config["script_path"] is None
+    assert config["script_code"] is None
+    # Advanced config
+    assert config["jvm_profile"] is None
+    assert config["python_control"] is None
+    assert config["generic_worker_control"] is None
+    assert config["extra_jvm_arguments"] == []
+    assert config["extra_environment_variables"] == []
+    assert config["class_path_additions"] == []
+    # Scheduling
+    assert config["scheduling"] == []
+    assert config["timeout_nanos"] is None
+    # Access control
+    assert config["admin_groups"] == []
+    assert config["viewer_groups"] == []
+    assert config["restart_users"] == "RU_ADMIN"
+    # Metadata
+    assert config["last_modified_by_authenticated"] is None
+    assert config["last_modified_by_effective"] is None
+    assert config["last_modified_time_nanos"] is None
+    assert config["created_time_nanos"] is None
+    assert config["completed_status"] is None
+    assert config["expiration_time_nanos"] is None
+    # Kubernetes/worker
+    assert config["kubernetes_control"] is None
+    assert config["replica_count"] == 0
+    assert config["spare_count"] == 0
+    assert config["assignment_policy"] is None
+    assert config["assignment_policy_params"] is None
+    assert config["additional_memory_gb"] == 0.0
+    
+    # Verify state_details - ALL 25 fields
+    state_details = result["state_details"]
+    assert state_details is not None
+    assert state_details["serial"] == 12345
+    assert state_details["version"] == 1
+    assert state_details["status"] == "RUNNING"
+    assert state_details["initialization_start_nanos"] == 1734467100000000000
+    assert state_details["initialization_complete_nanos"] == 1734467150000000000
+    assert state_details["last_update_nanos"] == 1734467200000000000
+    assert state_details["dispatcher_host"] == "dispatcher.example.com"
+    assert state_details["dispatcher_port"] == 8080
+    assert state_details["table_groups"] == []
+    assert state_details["scope_types"] == []
+    assert state_details["connection_details"] is None
+    assert state_details["exception_details"] is None
+    assert state_details["type_specific_state_json"] is None
+    assert state_details["last_authenticated_user"] is None
+    assert state_details["last_effective_user"] is None
+    assert state_details["script_loader_state_json"] is None
+    assert state_details["has_progress"] is False
+    assert state_details["progress_value"] == 0
+    assert state_details["progress_message"] is None
+    assert state_details["engine_version"] is None
+    assert state_details["should_stop_nanos"] is None
+    assert state_details["num_failures"] == 0
+    assert state_details["last_failure_time_nanos"] is None
+    assert state_details["replica_slot"] == 0
+    assert state_details["status_details"] is None
+    
+    # Verify replicas and spares are empty lists
+    assert result["replicas"] == []
+    assert result["spares"] == []
 
 
 @pytest.mark.asyncio
@@ -8873,9 +10037,9 @@ async def test_pq_details_success_by_serial():
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
 
-    # Mock controller methods
+    # Mock controller.map() to return PQ map (pq_details uses map() to ensure subscription is ready)
     mock_pq_info = create_mock_pq_info(12345, "analytics", "STOPPED", 8.0)
-    mock_controller.get = AsyncMock(return_value=mock_pq_info)
+    mock_controller.map = AsyncMock(return_value={12345: mock_pq_info})
 
     # Mock config
     full_config = {"enterprise": {"systems": {"test-system": {}}}}
@@ -8917,8 +10081,8 @@ async def test_pq_details_not_found():
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
 
-    # Mock controller to raise exception when getting PQ
-    mock_controller.get = AsyncMock(side_effect=Exception("PQ not found"))
+    # Mock controller.map() to return empty map (PQ not found)
+    mock_controller.map = AsyncMock(return_value={})
 
     # Mock config
     full_config = {"enterprise": {"systems": {"test-system": {}}}}
