@@ -498,8 +498,7 @@ async def get_programming_language_version_table(session: BaseSession) -> pyarro
     # TODO: Add support for other programming languages.
     _validate_python_session("get_programming_language_version_table", session)
 
-    script = textwrap.dedent(
-        """
+    script = textwrap.dedent("""
         from deephaven import new_table
         from deephaven.column import string_col, int_col
         import sys
@@ -520,8 +519,7 @@ async def get_programming_language_version_table(session: BaseSession) -> pyarro
             ])
 
         _python_version_table = _make_python_version_table()
-        """
-    )
+        """)
     _LOGGER.debug(
         "[queries:get_programming_language_version_table] Running Python version script in session..."
     )
@@ -599,8 +597,7 @@ async def get_pip_packages_table(session: BaseSession) -> pyarrow.Table:
     # TODO: Add support for other programming languages.
     _validate_python_session("get_pip_packages_table", session)
 
-    script = textwrap.dedent(
-        """
+    script = textwrap.dedent("""
         from deephaven import new_table
         from deephaven.column import string_col
         import importlib.metadata as importlib_metadata
@@ -617,8 +614,7 @@ async def get_pip_packages_table(session: BaseSession) -> pyarrow.Table:
             ])
 
         _pip_packages_table = _make_pip_packages_table()
-        """
-    )
+        """)
     _LOGGER.debug(
         "[queries:get_pip_packages_table] Running pip packages script in session..."
     )
