@@ -45,6 +45,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install .[test]
 
+      - name: Verify dependencies
+        run: |
+          pip list | grep -E "pytz|deephaven"
+          python -c "import pytz; print(f'pytz {pytz.__version__} installed')"
+
       - name: Run integration tests
         run: |
           # Enable INFO level logging to see subprocess output for debugging
