@@ -400,7 +400,7 @@ Discovery:
 """
 
 
-@mcp_server.custom_route("/health", methods=["GET"])  # type: ignore[misc]
+@mcp_server.custom_route("/health", methods=["GET"])  # type: ignore[untyped-decorator]
 async def health_check(request: Request) -> JSONResponse:
     """
     Health check endpoint for the docs server.
