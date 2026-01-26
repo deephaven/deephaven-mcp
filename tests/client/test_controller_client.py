@@ -403,7 +403,7 @@ async def test_make_pq_config_with_all_parameters(
     with patch.object(
         controller_client_mod, "CorePlusQueryConfig", autospec=True
     ) as mock_cfg:
-        result = await coreplus_controller_client.make_pq_config(
+        await coreplus_controller_client.make_pq_config(
             name="test-pq",
             heap_size_gb=8.0,
             script_body="print('hello')",
@@ -446,7 +446,7 @@ async def test_make_pq_config_with_script_path(
     with patch.object(
         controller_client_mod, "CorePlusQueryConfig", autospec=True
     ) as mock_cfg:
-        result = await coreplus_controller_client.make_pq_config(
+        await coreplus_controller_client.make_pq_config(
             name="test-pq",
             heap_size_gb=8.0,
             script_path="IrisQueries/groovy/analytics.groovy",
@@ -474,7 +474,7 @@ async def test_make_pq_config_none_defaults_preserve_config(
         controller_client_mod, "CorePlusQueryConfig", autospec=True
     ) as mock_cfg:
         # Call with minimal parameters - None defaults should NOT override
-        result = await coreplus_controller_client.make_pq_config(
+        await coreplus_controller_client.make_pq_config(
             name="test-pq",
             heap_size_gb=8.0,
             # Not passing programming_language, configuration_type, enabled
