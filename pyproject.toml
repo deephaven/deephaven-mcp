@@ -63,6 +63,7 @@ test = [
     "pytest-timeout>=2.1.0",   # Test timeout support for integration tests
     "httpx[cli]>=0.24.0",      # HTTP client for integration and stress tests
     "deephaven-server>=0.39,<41.0",  # Deephaven server for integration tests (v41.0 has protobuf 6.x gencode)
+    "pytz",                    # Required by deephaven-server 0.40.x (missing from its dependencies) - https://deephaven.atlassian.net/browse/DOC-1132
 ]
 
 # Code quality tools (linting, formatting, type checking)
@@ -82,6 +83,7 @@ lint = [
 # Community Core session creation (python launch method)
 community = [
     "deephaven-server>=0.39,<41.0",  # Deephaven Community Core server for python-based session creation (v41.0 has protobuf 6.x gencode)
+    "pytz",                    # Required by deephaven-server 0.40.x (missing from its dependencies) - https://deephaven.atlassian.net/browse/DOC-1132
 ]
 
 # Enterprise support (Deephaven Core+)
