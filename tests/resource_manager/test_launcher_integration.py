@@ -775,7 +775,7 @@ class TestInstanceTrackerIntegration:
 
             # Wait a moment for process to start
             await asyncio.sleep(2)
-            
+
             # If process failed, read and log output for debugging
             if process.returncode is not None:
                 stdout_data = await process.stdout.read() if process.stdout else b""
@@ -785,7 +785,7 @@ class TestInstanceTrackerIntegration:
                     f"STDOUT: {stdout_data.decode('utf-8', errors='replace')}\n"
                     f"STDERR: {stderr_data.decode('utf-8', errors='replace')}"
                 )
-            
+
             assert process.returncode is None
 
             # Track the process
