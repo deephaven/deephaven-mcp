@@ -10961,8 +10961,12 @@ async def test_pq_modify_no_changes():
 
 
 @pytest.mark.asyncio
-async def test_pq_modify_all_parameters():
+@patch("deephaven_mcp.mcp_systems_server._mcp.RestartUsersEnum")
+async def test_pq_modify_all_parameters(mock_restart_enum):
     """Test pq_modify with all parameters to achieve full coverage."""
+    # Mock RestartUsersEnum.Value() to return numeric enum value
+    mock_restart_enum.Value.return_value = 1  # RU_ADMIN = 1
+    
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock()
     mock_enterprise_registry = MagicMock()
@@ -11012,10 +11016,10 @@ async def test_pq_modify_all_parameters():
         python_virtual_environment="/path/to/venv",
         extra_environment_vars=["VAR1=value1"],
         init_timeout_nanos=60000000000,
-        auto_delete_timeout=3600000000000,
+        auto_delete_timeout=3600,
         admin_groups=["admins"],
         viewer_groups=["viewers"],
-        restart_users="OWNER",
+        restart_users="RU_ADMIN",
         restart=False,
     )
 
@@ -11040,10 +11044,112 @@ async def test_pq_modify_all_parameters():
     assert config_pb.pythonControl == "/path/to/venv"
     assert list(config_pb.extraEnvironmentVariables) == ["VAR1=value1"]
     assert config_pb.timeoutNanos == 60000000000
-    assert config_pb.expirationTimeNanos == 3600000000000
+    assert config_pb.expirationTimeNanos == 3600000000000  # 3600 seconds * 1e9
     assert list(config_pb.adminGroups) == ["admins"]
     assert list(config_pb.viewerGroups) == ["viewers"]
-    assert config_pb.restartUsers == "OWNER"
+    # restart_users should be converted to numeric enum value (1 = RU_ADMIN)
+    assert config_pb.restartUsers == 1
+    mock_restart_enum.Value.assert_called_once_with("RU_ADMIN")
+
+
+@pytest.mark.asyncio
+@patch("deephaven_mcp.mcp_systems_server._mcp.RestartUsersEnum", None)
+async def test_pq_modify_restart_users_enum_not_available():
+    """Test pq_modify when RestartUsersEnum is None (enterprise package not installed)."""
+    mock_config_manager = MagicMock()
+    mock_session_registry = MagicMock()
+    mock_enterprise_registry = MagicMock()
+    mock_factory_manager = MagicMock()
+    mock_factory = MagicMock()
+    mock_controller = MagicMock()
+
+    # Setup mock chain
+    mock_session_registry.enterprise_registry = AsyncMock(
+        return_value=mock_enterprise_registry
+    )
+    mock_enterprise_registry.get = AsyncMock(return_value=mock_factory_manager)
+    mock_factory_manager.get = AsyncMock(return_value=mock_factory)
+    mock_factory.controller_client = mock_controller
+
+    # Mock current PQ info
+    current_pq_info = create_mock_pq_info(12345, "analytics", "RUNNING", 8.0)
+    mock_controller.map = AsyncMock(return_value={12345: current_pq_info})
+
+    # Mock config
+    full_config = {"enterprise": {"systems": {"test-system": {}}}}
+    mock_config_manager.get_config = AsyncMock(return_value=full_config)
+
+    context = MockContext(
+        {
+            "config_manager": mock_config_manager,
+            "session_registry": mock_session_registry,
+        }
+    )
+
+    result = await mcp_mod.pq_modify(
+        context,
+        pq_id="enterprise:test-system:12345",
+        restart_users="RU_ADMIN",
+    )
+
+    assert result["success"] is False
+    assert "Core+ features are not available" in result["error"]
+    assert result["isError"] is True
+
+
+@pytest.mark.asyncio
+@patch("deephaven_mcp.mcp_systems_server._mcp.RestartUsersEnum")
+async def test_pq_modify_invalid_restart_users_value(mock_restart_enum):
+    """Test pq_modify with invalid restart_users value to cover ValueError path."""
+    # Mock RestartUsersEnum.Value() to raise ValueError for invalid value
+    mock_restart_enum.Value.side_effect = ValueError("unknown enum value")
+    mock_restart_enum.keys.return_value = [
+        "RU_ADMIN",
+        "RU_ADMIN_AND_VIEWERS",
+        "RU_VIEWERS_WHEN_DOWN",
+        "RU_UNSPECIFIED",
+    ]
+
+    mock_config_manager = MagicMock()
+    mock_session_registry = MagicMock()
+    mock_enterprise_registry = MagicMock()
+    mock_factory_manager = MagicMock()
+    mock_factory = MagicMock()
+    mock_controller = MagicMock()
+
+    # Setup mock chain
+    mock_session_registry.enterprise_registry = AsyncMock(
+        return_value=mock_enterprise_registry
+    )
+    mock_enterprise_registry.get = AsyncMock(return_value=mock_factory_manager)
+    mock_factory_manager.get = AsyncMock(return_value=mock_factory)
+    mock_factory.controller_client = mock_controller
+
+    # Mock current PQ info
+    current_pq_info = create_mock_pq_info(12345, "analytics", "RUNNING", 8.0)
+    mock_controller.map = AsyncMock(return_value={12345: current_pq_info})
+
+    # Mock config
+    full_config = {"enterprise": {"systems": {"test-system": {}}}}
+    mock_config_manager.get_config = AsyncMock(return_value=full_config)
+
+    context = MockContext(
+        {
+            "config_manager": mock_config_manager,
+            "session_registry": mock_session_registry,
+        }
+    )
+
+    result = await mcp_mod.pq_modify(
+        context,
+        pq_id="enterprise:test-system:12345",
+        restart_users="INVALID_VALUE",
+    )
+
+    assert result["success"] is False
+    assert "Invalid restart_users" in result["error"]
+    assert "INVALID_VALUE" in result["error"]
+    assert result["isError"] is True
 
 
 @pytest.mark.asyncio

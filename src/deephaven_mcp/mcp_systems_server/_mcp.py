@@ -71,6 +71,7 @@ from mcp.server.fastmcp import Context, FastMCP
 from deephaven_mcp import queries
 from deephaven_mcp._exceptions import (
     CommunitySessionConfigurationError,
+    MissingEnterprisePackageError,
     UnsupportedOperationError,
 )
 from deephaven_mcp.client import BaseSession, CorePlusSession
@@ -4202,6 +4203,34 @@ def _normalize_programming_language(language: str) -> str:
         )
 
 
+def _convert_restart_users_to_enum(restart_users_str: str) -> int:
+    """Convert restart_users string to protobuf enum numeric value.
+
+    Args:
+        restart_users_str (str): Restart users enum name (e.g., "RU_ADMIN")
+
+    Returns:
+        int: Numeric enum value for the protobuf field
+
+    Raises:
+        MissingEnterprisePackageError: If RestartUsersEnum is not available (enterprise package not installed)
+        ValueError: If restart_users_str is not a valid enum value
+    """
+    if RestartUsersEnum is None:
+        raise MissingEnterprisePackageError()
+
+    # Convert string name to numeric enum value using protobuf enum
+    try:
+        return cast(int, RestartUsersEnum.Value(restart_users_str))
+    except ValueError:
+        # Get all valid enum names from protobuf enum using .keys() method
+        valid_values = list(RestartUsersEnum.keys())
+        raise ValueError(
+            f"Invalid restart_users: '{restart_users_str}'. "
+            f"Must be one of: {', '.join(sorted(valid_values))}"
+        ) from None
+
+
 @mcp_server.tool()
 async def pq_name_to_id(
     context: Context,
@@ -4545,7 +4574,7 @@ async def pq_details(
                 "init_timeout_nanos": 300000000000,
                 "admin_groups": ["admins", "data-team"],
                 "viewer_groups": ["analysts"],
-                "restart_users": "0",
+                "restart_users": "RU_ADMIN",
                 "last_modified_by": "admin_user",
                 "last_modified_by_effective": "admin_user",
                 "last_modified_time_nanos": 1734467200000000000,
@@ -5174,6 +5203,17 @@ def _apply_pq_config_modifications(
         config_pb.scriptCode = ""
         has_changes = True
 
+    # Handle auto_delete_timeout: convert seconds to nanoseconds
+    if auto_delete_timeout is not None:
+        config_pb.expirationTimeNanos = auto_delete_timeout * 1_000_000_000
+        has_changes = True
+
+    # Handle restart_users: convert string to enum numeric value
+    if restart_users is not None:
+        restart_users_enum = _convert_restart_users_to_enum(restart_users)
+        config_pb.restartUsers = restart_users_enum
+        has_changes = True
+
     # Simple field mappings: (param_value, config_pb_attr)
     simple_fields: list[tuple[Any, str]] = [
         (pq_name, "name"),
@@ -5185,8 +5225,6 @@ def _apply_pq_config_modifications(
         (jvm_profile, "jvmProfile"),
         (python_virtual_environment, "pythonControl"),
         (init_timeout_nanos, "timeoutNanos"),
-        (auto_delete_timeout, "expirationTimeNanos"),
-        (restart_users, "restartUsers"),
     ]
 
     for value, attr in simple_fields:
@@ -5307,7 +5345,6 @@ async def pq_modify(
             "pq_id": "enterprise:prod:12345",
             "serial": 12345,
             "name": "analytics_worker",
-            "state": "RUNNING" or "STOPPED",
             "restarted": True or False,
             "message": "PQ modified successfully"
         }

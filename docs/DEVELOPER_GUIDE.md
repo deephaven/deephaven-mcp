@@ -1350,7 +1350,7 @@ Persistent Queries (PQs) are recipes for creating and managing long-running work
 - `auto_delete_timeout` (optional, int): Auto-deletion timeout in seconds
 - `admin_groups` (optional, list[string]): User groups with admin access
 - `viewer_groups` (optional, list[string]): User groups with viewer access
-- `restart_users` (optional, string): Who can restart ("RU_ADMIN", "RU_ADMIN_AND_VIEWERS", etc.)
+- `restart_users` (optional, string): Who can restart ("RU_ADMIN", "RU_ADMIN_AND_VIEWERS", "RU_VIEWERS_WHEN_DOWN")
 
 **Returns**:
 
