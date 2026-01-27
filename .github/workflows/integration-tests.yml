@@ -48,7 +48,6 @@ jobs:
       - name: Verify dependencies
         run: |
           pip list
-          python -c "import pytz; print(f'pytz {pytz.__version__} installed')"
 
       - name: Run integration tests
         run: |
