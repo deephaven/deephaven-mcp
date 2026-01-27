@@ -10966,7 +10966,7 @@ async def test_pq_modify_all_parameters(mock_restart_enum):
     """Test pq_modify with all parameters to achieve full coverage."""
     # Mock RestartUsersEnum.Value() to return numeric enum value
     mock_restart_enum.Value.return_value = 1  # RU_ADMIN = 1
-    
+
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock()
     mock_enterprise_registry = MagicMock()
