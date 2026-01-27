@@ -71,6 +71,7 @@ from mcp.server.fastmcp import Context, FastMCP
 from deephaven_mcp import queries
 from deephaven_mcp._exceptions import (
     CommunitySessionConfigurationError,
+    MissingEnterprisePackageError,
     UnsupportedOperationError,
 )
 from deephaven_mcp.client import BaseSession, CorePlusSession
@@ -4202,6 +4203,34 @@ def _normalize_programming_language(language: str) -> str:
         )
 
 
+def _convert_restart_users_to_enum(restart_users_str: str) -> int:
+    """Convert restart_users string to protobuf enum numeric value.
+
+    Args:
+        restart_users_str (str): Restart users enum name (e.g., "RU_ADMIN")
+
+    Returns:
+        int: Numeric enum value for the protobuf field
+
+    Raises:
+        MissingEnterprisePackageError: If RestartUsersEnum is not available (enterprise package not installed)
+        ValueError: If restart_users_str is not a valid enum value
+    """
+    if RestartUsersEnum is None:
+        raise MissingEnterprisePackageError()
+
+    # Convert string name to numeric enum value using protobuf enum
+    try:
+        return cast(int, RestartUsersEnum.Value(restart_users_str))
+    except ValueError:
+        # Get all valid enum names from protobuf enum using .keys() method
+        valid_values = list(RestartUsersEnum.keys())
+        raise ValueError(
+            f"Invalid restart_users: '{restart_users_str}'. "
+            f"Must be one of: {', '.join(sorted(valid_values))}"
+        ) from None
+
+
 @mcp_server.tool()
 async def pq_name_to_id(
     context: Context,
@@ -4545,7 +4574,7 @@ async def pq_details(
                 "init_timeout_nanos": 300000000000,
                 "admin_groups": ["admins", "data-team"],
                 "viewer_groups": ["analysts"],
-                "restart_users": "0",
+                "restart_users": "RU_ADMIN",
                 "last_modified_by": "admin_user",
                 "last_modified_by_effective": "admin_user",
                 "last_modified_time_nanos": 1734467200000000000,
@@ -5097,6 +5126,361 @@ async def pq_delete(
             exc_info=True,
         )
         result["error"] = f"Failed to delete PQ '{pq_id}': {type(e).__name__}: {e}"
+        result["isError"] = True
+
+    return result
+
+
+def _apply_pq_config_modifications(
+    config_pb: Any,
+    pq_name: str | None,
+    heap_size_gb: float | int | None,
+    script_body: str | None,
+    script_path: str | None,
+    programming_language: str | None,
+    configuration_type: str | None,
+    enabled: bool | None,
+    schedule: list[str] | None,
+    server: str | None,
+    engine: str | None,
+    jvm_profile: str | None,
+    extra_jvm_args: list[str] | None,
+    extra_class_path: list[str] | None,
+    python_virtual_environment: str | None,
+    extra_environment_vars: list[str] | None,
+    init_timeout_nanos: int | None,
+    auto_delete_timeout: int | None,
+    admin_groups: list[str] | None,
+    viewer_groups: list[str] | None,
+    restart_users: str | None,
+) -> bool:
+    """Apply configuration modifications to a PQ protobuf config.
+
+    Modifies the provided config_pb in-place based on the provided parameters.
+    Only non-None parameters are applied.
+
+    Args:
+        config_pb: The protobuf config object to modify
+        pq_name: New PQ name
+        heap_size_gb: New heap size in GB
+        script_body: New inline script code
+        script_path: New script path
+        programming_language: New programming language
+        configuration_type: New configuration type
+        enabled: New enabled status
+        schedule: New schedule list
+        server: New server name
+        engine: New engine/worker kind
+        jvm_profile: New JVM profile
+        extra_jvm_args: New extra JVM arguments list
+        extra_class_path: New extra classpath list
+        python_virtual_environment: New Python venv
+        extra_environment_vars: New environment variables list
+        init_timeout_nanos: New init timeout
+        auto_delete_timeout: New auto-delete timeout
+        admin_groups: New admin groups list
+        viewer_groups: New viewer groups list
+        restart_users: New restart users setting
+
+    Returns:
+        bool: True if any changes were made, False otherwise
+    """
+    has_changes = False
+
+    # Handle programming language with normalization
+    if programming_language is not None:
+        normalized_lang = _normalize_programming_language(programming_language)
+        config_pb.scriptLanguage = normalized_lang
+        has_changes = True
+
+    # Handle script_body and script_path (mutually clear the other)
+    if script_body is not None:
+        config_pb.scriptCode = script_body
+        config_pb.scriptPath = ""
+        has_changes = True
+    if script_path is not None:
+        config_pb.scriptPath = script_path
+        config_pb.scriptCode = ""
+        has_changes = True
+
+    # Handle auto_delete_timeout: convert seconds to nanoseconds
+    # None = no change, 0 = permanent (clear expiration), positive = timeout in seconds
+    if auto_delete_timeout is not None:
+        config_pb.expirationTimeNanos = auto_delete_timeout * 1_000_000_000
+        has_changes = True
+
+    # Handle restart_users: convert string to enum numeric value
+    if restart_users is not None:
+        restart_users_enum = _convert_restart_users_to_enum(restart_users)
+        config_pb.restartUsers = restart_users_enum
+        has_changes = True
+
+    # Simple field mappings: (param_value, config_pb_attr)
+    simple_fields: list[tuple[Any, str]] = [
+        (pq_name, "name"),
+        (heap_size_gb, "heapSizeGb"),
+        (configuration_type, "configurationType"),
+        (enabled, "enabled"),
+        (server, "serverName"),
+        (engine, "workerKind"),
+        (jvm_profile, "jvmProfile"),
+        (python_virtual_environment, "pythonControl"),
+        (init_timeout_nanos, "timeoutNanos"),
+    ]
+
+    for value, attr in simple_fields:
+        if value is not None:
+            setattr(config_pb, attr, value)
+            has_changes = True
+
+    # List field mappings: (param_value, config_pb_attr)
+    list_fields: list[tuple[list[str] | None, str]] = [
+        (schedule, "scheduling"),
+        (extra_jvm_args, "extraJvmArguments"),
+        (extra_class_path, "classPathAdditions"),
+        (extra_environment_vars, "extraEnvironmentVariables"),
+        (admin_groups, "adminGroups"),
+        (viewer_groups, "viewerGroups"),
+    ]
+
+    for value, attr in list_fields:
+        if value is not None:
+            field = getattr(config_pb, attr)
+            del field[:]
+            field.extend(value)
+            has_changes = True
+
+    return has_changes
+
+
+@mcp_server.tool()
+async def pq_modify(
+    context: Context,
+    pq_id: str,
+    restart: bool = False,
+    pq_name: str | None = None,
+    heap_size_gb: float | int | None = None,
+    script_body: str | None = None,
+    script_path: str | None = None,
+    programming_language: str | None = None,
+    configuration_type: str | None = None,
+    enabled: bool | None = None,
+    schedule: list[str] | None = None,
+    server: str | None = None,
+    engine: str | None = None,
+    jvm_profile: str | None = None,
+    extra_jvm_args: list[str] | None = None,
+    extra_class_path: list[str] | None = None,
+    python_virtual_environment: str | None = None,
+    extra_environment_vars: list[str] | None = None,
+    init_timeout_nanos: int | None = None,
+    auto_delete_timeout: int | None = None,
+    admin_groups: list[str] | None = None,
+    viewer_groups: list[str] | None = None,
+    restart_users: str | None = None,
+) -> dict:
+    """MCP Tool: Modify an existing persistent query configuration.
+
+    Updates a PQ's configuration by merging provided parameters with the current config.
+    Only specified (non-None) parameters are updated - all others remain unchanged.
+    Changes can be applied to PQs in any state (RUNNING, STOPPED, etc.).
+
+    Terminology Note:
+    - 'PQ' is shorthand for Persistent Query
+    - 'DHE' is shorthand for Deephaven Enterprise (also called 'Core+')
+    - 'DHC' is shorthand for Deephaven Community (also called 'Core')
+
+    AI Agent Usage:
+    - Only specify parameters you want to change - all params are optional
+    - List fields (extra_jvm_args, schedule, etc.) completely REPLACE the existing list
+    - restart=True applies changes immediately by restarting the PQ
+    - restart=False saves changes but requires manual pq_start to apply
+    - Some changes (heap size, script content, JVM args) require restart to take effect
+    - Can modify RUNNING PQs but be cautious - restart=True will disrupt active sessions
+    - Use pq_details first to see current config before modifying
+
+    Parameter Behaviors:
+    - pq_name: Renames the PQ (does not affect serial number or pq_id)
+    - heap_size_gb: Changes JVM heap allocation (requires restart to apply)
+    - script_body/script_path: Mutually exclusive - specifying one clears the other
+    - programming_language: "Python" or "Groovy" (case-insensitive)
+    - configuration_type: "Script" (interactive) or "RunAndDone" (batch)
+    - enabled: Whether PQ can be executed (true/false)
+    - schedule: List of "Key=Value" strings for scheduling (replaces entire schedule)
+    - List fields: Completely replace existing lists (not append/merge)
+
+    Restart Behavior:
+    - restart=True: PQ is stopped and restarted immediately, applying all changes
+    - restart=False: Changes are saved but PQ continues running with old config until manually restarted
+    - Note: Even with restart=False, some changes won't apply until next restart
+
+    Args:
+        context (Context): MCP context object
+        pq_id (str): PQ identifier in format 'enterprise:{system_name}:{serial}'
+        restart (bool): Restart PQ to apply changes immediately (default: False)
+        pq_name (str | None): New name for the PQ
+        heap_size_gb (float | int | None): JVM heap size in GB (e.g., 8.0 or 16)
+        script_body (str | None): Inline script code (mutually exclusive with script_path)
+        script_path (str | None): Path to script in Git repository (mutually exclusive with script_body)
+        programming_language (str | None): "Python" or "Groovy", case-insensitive
+        configuration_type (str | None): "Script" (live) or "RunAndDone" (batch)
+        enabled (bool | None): Whether query can be executed
+        schedule (list[str] | None): Scheduling config as ["Key=Value", ...] (replaces current)
+        server (str | None): Specific server to run on
+        engine (str | None): Worker engine type (default: "DeephavenCommunity")
+        jvm_profile (str | None): Named JVM profile from controller config
+        extra_jvm_args (list[str] | None): Additional JVM arguments (replaces current)
+        extra_class_path (list[str] | None): Additional classpath entries (replaces current)
+        python_virtual_environment (str | None): Named Python venv for Core+ workers
+        extra_environment_vars (list[str] | None): Environment variables as ["KEY=value", ...] (replaces current)
+        init_timeout_nanos (int | None): Initialization timeout in nanoseconds
+        auto_delete_timeout (int | None): Seconds of inactivity before auto-deletion. None = no change, 0 = permanent (no expiration), positive integer = timeout in seconds
+        admin_groups (list[str] | None): Groups with admin access (replaces current)
+        viewer_groups (list[str] | None): Groups with viewer access (replaces current)
+        restart_users (str | None): Who can restart - "RU_ADMIN", "RU_ADMIN_AND_VIEWERS", "RU_VIEWERS_WHEN_DOWN"
+
+    Returns:
+        dict: Success response:
+        {
+            "success": True,
+            "pq_id": "enterprise:prod:12345",
+            "serial": 12345,
+            "name": "analytics_worker",
+            "restarted": True or False,
+            "message": "PQ modified successfully"
+        }
+
+        dict: Error response:
+        {
+            "success": False,
+            "error": "Failed to modify PQ: ...",
+            "isError": True
+        }
+    """
+    _LOGGER.info(
+        f"[mcp_systems_server:pq_modify] Invoked: pq_id={pq_id!r}, restart={restart}"
+    )
+
+    result: dict[str, object] = {"success": False}
+
+    try:
+        # Parse pq_id to get system name and serial
+        try:
+            system_name, serial = _parse_pq_id(pq_id)
+        except ValueError as e:
+            result["error"] = f"Invalid pq_id '{pq_id}': {type(e).__name__}: {e}"
+            result["isError"] = True
+            return result
+
+        # Get config and session registry
+        config_manager: ConfigManager = context.request_context.lifespan_context[
+            "config_manager"
+        ]
+        session_registry: CombinedSessionRegistry = (
+            context.request_context.lifespan_context["session_registry"]
+        )
+
+        # Verify enterprise system exists
+        _, error_response = await _get_system_config(
+            "pq_modify", config_manager, system_name
+        )
+        if error_response:
+            result.update(error_response)
+            return result
+
+        # Get enterprise registry and factory
+        enterprise_registry = await session_registry.enterprise_registry()
+        factory_manager = await enterprise_registry.get(system_name)
+        factory = await factory_manager.get()
+
+        # Get controller client
+        controller = factory.controller_client
+
+        # Get all PQs from controller (ensures subscription is ready)
+        # Then extract the specific PQ by serial
+        pq_map = await controller.map()
+
+        if serial not in pq_map:
+            error_msg = f"PQ with serial {serial} not found on system '{system_name}'"
+            _LOGGER.error(f"[mcp_systems_server:pq_modify] {error_msg}")
+            result["error"] = error_msg
+            result["isError"] = True
+            return result
+
+        # Get current PQ info and config
+        pq_info = pq_map[serial]
+        config = pq_info.config
+        config_pb = config.pb
+
+        # Validate mutually exclusive parameters
+        if script_body is not None and script_path is not None:
+            result["error"] = (
+                "script_body and script_path are mutually exclusive - specify only one"
+            )
+            result["isError"] = True
+            return result
+
+        # Apply configuration modifications using helper function
+        has_changes = _apply_pq_config_modifications(
+            config_pb,
+            pq_name,
+            heap_size_gb,
+            script_body,
+            script_path,
+            programming_language,
+            configuration_type,
+            enabled,
+            schedule,
+            server,
+            engine,
+            jvm_profile,
+            extra_jvm_args,
+            extra_class_path,
+            python_virtual_environment,
+            extra_environment_vars,
+            init_timeout_nanos,
+            auto_delete_timeout,
+            admin_groups,
+            viewer_groups,
+            restart_users,
+        )
+
+        # Only modify if changes were made
+        if not has_changes:
+            result["error"] = (
+                "No changes specified - at least one parameter must be provided"
+            )
+            result["isError"] = True
+            return result
+
+        # Modify the PQ with the updated existing config
+        await controller.modify_query(config, restart=restart)
+
+        _LOGGER.info(
+            f"[mcp_systems_server:pq_modify] Modified PQ serial={serial}, name='{config.pb.name}', restart={restart}"
+        )
+
+        result.update(
+            {
+                "success": True,
+                "pq_id": pq_id,
+                "serial": serial,
+                "name": config.pb.name,
+                "restarted": restart,
+                "message": f"PQ '{config.pb.name}' modified successfully"
+                + (" and restarted" if restart else ""),
+            }
+        )
+
+    except Exception as e:
+        _LOGGER.error(
+            f"[mcp_systems_server:pq_modify] Failed to modify PQ: {e!r}",
+            exc_info=True,
+        )
+        error_msg = str(e) if str(e) else repr(e)
+        result["error"] = (
+            f"Failed to modify PQ '{pq_id}': {type(e).__name__}: {error_msg}"
+        )
         result["isError"] = True
 
     return result

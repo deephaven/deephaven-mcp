@@ -272,6 +272,7 @@ Manages and connects to multiple [Deephaven Community Core](https://deephaven.io
 - `pq_list` - List all persistent queries on a system
 - `pq_details` - Get detailed PQ information
 - `pq_create` - Create new persistent queries
+- `pq_modify` - Modify existing persistent query configuration
 - `pq_start` - Start persistent queries
 - `pq_stop` - Stop running persistent queries
 - `pq_restart` - Restart persistent queries

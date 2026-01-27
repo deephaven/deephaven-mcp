@@ -1323,6 +1323,60 @@ Persistent Queries (PQs) are recipes for creating and managing long-running work
 
 **Description**: Permanently removes the PQ from the controller. If running, it will be stopped first. This operation cannot be undone.
 
+##### `pq_modify`
+
+**Purpose**: Modify an existing persistent query configuration.
+
+**Parameters**:
+
+- `pq_id` (required, string): PQ identifier in format "enterprise:system_name:serial_or_name"
+- `restart` (optional, bool): Restart PQ after modification to apply changes (default: false)
+- `pq_name` (optional, string): New name for the PQ
+- `heap_size_gb` (optional, float | int): JVM heap size in GB
+- `script_body` (optional, string): Inline script code (mutually exclusive with script_path)
+- `script_path` (optional, string): Path to script file (mutually exclusive with script_body)
+- `programming_language` (optional, string): "Python" or "Groovy"
+- `configuration_type` (optional, string): Query type ("Script", "RunAndDone", etc.)
+- `enabled` (optional, bool): Whether query is enabled
+- `schedule` (optional, list[string]): Scheduling configuration
+- `server` (optional, string): Specific server to run on
+- `engine` (optional, string): Engine type (e.g., "DeephavenCommunity")
+- `jvm_profile` (optional, string): Named JVM profile
+- `extra_jvm_args` (optional, list[string]): Additional JVM arguments
+- `extra_class_path` (optional, list[string]): Additional classpath entries
+- `python_virtual_environment` (optional, string): Named Python virtual environment
+- `extra_environment_vars` (optional, list[string]): Additional environment variables
+- `init_timeout_nanos` (optional, int): Initialization timeout in nanoseconds
+- `auto_delete_timeout` (optional, int): Auto-deletion timeout in seconds. Omit to leave unchanged, 0 for permanent (no expiration), positive integer for timeout
+- `admin_groups` (optional, list[string]): User groups with admin access
+- `viewer_groups` (optional, list[string]): User groups with viewer access
+- `restart_users` (optional, string): Who can restart ("RU_ADMIN", "RU_ADMIN_AND_VIEWERS", "RU_VIEWERS_WHEN_DOWN")
+
+**Returns**:
+
+```json
+{
+  "success": true,
+  "pq_id": "enterprise:prod:12345",
+  "serial": 12345,
+  "name": "analytics_worker",
+  "restarted": false,
+  "message": "PQ 'analytics_worker' modified successfully"
+}
+```
+
+**Description**: Updates a PQ's configuration by merging provided parameters with the current config. Only specified (non-None) parameters are updated - all others remain unchanged. Changes can be applied to PQs in any state.
+
+**Important Notes**:
+
+- At least one parameter must be provided (returns error if no changes specified)
+- List parameters (extra_jvm_args, schedule, etc.) completely replace existing values
+- `restart=true` restarts the PQ immediately to apply changes
+- `restart=false` saves changes but requires manual restart to take effect
+- Some changes (heap size, script content, JVM args) require restart to apply
+- Can modify RUNNING PQs but `restart=true` will disrupt active sessions
+- Use `pq_details` first to see current configuration before modifying
+
 ##### `pq_start`
 
 **Purpose**: Start a persistent query.
