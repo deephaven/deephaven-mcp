@@ -1368,6 +1368,7 @@ Persistent Queries (PQs) are recipes for creating and managing long-running work
 **Description**: Updates a PQ's configuration by merging provided parameters with the current config. Only specified (non-None) parameters are updated - all others remain unchanged. Changes can be applied to PQs in any state.
 
 **Important Notes**:
+
 - At least one parameter must be provided (returns error if no changes specified)
 - List parameters (extra_jvm_args, schedule, etc.) completely replace existing values
 - `restart=true` restarts the PQ immediately to apply changes

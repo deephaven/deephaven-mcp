@@ -5102,6 +5102,118 @@ async def pq_delete(
     return result
 
 
+def _apply_pq_config_modifications(
+    config_pb: Any,
+    pq_name: str | None,
+    heap_size_gb: float | int | None,
+    script_body: str | None,
+    script_path: str | None,
+    programming_language: str | None,
+    configuration_type: str | None,
+    enabled: bool | None,
+    schedule: list[str] | None,
+    server: str | None,
+    engine: str | None,
+    jvm_profile: str | None,
+    extra_jvm_args: list[str] | None,
+    extra_class_path: list[str] | None,
+    python_virtual_environment: str | None,
+    extra_environment_vars: list[str] | None,
+    init_timeout_nanos: int | None,
+    auto_delete_timeout: int | None,
+    admin_groups: list[str] | None,
+    viewer_groups: list[str] | None,
+    restart_users: str | None,
+) -> bool:
+    """Apply configuration modifications to a PQ protobuf config.
+
+    Modifies the provided config_pb in-place based on the provided parameters.
+    Only non-None parameters are applied.
+
+    Args:
+        config_pb: The protobuf config object to modify
+        pq_name: New PQ name
+        heap_size_gb: New heap size in GB
+        script_body: New inline script code
+        script_path: New script path
+        programming_language: New programming language
+        configuration_type: New configuration type
+        enabled: New enabled status
+        schedule: New schedule list
+        server: New server name
+        engine: New engine/worker kind
+        jvm_profile: New JVM profile
+        extra_jvm_args: New extra JVM arguments list
+        extra_class_path: New extra classpath list
+        python_virtual_environment: New Python venv
+        extra_environment_vars: New environment variables list
+        init_timeout_nanos: New init timeout
+        auto_delete_timeout: New auto-delete timeout
+        admin_groups: New admin groups list
+        viewer_groups: New viewer groups list
+        restart_users: New restart users setting
+
+    Returns:
+        bool: True if any changes were made, False otherwise
+    """
+    has_changes = False
+
+    # Handle programming language with normalization
+    if programming_language is not None:
+        normalized_lang = _normalize_programming_language(programming_language)
+        config_pb.scriptLanguage = normalized_lang
+        has_changes = True
+
+    # Handle script_body and script_path (mutually clear the other)
+    if script_body is not None:
+        config_pb.scriptCode = script_body
+        config_pb.scriptPath = ""
+        has_changes = True
+    if script_path is not None:
+        config_pb.scriptPath = script_path
+        config_pb.scriptCode = ""
+        has_changes = True
+
+    # Simple field mappings: (param_value, config_pb_attr)
+    simple_fields: list[tuple[Any, str]] = [
+        (pq_name, "name"),
+        (heap_size_gb, "heapSizeGb"),
+        (configuration_type, "configurationType"),
+        (enabled, "enabled"),
+        (server, "serverName"),
+        (engine, "workerKind"),
+        (jvm_profile, "jvmProfile"),
+        (python_virtual_environment, "pythonControl"),
+        (init_timeout_nanos, "timeoutNanos"),
+        (auto_delete_timeout, "expirationTimeNanos"),
+        (restart_users, "restartUsers"),
+    ]
+
+    for value, attr in simple_fields:
+        if value is not None:
+            setattr(config_pb, attr, value)
+            has_changes = True
+
+    # List field mappings: (param_value, config_pb_attr)
+    list_fields: list[tuple[list[str] | None, str]] = [
+        (schedule, "scheduling"),
+        (extra_jvm_args, "extraJvmArguments"),
+        (extra_class_path, "classPathAdditions"),
+        (extra_environment_vars, "extraEnvironmentVariables"),
+        (admin_groups, "adminGroups"),
+        (viewer_groups, "viewerGroups"),
+    ]
+
+    for value, attr in list_fields:
+        if value is not None:
+            field = getattr(config_pb, attr)
+            del field[:]
+            field.extend(value)
+            has_changes = True
+
+    return has_changes
+
+
 @mcp_server.tool()
 async def pq_modify(
     context: Context,
@@ -5264,89 +5376,42 @@ async def pq_modify(
 
         # Validate mutually exclusive parameters
         if script_body is not None and script_path is not None:
-            result["error"] = "script_body and script_path are mutually exclusive - specify only one"
+            result["error"] = (
+                "script_body and script_path are mutually exclusive - specify only one"
+            )
             result["isError"] = True
             return result
 
-        # Track if any changes were made
-        has_changes = False
-
-        # Normalize programming language if provided
-        if programming_language is not None:
-            normalized_lang = _normalize_programming_language(programming_language)
-            config_pb.scriptLanguage = normalized_lang
-            has_changes = True
-
-        # Modify only the fields that were provided (None means keep current value)
-        if pq_name is not None:
-            config_pb.name = pq_name
-            has_changes = True
-        if heap_size_gb is not None:
-            config_pb.heapSizeGb = heap_size_gb
-            has_changes = True
-        if script_body is not None:
-            config_pb.scriptCode = script_body
-            config_pb.scriptPath = ""
-            has_changes = True
-        if script_path is not None:
-            config_pb.scriptPath = script_path
-            config_pb.scriptCode = ""
-            has_changes = True
-        if configuration_type is not None:
-            config_pb.configurationType = configuration_type
-            has_changes = True
-        if enabled is not None:
-            config_pb.enabled = enabled
-            has_changes = True
-        if schedule is not None:
-            del config_pb.scheduling[:]
-            config_pb.scheduling.extend(schedule)
-            has_changes = True
-        if server is not None:
-            config_pb.serverName = server
-            has_changes = True
-        if engine is not None:
-            config_pb.workerKind = engine
-            has_changes = True
-        if jvm_profile is not None:
-            config_pb.jvmProfile = jvm_profile
-            has_changes = True
-        if extra_jvm_args is not None:
-            del config_pb.extraJvmArguments[:]
-            config_pb.extraJvmArguments.extend(extra_jvm_args)
-            has_changes = True
-        if extra_class_path is not None:
-            del config_pb.classPathAdditions[:]
-            config_pb.classPathAdditions.extend(extra_class_path)
-            has_changes = True
-        if python_virtual_environment is not None:
-            config_pb.pythonControl = python_virtual_environment
-            has_changes = True
-        if extra_environment_vars is not None:
-            del config_pb.extraEnvironmentVariables[:]
-            config_pb.extraEnvironmentVariables.extend(extra_environment_vars)
-            has_changes = True
-        if init_timeout_nanos is not None:
-            config_pb.timeoutNanos = init_timeout_nanos
-            has_changes = True
-        if auto_delete_timeout is not None:
-            config_pb.expirationTimeNanos = auto_delete_timeout
-            has_changes = True
-        if admin_groups is not None:
-            del config_pb.adminGroups[:]
-            config_pb.adminGroups.extend(admin_groups)
-            has_changes = True
-        if viewer_groups is not None:
-            del config_pb.viewerGroups[:]
-            config_pb.viewerGroups.extend(viewer_groups)
-            has_changes = True
-        if restart_users is not None:
-            config_pb.restartUsers = restart_users
-            has_changes = True
+        # Apply configuration modifications using helper function
+        has_changes = _apply_pq_config_modifications(
+            config_pb,
+            pq_name,
+            heap_size_gb,
+            script_body,
+            script_path,
+            programming_language,
+            configuration_type,
+            enabled,
+            schedule,
+            server,
+            engine,
+            jvm_profile,
+            extra_jvm_args,
+            extra_class_path,
+            python_virtual_environment,
+            extra_environment_vars,
+            init_timeout_nanos,
+            auto_delete_timeout,
+            admin_groups,
+            viewer_groups,
+            restart_users,
+        )
 
         # Only modify if changes were made
         if not has_changes:
-            result["error"] = "No changes specified - at least one parameter must be provided"
+            result["error"] = (
+                "No changes specified - at least one parameter must be provided"
+            )
             result["isError"] = True
             return result
 
@@ -5364,7 +5429,8 @@ async def pq_modify(
                 "serial": serial,
                 "name": config.pb.name,
                 "restarted": restart,
-                "message": f"PQ '{config.pb.name}' modified successfully" + (" and restarted" if restart else ""),
+                "message": f"PQ '{config.pb.name}' modified successfully"
+                + (" and restarted" if restart else ""),
             }
         )
 
@@ -5374,7 +5440,9 @@ async def pq_modify(
             exc_info=True,
         )
         error_msg = str(e) if str(e) else repr(e)
-        result["error"] = f"Failed to modify PQ '{pq_id}': {type(e).__name__}: {error_msg}"
+        result["error"] = (
+            f"Failed to modify PQ '{pq_id}': {type(e).__name__}: {error_msg}"
+        )
         result["isError"] = True
 
     return result

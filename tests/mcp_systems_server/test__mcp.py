@@ -10610,11 +10610,13 @@ async def test_pq_modify_success():
     assert result["name"] == "analytics"
     assert result["restarted"] is False
     assert "modified successfully" in result["message"]
-    
+
     # Verify modify_query was called with the existing config (now modified) and restart=False
     mock_controller.modify_query.assert_called_once()
     call_args = mock_controller.modify_query.call_args
-    assert call_args[0][0] == current_pq_info.config  # First positional arg is the config
+    assert (
+        call_args[0][0] == current_pq_info.config
+    )  # First positional arg is the config
     assert call_args[1]["restart"] is False
     # Verify heap was actually modified in the existing config
     assert current_pq_info.config.pb.heapSizeGb == 16.0
@@ -10668,7 +10670,7 @@ async def test_pq_modify_with_restart():
     assert result["name"] == "analytics_renamed"
     assert result["restarted"] is True
     assert "restarted" in result["message"]
-    
+
     # Verify modify_query was called with existing config and restart=True
     call_args = mock_controller.modify_query.call_args
     assert call_args[0][0] == current_pq_info.config  # Existing config was passed
@@ -11020,7 +11022,7 @@ async def test_pq_modify_all_parameters():
     # Verify success
     assert result["success"] is True
     assert result["name"] == "new_name"
-    
+
     # Verify all fields were modified
     config_pb = current_pq_info.config.pb
     assert config_pb.name == "new_name"
