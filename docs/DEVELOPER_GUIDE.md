@@ -1347,7 +1347,7 @@ Persistent Queries (PQs) are recipes for creating and managing long-running work
 - `python_virtual_environment` (optional, string): Named Python virtual environment
 - `extra_environment_vars` (optional, list[string]): Additional environment variables
 - `init_timeout_nanos` (optional, int): Initialization timeout in nanoseconds
-- `auto_delete_timeout` (optional, int): Auto-deletion timeout in seconds
+- `auto_delete_timeout` (optional, int): Auto-deletion timeout in seconds. Omit to leave unchanged, 0 for permanent (no expiration), positive integer for timeout
 - `admin_groups` (optional, list[string]): User groups with admin access
 - `viewer_groups` (optional, list[string]): User groups with viewer access
 - `restart_users` (optional, string): Who can restart ("RU_ADMIN", "RU_ADMIN_AND_VIEWERS", "RU_VIEWERS_WHEN_DOWN")

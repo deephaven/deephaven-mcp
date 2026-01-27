@@ -11053,6 +11053,63 @@ async def test_pq_modify_all_parameters(mock_restart_enum):
 
 
 @pytest.mark.asyncio
+async def test_pq_modify_clear_auto_delete_timeout():
+    """Test pq_modify with auto_delete_timeout=0 to make query permanent."""
+    mock_config_manager = MagicMock()
+    mock_session_registry = MagicMock()
+    mock_enterprise_registry = MagicMock()
+    mock_factory_manager = MagicMock()
+    mock_factory = MagicMock()
+    mock_controller = MagicMock()
+
+    # Setup mock chain
+    mock_session_registry.enterprise_registry = AsyncMock(
+        return_value=mock_enterprise_registry
+    )
+    mock_enterprise_registry.get = AsyncMock(return_value=mock_factory_manager)
+    mock_factory_manager.get = AsyncMock(return_value=mock_factory)
+    mock_factory.controller_client = mock_controller
+
+    # Mock current PQ info with existing timeout
+    current_pq_info = create_mock_pq_info(12345, "analytics", "RUNNING", 8.0)
+    current_pq_info.config.pb.expirationTimeNanos = (
+        3600000000000  # Currently has 1 hour timeout
+    )
+    mock_controller.map = AsyncMock(return_value={12345: current_pq_info})
+    mock_controller.modify_query = AsyncMock()
+
+    # Mock config
+    full_config = {"enterprise": {"systems": {"test-system": {}}}}
+    mock_config_manager.get_config = AsyncMock(return_value=full_config)
+
+    context = MockContext(
+        {
+            "config_manager": mock_config_manager,
+            "session_registry": mock_session_registry,
+        }
+    )
+
+    # Call with auto_delete_timeout=0 to clear expiration (make permanent)
+    result = await mcp_mod.pq_modify(
+        context,
+        pq_id="enterprise:test-system:12345",
+        auto_delete_timeout=0,
+        restart=False,
+    )
+
+    # Verify success
+    assert result["success"] is True
+    assert result["message"] == "PQ 'analytics' modified successfully"
+
+    # Verify modify_query was called
+    mock_controller.modify_query.assert_called_once()
+
+    # Verify expirationTimeNanos was set to 0 (permanent)
+    config_pb = current_pq_info.config.pb
+    assert config_pb.expirationTimeNanos == 0
+
+
+@pytest.mark.asyncio
 @patch("deephaven_mcp.mcp_systems_server._mcp.RestartUsersEnum", None)
 async def test_pq_modify_restart_users_enum_not_available():
     """Test pq_modify when RestartUsersEnum is None (enterprise package not installed)."""

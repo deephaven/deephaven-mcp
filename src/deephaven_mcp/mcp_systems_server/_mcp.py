@@ -5204,6 +5204,7 @@ def _apply_pq_config_modifications(
         has_changes = True
 
     # Handle auto_delete_timeout: convert seconds to nanoseconds
+    # None = no change, 0 = permanent (clear expiration), positive = timeout in seconds
     if auto_delete_timeout is not None:
         config_pb.expirationTimeNanos = auto_delete_timeout * 1_000_000_000
         has_changes = True
@@ -5333,7 +5334,7 @@ async def pq_modify(
         python_virtual_environment (str | None): Named Python venv for Core+ workers
         extra_environment_vars (list[str] | None): Environment variables as ["KEY=value", ...] (replaces current)
         init_timeout_nanos (int | None): Initialization timeout in nanoseconds
-        auto_delete_timeout (int | None): Seconds of inactivity before auto-deletion (None = permanent)
+        auto_delete_timeout (int | None): Seconds of inactivity before auto-deletion. None = no change, 0 = permanent (no expiration), positive integer = timeout in seconds
         admin_groups (list[str] | None): Groups with admin access (replaces current)
         viewer_groups (list[str] | None): Groups with viewer access (replaces current)
         restart_users (str | None): Who can restart - "RU_ADMIN", "RU_ADMIN_AND_VIEWERS", "RU_VIEWERS_WHEN_DOWN"
