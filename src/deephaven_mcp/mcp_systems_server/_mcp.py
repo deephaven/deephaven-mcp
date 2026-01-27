@@ -10,24 +10,43 @@ Key Features:
     - All docstrings are optimized for agentic and programmatic consumption and describe both user-facing and technical details.
 
 Tools Provided:
+    Configuration and System Management:
     - mcp_reload: Reload configuration and clear all sessions atomically.
     - enterprise_systems_status: List all enterprise (Core+) systems with their status and configuration details.
+
+    Session Management:
     - sessions_list: List all sessions (community and enterprise) with basic metadata.
     - session_details: Get detailed information about a specific session.
-    - session_tables_schema: Retrieve full metadata schemas for one or more tables from a session (requires session_id).
-    - session_tables_list: Retrieve names of all tables in a session (lightweight alternative to session_tables_schema).
-    - session_script_run: Execute a script on a specified Deephaven session (requires session_id).
-    - session_pip_list: Retrieve all installed pip packages (name and version) from a specified Deephaven session using importlib.metadata, returned as a list of dicts.
-    - session_table_data: Retrieve table data with flexible formatting (json-row, json-column, csv) and optional row limiting for safe access to large tables.
-    - catalog_tables_list: Retrieve catalog table entries from enterprise (Core+) sessions with optional filtering by namespace or table name patterns.
-    - catalog_namespaces_list: Retrieve distinct namespaces from enterprise (Core+) catalog for efficient discovery of data domains.
-    - catalog_tables_schema: Retrieve full schemas for catalog tables in enterprise (Core+) sessions with flexible filtering by namespace, table names, or custom filters.
-    - catalog_table_sample: Retrieve sample data from a catalog table in enterprise (Core+) sessions with flexible formatting and row limiting for safe previewing.
     - session_community_create: Create a new dynamically launched Community session via Docker or python.
     - session_community_delete: Delete a dynamically created Community session and clean up resources.
     - session_community_credentials: SECURITY SENSITIVE - Retrieve connection credentials for browser access (disabled by default, requires security.community.credential_retrieval_mode configuration).
     - session_enterprise_create: Create a new enterprise session with configurable parameters and resource limits.
     - session_enterprise_delete: Delete an existing enterprise session and clean up resources.
+
+    Session Table Operations:
+    - session_tables_list: Retrieve names of all tables in a session (lightweight alternative to session_tables_schema).
+    - session_tables_schema: Retrieve full metadata schemas for one or more tables from a session (requires session_id).
+    - session_table_data: Retrieve table data with flexible formatting (json-row, json-column, csv) and optional row limiting for safe access to large tables.
+
+    Session Script and Package Management:
+    - session_script_run: Execute a script on a specified Deephaven session (requires session_id).
+    - session_pip_list: Retrieve all installed pip packages (name and version) from a specified Deephaven session using importlib.metadata, returned as a list of dicts.
+
+    Catalog Operations (Enterprise Core+ Only):
+    - catalog_tables_list: Retrieve catalog table entries from enterprise (Core+) sessions with optional filtering by namespace or table name patterns.
+    - catalog_namespaces_list: Retrieve distinct namespaces from enterprise (Core+) catalog for efficient discovery of data domains.
+    - catalog_tables_schema: Retrieve full schemas for catalog tables in enterprise (Core+) sessions with flexible filtering by namespace, table names, or custom filters.
+    - catalog_table_sample: Retrieve sample data from a catalog table in enterprise (Core+) sessions with flexible formatting and row limiting for safe previewing.
+
+    Persistent Query (PQ) Management (Enterprise Core+ Only):
+    - pq_name_to_id: Convert a PQ name to its canonical pq_id for use with other PQ tools.
+    - pq_list: List all persistent queries on an enterprise system with their status and configuration.
+    - pq_details: Get detailed information about a specific persistent query including state, configuration, and metadata.
+    - pq_create: Create a new persistent query with configurable resource allocation and settings.
+    - pq_delete: Permanently delete a persistent query and release its resources.
+    - pq_start: Start a persistent query and wait for it to reach RUNNING state.
+    - pq_stop: Stop one or more running persistent queries (supports bulk operations).
+    - pq_restart: Restart one or more stopped persistent queries (supports bulk operations).
 
 Return Types:
     - All tools return structured dict objects, never raise exceptions to the MCP layer.
@@ -55,6 +74,23 @@ from deephaven_mcp._exceptions import (
     UnsupportedOperationError,
 )
 from deephaven_mcp.client import BaseSession, CorePlusSession
+from deephaven_mcp.client._protobuf import (
+    CorePlusQueryConfig,
+    CorePlusQuerySerial,
+    CorePlusQueryState,
+)
+
+# Import protobuf enum classes for proper enum name resolution
+# Use try-except since proto module may not be available even if enterprise package is
+try:
+    from deephaven_enterprise.proto.persistent_query_pb2 import (
+        ExportedObjectTypeEnum,
+        RestartUsersEnum,
+    )
+except ImportError:
+    ExportedObjectTypeEnum = None  # pragma: no cover
+    RestartUsersEnum = None  # pragma: no cover
+
 from deephaven_mcp.config import (
     ConfigManager,
     get_config_section,
@@ -690,15 +726,15 @@ async def _get_session_liveness_info(
     It can optionally attempt to connect to the session to verify its actual status.
 
     Args:
-        mgr: Session manager for the target session
-        session_id: Session identifier for logging purposes
-        attempt_to_connect: Whether to attempt connecting to verify status
+        mgr (BaseItemManager): Session manager for the target session
+        session_id (str): Session identifier for logging purposes
+        attempt_to_connect (bool): Whether to attempt connecting to verify status
 
     Returns:
-        tuple: A 3-tuple containing:
+        tuple[bool, str, str | None]: A 3-tuple containing:
             - available (bool): Whether the session is available and responsive
             - liveness_status (str): Status classification ("ONLINE", "OFFLINE", etc.)
-            - liveness_detail (str): Detailed explanation of the status
+            - liveness_detail (str | None): Detailed explanation of the status
     """
     try:
         status, detail = await mgr.liveness_status(ensure_item=attempt_to_connect)
@@ -764,9 +800,9 @@ async def _get_session_programming_language(
     immediately without attempting to connect.
 
     Args:
-        mgr: Session manager for the target session
-        session_id: Session identifier for logging purposes
-        available: Whether the session is available (pre-checked)
+        mgr (BaseItemManager): Session manager for the target session
+        session_id (str): Session identifier for logging purposes
+        available (bool): Whether the session is available (pre-checked)
 
     Returns:
         str | None: The programming language name (e.g., "python") or None if
@@ -793,21 +829,20 @@ async def _get_session_versions(
     mgr: BaseItemManager, session_id: str, available: bool
 ) -> tuple[str | None, str | None]:
     """
-    Get Deephaven version information.
+    Get Deephaven version information from a session.
 
-    This function retrieves both community (Core) and enterprise (Core+/CorePlus)
-    version information from the session. If the session is not available, it returns
-    (None, None) immediately without attempting to connect.
+    Retrieves both community (Core) and enterprise (Core+) version information.
+    Returns (None, None) immediately without connecting if the session is unavailable.
 
     Args:
-        mgr: Session manager for the target session
-        session_id: Session identifier for logging purposes
-        available: Whether the session is available (pre-checked)
+        mgr (BaseItemManager): Session manager for the target session
+        session_id (str): Session identifier for logging purposes
+        available (bool): Whether the session is available (pre-checked)
 
     Returns:
-        tuple: A 2-tuple containing:
+        tuple[str | None, str | None]: A 2-tuple containing:
             - community_version (str | None): Deephaven Community/Core version (e.g., "0.24.0")
-            - enterprise_version (str | None): Deephaven Enterprise/Core+/CorePlus version
+            - enterprise_version (str | None): Deephaven Enterprise/Core+ version
                                               (e.g., "0.24.0") or None if not enterprise
     """
     if not available:
@@ -1465,7 +1500,9 @@ async def session_script_run(
             f"[mcp_systems_server:session_script_run] Failed for session: '{session_id}', error: {e!r}",
             exc_info=True,
         )
-        result["error"] = str(e)
+        result["error"] = (
+            f"Script execution failed for session '{session_id}': {type(e).__name__}: {e}"
+        )
         result["isError"] = True
     return result
 
@@ -1565,7 +1602,9 @@ async def session_pip_list(context: Context, session_id: str) -> dict:
             f"[mcp_systems_server:session_pip_list] Failed for session: '{session_id}', error: {e!r}",
             exc_info=True,
         )
-        result["error"] = str(e)
+        result["error"] = (
+            f"Failed to list pip packages for session '{session_id}': {type(e).__name__}: {e}"
+        )
         result["isError"] = True
     return result
 
@@ -1816,7 +1855,9 @@ async def session_table_data(
         _LOGGER.error(
             f"[mcp_systems_server:session_table_data] Invalid format parameter: {e!r}"
         )
-        result["error"] = str(e)
+        result["error"] = (
+            f"Invalid format parameter for table '{table_name}': {type(e).__name__}: {e}"
+        )
         result["isError"] = True
 
     except Exception as e:
@@ -1825,7 +1866,9 @@ async def session_table_data(
             f"table '{table_name}': {e!r}",
             exc_info=True,
         )
-        result["error"] = str(e)
+        result["error"] = (
+            f"Failed to get data from table '{table_name}' in session '{session_id}': {type(e).__name__}: {e}"
+        )
         result["isError"] = True
 
     return result
@@ -1924,7 +1967,9 @@ async def _get_catalog_data(
         _LOGGER.error(
             f"[mcp_systems_server:{tool_name}] Session '{session_id}' is not an enterprise session: {e!r}"
         )
-        result["error"] = str(e)
+        result["error"] = (
+            f"Session '{session_id}' does not support this operation: {type(e).__name__}: {e}"
+        )
         result["isError"] = True
 
     except ValueError as e:
@@ -1932,7 +1977,7 @@ async def _get_catalog_data(
         _LOGGER.error(
             f"[mcp_systems_server:{tool_name}] Invalid format parameter: {e!r}"
         )
-        result["error"] = str(e)
+        result["error"] = f"Invalid format parameter: {type(e).__name__}: {e}"
         result["isError"] = True
 
     except Exception as e:
@@ -1940,7 +1985,9 @@ async def _get_catalog_data(
             f"[mcp_systems_server:{tool_name}] Failed for session '{session_id}': {e!r}",
             exc_info=True,
         )
-        result["error"] = str(e)
+        result["error"] = (
+            f"Catalog operation failed for session '{session_id}': {type(e).__name__}: {e}"
+        )
         result["isError"] = True
 
     return result
@@ -3004,31 +3051,23 @@ async def _check_session_id_available(
 async def _get_system_config(
     function_name: str, config_manager: ConfigManager, system_name: str
 ) -> tuple[dict, dict | None]:
-    """Get system config from configuration and validate system exists.
+    """Get enterprise system configuration and validate it exists.
 
-    Retrieves the configuration for the specified enterprise system. Returns both
-    the system configuration and any error that occurred during retrieval. This is
-    a common validation step used by enterprise session management functions.
+    Retrieves the configuration for the specified enterprise system from the config manager.
+    This is a common validation step used by enterprise session management functions.
 
     Args:
         function_name (str): Name of the calling function for logging purposes.
-            Used to create contextual log messages.
         config_manager (ConfigManager): ConfigManager instance to retrieve configuration.
-        system_name (str): Name of the enterprise system to look up in the configuration.
+        system_name (str): Name of the enterprise system to look up.
 
     Returns:
         tuple[dict, dict | None]: A tuple containing (system_config, error_dict):
-            - system_config (dict): The enterprise system configuration dict if found,
-              or an empty dict {} if the system is not found.
-            - error_dict (dict | None): Error response dict with 'error' and 'isError'
-              keys if the system is not found, or None if successful.
+            - system_config (dict): The enterprise system configuration if found, or empty dict {} if not found.
+            - error_dict (dict | None): Error response with 'error' and 'isError' keys if system not found, or None on success.
 
-            Success case: ({"url": "...", "username": "...", ...}, None)
-            Error case: ({}, {"error": "Enterprise system 'X' not found...", "isError": True})
-
-    Raises:
-        Exception: May raise exceptions for unexpected errors such as issues reading
-            the configuration file or invalid configuration structure.
+            Success: ({"url": "...", "username": "...", ...}, None)
+            Error: ({}, {"error": "Enterprise system 'X' not found...", "isError": True})
 
     Example:
         >>> config_mgr = ConfigManager()
@@ -3294,8 +3333,10 @@ async def session_enterprise_create(
         programming_lang = resolved_config["programming_language"]
         if programming_lang and programming_lang.lower() != "python":
 
-            def language_transformer(config: Any) -> Any:
-                config.scriptLanguage = programming_lang
+            def language_transformer(
+                config: CorePlusQueryConfig,
+            ) -> CorePlusQueryConfig:
+                config.pb.scriptLanguage = programming_lang
                 return config
 
             configuration_transformer = language_transformer
@@ -3364,7 +3405,9 @@ async def session_enterprise_create(
             f"'{session_name}' on system '{system_name}': {e!r}",
             exc_info=True,
         )
-        result["error"] = str(e)
+        result["error"] = (
+            f"Failed to create enterprise session '{session_name}' on system '{system_name}': {type(e).__name__}: {e}"
+        )
         result["isError"] = True
 
     return result
@@ -3609,7 +3652,1941 @@ async def session_enterprise_delete(
             f"'{session_name}' from system '{system_name}': {e!r}",
             exc_info=True,
         )
-        result["error"] = str(e)
+        result["error"] = (
+            f"Failed to delete enterprise session '{session_name}' from system '{system_name}': {type(e).__name__}: {e}"
+        )
+        result["isError"] = True
+
+    return result
+
+
+# =============================================================================
+# Persistent Query (PQ) Management Tools
+# =============================================================================
+
+
+def _parse_pq_id(pq_id: str) -> tuple[str, CorePlusQuerySerial]:
+    """Parse a pq_id into system_name and serial.
+
+    Args:
+        pq_id (str): PQ identifier in format 'enterprise:{system_name}:{serial}'
+
+    Returns:
+        tuple[str, CorePlusQuerySerial]: Tuple of (system_name, serial)
+
+    Raises:
+        ValueError: If pq_id format is invalid or serial is not an integer
+    """
+    parts = pq_id.split(":")
+    if len(parts) != 3 or parts[0] != "enterprise":
+        raise ValueError(
+            f"Invalid pq_id format: '{pq_id}'. "
+            "Expected format: 'enterprise:{{system_name}}:{{serial}}'"
+        )
+    try:
+        serial_int = int(parts[2])
+    except ValueError:
+        raise ValueError(
+            f"Invalid pq_id format: '{pq_id}'. "
+            f"Serial must be an integer, got: '{parts[2]}'"
+        ) from None
+    return parts[1], CorePlusQuerySerial(serial_int)
+
+
+def _make_pq_id(system_name: str, serial: CorePlusQuerySerial) -> str:
+    """Construct a pq_id from system_name and serial.
+
+    Args:
+        system_name (str): Name of the enterprise system
+        serial (CorePlusQuerySerial): PQ serial number
+
+    Returns:
+        str: PQ identifier in format 'enterprise:{system_name}:{serial}'
+    """
+    return f"enterprise:{system_name}:{serial}"
+
+
+# MCP-safe timeout limits
+MAX_MCP_SAFE_TIMEOUT = 60  # Conservative limit to prevent client timeouts
+DEFAULT_PQ_TIMEOUT = 30  # Default for PQ lifecycle operations
+
+
+def _validate_timeout(timeout_seconds: int, function_name: str) -> int:
+    """Validate timeout is reasonable for MCP operations.
+
+    Args:
+        timeout_seconds (int): Requested timeout in seconds
+        function_name (str): Name of calling function for logging
+
+    Returns:
+        int: The validated timeout value (returns input value, logs warning if excessive)
+    """
+    # TODO: Test behavior of timeout_seconds <= 0 with actual Enterprise controller.
+    #       In some controller methods (get, get_serial_for_name), timeout=0 means
+    #       "no wait" / immediate return. Behavior for start_and_wait, stop_and_wait,
+    #       and restart_query is undocumented. May be: immediate check, error, or
+    #       undefined. Needs empirical testing to determine if we should validate/reject.
+
+    if timeout_seconds > MAX_MCP_SAFE_TIMEOUT:
+        _LOGGER.warning(
+            f"[mcp_systems_server:{function_name}] Timeout {timeout_seconds}s exceeds "
+            f"recommended MCP limit of {MAX_MCP_SAFE_TIMEOUT}s - may cause client timeouts"
+        )
+    return timeout_seconds
+
+
+def _format_pq_config(config: CorePlusQueryConfig) -> dict:
+    """Format PersistentQueryConfigMessage into MCP-compatible dictionary.
+
+    Extracts ALL 38 fields from PersistentQueryConfigMessage protobuf and formats them
+    for MCP API responses. Applies consistent field naming (snake_case) and converts
+    empty/zero values to None for optional fields to produce cleaner JSON.
+
+    Protobuf reference:
+    https://docs.deephaven.io/protodoc/latest/#io.deephaven.proto.persistent_query.PersistentQueryConfigMessage
+
+    Field transformations:
+    - Empty strings → None for optional string fields
+    - Zero values → None for optional timestamp fields
+    - Repeated fields → Python lists
+    - Enum values → Stringified
+    - camelCase protobuf names → snake_case API names
+
+    Args:
+        config (CorePlusQueryConfig): Wrapper around PersistentQueryConfigMessage protobuf
+
+    Returns:
+        dict: All 38 config fields formatted for MCP API, with optional fields converted to None when empty
+    """
+    pb = config.pb
+
+    # Get restartUsers enum name using protobuf enum class Name() method
+    # Handle unknown enum values (server may have newer proto than client)
+    restart_users = pb.restartUsers
+    if RestartUsersEnum is not None:
+        try:
+            restart_users_str = RestartUsersEnum.Name(restart_users)
+        except ValueError:
+            restart_users_str = f"UNKNOWN_RESTART_USERS_{restart_users}"
+    else:
+        restart_users_str = str(restart_users)
+
+    return {
+        "serial": pb.serial,
+        "version": pb.version,
+        "name": pb.name,
+        "owner": pb.owner,
+        "enabled": pb.enabled,
+        "heap_size_gb": pb.heapSizeGb,
+        "buffer_pool_to_heap_ratio": pb.bufferPoolToHeapRatio,
+        "detailed_gc_logging_enabled": pb.detailedGCLoggingEnabled,
+        "extra_jvm_arguments": list(pb.extraJvmArguments),
+        "extra_environment_variables": list(pb.extraEnvironmentVariables),
+        "class_path_additions": list(pb.classPathAdditions),
+        "server_name": pb.serverName if pb.serverName else None,
+        "admin_groups": list(pb.adminGroups),
+        "viewer_groups": list(pb.viewerGroups),
+        "restart_users": restart_users_str,
+        "script_code": pb.scriptCode if pb.scriptCode else None,
+        "script_path": pb.scriptPath if pb.scriptPath else None,
+        "script_language": pb.scriptLanguage,
+        "configuration_type": pb.configurationType,
+        "type_specific_fields_json": (
+            pb.typeSpecificFieldsJson if pb.typeSpecificFieldsJson else None
+        ),
+        "scheduling": list(pb.scheduling),
+        "timeout_nanos": pb.timeoutNanos if pb.timeoutNanos else None,
+        "jvm_profile": pb.jvmProfile if pb.jvmProfile else None,
+        "last_modified_by_authenticated": (
+            pb.lastModifiedByAuthenticated if pb.lastModifiedByAuthenticated else None
+        ),
+        "last_modified_by_effective": (
+            pb.lastModifiedByEffective if pb.lastModifiedByEffective else None
+        ),
+        "last_modified_time_nanos": (
+            pb.lastModifiedTimeNanos if pb.lastModifiedTimeNanos else None
+        ),
+        "completed_status": pb.completedStatus if pb.completedStatus else None,
+        "expiration_time_nanos": (
+            pb.expirationTimeNanos if pb.expirationTimeNanos else None
+        ),
+        "kubernetes_control": pb.kubernetesControl if pb.kubernetesControl else None,
+        "worker_kind": pb.workerKind,
+        "created_time_nanos": pb.createdTimeNanos if pb.createdTimeNanos else None,
+        "replica_count": pb.replicaCount,
+        "spare_count": pb.spareCount,
+        "assignment_policy": pb.assignmentPolicy if pb.assignmentPolicy else None,
+        "assignment_policy_params": (
+            pb.assignmentPolicyParams if pb.assignmentPolicyParams else None
+        ),
+        "additional_memory_gb": pb.additionalMemoryGb,
+        "python_control": pb.pythonControl if pb.pythonControl else None,
+        "generic_worker_control": (
+            pb.genericWorkerControl if pb.genericWorkerControl else None
+        ),
+    }
+
+
+def _format_named_string_list(nsl: Any) -> dict:
+    """Format NamedStringList protobuf into dict.
+
+    Protobuf reference:
+    https://docs.deephaven.io/protodoc/latest/#io.deephaven.proto.controller_common.NamedStringList
+
+    NamedStringList fields (2 total):
+    - name (string)
+    - values (repeated string)
+
+    Args:
+        nsl: NamedStringList protobuf object
+
+    Returns:
+        dict: Formatted named string list with snake_case keys
+    """
+    return {
+        "name": nsl.name,
+        "values": list(nsl.values),
+    }
+
+
+def _format_column_definition(col: Any) -> dict:
+    """Format ColumnDefinitionMessage protobuf into dict.
+
+    Protobuf reference:
+    https://docs.deephaven.io/protodoc/latest/#io.deephaven.proto.common.ColumnDefinitionMessage
+
+    ColumnDefinitionMessage fields (9 total):
+    - name (string)
+    - dataType (string)
+    - componentType (string)
+    - columnType (ColumnTypeEnum)
+    - isVarSizeString (bool)
+    - encoding (EncodingTypeEnum)
+    - codec (string)
+    - codecArgs (string)
+    - objectWidthBytes (int32)
+
+    Args:
+        col: ColumnDefinitionMessage protobuf object
+
+    Returns:
+        dict: Formatted column definition with snake_case keys
+    """
+    return {
+        "name": col.name,
+        "data_type": col.dataType or None,
+        "component_type": col.componentType or None,
+        "column_type": col.columnType if col.columnType else None,
+        "is_var_size_string": col.isVarSizeString,
+        "encoding": col.encoding if col.encoding else None,
+        "codec": col.codec or None,
+        "codec_args": col.codecArgs or None,
+        "object_width_bytes": col.objectWidthBytes if col.objectWidthBytes else None,
+    }
+
+
+def _format_table_definition(td: Any) -> dict:
+    """Format TableDefinitionMessage protobuf into dict.
+
+    Protobuf reference:
+    https://docs.deephaven.io/protodoc/latest/#io.deephaven.proto.common.TableDefinitionMessage
+
+    TableDefinitionMessage fields (4 total):
+    - namespace (string, optional)
+    - tableName (string, optional)
+    - columns (repeated ColumnDefinitionMessage)
+    - storageType (StorageTypeEnum, optional)
+
+    Args:
+        td: TableDefinitionMessage protobuf object
+
+    Returns:
+        dict: Formatted table definition with snake_case keys
+    """
+    columns = [_format_column_definition(col) for col in td.columns]
+    return {
+        "namespace": td.namespace or None,
+        "table_name": td.tableName or None,
+        "columns": columns,
+        "storage_type": td.storageType if td.storageType else None,
+    }
+
+
+def _format_exported_object_info(obj: Any) -> dict:
+    """Format ExportedObjectInfoMessage protobuf into dict.
+
+    Protobuf reference:
+    https://docs.deephaven.io/protodoc/latest/#io.deephaven.proto.persistent_query.ExportedObjectInfoMessage
+
+    ExportedObjectInfoMessage fields (4 total):
+    - name (string)
+    - type (ExportedObjectTypeEnum)
+    - tableDefinition (TableDefinitionMessage)
+    - originalType (string)
+
+    Args:
+        obj: ExportedObjectInfoMessage protobuf object
+
+    Returns:
+        dict: Formatted exported object info with snake_case keys
+    """
+    # Get enum name using protobuf enum class Name() method
+    # Handle unknown enum values (server may have newer proto than client)
+    obj_type = obj.type
+    if obj_type is not None and ExportedObjectTypeEnum is not None:
+        try:
+            obj_type = ExportedObjectTypeEnum.Name(obj_type)
+        except ValueError:
+            obj_type = f"UNKNOWN_EXPORTED_TYPE_{obj_type}"
+
+    # Format tableDefinition if present
+    table_def = (
+        _format_table_definition(obj.tableDefinition) if obj.tableDefinition else None
+    )
+
+    return {
+        "name": obj.name,
+        "type": obj_type,
+        "table_definition": table_def,
+        "original_type": obj.originalType or None,
+    }
+
+
+def _format_worker_protocol(wp: Any) -> dict:
+    """Format WorkerProtocolMessage protobuf into dict.
+
+    Protobuf reference:
+    https://docs.deephaven.io/protodoc/latest/#io.deephaven.proto.persistent_query.WorkerProtocolMessage
+
+    WorkerProtocolMessage fields (2 total):
+    - name (string)
+    - port (int32)
+
+    Args:
+        wp: WorkerProtocolMessage protobuf object
+
+    Returns:
+        dict: Formatted worker protocol with snake_case keys
+    """
+    return {
+        "name": wp.name,
+        "port": wp.port,
+    }
+
+
+def _format_connection_details(cd: Any) -> dict:
+    """Format ProcessorConnectionDetailsMessage protobuf into dict.
+
+    Protobuf reference:
+    https://docs.deephaven.io/protodoc/latest/#io.deephaven.proto.persistent_query.ProcessorConnectionDetailsMessage
+
+    ProcessorConnectionDetailsMessage fields (8 total):
+    - protocols (repeated WorkerProtocolMessage)
+    - workerName (string)
+    - processInfoId (string)
+    - processorHost (string)
+    - envoyPrefix (string)
+    - grpcUrl (string)
+    - staticUrl (string)
+    - enterpriseWebSocketUrl (string)
+
+    Args:
+        cd: ProcessorConnectionDetailsMessage protobuf object
+
+    Returns:
+        dict: Formatted connection details with snake_case keys
+    """
+    protocols = [_format_worker_protocol(p) for p in cd.protocols]
+    return {
+        "protocols": protocols,
+        "worker_name": cd.workerName or None,
+        "process_info_id": cd.processInfoId or None,
+        "processor_host": cd.processorHost or None,
+        "envoy_prefix": cd.envoyPrefix or None,
+        "grpc_url": cd.grpcUrl or None,
+        "static_url": cd.staticUrl or None,
+        "enterprise_web_socket_url": cd.enterpriseWebSocketUrl or None,
+    }
+
+
+def _format_exception_details(ed: Any) -> dict:
+    """Format ExceptionDetailsMessage protobuf into dict.
+
+    Protobuf reference:
+    https://docs.deephaven.io/protodoc/latest/#io.deephaven.proto.common.ExceptionDetailsMessage
+
+    ExceptionDetailsMessage fields (3 total):
+    - errorMessage (string)
+    - stackTrace (string)
+    - shortCauses (string)
+
+    Args:
+        ed: ExceptionDetailsMessage protobuf object
+
+    Returns:
+        dict: Formatted exception details with snake_case keys
+    """
+    return {
+        "error_message": ed.errorMessage or None,
+        "stack_trace": ed.stackTrace or None,
+        "short_causes": ed.shortCauses or None,
+    }
+
+
+def _format_pq_state(state: CorePlusQueryState | None) -> dict | None:
+    """Format PersistentQueryStateMessage into MCP-compatible dictionary.
+
+    Extracts ALL 25 fields from PersistentQueryStateMessage protobuf and formats them
+    for MCP API responses. Applies consistent field naming (snake_case) and converts
+    empty/zero values to None for optional fields to produce cleaner JSON. Returns None
+    if state is not available.
+
+    Protobuf reference:
+    https://docs.deephaven.io/protodoc/latest/#io.deephaven.proto.persistent_query.PersistentQueryStateMessage
+
+    PersistentQueryStateMessage fields (25 total):
+    - serial (int64)
+    - version (int64)
+    - status (PersistentQueryStatusEnum)
+    - initializationStartNanos (int64)
+    - initializationCompleteNanos (int64)
+    - lastUpdateNanos (int64)
+    - dispatcherHost (string)
+    - tableGroups (repeated NamedStringList)
+    - scopeTypes (repeated ExportedObjectInfoMessage)
+    - connectionDetails (ProcessorConnectionDetailsMessage, optional)
+    - exceptionDetails (ExceptionDetailsMessage, optional)
+    - typeSpecificStateJson (string, Encoded JSON)
+    - lastAuthenticatedUser (string)
+    - lastEffectiveUser (string)
+    - scriptLoaderStateJson (string, optional, Encoded JSON)
+    - hasProgress (bool)
+    - progressValue (int32)
+    - progressMessage (string)
+    - engineVersion (string)
+    - dispatcherPort (int32)
+    - shouldStopNanos (int64)
+    - numFailures (int32)
+    - lastFailureTimeNanos (int64)
+    - replicaSlot (int32)
+    - statusDetails (string)
+
+    Args:
+        state (CorePlusQueryState | None): CorePlusQueryState wrapper around PersistentQueryStateMessage protobuf,
+                                          or None if no state available
+
+    Returns:
+        dict | None: All 25 state fields formatted for MCP API, with optional fields converted
+                    to None when empty, or None if state not available
+    """
+    if state is None:
+        return None
+
+    pb = state.pb
+
+    # Format tableGroups using helper function
+    table_groups = [_format_named_string_list(g) for g in pb.tableGroups]
+
+    # Format scopeTypes using helper function
+    scope_types = [_format_exported_object_info(obj) for obj in pb.scopeTypes]
+
+    # Format connectionDetails using helper function
+    connection_details = (
+        _format_connection_details(pb.connectionDetails)
+        if pb.connectionDetails
+        else None
+    )
+
+    # Format exceptionDetails using helper function
+    exception_details = (
+        _format_exception_details(pb.exceptionDetails) if pb.exceptionDetails else None
+    )
+
+    # Use the wrapper's status property which properly converts enum to name via ControllerClient
+    status_str = state.status.name
+
+    result = {
+        "serial": pb.serial,
+        "version": pb.version,
+        "status": status_str,
+        "initialization_start_nanos": pb.initializationStartNanos or None,
+        "initialization_complete_nanos": pb.initializationCompleteNanos or None,
+        "last_update_nanos": pb.lastUpdateNanos or None,
+        "dispatcher_host": pb.dispatcherHost or None,
+        "table_groups": table_groups,
+        "scope_types": scope_types,
+        "connection_details": connection_details,
+        "exception_details": exception_details,
+        "type_specific_state_json": pb.typeSpecificStateJson or None,
+        "last_authenticated_user": pb.lastAuthenticatedUser or None,
+        "last_effective_user": pb.lastEffectiveUser or None,
+        "script_loader_state_json": pb.scriptLoaderStateJson or None,
+        "has_progress": pb.hasProgress,
+        "progress_value": pb.progressValue,
+        "progress_message": pb.progressMessage or None,
+        "engine_version": pb.engineVersion or None,
+        "dispatcher_port": pb.dispatcherPort or None,
+        "should_stop_nanos": pb.shouldStopNanos or None,
+        "num_failures": pb.numFailures,
+        "last_failure_time_nanos": pb.lastFailureTimeNanos or None,
+        "replica_slot": pb.replicaSlot,
+        "status_details": pb.statusDetails or None,
+    }
+
+    return result
+
+
+def _format_pq_replicas(replicas: list[CorePlusQueryState]) -> list[dict]:
+    """Format list of replica PersistentQueryStateMessage objects.
+
+    Applies _format_pq_state to each replica in the list, filtering out None entries.
+    Replicas are additional running instances of a persistent query for high availability.
+
+    Args:
+        replicas (list[CorePlusQueryState]): List of CorePlusQueryState wrappers for replica states
+
+    Returns:
+        list[dict]: List of formatted replica state dictionaries (36 fields each), or empty list
+                   if no replicas provided
+    """
+    if not replicas:
+        return []
+
+    formatted = [
+        _format_pq_state(replica) for replica in replicas if replica is not None
+    ]
+    return [f for f in formatted if f is not None]
+
+
+def _format_pq_spares(spares: list[CorePlusQueryState]) -> list[dict]:
+    """Format list of spare PersistentQueryStateMessage objects.
+
+    Applies _format_pq_state to each spare in the list, filtering out None entries.
+    Spares are pre-initialized worker instances ready to take over if the primary fails.
+
+    Args:
+        spares (list[CorePlusQueryState]): List of CorePlusQueryState wrappers for spare states
+
+    Returns:
+        list[dict]: List of formatted spare state dictionaries (36 fields each), or empty list
+                   if no spares provided
+    """
+    if not spares:
+        return []
+
+    formatted = [_format_pq_state(spare) for spare in spares if spare is not None]
+    return [f for f in formatted if f is not None]
+
+
+def _normalize_programming_language(language: str) -> str:
+    """Normalize and validate programming language string.
+
+    Args:
+        language (str): Programming language string (case-insensitive)
+
+    Returns:
+        str: Normalized language string ("Python" or "Groovy")
+
+    Raises:
+        ValueError: If language is not "Python" or "Groovy" (case-insensitive)
+    """
+    lang_lower = language.lower()
+    if lang_lower == "python":
+        return "Python"
+    elif lang_lower == "groovy":
+        return "Groovy"
+    else:
+        raise ValueError(
+            f"Invalid programming_language: '{language}'. "
+            "Must be 'Python' or 'Groovy' (case-insensitive)."
+        )
+
+
+@mcp_server.tool()
+async def pq_name_to_id(
+    context: Context,
+    system_name: str,
+    pq_name: str,
+) -> dict:
+    """MCP Tool: Convert PQ name to pq_id format.
+
+    Helper tool to look up a persistent query by name and return its pq_id.
+    This is useful when you know the PQ name but need the pq_id for other operations.
+
+    Terminology Note:
+    - 'PQ' is shorthand for Persistent Query
+    - Serial numbers are system-assigned unique integer identifiers
+    - pq_id is the canonical string format: 'enterprise:{system_name}:{serial}'
+    - 'DHE' is shorthand for Deephaven Enterprise (also called 'Core+' or 'CorePlus')
+
+    AI Agent Usage:
+    - Use this tool when you know the PQ name but need the pq_id
+    - The returned pq_id can be used with pq_details, pq_start, pq_stop, etc.
+    - This tool performs a network lookup to find the serial number
+    - If the PQ doesn't exist, you'll get an error
+
+    Args:
+        context: MCP context object
+        system_name: Name of the enterprise system
+        pq_name: Name of the persistent query
+
+    Returns:
+        Success response:
+        {
+            "success": True,
+            "pq_id": "enterprise:prod:12345",
+            "serial": 12345,
+            "name": "analytics_worker",
+            "system_name": "prod"
+        }
+
+        Error response:
+        {
+            "success": False,
+            "error": "PQ 'nonexistent' not found on system 'prod'",
+            "isError": True
+        }
+    """
+    _LOGGER.info(
+        f"[mcp_systems_server:pq_name_to_id] Invoked: system_name={system_name!r}, pq_name={pq_name!r}"
+    )
+
+    result: dict[str, object] = {"success": False}
+
+    try:
+        # Get config and session registry
+        config_manager: ConfigManager = context.request_context.lifespan_context[
+            "config_manager"
+        ]
+        session_registry: CombinedSessionRegistry = (
+            context.request_context.lifespan_context["session_registry"]
+        )
+
+        # Verify enterprise system exists
+        _, error_response = await _get_system_config(
+            "pq_name_to_id", config_manager, system_name
+        )
+        if error_response:
+            return error_response
+
+        # Get enterprise registry and factory
+        enterprise_registry = await session_registry.enterprise_registry()
+        factory_manager = await enterprise_registry.get(system_name)
+        factory = await factory_manager.get()
+
+        # Get controller client
+        controller = factory.controller_client
+
+        # Look up serial by name
+        try:
+            serial = await controller.get_serial_for_name(pq_name)
+        except Exception as e:
+            error_msg = f"PQ '{pq_name}' not found on system '{system_name}': {e}"
+            _LOGGER.error(f"[mcp_systems_server:pq_name_to_id] {error_msg}")
+            result["error"] = error_msg
+            result["isError"] = True
+            return result
+
+        # Construct pq_id from serial
+        pq_id = _make_pq_id(system_name, serial)
+
+        _LOGGER.info(
+            f"[mcp_systems_server:pq_name_to_id] Converted PQ '{pq_name}' to pq_id '{pq_id}' (serial: {serial})"
+        )
+
+        result = {
+            "success": True,
+            "pq_id": pq_id,
+            "serial": serial,
+            "name": pq_name,
+            "system_name": system_name,
+        }
+
+    except Exception as e:
+        _LOGGER.error(
+            f"[mcp_systems_server:pq_name_to_id] Failed to convert PQ name '{pq_name}' on system '{system_name}': {e!r}",
+            exc_info=True,
+        )
+        result["error"] = (
+            f"Failed to convert PQ name '{pq_name}' to ID on system '{system_name}': {type(e).__name__}: {e}"
+        )
+        result["isError"] = True
+
+    return result
+
+
+@mcp_server.tool()
+async def pq_list(
+    context: Context,
+    system_name: str,
+) -> dict:
+    """MCP Tool: List all persistent queries (PQs) on an enterprise system.
+
+    Returns a summary list of all persistent queries managed by the specified enterprise
+    system's controller, including key fields for filtering and identification.
+    Use pq_details to get full configuration and state information for a specific PQ.
+
+    Terminology Note:
+    - 'PQ' is shorthand for Persistent Query
+    - Persistent Queries are recipes that create and manage worker sessions
+    - A running PQ creates a session that can be connected to
+    - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
+    - 'DHE' is shorthand for Deephaven Enterprise (also called 'Core+' or 'CorePlus')
+    - 'DHC' is shorthand for Deephaven Community (also called 'Core')
+
+    AI Agent Usage:
+    - Use this to discover all PQs on a system before performing operations
+    - Each PQ includes a pq_id that can be used with pq_details, pq_start, pq_stop, etc.
+    - Common states: RUNNING (active), STOPPED (inactive), INITIALIZING (starting), FAILED (error)
+    - Filter results by status, owner, worker_kind, configuration_type, or script_language
+    - session_id field only present when status is RUNNING or INITIALIZING
+    - Use pq_details(pq_id) to get full configuration and state for a specific PQ
+    - Empty pqs list is valid - indicates no PQs configured on the system
+
+    Args:
+        context (Context): MCP context object
+        system_name (str): Name of the enterprise system
+
+    Returns:
+        dict: Success response:
+        {
+            "success": True,
+            "system_name": "prod_cluster",
+            "pqs": [
+                {
+                    "pq_id": "enterprise:prod_cluster:12345",
+                    "serial": 12345,
+                    "name": "analytics_worker",
+                    "status": "RUNNING",
+                    "enabled": True,
+                    "owner": "admin_user",
+                    "heap_size_gb": 8.0,
+                    "worker_kind": "DeephavenCommunity",
+                    "configuration_type": "Script",
+                    "script_language": "Python",
+                    "server_name": "QueryServer_1",
+                    "admin_groups": ["admins", "data-team"],
+                    "viewer_groups": ["analysts"],
+                    "is_scheduled": True,
+                    "num_failures": 0,
+                    "session_id": "enterprise:prod_cluster:analytics_worker"  # Only when RUNNING/INITIALIZING
+                }
+            ]
+        }
+
+        Error response:
+        {
+            "success": False,
+            "error": "Enterprise system 'prod' not found in configuration",
+            "isError": True
+        }
+    """
+    _LOGGER.info(f"[mcp_systems_server:pq_list] Invoked: system_name={system_name!r}")
+
+    result: dict[str, object] = {"success": False}
+
+    try:
+        # Get config and session registry
+        config_manager: ConfigManager = context.request_context.lifespan_context[
+            "config_manager"
+        ]
+        session_registry: CombinedSessionRegistry = (
+            context.request_context.lifespan_context["session_registry"]
+        )
+
+        # Verify enterprise system exists
+        _, error_response = await _get_system_config(
+            "pq_list", config_manager, system_name
+        )
+        if error_response:
+            result.update(error_response)
+            return result
+
+        # Get enterprise registry and factory
+        enterprise_registry = await session_registry.enterprise_registry()
+        factory_manager = await enterprise_registry.get(system_name)
+        factory = await factory_manager.get()
+
+        # Get controller client
+        controller = factory.controller_client
+
+        # Get all PQs from controller
+        pq_map = await controller.map()
+
+        # Format PQ list with trimmed summary fields
+        # NOTE: pq_info is PersistentQueryInfoMessage
+        # Protobuf docs: https://docs.deephaven.io/protodoc/latest/#io.deephaven.proto.persistent_query.PersistentQueryInfoMessage
+        # Full details available via pq_details tool
+        pqs = []
+        for serial, pq_info in pq_map.items():
+            config_pb = pq_info.config.pb
+            state_pb = pq_info.state.pb if pq_info.state else None
+            pq_name = config_pb.name
+            pq_id = _make_pq_id(system_name, serial)
+            status = pq_info.state.status.name if pq_info.state else "UNKNOWN"
+
+            pq_data = {
+                "pq_id": pq_id,
+                "serial": serial,
+                "name": pq_name,
+                "status": status,
+                "enabled": config_pb.enabled,
+                "owner": config_pb.owner,
+                "heap_size_gb": config_pb.heapSizeGb,
+                "worker_kind": config_pb.workerKind,
+                "configuration_type": config_pb.configurationType,
+                "script_language": config_pb.scriptLanguage,
+                "server_name": config_pb.serverName or None,
+                "admin_groups": list(config_pb.adminGroups),
+                "viewer_groups": list(config_pb.viewerGroups),
+                "is_scheduled": bool(config_pb.scheduling),
+                "num_failures": state_pb.numFailures if state_pb else 0,
+            }
+
+            # Add session_id if PQ is running (session_id uses name, not serial)
+            if status in ["RUNNING", "INITIALIZING"]:
+                session_id = BaseItemManager.make_full_name(
+                    SystemType.ENTERPRISE, system_name, pq_name
+                )
+                pq_data["session_id"] = session_id
+
+            pqs.append(pq_data)
+
+        _LOGGER.info(
+            f"[mcp_systems_server:pq_list] Found {len(pqs)} PQs on system '{system_name}'"
+        )
+
+        result.update(
+            {
+                "success": True,
+                "system_name": system_name,
+                "pqs": pqs,
+            }
+        )
+
+    except Exception as e:
+        _LOGGER.error(
+            f"[mcp_systems_server:pq_list] Failed to list PQs on system '{system_name}': {e!r}",
+            exc_info=True,
+        )
+        result["error"] = (
+            f"Failed to list PQs on system '{system_name}': {type(e).__name__}: {e}"
+        )
+        result["isError"] = True
+
+    return result
+
+
+@mcp_server.tool()
+async def pq_details(
+    context: Context,
+    pq_id: str,
+) -> dict:
+    """MCP Tool: Get detailed information about a persistent query.
+
+    Retrieves comprehensive details about a specific PQ including its full
+    configuration, current state, resource allocation, permissions, and
+    session connection details if running.
+
+    Terminology Note:
+    - 'PQ' is shorthand for Persistent Query
+    - Persistent Queries are recipes that create and manage worker sessions
+    - A running PQ creates a session that can be connected to
+    - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
+    - 'DHE' is shorthand for Deephaven Enterprise (also called 'Core+' or 'CorePlus')
+    - 'DHC' is shorthand for Deephaven Community (also called 'Core')
+
+    AI Agent Usage:
+    - Use pq_id from pq_list to identify the PQ
+    - If you only have a PQ name, use pq_name_to_id to look up the pq_id first
+    - session_id only present when state is RUNNING or INITIALIZING
+    - Worker connection details (host, port) available in state_details.worker_host and state_details.worker_port
+    - Use session_id with other session tools to interact with running PQ
+    - null script_path means inline script_body (or vice versa)
+    - Empty arrays ([]) indicate optional features disabled (scheduling, admin_groups, etc.)
+    - jvm_profile null means default JVM settings
+    - replicas array contains state of all active replicas (load-balanced instances)
+    - spares array contains state of spare instances ready to replace failed replicas
+
+    Args:
+        context (Context): MCP context object
+        pq_id (str): PQ identifier in format 'enterprise:{system_name}:{serial}'
+
+    Returns:
+        dict: Success response with comprehensive PQ information:
+        {
+            "success": True,
+            "pq_id": "enterprise:prod:12345",
+            "serial": 12345,
+            "name": "analytics_worker",
+            "state": "RUNNING",
+            "session_id": "enterprise:prod:analytics_worker",
+            "config": {
+                "modification_version": 5,
+                "owner": "admin_user",
+                "enabled": true,
+                "heap_size_gb": 8.0,
+                "off_heap_memory_gb": 2.0,
+                "is_temporary": false,
+                "engine": "DeephavenCommunity",
+                "script_language": "Python",
+                "configuration_type": "Script",
+                "configuration_type_json": null,
+                "server_name": "QueryServer_1",
+                "script_path": "/scripts/analytics.py",
+                "script_body": null,
+                "jvm_profile": "large-memory",
+                "python_virtual_environment": "analytics-env",
+                "worker_config": null,
+                "extra_jvm_args": ["-XX:+UseG1GC"],
+                "extra_environment_vars": ["VAR1=value1"],
+                "extra_class_path": ["/custom/libs"],
+                "scheduling": ["SchedulerType=Daily", "StartTime=08:00:00"],
+                "init_timeout_nanos": 300000000000,
+                "admin_groups": ["admins", "data-team"],
+                "viewer_groups": ["analysts"],
+                "restart_users": "0",
+                "last_modified_by": "admin_user",
+                "last_modified_by_effective": "admin_user",
+                "last_modified_time_nanos": 1734467200000000000,
+                "creation_time_nanos": 1734380800000000000,
+                "termination_status": null,
+                "termination_time_nanos": null,
+                "worker_pod_template": null,
+                "num_replicas": 2,
+                "num_spares": 1,
+                "assignment_policy": "RoundRobin",
+                "assignment_policy_parameters": null
+            },
+            "state_details": {
+                "serial": 12345,
+                "modification_version": 5,
+                "status": "RUNNING",
+                "initialization_time_nanos": 1734467100000000000,
+                "last_update_time_nanos": 1734467200000000000,
+                "start_time_nanos": 1734467100000000000,
+                "worker_host": "worker-01.example.com",
+                "worker_port": 10000,
+                "process_info_id": "pid-12345",
+                "dispatcher_host": "dispatcher.example.com",
+                "dispatcher_port": 8080,
+                "replica_id": null,
+                "is_replica": false,
+                "last_error_message": null,
+                "environment_variables": [],
+                "exported_objects": [],
+                "processor_details_host": null,
+                "processor_details_port": null,
+                "exception_type": null,
+                "exception_message": null,
+                "metadata_json": null,
+                "grpc_session_id": null,
+                "flight_session_id": null,
+                "session_token": null,
+                "token_expiration_time_nanos": null,
+                "query_info_json": null,
+                "temp_query_id": 0,
+                "total_memory_mb": 0,
+                "grpc_address": null,
+                "flight_address": null,
+                "http_port": null,
+                "last_activity_time_nanos": null,
+                "assigned_dispatcher_id": 0,
+                "kill_time_nanos": null,
+                "assigned_worker_group_id": 0,
+                "config_id": null
+            },
+            "replicas": [
+                {
+                    "serial": 12345,
+                    "modification_version": 5,
+                    "status": "RUNNING",
+                    "initialization_time_nanos": 1734467100000000000,
+                    "last_update_time_nanos": 1734467200000000000,
+                    "start_time_nanos": 1734467100000000000,
+                    "worker_host": "worker-02.example.com",
+                    "worker_port": 10001,
+                    "process_info_id": "pid-12346",
+                    "dispatcher_host": "dispatcher.example.com",
+                    "dispatcher_port": 8080,
+                    "replica_id": "replica-1",
+                    "is_replica": true,
+                    "last_error_message": null,
+                    "environment_variables": [],
+                    "exported_objects": [],
+                    "processor_details_host": null,
+                    "processor_details_port": null,
+                    "exception_type": null,
+                    "exception_message": null,
+                    "metadata_json": null,
+                    "grpc_session_id": null,
+                    "flight_session_id": null,
+                    "session_token": null,
+                    "token_expiration_time_nanos": null,
+                    "query_info_json": null,
+                    "temp_query_id": 0,
+                    "total_memory_mb": 0,
+                    "grpc_address": null,
+                    "flight_address": null,
+                    "http_port": null,
+                    "last_activity_time_nanos": null,
+                    "assigned_dispatcher_id": 0,
+                    "kill_time_nanos": null,
+                    "assigned_worker_group_id": 0,
+                    "config_id": null
+                }
+            ],
+            "spares": [
+                {
+                    "serial": 12345,
+                    "modification_version": 5,
+                    "status": "INITIALIZING",
+                    "initialization_time_nanos": 1734467150000000000,
+                    "last_update_time_nanos": 1734467200000000000,
+                    "start_time_nanos": 1734467150000000000,
+                    "worker_host": "worker-03.example.com",
+                    "worker_port": 10002,
+                    "process_info_id": "pid-12347",
+                    "dispatcher_host": "dispatcher.example.com",
+                    "dispatcher_port": 8080,
+                    "replica_id": "spare-1",
+                    "is_replica": false,
+                    "last_error_message": null,
+                    "environment_variables": [],
+                    "exported_objects": [],
+                    "processor_details_host": null,
+                    "processor_details_port": null,
+                    "exception_type": null,
+                    "exception_message": null,
+                    "metadata_json": null,
+                    "grpc_session_id": null,
+                    "flight_session_id": null,
+                    "session_token": null,
+                    "token_expiration_time_nanos": null,
+                    "query_info_json": null,
+                    "temp_query_id": 0,
+                    "total_memory_mb": 0,
+                    "grpc_address": null,
+                    "flight_address": null,
+                    "http_port": null,
+                    "last_activity_time_nanos": null,
+                    "assigned_dispatcher_id": 0,
+                    "kill_time_nanos": null,
+                    "assigned_worker_group_id": 0,
+                    "config_id": null
+                }
+            ]
+        }
+
+        dict: Error response:
+        {
+            "success": False,
+            "error": "PQ 'nonexistent' not found",
+            "isError": True
+        }
+    """
+    _LOGGER.info(f"[mcp_systems_server:pq_details] Invoked: pq_id={pq_id!r}")
+
+    result: dict[str, object] = {"success": False}
+
+    try:
+        # Parse pq_id to get system name and serial
+        try:
+            system_name, serial = _parse_pq_id(pq_id)
+        except ValueError as e:
+            result["error"] = f"Invalid pq_id '{pq_id}': {type(e).__name__}: {e}"
+            result["isError"] = True
+            return result
+
+        # Get config and session registry
+        config_manager: ConfigManager = context.request_context.lifespan_context[
+            "config_manager"
+        ]
+        session_registry: CombinedSessionRegistry = (
+            context.request_context.lifespan_context["session_registry"]
+        )
+
+        # Verify enterprise system exists
+        _, error_response = await _get_system_config(
+            "pq_details", config_manager, system_name
+        )
+        if error_response:
+            result.update(error_response)
+            return result
+
+        # Get enterprise registry and factory
+        enterprise_registry = await session_registry.enterprise_registry()
+        factory_manager = await enterprise_registry.get(system_name)
+        factory = await factory_manager.get()
+
+        # Get controller client
+        controller = factory.controller_client
+
+        # Get all PQs from controller (ensures subscription is ready)
+        # Then extract the specific PQ by serial
+        pq_map = await controller.map()
+
+        if serial not in pq_map:
+            error_msg = f"PQ with serial {serial} not found on system '{system_name}'"
+            _LOGGER.error(f"[mcp_systems_server:pq_details] {error_msg}")
+            result["error"] = error_msg
+            result["isError"] = True
+            return result
+
+        pq_info = pq_map[serial]
+
+        # Format response
+        # NOTE: pq_info is PersistentQueryInfoMessage
+        # Protobuf docs: https://docs.deephaven.io/protodoc/latest/#io.deephaven.proto.persistent_query.PersistentQueryInfoMessage
+        pq_name = pq_info.config.pb.name
+        state_name = pq_info.state.status.name if pq_info.state else "UNKNOWN"
+
+        pq_data = {
+            "success": True,
+            "pq_id": pq_id,
+            "serial": serial,
+            "name": pq_name,
+            "state": state_name,
+            "config": _format_pq_config(pq_info.config),
+            "state_details": _format_pq_state(pq_info.state),
+            "replicas": _format_pq_replicas(pq_info.replicas),
+            "spares": _format_pq_spares(pq_info.spares),
+        }
+
+        # Add session_id if running (session_id uses name, not serial)
+        if state_name in ["RUNNING", "INITIALIZING"]:
+            session_id = BaseItemManager.make_full_name(
+                SystemType.ENTERPRISE, system_name, pq_name
+            )
+            pq_data["session_id"] = session_id
+
+        _LOGGER.info(
+            f"[mcp_systems_server:pq_details] Retrieved details for PQ '{pq_name}' (serial: {serial})"
+        )
+
+        result.update(pq_data)
+
+    except Exception as e:
+        _LOGGER.error(
+            f"[mcp_systems_server:pq_details] Failed to get PQ details: {e!r}",
+            exc_info=True,
+        )
+        result["error"] = (
+            f"Failed to get PQ details for '{pq_id}': {type(e).__name__}: {e}"
+        )
+        result["isError"] = True
+
+    return result
+
+
+@mcp_server.tool()
+async def pq_create(
+    context: Context,
+    system_name: str,
+    pq_name: str,
+    heap_size_gb: float | int,
+    script_body: str | None = None,
+    script_path: str | None = None,
+    programming_language: str = "Python",
+    configuration_type: str = "Script",
+    enabled: bool = True,
+    schedule: list[str] | None = None,
+    server: str | None = None,
+    engine: str = "DeephavenCommunity",
+    jvm_profile: str | None = None,
+    extra_jvm_args: list[str] | None = None,
+    extra_class_path: list[str] | None = None,
+    python_virtual_environment: str | None = None,
+    extra_environment_vars: list[str] | None = None,
+    init_timeout_nanos: int | None = None,
+    auto_delete_timeout: int | None = None,
+    admin_groups: list[str] | None = None,
+    viewer_groups: list[str] | None = None,
+    restart_users: str | None = None,
+) -> dict:
+    """MCP Tool: Create a new persistent query on an enterprise system.
+
+    Creates a PQ configuration and adds it to the controller. The PQ will
+    be created but not automatically started - use pq_start to start it.
+
+    Terminology Note:
+    - 'PQ' is shorthand for Persistent Query
+    - Persistent Queries are recipes that create and manage worker sessions
+    - 'DHE' is shorthand for Deephaven Enterprise (also called 'Core+' or 'CorePlus')
+    - 'DHC' is shorthand for Deephaven Community (also called 'Core')
+
+    AI Agent Usage:
+    - PQ is created in UNINITIALIZED state - must call pq_start to run it
+    - Returns pq_id and serial number for use with other PQ management tools
+    - programming_language is case-insensitive: "Python"/"python" or "Groovy"/"groovy"
+    - auto_delete_timeout=None (default) creates a permanent PQ; set to seconds for auto-deletion
+    - Specify code via script_body (inline) OR script_path (Git) - specifying both causes error
+    - Omit both script_body and script_path to create empty interactive session
+    - configuration_type="RunAndDone" for batch jobs that execute once and stop
+    - configuration_type="Script" (default) for long-running interactive sessions
+    - schedule parameter enables automated start/stop - see detailed format below
+    - All list parameters (schedule, admin_groups, etc.) accept empty list [] or None
+
+    Script Source Options (mutually exclusive):
+    - script_body: Inline Python/Groovy code as a string. Use for simple scripts or dynamic code generation.
+    - script_path: Path to script in controller's Git repository (e.g., "IrisQueries/groovy/analytics.groovy"). Use for version-controlled scripts.
+    - Both None: Creates empty interactive session where code is entered manually after starting.
+    - Both specified: Returns validation error - only one source allowed.
+
+    Configuration Types:
+    - "Script": Standard live interactive query (default, runs continuously)
+    - "RunAndDone": Batch query that executes once and terminates automatically
+    - Other types exist (Merge, Import, etc.) but are specialized
+
+    Scheduling Format (list of "Key=Value" strings):
+    - SchedulerType: Use full qualified Java class name (required if scheduling)
+    - Time format: HH:MM:SS (24-hour) for all time fields
+    - TimeZone: Standard timezone identifiers (e.g., "America/New_York", "UTC")
+    - Empty list [] or None: No automatic scheduling (manual start/stop only)
+
+    Daily Scheduler:
+      ["SchedulerType=com.illumon.iris.controller.IrisQuerySchedulerDaily",
+       "StartTime=08:00:00", "StopTime=18:00:00", "TimeZone=America/New_York"]
+      - Required: SchedulerType, StartTime, StopTime
+      - Optional: TimeZone (defaults to server timezone)
+
+    Continuous Scheduler:
+      ["SchedulerType=com.illumon.iris.controller.IrisQuerySchedulerContinuous"]
+      - Required: SchedulerType only
+      - Runs continuously without stop times
+
+    Monthly Scheduler:
+      ["SchedulerType=com.illumon.iris.controller.IrisQuerySchedulerMonthly",
+       "DayOfMonth=1", "StartTime=00:00:00", "TimeZone=UTC"]
+      - Required: SchedulerType, DayOfMonth, StartTime
+      - Optional: TimeZone, StopTime
+      - DayOfMonth: 1-31 (or last day if month has fewer days)
+
+    Restart Permissions:
+    - "RU_ADMIN": Only administrators can restart (most restrictive)
+    - "RU_ADMIN_AND_VIEWERS": Both admins and viewers can restart
+    - "RU_VIEWERS_WHEN_DOWN": Admins always; viewers only when query is down
+
+    Args:
+        context (Context): MCP context object
+        system_name (str): Name of the enterprise system
+        pq_name (str): Human-readable name for the PQ
+        heap_size_gb (float | int): JVM heap size in GB (e.g., 8.0 or 16)
+        script_body (str | None): Inline script code to execute (mutually exclusive with script_path)
+        script_path (str | None): Path to script in Git repository (mutually exclusive with script_body)
+        programming_language (str): Script language - "Python" or "Groovy", case-insensitive (default: "Python")
+        configuration_type (str): Query type - "Script" (live) or "RunAndDone" (batch), default: "Script"
+        enabled (bool): Whether query can be executed (default: True)
+        schedule (list[str] | None): Scheduling config as ["Key=Value", ...] (e.g., ["SchedulerType=...", "StartTime=08:00:00"])
+        server (str | None): Specific server to run on (None = controller chooses)
+        engine (str): Worker engine type (default: "DeephavenCommunity")
+        jvm_profile (str | None): Named JVM profile from controller config (e.g., "large-memory")
+        extra_jvm_args (list[str] | None): Additional JVM arguments
+        extra_class_path (list[str] | None): Additional classpath entries to prepend (e.g., ["/opt/libs/custom.jar"])
+        python_virtual_environment (str | None): Named Python venv for Core+ workers
+        extra_environment_vars (list[str] | None): Environment variables as ["KEY=value", ...]
+        init_timeout_nanos (int | None): Initialization timeout in nanoseconds
+        auto_delete_timeout (int | None): Seconds of inactivity before auto-deletion. None (default) = permanent
+        admin_groups (list[str] | None): Groups with admin access
+        viewer_groups (list[str] | None): Groups with viewer access
+        restart_users (str | None): Who can restart - "RU_ADMIN", "RU_ADMIN_AND_VIEWERS", "RU_VIEWERS_WHEN_DOWN"
+
+    Returns:
+        dict: Success response:
+        {
+            "success": True,
+            "pq_id": "enterprise:prod:12345",
+            "serial": 12345,
+            "name": "analytics_worker",
+            "state": "UNINITIALIZED",
+            "message": "PQ created successfully"
+        }
+
+        dict: Error response:
+        {
+            "success": False,
+            "error": "Failed to create PQ: ...",
+            "isError": True
+        }
+    """
+    _LOGGER.info(
+        f"[mcp_systems_server:pq_create] Invoked: system_name={system_name!r}, "
+        f"pq_name={pq_name!r}, heap_size_gb={heap_size_gb}"
+    )
+
+    result: dict[str, object] = {"success": False}
+
+    try:
+        # Get config and session registry
+        config_manager: ConfigManager = context.request_context.lifespan_context[
+            "config_manager"
+        ]
+        session_registry: CombinedSessionRegistry = (
+            context.request_context.lifespan_context["session_registry"]
+        )
+
+        # Verify enterprise system exists
+        _, error_response = await _get_system_config(
+            "pq_create", config_manager, system_name
+        )
+        if error_response:
+            result.update(error_response)
+            return result
+
+        # Get enterprise registry and factory
+        enterprise_registry = await session_registry.enterprise_registry()
+        factory_manager = await enterprise_registry.get(system_name)
+        factory = await factory_manager.get()
+
+        # Get controller client
+        controller = factory.controller_client
+
+        # Normalize and validate programming language
+        normalized_lang = _normalize_programming_language(programming_language)
+
+        # Create PQ configuration
+        pq_config = await controller.make_pq_config(
+            name=pq_name,
+            heap_size_gb=heap_size_gb,
+            script_body=script_body,
+            script_path=script_path,
+            programming_language=normalized_lang,
+            configuration_type=configuration_type,
+            enabled=enabled,
+            schedule=schedule,
+            server=server,
+            engine=engine,
+            jvm_profile=jvm_profile,
+            extra_jvm_args=extra_jvm_args,
+            extra_class_path=extra_class_path,
+            python_virtual_environment=python_virtual_environment,
+            extra_environment_vars=extra_environment_vars,
+            init_timeout_nanos=init_timeout_nanos,
+            auto_delete_timeout=auto_delete_timeout,
+            admin_groups=admin_groups,
+            viewer_groups=viewer_groups,
+            restart_users=restart_users,
+        )
+
+        # Add the PQ to controller
+        serial = await controller.add_query(pq_config)
+
+        # Construct pq_id (serial-based)
+        pq_id = _make_pq_id(system_name, serial)
+
+        _LOGGER.info(
+            f"[mcp_systems_server:pq_create] Created PQ '{pq_name}' with serial {serial}, pq_id='{pq_id}'"
+        )
+
+        result.update(
+            {
+                "success": True,
+                "pq_id": pq_id,
+                "serial": serial,
+                "name": pq_name,
+                "state": "UNINITIALIZED",
+                "message": f"PQ '{pq_name}' created successfully with serial {serial}",
+            }
+        )
+
+    except Exception as e:
+        _LOGGER.error(
+            f"[mcp_systems_server:pq_create] Failed to create PQ '{pq_name}': {e!r}",
+            exc_info=True,
+        )
+        # Provide descriptive error message with exception type
+        error_msg = str(e) if str(e) else repr(e)
+        result["error"] = (
+            f"Failed to create PQ '{pq_name}': {type(e).__name__}: {error_msg}"
+        )
+        result["isError"] = True
+
+    return result
+
+
+@mcp_server.tool()
+async def pq_delete(
+    context: Context,
+    pq_id: str,
+) -> dict:
+    """MCP Tool: Delete a persistent query.
+
+    Permanently removes the PQ from the controller. If the PQ is running,
+    it will be stopped first. This operation cannot be undone.
+
+    Terminology Note:
+    - 'PQ' is shorthand for Persistent Query
+    - 'DHE' is shorthand for Deephaven Enterprise (also called 'Core+' or 'CorePlus')
+
+    AI Agent Usage:
+    - Use pq_id from pq_list to identify the PQ
+    - If you only have a PQ name, use pq_name_to_id to look up the pq_id
+    - Operation is irreversible - confirm before deleting
+    - Running PQs will be stopped automatically
+
+    Args:
+        context: MCP context object
+        pq_id: PQ identifier in format 'enterprise:{system_name}:{serial}'
+
+    Returns:
+        Success response:
+        {
+            "success": True,
+            "message": "PQ deleted successfully"
+        }
+
+        Error response:
+        {
+            "success": False,
+            "error": "PQ not found",
+            "isError": True
+        }
+    """
+    _LOGGER.info(f"[mcp_systems_server:pq_delete] Invoked: pq_id={pq_id!r}")
+
+    result: dict[str, object] = {"success": False}
+
+    try:
+        # Parse pq_id to get system name and serial
+        try:
+            system_name, serial = _parse_pq_id(pq_id)
+        except ValueError as e:
+            result["error"] = f"Invalid pq_id '{pq_id}': {type(e).__name__}: {e}"
+            result["isError"] = True
+            return result
+
+        # Get config and session registry
+        config_manager: ConfigManager = context.request_context.lifespan_context[
+            "config_manager"
+        ]
+        session_registry: CombinedSessionRegistry = (
+            context.request_context.lifespan_context["session_registry"]
+        )
+
+        # Verify enterprise system exists
+        _, error_response = await _get_system_config(
+            "pq_delete", config_manager, system_name
+        )
+        if error_response:
+            result.update(error_response)
+            return result
+
+        # Get enterprise registry and factory
+        enterprise_registry = await session_registry.enterprise_registry()
+        factory_manager = await enterprise_registry.get(system_name)
+        factory = await factory_manager.get()
+
+        # Get controller client
+        controller = factory.controller_client
+
+        # Delete the PQ (serial already from pq_id)
+        await controller.delete_query(serial)
+
+        _LOGGER.info(f"[mcp_systems_server:pq_delete] Deleted PQ with serial {serial}")
+
+        result.update(
+            {
+                "success": True,
+                "message": f"PQ with serial {serial} deleted successfully",
+            }
+        )
+
+    except Exception as e:
+        _LOGGER.error(
+            f"[mcp_systems_server:pq_delete] Failed to delete PQ: {e!r}",
+            exc_info=True,
+        )
+        result["error"] = f"Failed to delete PQ '{pq_id}': {type(e).__name__}: {e}"
+        result["isError"] = True
+
+    return result
+
+
+@mcp_server.tool()
+async def pq_start(
+    context: Context,
+    pq_id: str,
+    timeout_seconds: int = DEFAULT_PQ_TIMEOUT,
+) -> dict:
+    """MCP Tool: Start a persistent query.
+
+    Starts a stopped or newly created PQ, waiting for it to transition to RUNNING state.
+    The start command is sent to the controller, then this method polls the PQ state
+    until it reaches RUNNING (passing through INITIALIZING) or the timeout expires.
+
+    **Critical for AI Agents**:
+    - If timeout is reached, this returns an error BUT the PQ continues starting in the background
+    - After a timeout error, use pq_details to check if the PQ eventually reached RUNNING state
+    - Initialization time varies: simple sessions ~5-15s, large heap/complex scripts ~30-60s
+    - Timeout does NOT cancel the start operation - it only stops waiting
+
+    Terminology Note:
+    - 'PQ' is shorthand for Persistent Query
+    - 'DHE' is shorthand for Deephaven Enterprise (also called 'Core+' or 'CorePlus')
+
+    AI Agent Usage:
+    - Use pq_id from pq_list to identify the PQ
+    - If you only have a PQ name, use pq_name_to_id to look up the pq_id first
+    - This operation blocks until RUNNING or timeout - choose timeout wisely
+    - Recommended timeout: 30s for typical PQs, 60s for large heap (>32GB) or complex initialization
+    - On timeout error, wait a few seconds then call pq_details to check final state
+    - Cannot start a PQ that is already RUNNING - will return error
+    - Can restart a STOPPED or FAILED PQ - this is a normal operation
+
+    Args:
+        context (Context): MCP context object
+        pq_id (str): PQ identifier in format 'enterprise:{system_name}:{serial}'
+        timeout_seconds (int): Max seconds to wait for PQ to start (default: 30, max recommended: 60)
+
+    Returns:
+        dict: Success response:
+        {
+            "success": True,
+            "pq_id": "enterprise:prod:12345",
+            "serial": 12345,
+            "name": "analytics_worker",
+            "state": "RUNNING",
+            "session_id": "enterprise:prod:analytics_worker",
+            "message": "PQ started successfully"
+        }
+
+        dict: Error response:
+        {
+            "success": False,
+            "error": "Failed to start PQ: ...",
+            "isError": True
+        }
+    """
+    _LOGGER.info(
+        f"[mcp_systems_server:pq_start] Invoked: pq_id={pq_id!r}, timeout_seconds={timeout_seconds}"
+    )
+
+    result: dict[str, object] = {"success": False}
+
+    try:
+        # Parse pq_id to get system name and serial
+        try:
+            system_name, serial = _parse_pq_id(pq_id)
+        except ValueError as e:
+            result["error"] = f"Invalid pq_id '{pq_id}': {type(e).__name__}: {e}"
+            result["isError"] = True
+            return result
+
+        # Get config and session registry
+        config_manager: ConfigManager = context.request_context.lifespan_context[
+            "config_manager"
+        ]
+        session_registry: CombinedSessionRegistry = (
+            context.request_context.lifespan_context["session_registry"]
+        )
+
+        # Verify enterprise system exists
+        _, error_response = await _get_system_config(
+            "pq_start", config_manager, system_name
+        )
+        if error_response:
+            result.update(error_response)
+            return result
+
+        # Get enterprise registry and factory
+        enterprise_registry = await session_registry.enterprise_registry()
+        factory_manager = await enterprise_registry.get(system_name)
+        factory = await factory_manager.get()
+
+        # Get controller client
+        controller = factory.controller_client
+
+        # Validate timeout
+        validated_timeout = _validate_timeout(timeout_seconds, "pq_start")
+
+        # Start the PQ (serial already from pq_id)
+        await controller.start_and_wait(serial, validated_timeout)
+
+        # Get updated PQ info
+        pq_info = await controller.get(serial)
+        pq_name = pq_info.config.pb.name
+        state_name = pq_info.state.status.name if pq_info.state else "UNKNOWN"
+
+        _LOGGER.info(
+            f"[mcp_systems_server:pq_start] Started PQ '{pq_name}' (serial: {serial}), state: {state_name}"
+        )
+
+        response_data = {
+            "success": True,
+            "pq_id": pq_id,
+            "serial": serial,
+            "name": pq_name,
+            "state": state_name,
+            "message": f"PQ '{pq_name}' started successfully",
+        }
+
+        # Add session_id if running (session_id uses name, not serial)
+        if state_name in ["RUNNING", "INITIALIZING"]:
+            session_id = BaseItemManager.make_full_name(
+                SystemType.ENTERPRISE, system_name, pq_name
+            )
+            response_data["session_id"] = session_id
+
+        result.update(response_data)
+
+    except Exception as e:
+        _LOGGER.error(
+            f"[mcp_systems_server:pq_start] Failed to start PQ: {e!r}",
+            exc_info=True,
+        )
+        result["error"] = f"Failed to start PQ '{pq_id}': {type(e).__name__}: {e}"
+        result["isError"] = True
+
+    return result
+
+
+@mcp_server.tool()
+async def pq_stop(
+    context: Context,
+    pq_id: str | list[str],
+    timeout_seconds: int = DEFAULT_PQ_TIMEOUT,
+) -> dict:
+    """MCP Tool: Stop one or more running persistent queries.
+
+    Gracefully stops one or more running PQs, waiting for them to transition to STOPPED state.
+    When multiple pq_ids are provided, stop commands are sent concurrently for efficiency,
+    but this method waits for ALL PQs to stop (or timeout) before returning.
+
+    **Important**: All pq_ids must be from the same enterprise system - mixing systems returns error.
+
+    **Important**: If the timeout is reached, a timeout error is returned but the
+    PQs continue stopping in the background. Use pq_details to check the current
+    state after a timeout.
+
+    Terminology Note:
+    - 'PQ' is shorthand for Persistent Query
+    - 'DHE' is shorthand for Deephaven Enterprise (also called 'Core+' or 'CorePlus')
+
+    AI Agent Usage:
+    - Use pq_id from pq_list to identify PQs
+    - If you only have PQ names, use pq_name_to_id to look up the pq_ids first
+    - Single PQ: pass string "enterprise:system:12345"
+    - Multiple PQs: pass list ["enterprise:system:12345", "enterprise:system:67890"]
+    - Response always contains list in 'stopped' field, even for single PQ
+    - Concurrent stops are efficient for batch operations on many PQs
+    - Typical stop time: 5-15 seconds; increase timeout_seconds for slow shutdowns
+    - On timeout, some PQs may stop successfully while others time out
+    - Cannot stop a PQ that is already STOPPED - will return error
+    - Stopping preserves PQ configuration - use pq_start to run again
+    - Stopping is graceful - allows scripts to finish current operations
+
+    Args:
+        context (Context): MCP context object
+        pq_id (str | list[str]): PQ identifier or list of identifiers in format 'enterprise:{system_name}:{serial}'
+        timeout_seconds (int): Max seconds to wait for PQs to stop (default: 30, max recommended: 60)
+
+    Returns:
+        dict: Success response (always returns list, even for single PQ):
+        {
+            "success": True,
+            "stopped": [
+                {
+                    "pq_id": "enterprise:prod:12345",
+                    "serial": 12345,
+                    "name": "analytics_worker",
+                    "state": "STOPPED"
+                },
+                {
+                    "pq_id": "enterprise:prod:67890",
+                    "serial": 67890,
+                    "name": "reporting_worker",
+                    "state": "STOPPED"
+                }
+            ],
+            "message": "Stopped 2 PQ(s)"
+        }
+
+        dict: Error response:
+        {
+            "success": False,
+            "error": "Failed to stop PQ: ...",
+            "isError": True
+        }
+    """
+    _LOGGER.info(
+        f"[mcp_systems_server:pq_stop] Invoked: pq_id={pq_id!r}, timeout_seconds={timeout_seconds}"
+    )
+
+    result: dict[str, object] = {"success": False}
+
+    try:
+        # Normalize to list
+        pq_ids = [pq_id] if isinstance(pq_id, str) else pq_id
+
+        if not pq_ids:
+            result["error"] = "At least one pq_id must be provided"
+            result["isError"] = True
+            return result
+
+        # Parse all pq_ids and validate they're from the same system
+        parsed_pqs = []
+        system_name = None
+        for pid in pq_ids:
+            try:
+                sys_name, serial = _parse_pq_id(pid)
+                if system_name is None:
+                    system_name = sys_name
+                elif system_name != sys_name:
+                    result["error"] = (
+                        f"All pq_ids must be from the same system. "
+                        f"Got '{system_name}' and '{sys_name}'"
+                    )
+                    result["isError"] = True
+                    return result
+                parsed_pqs.append((pid, serial))
+            except ValueError as e:
+                result["error"] = f"Invalid pq_id '{pid}': {type(e).__name__}: {e}"
+                result["isError"] = True
+                return result
+
+        # Ensure system_name is set (required for type safety)
+        if system_name is None:  # pragma: no cover
+            result["error"] = "No valid pq_ids provided"
+            result["isError"] = True
+            return result
+
+        # Get config and session registry
+        config_manager: ConfigManager = context.request_context.lifespan_context[
+            "config_manager"
+        ]
+        session_registry: CombinedSessionRegistry = (
+            context.request_context.lifespan_context["session_registry"]
+        )
+
+        # Verify enterprise system exists
+        _, error_response = await _get_system_config(
+            "pq_stop", config_manager, system_name
+        )
+        if error_response:
+            result.update(error_response)
+            return result
+
+        # Get enterprise registry and factory
+        enterprise_registry = await session_registry.enterprise_registry()
+        factory_manager = await enterprise_registry.get(system_name)
+        factory = await factory_manager.get()
+
+        # Get controller client
+        controller = factory.controller_client
+
+        # Validate timeout
+        validated_timeout = _validate_timeout(timeout_seconds, "pq_stop")
+
+        # Extract serials
+        serials = [serial for _, serial in parsed_pqs]
+
+        # Stop the PQs - stop_query handles both single and multiple
+        await controller.stop_query(serials, validated_timeout)
+
+        # Get updated info for all PQs
+        stopped_pqs = []
+        for pid, serial in parsed_pqs:
+            pq_info = await controller.get(serial)
+            pq_name = pq_info.config.pb.name
+            state_name = pq_info.state.status.name if pq_info.state else "UNKNOWN"
+            stopped_pqs.append(
+                {
+                    "pq_id": pid,
+                    "serial": serial,
+                    "name": pq_name,
+                    "state": state_name,
+                }
+            )
+
+        _LOGGER.info(f"[mcp_systems_server:pq_stop] Stopped {len(stopped_pqs)} PQ(s)")
+
+        # Always return consistent format with list
+        result.update(
+            {
+                "success": True,
+                "stopped": stopped_pqs,
+                "message": f"Stopped {len(stopped_pqs)} PQ(s)",
+            }
+        )
+
+    except Exception as e:
+        _LOGGER.error(
+            f"[mcp_systems_server:pq_stop] Failed to stop PQ: {e!r}",
+            exc_info=True,
+        )
+        result["error"] = f"Failed to stop PQ(s): {type(e).__name__}: {e}"
+        result["isError"] = True
+
+    return result
+
+
+@mcp_server.tool()
+async def pq_restart(
+    context: Context,
+    pq_id: str | list[str],
+    timeout_seconds: int = DEFAULT_PQ_TIMEOUT,
+) -> dict:
+    """MCP Tool: Restart one or more stopped or failed persistent queries.
+
+    Restarts stopped or failed PQs using their original configurations.
+    More efficient than delete + recreate for the same configuration. When multiple
+    PQs are provided, they are restarted concurrently for efficiency.
+
+    **Important**: If the timeout is reached, a timeout error is returned but the
+    PQs continue restarting in the background. Use pq_details to check the current
+    state after a timeout.
+
+    Terminology Note:
+    - 'PQ' is shorthand for Persistent Query
+    - 'DHE' is shorthand for Deephaven Enterprise (also called 'Core+' or 'CorePlus')
+
+    AI Agent Usage:
+    - Use pq_id from pq_list to identify PQs
+    - If you only have PQ names, use pq_name_to_id to look up the pq_ids
+    - Can restart multiple PQs at once for efficiency - they restart concurrently
+    - Works for stopped, failed, or completed PQs
+    - Preserves PQ serial numbers and configurations
+    - More efficient than deleting and recreating
+    - This operation waits for PQs to restart - may take time for large PQs
+    - Increase timeout_seconds for PQs that take longer to restart
+    - If timeout occurs, PQs may still reach RUNNING state - use pq_details to verify
+
+    Args:
+        context: MCP context object
+        pq_id: PQ identifier or list of identifiers in format 'enterprise:{system_name}:{serial}'
+        timeout_seconds: Max seconds to wait for restart (default: 30, max recommended: 60)
+
+    Returns:
+        Success response (always returns list, even for single PQ):
+        {
+            "success": True,
+            "restarted": [
+                {
+                    "pq_id": "enterprise:prod:12345",
+                    "serial": 12345,
+                    "name": "analytics_worker"
+                },
+                {
+                    "pq_id": "enterprise:prod:67890",
+                    "serial": 67890,
+                    "name": "reporting_worker"
+                }
+            ],
+            "message": "Restarted 2 PQ(s)"
+        }
+
+        Error response:
+        {
+            "success": False,
+            "error": "Failed to restart PQ: ...",
+            "isError": True
+        }
+    """
+    _LOGGER.info(
+        f"[mcp_systems_server:pq_restart] Invoked: pq_id={pq_id!r}, timeout_seconds={timeout_seconds}"
+    )
+
+    result: dict[str, object] = {"success": False}
+
+    try:
+        # Normalize to list
+        pq_ids = [pq_id] if isinstance(pq_id, str) else pq_id
+
+        if not pq_ids:
+            result["error"] = "At least one pq_id must be provided"
+            result["isError"] = True
+            return result
+
+        # Parse all pq_ids and validate they're from the same system
+        parsed_pqs = []
+        system_name = None
+        for pid in pq_ids:
+            try:
+                sys_name, serial = _parse_pq_id(pid)
+                if system_name is None:
+                    system_name = sys_name
+                elif system_name != sys_name:
+                    result["error"] = (
+                        f"All pq_ids must be from the same system. "
+                        f"Got '{system_name}' and '{sys_name}'"
+                    )
+                    result["isError"] = True
+                    return result
+                parsed_pqs.append((pid, serial))
+            except ValueError as e:
+                result["error"] = f"Invalid pq_id '{pid}': {type(e).__name__}: {e}"
+                result["isError"] = True
+                return result
+
+        # Ensure system_name is set (required for type safety)
+        if system_name is None:  # pragma: no cover
+            result["error"] = "No valid pq_ids provided"
+            result["isError"] = True
+            return result
+
+        # Get config and session registry
+        config_manager: ConfigManager = context.request_context.lifespan_context[
+            "config_manager"
+        ]
+        session_registry: CombinedSessionRegistry = (
+            context.request_context.lifespan_context["session_registry"]
+        )
+
+        # Verify enterprise system exists
+        _, error_response = await _get_system_config(
+            "pq_restart", config_manager, system_name
+        )
+        if error_response:
+            result.update(error_response)
+            return result
+
+        # Get enterprise registry and factory
+        enterprise_registry = await session_registry.enterprise_registry()
+        factory_manager = await enterprise_registry.get(system_name)
+        factory = await factory_manager.get()
+
+        # Get controller client
+        controller = factory.controller_client
+
+        # Get names for all PQs before restart
+        restarted_pqs = []
+        for pid, serial in parsed_pqs:
+            pq_info = await controller.get(serial)
+            pq_name = pq_info.config.pb.name
+            restarted_pqs.append(
+                {
+                    "pq_id": pid,
+                    "serial": serial,
+                    "name": pq_name,
+                }
+            )
+
+        # Validate timeout
+        validated_timeout = _validate_timeout(timeout_seconds, "pq_restart")
+
+        # Extract serials and restart
+        serials = [serial for _, serial in parsed_pqs]
+        await controller.restart_query(serials, validated_timeout)
+
+        _LOGGER.info(
+            f"[mcp_systems_server:pq_restart] Restarted {len(restarted_pqs)} PQ(s)"
+        )
+
+        # Always return consistent format with list
+        result.update(
+            {
+                "success": True,
+                "restarted": restarted_pqs,
+                "message": f"Restarted {len(restarted_pqs)} PQ(s)",
+            }
+        )
+
+    except Exception as e:
+        _LOGGER.error(
+            f"[mcp_systems_server:pq_restart] Failed to restart PQ: {e!r}",
+            exc_info=True,
+        )
+        result["error"] = f"Failed to restart PQ(s): {type(e).__name__}: {e}"
         result["isError"] = True
 
     return result
@@ -4231,10 +6208,11 @@ def _build_success_response(
 
     # Add launch-method-specific details
     if resolved_launch_method == "docker":
-        result["container_id"] = getattr(launched_session, "container_id", None)
+        docker_session = cast(DockerLaunchedSession, launched_session)
+        result["container_id"] = docker_session.container_id
     elif resolved_launch_method == "python":
-        process = getattr(launched_session, "process", None)
-        result["process_id"] = process.pid if process else None
+        python_session = cast(PythonLaunchedSession, launched_session)
+        result["process_id"] = python_session.process.pid
 
     return result
 
@@ -4583,7 +6561,9 @@ async def session_community_create(
             f"[mcp_systems_server:session_community_create] Failed to create session '{session_name}': {e!r}",
             exc_info=True,
         )
-        result["error"] = str(e)
+        result["error"] = (
+            f"Failed to create community session '{session_name}': {type(e).__name__}: {e}"
+        )
         result["isError"] = True
 
     return result
@@ -4783,7 +6763,9 @@ async def session_community_delete(
             f"[mcp_systems_server:session_community_delete] Failed to delete session '{session_name}': {e!r}",
             exc_info=True,
         )
-        result["error"] = str(e)
+        result["error"] = (
+            f"Failed to delete community session '{session_name}': {type(e).__name__}: {e}"
+        )
         result["isError"] = True
 
     return result

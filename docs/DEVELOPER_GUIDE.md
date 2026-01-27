@@ -1202,6 +1202,217 @@ On error:
 
 **Description**: This tool permanently terminates an enterprise session and removes it from the session registry. The session cannot be recovered after deletion. Use with caution as any unsaved work in the session will be lost.
 
+#### Persistent Query (PQ) Management Tools
+
+Persistent Queries (PQs) are recipes for creating and managing long-running worker sessions in Deephaven Enterprise. Unlike ephemeral sessions created via `session_enterprise_create`, PQs can be configured to run on schedules, restart automatically on failure, and persist across server restarts.
+
+**Key Concepts:**
+
+- **PQ Definition**: A configuration specifying how to create a worker session (heap size, JVM args, schedule, etc.)
+- **PQ Serial**: Immutable unique identifier for a PQ (recommended for all operations)
+- **PQ Name**: Human-readable name (can change, less reliable than serial)
+- **PQ States**: UNINITIALIZED, RUNNING, STOPPED, FAILED, COMPLETED, etc.
+- **Session Integration**: Running PQs create sessions accessible via standard session tools using `session_id` format `enterprise:{system_name}:{pq_name}`
+
+##### `pq_list`
+
+**Purpose**: List all persistent queries on an enterprise system.
+
+**Parameters**:
+
+- `system_name` (required, string): Name of the enterprise system
+
+**Returns**:
+
+```json
+{
+  "success": true,
+  "system_name": "prod_cluster",
+  "pqs": [
+    {
+      "serial": 12345,
+      "name": "analytics_worker",
+      "state": "RUNNING",
+      "heap_size_gb": 8.0,
+      "session_id": "enterprise:prod_cluster:analytics_worker"
+    }
+  ]
+}
+```
+
+**Description**: Returns a list of all PQs with their current states. Running PQs include a `session_id` field that can be used with session data tools.
+
+##### `pq_details`
+
+**Purpose**: Get detailed information about a specific persistent query.
+
+**Parameters**:
+
+- `system_name` (required, string): Name of the enterprise system
+- `pq_identifier` (required, string | int): PQ name (string) or serial number (integer)
+
+**Returns**:
+
+```json
+{
+  "success": true,
+  "serial": 12345,
+  "name": "analytics_worker",
+  "state": "RUNNING",
+  "session_id": "enterprise:prod:analytics_worker",
+  "worker_host": "worker-01.example.com",
+  "worker_port": 10000,
+  "config": {
+    "heap_size_gb": 8.0,
+    "engine": "DeephavenCommunity"
+  }
+}
+```
+
+**Description**: Returns comprehensive PQ details including configuration, state, and worker connection information. Use the `session_id` with session tools to interact with the running PQ session.
+
+##### `pq_create`
+
+**Purpose**: Create a new persistent query.
+
+**Parameters**:
+
+- `system_name` (required, string): Name of the enterprise system
+- `pq_name` (required, string): Human-readable name for the PQ
+- `heap_size_gb` (required, float | int): JVM heap size in GB
+- `programming_language` (optional, string): "Python" or "Groovy"
+- `auto_delete_timeout` (optional, int): Seconds of inactivity before auto-deletion (default: 600)
+- `server` (optional, string): Specific server to run on
+- `engine` (optional, string): Worker engine type (default: "DeephavenCommunity")
+- `extra_jvm_args` (optional, list[string]): Additional JVM arguments
+- `extra_environment_vars` (optional, list[string]): Environment variables as ["KEY=value", ...]
+- `admin_groups` (optional, list[string]): Groups with admin access
+- `viewer_groups` (optional, list[string]): Groups with viewer access
+
+**Returns**:
+
+```json
+{
+  "success": true,
+  "serial": 12345,
+  "pq_name": "analytics_worker",
+  "state": "UNINITIALIZED",
+  "message": "PQ created successfully"
+}
+```
+
+**Description**: Creates a new PQ in UNINITIALIZED state. Use `pq_start` to run it.
+
+##### `pq_delete`
+
+**Purpose**: Permanently delete a persistent query.
+
+**Parameters**:
+
+- `system_name` (required, string): Name of the enterprise system
+- `pq_identifier` (required, string | int): PQ name or serial number
+
+**Returns**:
+
+```json
+{
+  "success": true,
+  "message": "PQ deleted successfully"
+}
+```
+
+**Description**: Permanently removes the PQ from the controller. If running, it will be stopped first. This operation cannot be undone.
+
+##### `pq_start`
+
+**Purpose**: Start a persistent query.
+
+**Parameters**:
+
+- `system_name` (required, string): Name of the enterprise system
+- `pq_identifier` (required, string | int): PQ name or serial number
+- `wait` (optional, bool): Wait for PQ to reach RUNNING state (default: true)
+- `timeout_seconds` (optional, int): Max seconds to wait if wait=true (default: 120)
+
+**Returns**:
+
+```json
+{
+  "success": true,
+  "serial": 12345,
+  "state": "RUNNING",
+  "session_id": "enterprise:prod:analytics_worker",
+  "message": "PQ started successfully"
+}
+```
+
+**Description**: Starts a stopped or newly created PQ. When started successfully, a `session_id` is returned that can be used with session data tools.
+
+##### `pq_stop`
+
+**Purpose**: Stop a running persistent query.
+
+**Parameters**:
+
+- `system_name` (required, string): Name of the enterprise system
+- `pq_identifier` (required, string | int): PQ name or serial number
+- `wait` (optional, bool): Wait for PQ to reach terminal state (default: true)
+- `timeout_seconds` (optional, int): Max seconds to wait if wait=true (default: 120)
+
+**Returns**:
+
+```json
+{
+  "success": true,
+  "serial": 12345,
+  "state": "STOPPED",
+  "message": "PQ stopped successfully"
+}
+```
+
+**Description**: Gracefully stops a running PQ. The PQ definition is preserved and can be restarted later with `pq_start` or `pq_restart`.
+
+##### `pq_restart`
+
+**Purpose**: Restart a persistent query.
+
+**Parameters**:
+
+- `system_name` (required, string): Name of the enterprise system
+- `pq_identifier` (required, string | int): PQ name or serial number
+
+**Returns**:
+
+```json
+{
+  "success": true,
+  "serial": 12345,
+  "message": "PQ restart initiated"
+}
+```
+
+**Description**: Restarts a stopped or failed PQ using its original configuration. More efficient than deleting and recreating.
+
+**Workflow Examples**:
+
+1. **Create and start a new PQ:**
+
+   ```text
+   pq_create → pq_start → use session_id with session tools
+   ```
+
+2. **Manage existing PQ:**
+
+   ```text
+   pq_list → pq_details → pq_stop → pq_restart
+   ```
+
+3. **Query running PQ data:**
+
+   ```text
+   pq_details → get session_id → session_tables_list → session_table_data
+   ```
+
 #### Community Session Tools
 
 ##### `session_community_create`

@@ -26,6 +26,12 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
       - name: Cache pip dependencies
         uses: actions/cache@v3
         with:
@@ -38,6 +44,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install .[test]
+
+      - name: Verify dependencies
+        run: |
+          pip list
 
       - name: Run integration tests
         run: |

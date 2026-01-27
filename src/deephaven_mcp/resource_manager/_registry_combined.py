@@ -2,7 +2,7 @@
 Combined registry for managing both community and enterprise session resources.
 
 This module provides the `CombinedSessionRegistry` class that unifies management of both
-community sessions and multiple enterprise (CorePlus) session factory registries
+community sessions and multiple enterprise (Core+) session factory registries
 with proper async locking, caching, and lifecycle management.
 
 Key Classes:
@@ -92,7 +92,7 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
     A unified registry for managing both community and enterprise session resources.
 
     This registry provides a centralized management system for all session resources,
-    including both community (local) sessions and enterprise (CorePlus) sessions across
+    including both community (local) sessions and enterprise (Core+) sessions across
     multiple factories. It manages the full lifecycle of these resources with proper
     caching, health checking, and cleanup.
 
@@ -379,10 +379,10 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
         instance, allowing specialized operations on enterprise session factories that
         might not be available through the combined registry's unified interface.
 
-        The enterprise registry manages CorePlusSessionFactory instances that connect
-        to Deephaven Enterprise Edition deployments. These factories are responsible
-        for creating enterprise sessions through controller clients, handling advanced
-        authentication, and managing enterprise-specific features.
+        The enterprise registry manages session factories that connect to Deephaven
+        Enterprise (Core+) deployments. These factories are responsible for creating
+        enterprise sessions through controller clients, handling advanced authentication,
+        and managing enterprise-specific features.
 
         Use this method when you need enterprise-specific functionality such as:
         - Direct factory management and configuration
@@ -490,6 +490,15 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
         factory_instance = await factory.get()
         client = factory_instance.controller_client
 
+        # Subscribe to persistent query state immediately after creation
+        _LOGGER.debug(
+            f"[{self.__class__.__name__}] subscribing controller client to query state for factory '{factory_name}'"
+        )
+        await client.subscribe()
+        _LOGGER.debug(
+            f"[{self.__class__.__name__}] controller client subscribed for factory '{factory_name}'"
+        )
+
         # Cache the client
         self._controller_clients[factory_name] = client
         return client
@@ -507,7 +516,7 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
         created with a closure that connects to the persistent query session through
         the factory.
 
-        The method is idempotent - if a session already exists in the registry, it will
+        This method is idempotent - if a session already exists in the registry, it will
         not be recreated. This prevents duplicate session managers and preserves existing
         session state when updates occur.
 
@@ -734,10 +743,10 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
     ) -> None:
         """Update enterprise sessions for one or all factories.
 
-        This method queries enterprise factories to retrieve and sync their sessions.
-        Queries run in parallel for performance. Connection errors are logged and
-        treated as offline factories (sessions removed). Other exceptions are collected
-        and raised together as an ExceptionGroup.
+        This method queries enterprise factories to retrieve and synchronize their sessions.
+        Queries run in parallel for performance. Connection errors are logged and treated
+        as offline factories (all sessions removed). Other exceptions are collected and
+        raised together as an ExceptionGroup.
 
         Args:
             factory_name (str | None): Optional factory name to update. If None, updates all factories.
@@ -828,7 +837,7 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
         """Retrieve a specific session manager from the registry by its fully qualified name.
 
         This method provides access to any session manager (community or enterprise)
-        by its fully qualified name. For enterprise sessions, it updates only the
+        by its fully qualified name. For enterprise sessions, it first updates only the
         specific factory's sessions (not all factories) to ensure fresh data while
         minimizing unnecessary network calls.
 
@@ -912,7 +921,7 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
         The returned dictionary includes:
         - All community sessions loaded from configuration during initialization
         - All enterprise sessions discovered from controller clients
-        - Both tracked sessions (added via add_session) and discovered sessions
+        - Both explicitly tracked sessions (added via add_session) and discovered sessions
 
         The returned dictionary is a copy, so modifications to it will not affect
         the registry's internal state. This ensures safe iteration and manipulation
@@ -971,9 +980,10 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
     async def add_session(self, manager: BaseItemManager) -> None:
         """Add a session manager to the registry with tracking.
 
-        This method adds a session manager to the registry and marks it as tracked for
-        counting purposes. This is typically used by the MCP server to register sessions
-        that it has created, allowing for proper session lifecycle management and counting.
+        This method adds a session manager to the registry and marks it as explicitly tracked
+        for counting purposes. This is typically used by the MCP server to register sessions
+        that it has created, allowing for proper session lifecycle management and accurate
+        counting of MCP-created sessions.
 
         The operation is not idempotent - attempting to add a session that already exists
         will raise a ValueError to catch programming errors early. This fail-fast behavior
@@ -1025,9 +1035,10 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
     async def remove_session(self, session_id: str) -> BaseItemManager | None:
         """Remove and return a session manager from the registry with tracking cleanup.
 
-        This method removes a session manager from the registry and also removes it
-        from the internal tracking set used by count_added_sessions(). This ensures
-        proper cleanup of sessions that were previously added via add_session().
+        This method removes a session manager from the registry and also removes it from
+        the internal tracking set used by count_added_sessions(). This ensures proper
+        cleanup of sessions that were previously added via add_session(), maintaining
+        accurate session counts.
 
         The operation is idempotent - calling it multiple times with the same
         session_id is safe and will return None for subsequent calls. This design
@@ -1043,8 +1054,8 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
 
         Note:
             This method does not raise an exception if the session is not found,
-            as sessions may be removed by external systems, timeout naturally, or
-            be removed by automatic cleanup processes. Callers should check the
+            as sessions may be removed by external systems, expire due to timeout,
+            or be removed by automatic cleanup processes. Callers should check the
             return value if they need to know whether the session existed.
 
         Raises:
@@ -1086,9 +1097,9 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
     ) -> int:
         """Count sessions added to this registry for a specific system that still exist.
 
-        This method provides the functionality previously handled by the global
-        _created_sessions tracking in the MCP server. It counts only sessions that
-        were explicitly added via add_session() and filters for the specified system.
+        This method provides session counting functionality for MCP-created sessions.
+        It counts only sessions that were explicitly added via add_session() and filters
+        them by the specified system type and name.
 
         Args:
             system_type (str | SystemType): The system type to filter by. Can be either
@@ -1258,7 +1269,7 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
                     )
 
             # Log that we're releasing controller clients
-            # (Note: CorePlusControllerClient doesn't have a close() method; clients are managed by the CorePlus system)
+            # (Note: CorePlusControllerClient doesn't have a close() method; clients are managed by the Core+ system)
             for factory_name, _ in list(self._controller_clients.items()):
                 _LOGGER.debug(
                     f"[{self.__class__.__name__}] releasing controller client for factory '{factory_name}'"
