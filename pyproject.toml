@@ -32,7 +32,7 @@ dependencies = [
     "mcp[cli]>=1.12.0",          # CLI and fastmcp server
     "mcp-proxy",                # SSE/Streamable-HTTP proxy support
     # Deephaven integration
-    "pydeephaven>=0.39,<41.0",      # Deephaven Python API (v41.0 has protobuf 6.x gencode, incompatible with protobuf 5.x runtime)
+    "pydeephaven>=0.39,<41.0",      # Deephaven Python API (v41.0+ has protobuf version conflict with autogen-ext)
     # Docs/LLM and web server dependencies
     "fastapi>=0.116.0",         # FastAPI web framework for Docs server
     "uvicorn[standard]>=0.35.0", # ASGI server for FastAPI
