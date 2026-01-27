@@ -10581,12 +10581,8 @@ async def test_pq_modify_success():
     current_pq_info = create_mock_pq_info(12345, "analytics", "RUNNING", 8.0)
     current_pq_info.config.pb.scriptCode = "print('old')"
 
-    # Mock updated PQ info (after modification) - reflects heap change
-    updated_pq_info = create_mock_pq_info(12345, "analytics", "RUNNING", 16.0)
-    updated_pq_info.config.pb.scriptCode = "print('old')"
-
-    # Mock controller methods
-    mock_controller.get = AsyncMock(side_effect=[current_pq_info, updated_pq_info])
+    # Mock controller methods - map() returns dict of {serial: pq_info}
+    mock_controller.map = AsyncMock(return_value={12345: current_pq_info})
     mock_controller.modify_query = AsyncMock()
 
     # Mock config
@@ -10642,11 +10638,10 @@ async def test_pq_modify_with_restart():
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
 
-    # Mock current and updated PQ info
+    # Mock current PQ info - config will be modified in-place
     current_pq_info = create_mock_pq_info(12345, "analytics", "STOPPED", 8.0)
-    updated_pq_info = create_mock_pq_info(12345, "analytics_renamed", "RUNNING", 8.0)
 
-    mock_controller.get = AsyncMock(side_effect=[current_pq_info, updated_pq_info])
+    mock_controller.map = AsyncMock(return_value={12345: current_pq_info})
     mock_controller.modify_query = AsyncMock()
 
     # Mock config
@@ -10702,7 +10697,7 @@ async def test_pq_modify_script_path():
 
     # Mock current PQ info
     current_pq_info = create_mock_pq_info(12345, "analytics", "RUNNING", 8.0)
-    mock_controller.get = AsyncMock(return_value=current_pq_info)
+    mock_controller.map = AsyncMock(return_value={12345: current_pq_info})
     mock_controller.modify_query = AsyncMock()
 
     # Mock config
@@ -10750,7 +10745,7 @@ async def test_pq_modify_mutually_exclusive_scripts():
 
     # Mock current PQ info
     current_pq_info = create_mock_pq_info(12345, "analytics", "RUNNING", 8.0)
-    mock_controller.get = AsyncMock(return_value=current_pq_info)
+    mock_controller.map = AsyncMock(return_value={12345: current_pq_info})
 
     # Mock config
     full_config = {"enterprise": {"systems": {"test-system": {}}}}
@@ -10828,6 +10823,50 @@ async def test_pq_modify_system_not_found():
 
 
 @pytest.mark.asyncio
+async def test_pq_modify_pq_not_found():
+    """Test pq_modify when PQ serial not found in controller map."""
+    mock_config_manager = MagicMock()
+    mock_session_registry = MagicMock()
+    mock_enterprise_registry = MagicMock()
+    mock_factory_manager = MagicMock()
+    mock_factory = MagicMock()
+    mock_controller = MagicMock()
+
+    # Setup mock chain
+    mock_session_registry.enterprise_registry = AsyncMock(
+        return_value=mock_enterprise_registry
+    )
+    mock_enterprise_registry.get = AsyncMock(return_value=mock_factory_manager)
+    mock_factory_manager.get = AsyncMock(return_value=mock_factory)
+    mock_factory.controller_client = mock_controller
+
+    # Mock controller.map() to return empty dict (PQ doesn't exist)
+    mock_controller.map = AsyncMock(return_value={})
+
+    # Mock config
+    full_config = {"enterprise": {"systems": {"test-system": {}}}}
+    mock_config_manager.get_config = AsyncMock(return_value=full_config)
+
+    context = MockContext(
+        {
+            "config_manager": mock_config_manager,
+            "session_registry": mock_session_registry,
+        }
+    )
+
+    result = await mcp_mod.pq_modify(
+        context,
+        pq_id="enterprise:test-system:99999",
+        heap_size_gb=16.0,
+    )
+
+    assert result["success"] is False
+    assert "not found" in result["error"]
+    assert "99999" in result["error"]
+    assert result["isError"] is True
+
+
+@pytest.mark.asyncio
 async def test_pq_modify_invalid_language():
     """Test pq_modify with invalid programming language."""
     mock_config_manager = MagicMock()
@@ -10847,7 +10886,7 @@ async def test_pq_modify_invalid_language():
 
     # Mock current PQ info
     current_pq_info = create_mock_pq_info(12345, "analytics", "RUNNING", 8.0)
-    mock_controller.get = AsyncMock(return_value=current_pq_info)
+    mock_controller.map = AsyncMock(return_value={12345: current_pq_info})
 
     # Mock config
     full_config = {"enterprise": {"systems": {"test-system": {}}}}
@@ -10891,7 +10930,7 @@ async def test_pq_modify_no_changes():
 
     # Mock current PQ info
     current_pq_info = create_mock_pq_info(12345, "analytics", "RUNNING", 8.0)
-    mock_controller.get = AsyncMock(return_value=current_pq_info)
+    mock_controller.map = AsyncMock(return_value={12345: current_pq_info})
 
     # Mock config
     full_config = {"enterprise": {"systems": {"test-system": {}}}}
@@ -10939,7 +10978,7 @@ async def test_pq_modify_all_parameters():
 
     # Mock current PQ info
     current_pq_info = create_mock_pq_info(12345, "old_name", "RUNNING", 8.0)
-    mock_controller.get = AsyncMock(return_value=current_pq_info)
+    mock_controller.map = AsyncMock(return_value={12345: current_pq_info})
     mock_controller.modify_query = AsyncMock()
 
     # Mock config
