@@ -5246,8 +5246,19 @@ async def pq_modify(
         # Get controller client
         controller = factory.controller_client
 
+        # Get all PQs from controller (ensures subscription is ready)
+        # Then extract the specific PQ by serial
+        pq_map = await controller.map()
+
+        if serial not in pq_map:
+            error_msg = f"PQ with serial {serial} not found on system '{system_name}'"
+            _LOGGER.error(f"[mcp_systems_server:pq_modify] {error_msg}")
+            result["error"] = error_msg
+            result["isError"] = True
+            return result
+
         # Get current PQ info and config
-        pq_info = await controller.get(serial)
+        pq_info = pq_map[serial]
         config = pq_info.config
         config_pb = config.pb
 
