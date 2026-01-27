@@ -129,7 +129,7 @@ class CorePlusControllerClient(
         """
         super().__init__(controller_client, is_enterprise=True)
         self._subscribed = False
-        _LOGGER.info("[CorePlusControllerClient] initialized")
+        _LOGGER.debug("[CorePlusControllerClient] Initialized")
 
     # ===========================================================================
     # Initialization & Connection Management
@@ -818,6 +818,87 @@ class CorePlusControllerClient(
                 f"[CorePlusControllerClient:delete_query] Failed to delete query {serial}: {e}"
             )
             raise QueryError(f"Failed to delete query {serial}: {e}") from e
+
+    async def modify_query(
+        self,
+        updated_config: CorePlusQueryConfig,
+        restart: bool = False,
+    ) -> None:
+        """Modify a persistent query configuration asynchronously.
+
+        This method updates an existing persistent query's configuration. The query configuration
+        must include the serial number of the query to modify. Changes can be applied to queries
+        in any state (RUNNING, STOPPED, etc.).
+
+        The restart parameter controls whether the query is restarted to apply the changes:
+        - restart=True: The query is restarted immediately, applying all configuration changes.
+                       This is required for changes like heap size, JVM args, or script content.
+        - restart=False: Changes are saved but require a manual restart (via restart_query or
+                        start_and_wait) to take effect. This is useful for preparing configuration
+                        changes without disrupting a running query.
+
+        Note that some configuration changes (like resource allocation or script changes) will
+        only take effect after the query is restarted, regardless of the restart parameter.
+
+        A successful call to authenticate should have happened before this call, as query
+        modification requires an authenticated session.
+
+        Args:
+            updated_config (CorePlusQueryConfig): The complete updated configuration for the query.
+                        The configuration must include the serial number of the query to modify.
+                        All fields should be set to their desired values - this is not a partial
+                        update mechanism.
+            restart (bool): Whether to restart the query after modifying the configuration.
+                        Defaults to False. Set to True to apply changes immediately.
+
+        Raises:
+            DeephavenConnectionError: If not authenticated or unable to connect to the controller
+                                    due to network issues or if the controller is unavailable.
+            ValueError: If the configuration is invalid or malformed, or if the serial number
+                       in the configuration is invalid.
+            KeyError: If the query with the serial number in the configuration does not exist.
+            QueryError: If the query modification fails for any other reason such as permission
+                       issues, configuration conflicts, or internal controller errors.
+
+        Example:
+            # Get current query info and modify it
+            query_info = await controller.get(serial)
+            config = query_info.config
+
+            # Update heap size in the protobuf
+            config.pb.heapSizeGb = 16.0
+
+            # Modify without restarting (changes saved for next restart)
+            await controller.modify_query(config, restart=False)
+
+            # Or modify and restart immediately
+            await controller.modify_query(config, restart=True)
+        """
+        pb = updated_config.pb
+        _LOGGER.debug(
+            f"[CorePlusControllerClient:modify_query] Modifying query: "
+            f"serial={pb.serial}, name='{pb.name}', restart={restart}"
+        )
+        try:
+            await asyncio.to_thread(self.wrapped.modify_query, pb, restart)
+            _LOGGER.debug(
+                f"[CorePlusControllerClient:modify_query] Query {pb.serial} modified successfully"
+            )
+        except ConnectionError as e:
+            _LOGGER.error(
+                f"[CorePlusControllerClient:modify_query] Connection error while modifying query {pb.serial}: {e}"
+            )
+            raise DeephavenConnectionError(
+                f"Unable to connect to controller service: {e}"
+            ) from e
+        except (ValueError, KeyError):
+            # Re-raise native exceptions unchanged
+            raise
+        except Exception as e:
+            _LOGGER.error(
+                f"[CorePlusControllerClient:modify_query] Failed to modify query {pb.serial}: {e}"
+            )
+            raise QueryError(f"Failed to modify query {pb.serial}: {e}") from e
 
     async def restart_query(
         self,

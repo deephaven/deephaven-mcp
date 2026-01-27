@@ -830,3 +830,88 @@ async def test_get_serial_for_name_without_subscribe_raises_internal_error(
     assert "subscribe() must be called before get_serial_for_name()" in str(
         exc_info.value
     )
+
+
+@pytest.mark.asyncio
+async def test_modify_query_success(coreplus_controller_client, dummy_controller_client):
+    """Test that modify_query successfully calls wrapped client."""
+    from deephaven_mcp.client._protobuf import CorePlusQueryConfig
+    
+    mock_config = MagicMock(spec=CorePlusQueryConfig)
+    mock_config.pb = MagicMock()
+    mock_config.pb.serial = 12345
+    mock_config.pb.name = "test_query"
+    
+    dummy_controller_client.modify_query = MagicMock()
+    
+    await coreplus_controller_client.modify_query(mock_config, restart=False)
+    
+    dummy_controller_client.modify_query.assert_called_once_with(mock_config.pb, False)
+
+
+@pytest.mark.asyncio
+async def test_modify_query_with_restart(coreplus_controller_client, dummy_controller_client):
+    """Test that modify_query passes restart parameter correctly."""
+    from deephaven_mcp.client._protobuf import CorePlusQueryConfig
+    
+    mock_config = MagicMock(spec=CorePlusQueryConfig)
+    mock_config.pb = MagicMock()
+    mock_config.pb.serial = 12345
+    mock_config.pb.name = "test_query"
+    
+    dummy_controller_client.modify_query = MagicMock()
+    
+    await coreplus_controller_client.modify_query(mock_config, restart=True)
+    
+    dummy_controller_client.modify_query.assert_called_once_with(mock_config.pb, True)
+
+
+@pytest.mark.asyncio
+async def test_modify_query_connection_error(coreplus_controller_client, dummy_controller_client):
+    """Test that modify_query raises DeephavenConnectionError on connection failure."""
+    from deephaven_mcp.client._protobuf import CorePlusQueryConfig
+    
+    mock_config = MagicMock(spec=CorePlusQueryConfig)
+    mock_config.pb = MagicMock()
+    mock_config.pb.serial = 12345
+    mock_config.pb.name = "test_query"
+    
+    dummy_controller_client.modify_query = MagicMock(side_effect=ConnectionError("Connection failed"))
+    
+    with pytest.raises(DeephavenConnectionError) as exc_info:
+        await coreplus_controller_client.modify_query(mock_config, restart=False)
+    assert "Unable to connect to controller service" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_modify_query_value_error(coreplus_controller_client, dummy_controller_client):
+    """Test that modify_query re-raises ValueError unchanged."""
+    from deephaven_mcp.client._protobuf import CorePlusQueryConfig
+    
+    mock_config = MagicMock(spec=CorePlusQueryConfig)
+    mock_config.pb = MagicMock()
+    mock_config.pb.serial = 12345
+    mock_config.pb.name = "test_query"
+    
+    dummy_controller_client.modify_query = MagicMock(side_effect=ValueError("Invalid config"))
+    
+    with pytest.raises(ValueError) as exc_info:
+        await coreplus_controller_client.modify_query(mock_config, restart=False)
+    assert "Invalid config" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_modify_query_other_error(coreplus_controller_client, dummy_controller_client):
+    """Test that modify_query wraps other errors in QueryError."""
+    from deephaven_mcp.client._protobuf import CorePlusQueryConfig
+    
+    mock_config = MagicMock(spec=CorePlusQueryConfig)
+    mock_config.pb = MagicMock()
+    mock_config.pb.serial = 12345
+    mock_config.pb.name = "test_query"
+    
+    dummy_controller_client.modify_query = MagicMock(side_effect=RuntimeError("Internal error"))
+    
+    with pytest.raises(QueryError) as exc_info:
+        await coreplus_controller_client.modify_query(mock_config, restart=False)
+    assert "Failed to modify query" in str(exc_info.value)
