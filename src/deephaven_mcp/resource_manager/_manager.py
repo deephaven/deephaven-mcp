@@ -247,7 +247,7 @@ class ResourceLivenessStatus(enum.Enum):
         return self.name
 
 
-class SystemType(str, enum.Enum):
+class SystemType(enum.StrEnum):
     """Enum representing different types of Deephaven backend deployment architectures.
 
     This enum categorizes the distinct Deephaven deployment models that require
@@ -261,7 +261,7 @@ class SystemType(str, enum.Enum):
         polymorphic behavior across different deployment architectures.
 
     String Inheritance:
-        This enum inherits from str, making instances directly usable as string
+        This enum inherits from StrEnum, making instances directly usable as string
         values in configuration, logging, and serialization contexts without
         explicit conversion.
 
