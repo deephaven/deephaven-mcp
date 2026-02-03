@@ -5311,15 +5311,14 @@ async def pq_delete(
 
     try:
         # Common setup for batch operations
-        parsed_pqs, system_name, controller, setup_error = (
-            await _setup_batch_pq_operation(context, pq_id, "pq_delete")
+        parsed_pqs, _, controller, setup_error = await _setup_batch_pq_operation(
+            context, pq_id, "pq_delete"
         )
         if setup_error:
             return setup_error
 
         # Type narrowing: when setup_error is None, all values are guaranteed non-None
         parsed_pqs = cast(list[tuple[str, CorePlusQuerySerial]], parsed_pqs)
-        system_name = cast(str, system_name)
         controller = cast(CorePlusControllerClient, controller)
 
         # Validate timeout
@@ -6246,15 +6245,14 @@ async def pq_stop(
 
     try:
         # Common setup for batch operations
-        parsed_pqs, system_name, controller, setup_error = (
-            await _setup_batch_pq_operation(context, pq_id, "pq_stop")
+        parsed_pqs, _, controller, setup_error = await _setup_batch_pq_operation(
+            context, pq_id, "pq_stop"
         )
         if setup_error:
             return setup_error
 
         # Type narrowing: when setup_error is None, all values are guaranteed non-None
         parsed_pqs = cast(list[tuple[str, CorePlusQuerySerial]], parsed_pqs)
-        system_name = cast(str, system_name)
         controller = cast(CorePlusControllerClient, controller)
 
         # Validate timeout
