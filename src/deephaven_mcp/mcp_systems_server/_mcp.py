@@ -84,6 +84,11 @@ from deephaven_mcp.client._protobuf import (
 )
 
 if TYPE_CHECKING:
+    from deephaven.proto.table_pb2 import (
+        ColumnDefinitionMessage,
+        ExportedObjectInfoMessage,
+        TableDefinitionMessage,
+    )
     from deephaven_enterprise.proto.controller_common_pb2 import (
         NamedStringList,
     )
@@ -92,11 +97,6 @@ if TYPE_CHECKING:
         PersistentQueryConfigMessage,
         ProcessorConnectionDetailsMessage,
         WorkerProtocolMessage,
-    )
-    from deephaven.proto.table_pb2 import (
-        ColumnDefinitionMessage,
-        ExportedObjectInfoMessage,
-        TableDefinitionMessage,
     )
 
 # Import protobuf enum classes for proper enum name resolution
@@ -3729,7 +3729,9 @@ def _make_pq_id(system_name: str, serial: CorePlusQuerySerial) -> str:
 # MCP-safe timeout limits
 MAX_MCP_SAFE_TIMEOUT = 60  # Conservative limit to prevent client timeouts
 DEFAULT_PQ_TIMEOUT = 30  # Default for PQ lifecycle operations
-DEFAULT_MAX_CONCURRENT = 20  # Default concurrency limit for parallel PQ batch operations
+DEFAULT_MAX_CONCURRENT = (
+    20  # Default concurrency limit for parallel PQ batch operations
+)
 
 
 def _validate_timeout(timeout_seconds: int, function_name: str) -> int:
@@ -5346,7 +5348,9 @@ async def pq_delete(
 
             try:
                 # Get name before deletion
-                pq_info = await controller.get(serial, timeout_seconds=validated_timeout)
+                pq_info = await controller.get(
+                    serial, timeout_seconds=validated_timeout
+                )
                 pq_name = pq_info.config.pb.name
 
                 # Delete the PQ
@@ -5373,7 +5377,9 @@ async def pq_delete(
         # Use semaphore to limit concurrent operations
         semaphore = asyncio.Semaphore(max_concurrent)
 
-        async def delete_with_limit(pid: str, serial: CorePlusQuerySerial) -> dict[str, object]:
+        async def delete_with_limit(
+            pid: str, serial: CorePlusQuerySerial
+        ) -> dict[str, object]:
             """Delete with concurrency limit."""
             async with semaphore:
                 return await delete_single_pq(pid, serial)
@@ -5391,13 +5397,15 @@ async def pq_delete(
             if isinstance(r, Exception):
                 # Unexpected exception - convert to error dict
                 pid, serial = parsed_pqs[i]
-                results.append({
-                    "pq_id": pid,
-                    "serial": serial,
-                    "success": False,
-                    "name": None,
-                    "error": f"Unexpected error: {type(r).__name__}: {r}",
-                })
+                results.append(
+                    {
+                        "pq_id": pid,
+                        "serial": serial,
+                        "success": False,
+                        "name": None,
+                        "error": f"Unexpected error: {type(r).__name__}: {r}",
+                    }
+                )
             else:
                 results.append(r)
 
@@ -5968,7 +5976,9 @@ async def pq_start(
                 await controller.start_and_wait(serial, validated_timeout)
 
                 # Get updated info
-                pq_info = await controller.get(serial, timeout_seconds=validated_timeout)
+                pq_info = await controller.get(
+                    serial, timeout_seconds=validated_timeout
+                )
                 pq_name = pq_info.config.pb.name
                 state_name = pq_info.state.status.name if pq_info.state else "UNKNOWN"
 
@@ -5978,8 +5988,10 @@ async def pq_start(
                 item_result["state"] = state_name
 
                 # Add session_id if running (session_id uses name, not serial)
-                _add_session_id_if_running(item_result, state_name, system_name, pq_name)
-                
+                _add_session_id_if_running(
+                    item_result, state_name, system_name, pq_name
+                )
+
                 _LOGGER.debug(
                     f"[mcp_systems_server:pq_start] Successfully started PQ {pid}"
                 )
@@ -5998,7 +6010,9 @@ async def pq_start(
         # Use semaphore to limit concurrent operations
         semaphore = asyncio.Semaphore(max_concurrent)
 
-        async def start_with_limit(pid: str, serial: CorePlusQuerySerial) -> dict[str, object]:
+        async def start_with_limit(
+            pid: str, serial: CorePlusQuerySerial
+        ) -> dict[str, object]:
             """Start with concurrency limit."""
             async with semaphore:
                 return await start_single_pq(pid, serial)
@@ -6016,15 +6030,17 @@ async def pq_start(
             if isinstance(r, Exception):
                 # Unexpected exception - convert to error dict
                 pid, serial = parsed_pqs[i]
-                results.append({
-                    "pq_id": pid,
-                    "serial": serial,
-                    "success": False,
-                    "name": None,
-                    "state": None,
-                    "session_id": None,
-                    "error": f"Unexpected error: {type(r).__name__}: {r}",
-                })
+                results.append(
+                    {
+                        "pq_id": pid,
+                        "serial": serial,
+                        "success": False,
+                        "name": None,
+                        "state": None,
+                        "session_id": None,
+                        "error": f"Unexpected error: {type(r).__name__}: {r}",
+                    }
+                )
             else:
                 results.append(r)
 
@@ -6208,7 +6224,9 @@ async def pq_stop(
                 await controller.stop_query([serial], validated_timeout)
 
                 # Get updated info
-                pq_info = await controller.get(serial, timeout_seconds=validated_timeout)
+                pq_info = await controller.get(
+                    serial, timeout_seconds=validated_timeout
+                )
                 pq_name = pq_info.config.pb.name
                 state_name = pq_info.state.status.name if pq_info.state else "UNKNOWN"
 
@@ -6216,7 +6234,7 @@ async def pq_stop(
                 item_result["success"] = True
                 item_result["name"] = pq_name
                 item_result["state"] = state_name
-                
+
                 _LOGGER.debug(
                     f"[mcp_systems_server:pq_stop] Successfully stopped PQ {pid}"
                 )
@@ -6235,7 +6253,9 @@ async def pq_stop(
         # Use semaphore to limit concurrent operations
         semaphore = asyncio.Semaphore(max_concurrent)
 
-        async def stop_with_limit(pid: str, serial: CorePlusQuerySerial) -> dict[str, object]:
+        async def stop_with_limit(
+            pid: str, serial: CorePlusQuerySerial
+        ) -> dict[str, object]:
             """Stop with concurrency limit."""
             async with semaphore:
                 return await stop_single_pq(pid, serial)
@@ -6253,14 +6273,16 @@ async def pq_stop(
             if isinstance(r, Exception):
                 # Unexpected exception - convert to error dict
                 pid, serial = parsed_pqs[i]
-                results.append({
-                    "pq_id": pid,
-                    "serial": serial,
-                    "success": False,
-                    "name": None,
-                    "state": None,
-                    "error": f"Unexpected error: {type(r).__name__}: {r}",
-                })
+                results.append(
+                    {
+                        "pq_id": pid,
+                        "serial": serial,
+                        "success": False,
+                        "name": None,
+                        "state": None,
+                        "error": f"Unexpected error: {type(r).__name__}: {r}",
+                    }
+                )
             else:
                 results.append(r)
 
@@ -6445,7 +6467,9 @@ async def pq_restart(
                 await controller.restart_query([serial], validated_timeout)
 
                 # Get updated info
-                pq_info = await controller.get(serial, timeout_seconds=validated_timeout)
+                pq_info = await controller.get(
+                    serial, timeout_seconds=validated_timeout
+                )
                 pq_name = pq_info.config.pb.name
                 state_name = pq_info.state.status.name if pq_info.state else "UNKNOWN"
 
@@ -6455,8 +6479,10 @@ async def pq_restart(
                 item_result["state"] = state_name
 
                 # Add session_id if running (session_id uses name, not serial)
-                _add_session_id_if_running(item_result, state_name, system_name, pq_name)
-                
+                _add_session_id_if_running(
+                    item_result, state_name, system_name, pq_name
+                )
+
                 _LOGGER.debug(
                     f"[mcp_systems_server:pq_restart] Successfully restarted PQ {pid}"
                 )
@@ -6475,7 +6501,9 @@ async def pq_restart(
         # Use semaphore to limit concurrent operations
         semaphore = asyncio.Semaphore(max_concurrent)
 
-        async def restart_with_limit(pid: str, serial: CorePlusQuerySerial) -> dict[str, object]:
+        async def restart_with_limit(
+            pid: str, serial: CorePlusQuerySerial
+        ) -> dict[str, object]:
             """Restart with concurrency limit."""
             async with semaphore:
                 return await restart_single_pq(pid, serial)
@@ -6493,15 +6521,17 @@ async def pq_restart(
             if isinstance(r, Exception):
                 # Unexpected exception - convert to error dict
                 pid, serial = parsed_pqs[i]
-                results.append({
-                    "pq_id": pid,
-                    "serial": serial,
-                    "success": False,
-                    "name": None,
-                    "state": None,
-                    "session_id": None,
-                    "error": f"Unexpected error: {type(r).__name__}: {r}",
-                })
+                results.append(
+                    {
+                        "pq_id": pid,
+                        "serial": serial,
+                        "success": False,
+                        "name": None,
+                        "state": None,
+                        "session_id": None,
+                        "error": f"Unexpected error: {type(r).__name__}: {r}",
+                    }
+                )
             else:
                 results.append(r)
 

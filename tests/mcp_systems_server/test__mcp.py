@@ -10955,7 +10955,7 @@ async def test_pq_delete_success_custom_timeout():
     assert result["success"] is True
     assert result["results"][0]["success"] is True
     assert result["results"][0]["name"] == "analytics"
-    
+
     # Verify controller.get was called with custom timeout
     mock_controller.get.assert_called_once_with(12345, timeout_seconds=20)
     mock_controller.delete_query.assert_called_once_with(12345)
@@ -12617,24 +12617,26 @@ async def test_pq_delete_parallel_execution_with_semaphore():
     mock_controller = MagicMock()
 
     # Setup mock chain
-    mock_session_registry.enterprise_registry = AsyncMock(return_value=mock_enterprise_registry)
+    mock_session_registry.enterprise_registry = AsyncMock(
+        return_value=mock_enterprise_registry
+    )
     mock_enterprise_registry.get = AsyncMock(return_value=mock_factory_manager)
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
 
     # Track execution order and timing
     execution_log = []
-    
+
     async def mock_delete_with_delay(serial):
         execution_log.append(f"delete_start_{serial}")
         await asyncio.sleep(0.01)  # Simulate work
         execution_log.append(f"delete_end_{serial}")
-    
+
     async def mock_get_with_delay(serial, timeout_seconds=0):
         execution_log.append(f"get_{serial}")
         await asyncio.sleep(0.001)  # Small delay
         return create_mock_pq_info(serial, f"pq_{serial}", "STOPPED")
-    
+
     mock_controller.delete_query = AsyncMock(side_effect=mock_delete_with_delay)
     mock_controller.get = AsyncMock(side_effect=mock_get_with_delay)
 
@@ -12652,7 +12654,11 @@ async def test_pq_delete_parallel_execution_with_semaphore():
     # Test with 3 PQs and max_concurrent=2
     result = await mcp_mod.pq_delete(
         context,
-        pq_id=["enterprise:test-system:1", "enterprise:test-system:2", "enterprise:test-system:3"],
+        pq_id=[
+            "enterprise:test-system:1",
+            "enterprise:test-system:2",
+            "enterprise:test-system:3",
+        ],
         max_concurrent=2,
     )
 
@@ -12663,20 +12669,22 @@ async def test_pq_delete_parallel_execution_with_semaphore():
 
     # Verify operations executed (all 3 should have been processed)
     assert mock_controller.delete_query.call_count == 3
-    
-    # Verify parallel execution occurred - with max_concurrent=2, 
+
+    # Verify parallel execution occurred - with max_concurrent=2,
     # we should see overlapping execution (not strictly sequential)
     # The first two should start before the third one
     assert "delete_start_1" in execution_log
     assert "delete_start_2" in execution_log
-    
+
     # Due to semaphore limit of 2, the third operation should start
     # only after one of the first two finishes
     delete_start_3_index = execution_log.index("delete_start_3")
     # At least one of the first two should have ended before the third starts
-    ends_before_third = [i for i, log in enumerate(execution_log) 
-                         if (log == "delete_end_1" or log == "delete_end_2") 
-                         and i < delete_start_3_index]
+    ends_before_third = [
+        i
+        for i, log in enumerate(execution_log)
+        if (log == "delete_end_1" or log == "delete_end_2") and i < delete_start_3_index
+    ]
     assert len(ends_before_third) > 0, "Semaphore should limit concurrency to 2"
 
 
@@ -12691,7 +12699,9 @@ async def test_pq_delete_handles_unexpected_exception():
     mock_controller = MagicMock()
 
     # Setup mock chain
-    mock_session_registry.enterprise_registry = AsyncMock(return_value=mock_enterprise_registry)
+    mock_session_registry.enterprise_registry = AsyncMock(
+        return_value=mock_enterprise_registry
+    )
     mock_enterprise_registry.get = AsyncMock(return_value=mock_factory_manager)
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
@@ -12699,8 +12709,9 @@ async def test_pq_delete_handles_unexpected_exception():
     # First PQ succeeds, second raises unexpected exception, third succeeds
     mock_pq_info1 = create_mock_pq_info(1, "pq1", "STOPPED")
     mock_pq_info3 = create_mock_pq_info(3, "pq3", "STOPPED")
-    
+
     get_call_count = 0
+
     async def mock_get_side_effect(serial, timeout_seconds=0):
         nonlocal get_call_count
         get_call_count += 1
@@ -12711,7 +12722,7 @@ async def test_pq_delete_handles_unexpected_exception():
             raise RuntimeError("Unexpected database error")
         else:
             return mock_pq_info3
-    
+
     mock_controller.get = AsyncMock(side_effect=mock_get_side_effect)
     mock_controller.delete_query = AsyncMock()
 
@@ -12728,26 +12739,30 @@ async def test_pq_delete_handles_unexpected_exception():
 
     result = await mcp_mod.pq_delete(
         context,
-        pq_id=["enterprise:test-system:1", "enterprise:test-system:2", "enterprise:test-system:3"],
+        pq_id=[
+            "enterprise:test-system:1",
+            "enterprise:test-system:2",
+            "enterprise:test-system:3",
+        ],
     )
 
     # Should still succeed overall (best-effort)
     assert result["success"] is True
     assert len(result["results"]) == 3
-    
+
     # First PQ should succeed
     assert result["results"][0]["success"] is True
     assert result["results"][0]["name"] == "pq1"
-    
+
     # Second PQ should have error from the exception
     assert result["results"][1]["success"] is False
     assert "RuntimeError" in result["results"][1]["error"]
     assert "Unexpected database error" in result["results"][1]["error"]
-    
+
     # Third PQ should succeed
     assert result["results"][2]["success"] is True
     assert result["results"][2]["name"] == "pq3"
-    
+
     # Summary should reflect 2 successes and 1 failure
     assert result["summary"]["succeeded"] == 2
     assert result["summary"]["failed"] == 1
@@ -12764,7 +12779,9 @@ async def test_pq_start_parallel_execution():
     mock_controller = MagicMock()
 
     # Setup mock chain
-    mock_session_registry.enterprise_registry = AsyncMock(return_value=mock_enterprise_registry)
+    mock_session_registry.enterprise_registry = AsyncMock(
+        return_value=mock_enterprise_registry
+    )
     mock_enterprise_registry.get = AsyncMock(return_value=mock_factory_manager)
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
@@ -12772,16 +12789,20 @@ async def test_pq_start_parallel_execution():
     # Track concurrent execution
     active_operations = []
     max_concurrent_observed = 0
-    
+
     async def mock_start_and_wait(serial, timeout):
         active_operations.append(serial)
         nonlocal max_concurrent_observed
         max_concurrent_observed = max(max_concurrent_observed, len(active_operations))
         await asyncio.sleep(0.01)
         active_operations.remove(serial)
-    
+
     mock_controller.start_and_wait = AsyncMock(side_effect=mock_start_and_wait)
-    mock_controller.get = AsyncMock(side_effect=lambda s, timeout_seconds=0: create_mock_pq_info(s, f"pq_{s}", "RUNNING"))
+    mock_controller.get = AsyncMock(
+        side_effect=lambda s, timeout_seconds=0: create_mock_pq_info(
+            s, f"pq_{s}", "RUNNING"
+        )
+    )
 
     # Mock config
     full_config = {"enterprise": {"systems": {"test-system": {}}}}
@@ -12821,7 +12842,9 @@ async def test_pq_stop_parallel_with_mixed_results():
     mock_controller = MagicMock()
 
     # Setup mock chain
-    mock_session_registry.enterprise_registry = AsyncMock(return_value=mock_enterprise_registry)
+    mock_session_registry.enterprise_registry = AsyncMock(
+        return_value=mock_enterprise_registry
+    )
     mock_enterprise_registry.get = AsyncMock(return_value=mock_factory_manager)
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
@@ -12832,11 +12855,11 @@ async def test_pq_stop_parallel_with_mixed_results():
         serial = serials[0]
         if serial == 2:
             raise TimeoutError("PQ did not stop in time")
-    
+
     async def mock_get_side_effect(serial, timeout_seconds=0):
         # This is only called after successful stops
         return create_mock_pq_info(serial, f"pq_{serial}", "STOPPED")
-    
+
     mock_controller.stop_query = AsyncMock(side_effect=mock_stop_side_effect)
     mock_controller.get = AsyncMock(side_effect=mock_get_side_effect)
 
@@ -12853,19 +12876,23 @@ async def test_pq_stop_parallel_with_mixed_results():
 
     result = await mcp_mod.pq_stop(
         context,
-        pq_id=["enterprise:test-system:1", "enterprise:test-system:2", "enterprise:test-system:3"],
+        pq_id=[
+            "enterprise:test-system:1",
+            "enterprise:test-system:2",
+            "enterprise:test-system:3",
+        ],
     )
 
     # Should succeed overall (best-effort)
     assert result["success"] is True
     assert len(result["results"]) == 3
-    
+
     # Check individual results
     assert result["results"][0]["success"] is True
     assert result["results"][1]["success"] is False
     assert "TimeoutError" in result["results"][1]["error"]
     assert result["results"][2]["success"] is True
-    
+
     # Summary
     assert result["summary"]["succeeded"] == 2
     assert result["summary"]["failed"] == 1
@@ -12882,14 +12909,20 @@ async def test_pq_restart_parallel_execution():
     mock_controller = MagicMock()
 
     # Setup mock chain
-    mock_session_registry.enterprise_registry = AsyncMock(return_value=mock_enterprise_registry)
+    mock_session_registry.enterprise_registry = AsyncMock(
+        return_value=mock_enterprise_registry
+    )
     mock_enterprise_registry.get = AsyncMock(return_value=mock_factory_manager)
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
 
     # Mock successful restarts
     mock_controller.restart_query = AsyncMock()
-    mock_controller.get = AsyncMock(side_effect=lambda s, timeout_seconds=0: create_mock_pq_info(s, f"pq_{s}", "RUNNING"))
+    mock_controller.get = AsyncMock(
+        side_effect=lambda s, timeout_seconds=0: create_mock_pq_info(
+            s, f"pq_{s}", "RUNNING"
+        )
+    )
 
     # Mock config
     full_config = {"enterprise": {"systems": {"test-system": {}}}}
@@ -12915,7 +12948,7 @@ async def test_pq_restart_parallel_execution():
     assert all(r["success"] for r in result["results"])
     assert result["summary"]["succeeded"] == 4
     assert result["summary"]["failed"] == 0
-    
+
     # Verify all restart_query calls were made
     assert mock_controller.restart_query.call_count == 4
 
@@ -12930,13 +12963,19 @@ async def test_pq_delete_exception_escapes_to_gather(monkeypatch):
     mock_factory = MagicMock()
     mock_controller = MagicMock()
 
-    mock_session_registry.enterprise_registry = AsyncMock(return_value=mock_enterprise_registry)
+    mock_session_registry.enterprise_registry = AsyncMock(
+        return_value=mock_enterprise_registry
+    )
     mock_enterprise_registry.get = AsyncMock(return_value=mock_factory_manager)
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
 
     mock_controller.delete_query = AsyncMock()
-    mock_controller.get = AsyncMock(side_effect=lambda s, timeout_seconds=0: create_mock_pq_info(s, f"pq_{s}", "STOPPED"))
+    mock_controller.get = AsyncMock(
+        side_effect=lambda s, timeout_seconds=0: create_mock_pq_info(
+            s, f"pq_{s}", "STOPPED"
+        )
+    )
 
     full_config = {"enterprise": {"systems": {"test-system": {}}}}
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
@@ -12950,7 +12989,7 @@ async def test_pq_delete_exception_escapes_to_gather(monkeypatch):
 
     # Monkeypatch asyncio.gather to inject a raw exception into the results
     original_gather = asyncio.gather
-    
+
     async def patched_gather(*args, **kwargs):
         results = await original_gather(*args, **kwargs)
         # Replace second result with a raw Exception to trigger isinstance branch
@@ -12958,12 +12997,16 @@ async def test_pq_delete_exception_escapes_to_gather(monkeypatch):
         if len(results_list) > 1:
             results_list[1] = RuntimeError("Injected exception for testing")
         return results_list
-    
+
     monkeypatch.setattr(asyncio, "gather", patched_gather)
 
     result = await mcp_mod.pq_delete(
         context,
-        pq_id=["enterprise:test-system:1", "enterprise:test-system:2", "enterprise:test-system:3"],
+        pq_id=[
+            "enterprise:test-system:1",
+            "enterprise:test-system:2",
+            "enterprise:test-system:3",
+        ],
     )
 
     assert result["success"] is True
@@ -12985,13 +13028,19 @@ async def test_pq_start_exception_escapes_to_gather(monkeypatch):
     mock_factory = MagicMock()
     mock_controller = MagicMock()
 
-    mock_session_registry.enterprise_registry = AsyncMock(return_value=mock_enterprise_registry)
+    mock_session_registry.enterprise_registry = AsyncMock(
+        return_value=mock_enterprise_registry
+    )
     mock_enterprise_registry.get = AsyncMock(return_value=mock_factory_manager)
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
 
     mock_controller.start_and_wait = AsyncMock()
-    mock_controller.get = AsyncMock(side_effect=lambda s, timeout_seconds=0: create_mock_pq_info(s, f"pq_{s}", "RUNNING"))
+    mock_controller.get = AsyncMock(
+        side_effect=lambda s, timeout_seconds=0: create_mock_pq_info(
+            s, f"pq_{s}", "RUNNING"
+        )
+    )
 
     full_config = {"enterprise": {"systems": {"test-system": {}}}}
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
@@ -13005,19 +13054,23 @@ async def test_pq_start_exception_escapes_to_gather(monkeypatch):
 
     # Monkeypatch asyncio.gather to inject a raw exception
     original_gather = asyncio.gather
-    
+
     async def patched_gather(*args, **kwargs):
         results = await original_gather(*args, **kwargs)
         results_list = list(results)
         if len(results_list) > 1:
             results_list[1] = ValueError("Injected exception for testing")
         return results_list
-    
+
     monkeypatch.setattr(asyncio, "gather", patched_gather)
 
     result = await mcp_mod.pq_start(
         context,
-        pq_id=["enterprise:test-system:1", "enterprise:test-system:2", "enterprise:test-system:3"],
+        pq_id=[
+            "enterprise:test-system:1",
+            "enterprise:test-system:2",
+            "enterprise:test-system:3",
+        ],
     )
 
     assert result["success"] is True
@@ -13037,13 +13090,19 @@ async def test_pq_stop_exception_escapes_to_gather(monkeypatch):
     mock_factory = MagicMock()
     mock_controller = MagicMock()
 
-    mock_session_registry.enterprise_registry = AsyncMock(return_value=mock_enterprise_registry)
+    mock_session_registry.enterprise_registry = AsyncMock(
+        return_value=mock_enterprise_registry
+    )
     mock_enterprise_registry.get = AsyncMock(return_value=mock_factory_manager)
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
 
     mock_controller.stop_query = AsyncMock()
-    mock_controller.get = AsyncMock(side_effect=lambda s, timeout_seconds=0: create_mock_pq_info(s, f"pq_{s}", "STOPPED"))
+    mock_controller.get = AsyncMock(
+        side_effect=lambda s, timeout_seconds=0: create_mock_pq_info(
+            s, f"pq_{s}", "STOPPED"
+        )
+    )
 
     full_config = {"enterprise": {"systems": {"test-system": {}}}}
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
@@ -13057,19 +13116,23 @@ async def test_pq_stop_exception_escapes_to_gather(monkeypatch):
 
     # Monkeypatch asyncio.gather to inject a raw exception
     original_gather = asyncio.gather
-    
+
     async def patched_gather(*args, **kwargs):
         results = await original_gather(*args, **kwargs)
         results_list = list(results)
         if len(results_list) > 1:
             results_list[1] = TypeError("Injected exception for testing")
         return results_list
-    
+
     monkeypatch.setattr(asyncio, "gather", patched_gather)
 
     result = await mcp_mod.pq_stop(
         context,
-        pq_id=["enterprise:test-system:1", "enterprise:test-system:2", "enterprise:test-system:3"],
+        pq_id=[
+            "enterprise:test-system:1",
+            "enterprise:test-system:2",
+            "enterprise:test-system:3",
+        ],
     )
 
     assert result["success"] is True
@@ -13089,13 +13152,19 @@ async def test_pq_restart_exception_escapes_to_gather(monkeypatch):
     mock_factory = MagicMock()
     mock_controller = MagicMock()
 
-    mock_session_registry.enterprise_registry = AsyncMock(return_value=mock_enterprise_registry)
+    mock_session_registry.enterprise_registry = AsyncMock(
+        return_value=mock_enterprise_registry
+    )
     mock_enterprise_registry.get = AsyncMock(return_value=mock_factory_manager)
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
 
     mock_controller.restart_query = AsyncMock()
-    mock_controller.get = AsyncMock(side_effect=lambda s, timeout_seconds=0: create_mock_pq_info(s, f"pq_{s}", "RUNNING"))
+    mock_controller.get = AsyncMock(
+        side_effect=lambda s, timeout_seconds=0: create_mock_pq_info(
+            s, f"pq_{s}", "RUNNING"
+        )
+    )
 
     full_config = {"enterprise": {"systems": {"test-system": {}}}}
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
@@ -13109,19 +13178,23 @@ async def test_pq_restart_exception_escapes_to_gather(monkeypatch):
 
     # Monkeypatch asyncio.gather to inject a raw exception
     original_gather = asyncio.gather
-    
+
     async def patched_gather(*args, **kwargs):
         results = await original_gather(*args, **kwargs)
         results_list = list(results)
         if len(results_list) > 1:
             results_list[1] = OSError("Injected exception for testing")
         return results_list
-    
+
     monkeypatch.setattr(asyncio, "gather", patched_gather)
 
     result = await mcp_mod.pq_restart(
         context,
-        pq_id=["enterprise:test-system:1", "enterprise:test-system:2", "enterprise:test-system:3"],
+        pq_id=[
+            "enterprise:test-system:1",
+            "enterprise:test-system:2",
+            "enterprise:test-system:3",
+        ],
     )
 
     assert result["success"] is True
@@ -13156,5 +13229,3 @@ async def test_pq_create_script_body_and_path_mutually_exclusive():
     assert result["success"] is False
     assert "mutually exclusive" in result["error"]
     assert result["isError"] is True
-
-

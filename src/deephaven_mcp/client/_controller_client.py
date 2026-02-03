@@ -297,7 +297,9 @@ class CorePlusControllerClient(
             )
             raise QueryError(f"Failed to retrieve query state: {e}") from e
 
-    async def map_and_version(self) -> tuple[dict[CorePlusQuerySerial, CorePlusQueryInfo], int]:
+    async def map_and_version(
+        self,
+    ) -> tuple[dict[CorePlusQuerySerial, CorePlusQueryInfo], int]:
         """Retrieve query state with version number for synchronization.
 
         This method returns the current persistent query state alongside a version number
@@ -323,7 +325,9 @@ class CorePlusControllerClient(
                 "subscribe() must be called before map_and_version(). This indicates a programming bug - "
                 "the controller client was not properly initialized."
             )
-        _LOGGER.debug("[CorePlusControllerClient:map_and_version] Retrieving query map with version")
+        _LOGGER.debug(
+            "[CorePlusControllerClient:map_and_version] Retrieving query map with version"
+        )
         try:
             raw_map, version = await asyncio.to_thread(self.wrapped.map_and_version)
             query_map = {
