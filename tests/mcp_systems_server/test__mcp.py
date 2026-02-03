@@ -12601,6 +12601,31 @@ def test_validate_timeout_negative():
     assert "Use timeout_seconds=0 for fire-and-forget" in str(exc_info.value)
 
 
+def test_validate_max_concurrent_zero():
+    """Test _validate_max_concurrent with zero raises ValueError."""
+    with pytest.raises(ValueError) as exc_info:
+        mcp_mod._validate_max_concurrent(0, "test_function")
+
+    assert "max_concurrent must be at least 1" in str(exc_info.value)
+    assert "got 0" in str(exc_info.value)
+
+
+def test_validate_max_concurrent_negative():
+    """Test _validate_max_concurrent with negative value raises ValueError."""
+    with pytest.raises(ValueError) as exc_info:
+        mcp_mod._validate_max_concurrent(-5, "test_function")
+
+    assert "max_concurrent must be at least 1" in str(exc_info.value)
+    assert "got -5" in str(exc_info.value)
+
+
+def test_validate_max_concurrent_valid():
+    """Test _validate_max_concurrent with valid values returns the value."""
+    assert mcp_mod._validate_max_concurrent(1, "test_function") == 1
+    assert mcp_mod._validate_max_concurrent(20, "test_function") == 20
+    assert mcp_mod._validate_max_concurrent(100, "test_function") == 100
+
+
 # =============================================================================
 # Parallel Execution Tests for PQ Batch Operations
 # =============================================================================

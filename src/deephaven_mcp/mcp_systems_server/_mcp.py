@@ -3764,6 +3764,27 @@ def _validate_timeout(timeout_seconds: int, function_name: str) -> int:
     return timeout_seconds
 
 
+def _validate_max_concurrent(max_concurrent: int, function_name: str) -> int:
+    """Validate max_concurrent is valid for parallel operations.
+
+    Args:
+        max_concurrent (int): Maximum number of concurrent operations (must be >= 1).
+        function_name (str): Name of calling function for logging
+
+    Returns:
+        int: The validated max_concurrent value
+
+    Raises:
+        ValueError: If max_concurrent is less than 1
+    """
+    if max_concurrent < 1:
+        raise ValueError(
+            f"max_concurrent must be at least 1, got {max_concurrent}. "
+            f"Use a positive integer to control parallelism (e.g., 20 for moderate concurrency)."
+        )
+    return max_concurrent
+
+
 def _format_pq_config(config: CorePlusQueryConfig) -> dict:
     """Format PersistentQueryConfigMessage into MCP-compatible dictionary.
 
@@ -5321,8 +5342,9 @@ async def pq_delete(
         parsed_pqs = cast(list[tuple[str, CorePlusQuerySerial]], parsed_pqs)
         controller = cast(CorePlusControllerClient, controller)
 
-        # Validate timeout
+        # Validate parameters
         validated_timeout = _validate_timeout(timeout_seconds, "pq_delete")
+        validated_max_concurrent = _validate_max_concurrent(max_concurrent, "pq_delete")
 
         # Process each PQ with controlled parallelism (best-effort)
         # Note: Controller API supports batch deletion, but we process with parallel
@@ -5330,7 +5352,7 @@ async def pq_delete(
         # for AI agents while maintaining performance
         _LOGGER.info(
             f"[mcp_systems_server:pq_delete] Processing {len(parsed_pqs)} PQ(s) "
-            f"with max_concurrent={max_concurrent}, timeout={validated_timeout}s"
+            f"with max_concurrent={validated_max_concurrent}, timeout={validated_timeout}s"
         )
 
         async def delete_single_pq(
@@ -5374,7 +5396,7 @@ async def pq_delete(
             return item_result
 
         # Use semaphore to limit concurrent operations
-        semaphore = asyncio.Semaphore(max_concurrent)
+        semaphore = asyncio.Semaphore(validated_max_concurrent)
 
         async def delete_with_limit(
             pid: str, serial: CorePlusQuerySerial
@@ -6006,8 +6028,9 @@ async def pq_start(
         system_name = cast(str, system_name)
         controller = cast(CorePlusControllerClient, controller)
 
-        # Validate timeout
+        # Validate parameters
         validated_timeout = _validate_timeout(timeout_seconds, "pq_start")
+        validated_max_concurrent = _validate_max_concurrent(max_concurrent, "pq_start")
 
         # Process each PQ with controlled parallelism (best-effort)
         # Note: Controller start_and_wait() only accepts single serial (no batch support)
@@ -6015,7 +6038,7 @@ async def pq_start(
         # success/failure reporting for AI agents while maintaining performance
         _LOGGER.info(
             f"[mcp_systems_server:pq_start] Processing {len(parsed_pqs)} PQ(s) "
-            f"with max_concurrent={max_concurrent}, timeout={validated_timeout}s"
+            f"with max_concurrent={validated_max_concurrent}, timeout={validated_timeout}s"
         )
 
         async def start_single_pq(
@@ -6069,7 +6092,7 @@ async def pq_start(
             return item_result
 
         # Use semaphore to limit concurrent operations
-        semaphore = asyncio.Semaphore(max_concurrent)
+        semaphore = asyncio.Semaphore(validated_max_concurrent)
 
         async def start_with_limit(
             pid: str, serial: CorePlusQuerySerial
@@ -6255,8 +6278,9 @@ async def pq_stop(
         parsed_pqs = cast(list[tuple[str, CorePlusQuerySerial]], parsed_pqs)
         controller = cast(CorePlusControllerClient, controller)
 
-        # Validate timeout
+        # Validate parameters
         validated_timeout = _validate_timeout(timeout_seconds, "pq_stop")
+        validated_max_concurrent = _validate_max_concurrent(max_concurrent, "pq_stop")
 
         # Process each PQ with controlled parallelism (best-effort)
         # Note: Controller stop_query() supports batch, but we process with parallel
@@ -6264,7 +6288,7 @@ async def pq_stop(
         # for AI agents while maintaining performance
         _LOGGER.info(
             f"[mcp_systems_server:pq_stop] Processing {len(parsed_pqs)} PQ(s) "
-            f"with max_concurrent={max_concurrent}, timeout={validated_timeout}s"
+            f"with max_concurrent={validated_max_concurrent}, timeout={validated_timeout}s"
         )
 
         async def stop_single_pq(
@@ -6312,7 +6336,7 @@ async def pq_stop(
             return item_result
 
         # Use semaphore to limit concurrent operations
-        semaphore = asyncio.Semaphore(max_concurrent)
+        semaphore = asyncio.Semaphore(validated_max_concurrent)
 
         async def stop_with_limit(
             pid: str, serial: CorePlusQuerySerial
@@ -6498,8 +6522,11 @@ async def pq_restart(
         system_name = cast(str, system_name)
         controller = cast(CorePlusControllerClient, controller)
 
-        # Validate timeout
+        # Validate parameters
         validated_timeout = _validate_timeout(timeout_seconds, "pq_restart")
+        validated_max_concurrent = _validate_max_concurrent(
+            max_concurrent, "pq_restart"
+        )
 
         # Process each PQ with controlled parallelism (best-effort)
         # Note: Controller restart_query() supports batch, but we process with parallel
@@ -6507,7 +6534,7 @@ async def pq_restart(
         # for AI agents while maintaining performance
         _LOGGER.info(
             f"[mcp_systems_server:pq_restart] Processing {len(parsed_pqs)} PQ(s) "
-            f"with max_concurrent={max_concurrent}, timeout={validated_timeout}s"
+            f"with max_concurrent={validated_max_concurrent}, timeout={validated_timeout}s"
         )
 
         async def restart_single_pq(
@@ -6561,7 +6588,7 @@ async def pq_restart(
             return item_result
 
         # Use semaphore to limit concurrent operations
-        semaphore = asyncio.Semaphore(max_concurrent)
+        semaphore = asyncio.Semaphore(validated_max_concurrent)
 
         async def restart_with_limit(
             pid: str, serial: CorePlusQuerySerial
