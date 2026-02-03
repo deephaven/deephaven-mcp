@@ -1438,8 +1438,7 @@ Persistent Queries (PQs) are recipes for creating and managing long-running work
 **Parameters**:
 
 - `pq_id` (required, string | list[string]): PQ identifier or list of identifiers in format `"enterprise:{system_name}:{serial}"`
-- `wait` (optional, bool): Wait for PQ to reach RUNNING state (default: true)
-- `timeout_seconds` (optional, int): Timeout per PQ (default: 120). Only used if wait=true.
+- `timeout_seconds` (optional, int): Max seconds to wait for PQs to start (default: 30). Set to 0 for fire-and-forget.
 
 **Returns**:
 
@@ -1484,8 +1483,7 @@ Persistent Queries (PQs) are recipes for creating and managing long-running work
 **Parameters**:
 
 - `pq_id` (required, string | list[string]): PQ identifier or list of identifiers in format `"enterprise:{system_name}:{serial}"`
-- `wait` (optional, bool): Wait for PQ to reach terminal state (default: true)
-- `timeout_seconds` (optional, int): Timeout per PQ (default: 120). Only used if wait=true.
+- `timeout_seconds` (optional, int): Max seconds to wait for PQs to stop (default: 30). Set to 0 for fire-and-forget.
 
 **Returns**:
 
@@ -1528,8 +1526,7 @@ Persistent Queries (PQs) are recipes for creating and managing long-running work
 **Parameters**:
 
 - `pq_id` (required, string | list[string]): PQ identifier or list of identifiers in format `"enterprise:{system_name}:{serial}"`
-- `wait` (optional, bool): Wait for PQ to reach RUNNING state (default: true)
-- `timeout_seconds` (optional, int): Timeout per PQ (default: 120). Only used if wait=true.
+- `timeout_seconds` (optional, int): Max seconds to wait for PQs to restart (default: 30). Set to 0 for fire-and-forget.
 
 **Returns**:
 
