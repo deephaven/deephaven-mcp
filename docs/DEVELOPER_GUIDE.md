@@ -1263,17 +1263,28 @@ Persistent Queries (PQs) are recipes for creating and managing long-running work
   "system_name": "prod_cluster",
   "pqs": [
     {
+      "pq_id": "enterprise:prod_cluster:12345",
       "serial": 12345,
       "name": "analytics_worker",
-      "state": "RUNNING",
+      "status": "RUNNING",
+      "enabled": true,
+      "owner": "admin_user",
       "heap_size_gb": 8.0,
+      "worker_kind": "DeephavenCommunity",
+      "configuration_type": "Script",
+      "script_language": "Python",
+      "server_name": "QueryServer_1",
+      "admin_groups": ["admins"],
+      "viewer_groups": ["analysts"],
+      "is_scheduled": true,
+      "num_failures": 0,
       "session_id": "enterprise:prod_cluster:analytics_worker"
     }
   ]
 }
 ```
 
-**Description**: Returns a list of all PQs with their current states. Running PQs include a `session_id` field that can be used with session data tools.
+**Description**: Returns a list of all PQs with comprehensive metadata. The `status` field indicates the current state (RUNNING, STOPPED, INITIALIZING, FAILED, etc.). Running or initializing PQs include a `session_id` field that can be used with session data tools. Filter results by status, owner, worker_kind, configuration_type, or script_language.
 
 ##### `pq_details`
 
@@ -1313,14 +1324,24 @@ Persistent Queries (PQs) are recipes for creating and managing long-running work
 - `system_name` (required, string): Name of the enterprise system
 - `pq_name` (required, string): Human-readable name for the PQ
 - `heap_size_gb` (required, float | int): JVM heap size in GB
-- `programming_language` (optional, string): "Python" or "Groovy"
-- `auto_delete_timeout` (optional, int): Seconds of inactivity before auto-deletion (default: 600)
+- `script_body` (optional, string): Inline script code (mutually exclusive with script_path)
+- `script_path` (optional, string): Path to script in Git repository (mutually exclusive with script_body)
+- `programming_language` (optional, string): "Python" or "Groovy" (default: "Python")
+- `configuration_type` (optional, string): "Script" or "RunAndDone" (default: "Script")
+- `enabled` (optional, bool): Whether PQ is enabled (default: true)
+- `schedule` (optional, list[string]): Scheduling configuration as ["Key=Value", ...]
 - `server` (optional, string): Specific server to run on
 - `engine` (optional, string): Worker engine type (default: "DeephavenCommunity")
+- `jvm_profile` (optional, string): JVM profile name
 - `extra_jvm_args` (optional, list[string]): Additional JVM arguments
+- `extra_class_path` (optional, list[string]): Additional classpath entries
+- `python_virtual_environment` (optional, string): Python virtual environment name
 - `extra_environment_vars` (optional, list[string]): Environment variables as ["KEY=value", ...]
+- `init_timeout_nanos` (optional, int): Initialization timeout in nanoseconds
+- `auto_delete_timeout` (optional, int): Seconds of inactivity before auto-deletion (default: None - permanent PQ)
 - `admin_groups` (optional, list[string]): Groups with admin access
 - `viewer_groups` (optional, list[string]): Groups with viewer access
+- `restart_users` (optional, string): Restart permission policy (default: None)
 
 **Returns**:
 
