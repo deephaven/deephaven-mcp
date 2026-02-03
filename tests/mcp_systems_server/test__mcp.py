@@ -11134,6 +11134,40 @@ async def test_pq_delete_empty_list():
 
 
 @pytest.mark.asyncio
+async def test_pq_delete_negative_timeout():
+    """Test pq_delete with negative timeout triggers validation error."""
+    context = MockContext(
+        {"config_manager": MagicMock(), "session_registry": MagicMock()}
+    )
+
+    result = await mcp_mod.pq_delete(
+        context, "enterprise:system1:12345", timeout_seconds=-1
+    )
+
+    assert result["success"] is False
+    assert "timeout_seconds must be non-negative" in result["error"]
+    assert "got -1" in result["error"]
+    assert result["isError"] is True
+
+
+@pytest.mark.asyncio
+async def test_pq_delete_zero_max_concurrent():
+    """Test pq_delete with max_concurrent=0 triggers validation error."""
+    context = MockContext(
+        {"config_manager": MagicMock(), "session_registry": MagicMock()}
+    )
+
+    result = await mcp_mod.pq_delete(
+        context, "enterprise:system1:12345", max_concurrent=0
+    )
+
+    assert result["success"] is False
+    assert "max_concurrent must be at least 1" in result["error"]
+    assert "got 0" in result["error"]
+    assert result["isError"] is True
+
+
+@pytest.mark.asyncio
 async def test_pq_modify_success():
     """Test successful PQ modification without restart."""
     mock_config_manager = MagicMock()

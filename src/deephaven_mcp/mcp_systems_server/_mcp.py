@@ -4256,37 +4256,61 @@ async def _setup_batch_pq_operation(
     context: Context,
     pq_id: str | list[str],
     function_name: str,
+    timeout_seconds: int,
+    max_concurrent: int,
 ) -> tuple[
     list[tuple[str, CorePlusQuerySerial]] | None,
     str | None,
     CorePlusControllerClient | None,
+    int | None,
+    int | None,
     dict[str, object] | None,
 ]:
     """Set up common infrastructure for batch PQ operations.
 
-    Validates pq_ids, gets system config, and returns controller client.
-    Consolidates ~40 lines of boilerplate across pq_delete, pq_start, pq_stop, pq_restart.
+    Validates pq_ids and parameters, gets system config, and returns controller client.
+    Consolidates validation and setup boilerplate across pq_delete, pq_start, pq_stop, pq_restart.
 
     Args:
         context: MCP context object
         pq_id: Single pq_id string or list of pq_id strings
         function_name: Name of calling function for logging
+        timeout_seconds: Timeout in seconds for operations (validated >= 0)
+        max_concurrent: Maximum concurrent operations (validated >= 1)
 
     Returns:
-        tuple: (parsed_pqs, system_name, controller, error_response)
-               On success: (parsed_list, "system_name", controller_client, None)
-               On failure: (None, None, None, {"success": False, "error": "...", "isError": True})
+        tuple: (parsed_pqs, system_name, controller, validated_timeout, validated_max_concurrent, error_response)
+               On success: (parsed_list, "system_name", controller_client, timeout_int, max_concurrent_int, None)
+               On failure: (None, None, None, None, None, {"success": False, "error": "...", "isError": True})
 
     Usage:
-        parsed_pqs, system_name, controller, error = await _setup_batch_pq_operation(...)
+        parsed_pqs, system_name, controller, timeout, max_conc, error = await _setup_batch_pq_operation(...)
         if error:
             return error
-        # Type narrowing: parsed_pqs, system_name, controller are all non-None here
+        # Type narrowing: all returned values except error are non-None here
     """
+    # Validate parameters
+    try:
+        validated_timeout = _validate_timeout(timeout_seconds, function_name)
+        validated_max_concurrent = _validate_max_concurrent(
+            max_concurrent, function_name
+        )
+    except ValueError as e:
+        return (
+            None,
+            None,
+            None,
+            None,
+            None,
+            {"success": False, "error": str(e), "isError": True},
+        )
+
     # Validate and parse pq_ids
     parsed_pqs, system_name, parse_error = _validate_and_parse_pq_ids(pq_id)
     if parse_error:
         return (
+            None,
+            None,
             None,
             None,
             None,
@@ -4310,7 +4334,7 @@ async def _setup_batch_pq_operation(
         function_name, config_manager, system_name
     )
     if error_response:
-        return (None, None, None, error_response)
+        return (None, None, None, None, None, error_response)
 
     # Get enterprise registry and factory
     enterprise_registry = await session_registry.enterprise_registry()
@@ -4320,7 +4344,14 @@ async def _setup_batch_pq_operation(
     # Get controller client
     controller = factory.controller_client
 
-    return (parsed_pqs, system_name, controller, None)
+    return (
+        parsed_pqs,
+        system_name,
+        controller,
+        validated_timeout,
+        validated_max_concurrent,
+        None,
+    )
 
 
 def _validate_and_parse_pq_ids(
@@ -5331,9 +5362,16 @@ async def pq_delete(
     result: dict[str, object] = {"success": False}
 
     try:
-        # Common setup for batch operations
-        parsed_pqs, _, controller, setup_error = await _setup_batch_pq_operation(
-            context, pq_id, "pq_delete"
+        # Common setup and validation for batch operations
+        (
+            parsed_pqs,
+            _,
+            controller,
+            validated_timeout,
+            validated_max_concurrent,
+            setup_error,
+        ) = await _setup_batch_pq_operation(
+            context, pq_id, "pq_delete", timeout_seconds, max_concurrent
         )
         if setup_error:
             return setup_error
@@ -5341,10 +5379,8 @@ async def pq_delete(
         # Type narrowing: when setup_error is None, all values are guaranteed non-None
         parsed_pqs = cast(list[tuple[str, CorePlusQuerySerial]], parsed_pqs)
         controller = cast(CorePlusControllerClient, controller)
-
-        # Validate parameters
-        validated_timeout = _validate_timeout(timeout_seconds, "pq_delete")
-        validated_max_concurrent = _validate_max_concurrent(max_concurrent, "pq_delete")
+        validated_timeout = cast(int, validated_timeout)
+        validated_max_concurrent = cast(int, validated_max_concurrent)
 
         # Process each PQ with controlled parallelism (best-effort)
         # Note: Controller API supports batch deletion, but we process with parallel
@@ -6016,9 +6052,16 @@ async def pq_start(
     result: dict[str, object] = {"success": False}
 
     try:
-        # Common setup for batch operations
-        parsed_pqs, system_name, controller, setup_error = (
-            await _setup_batch_pq_operation(context, pq_id, "pq_start")
+        # Common setup and validation for batch operations
+        (
+            parsed_pqs,
+            system_name,
+            controller,
+            validated_timeout,
+            validated_max_concurrent,
+            setup_error,
+        ) = await _setup_batch_pq_operation(
+            context, pq_id, "pq_start", timeout_seconds, max_concurrent
         )
         if setup_error:
             return setup_error
@@ -6027,10 +6070,8 @@ async def pq_start(
         parsed_pqs = cast(list[tuple[str, CorePlusQuerySerial]], parsed_pqs)
         system_name = cast(str, system_name)
         controller = cast(CorePlusControllerClient, controller)
-
-        # Validate parameters
-        validated_timeout = _validate_timeout(timeout_seconds, "pq_start")
-        validated_max_concurrent = _validate_max_concurrent(max_concurrent, "pq_start")
+        validated_timeout = cast(int, validated_timeout)
+        validated_max_concurrent = cast(int, validated_max_concurrent)
 
         # Process each PQ with controlled parallelism (best-effort)
         # Note: Controller start_and_wait() only accepts single serial (no batch support)
@@ -6267,9 +6308,16 @@ async def pq_stop(
     result: dict[str, object] = {"success": False}
 
     try:
-        # Common setup for batch operations
-        parsed_pqs, _, controller, setup_error = await _setup_batch_pq_operation(
-            context, pq_id, "pq_stop"
+        # Common setup and validation for batch operations
+        (
+            parsed_pqs,
+            _,
+            controller,
+            validated_timeout,
+            validated_max_concurrent,
+            setup_error,
+        ) = await _setup_batch_pq_operation(
+            context, pq_id, "pq_stop", timeout_seconds, max_concurrent
         )
         if setup_error:
             return setup_error
@@ -6277,10 +6325,8 @@ async def pq_stop(
         # Type narrowing: when setup_error is None, all values are guaranteed non-None
         parsed_pqs = cast(list[tuple[str, CorePlusQuerySerial]], parsed_pqs)
         controller = cast(CorePlusControllerClient, controller)
-
-        # Validate parameters
-        validated_timeout = _validate_timeout(timeout_seconds, "pq_stop")
-        validated_max_concurrent = _validate_max_concurrent(max_concurrent, "pq_stop")
+        validated_timeout = cast(int, validated_timeout)
+        validated_max_concurrent = cast(int, validated_max_concurrent)
 
         # Process each PQ with controlled parallelism (best-effort)
         # Note: Controller stop_query() supports batch, but we process with parallel
@@ -6510,9 +6556,16 @@ async def pq_restart(
     result: dict[str, object] = {"success": False}
 
     try:
-        # Common setup for batch operations
-        parsed_pqs, system_name, controller, setup_error = (
-            await _setup_batch_pq_operation(context, pq_id, "pq_restart")
+        # Common setup and validation for batch operations
+        (
+            parsed_pqs,
+            system_name,
+            controller,
+            validated_timeout,
+            validated_max_concurrent,
+            setup_error,
+        ) = await _setup_batch_pq_operation(
+            context, pq_id, "pq_restart", timeout_seconds, max_concurrent
         )
         if setup_error:
             return setup_error
@@ -6521,12 +6574,8 @@ async def pq_restart(
         parsed_pqs = cast(list[tuple[str, CorePlusQuerySerial]], parsed_pqs)
         system_name = cast(str, system_name)
         controller = cast(CorePlusControllerClient, controller)
-
-        # Validate parameters
-        validated_timeout = _validate_timeout(timeout_seconds, "pq_restart")
-        validated_max_concurrent = _validate_max_concurrent(
-            max_concurrent, "pq_restart"
-        )
+        validated_timeout = cast(int, validated_timeout)
+        validated_max_concurrent = cast(int, validated_max_concurrent)
 
         # Process each PQ with controlled parallelism (best-effort)
         # Note: Controller restart_query() supports batch, but we process with parallel
