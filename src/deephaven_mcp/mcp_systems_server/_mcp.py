@@ -5222,6 +5222,7 @@ async def pq_create(
 async def pq_delete(
     context: Context,
     pq_id: str | list[str],
+    timeout_seconds: int = 10,
     max_concurrent: int = DEFAULT_MAX_CONCURRENT,
 ) -> dict:
     """MCP Tool: Delete one or more persistent queries.
@@ -5266,6 +5267,7 @@ async def pq_delete(
     Args:
         context: MCP context object
         pq_id (str | list[str]): PQ identifier or list of identifiers in format 'enterprise:{system_name}:{serial}'
+        timeout_seconds: Max seconds to retrieve PQ information (default: 10)
         max_concurrent (int): Maximum concurrent delete operations (default: 20)
 
     Returns:
@@ -5299,7 +5301,9 @@ async def pq_delete(
             "isError": True
         }
     """
-    _LOGGER.info(f"[mcp_systems_server:pq_delete] Invoked: pq_id={pq_id!r}")
+    _LOGGER.info(
+        f"[mcp_systems_server:pq_delete] Invoked: pq_id={pq_id!r}, timeout_seconds={timeout_seconds}"
+    )
 
     result: dict[str, object] = {"success": False}
 
@@ -5316,13 +5320,16 @@ async def pq_delete(
         system_name = cast(str, system_name)
         controller = cast(CorePlusControllerClient, controller)
 
+        # Validate timeout
+        validated_timeout = _validate_timeout(timeout_seconds, "pq_delete")
+
         # Process each PQ with controlled parallelism (best-effort)
         # Note: Controller API supports batch deletion, but we process with parallel
         # individual calls to provide granular per-item success/failure reporting
         # for AI agents while maintaining performance
         _LOGGER.info(
             f"[mcp_systems_server:pq_delete] Processing {len(parsed_pqs)} PQ(s) "
-            f"with max_concurrent={max_concurrent}"
+            f"with max_concurrent={max_concurrent}, timeout={validated_timeout}s"
         )
 
         async def delete_single_pq(
@@ -5339,7 +5346,7 @@ async def pq_delete(
 
             try:
                 # Get name before deletion
-                pq_info = await controller.get(serial)
+                pq_info = await controller.get(serial, timeout_seconds=validated_timeout)
                 pq_name = pq_info.config.pb.name
 
                 # Delete the PQ
@@ -5961,7 +5968,7 @@ async def pq_start(
                 await controller.start_and_wait(serial, validated_timeout)
 
                 # Get updated info
-                pq_info = await controller.get(serial)
+                pq_info = await controller.get(serial, timeout_seconds=validated_timeout)
                 pq_name = pq_info.config.pb.name
                 state_name = pq_info.state.status.name if pq_info.state else "UNKNOWN"
 
@@ -6201,7 +6208,7 @@ async def pq_stop(
                 await controller.stop_query([serial], validated_timeout)
 
                 # Get updated info
-                pq_info = await controller.get(serial)
+                pq_info = await controller.get(serial, timeout_seconds=validated_timeout)
                 pq_name = pq_info.config.pb.name
                 state_name = pq_info.state.status.name if pq_info.state else "UNKNOWN"
 
@@ -6438,7 +6445,7 @@ async def pq_restart(
                 await controller.restart_query([serial], validated_timeout)
 
                 # Get updated info
-                pq_info = await controller.get(serial)
+                pq_info = await controller.get(serial, timeout_seconds=validated_timeout)
                 pq_name = pq_info.config.pb.name
                 state_name = pq_info.state.status.name if pq_info.state else "UNKNOWN"
 

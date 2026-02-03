@@ -9177,7 +9177,7 @@ async def test_pq_delete_partial_failure():
 
     call_count = [0]
 
-    async def mock_get_side_effect(serial):
+    async def mock_get_side_effect(serial, timeout_seconds=0):
         call_count[0] += 1
         if call_count[0] == 1:
             return mock_pq_info_1
@@ -10914,6 +10914,54 @@ async def test_pq_delete_success_by_name():
 
 
 @pytest.mark.asyncio
+async def test_pq_delete_success_custom_timeout():
+    """Test successful PQ deletion with custom timeout."""
+    mock_config_manager = MagicMock()
+    mock_session_registry = MagicMock()
+    mock_enterprise_registry = MagicMock()
+    mock_factory_manager = MagicMock()
+    mock_factory = MagicMock()
+    mock_controller = MagicMock()
+
+    # Setup mock chain
+    mock_session_registry.enterprise_registry = AsyncMock(
+        return_value=mock_enterprise_registry
+    )
+    mock_enterprise_registry.get = AsyncMock(return_value=mock_factory_manager)
+    mock_factory_manager.get = AsyncMock(return_value=mock_factory)
+    mock_factory.controller_client = mock_controller
+
+    # Mock controller methods
+    mock_controller.delete_query = AsyncMock()
+    mock_pq_info = create_mock_pq_info(12345, "analytics", "STOPPED", 8.0)
+    mock_controller.get = AsyncMock(return_value=mock_pq_info)
+
+    # Mock config
+    full_config = {"enterprise": {"systems": {"test-system": {}}}}
+    mock_config_manager.get_config = AsyncMock(return_value=full_config)
+
+    context = MockContext(
+        {
+            "config_manager": mock_config_manager,
+            "session_registry": mock_session_registry,
+        }
+    )
+
+    result = await mcp_mod.pq_delete(
+        context, pq_id="enterprise:test-system:12345", timeout_seconds=20
+    )
+
+    # Verify success
+    assert result["success"] is True
+    assert result["results"][0]["success"] is True
+    assert result["results"][0]["name"] == "analytics"
+    
+    # Verify controller.get was called with custom timeout
+    mock_controller.get.assert_called_once_with(12345, timeout_seconds=20)
+    mock_controller.delete_query.assert_called_once_with(12345)
+
+
+@pytest.mark.asyncio
 async def test_pq_delete_invalid_pq_id():
     """Test pq_delete with invalid pq_id format."""
     mock_config_manager = MagicMock()
@@ -12582,7 +12630,7 @@ async def test_pq_delete_parallel_execution_with_semaphore():
         await asyncio.sleep(0.01)  # Simulate work
         execution_log.append(f"delete_end_{serial}")
     
-    async def mock_get_with_delay(serial):
+    async def mock_get_with_delay(serial, timeout_seconds=0):
         execution_log.append(f"get_{serial}")
         await asyncio.sleep(0.001)  # Small delay
         return create_mock_pq_info(serial, f"pq_{serial}", "STOPPED")
@@ -12653,7 +12701,7 @@ async def test_pq_delete_handles_unexpected_exception():
     mock_pq_info3 = create_mock_pq_info(3, "pq3", "STOPPED")
     
     get_call_count = 0
-    async def mock_get_side_effect(serial):
+    async def mock_get_side_effect(serial, timeout_seconds=0):
         nonlocal get_call_count
         get_call_count += 1
         if get_call_count == 1:
@@ -12733,7 +12781,7 @@ async def test_pq_start_parallel_execution():
         active_operations.remove(serial)
     
     mock_controller.start_and_wait = AsyncMock(side_effect=mock_start_and_wait)
-    mock_controller.get = AsyncMock(side_effect=lambda s: create_mock_pq_info(s, f"pq_{s}", "RUNNING"))
+    mock_controller.get = AsyncMock(side_effect=lambda s, timeout_seconds=0: create_mock_pq_info(s, f"pq_{s}", "RUNNING"))
 
     # Mock config
     full_config = {"enterprise": {"systems": {"test-system": {}}}}
@@ -12785,7 +12833,7 @@ async def test_pq_stop_parallel_with_mixed_results():
         if serial == 2:
             raise TimeoutError("PQ did not stop in time")
     
-    async def mock_get_side_effect(serial):
+    async def mock_get_side_effect(serial, timeout_seconds=0):
         # This is only called after successful stops
         return create_mock_pq_info(serial, f"pq_{serial}", "STOPPED")
     
@@ -12841,7 +12889,7 @@ async def test_pq_restart_parallel_execution():
 
     # Mock successful restarts
     mock_controller.restart_query = AsyncMock()
-    mock_controller.get = AsyncMock(side_effect=lambda s: create_mock_pq_info(s, f"pq_{s}", "RUNNING"))
+    mock_controller.get = AsyncMock(side_effect=lambda s, timeout_seconds=0: create_mock_pq_info(s, f"pq_{s}", "RUNNING"))
 
     # Mock config
     full_config = {"enterprise": {"systems": {"test-system": {}}}}
@@ -12888,7 +12936,7 @@ async def test_pq_delete_exception_escapes_to_gather(monkeypatch):
     mock_factory.controller_client = mock_controller
 
     mock_controller.delete_query = AsyncMock()
-    mock_controller.get = AsyncMock(side_effect=lambda s: create_mock_pq_info(s, f"pq_{s}", "STOPPED"))
+    mock_controller.get = AsyncMock(side_effect=lambda s, timeout_seconds=0: create_mock_pq_info(s, f"pq_{s}", "STOPPED"))
 
     full_config = {"enterprise": {"systems": {"test-system": {}}}}
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
@@ -12943,7 +12991,7 @@ async def test_pq_start_exception_escapes_to_gather(monkeypatch):
     mock_factory.controller_client = mock_controller
 
     mock_controller.start_and_wait = AsyncMock()
-    mock_controller.get = AsyncMock(side_effect=lambda s: create_mock_pq_info(s, f"pq_{s}", "RUNNING"))
+    mock_controller.get = AsyncMock(side_effect=lambda s, timeout_seconds=0: create_mock_pq_info(s, f"pq_{s}", "RUNNING"))
 
     full_config = {"enterprise": {"systems": {"test-system": {}}}}
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
@@ -12995,7 +13043,7 @@ async def test_pq_stop_exception_escapes_to_gather(monkeypatch):
     mock_factory.controller_client = mock_controller
 
     mock_controller.stop_query = AsyncMock()
-    mock_controller.get = AsyncMock(side_effect=lambda s: create_mock_pq_info(s, f"pq_{s}", "STOPPED"))
+    mock_controller.get = AsyncMock(side_effect=lambda s, timeout_seconds=0: create_mock_pq_info(s, f"pq_{s}", "STOPPED"))
 
     full_config = {"enterprise": {"systems": {"test-system": {}}}}
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
@@ -13047,7 +13095,7 @@ async def test_pq_restart_exception_escapes_to_gather(monkeypatch):
     mock_factory.controller_client = mock_controller
 
     mock_controller.restart_query = AsyncMock()
-    mock_controller.get = AsyncMock(side_effect=lambda s: create_mock_pq_info(s, f"pq_{s}", "RUNNING"))
+    mock_controller.get = AsyncMock(side_effect=lambda s, timeout_seconds=0: create_mock_pq_info(s, f"pq_{s}", "RUNNING"))
 
     full_config = {"enterprise": {"systems": {"test-system": {}}}}
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
