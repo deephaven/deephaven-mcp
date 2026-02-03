@@ -5520,10 +5520,30 @@ def _apply_pq_config_simple_fields(
     python_virtual_environment: str | None,
     init_timeout_nanos: int | None,
 ) -> bool:
-    """Apply simple field updates to PQ config.
+    """Apply simple (scalar) field updates to PersistentQueryConfigMessage protobuf.
+
+    Updates only the fields that are not None. This helper consolidates the boilerplate
+    for applying individual field modifications to reduce code duplication across
+    pq_create and pq_modify operations.
+
+    Args:
+        config_pb (PersistentQueryConfigMessage): Protobuf config object to modify in-place
+        pq_name (str | None): New PQ name → protobuf field: config_pb.name
+        heap_size_gb (float | int | None): Worker heap size in GB → protobuf field: config_pb.heapSizeGb
+        configuration_type (str | None): Config type (e.g., "python", "groovy") → protobuf field: config_pb.configurationType
+        enabled (bool | None): Whether PQ is enabled → protobuf field: config_pb.enabled
+        server (str | None): Target server name → protobuf field: config_pb.serverName
+        engine (str | None): Worker kind/engine type → protobuf field: config_pb.workerKind
+        jvm_profile (str | None): JVM profile name → protobuf field: config_pb.jvmProfile
+        python_virtual_environment (str | None): Python venv control → protobuf field: config_pb.pythonControl
+        init_timeout_nanos (int | None): Initialization timeout in nanoseconds → protobuf field: config_pb.timeoutNanos
 
     Returns:
-        bool: True if any changes were made
+        bool: True if any changes were made, False if all parameters were None
+
+    Note:
+        This function modifies config_pb in-place. Only non-None parameters trigger updates.
+        See _apply_pq_config_list_fields for list-based field updates (script_code, env_vars, etc.).
     """
     has_changes = False
     if pq_name is not None:
@@ -5565,10 +5585,30 @@ def _apply_pq_config_list_fields(
     admin_groups: list[str] | None,
     viewer_groups: list[str] | None,
 ) -> bool:
-    """Apply list field updates to PQ config.
+    """Apply list (repeated) field updates to PersistentQueryConfigMessage protobuf.
+
+    Updates only the fields that are not None using a del/extend pattern to fully replace
+    existing list contents. This helper consolidates the boilerplate for applying list
+    modifications to reduce code duplication across pq_create and pq_modify operations.
+
+    Args:
+        config_pb (PersistentQueryConfigMessage): Protobuf config object to modify in-place
+        schedule (list[str] | None): Cron schedule entries → protobuf field: config_pb.scheduling
+        extra_jvm_args (list[str] | None): Additional JVM arguments → protobuf field: config_pb.extraJvmArguments
+        extra_class_path (list[str] | None): Additional classpath entries → protobuf field: config_pb.classPathAdditions
+        extra_environment_vars (list[str] | None): Additional env vars (KEY=VALUE format) → protobuf field: config_pb.extraEnvironmentVariables
+        admin_groups (list[str] | None): Admin group names → protobuf field: config_pb.adminGroups
+        viewer_groups (list[str] | None): Viewer group names → protobuf field: config_pb.viewerGroups
 
     Returns:
-        bool: True if any changes were made
+        bool: True if any changes were made, False if all parameters were None
+
+    Note:
+        Uses del [:] + extend() pattern for protobuf repeated fields to fully replace contents:
+        - del config_pb.field[:] clears the existing list
+        - config_pb.field.extend(new_list) adds all new elements
+        This ensures complete replacement rather than appending to existing values.
+        See _apply_pq_config_simple_fields for scalar field updates.
     """
     has_changes = False
     if schedule is not None:
