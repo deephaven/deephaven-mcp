@@ -515,7 +515,7 @@ class CorePlusControllerClient(
                 f"[CorePlusControllerClient:wait_for_change_from_version] "
                 f"Returned: {result} (version {'changed' if result else 'unchanged'})"
             )
-            return result
+            return bool(result)
         except ConnectionError as e:
             _LOGGER.error(
                 f"[CorePlusControllerClient:wait_for_change_from_version] Connection error: {e}"

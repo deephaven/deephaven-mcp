@@ -5392,7 +5392,7 @@ async def pq_delete(
         )
 
         # Handle any unexpected exceptions that weren't caught in the operation functions
-        results = []
+        results: list[dict[str, object]] = []
         for i, r in enumerate(raw_results):
             if isinstance(r, Exception):
                 # Unexpected exception - convert to error dict
@@ -5407,7 +5407,8 @@ async def pq_delete(
                     }
                 )
             else:
-                results.append(r)
+                # Normal dict result from operation function
+                results.append(cast(dict[str, object], r))
 
         # Calculate summary
         succeeded = sum(1 for r in results if r["success"])
@@ -5448,6 +5449,96 @@ async def pq_delete(
         result["isError"] = True
 
     return result
+
+
+def _apply_pq_config_simple_fields(
+    config_pb: "PersistentQueryConfigMessage",
+    pq_name: str | None,
+    heap_size_gb: float | int | None,
+    configuration_type: str | None,
+    enabled: bool | None,
+    server: str | None,
+    engine: str | None,
+    jvm_profile: str | None,
+    python_virtual_environment: str | None,
+    init_timeout_nanos: int | None,
+) -> bool:
+    """Apply simple field updates to PQ config.
+
+    Returns:
+        bool: True if any changes were made
+    """
+    has_changes = False
+    if pq_name is not None:
+        config_pb.name = pq_name
+        has_changes = True
+    if heap_size_gb is not None:
+        config_pb.heapSizeGb = heap_size_gb
+        has_changes = True
+    if configuration_type is not None:
+        config_pb.configurationType = configuration_type
+        has_changes = True
+    if enabled is not None:
+        config_pb.enabled = enabled
+        has_changes = True
+    if server is not None:
+        config_pb.serverName = server
+        has_changes = True
+    if engine is not None:
+        config_pb.workerKind = engine
+        has_changes = True
+    if jvm_profile is not None:
+        config_pb.jvmProfile = jvm_profile
+        has_changes = True
+    if python_virtual_environment is not None:
+        config_pb.pythonControl = python_virtual_environment
+        has_changes = True
+    if init_timeout_nanos is not None:
+        config_pb.timeoutNanos = init_timeout_nanos
+        has_changes = True
+    return has_changes
+
+
+def _apply_pq_config_list_fields(
+    config_pb: "PersistentQueryConfigMessage",
+    schedule: list[str] | None,
+    extra_jvm_args: list[str] | None,
+    extra_class_path: list[str] | None,
+    extra_environment_vars: list[str] | None,
+    admin_groups: list[str] | None,
+    viewer_groups: list[str] | None,
+) -> bool:
+    """Apply list field updates to PQ config.
+
+    Returns:
+        bool: True if any changes were made
+    """
+    has_changes = False
+    if schedule is not None:
+        del config_pb.scheduling[:]
+        config_pb.scheduling.extend(schedule)
+        has_changes = True
+    if extra_jvm_args is not None:
+        del config_pb.extraJvmArguments[:]
+        config_pb.extraJvmArguments.extend(extra_jvm_args)
+        has_changes = True
+    if extra_class_path is not None:
+        del config_pb.classPathAdditions[:]
+        config_pb.classPathAdditions.extend(extra_class_path)
+        has_changes = True
+    if extra_environment_vars is not None:
+        del config_pb.extraEnvironmentVariables[:]
+        config_pb.extraEnvironmentVariables.extend(extra_environment_vars)
+        has_changes = True
+    if admin_groups is not None:
+        del config_pb.adminGroups[:]
+        config_pb.adminGroups.extend(admin_groups)
+        has_changes = True
+    if viewer_groups is not None:
+        del config_pb.viewerGroups[:]
+        config_pb.viewerGroups.extend(viewer_groups)
+        has_changes = True
+    return has_changes
 
 
 def _apply_pq_config_modifications(
@@ -5523,7 +5614,6 @@ def _apply_pq_config_modifications(
         has_changes = True
 
     # Handle auto_delete_timeout: convert seconds to nanoseconds
-    # None = no change, 0 = permanent (clear expiration), positive = timeout in seconds
     if auto_delete_timeout is not None:
         config_pb.expirationTimeNanos = auto_delete_timeout * 1_000_000_000
         has_changes = True
@@ -5534,59 +5624,31 @@ def _apply_pq_config_modifications(
         config_pb.restartUsers = restart_users_enum
         has_changes = True
 
-    # Simple field updates
-    if pq_name is not None:
-        config_pb.name = pq_name
-        has_changes = True
-    if heap_size_gb is not None:
-        config_pb.heapSizeGb = heap_size_gb
-        has_changes = True
-    if configuration_type is not None:
-        config_pb.configurationType = configuration_type
-        has_changes = True
-    if enabled is not None:
-        config_pb.enabled = enabled
-        has_changes = True
-    if server is not None:
-        config_pb.serverName = server
-        has_changes = True
-    if engine is not None:
-        config_pb.workerKind = engine
-        has_changes = True
-    if jvm_profile is not None:
-        config_pb.jvmProfile = jvm_profile
-        has_changes = True
-    if python_virtual_environment is not None:
-        config_pb.pythonControl = python_virtual_environment
-        has_changes = True
-    if init_timeout_nanos is not None:
-        config_pb.timeoutNanos = init_timeout_nanos
+    # Apply simple field updates
+    if _apply_pq_config_simple_fields(
+        config_pb,
+        pq_name,
+        heap_size_gb,
+        configuration_type,
+        enabled,
+        server,
+        engine,
+        jvm_profile,
+        python_virtual_environment,
+        init_timeout_nanos,
+    ):
         has_changes = True
 
-    # List field updates - explicit field access for protobuf repeated fields
-    if schedule is not None:
-        del config_pb.scheduling[:]
-        config_pb.scheduling.extend(schedule)
-        has_changes = True
-    if extra_jvm_args is not None:
-        del config_pb.extraJvmArguments[:]
-        config_pb.extraJvmArguments.extend(extra_jvm_args)
-        has_changes = True
-    if extra_class_path is not None:
-        del config_pb.classPathAdditions[:]
-        config_pb.classPathAdditions.extend(extra_class_path)
-        has_changes = True
-    if extra_environment_vars is not None:
-        del config_pb.extraEnvironmentVariables[:]
-        config_pb.extraEnvironmentVariables.extend(extra_environment_vars)
-        has_changes = True
-    if admin_groups is not None:
-        del config_pb.adminGroups[:]
-        config_pb.adminGroups.extend(admin_groups)
-        has_changes = True
-    if viewer_groups is not None:
-        del config_pb.viewerGroups[:]
-        config_pb.viewerGroups.extend(viewer_groups)
+    # Apply list field updates
+    if _apply_pq_config_list_fields(
+        config_pb,
+        schedule,
+        extra_jvm_args,
+        extra_class_path,
+        extra_environment_vars,
+        admin_groups,
+        viewer_groups,
+    ):
         has_changes = True
 
     return has_changes
@@ -6025,7 +6087,7 @@ async def pq_start(
         )
 
         # Handle any unexpected exceptions that weren't caught in the operation functions
-        results = []
+        results: list[dict[str, object]] = []
         for i, r in enumerate(raw_results):
             if isinstance(r, Exception):
                 # Unexpected exception - convert to error dict
@@ -6042,7 +6104,8 @@ async def pq_start(
                     }
                 )
             else:
-                results.append(r)
+                # Normal dict result from operation function
+                results.append(cast(dict[str, object], r))
 
         # Calculate summary
         succeeded = sum(1 for r in results if r["success"])
@@ -6268,7 +6331,7 @@ async def pq_stop(
         )
 
         # Handle any unexpected exceptions that weren't caught in the operation functions
-        results = []
+        results: list[dict[str, object]] = []
         for i, r in enumerate(raw_results):
             if isinstance(r, Exception):
                 # Unexpected exception - convert to error dict
@@ -6284,7 +6347,8 @@ async def pq_stop(
                     }
                 )
             else:
-                results.append(r)
+                # Normal dict result from operation function
+                results.append(cast(dict[str, object], r))
 
         # Calculate summary
         succeeded = sum(1 for r in results if r["success"])
@@ -6516,7 +6580,7 @@ async def pq_restart(
         )
 
         # Handle any unexpected exceptions that weren't caught in the operation functions
-        results = []
+        results: list[dict[str, object]] = []
         for i, r in enumerate(raw_results):
             if isinstance(r, Exception):
                 # Unexpected exception - convert to error dict
@@ -6533,7 +6597,8 @@ async def pq_restart(
                     }
                 )
             else:
-                results.append(r)
+                # Normal dict result from operation function
+                results.append(cast(dict[str, object], r))
 
         # Calculate summary
         succeeded = sum(1 for r in results if r["success"])
