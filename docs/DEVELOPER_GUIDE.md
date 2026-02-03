@@ -1343,6 +1343,7 @@ Persistent Queries (PQs) are recipes for creating and managing long-running work
 **Parameters**:
 
 - `pq_id` (required, string | list[string]): PQ identifier or list of identifiers in format `"enterprise:{system_name}:{serial}"`
+- `timeout_seconds` (optional, int): Max seconds to retrieve PQ information (default: 10)
 
 **Returns**:
 
