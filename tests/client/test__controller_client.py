@@ -931,3 +931,120 @@ async def test_modify_query_other_error(
     with pytest.raises(QueryError) as exc_info:
         await coreplus_controller_client.modify_query(mock_config, restart=False)
     assert "Failed to modify query" in str(exc_info.value)
+
+
+# --- map_and_version() tests ---
+
+
+@pytest.mark.asyncio
+async def test_map_and_version_success(
+    coreplus_controller_client, dummy_controller_client
+):
+    from deephaven_mcp._exceptions import InternalError
+
+    coreplus_controller_client._subscribed = True
+    mock_query_info = MagicMock()
+    dummy_controller_client.map_and_version.return_value = (
+        {1: mock_query_info, 2: mock_query_info},
+        42,
+    )
+
+    result_map, version = await coreplus_controller_client.map_and_version()
+
+    assert len(result_map) == 2
+    assert version == 42
+    dummy_controller_client.map_and_version.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_map_and_version_not_subscribed(coreplus_controller_client):
+    from deephaven_mcp._exceptions import InternalError
+
+    coreplus_controller_client._subscribed = False
+
+    with pytest.raises(InternalError) as exc_info:
+        await coreplus_controller_client.map_and_version()
+    assert "subscribe() must be called before map_and_version()" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_map_and_version_connection_error(
+    coreplus_controller_client, dummy_controller_client
+):
+    coreplus_controller_client._subscribed = True
+    dummy_controller_client.map_and_version.side_effect = ConnectionError(
+        "connection failed"
+    )
+
+    with pytest.raises(DeephavenConnectionError) as exc_info:
+        await coreplus_controller_client.map_and_version()
+    assert "Unable to connect to controller service" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_map_and_version_other_error(
+    coreplus_controller_client, dummy_controller_client
+):
+    coreplus_controller_client._subscribed = True
+    dummy_controller_client.map_and_version.side_effect = Exception("unexpected error")
+
+    with pytest.raises(QueryError) as exc_info:
+        await coreplus_controller_client.map_and_version()
+    assert "Failed to retrieve query state with version" in str(exc_info.value)
+
+
+# --- wait_for_change_from_version() tests ---
+
+
+@pytest.mark.asyncio
+async def test_wait_for_change_from_version_changed(
+    coreplus_controller_client, dummy_controller_client
+):
+    dummy_controller_client.wait_for_change_from_version.return_value = True
+
+    result = await coreplus_controller_client.wait_for_change_from_version(42, 10.0)
+
+    assert result is True
+    dummy_controller_client.wait_for_change_from_version.assert_called_once_with(
+        42, 10.0
+    )
+
+
+@pytest.mark.asyncio
+async def test_wait_for_change_from_version_timeout(
+    coreplus_controller_client, dummy_controller_client
+):
+    dummy_controller_client.wait_for_change_from_version.return_value = False
+
+    result = await coreplus_controller_client.wait_for_change_from_version(42, 5.0)
+
+    assert result is False
+    dummy_controller_client.wait_for_change_from_version.assert_called_once_with(
+        42, 5.0
+    )
+
+
+@pytest.mark.asyncio
+async def test_wait_for_change_from_version_connection_error(
+    coreplus_controller_client, dummy_controller_client
+):
+    dummy_controller_client.wait_for_change_from_version.side_effect = ConnectionError(
+        "connection lost"
+    )
+
+    with pytest.raises(DeephavenConnectionError) as exc_info:
+        await coreplus_controller_client.wait_for_change_from_version(42, 10.0)
+    assert "Unable to connect to controller service" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_wait_for_change_from_version_other_error(
+    coreplus_controller_client, dummy_controller_client
+):
+    dummy_controller_client.wait_for_change_from_version.side_effect = RuntimeError(
+        "unexpected error"
+    )
+
+    with pytest.raises(QueryError) as exc_info:
+        await coreplus_controller_client.wait_for_change_from_version(42, 10.0)
+    assert "Failed to wait for version change from 42" in str(exc_info.value)

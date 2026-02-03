@@ -269,14 +269,17 @@ Manages and connects to multiple [Deephaven Community Core](https://deephaven.io
 
 *Persistent Query (PQ) Management:*
 
+- `pq_name_to_id` - Convert PQ name to canonical pq_id
 - `pq_list` - List all persistent queries on a system
 - `pq_details` - Get detailed PQ information
 - `pq_create` - Create new persistent queries
 - `pq_modify` - Modify existing persistent query configuration
-- `pq_start` - Start persistent queries
-- `pq_stop` - Stop running persistent queries
-- `pq_restart` - Restart persistent queries
-- `pq_delete` - Delete persistent queries
+- `pq_start` - Start persistent queries (supports parallel execution with configurable concurrency)
+- `pq_stop` - Stop running persistent queries (supports parallel execution with configurable concurrency)
+- `pq_restart` - Restart persistent queries (supports parallel execution with configurable concurrency)
+- `pq_delete` - Delete persistent queries (supports parallel execution with configurable concurrency)
+
+**Parallel Batch Operations**: When operating on multiple PQs, `pq_start`, `pq_stop`, `pq_restart`, and `pq_delete` execute operations in parallel with a default concurrency limit of 20. This provides near-batch performance (~10x faster for large batches) while maintaining granular per-item error reporting for AI agents. The concurrency limit can be adjusted via the `max_concurrent` parameter to balance performance and server load.
 
 *Table Operations:*
 

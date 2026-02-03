@@ -58,6 +58,16 @@ This repository houses the Python-based [Model Context Protocol (MCP)](https://m
       - [Enterprise Session Tools](#enterprise-session-tools)
         - [`session_enterprise_create`](#session_enterprise_create)
         - [`session_enterprise_delete`](#session_enterprise_delete)
+      - [Persistent Query (PQ) Management Tools](#persistent-query-pq-management-tools)
+        - [`pq_name_to_id`](#pq_name_to_id)
+        - [`pq_list`](#pq_list)
+        - [`pq_details`](#pq_details)
+        - [`pq_create`](#pq_create)
+        - [`pq_delete`](#pq_delete)
+        - [`pq_modify`](#pq_modify)
+        - [`pq_start`](#pq_start)
+        - [`pq_stop`](#pq_stop)
+        - [`pq_restart`](#pq_restart)
       - [Community Session Tools](#community-session-tools)
         - [`session_community_create`](#session_community_create)
         - [`session_community_delete`](#session_community_delete)
@@ -1214,6 +1224,29 @@ Persistent Queries (PQs) are recipes for creating and managing long-running work
 - **PQ States**: UNINITIALIZED, RUNNING, STOPPED, FAILED, COMPLETED, etc.
 - **Session Integration**: Running PQs create sessions accessible via standard session tools using `session_id` format `enterprise:{system_name}:{pq_name}`
 
+##### `pq_name_to_id`
+
+**Purpose**: Convert a PQ name to its canonical pq_id format.
+
+**Parameters**:
+
+- `system_name` (required, string): Name of the enterprise system
+- `pq_name` (required, string): Name of the persistent query
+
+**Returns**:
+
+```json
+{
+  "success": true,
+  "pq_id": "enterprise:prod:12345",
+  "serial": 12345,
+  "name": "analytics_worker",
+  "system_name": "prod"
+}
+```
+
+**Description**: Helper tool to look up a PQ by name and return its pq_id in the canonical format `enterprise:{system_name}:{serial}`. Use this when you know the PQ name but need the pq_id for other PQ operations. The tool performs a network lookup to find the serial number. Returns an error if the PQ doesn't exist on the specified system.
+
 ##### `pq_list`
 
 **Purpose**: List all persistent queries on an enterprise system.
@@ -1230,17 +1263,28 @@ Persistent Queries (PQs) are recipes for creating and managing long-running work
   "system_name": "prod_cluster",
   "pqs": [
     {
+      "pq_id": "enterprise:prod_cluster:12345",
       "serial": 12345,
       "name": "analytics_worker",
-      "state": "RUNNING",
+      "status": "RUNNING",
+      "enabled": true,
+      "owner": "admin_user",
       "heap_size_gb": 8.0,
+      "worker_kind": "DeephavenCommunity",
+      "configuration_type": "Script",
+      "script_language": "Python",
+      "server_name": "QueryServer_1",
+      "admin_groups": ["admins"],
+      "viewer_groups": ["analysts"],
+      "is_scheduled": true,
+      "num_failures": 0,
       "session_id": "enterprise:prod_cluster:analytics_worker"
     }
   ]
 }
 ```
 
-**Description**: Returns a list of all PQs with their current states. Running PQs include a `session_id` field that can be used with session data tools.
+**Description**: Returns a list of all PQs with comprehensive metadata. The `status` field indicates the current state (RUNNING, STOPPED, INITIALIZING, FAILED, etc.). Running or initializing PQs include a `session_id` field that can be used with session data tools. Filter results by status, owner, worker_kind, configuration_type, or script_language.
 
 ##### `pq_details`
 
@@ -1248,14 +1292,14 @@ Persistent Queries (PQs) are recipes for creating and managing long-running work
 
 **Parameters**:
 
-- `system_name` (required, string): Name of the enterprise system
-- `pq_identifier` (required, string | int): PQ name (string) or serial number (integer)
+- `pq_id` (required, string): PQ identifier in format `"enterprise:{system_name}:{serial}"`
 
 **Returns**:
 
 ```json
 {
   "success": true,
+  "pq_id": "enterprise:prod:12345",
   "serial": 12345,
   "name": "analytics_worker",
   "state": "RUNNING",
@@ -1280,14 +1324,24 @@ Persistent Queries (PQs) are recipes for creating and managing long-running work
 - `system_name` (required, string): Name of the enterprise system
 - `pq_name` (required, string): Human-readable name for the PQ
 - `heap_size_gb` (required, float | int): JVM heap size in GB
-- `programming_language` (optional, string): "Python" or "Groovy"
-- `auto_delete_timeout` (optional, int): Seconds of inactivity before auto-deletion (default: 600)
+- `script_body` (optional, string): Inline script code (mutually exclusive with script_path)
+- `script_path` (optional, string): Path to script in Git repository (mutually exclusive with script_body)
+- `programming_language` (optional, string): "Python" or "Groovy" (default: "Python")
+- `configuration_type` (optional, string): "Script" or "RunAndDone" (default: "Script")
+- `enabled` (optional, bool): Whether PQ is enabled (default: true)
+- `schedule` (optional, list[string]): Scheduling configuration as ["Key=Value", ...]
 - `server` (optional, string): Specific server to run on
 - `engine` (optional, string): Worker engine type (default: "DeephavenCommunity")
+- `jvm_profile` (optional, string): JVM profile name
 - `extra_jvm_args` (optional, list[string]): Additional JVM arguments
+- `extra_class_path` (optional, list[string]): Additional classpath entries
+- `python_virtual_environment` (optional, string): Python virtual environment name
 - `extra_environment_vars` (optional, list[string]): Environment variables as ["KEY=value", ...]
+- `init_timeout_nanos` (optional, int): Initialization timeout in nanoseconds
+- `auto_delete_timeout` (optional, int): Seconds of inactivity before auto-deletion (default: None - permanent PQ)
 - `admin_groups` (optional, list[string]): Groups with admin access
 - `viewer_groups` (optional, list[string]): Groups with viewer access
+- `restart_users` (optional, string): Restart permission policy (default: None)
 
 **Returns**:
 
@@ -1305,23 +1359,44 @@ Persistent Queries (PQs) are recipes for creating and managing long-running work
 
 ##### `pq_delete`
 
-**Purpose**: Permanently delete a persistent query.
+**Purpose**: Permanently delete one or more persistent queries (best-effort batch operation).
 
 **Parameters**:
 
-- `system_name` (required, string): Name of the enterprise system
-- `pq_identifier` (required, string | int): PQ name or serial number
+- `pq_id` (required, string | list[string]): PQ identifier or list of identifiers in format `"enterprise:{system_name}:{serial}"`
+- `timeout_seconds` (optional, int): Max seconds to retrieve PQ information (default: 10)
 
 **Returns**:
 
 ```json
 {
   "success": true,
-  "message": "PQ deleted successfully"
+  "results": [
+    {
+      "pq_id": "enterprise:prod:12345",
+      "serial": 12345,
+      "success": true,
+      "name": "analytics_worker",
+      "error": null
+    },
+    {
+      "pq_id": "enterprise:prod:67890",
+      "serial": 67890,
+      "success": false,
+      "name": null,
+      "error": "PQ not found"
+    }
+  ],
+  "summary": {
+    "total": 2,
+    "succeeded": 1,
+    "failed": 1
+  },
+  "message": "Deleted 1 of 2 PQ(s), 1 failed"
 }
 ```
 
-**Description**: Permanently removes the PQ from the controller. If running, it will be stopped first. This operation cannot be undone.
+**Description**: Permanently removes PQs and all associated data. Operates in **best-effort mode**: processes each PQ independently, continuing even if some deletions fail. All PQ IDs must be from the same enterprise system. Use `pq_name_to_id` if you only have PQ names. If running, it will be stopped first. This operation cannot be undone.
 
 ##### `pq_modify`
 
@@ -1329,7 +1404,7 @@ Persistent Queries (PQs) are recipes for creating and managing long-running work
 
 **Parameters**:
 
-- `pq_id` (required, string): PQ identifier in format "enterprise:system_name:serial_or_name"
+- `pq_id` (required, string): PQ identifier in format `"enterprise:{system_name}:{serial}"`
 - `restart` (optional, bool): Restart PQ after modification to apply changes (default: false)
 - `pq_name` (optional, string): New name for the PQ
 - `heap_size_gb` (optional, float | int): JVM heap size in GB
@@ -1379,73 +1454,134 @@ Persistent Queries (PQs) are recipes for creating and managing long-running work
 
 ##### `pq_start`
 
-**Purpose**: Start a persistent query.
+**Purpose**: Start one or more persistent queries (best-effort batch operation).
 
 **Parameters**:
 
-- `system_name` (required, string): Name of the enterprise system
-- `pq_identifier` (required, string | int): PQ name or serial number
-- `wait` (optional, bool): Wait for PQ to reach RUNNING state (default: true)
-- `timeout_seconds` (optional, int): Max seconds to wait if wait=true (default: 120)
+- `pq_id` (required, string | list[string]): PQ identifier or list of identifiers in format `"enterprise:{system_name}:{serial}"`
+- `timeout_seconds` (optional, int): Max seconds to wait for PQs to start (default: 30). Set to 0 for fire-and-forget.
 
 **Returns**:
 
 ```json
 {
   "success": true,
-  "serial": 12345,
-  "state": "RUNNING",
-  "session_id": "enterprise:prod:analytics_worker",
-  "message": "PQ started successfully"
+  "results": [
+    {
+      "pq_id": "enterprise:prod:12345",
+      "serial": 12345,
+      "success": true,
+      "name": "analytics",
+      "state": "RUNNING",
+      "session_id": "enterprise:test-system:analytics",
+      "error": null
+    },
+    {
+      "pq_id": "enterprise:prod:67890",
+      "serial": 67890,
+      "success": false,
+      "name": null,
+      "state": null,
+      "session_id": null,
+      "error": "Timeout waiting for PQ to start"
+    }
+  ],
+  "summary": {
+    "total": 2,
+    "succeeded": 1,
+    "failed": 1
+  },
+  "message": "Started 1 of 2 PQ(s), 1 failed"
 }
 ```
 
-**Description**: Starts a stopped or newly created PQ. When started successfully, a `session_id` is returned that can be used with session data tools.
+**Description**: Starts stopped or newly created PQs. Operates in **best-effort mode**: processes each PQ independently. Returns `session_id` for successfully started PQs. If timeout occurs, PQ continues starting in background. All PQ IDs must be from the same enterprise system.
 
 ##### `pq_stop`
 
-**Purpose**: Stop a running persistent query.
+**Purpose**: Stop one or more running persistent queries (best-effort batch operation).
 
 **Parameters**:
 
-- `system_name` (required, string): Name of the enterprise system
-- `pq_identifier` (required, string | int): PQ name or serial number
-- `wait` (optional, bool): Wait for PQ to reach terminal state (default: true)
-- `timeout_seconds` (optional, int): Max seconds to wait if wait=true (default: 120)
+- `pq_id` (required, string | list[string]): PQ identifier or list of identifiers in format `"enterprise:{system_name}:{serial}"`
+- `timeout_seconds` (optional, int): Max seconds to wait for PQs to stop (default: 30). Set to 0 for fire-and-forget.
 
 **Returns**:
 
 ```json
 {
   "success": true,
-  "serial": 12345,
-  "state": "STOPPED",
-  "message": "PQ stopped successfully"
+  "results": [
+    {
+      "pq_id": "enterprise:prod:12345",
+      "serial": 12345,
+      "success": true,
+      "name": "analytics_worker",
+      "state": "STOPPED",
+      "error": null
+    },
+    {
+      "pq_id": "enterprise:prod:67890",
+      "serial": 67890,
+      "success": false,
+      "name": null,
+      "state": null,
+      "error": "PQ already stopped"
+    }
+  ],
+  "summary": {
+    "total": 2,
+    "succeeded": 1,
+    "failed": 1
+  },
+  "message": "Stopped 1 of 2 PQ(s), 1 failed"
 }
 ```
 
-**Description**: Gracefully stops a running PQ. The PQ definition is preserved and can be restarted later with `pq_start` or `pq_restart`.
+**Description**: Gracefully stops running PQs. Operates in **best-effort mode**: processes each PQ independently. PQ definitions are preserved and can be restarted. If timeout occurs, PQ continues stopping in background. All PQ IDs must be from the same enterprise system.
 
 ##### `pq_restart`
 
-**Purpose**: Restart a persistent query.
+**Purpose**: Restart one or more persistent queries (best-effort batch operation).
 
 **Parameters**:
 
-- `system_name` (required, string): Name of the enterprise system
-- `pq_identifier` (required, string | int): PQ name or serial number
+- `pq_id` (required, string | list[string]): PQ identifier or list of identifiers in format `"enterprise:{system_name}:{serial}"`
+- `timeout_seconds` (optional, int): Max seconds to wait for PQs to restart (default: 30). Set to 0 for fire-and-forget.
 
 **Returns**:
 
 ```json
 {
   "success": true,
-  "serial": 12345,
-  "message": "PQ restart initiated"
+  "results": [
+    {
+      "pq_id": "enterprise:prod:12345",
+      "serial": 12345,
+      "success": true,
+      "name": "analytics_worker",
+      "state": "RUNNING",
+      "error": null
+    },
+    {
+      "pq_id": "enterprise:prod:67890",
+      "serial": 67890,
+      "success": false,
+      "name": null,
+      "state": null,
+      "error": "PQ cannot be restarted"
+    }
+  ],
+  "summary": {
+    "total": 2,
+    "succeeded": 1,
+    "failed": 1
+  },
+  "message": "Restarted 1 of 2 PQ(s), 1 failed"
 }
 ```
 
-**Description**: Restarts a stopped or failed PQ using its original configuration. More efficient than deleting and recreating.
+**Description**: Restarts stopped, failed, or completed PQs using original configuration. Operates in **best-effort mode**: processes each PQ independently. More efficient than deleting and recreating. Preserves PQ serial numbers. If timeout occurs, PQ continues restarting in background. All PQ IDs must be from the same enterprise system.
 
 **Workflow Examples**:
 

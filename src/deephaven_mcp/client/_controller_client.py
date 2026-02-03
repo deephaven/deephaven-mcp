@@ -297,6 +297,60 @@ class CorePlusControllerClient(
             )
             raise QueryError(f"Failed to retrieve query state: {e}") from e
 
+    async def map_and_version(
+        self,
+    ) -> tuple[dict[CorePlusQuerySerial, CorePlusQueryInfo], int]:
+        """Retrieve query state with version number for synchronization.
+
+        This method returns the current persistent query state alongside a version number
+        that tracks changes to the subscription map. The version number is monotonically
+        increasing and increments every time the map changes (query created, deleted, or
+        state modified).
+
+        This is the proper way to detect stale data - if you cache the version number and
+        later call this method again, a different version indicates the map has changed.
+
+        Returns:
+            tuple[dict[CorePlusQuerySerial, CorePlusQueryInfo], int]: A tuple containing:
+                - Dictionary mapping query serial numbers to CorePlusQueryInfo objects
+                - Version number (int) representing the current map state
+
+        Raises:
+            DeephavenConnectionError: If unable to connect to the controller service
+            QueryError: If not subscribed or subscription state is invalid
+            InternalError: If subscribe() was not called before this method
+        """
+        if not self._subscribed:
+            raise InternalError(
+                "subscribe() must be called before map_and_version(). This indicates a programming bug - "
+                "the controller client was not properly initialized."
+            )
+        _LOGGER.debug(
+            "[CorePlusControllerClient:map_and_version] Retrieving query map with version"
+        )
+        try:
+            raw_map, version = await asyncio.to_thread(self.wrapped.map_and_version)
+            query_map = {
+                cast(CorePlusQuerySerial, k): CorePlusQueryInfo(v)
+                for k, v in raw_map.items()
+            }
+            _LOGGER.debug(
+                f"[CorePlusControllerClient:map_and_version] Retrieved {len(query_map)} queries, version={version}"
+            )
+            return query_map, version
+        except ConnectionError as e:
+            _LOGGER.error(
+                f"[CorePlusControllerClient:map_and_version] Connection error: {e}"
+            )
+            raise DeephavenConnectionError(
+                f"Unable to connect to controller service: {e}"
+            ) from e
+        except Exception as e:
+            _LOGGER.error(
+                f"[CorePlusControllerClient:map_and_version] Failed to retrieve query map: {e}"
+            )
+            raise QueryError(f"Failed to retrieve query state with version: {e}") from e
+
     async def get_serial_for_name(
         self, name: str, timeout_seconds: float = 0
     ) -> CorePlusQuerySerial:
@@ -417,6 +471,65 @@ class CorePlusControllerClient(
                 f"[CorePlusControllerClient:wait_for_change] Failed to wait for change: {e}"
             )
             raise QueryError(f"Failed to wait for query state change: {e}") from e
+
+    async def wait_for_change_from_version(
+        self, map_version: int, timeout_seconds: float
+    ) -> bool:
+        """Wait for query map version to increment beyond specified version.
+
+        This method blocks until the subscription map version becomes greater than the
+        specified version, indicating that changes have occurred. This is the proper
+        way to detect when cached data becomes stale.
+
+        The version number is monotonically increasing and increments every time the
+        subscription map changes (query created, deleted, or state modified).
+
+        Typical usage pattern:
+        1. Call map_and_version() to get current state and version
+        2. Cache the data and version number
+        3. Later, call wait_for_change_from_version(cached_version, timeout)
+        4. If returns True, call map_and_version() again to get fresh data
+
+        Args:
+            map_version (int): The version number to wait to exceed. Typically obtained
+                              from a previous map_and_version() call.
+            timeout_seconds (float): Maximum time to wait for version change, in seconds.
+                                    Must be positive.
+
+        Returns:
+            bool: True if version changed (version > map_version), False if timeout occurred
+
+        Raises:
+            DeephavenConnectionError: If unable to connect to controller service
+            QueryError: If subscription state is invalid
+        """
+        _LOGGER.debug(
+            f"[CorePlusControllerClient:wait_for_change_from_version] "
+            f"Waiting for version > {map_version}, timeout={timeout_seconds}s"
+        )
+        try:
+            result = await asyncio.to_thread(
+                self.wrapped.wait_for_change_from_version, map_version, timeout_seconds
+            )
+            _LOGGER.debug(
+                f"[CorePlusControllerClient:wait_for_change_from_version] "
+                f"Returned: {result} (version {'changed' if result else 'unchanged'})"
+            )
+            return bool(result)
+        except ConnectionError as e:
+            _LOGGER.error(
+                f"[CorePlusControllerClient:wait_for_change_from_version] Connection error: {e}"
+            )
+            raise DeephavenConnectionError(
+                f"Unable to connect to controller service: {e}"
+            ) from e
+        except Exception as e:
+            _LOGGER.error(
+                f"[CorePlusControllerClient:wait_for_change_from_version] Failed: {e}"
+            )
+            raise QueryError(
+                f"Failed to wait for version change from {map_version}: {e}"
+            ) from e
 
     async def get(
         self, serial: CorePlusQuerySerial, timeout_seconds: float = 0
