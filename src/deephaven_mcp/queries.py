@@ -144,7 +144,7 @@ async def _apply_row_limit(
             )
 
         # Determine if we got the complete table
-        is_complete = original_size is not None and original_size <= max_rows
+        is_complete = original_size <= max_rows
         _LOGGER.debug(
             f"[queries:_apply_row_limit] {context_name.capitalize()} has {original_size} total rows"
         )
