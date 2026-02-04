@@ -7,7 +7,7 @@ Async test client for the Deephaven MCP Docs server (agentic, MCP-compatible).
 - Demonstrates calling docs_chat with a sample prompt.
 - Prints the result for verification.
 
-Requires: autogen-ext[mcp]
+Requires: mcp package (native client)
 
 Usage examples:
     python scripts/mcp_docs_test_client.py --transport streamable-http --url http://localhost:8001/mcp --prompt "What is Deephaven?"
@@ -24,8 +24,11 @@ import logging
 import shlex
 import sys
 
-from autogen_core import CancellationToken
-from autogen_ext.tools.mcp import SseServerParams, StdioServerParams, mcp_server_tools
+import httpx
+from mcp import StdioServerParameters
+from mcp.client.sse import sse_client
+from mcp.client.stdio import stdio_client
+from mcp.client.streamable_http import streamable_http_client
 
 # Configure logging
 logging.basicConfig(
@@ -48,13 +51,14 @@ def parse_args():
             - env: List of environment variable strings (KEY=VALUE)
             - prompt: Question/prompt to send to docs_chat tool
             - history: Optional chat history as JSON string
+            - token: Optional authorization token for HTTP transports
     """
     parser = argparse.ArgumentParser(
-        description="Async MCP Docs test client (SSE or stdio)"
+        description="Async MCP Docs test client (streamable-http, SSE, or stdio)"
     )
     parser.add_argument(
         "--transport",
-        choices=["sse", "stdio", "streamable-http"],
+        choices=["streamable-http", "sse", "stdio"],
         default="streamable-http",
         help="Transport type (streamable-http, sse, or stdio)",
     )
@@ -84,6 +88,11 @@ def parse_args():
         default=None,
         help="Optional chat history as JSON string (list of {role, content}).",
     )
+    parser.add_argument(
+        "--token",
+        default=None,
+        help="Optional authorization token for HTTP transports (Bearer token)",
+    )
     return parser.parse_args()
 
 
@@ -107,43 +116,8 @@ async def main():
             args.url = "http://localhost:8001/sse"
         elif args.transport == "streamable-http":
             args.url = "http://localhost:8001/mcp"
-        # stdio doesn't need a URL
-
-    if args.transport in ["sse", "streamable-http"]:
-        server_params = SseServerParams(url=args.url)
-    else:  # stdio
-        # Parse env vars from --env KEY=VALUE
-        env_dict = {}
-        for item in args.env:
-            if "=" in item:
-                k, v = item.split("=", 1)
-                env_dict[k] = v
-            else:
-                raise ValueError(f"Invalid --env entry: {item}. Must be KEY=VALUE.")
-        stdio_tokens = shlex.split(args.stdio_cmd)
-        if not stdio_tokens:
-            raise ValueError("--stdio-cmd must not be empty")
-        stdio_command = stdio_tokens[0]
-        stdio_args = stdio_tokens[1:]
-        server_params = StdioServerParams(
-            command=stdio_command, args=stdio_args, env=env_dict if env_dict else None
-        )
-
-    _LOGGER.info(f"Connecting to MCP Docs server via {args.transport} transport")
-    if args.transport in ["sse", "streamable-http"]:
-        _LOGGER.info(f"Server URL: {args.url}")
-
-    tools = await mcp_server_tools(server_params)
-    _LOGGER.info(f"Available tools: {[t.name for t in tools]}")
-    tool_map = {t.name: t for t in tools}
-
-    if "docs_chat" not in tool_map:
-        _LOGGER.error("docs_chat tool not found on server!")
-        print("docs_chat tool not found on server!", file=sys.stderr)
-        sys.exit(1)
 
     # Prepare arguments for docs_chat
-    prompt = args.prompt
     history = None
     if args.history:
         try:
@@ -154,22 +128,122 @@ async def main():
             print(f"Failed to parse --history: {e}", file=sys.stderr)
             sys.exit(2)
 
-    _LOGGER.info(f"Calling docs_chat with prompt: {prompt!r}")
-    if history:
-        _LOGGER.info(f"Using chat history with {len(history)} messages")
+    _LOGGER.info(f"Connecting to MCP Docs server via {args.transport} transport")
 
-    try:
-        result = await tool_map["docs_chat"].run_json(
-            {"prompt": prompt, "history": history} if history else {"prompt": prompt},
-            cancellation_token=CancellationToken(),
+    if args.transport in ["sse", "streamable-http"]:
+        # Prepare HTTP client with optional auth token
+        headers = {}
+        if args.token:
+            headers["Authorization"] = f"Bearer {args.token}"
+        
+        http_client = httpx.AsyncClient(headers=headers) if headers else None
+
+        if args.transport == "streamable-http":
+            client_func = lambda url: streamable_http_client(
+                url, http_client=http_client
+            )
+        else:
+            client_func = lambda url: sse_client(url, http_client=http_client)
+
+        _LOGGER.info(f"Server URL: {args.url}")
+        
+        # Use try/finally to ensure proper cleanup of HTTP client
+        try:
+            async with client_func(args.url) as (read, write):
+                async with read, write:
+                    await write.send_initialize()
+                    result = await read.recv_initialize()
+                    _LOGGER.info(f"Connected to MCP server: {result}")
+
+                    session = await write.get_result(read)
+
+                    # List tools
+                    tools_result = await session.list_tools()
+                    tools = tools_result.tools
+                    tool_names = [t.name for t in tools]
+                    _LOGGER.info(f"Available tools: {tool_names}")
+
+                    if "docs_chat" not in tool_names:
+                        _LOGGER.error("docs_chat tool not found on server!")
+                        print("docs_chat tool not found on server!", file=sys.stderr)
+                        sys.exit(1)
+
+                    # Call docs_chat
+                    _LOGGER.info(f"Calling docs_chat with prompt: {args.prompt!r}")
+                    if history:
+                        _LOGGER.info(f"Using chat history with {len(history)} messages")
+
+                    try:
+                        call_args = {"prompt": args.prompt}
+                        if history:
+                            call_args["history"] = history
+                        result = await session.call_tool("docs_chat", arguments=call_args)
+                        _LOGGER.info("docs_chat call completed successfully")
+                        print("\ndocs_chat result:")
+                        print(result.content[0].text if result.content else str(result))
+                    except Exception as e:
+                        _LOGGER.error(f"Error calling docs_chat: {e}")
+                        print(f"Error calling docs_chat: {e}", file=sys.stderr)
+                        sys.exit(3)
+        finally:
+            if http_client:
+                await http_client.aclose()
+    else:  # stdio
+        # Parse env vars from --env KEY=VALUE
+        env_dict = {}
+        for item in args.env:
+            if "=" in item:
+                k, v = item.split("=", 1)
+                env_dict[k] = v
+            else:
+                raise ValueError(f"Invalid --env entry: {item}. Must be KEY=VALUE.")
+
+        stdio_tokens = shlex.split(args.stdio_cmd)
+        if not stdio_tokens:
+            raise ValueError("--stdio-cmd must not be empty")
+
+        server_params = StdioServerParameters(
+            command=stdio_tokens[0],
+            args=stdio_tokens[1:],
+            env=env_dict if env_dict else None,
         )
-        _LOGGER.info("docs_chat call completed successfully")
-        print("\ndocs_chat result:")
-        print(result)
-    except Exception as e:
-        _LOGGER.error(f"Error calling docs_chat: {e}")
-        print(f"Error calling docs_chat: {e}", file=sys.stderr)
-        sys.exit(3)
+
+        async with stdio_client(server_params) as (read, write):
+            async with read, write:
+                await write.send_initialize()
+                result = await read.recv_initialize()
+                _LOGGER.info(f"Connected to MCP server: {result}")
+
+                session = await write.get_result(read)
+
+                # List tools
+                tools_result = await session.list_tools()
+                tools = tools_result.tools
+                tool_names = [t.name for t in tools]
+                _LOGGER.info(f"Available tools: {tool_names}")
+
+                if "docs_chat" not in tool_names:
+                    _LOGGER.error("docs_chat tool not found on server!")
+                    print("docs_chat tool not found on server!", file=sys.stderr)
+                    sys.exit(1)
+
+                # Call docs_chat
+                _LOGGER.info(f"Calling docs_chat with prompt: {args.prompt!r}")
+                if history:
+                    _LOGGER.info(f"Using chat history with {len(history)} messages")
+
+                try:
+                    call_args = {"prompt": args.prompt}
+                    if history:
+                        call_args["history"] = history
+                    result = await session.call_tool("docs_chat", arguments=call_args)
+                    _LOGGER.info("docs_chat call completed successfully")
+                    print("\ndocs_chat result:")
+                    print(result.content[0].text if result.content else str(result))
+                except Exception as e:
+                    _LOGGER.error(f"Error calling docs_chat: {e}")
+                    print(f"Error calling docs_chat: {e}", file=sys.stderr)
+                    sys.exit(3)
 
 
 if __name__ == "__main__":
