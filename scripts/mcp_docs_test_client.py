@@ -135,6 +135,7 @@ async def main():
         headers = {}
         if args.token:
             headers["Authorization"] = f"Bearer {args.token}"
+        
         http_client = httpx.AsyncClient(headers=headers) if headers else None
 
         if args.transport == "streamable-http":
@@ -145,42 +146,48 @@ async def main():
             client_func = lambda url: sse_client(url, http_client=http_client)
 
         _LOGGER.info(f"Server URL: {args.url}")
-        async with client_func(args.url) as (read, write):
-            async with read, write:
-                await write.send_initialize()
-                result = await read.recv_initialize()
-                _LOGGER.info(f"Connected to MCP server: {result}")
+        
+        # Use try/finally to ensure proper cleanup of HTTP client
+        try:
+            async with client_func(args.url) as (read, write):
+                async with read, write:
+                    await write.send_initialize()
+                    result = await read.recv_initialize()
+                    _LOGGER.info(f"Connected to MCP server: {result}")
 
-                session = await write.get_result(read)
+                    session = await write.get_result(read)
 
-                # List tools
-                tools_result = await session.list_tools()
-                tools = tools_result.tools
-                tool_names = [t.name for t in tools]
-                _LOGGER.info(f"Available tools: {tool_names}")
+                    # List tools
+                    tools_result = await session.list_tools()
+                    tools = tools_result.tools
+                    tool_names = [t.name for t in tools]
+                    _LOGGER.info(f"Available tools: {tool_names}")
 
-                if "docs_chat" not in tool_names:
-                    _LOGGER.error("docs_chat tool not found on server!")
-                    print("docs_chat tool not found on server!", file=sys.stderr)
-                    sys.exit(1)
+                    if "docs_chat" not in tool_names:
+                        _LOGGER.error("docs_chat tool not found on server!")
+                        print("docs_chat tool not found on server!", file=sys.stderr)
+                        sys.exit(1)
 
-                # Call docs_chat
-                _LOGGER.info(f"Calling docs_chat with prompt: {args.prompt!r}")
-                if history:
-                    _LOGGER.info(f"Using chat history with {len(history)} messages")
-
-                try:
-                    call_args = {"prompt": args.prompt}
+                    # Call docs_chat
+                    _LOGGER.info(f"Calling docs_chat with prompt: {args.prompt!r}")
                     if history:
-                        call_args["history"] = history
-                    result = await session.call_tool("docs_chat", arguments=call_args)
-                    _LOGGER.info("docs_chat call completed successfully")
-                    print("\ndocs_chat result:")
-                    print(result.content[0].text if result.content else str(result))
-                except Exception as e:
-                    _LOGGER.error(f"Error calling docs_chat: {e}")
-                    print(f"Error calling docs_chat: {e}", file=sys.stderr)
-                    sys.exit(3)
+                        _LOGGER.info(f"Using chat history with {len(history)} messages")
+
+                    try:
+                        call_args = {"prompt": args.prompt}
+                        if history:
+                            call_args["history"] = history
+                        result = await session.call_tool("docs_chat", arguments=call_args)
+                        _LOGGER.info("docs_chat call completed successfully")
+                        print("\ndocs_chat result:")
+                        print(result.content[0].text if result.content else str(result))
+                    except Exception as e:
+                        _LOGGER.error(f"Error calling docs_chat: {e}")
+                        print(f"Error calling docs_chat: {e}", file=sys.stderr)
+                        sys.exit(3)
+        finally:
+            if http_client:
+                await http_client.aclose()
     else:  # stdio
         # Parse env vars from --env KEY=VALUE
         env_dict = {}

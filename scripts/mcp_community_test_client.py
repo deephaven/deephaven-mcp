@@ -144,6 +144,7 @@ async def main():
         headers = {}
         if args.token:
             headers["Authorization"] = f"Bearer {args.token}"
+        
         http_client = httpx.AsyncClient(headers=headers) if headers else None
 
         if args.transport == "streamable-http":
@@ -154,23 +155,29 @@ async def main():
             client_func = lambda url: sse_client(url, http_client=http_client)
 
         _LOGGER.info(f"Server URL: {args.url}")
-        async with client_func(args.url) as (read, write):
-            async with read, write:
-                await write.send_initialize()
-                result = await read.recv_initialize()
-                _LOGGER.info(f"Connected to MCP server: {result}")
+        
+        # Use async context manager to ensure proper cleanup of HTTP client
+        try:
+            async with client_func(args.url) as (read, write):
+                async with read, write:
+                    await write.send_initialize()
+                    result = await read.recv_initialize()
+                    _LOGGER.info(f"Connected to MCP server: {result}")
 
-                session = await write.get_result(read)
+                    session = await write.get_result(read)
 
-                # List tools
-                tools_result = await session.list_tools()
-                tools = tools_result.tools
-                tool_names = [t.name for t in tools]
-                _LOGGER.info(f"Available tools: {tool_names}")
-                print("Available tools:", tool_names)
+                    # List tools
+                    tools_result = await session.list_tools()
+                    tools = tools_result.tools
+                    tool_names = [t.name for t in tools]
+                    _LOGGER.info(f"Available tools: {tool_names}")
+                    print("Available tools:", tool_names)
 
-                # Test tools
-                await test_tools(session)
+                    # Test tools
+                    await test_tools(session)
+        finally:
+            if http_client:
+                await http_client.aclose()
     else:  # stdio
         # Parse env vars from --env KEY=VALUE
         env_dict = {}
@@ -221,43 +228,43 @@ async def test_tools(session):
         session: Active MCP session object
     """
 
-    # 1. refresh
-    _LOGGER.info("Testing tool: refresh")
-    print("\nCalling tool: refresh")
-    result = await call_tool(session, "refresh", {})
-    print(f"Result for refresh: {result}")
+    # 1. mcp_reload
+    _LOGGER.info("Testing tool: mcp_reload")
+    print("\nCalling tool: mcp_reload")
+    result = await call_tool(session, "mcp_reload", {})
+    print(f"Result for mcp_reload: {result}")
 
-    # 2. list_sessions
-    _LOGGER.info("Testing tool: list_sessions")
-    print("\nCalling tool: list_sessions")
-    result = await call_tool(session, "list_sessions", {})
-    print(f"Result for list_sessions: {result}")
+    # 2. sessions_list
+    _LOGGER.info("Testing tool: sessions_list")
+    print("\nCalling tool: sessions_list")
+    result = await call_tool(session, "sessions_list", {})
+    print(f"Result for sessions_list: {result}")
 
-    # 3. get_session_details (example - requires session_id)
-    _LOGGER.info("Testing tool: get_session_details")
-    print("\nCalling tool: get_session_details (example)")
+    # 3. session_details (example - requires session_id)
+    _LOGGER.info("Testing tool: session_details")
+    print("\nCalling tool: session_details (example)")
     result = await call_tool(
-        session, "get_session_details", {"session_id": "community:local:example"}
+        session, "session_details", {"session_id": "community:local:example"}
     )
-    print(f"Result for get_session_details: {result}")
+    print(f"Result for session_details: {result}")
 
-    # 4. table_schemas (example - requires session_id)
-    _LOGGER.info("Testing tool: table_schemas")
-    print("\nCalling tool: table_schemas (example)")
+    # 4. session_tables_schema (example - requires session_id)
+    _LOGGER.info("Testing tool: session_tables_schema")
+    print("\nCalling tool: session_tables_schema (example)")
     result = await call_tool(
-        session, "table_schemas", {"session_id": "community:local:example"}
+        session, "session_tables_schema", {"session_id": "community:local:example"}
     )
-    print(f"Result for table_schemas: {result}")
+    print(f"Result for session_tables_schema: {result}")
 
-    # 5. run_script (example - requires session_id and script)
-    _LOGGER.info("Testing tool: run_script")
-    print("\nCalling tool: run_script (example)")
+    # 5. session_script_run (example - requires session_id and script)
+    _LOGGER.info("Testing tool: session_script_run")
+    print("\nCalling tool: session_script_run (example)")
     result = await call_tool(
         session,
-        "run_script",
+        "session_script_run",
         {"session_id": "community:local:example", "script": "print('hello world')"},
     )
-    print(f"Result for run_script: {result}")
+    print(f"Result for session_script_run: {result}")
 
     # 6. enterprise_systems_status
     _LOGGER.info("Testing tool: enterprise_systems_status")
@@ -265,13 +272,13 @@ async def test_tools(session):
     result = await call_tool(session, "enterprise_systems_status", {})
     print(f"Result for enterprise_systems_status: {result}")
 
-    # 7. pip_packages (example - requires session_id)
-    _LOGGER.info("Testing tool: pip_packages")
-    print("\nCalling tool: pip_packages (example)")
+    # 7. session_pip_list (example - requires session_id)
+    _LOGGER.info("Testing tool: session_pip_list")
+    print("\nCalling tool: session_pip_list (example)")
     result = await call_tool(
-        session, "pip_packages", {"session_id": "community:local:example"}
+        session, "session_pip_list", {"session_id": "community:local:example"}
     )
-    print(f"Result for pip_packages: {result}")
+    print(f"Result for session_pip_list: {result}")
 
 
 if __name__ == "__main__":
