@@ -300,9 +300,8 @@ class BaseSession(ClientObjectWrapper[T], Generic[T]):
         """
         _LOGGER.debug("[CoreSession:time_table] Called")
         try:
-            # TODO: remove type: ignore after pydeephaven is updated.  See https://deephaven.atlassian.net/browse/DH-19874
             return await asyncio.to_thread(
-                self.wrapped.time_table, period, start_time, blink_table  # type: ignore[arg-type]
+                self.wrapped.time_table, period, start_time, blink_table
             )
         except ConnectionError as e:
             _LOGGER.error(
@@ -398,8 +397,9 @@ class BaseSession(ClientObjectWrapper[T], Generic[T]):
         """
         _LOGGER.debug(f"[CoreSession:merge_tables] Called with {len(tables)} tables")
         try:
-            # TODO: remove type: ignore after pydeephaven is updated.  See https://deephaven.atlassian.net/browse/DH-19874
-            return await asyncio.to_thread(self.wrapped.merge_tables, tables, order_by)  # type: ignore[arg-type]
+            return await asyncio.to_thread(
+                self.wrapped.merge_tables, tables, order_by  # type: ignore[arg-type]
+            )
         except ConnectionError as e:
             _LOGGER.error(
                 f"[CoreSession:merge_tables] Connection error merging tables: {e}"
@@ -570,9 +570,8 @@ class BaseSession(ClientObjectWrapper[T], Generic[T]):
         """
         _LOGGER.debug("[CoreSession:input_table] Called")
         try:
-            # TODO: remove type: ignore after pydeephaven is updated.  See https://deephaven.atlassian.net/browse/DH-19874
             return await asyncio.to_thread(
-                self.wrapped.input_table, schema, init_table, key_cols, blink_table  # type: ignore[arg-type]
+                self.wrapped.input_table, schema, init_table, key_cols, blink_table
             )
         except ValueError:
             # Re-raise ValueError directly for invalid inputs
