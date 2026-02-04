@@ -45,7 +45,7 @@ prompts = [
 def parse_args():
     """
     Parse command-line arguments for the stress test client.
-    
+
     Returns:
         argparse.Namespace: Parsed arguments with fields:
             - url: SSE server URL or shortcut (prod, dev, local)
@@ -90,10 +90,10 @@ def parse_args():
 def resolve_url(url_option):
     """
     Resolve URL shortcut to full SSE endpoint URL.
-    
+
     Args:
         url_option: URL string or shortcut ('local', 'prod', 'dev')
-    
+
     Returns:
         str: Full SSE endpoint URL
     """
@@ -114,12 +114,12 @@ prompt_timings_lock = asyncio.Lock()
 async def call_docs_chat(session, prompt, history) -> str:
     """
     Call docs_chat tool and record timing statistics.
-    
+
     Args:
         session: Active MCP session object
         prompt: Question/prompt to send to docs_chat
         history: Optional chat history (list of message dicts)
-    
+
     Returns:
         str: Tool result text
     """
@@ -137,10 +137,10 @@ async def call_docs_chat(session, prompt, history) -> str:
 async def thread_worker(session, history, runs, thread_id):
     """
     Worker task that executes prompts concurrently.
-    
+
     Each worker runs through all prompts for the specified number of runs,
     calling docs_chat and displaying results.
-    
+
     Args:
         session: Active MCP session object
         history: Optional chat history (list of message dicts)
@@ -159,7 +159,7 @@ async def thread_worker(session, history, runs, thread_id):
 def print_prompt_stats():
     """
     Print timing statistics (min, max, avg) for each prompt.
-    
+
     Displays statistics collected during the stress test run, including
     the number of samples for each prompt.
     """
@@ -181,7 +181,7 @@ def print_prompt_stats():
 async def main():
     """
     Main entry point for the concurrent stress test.
-    
+
     Connects to the MCP Docs server via SSE, verifies docs_chat tool availability,
     launches concurrent worker tasks, and prints timing statistics.
     Handles various exception types using Python 3.11+ ExceptionGroup syntax.
@@ -205,15 +205,15 @@ async def main():
                 await write.send_initialize()
                 result = await read.recv_initialize()
                 print(f"Connected to MCP server: {result}")
-                
+
                 session = await write.get_result(read)
-                
+
                 # List tools
                 tools_result = await session.list_tools()
                 tools = tools_result.tools
                 tool_names = [t.name for t in tools]
                 print("Available tools:", tool_names)
-                
+
                 if "docs_chat" not in tool_names:
                     print("docs_chat tool not found on server!", file=sys.stderr)
                     sys.exit(1)

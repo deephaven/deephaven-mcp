@@ -136,37 +136,39 @@ async def main():
         if args.token:
             headers["Authorization"] = f"Bearer {args.token}"
         http_client = httpx.AsyncClient(headers=headers) if headers else None
-        
+
         if args.transport == "streamable-http":
-            client_func = lambda url: streamable_http_client(url, http_client=http_client)
+            client_func = lambda url: streamable_http_client(
+                url, http_client=http_client
+            )
         else:
             client_func = lambda url: sse_client(url, http_client=http_client)
-        
+
         _LOGGER.info(f"Server URL: {args.url}")
         async with client_func(args.url) as (read, write):
             async with read, write:
                 await write.send_initialize()
                 result = await read.recv_initialize()
                 _LOGGER.info(f"Connected to MCP server: {result}")
-                
+
                 session = await write.get_result(read)
-                
+
                 # List tools
                 tools_result = await session.list_tools()
                 tools = tools_result.tools
                 tool_names = [t.name for t in tools]
                 _LOGGER.info(f"Available tools: {tool_names}")
-                
+
                 if "docs_chat" not in tool_names:
                     _LOGGER.error("docs_chat tool not found on server!")
                     print("docs_chat tool not found on server!", file=sys.stderr)
                     sys.exit(1)
-                
+
                 # Call docs_chat
                 _LOGGER.info(f"Calling docs_chat with prompt: {args.prompt!r}")
                 if history:
                     _LOGGER.info(f"Using chat history with {len(history)} messages")
-                
+
                 try:
                     call_args = {"prompt": args.prompt}
                     if history:
@@ -188,41 +190,41 @@ async def main():
                 env_dict[k] = v
             else:
                 raise ValueError(f"Invalid --env entry: {item}. Must be KEY=VALUE.")
-        
+
         stdio_tokens = shlex.split(args.stdio_cmd)
         if not stdio_tokens:
             raise ValueError("--stdio-cmd must not be empty")
-        
+
         server_params = StdioServerParameters(
             command=stdio_tokens[0],
             args=stdio_tokens[1:],
-            env=env_dict if env_dict else None
+            env=env_dict if env_dict else None,
         )
-        
+
         async with stdio_client(server_params) as (read, write):
             async with read, write:
                 await write.send_initialize()
                 result = await read.recv_initialize()
                 _LOGGER.info(f"Connected to MCP server: {result}")
-                
+
                 session = await write.get_result(read)
-                
+
                 # List tools
                 tools_result = await session.list_tools()
                 tools = tools_result.tools
                 tool_names = [t.name for t in tools]
                 _LOGGER.info(f"Available tools: {tool_names}")
-                
+
                 if "docs_chat" not in tool_names:
                     _LOGGER.error("docs_chat tool not found on server!")
                     print("docs_chat tool not found on server!", file=sys.stderr)
                     sys.exit(1)
-                
+
                 # Call docs_chat
                 _LOGGER.info(f"Calling docs_chat with prompt: {args.prompt!r}")
                 if history:
                     _LOGGER.info(f"Using chat history with {len(history)} messages")
-                
+
                 try:
                     call_args = {"prompt": args.prompt}
                     if history:

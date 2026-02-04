@@ -45,7 +45,7 @@ prompts = [
 def parse_args():
     """
     Parse command-line arguments for the stress test client.
-    
+
     Returns:
         argparse.Namespace: Parsed arguments with fields:
             - url: SSE server URL or shortcut (prod, dev, local)
@@ -90,10 +90,10 @@ def parse_args():
 def resolve_url(url_option):
     """
     Resolve URL shortcut to full SSE endpoint URL.
-    
+
     Args:
         url_option: URL string or shortcut ('local', 'prod', 'dev')
-    
+
     Returns:
         str: Full SSE endpoint URL
     """
@@ -114,33 +114,33 @@ prompt_timings_lock = asyncio.Lock()
 async def call_docs_chat_with_cancel(session, prompt, history, sleep_seconds) -> str:
     """
     Call docs_chat tool and cancel it after a specified sleep duration.
-    
+
     Starts the docs_chat call as an async task, sleeps for the specified duration,
     then cancels the task. Records timing statistics regardless of completion.
-    
+
     Args:
         session: Active MCP session object
         prompt: Question/prompt to send to docs_chat
         history: Optional chat history (list of message dicts)
         sleep_seconds: Duration to wait before cancelling the call
-    
+
     Returns:
         str: Tool result text if completed, or "CANCELLED" if cancelled
     """
     start = time.perf_counter()
-    
+
     # Start the docs_chat call
     call_args = {"prompt": prompt}
     if history:
         call_args["history"] = history
     task = asyncio.create_task(session.call_tool("docs_chat", arguments=call_args))
-    
+
     # Sleep for the specified duration
     await asyncio.sleep(sleep_seconds)
-    
+
     # Cancel the task
     task.cancel()
-    
+
     try:
         result = await task
         duration = time.perf_counter() - start
@@ -157,7 +157,7 @@ async def call_docs_chat_with_cancel(session, prompt, history, sleep_seconds) ->
 def print_prompt_stats():
     """
     Print timing statistics (min, max, avg) for each prompt.
-    
+
     Displays statistics collected during the stress test run, including
     the number of samples for each prompt.
     """
@@ -179,7 +179,7 @@ def print_prompt_stats():
 async def run_worker(session, history, runs, sleep_seconds):
     """
     Execute stress test by running prompts sequentially with cancellation.
-    
+
     Args:
         session: Active MCP session object
         history: Optional chat history (list of message dicts)
@@ -189,14 +189,16 @@ async def run_worker(session, history, runs, sleep_seconds):
     for run in range(runs):
         for prompt in prompts:
             print(f"[Run {run+1} of {runs}] Sending prompt: {prompt!r}")
-            result = await call_docs_chat_with_cancel(session, prompt, history, sleep_seconds)
+            result = await call_docs_chat_with_cancel(
+                session, prompt, history, sleep_seconds
+            )
             print(f"[Run {run+1} of {runs}] Result: {result!r}")
 
 
 async def main():
     """
     Main entry point for the stress test.
-    
+
     Connects to the MCP Docs server via SSE, verifies docs_chat tool availability,
     runs the stress test with cancellation, and prints timing statistics.
     Handles various exception types using Python 3.11+ ExceptionGroup syntax.
@@ -220,15 +222,15 @@ async def main():
                 await write.send_initialize()
                 result = await read.recv_initialize()
                 print(f"Connected to MCP server: {result}")
-                
+
                 session = await write.get_result(read)
-                
+
                 # List tools
                 tools_result = await session.list_tools()
                 tools = tools_result.tools
                 tool_names = [t.name for t in tools]
                 print("Available tools:", tool_names)
-                
+
                 if "docs_chat" not in tool_names:
                     print("docs_chat tool not found on server!", file=sys.stderr)
                     sys.exit(1)

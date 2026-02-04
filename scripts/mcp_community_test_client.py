@@ -99,12 +99,12 @@ def parse_args():
 async def call_tool(session, tool_name, arguments):
     """
     Call an MCP tool and handle errors gracefully.
-    
+
     Args:
         session: Active MCP session object
         tool_name: Name of the tool to call
         arguments: Dictionary of arguments to pass to the tool
-    
+
     Returns:
         str: Tool result as text, or error message if the call fails
     """
@@ -124,7 +124,7 @@ async def main():
     - Lists all registered tools on the server.
     - Calls test_tools() to demonstrate tool invocation with sample arguments.
     - Prints the results or errors for each tool invocation.
-    
+
     Raises:
         ValueError: If --env entries are malformed or --stdio-cmd is empty
     """
@@ -145,28 +145,30 @@ async def main():
         if args.token:
             headers["Authorization"] = f"Bearer {args.token}"
         http_client = httpx.AsyncClient(headers=headers) if headers else None
-        
+
         if args.transport == "streamable-http":
-            client_func = lambda url: streamable_http_client(url, http_client=http_client)
+            client_func = lambda url: streamable_http_client(
+                url, http_client=http_client
+            )
         else:
             client_func = lambda url: sse_client(url, http_client=http_client)
-        
+
         _LOGGER.info(f"Server URL: {args.url}")
         async with client_func(args.url) as (read, write):
             async with read, write:
                 await write.send_initialize()
                 result = await read.recv_initialize()
                 _LOGGER.info(f"Connected to MCP server: {result}")
-                
+
                 session = await write.get_result(read)
-                
+
                 # List tools
                 tools_result = await session.list_tools()
                 tools = tools_result.tools
                 tool_names = [t.name for t in tools]
                 _LOGGER.info(f"Available tools: {tool_names}")
                 print("Available tools:", tool_names)
-                
+
                 # Test tools
                 await test_tools(session)
     else:  # stdio
@@ -178,32 +180,32 @@ async def main():
                 env_dict[k] = v
             else:
                 raise ValueError(f"Invalid --env entry: {item}. Must be KEY=VALUE.")
-        
+
         stdio_tokens = shlex.split(args.stdio_cmd)
         if not stdio_tokens:
             raise ValueError("--stdio-cmd must not be empty")
-        
+
         server_params = StdioServerParameters(
             command=stdio_tokens[0],
             args=stdio_tokens[1:],
-            env=env_dict if env_dict else None
+            env=env_dict if env_dict else None,
         )
-        
+
         async with stdio_client(server_params) as (read, write):
             async with read, write:
                 await write.send_initialize()
                 result = await read.recv_initialize()
                 _LOGGER.info(f"Connected to MCP server: {result}")
-                
+
                 session = await write.get_result(read)
-                
+
                 # List tools
                 tools_result = await session.list_tools()
                 tools = tools_result.tools
                 tool_names = [t.name for t in tools]
                 _LOGGER.info(f"Available tools: {tool_names}")
                 print("Available tools:", tool_names)
-                
+
                 # Test tools
                 await test_tools(session)
 
@@ -211,10 +213,10 @@ async def main():
 async def test_tools(session):
     """
     Demonstrate calling various MCP tools with example arguments.
-    
+
     This function shows how to call each tool type. Modify the session_id
     and other arguments as needed for your actual server setup.
-    
+
     Args:
         session: Active MCP session object
     """
@@ -234,22 +236,27 @@ async def test_tools(session):
     # 3. get_session_details (example - requires session_id)
     _LOGGER.info("Testing tool: get_session_details")
     print("\nCalling tool: get_session_details (example)")
-    result = await call_tool(session, "get_session_details", {"session_id": "community:local:example"})
+    result = await call_tool(
+        session, "get_session_details", {"session_id": "community:local:example"}
+    )
     print(f"Result for get_session_details: {result}")
 
     # 4. table_schemas (example - requires session_id)
     _LOGGER.info("Testing tool: table_schemas")
     print("\nCalling tool: table_schemas (example)")
-    result = await call_tool(session, "table_schemas", {"session_id": "community:local:example"})
+    result = await call_tool(
+        session, "table_schemas", {"session_id": "community:local:example"}
+    )
     print(f"Result for table_schemas: {result}")
 
     # 5. run_script (example - requires session_id and script)
     _LOGGER.info("Testing tool: run_script")
     print("\nCalling tool: run_script (example)")
-    result = await call_tool(session, "run_script", {
-        "session_id": "community:local:example",
-        "script": "print('hello world')"
-    })
+    result = await call_tool(
+        session,
+        "run_script",
+        {"session_id": "community:local:example", "script": "print('hello world')"},
+    )
     print(f"Result for run_script: {result}")
 
     # 6. enterprise_systems_status
@@ -261,7 +268,9 @@ async def test_tools(session):
     # 7. pip_packages (example - requires session_id)
     _LOGGER.info("Testing tool: pip_packages")
     print("\nCalling tool: pip_packages (example)")
-    result = await call_tool(session, "pip_packages", {"session_id": "community:local:example"})
+    result = await call_tool(
+        session, "pip_packages", {"session_id": "community:local:example"}
+    )
     print(f"Result for pip_packages: {result}")
 
 
