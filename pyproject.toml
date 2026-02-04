@@ -58,9 +58,7 @@ test = [
     "httpx[cli]>=0.24.0",      # HTTP client for integration and stress tests
     "deephaven-server>=0.39",  # Deephaven server for integration tests
     "pytz",                    # Required by deephaven-server <41.1 (missing from its dependencies) - https://deephaven.atlassian.net/browse/DOC-1132
-    # Test client and stress testing dependencies
-    "autogen-ext[mcp]>=0.5.4", # MCP client for test scripts
-    "autogen-core",            # CancellationToken for test clients
+    # Stress testing dependencies
     "aiolimiter>=1.1.0",       # Rate limiting for stress tests
     "python-dotenv>=1.0.0",    # Optional .env file loading for test scripts
 ]
@@ -108,9 +106,7 @@ dh-mcp-docs-server = "deephaven_mcp.mcp_docs_server.main:main"
 [tool.uv]
 package = true
 override-dependencies = [
-    "pydeephaven==41.1",     # Force newer pydeephaven version
-    "protobuf==6.31.1",      # Match pydeephaven 41.1's gencode version
-    "grpcio==1.76.0",        # Force compatible grpc version
+    "numba==0.63.1",         # Force Python 3.11 compatible numba (deephaven-core 41.1 pins to incompatible 0.53.1)
 ]
 
 [build-system]

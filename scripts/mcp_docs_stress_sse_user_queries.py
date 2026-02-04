@@ -13,7 +13,7 @@ Features:
 - Handles connection errors, timeouts, cancellations, and other exceptions robustly using Python 3.11+ ExceptionGroup handling.
 
 Requirements:
-- autogen-ext[mcp]
+- mcp package (native client)
 - Python 3.11 or newer (for ExceptionGroup/except* support)
 
 Usage:
@@ -32,8 +32,7 @@ import traceback
 from collections import defaultdict
 
 import httpx
-from autogen_core import CancellationToken
-from autogen_ext.tools.mcp import SseServerParams, mcp_server_tools
+from mcp.client.sse import sse_client
 
 prompts = [
     "What is Deephaven?",
@@ -44,6 +43,16 @@ prompts = [
 
 
 def parse_args():
+    """
+    Parse command-line arguments for the stress test client.
+    
+    Returns:
+        argparse.Namespace: Parsed arguments with fields:
+            - url: SSE server URL or shortcut (prod, dev, local)
+            - history: Optional chat history as JSON string
+            - threads: Number of concurrent threads (async tasks) to use
+            - runs: Number of times each thread runs the set of user queries
+    """
     parser = argparse.ArgumentParser(
         description="Async MCP Docs test client (SSE only)"
     )
@@ -79,6 +88,15 @@ def parse_args():
 
 
 def resolve_url(url_option):
+    """
+    Resolve URL shortcut to full SSE endpoint URL.
+    
+    Args:
+        url_option: URL string or shortcut ('local', 'prod', 'dev')
+    
+    Returns:
+        str: Full SSE endpoint URL
+    """
     if url_option == "local":
         return "http://localhost:8000/sse"
     elif url_option == "prod":
@@ -93,29 +111,58 @@ prompt_timings = defaultdict(list)
 prompt_timings_lock = asyncio.Lock()
 
 
-async def call_docs_chat(tool, prompt, history) -> str:
+async def call_docs_chat(session, prompt, history) -> str:
+    """
+    Call docs_chat tool and record timing statistics.
+    
+    Args:
+        session: Active MCP session object
+        prompt: Question/prompt to send to docs_chat
+        history: Optional chat history (list of message dicts)
+    
+    Returns:
+        str: Tool result text
+    """
     start = time.perf_counter()
-    result = await tool.run_json(
-        {"prompt": prompt, "history": history} if history else {"prompt": prompt},
-        cancellation_token=CancellationToken(),
-    )
+    call_args = {"prompt": prompt}
+    if history:
+        call_args["history"] = history
+    result = await session.call_tool("docs_chat", arguments=call_args)
     duration = time.perf_counter() - start
     async with prompt_timings_lock:
         prompt_timings[prompt].append(duration)
-    return result
+    return result.content[0].text if result.content else str(result)
 
 
-async def thread_worker(tool, history, runs, thread_id):
+async def thread_worker(session, history, runs, thread_id):
+    """
+    Worker task that executes prompts concurrently.
+    
+    Each worker runs through all prompts for the specified number of runs,
+    calling docs_chat and displaying results.
+    
+    Args:
+        session: Active MCP session object
+        history: Optional chat history (list of message dicts)
+        runs: Number of times to iterate through all prompts
+        thread_id: Identifier for this worker thread (for display purposes)
+    """
     for run in range(runs):
         for prompt in prompts:
             print(
                 f"[Thread {thread_id} Run {run+1} of {runs}] Sending prompt: {prompt!r}"
             )
-            result = await call_docs_chat(tool, prompt, history)
+            result = await call_docs_chat(session, prompt, history)
             print(f"[Thread {thread_id} Run {run+1} of {runs}] Result: {result!r}")
 
 
 def print_prompt_stats():
+    """
+    Print timing statistics (min, max, avg) for each prompt.
+    
+    Displays statistics collected during the stress test run, including
+    the number of samples for each prompt.
+    """
     print("\nPrompt timing statistics (seconds):")
     for prompt in prompts:
         print(f"Prompt: {prompt!r}")
@@ -132,20 +179,17 @@ def print_prompt_stats():
 
 
 async def main():
+    """
+    Main entry point for the concurrent stress test.
+    
+    Connects to the MCP Docs server via SSE, verifies docs_chat tool availability,
+    launches concurrent worker tasks, and prints timing statistics.
+    Handles various exception types using Python 3.11+ ExceptionGroup syntax.
+    """
     try:
         args = parse_args()
         url = resolve_url(args.url)
         print(f"Connecting to MCP Docs server at {url}")
-
-        server_params = SseServerParams(url=url)
-
-        tools = await mcp_server_tools(server_params)
-        print("Available tools:", [t.name for t in tools])
-        tool_map = {t.name: t for t in tools}
-
-        if "docs_chat" not in tool_map:
-            print("docs_chat tool not found on server!", file=sys.stderr)
-            sys.exit(1)
 
         # Prepare arguments for docs_chat
         history = None
@@ -156,14 +200,32 @@ async def main():
                 print(f"Failed to parse --history: {e}", file=sys.stderr)
                 sys.exit(2)
 
-        # Launch threads (tasks) concurrently
-        tasks = [
-            thread_worker(tool_map["docs_chat"], history, args.runs, i + 1)
-            for i in range(args.threads)
-        ]
-        await asyncio.gather(*tasks)
-        print("\n" * 3)
-        print_prompt_stats()
+        async with sse_client(url) as (read, write):
+            async with read, write:
+                await write.send_initialize()
+                result = await read.recv_initialize()
+                print(f"Connected to MCP server: {result}")
+                
+                session = await write.get_result(read)
+                
+                # List tools
+                tools_result = await session.list_tools()
+                tools = tools_result.tools
+                tool_names = [t.name for t in tools]
+                print("Available tools:", tool_names)
+                
+                if "docs_chat" not in tool_names:
+                    print("docs_chat tool not found on server!", file=sys.stderr)
+                    sys.exit(1)
+
+                # Launch threads (tasks) concurrently
+                tasks = [
+                    thread_worker(session, history, args.runs, i + 1)
+                    for i in range(args.threads)
+                ]
+                await asyncio.gather(*tasks)
+                print("\n" * 3)
+                print_prompt_stats()
     except* asyncio.TimeoutError as eg:
         print("Timed out waiting for main() to complete.", file=sys.stderr)
         sys.exit(5)
@@ -188,4 +250,4 @@ async def main():
 if __name__ == "__main__":
     asyncio.run(
         asyncio.wait_for(main(), timeout=400)
-    )  # 20 seconds for the whole script
+    )  # 400 seconds timeout for the whole script
