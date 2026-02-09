@@ -24,6 +24,19 @@ Usage:
 
 from deephaven_mcp.mcp_systems_server._tools.mcp_server import mcp_server
 
+# Import all tool modules to execute their @mcp_server.tool() decorators
+# This registers all tools with the mcp_server instance
+# Using underscore aliases to keep imports private (not part of public API)
+from deephaven_mcp.mcp_systems_server._tools import (
+    catalog as _catalog,
+    pq as _pq,
+    script as _script,
+    session as _session,
+    session_community as _session_community,
+    session_enterprise as _session_enterprise,
+    table as _table,
+)
+
 __all__ = [
     "mcp_server",
 ]
