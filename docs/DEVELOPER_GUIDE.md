@@ -2814,15 +2814,21 @@ Both servers can be used programmatically within Python applications:
 
 ```python
 # Import the server components
-from deephaven_mcp.mcp_systems_server import mcp_server, run_server
+from deephaven_mcp.mcp_systems_server import mcp_server
 
-# Use the MCP tools directly (all tools are async)
-from deephaven_mcp.mcp_systems_server._mcp import mcp_reload, enterprise_systems_status, sessions_list, session_details, session_tables_schema, session_script_run, session_pip_list
+# The server instance has all MCP tools registered via decorators
+# Tools are organized in modules under _tools/:
+#   - _tools.mcp_server: mcp_reload
+#   - _tools.session: sessions_list, session_details
+#   - _tools.session_enterprise: session_enterprise_create, session_enterprise_delete
+#   - _tools.session_community: session_community_create, session_community_delete, session_community_credentials
+#   - _tools.table: session_tables_schema, session_tables_list, session_table_data
+#   - _tools.script: session_script_run, session_pip_list
+#   - _tools.catalog: catalog_tables_list, catalog_tables_schema, catalog_table_data
+#   - _tools.pq: pq_list, pq_create, pq_delete, pq_get, pq_update, pq_start, pq_stop, pq_restart
 
-# Example: Get status of all enterprise systems
-result = enterprise_systems_status(context)  # Requires MCP context
-
-# Or start the server with a specific transport
+# Start the server (tools are accessible via MCP protocol)
+from deephaven_mcp.mcp_systems_server.main import run_server
 run_server(transport="streamable-http")  # Starts streamable-http server (default)
 run_server(transport="sse")  # Starts SSE server
 ```
@@ -2918,7 +2924,7 @@ Both servers expose their tools through FastMCP, following the Model Context Pro
 - **Run the server directly (development mode):**
 
   ```sh
-  PYTHONPATH=src uv run mcp dev src/deephaven_mcp/community/_mcp.py:mcp_server
+  PYTHONPATH=src uv run mcp dev src/deephaven_mcp/mcp_systems_server/_mcp.py:mcp_server
   ```
 
   This command starts the MCP server for local development with advanced debugging capabilities. You can specify different entrypoints as needed.

@@ -135,7 +135,7 @@ async def main():
         headers = {}
         if args.token:
             headers["Authorization"] = f"Bearer {args.token}"
-        
+
         http_client = httpx.AsyncClient(headers=headers) if headers else None
 
         if args.transport == "streamable-http":
@@ -146,7 +146,7 @@ async def main():
             client_func = lambda url: sse_client(url, http_client=http_client)
 
         _LOGGER.info(f"Server URL: {args.url}")
-        
+
         # Use try/finally to ensure proper cleanup of HTTP client
         try:
             async with client_func(args.url) as (read, write):
@@ -177,7 +177,9 @@ async def main():
                         call_args = {"prompt": args.prompt}
                         if history:
                             call_args["history"] = history
-                        result = await session.call_tool("docs_chat", arguments=call_args)
+                        result = await session.call_tool(
+                            "docs_chat", arguments=call_args
+                        )
                         _LOGGER.info("docs_chat call completed successfully")
                         print("\ndocs_chat result:")
                         print(result.content[0].text if result.content else str(result))
