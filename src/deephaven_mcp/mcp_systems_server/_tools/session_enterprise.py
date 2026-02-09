@@ -15,7 +15,6 @@ from typing import Any
 
 from mcp.server.fastmcp import Context
 
-from deephaven_mcp._exceptions import MissingEnterprisePackageError
 from deephaven_mcp.client import CorePlusSession
 from deephaven_mcp.client._protobuf import CorePlusQueryConfig
 from deephaven_mcp.config import (
@@ -23,13 +22,6 @@ from deephaven_mcp.config import (
     get_config_section,
     redact_enterprise_system_config,
 )
-from deephaven_mcp.resource_manager import (
-    BaseItemManager,
-    CombinedSessionRegistry,
-    EnterpriseSessionManager,
-    SystemType,
-)
-
 from deephaven_mcp.mcp_systems_server._tools.mcp_server import (
     mcp_server,
 )
@@ -39,6 +31,12 @@ from deephaven_mcp.mcp_systems_server._tools.session import (
 )
 from deephaven_mcp.mcp_systems_server._tools.shared import (
     _get_system_config,
+)
+from deephaven_mcp.resource_manager import (
+    BaseItemManager,
+    CombinedSessionRegistry,
+    EnterpriseSessionManager,
+    SystemType,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -51,7 +49,6 @@ DEFAULT_ENGINE = "DeephavenCommunity"
 
 DEFAULT_TIMEOUT_SECONDS = 60
 """Default timeout for enterprise session operations when not specified in config."""
-
 
 
 @mcp_server.tool()
@@ -193,8 +190,6 @@ async def enterprise_systems_status(
         return {"success": False, "error": str(e), "isError": True}
 
 
-
-
 async def _check_session_limits(
     session_registry: CombinedSessionRegistry, system_name: str, max_sessions: int
 ) -> dict | None:
@@ -226,8 +221,6 @@ async def _check_session_limits(
     return None
 
 
-
-
 def _generate_session_name_if_none(
     system_config: dict, session_name: str | None
 ) -> str:
@@ -256,8 +249,6 @@ def _generate_session_name_if_none(
     return generated
 
 
-
-
 async def _check_session_id_available(
     session_registry: CombinedSessionRegistry, session_id: str
 ) -> dict | None:
@@ -281,8 +272,6 @@ async def _check_session_id_available(
         return {"error": error_msg, "isError": True}
     except KeyError:
         return None  # Good - session doesn't exist yet
-
-
 
 
 @mcp_server.tool()
@@ -609,8 +598,6 @@ async def session_enterprise_create(
     return result
 
 
-
-
 def _resolve_session_parameters(
     heap_size_gb: float | int | None,
     auto_delete_timeout: int | None,
@@ -667,8 +654,6 @@ def _resolve_session_parameters(
         "programming_language": programming_language
         or defaults.get("programming_language", DEFAULT_PROGRAMMING_LANGUAGE),
     }
-
-
 
 
 @mcp_server.tool()
@@ -860,5 +845,3 @@ async def session_enterprise_delete(
         result["isError"] = True
 
     return result
-
-

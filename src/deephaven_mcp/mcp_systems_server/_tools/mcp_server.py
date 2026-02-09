@@ -26,7 +26,6 @@ from deephaven_mcp.resource_manager._instance_tracker import (
 _LOGGER = logging.getLogger(__name__)
 
 
-
 @asynccontextmanager
 async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
     """
@@ -135,7 +134,6 @@ Usage:
 """
 
 
-
 # TODO: remove mcp_reload?
 @mcp_server.tool()
 async def mcp_reload(context: Context) -> dict:
@@ -212,5 +210,3 @@ async def mcp_reload(context: Context) -> dict:
             exc_info=True,
         )
         return {"success": False, "error": str(e), "isError": True}
-
-

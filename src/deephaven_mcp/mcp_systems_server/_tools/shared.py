@@ -21,7 +21,6 @@ from deephaven_mcp.resource_manager import CombinedSessionRegistry
 _LOGGER = logging.getLogger(__name__)
 
 
-
 async def _get_session_from_context(
     function_name: str, context: Context, session_id: str
 ) -> BaseSession:
@@ -68,8 +67,6 @@ async def _get_session_from_context(
     )
 
     return session
-
-
 
 
 async def _get_enterprise_session(
@@ -126,12 +123,9 @@ async def _get_enterprise_session(
         return None, {"success": False, "error": error_msg, "isError": True}
 
 
-
-
 # Size limits for table data responses
 MAX_RESPONSE_SIZE = 50_000_000  # 50MB hard limit
 WARNING_SIZE = 5_000_000  # 5MB warning threshold
-
 
 
 def _check_response_size(table_name: str, estimated_size: int) -> dict | None:
@@ -169,8 +163,6 @@ def _check_response_size(table_name: str, estimated_size: int) -> dict | None:
         }
 
     return None  # Size is acceptable
-
-
 
 
 def _format_meta_table_result(
@@ -260,8 +252,6 @@ def _format_meta_table_result(
     return result
 
 
-
-
 async def _get_system_config(
     function_name: str, config_manager: ConfigManager, system_name: str
 ) -> tuple[dict, dict | None]:
@@ -305,5 +295,3 @@ async def _get_system_config(
         return {}, {"error": error_msg, "isError": True}
 
     return enterprise_systems_config[system_name], None
-
-

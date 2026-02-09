@@ -16,6 +16,7 @@ from mcp.server.fastmcp import Context
 
 from deephaven_mcp import queries
 from deephaven_mcp.client import BaseSession
+from deephaven_mcp.mcp_systems_server._tools.mcp_server import mcp_server
 from deephaven_mcp.resource_manager import (
     BaseItemManager,
     CombinedSessionRegistry,
@@ -23,13 +24,6 @@ from deephaven_mcp.resource_manager import (
 )
 
 T = TypeVar("T")
-
-from deephaven_mcp.mcp_systems_server._tools.mcp_server import (
-    mcp_server,
-)
-from deephaven_mcp.mcp_systems_server._tools.shared import (
-    _get_session_from_context,
-)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -46,7 +40,6 @@ in the enterprise system configuration. Can be overridden per system in the conf
 
 DEFAULT_PROGRAMMING_LANGUAGE = "Python"
 """Default programming language for community and enterprise sessions when not specified in config."""
-
 
 
 @mcp_server.tool()
@@ -163,8 +156,6 @@ async def sessions_list(context: Context) -> dict:
         return {"success": False, "error": str(e), "isError": True}
 
 
-
-
 async def _get_session_liveness_info(
     mgr: BaseItemManager, session_id: str, attempt_to_connect: bool
 ) -> tuple[bool, str, str | None]:
@@ -199,8 +190,6 @@ async def _get_session_liveness_info(
             f"[mcp_systems_server:session_details] Could not check liveness for '{session_id}': {e!r}"
         )
         return False, "OFFLINE", str(e)
-
-
 
 
 async def _get_session_property(
@@ -240,8 +229,6 @@ async def _get_session_property(
         return None
 
 
-
-
 async def _get_session_programming_language(
     mgr: BaseItemManager, session_id: str, available: bool
 ) -> str | None:
@@ -276,8 +263,6 @@ async def _get_session_programming_language(
             f"[mcp_systems_server:session_details] Could not get programming_language for '{session_id}': {e!r}"
         )
         return None
-
-
 
 
 async def _get_session_versions(
@@ -315,8 +300,6 @@ async def _get_session_versions(
             f"[mcp_systems_server:session_details] Could not get Deephaven versions for '{session_id}': {e!r}"
         )
         return None, None
-
-
 
 
 @mcp_server.tool()
@@ -511,5 +494,3 @@ async def session_details(
             f"[mcp_systems_server:session_details] Failed: {e!r}", exc_info=True
         )
         return {"success": False, "error": str(e), "isError": True}
-
-

@@ -9,15 +9,14 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
-
 from conftest import MockContext, create_mock_instance_tracker
 
+from deephaven_mcp import config
 from deephaven_mcp.mcp_systems_server._tools.table import (
     session_table_data,
     session_tables_list,
     session_tables_schema,
 )
-from deephaven_mcp import config
 from deephaven_mcp.resource_manager import (
     DockerLaunchedSession,
     DynamicCommunitySessionManager,
@@ -54,12 +53,9 @@ async def test_session_tables_schema_empty_table_names():
     mock_session_manager.get = AsyncMock(return_value=DummySession())
     session_registry.get = AsyncMock(return_value=mock_session_manager)
     context = MockContext({"session_registry": session_registry})
-    res = await session_tables_schema(
-        context, session_id="worker", table_names=[]
-    )
+    res = await session_tables_schema(context, session_id="worker", table_names=[])
     assert isinstance(res, dict)
     assert res == {"success": True, "schemas": [], "count": 0}
-
 
 
 @pytest.mark.asyncio
@@ -102,7 +98,6 @@ async def test_session_tables_schema_interface_contract():
     assert result["schemas"][0]["table"] == "test_table"
 
 
-
 @pytest.mark.asyncio
 async def test_session_tables_schema_would_catch_original_bug():
     """Test that validates the original bug pattern would be caught"""
@@ -136,7 +131,6 @@ async def test_session_tables_schema_would_catch_original_bug():
     assert result == ["table1", "table2"]
 
 
-
 @pytest.mark.asyncio
 async def test_session_tables_schema_no_tables():
     session_registry = AsyncMock()
@@ -153,12 +147,9 @@ async def test_session_tables_schema_no_tables():
     mock_session_manager.get = AsyncMock(return_value=DummySession())
     session_registry.get = AsyncMock(return_value=mock_session_manager)
     context = MockContext({"session_registry": session_registry})
-    res = await session_tables_schema(
-        context, session_id="worker", table_names=None
-    )
+    res = await session_tables_schema(context, session_id="worker", table_names=None)
     assert isinstance(res, dict)
     assert res == {"success": True, "schemas": [], "count": 0}
-
 
 
 @pytest.mark.asyncio
@@ -223,7 +214,6 @@ async def test_session_tables_schema_success():
     assert result["schemas"][0]["data"][0]["DataType"] == "int"
     assert "meta_columns" in result["schemas"][0]
     assert result["schemas"][0]["row_count"] == 1
-
 
 
 @pytest.mark.asyncio
@@ -295,7 +285,6 @@ async def test_session_tables_schema_all_tables():
     assert result["schemas"][1]["data"][0]["DataType"] == "int"
 
 
-
 @pytest.mark.asyncio
 async def test_session_tables_schema_schema_key_error():
     # Create our mock session
@@ -359,7 +348,6 @@ async def test_session_tables_schema_schema_key_error():
     assert result["schemas"][0]["data"][0]["foo"] == "bar"
 
 
-
 @pytest.mark.asyncio
 async def test_session_tables_schema_session_error():
     # Following the pattern in _mcp.py:
@@ -376,14 +364,11 @@ async def test_session_tables_schema_session_error():
             "session_registry": session_registry,
         }
     )
-    res = await session_tables_schema(
-        context, session_id="worker", table_names=["t1"]
-    )
+    res = await session_tables_schema(context, session_id="worker", table_names=["t1"])
     assert isinstance(res, dict)
     assert res["success"] is False
     assert res["isError"] is True
     assert "fail" in res["error"]
-
 
 
 @pytest.mark.asyncio
@@ -419,7 +404,6 @@ async def test_session_tables_list_success_multiple_tables():
     assert result["count"] == 3
 
 
-
 @pytest.mark.asyncio
 async def test_session_tables_list_success_empty_session():
     """Test session_tables_list with no tables in session."""
@@ -449,7 +433,6 @@ async def test_session_tables_list_success_empty_session():
     assert result["count"] == 0
 
 
-
 @pytest.mark.asyncio
 async def test_session_tables_list_invalid_session_id():
     """Test session_tables_list with invalid session_id."""
@@ -469,7 +452,6 @@ async def test_session_tables_list_invalid_session_id():
     assert result["success"] is False
     assert result["isError"] is True
     assert "Session not found" in result["error"]
-
 
 
 @pytest.mark.asyncio
@@ -492,7 +474,6 @@ async def test_session_tables_list_session_connection_failure():
     assert result["success"] is False
     assert result["isError"] is True
     assert "Connection failed" in result["error"]
-
 
 
 @pytest.mark.asyncio
@@ -523,7 +504,6 @@ async def test_session_tables_list_session_tables_method_failure():
     assert "Failed to retrieve table list" in result["error"]
 
 
-
 @pytest.mark.asyncio
 async def test_session_tables_list_community_session():
     """Test session_tables_list works with community sessions."""
@@ -543,9 +523,7 @@ async def test_session_tables_list_community_session():
     context = MockContext({"session_registry": session_registry})
 
     # Call list_tables
-    result = await session_tables_list(
-        context, session_id="community:local:test"
-    )
+    result = await session_tables_list(context, session_id="community:local:test")
 
     # Verify the result
     assert isinstance(result, dict)
@@ -553,7 +531,6 @@ async def test_session_tables_list_community_session():
     assert result["session_id"] == "community:local:test"
     assert result["table_names"] == ["table1", "table2"]
     assert result["count"] == 2
-
 
 
 @pytest.mark.asyncio
@@ -615,7 +592,6 @@ async def test_session_table_data_success_default_params():
         )
 
 
-
 @pytest.mark.asyncio
 async def test_session_table_data_success_custom_params():
     """Test get_table_data with custom parameters."""
@@ -655,7 +631,6 @@ async def test_session_table_data_success_custom_params():
         )
 
 
-
 @pytest.mark.asyncio
 async def test_session_table_data_success_full_table():
     """Test get_table_data with max_rows=None for full table."""
@@ -691,9 +666,7 @@ async def test_session_table_data_success_full_table():
 
         mock_get_table.return_value = (mock_arrow_table, True)
 
-        result = await session_table_data(
-            context, "session1", "table1", max_rows=None
-        )
+        result = await session_table_data(context, "session1", "table1", max_rows=None)
 
         assert result["success"] is True
         assert (
@@ -704,7 +677,6 @@ async def test_session_table_data_success_full_table():
         mock_get_table.assert_called_once_with(
             mock_session, "table1", max_rows=None, head=True
         )
-
 
 
 @pytest.mark.asyncio
@@ -741,7 +713,6 @@ async def test_session_table_data_invalid_format():
         assert result["isError"] is True
 
 
-
 @pytest.mark.asyncio
 async def test_session_table_data_size_limit_exceeded():
     """Test get_table_data when response size exceeds limit."""
@@ -775,7 +746,6 @@ async def test_session_table_data_size_limit_exceeded():
         assert result["isError"] is True
 
 
-
 @pytest.mark.asyncio
 async def test_session_table_data_session_not_found():
     """Test get_table_data when session is not found."""
@@ -789,7 +759,6 @@ async def test_session_table_data_session_not_found():
     assert result["success"] is False
     assert "Session not found" in result["error"]
     assert result["isError"] is True
-
 
 
 @pytest.mark.asyncio
@@ -814,5 +783,3 @@ async def test_session_table_data_table_not_found():
         assert result["success"] is False
         assert "Table 'invalid_table' not found" in result["error"]
         assert result["isError"] is True
-
-

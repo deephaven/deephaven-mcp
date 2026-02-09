@@ -73,7 +73,6 @@ from deephaven_mcp.mcp_systems_server._tools.shared import (
 _LOGGER = logging.getLogger(__name__)
 
 
-
 # =============================================================================
 # Persistent Query (PQ) Management Tools
 # =============================================================================
@@ -107,8 +106,6 @@ def _parse_pq_id(pq_id: str) -> tuple[str, CorePlusQuerySerial]:
     return parts[1], CorePlusQuerySerial(serial_int)
 
 
-
-
 def _make_pq_id(system_name: str, serial: CorePlusQuerySerial) -> str:
     """Construct a pq_id from system_name and serial.
 
@@ -122,15 +119,12 @@ def _make_pq_id(system_name: str, serial: CorePlusQuerySerial) -> str:
     return f"enterprise:{system_name}:{serial}"
 
 
-
-
 # MCP-safe timeout limits
 MAX_MCP_SAFE_TIMEOUT = 60  # Conservative limit to prevent client timeouts
 DEFAULT_PQ_TIMEOUT = 30  # Default for PQ lifecycle operations
 DEFAULT_MAX_CONCURRENT = (
     20  # Default concurrency limit for parallel PQ batch operations
 )
-
 
 
 def _validate_timeout(timeout_seconds: int, function_name: str) -> int:
@@ -163,8 +157,6 @@ def _validate_timeout(timeout_seconds: int, function_name: str) -> int:
     return timeout_seconds
 
 
-
-
 def _validate_max_concurrent(max_concurrent: int, function_name: str) -> int:
     """Validate max_concurrent is valid for parallel operations.
 
@@ -184,8 +176,6 @@ def _validate_max_concurrent(max_concurrent: int, function_name: str) -> int:
             f"Use a positive integer to control parallelism (e.g., 20 for moderate concurrency)."
         )
     return max_concurrent
-
-
 
 
 def _format_pq_config(config: CorePlusQueryConfig) -> dict:
@@ -280,8 +270,6 @@ def _format_pq_config(config: CorePlusQueryConfig) -> dict:
     }
 
 
-
-
 def _format_named_string_list(nsl: "NamedStringList") -> dict:
     """Format NamedStringList protobuf into dict.
 
@@ -302,8 +290,6 @@ def _format_named_string_list(nsl: "NamedStringList") -> dict:
         "name": nsl.name,
         "values": list(nsl.values),
     }
-
-
 
 
 def _format_column_definition(col: "ColumnDefinitionMessage") -> dict:
@@ -342,8 +328,6 @@ def _format_column_definition(col: "ColumnDefinitionMessage") -> dict:
     }
 
 
-
-
 def _format_table_definition(td: "TableDefinitionMessage") -> dict:
     """Format TableDefinitionMessage protobuf into dict.
 
@@ -369,8 +353,6 @@ def _format_table_definition(td: "TableDefinitionMessage") -> dict:
         "columns": columns,
         "storage_type": td.storageType if td.storageType else None,
     }
-
-
 
 
 def _format_exported_object_info(obj: "ExportedObjectInfoMessage") -> dict:
@@ -413,8 +395,6 @@ def _format_exported_object_info(obj: "ExportedObjectInfoMessage") -> dict:
     }
 
 
-
-
 def _format_worker_protocol(wp: "WorkerProtocolMessage") -> dict:
     """Format WorkerProtocolMessage protobuf into dict.
 
@@ -435,8 +415,6 @@ def _format_worker_protocol(wp: "WorkerProtocolMessage") -> dict:
         "name": wp.name,
         "port": wp.port,
     }
-
-
 
 
 def _format_connection_details(cd: "ProcessorConnectionDetailsMessage") -> dict:
@@ -474,8 +452,6 @@ def _format_connection_details(cd: "ProcessorConnectionDetailsMessage") -> dict:
     }
 
 
-
-
 def _format_exception_details(ed: "ExceptionDetailsMessage") -> dict:
     """Format ExceptionDetailsMessage protobuf into dict.
 
@@ -498,8 +474,6 @@ def _format_exception_details(ed: "ExceptionDetailsMessage") -> dict:
         "stack_trace": ed.stackTrace or None,
         "short_causes": ed.shortCauses or None,
     }
-
-
 
 
 def _format_pq_state(state: CorePlusQueryState | None) -> dict | None:
@@ -605,8 +579,6 @@ def _format_pq_state(state: CorePlusQueryState | None) -> dict | None:
     return result
 
 
-
-
 def _format_pq_replicas(replicas: list[CorePlusQueryState]) -> list[dict]:
     """Format list of replica PersistentQueryStateMessage objects.
 
@@ -629,8 +601,6 @@ def _format_pq_replicas(replicas: list[CorePlusQueryState]) -> list[dict]:
     return [f for f in formatted if f is not None]
 
 
-
-
 def _format_pq_spares(spares: list[CorePlusQueryState]) -> list[dict]:
     """Format list of spare PersistentQueryStateMessage objects.
 
@@ -649,8 +619,6 @@ def _format_pq_spares(spares: list[CorePlusQueryState]) -> list[dict]:
 
     formatted = [_format_pq_state(spare) for spare in spares if spare is not None]
     return [f for f in formatted if f is not None]
-
-
 
 
 def _normalize_programming_language(language: str) -> str:
@@ -675,8 +643,6 @@ def _normalize_programming_language(language: str) -> str:
             f"Invalid programming_language: '{language}'. "
             "Must be 'Python' or 'Groovy' (case-insensitive)."
         )
-
-
 
 
 async def _setup_batch_pq_operation(
@@ -781,8 +747,6 @@ async def _setup_batch_pq_operation(
     )
 
 
-
-
 def _validate_and_parse_pq_ids(
     pq_id: str | list[str],
 ) -> tuple[list[tuple[str, CorePlusQuerySerial]] | None, str | None, str | None]:
@@ -824,8 +788,6 @@ def _validate_and_parse_pq_ids(
     return (parsed_pqs, system_name, None)
 
 
-
-
 def _convert_restart_users_to_enum(restart_users_str: str) -> int:
     """Convert restart_users string to protobuf enum numeric value.
 
@@ -854,8 +816,6 @@ def _convert_restart_users_to_enum(restart_users_str: str) -> int:
         ) from None
 
 
-
-
 def _add_session_id_if_running(
     result_dict: dict[str, object],
     state_name: str,
@@ -878,8 +838,6 @@ def _add_session_id_if_running(
             SystemType.ENTERPRISE, system_name, pq_name
         )
         result_dict["session_id"] = session_id
-
-
 
 
 @mcp_server.tool()
@@ -998,8 +956,6 @@ async def pq_name_to_id(
         result["isError"] = True
 
     return result
-
-
 
 
 @mcp_server.tool()
@@ -1162,8 +1118,6 @@ async def pq_list(
         result["isError"] = True
 
     return result
-
-
 
 
 @mcp_server.tool()
@@ -1471,8 +1425,6 @@ async def pq_details(
     return result
 
 
-
-
 @mcp_server.tool()
 async def pq_create(
     context: Context,
@@ -1713,8 +1665,6 @@ async def pq_create(
     return result
 
 
-
-
 @mcp_server.tool()
 async def pq_delete(
     context: Context,
@@ -1951,8 +1901,6 @@ async def pq_delete(
     return result
 
 
-
-
 def _apply_pq_config_simple_fields(
     config_pb: "PersistentQueryConfigMessage",
     pq_name: str | None,
@@ -2021,8 +1969,6 @@ def _apply_pq_config_simple_fields(
     return has_changes
 
 
-
-
 def _apply_pq_config_list_fields(
     config_pb: "PersistentQueryConfigMessage",
     schedule: list[str] | None,
@@ -2083,8 +2029,6 @@ def _apply_pq_config_list_fields(
         config_pb.viewerGroups.extend(viewer_groups)
         has_changes = True
     return has_changes
-
-
 
 
 def _apply_pq_config_modifications(
@@ -2198,8 +2142,6 @@ def _apply_pq_config_modifications(
         has_changes = True
 
     return has_changes
-
-
 
 
 @mcp_server.tool()
@@ -2441,8 +2383,6 @@ async def pq_modify(
         result["isError"] = True
 
     return result
-
-
 
 
 @mcp_server.tool()
@@ -2704,8 +2644,6 @@ async def pq_start(
     return result
 
 
-
-
 @mcp_server.tool()
 async def pq_stop(
     context: Context,
@@ -2952,8 +2890,6 @@ async def pq_stop(
         result["isError"] = True
 
     return result
-
-
 
 
 @mcp_server.tool()
@@ -3210,5 +3146,3 @@ async def pq_restart(
         result["isError"] = True
 
     return result
-
-

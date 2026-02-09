@@ -9,9 +9,9 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
-
 from conftest import MockContext, create_mock_instance_tracker
 
+from deephaven_mcp import config
 from deephaven_mcp.mcp_systems_server._tools.session_community import (
     _normalize_auth_type,
     _resolve_community_session_parameters,
@@ -19,7 +19,6 @@ from deephaven_mcp.mcp_systems_server._tools.session_community import (
     session_community_credentials,
     session_community_delete,
 )
-from deephaven_mcp import config
 from deephaven_mcp.resource_manager import (
     DockerLaunchedSession,
     DynamicCommunitySessionManager,
@@ -109,7 +108,6 @@ async def test_session_community_create_success():
         mock_session_registry.add_session.assert_called_once()
 
 
-
 @pytest.mark.asyncio
 async def test_session_community_create_not_configured():
     """Test community session creation when not configured."""
@@ -137,7 +135,6 @@ async def test_session_community_create_not_configured():
     assert result["success"] is False
     assert "not configured" in result["error"]
     assert result["isError"] is True
-
 
 
 @pytest.mark.asyncio
@@ -210,7 +207,6 @@ async def test_session_community_create_sessions_disabled():
         mock_session_registry.count_added_sessions.assert_not_called()
 
 
-
 @pytest.mark.asyncio
 async def test_session_community_create_max_sessions_reached():
     """Test community session creation when max sessions reached."""
@@ -245,7 +241,6 @@ async def test_session_community_create_max_sessions_reached():
     assert result["success"] is False
     assert "Session limit reached" in result["error"]
     assert result["isError"] is True
-
 
 
 @pytest.mark.asyncio
@@ -301,7 +296,6 @@ async def test_session_community_create_launch_failure():
         assert result["isError"] is True
 
 
-
 @pytest.mark.asyncio
 async def test_session_community_delete_success():
     """Test successful community session deletion."""
@@ -345,7 +339,6 @@ async def test_session_community_delete_success():
     # Verify session was closed and removed
     mock_manager.close.assert_called_once()
     mock_session_registry.remove_session.assert_called_once()
-
 
 
 @pytest.mark.asyncio
@@ -398,7 +391,6 @@ async def test_session_community_delete_python_session():
     mock_session_registry.remove_session.assert_called_once()
 
 
-
 @pytest.mark.asyncio
 async def test_session_community_delete_not_found():
     """Test community session deletion when session not found."""
@@ -424,7 +416,6 @@ async def test_session_community_delete_not_found():
     assert result["success"] is False
     assert "not found" in result["error"]
     assert result["isError"] is True
-
 
 
 @pytest.mark.asyncio
@@ -458,7 +449,6 @@ async def test_session_community_delete_not_dynamic():
     assert result["success"] is False
     assert "Only dynamically created sessions" in result["error"]
     assert result["isError"] is True
-
 
 
 @pytest.mark.asyncio
@@ -522,7 +512,6 @@ async def test_session_community_create_case_insensitive_params():
             # Other errors (like Docker not available) are OK for this test
 
 
-
 @pytest.mark.asyncio
 async def test_session_community_create_validates_programming_language_with_python():
     """Test that programming_language parameter raises error with python launch method."""
@@ -566,7 +555,6 @@ async def test_session_community_create_validates_programming_language_with_pyth
         in result["error"]
     )
     assert result["isError"] is True
-
 
 
 @pytest.mark.asyncio
@@ -614,7 +602,6 @@ async def test_session_community_create_validates_docker_image_with_python():
     assert result["isError"] is True
 
 
-
 @pytest.mark.asyncio
 async def test_session_community_create_validates_docker_memory_limit_with_python():
     """Test that docker_memory_limit_gb parameter raises error with python launch method."""
@@ -658,7 +645,6 @@ async def test_session_community_create_validates_docker_memory_limit_with_pytho
         in result["error"]
     )
     assert result["isError"] is True
-
 
 
 @pytest.mark.asyncio
@@ -706,7 +692,6 @@ async def test_session_community_create_validates_docker_cpu_limit_with_python()
     assert result["isError"] is True
 
 
-
 @pytest.mark.asyncio
 async def test_session_community_create_validates_docker_volumes_with_python():
     """Test that docker_volumes parameter raises error with python launch method."""
@@ -752,7 +737,6 @@ async def test_session_community_create_validates_docker_volumes_with_python():
     assert result["isError"] is True
 
 
-
 @pytest.mark.asyncio
 async def test_session_community_create_validates_python_venv_path_with_docker():
     """Test that python_venv_path parameter raises error with docker launch method."""
@@ -796,7 +780,6 @@ async def test_session_community_create_validates_python_venv_path_with_docker()
         in result["error"]
     )
     assert result["isError"] is True
-
 
 
 @pytest.mark.asyncio
@@ -845,7 +828,6 @@ async def test_session_community_create_validates_mutually_exclusive_params():
     assert result["isError"] is True
 
 
-
 @pytest.mark.asyncio
 async def test_session_community_delete_validates_source():
     """Test that session_community_delete only allows deletion of dynamic sessions."""
@@ -882,7 +864,6 @@ async def test_session_community_delete_validates_source():
     assert "not a dynamically created session" in result["error"]
     assert "source: 'community'" in result["error"]
     assert result["isError"] is True
-
 
 
 @pytest.mark.asyncio
@@ -930,7 +911,6 @@ async def test_session_community_delete_allows_dynamic_sessions():
     mock_session_registry.remove_session.assert_called_once_with(
         "community:dynamic:test-session"
     )
-
 
 
 @pytest.mark.asyncio
@@ -1003,7 +983,6 @@ async def test_session_community_create_explicit_docker_image():
         assert call_kwargs["docker_image"] == "ghcr.io/deephaven/custom-server:v1.2.3"
 
 
-
 @pytest.mark.asyncio
 async def test_session_community_create_groovy_programming_language():
     """Test coverage for lines 3836-3837: Groovy programming language parameter."""
@@ -1074,7 +1053,6 @@ async def test_session_community_create_groovy_programming_language():
         assert "slim" in call_kwargs["docker_image"]  # Groovy uses server-slim
 
 
-
 @pytest.mark.asyncio
 async def test_session_community_create_unsupported_programming_language():
     """Test coverage for lines 3839-3843: unsupported programming language error."""
@@ -1112,7 +1090,6 @@ async def test_session_community_create_unsupported_programming_language():
     assert "Unsupported programming_language" in result["error"]
     assert "JavaScript" in result["error"]
     assert "Python" in result["error"] and "Groovy" in result["error"]
-
 
 
 @pytest.mark.asyncio
@@ -1186,7 +1163,6 @@ async def test_session_community_create_groovy_from_config_defaults():
         assert "slim" in call_kwargs["docker_image"]  # Groovy uses slim image
 
 
-
 @pytest.mark.asyncio
 async def test_session_community_create_invalid_config_programming_language():
     """Test coverage for lines 3853-3857: invalid programming language in config."""
@@ -1225,7 +1201,6 @@ async def test_session_community_create_invalid_config_programming_language():
     assert "Invalid programming_language in config" in result["error"]
     assert "Ruby" in result["error"]
     assert "Python" in result["error"] and "Groovy" in result["error"]
-
 
 
 @pytest.mark.asyncio
@@ -1270,7 +1245,6 @@ async def test_session_community_create_missing_auth_token_env_var():
     assert "not set" in result["error"]
 
 
-
 @pytest.mark.asyncio
 async def test_session_community_credentials_disabled_by_default():
     """Test that credential retrieval is disabled by default (mode='none')."""
@@ -1309,7 +1283,6 @@ async def test_session_community_credentials_disabled_by_default():
     assert "deephaven_mcp.json" in result["error"]
 
 
-
 @pytest.mark.asyncio
 async def test_session_community_credentials_explicit_none():
     """Test that credential retrieval respects explicit 'none' mode."""
@@ -1336,7 +1309,6 @@ async def test_session_community_credentials_explicit_none():
     assert result["isError"] is True
     assert "Credential retrieval is disabled" in result["error"]
     assert "mode='none'" in result["error"]
-
 
 
 @pytest.mark.asyncio
@@ -1393,7 +1365,6 @@ async def test_session_community_credentials_dynamic_success():
     assert "isError" not in result
 
 
-
 @pytest.mark.asyncio
 async def test_session_community_credentials_anonymous_auth():
     """Test credential retrieval with anonymous auth (no token)."""
@@ -1438,7 +1409,6 @@ async def test_session_community_credentials_anonymous_auth():
     assert result["auth_type"] == "ANONYMOUS"
 
 
-
 @pytest.mark.asyncio
 async def test_session_community_credentials_no_config():
     """Test when community config is empty."""
@@ -1464,7 +1434,6 @@ async def test_session_community_credentials_no_config():
     assert result["isError"] is True
     assert "Credential retrieval is disabled" in result["error"]
     assert "mode='none'" in result["error"]
-
 
 
 @pytest.mark.asyncio
@@ -1496,7 +1465,6 @@ async def test_session_community_credentials_session_not_found():
     assert "Session 'community:dynamic:nonexistent' not found" in result["error"]
 
 
-
 @pytest.mark.asyncio
 async def test_session_community_credentials_not_dynamic_session():
     """Test when session is not a DynamicCommunitySessionManager."""
@@ -1526,7 +1494,6 @@ async def test_session_community_credentials_not_dynamic_session():
     assert result["success"] is False
     assert result["isError"] is True
     assert "not a community session" in result["error"]
-
 
 
 @pytest.mark.asyncio
@@ -1575,7 +1542,6 @@ async def test_session_community_credentials_static_session():
     assert "isError" not in result
 
 
-
 @pytest.mark.asyncio
 async def test_session_community_credentials_static_session_anonymous():
     """Test credential retrieval for static community session with anonymous auth."""
@@ -1621,7 +1587,6 @@ async def test_session_community_credentials_static_session_anonymous():
     assert "isError" not in result
 
 
-
 @pytest.mark.asyncio
 async def test_session_community_credentials_invalid_session_id():
     """Test when session_id has invalid format."""
@@ -1649,7 +1614,6 @@ async def test_session_community_credentials_invalid_session_id():
     assert "community:dynamic:" in result["error"]
 
 
-
 @pytest.mark.asyncio
 async def test_session_community_credentials_exception_handling():
     """Test exception handling in session_community_credentials."""
@@ -1675,7 +1639,6 @@ async def test_session_community_credentials_exception_handling():
     assert result["success"] is False
     assert result["isError"] is True
     assert "Unexpected config error" in result["error"]
-
 
 
 @pytest.mark.asyncio
@@ -1716,7 +1679,6 @@ async def test_session_community_credentials_dynamic_only_denies_static():
     assert result["isError"] is True
     assert "static sessions is disabled" in result["error"]
     assert "dynamic_only" in result["error"]
-
 
 
 @pytest.mark.asyncio
@@ -1766,7 +1728,6 @@ async def test_session_community_credentials_static_only_denies_dynamic():
     assert "static_only" in result["error"]
 
 
-
 @pytest.mark.asyncio
 async def test_session_community_credentials_all_allows_both():
     """Test that mode='all' allows both dynamic and static session credentials."""
@@ -1807,13 +1768,11 @@ async def test_session_community_credentials_all_allows_both():
     assert result["auth_token"] == "static_token_123"
 
 
-
 def test_normalize_auth_type_psk_uppercase():
     """Test PSK shorthand normalization - uppercase."""
     result, error = _normalize_auth_type("PSK")
     assert error is None
     assert result == "io.deephaven.authentication.psk.PskAuthenticationHandler"
-
 
 
 def test_normalize_auth_type_psk_lowercase():
@@ -1823,13 +1782,11 @@ def test_normalize_auth_type_psk_lowercase():
     assert result == "io.deephaven.authentication.psk.PskAuthenticationHandler"
 
 
-
 def test_normalize_auth_type_psk_mixedcase():
     """Test PSK shorthand normalization - mixed case."""
     result, error = _normalize_auth_type("Psk")
     assert error is None
     assert result == "io.deephaven.authentication.psk.PskAuthenticationHandler"
-
 
 
 def test_normalize_auth_type_anonymous_uppercase():
@@ -1839,7 +1796,6 @@ def test_normalize_auth_type_anonymous_uppercase():
     assert result == "Anonymous"
 
 
-
 def test_normalize_auth_type_anonymous_lowercase():
     """Test Anonymous shorthand normalization - lowercase."""
     result, error = _normalize_auth_type("anonymous")
@@ -1847,13 +1803,11 @@ def test_normalize_auth_type_anonymous_lowercase():
     assert result == "Anonymous"
 
 
-
 def test_normalize_auth_type_anonymous_proper_case():
     """Test Anonymous shorthand normalization - proper case."""
     result, error = _normalize_auth_type("Anonymous")
     assert error is None
     assert result == "Anonymous"
-
 
 
 def test_normalize_auth_type_basic_rejected():
@@ -1864,7 +1818,6 @@ def test_normalize_auth_type_basic_rejected():
     assert "requires database setup" in error
 
 
-
 def test_normalize_auth_type_basic_lowercase_rejected():
     """Test that Basic auth (lowercase) is rejected."""
     result, error = _normalize_auth_type("basic")
@@ -1872,13 +1825,11 @@ def test_normalize_auth_type_basic_lowercase_rejected():
     assert "Basic authentication is not supported" in error
 
 
-
 def test_normalize_auth_type_basic_uppercase_rejected():
     """Test that Basic auth (uppercase) is rejected."""
     result, error = _normalize_auth_type("BASIC")
     assert error is not None
     assert "Basic authentication is not supported" in error
-
 
 
 def test_normalize_auth_type_psk_handler_wrong_case_rejected():
@@ -1891,7 +1842,6 @@ def test_normalize_auth_type_psk_handler_wrong_case_rejected():
     assert "io.deephaven.authentication.psk.PskAuthenticationHandler" in error
 
 
-
 def test_normalize_auth_type_whitespace_rejected():
     """Test that auth_type with whitespace is rejected."""
     result, error = _normalize_auth_type(" PSK")
@@ -1899,13 +1849,11 @@ def test_normalize_auth_type_whitespace_rejected():
     assert "whitespace" in error
 
 
-
 def test_normalize_auth_type_trailing_whitespace_rejected():
     """Test that auth_type with trailing whitespace is rejected."""
     result, error = _normalize_auth_type("PSK ")
     assert error is not None
     assert "whitespace" in error
-
 
 
 def test_normalize_auth_type_full_class_name_preserved():
@@ -1917,13 +1865,11 @@ def test_normalize_auth_type_full_class_name_preserved():
     assert result == "io.deephaven.authentication.psk.PskAuthenticationHandler"
 
 
-
 def test_normalize_auth_type_custom_authenticator_preserved():
     """Test that custom authenticator class names are preserved."""
     result, error = _normalize_auth_type("com.example.CustomAuthenticator")
     assert error is None
     assert result == "com.example.CustomAuthenticator"
-
 
 
 def test_normalize_auth_type_no_dots_preserved():
@@ -1933,7 +1879,6 @@ def test_normalize_auth_type_no_dots_preserved():
     assert result == "CustomAuth"
 
 
-
 def test_normalize_auth_type_anonymous_mixedcase():
     """Test Anonymous shorthand normalization - various mixed cases."""
     result, error = _normalize_auth_type("AnOnYmOuS")
@@ -1941,13 +1886,11 @@ def test_normalize_auth_type_anonymous_mixedcase():
     assert result == "Anonymous"
 
 
-
 def test_normalize_auth_type_uppercase_custom_authenticator_allowed():
     """Test that custom authenticators with uppercase names are allowed."""
     result, error = _normalize_auth_type("COM.MYCOMPANY.CUSTOMAUTH")
     assert error is None
     assert result == "COM.MYCOMPANY.CUSTOMAUTH"
-
 
 
 def test_resolve_community_session_parameters_invalid_auth_type():
@@ -1976,7 +1919,6 @@ def test_resolve_community_session_parameters_invalid_auth_type():
     assert error["isError"] is True
     assert "Invalid auth_type" in error["error"]
     assert "Basic authentication is not supported" in error["error"]
-
 
 
 @pytest.mark.asyncio
@@ -2080,7 +2022,6 @@ async def test_session_community_create_groovy_session_type_in_config():
         ), "Groovy should use slim Docker image"
 
 
-
 @pytest.mark.asyncio
 async def test_session_community_create_python_session_type_in_config():
     """Regression test: Verify programming_language='Python' results in session_type='python'."""
@@ -2163,7 +2104,6 @@ async def test_session_community_create_python_session_type_in_config():
         assert captured_config["session_type"] == "python"
 
 
-
 @pytest.mark.asyncio
 async def test_session_community_create_default_session_type_in_config():
     """Regression test: Verify omitting programming_language defaults to Python."""
@@ -2244,5 +2184,3 @@ async def test_session_community_create_default_session_type_in_config():
         assert "session_type" in captured_config
         # Should default to Python
         assert captured_config["session_type"] == "python"
-
-

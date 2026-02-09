@@ -9,8 +9,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
-
 from conftest import MockContext, create_mock_instance_tracker
+
 
 # Test-specific helper functions (only used in this file)
 def create_mock_pq_info(serial, name, state="RUNNING", heap_size=8.0):
@@ -115,9 +115,7 @@ def create_mock_pq_info(serial, name, state="RUNNING", heap_size=8.0):
     return mock_pq_info
 
 
-
-
-
+from deephaven_mcp import config
 from deephaven_mcp.mcp_systems_server._tools.pq import (
     _format_column_definition,
     _format_connection_details,
@@ -144,7 +142,6 @@ from deephaven_mcp.mcp_systems_server._tools.pq import (
     pq_start,
     pq_stop,
 )
-from deephaven_mcp import config
 from deephaven_mcp.resource_manager import (
     DockerLaunchedSession,
     DynamicCommunitySessionManager,
@@ -185,9 +182,7 @@ async def test_pq_name_to_id_success():
         }
     )
 
-    result = await pq_name_to_id(
-        context, system_name="prod", pq_name="analytics"
-    )
+    result = await pq_name_to_id(context, system_name="prod", pq_name="analytics")
 
     assert result["success"] is True
     assert result["pq_id"] == "enterprise:prod:12345"
@@ -195,7 +190,6 @@ async def test_pq_name_to_id_success():
     assert result["name"] == "analytics"
     assert result["system_name"] == "prod"
     mock_controller.get_serial_for_name.assert_called_once_with("analytics")
-
 
 
 @pytest.mark.asyncio
@@ -230,14 +224,11 @@ async def test_pq_name_to_id_not_found():
         }
     )
 
-    result = await pq_name_to_id(
-        context, system_name="prod", pq_name="nonexistent"
-    )
+    result = await pq_name_to_id(context, system_name="prod", pq_name="nonexistent")
 
     assert result["success"] is False
     assert "not found" in result["error"]
     assert result["isError"] is True
-
 
 
 @pytest.mark.asyncio
@@ -266,7 +257,6 @@ async def test_pq_name_to_id_system_not_found():
     assert result["isError"] is True
 
 
-
 @pytest.mark.asyncio
 async def test_pq_name_to_id_exception():
     """Test pq_name_to_id when exception occurs."""
@@ -282,14 +272,11 @@ async def test_pq_name_to_id_exception():
         }
     )
 
-    result = await pq_name_to_id(
-        context, system_name="prod", pq_name="analytics"
-    )
+    result = await pq_name_to_id(context, system_name="prod", pq_name="analytics")
 
     assert result["success"] is False
     assert "error" in result
     assert result["isError"] is True
-
 
 
 @patch("deephaven_mcp.mcp_systems_server._tools.pq.RestartUsersEnum")
@@ -430,7 +417,6 @@ def test_format_pq_config(mock_restart_enum):
     assert result["generic_worker_control"] is None  # Empty -> None
 
 
-
 @patch("deephaven_mcp.mcp_systems_server._tools.pq.RestartUsersEnum")
 def test_format_pq_config_unknown_enum_fallback(mock_restart_enum):
     """Test _format_pq_config handles unknown enum values gracefully (version mismatch)."""
@@ -485,7 +471,6 @@ def test_format_pq_config_unknown_enum_fallback(mock_restart_enum):
 
     # Should return fallback string for unknown enum
     assert result["restart_users"] == "UNKNOWN_RESTART_USERS_99"
-
 
 
 @patch("deephaven_mcp.mcp_systems_server._tools.pq.RestartUsersEnum", None)
@@ -543,7 +528,6 @@ def test_format_pq_config_no_restart_enum():
     assert result["serial"] == 12345
 
 
-
 @pytest.mark.asyncio
 async def test_pq_restart_multiple():
     """Test pq_restart with multiple PQs."""
@@ -596,7 +580,6 @@ async def test_pq_restart_multiple():
     assert result["summary"]["succeeded"] == 2
     assert result["summary"]["failed"] == 0
     assert result["message"] == "Restarted 2 of 2 PQ(s)"
-
 
 
 @pytest.mark.asyncio
@@ -653,7 +636,6 @@ async def test_pq_restart_partial_failure():
     assert result["summary"]["succeeded"] == 1
     assert result["summary"]["failed"] == 1
     assert result["message"] == "Restarted 1 of 2 PQ(s), 1 failed"
-
 
 
 @pytest.mark.asyncio
@@ -721,7 +703,6 @@ async def test_pq_delete_partial_failure():
     assert result["message"] == "Deleted 1 of 2 PQ(s), 1 failed"
 
 
-
 @pytest.mark.asyncio
 async def test_pq_start_partial_failure():
     """Test pq_start with one success and one failure."""
@@ -777,7 +758,6 @@ async def test_pq_start_partial_failure():
     assert result["summary"]["succeeded"] == 1
     assert result["summary"]["failed"] == 1
     assert result["message"] == "Started 1 of 2 PQ(s), 1 failed"
-
 
 
 @pytest.mark.asyncio
@@ -836,7 +816,6 @@ async def test_pq_stop_partial_failure():
     assert result["message"] == "Stopped 1 of 2 PQ(s), 1 failed"
 
 
-
 def test_format_named_string_list():
     """Test _format_named_string_list formats NamedStringList correctly."""
     mock_nsl = MagicMock()
@@ -847,7 +826,6 @@ def test_format_named_string_list():
 
     assert result["name"] == "my_group"
     assert result["values"] == ["value1", "value2", "value3"]
-
 
 
 def test_format_named_string_list_empty():
@@ -862,7 +840,6 @@ def test_format_named_string_list_empty():
     assert result["values"] == []
 
 
-
 def test_format_worker_protocol():
     """Test _format_worker_protocol formats WorkerProtocolMessage correctly."""
     mock_wp = MagicMock()
@@ -875,7 +852,6 @@ def test_format_worker_protocol():
     assert result["port"] == 9000
 
 
-
 def test_format_worker_protocol_with_zero_port():
     """Test _format_worker_protocol handles zero port value."""
     mock_wp = MagicMock()
@@ -886,7 +862,6 @@ def test_format_worker_protocol_with_zero_port():
 
     assert result["name"] == "http"
     assert result["port"] == 0
-
 
 
 def test_format_column_definition():
@@ -915,7 +890,6 @@ def test_format_column_definition():
     assert result["object_width_bytes"] == 8
 
 
-
 def test_format_column_definition_with_empty_values():
     """Test _format_column_definition handles empty values correctly."""
     mock_col = MagicMock()
@@ -940,7 +914,6 @@ def test_format_column_definition_with_empty_values():
     assert result["codec"] is None
     assert result["codec_args"] is None
     assert result["object_width_bytes"] is None
-
 
 
 def test_format_table_definition():
@@ -971,7 +944,6 @@ def test_format_table_definition():
     assert result["columns"][0]["name"] == "id"
 
 
-
 def test_format_table_definition_with_empty_values():
     """Test _format_table_definition handles empty values correctly."""
     mock_td = MagicMock()
@@ -986,7 +958,6 @@ def test_format_table_definition_with_empty_values():
     assert result["table_name"] is None
     assert result["columns"] == []
     assert result["storage_type"] is None
-
 
 
 @patch("deephaven_mcp.mcp_systems_server._tools.pq.ExportedObjectTypeEnum")
@@ -1008,7 +979,6 @@ def test_format_exported_object_info(mock_exported_enum):
     assert result["type"] == "EOT_TABLE"
     assert result["table_definition"] is None
     assert result["original_type"] == "io.deephaven.db.tables.Table"
-
 
 
 @patch("deephaven_mcp.mcp_systems_server._tools.pq.ExportedObjectTypeEnum")
@@ -1050,7 +1020,6 @@ def test_format_exported_object_info_with_table_definition(mock_exported_enum):
     assert result["original_type"] is None
 
 
-
 def test_format_connection_details():
     """Test _format_connection_details formats ProcessorConnectionDetailsMessage correctly."""
     mock_protocol = MagicMock()
@@ -1079,7 +1048,6 @@ def test_format_connection_details():
     assert result["enterprise_web_socket_url"] == "wss://ws.example.com"
 
 
-
 def test_format_connection_details_with_empty_values():
     """Test _format_connection_details handles empty values correctly."""
     mock_cd = MagicMock()
@@ -1104,7 +1072,6 @@ def test_format_connection_details_with_empty_values():
     assert result["enterprise_web_socket_url"] is None
 
 
-
 def test_format_exception_details():
     """Test _format_exception_details formats ExceptionDetailsMessage correctly."""
     mock_ed = MagicMock()
@@ -1117,7 +1084,6 @@ def test_format_exception_details():
     assert result["error_message"] == "Something went wrong"
     assert result["stack_trace"] == "at line 1\nat line 2"
     assert result["short_causes"] == "Error cause"
-
 
 
 def test_format_exception_details_with_empty_values():
@@ -1134,12 +1100,10 @@ def test_format_exception_details_with_empty_values():
     assert result["short_causes"] is None
 
 
-
 def test_format_pq_state_with_none():
     """Test _format_pq_state returns None when state is None."""
     result = _format_pq_state(None)
     assert result is None
-
 
 
 @patch("deephaven_mcp.mcp_systems_server._tools.pq.ExportedObjectTypeEnum")
@@ -1199,7 +1163,6 @@ def test_format_pq_state_unknown_enum_fallback(mock_exported_enum):
             "original_type": "some.unknown.Type",
         }
     ]
-
 
 
 @patch("deephaven_mcp.mcp_systems_server._tools.pq.ExportedObjectTypeEnum")
@@ -1285,7 +1248,6 @@ def test_format_pq_state_with_table_definition(mock_exported_enum):
     assert col["component_type"] is None
     assert col["column_type"] == 1
     assert col["is_var_size_string"] is False
-
 
 
 @patch("deephaven_mcp.mcp_systems_server._tools.pq.ExportedObjectTypeEnum")
@@ -1438,7 +1400,6 @@ def test_format_pq_state_with_all_fields(mock_exported_enum):
     assert result["status_details"] == "Running normally"
 
 
-
 def test_format_pq_state_with_empty_connection_details():
     """Test _format_pq_state handles empty protocols list in connectionDetails."""
     mock_state = MagicMock()
@@ -1505,12 +1466,10 @@ def test_format_pq_state_with_empty_connection_details():
     }
 
 
-
 def test_format_pq_replicas_empty():
     """Test _format_pq_replicas returns empty list for empty input."""
     result = _format_pq_replicas([])
     assert result == []
-
 
 
 def test_format_pq_replicas_with_data():
@@ -1552,7 +1511,6 @@ def test_format_pq_replicas_with_data():
     assert result[0]["status"] == "RUNNING"
 
 
-
 def test_format_pq_replicas_filters_none():
     """Test _format_pq_replicas filters out None entries."""
     mock_replica = MagicMock()
@@ -1591,12 +1549,10 @@ def test_format_pq_replicas_filters_none():
     assert len(result) == 1
 
 
-
 def test_format_pq_spares_empty():
     """Test _format_pq_spares returns empty list for empty input."""
     result = _format_pq_spares([])
     assert result == []
-
 
 
 def test_format_pq_spares_with_data():
@@ -1636,7 +1592,6 @@ def test_format_pq_spares_with_data():
     assert result[0]["serial"] == 12345
     assert result[0]["status"] == "INITIALIZING"
     assert result[0]["replica_slot"] == 2
-
 
 
 def test_format_pq_spares_filters_none():
@@ -1686,7 +1641,6 @@ def test_format_pq_spares_filters_none():
 
     result = _format_pq_spares([None, mock_spare])
     assert len(result) == 1
-
 
 
 @pytest.mark.asyncio
@@ -1774,7 +1728,6 @@ async def test_pq_list_success():
     assert "session_id" not in pq2  # Stopped PQ should not have session_id
 
 
-
 @pytest.mark.asyncio
 async def test_pq_list_system_not_found():
     """Test pq_list when system not found."""
@@ -1797,7 +1750,6 @@ async def test_pq_list_system_not_found():
     assert "not found" in result["error"]
 
 
-
 @pytest.mark.asyncio
 async def test_pq_list_exception():
     """Test pq_list when exception occurs."""
@@ -1818,7 +1770,6 @@ async def test_pq_list_exception():
     assert result["success"] is False
     assert "error" in result
     assert result["isError"] is True
-
 
 
 @pytest.mark.asyncio
@@ -1957,7 +1908,6 @@ async def test_pq_details_success_by_name(mock_exported_enum, mock_restart_enum)
     assert result["spares"] == []
 
 
-
 @pytest.mark.asyncio
 async def test_pq_details_success_by_serial():
     """Test successful PQ details retrieval for stopped PQ."""
@@ -2002,7 +1952,6 @@ async def test_pq_details_success_by_serial():
     assert "session_id" not in result  # Stopped PQ shouldn't have session_id
 
 
-
 @pytest.mark.asyncio
 async def test_pq_details_not_found():
     """Test pq_details when PQ not found."""
@@ -2041,7 +1990,6 @@ async def test_pq_details_not_found():
     assert "error" in result
 
 
-
 @pytest.mark.asyncio
 async def test_pq_details_invalid_pq_id():
     """Test pq_details with invalid pq_id format."""
@@ -2060,7 +2008,6 @@ async def test_pq_details_invalid_pq_id():
     assert result["success"] is False
     assert "Invalid pq_id format" in result["error"]
     assert result["isError"] is True
-
 
 
 @pytest.mark.asyncio
@@ -2086,7 +2033,6 @@ async def test_pq_details_system_not_found():
     assert result["isError"] is True
 
 
-
 @pytest.mark.asyncio
 async def test_pq_details_exception():
     """Test pq_details when exception occurs."""
@@ -2107,7 +2053,6 @@ async def test_pq_details_exception():
     assert result["success"] is False
     assert "error" in result
     assert result["isError"] is True
-
 
 
 @pytest.mark.asyncio
@@ -2145,7 +2090,6 @@ async def test_pq_details_not_found_by_serial():
 
     assert result["success"] is False
     assert "error" in result
-
 
 
 @pytest.mark.asyncio
@@ -2196,7 +2140,6 @@ async def test_pq_create_success():
     assert result["serial"] == 12345
     assert result["name"] == "new-pq"
     assert result["state"] == "UNINITIALIZED"
-
 
 
 @pytest.mark.asyncio
@@ -2250,7 +2193,6 @@ async def test_pq_create_success_groovy():
     assert result["state"] == "UNINITIALIZED"
 
 
-
 @pytest.mark.asyncio
 async def test_pq_create_invalid_language():
     """Test pq_create with invalid programming language."""
@@ -2289,7 +2231,6 @@ async def test_pq_create_invalid_language():
     assert result["isError"] is True
 
 
-
 @pytest.mark.asyncio
 async def test_pq_create_system_not_found():
     """Test pq_create when enterprise system not found."""
@@ -2313,7 +2254,6 @@ async def test_pq_create_system_not_found():
     assert "error" in result
     assert "not found" in result["error"]
     assert result["isError"] is True
-
 
 
 @pytest.mark.asyncio
@@ -2340,7 +2280,6 @@ async def test_pq_create_exception():
     assert result["isError"] is True
 
 
-
 def test_validate_and_parse_pq_ids_single():
     """Test _validate_and_parse_pq_ids with single pq_id."""
     parsed_pqs, system_name, error = _validate_and_parse_pq_ids(
@@ -2352,7 +2291,6 @@ def test_validate_and_parse_pq_ids_single():
     assert parsed_pqs[0][0] == "enterprise:test-system:12345"
     assert parsed_pqs[0][1] == 12345
     assert system_name == "test-system"
-
 
 
 def test_validate_and_parse_pq_ids_multiple():
@@ -2368,7 +2306,6 @@ def test_validate_and_parse_pq_ids_multiple():
     assert system_name == "test-system"
 
 
-
 def test_validate_and_parse_pq_ids_empty_list():
     """Test _validate_and_parse_pq_ids with empty list."""
     parsed_pqs, system_name, error = _validate_and_parse_pq_ids([])
@@ -2376,7 +2313,6 @@ def test_validate_and_parse_pq_ids_empty_list():
     assert parsed_pqs is None
     assert system_name is None
     assert error == "At least one pq_id must be provided"
-
 
 
 def test_validate_and_parse_pq_ids_different_systems():
@@ -2391,18 +2327,14 @@ def test_validate_and_parse_pq_ids_different_systems():
     assert "system2" in error
 
 
-
 def test_validate_and_parse_pq_ids_invalid_format():
     """Test _validate_and_parse_pq_ids with invalid pq_id format."""
-    parsed_pqs, system_name, error = _validate_and_parse_pq_ids(
-        "invalid-format"
-    )
+    parsed_pqs, system_name, error = _validate_and_parse_pq_ids("invalid-format")
 
     assert parsed_pqs is None
     assert system_name is None
     assert "Invalid pq_id" in error
     assert "invalid-format" in error
-
 
 
 @pytest.mark.asyncio
@@ -2457,7 +2389,6 @@ async def test_pq_delete_success_by_name():
     mock_controller.delete_query.assert_called_once_with(12345)
 
 
-
 @pytest.mark.asyncio
 async def test_pq_delete_success_custom_timeout():
     """Test successful PQ deletion with custom timeout."""
@@ -2506,7 +2437,6 @@ async def test_pq_delete_success_custom_timeout():
     mock_controller.delete_query.assert_called_once_with(12345)
 
 
-
 @pytest.mark.asyncio
 async def test_pq_delete_invalid_pq_id():
     """Test pq_delete with invalid pq_id format."""
@@ -2525,7 +2455,6 @@ async def test_pq_delete_invalid_pq_id():
     assert result["success"] is False
     assert "Invalid pq_id format" in result["error"]
     assert result["isError"] is True
-
 
 
 @pytest.mark.asyncio
@@ -2551,7 +2480,6 @@ async def test_pq_delete_system_not_found():
     assert result["isError"] is True
 
 
-
 @pytest.mark.asyncio
 async def test_pq_delete_exception():
     """Test pq_delete when exception occurs."""
@@ -2572,7 +2500,6 @@ async def test_pq_delete_exception():
     assert result["success"] is False
     assert "error" in result
     assert result["isError"] is True
-
 
 
 @pytest.mark.asyncio
@@ -2638,7 +2565,6 @@ async def test_pq_delete_multiple():
     assert mock_controller.delete_query.call_count == 2
 
 
-
 @pytest.mark.asyncio
 async def test_pq_delete_different_systems_error():
     """Test error when trying to delete PQs from different systems."""
@@ -2662,7 +2588,6 @@ async def test_pq_delete_different_systems_error():
     assert result["isError"] is True
 
 
-
 @pytest.mark.asyncio
 async def test_pq_delete_empty_list():
     """Test error when trying to delete with empty pq_id list."""
@@ -2684,7 +2609,6 @@ async def test_pq_delete_empty_list():
     assert result["isError"] is True
 
 
-
 @pytest.mark.asyncio
 async def test_pq_delete_negative_timeout():
     """Test pq_delete with negative timeout triggers validation error."""
@@ -2692,15 +2616,12 @@ async def test_pq_delete_negative_timeout():
         {"config_manager": MagicMock(), "session_registry": MagicMock()}
     )
 
-    result = await pq_delete(
-        context, "enterprise:system1:12345", timeout_seconds=-1
-    )
+    result = await pq_delete(context, "enterprise:system1:12345", timeout_seconds=-1)
 
     assert result["success"] is False
     assert "timeout_seconds must be non-negative" in result["error"]
     assert "got -1" in result["error"]
     assert result["isError"] is True
-
 
 
 @pytest.mark.asyncio
@@ -2710,15 +2631,12 @@ async def test_pq_delete_zero_max_concurrent():
         {"config_manager": MagicMock(), "session_registry": MagicMock()}
     )
 
-    result = await pq_delete(
-        context, "enterprise:system1:12345", max_concurrent=0
-    )
+    result = await pq_delete(context, "enterprise:system1:12345", max_concurrent=0)
 
     assert result["success"] is False
     assert "max_concurrent must be at least 1" in result["error"]
     assert "got 0" in result["error"]
     assert result["isError"] is True
-
 
 
 @pytest.mark.asyncio
@@ -2784,7 +2702,6 @@ async def test_pq_modify_success():
     assert current_pq_info.config.pb.heapSizeGb == 16.0
 
 
-
 @pytest.mark.asyncio
 async def test_pq_modify_with_restart():
     """Test successful PQ modification with restart."""
@@ -2842,7 +2759,6 @@ async def test_pq_modify_with_restart():
     assert current_pq_info.config.pb.name == "analytics_renamed"
 
 
-
 @pytest.mark.asyncio
 async def test_pq_modify_script_path():
     """Test pq_modify with script_path (without script_body) for coverage."""
@@ -2891,7 +2807,6 @@ async def test_pq_modify_script_path():
     assert current_pq_info.config.pb.scriptCode == ""
 
 
-
 @pytest.mark.asyncio
 async def test_pq_modify_mutually_exclusive_scripts():
     """Test pq_modify with both script_body and script_path (mutually exclusive)."""
@@ -2938,7 +2853,6 @@ async def test_pq_modify_mutually_exclusive_scripts():
     assert result["isError"] is True
 
 
-
 @pytest.mark.asyncio
 async def test_pq_modify_invalid_pq_id():
     """Test pq_modify with invalid pq_id format."""
@@ -2961,7 +2875,6 @@ async def test_pq_modify_invalid_pq_id():
     assert result["success"] is False
     assert "Invalid pq_id" in result["error"]
     assert result["isError"] is True
-
 
 
 @pytest.mark.asyncio
@@ -2989,7 +2902,6 @@ async def test_pq_modify_system_not_found():
     assert result["success"] is False
     assert "not found" in result["error"]
     assert result["isError"] is True
-
 
 
 @pytest.mark.asyncio
@@ -3036,7 +2948,6 @@ async def test_pq_modify_pq_not_found():
     assert result["isError"] is True
 
 
-
 @pytest.mark.asyncio
 async def test_pq_modify_invalid_language():
     """Test pq_modify with invalid programming language."""
@@ -3079,7 +2990,6 @@ async def test_pq_modify_invalid_language():
     assert result["success"] is False
     assert "Invalid programming_language" in result["error"]
     assert result["isError"] is True
-
 
 
 @pytest.mark.asyncio
@@ -3128,7 +3038,6 @@ async def test_pq_modify_no_changes():
     assert result["isError"] is True
     # Verify modify_query was NOT called
     mock_controller.modify_query.assert_not_called()
-
 
 
 @pytest.mark.asyncio
@@ -3223,7 +3132,6 @@ async def test_pq_modify_all_parameters(mock_restart_enum):
     mock_restart_enum.Value.assert_called_once_with("RU_ADMIN")
 
 
-
 @pytest.mark.asyncio
 async def test_pq_modify_clear_auto_delete_timeout():
     """Test pq_modify with auto_delete_timeout=0 to make query permanent."""
@@ -3281,7 +3189,6 @@ async def test_pq_modify_clear_auto_delete_timeout():
     assert config_pb.expirationTimeNanos == 0
 
 
-
 @pytest.mark.asyncio
 @patch("deephaven_mcp.mcp_systems_server._tools.pq.RestartUsersEnum", None)
 async def test_pq_modify_restart_users_enum_not_available():
@@ -3325,7 +3232,6 @@ async def test_pq_modify_restart_users_enum_not_available():
     assert result["success"] is False
     assert "Core+ features are not available" in result["error"]
     assert result["isError"] is True
-
 
 
 @pytest.mark.asyncio
@@ -3383,7 +3289,6 @@ async def test_pq_modify_invalid_restart_users_value(mock_restart_enum):
     assert result["isError"] is True
 
 
-
 @pytest.mark.asyncio
 async def test_pq_modify_exception():
     """Test pq_modify when exception occurs."""
@@ -3408,7 +3313,6 @@ async def test_pq_modify_exception():
     assert result["success"] is False
     assert "error" in result
     assert result["isError"] is True
-
 
 
 @pytest.mark.asyncio
@@ -3466,7 +3370,6 @@ async def test_pq_start_success():
     mock_controller.start_and_wait.assert_called_once_with(12345, 30)
 
 
-
 @pytest.mark.asyncio
 async def test_pq_start_invalid_pq_id():
     """Test pq_start with invalid pq_id format."""
@@ -3485,7 +3388,6 @@ async def test_pq_start_invalid_pq_id():
     assert result["success"] is False
     assert "Invalid pq_id format" in result["error"]
     assert result["isError"] is True
-
 
 
 @pytest.mark.asyncio
@@ -3511,7 +3413,6 @@ async def test_pq_start_system_not_found():
     assert result["isError"] is True
 
 
-
 @pytest.mark.asyncio
 async def test_pq_start_exception():
     """Test pq_start when exception occurs."""
@@ -3532,7 +3433,6 @@ async def test_pq_start_exception():
     assert result["success"] is False
     assert "error" in result
     assert result["isError"] is True
-
 
 
 @pytest.mark.asyncio
@@ -3597,7 +3497,6 @@ async def test_pq_start_multiple():
     assert result["message"] == "Started 2 PQ(s)"
 
 
-
 @pytest.mark.asyncio
 async def test_pq_start_different_systems_error():
     """Test error when trying to start PQs from different systems."""
@@ -3621,7 +3520,6 @@ async def test_pq_start_different_systems_error():
     assert result["isError"] is True
 
 
-
 @pytest.mark.asyncio
 async def test_pq_start_empty_list():
     """Test error when trying to start with empty pq_id list."""
@@ -3641,7 +3539,6 @@ async def test_pq_start_empty_list():
     assert result["success"] is False
     assert "At least one pq_id must be provided" in result["error"]
     assert result["isError"] is True
-
 
 
 @pytest.mark.asyncio
@@ -3695,7 +3592,6 @@ async def test_pq_stop_success():
     assert result["summary"]["failed"] == 0
     assert result["message"] == "Stopped 1 PQ(s)"
     mock_controller.stop_query.assert_called_once_with([12345], 30)
-
 
 
 @pytest.mark.asyncio
@@ -3753,7 +3649,6 @@ async def test_pq_stop_success_custom_timeout():
     mock_controller.stop_query.assert_called_once_with([12345], 60)
 
 
-
 @pytest.mark.asyncio
 async def test_pq_stop_empty_list():
     """Test pq_stop with empty pq_id list."""
@@ -3774,7 +3669,6 @@ async def test_pq_stop_empty_list():
     assert result["isError"] is True
 
 
-
 @pytest.mark.asyncio
 async def test_pq_stop_invalid_pq_id_in_list():
     """Test pq_stop with invalid pq_id in list."""
@@ -3788,14 +3682,11 @@ async def test_pq_stop_invalid_pq_id_in_list():
         }
     )
 
-    result = await pq_stop(
-        context, pq_id=["enterprise:prod:12345", "invalid:format"]
-    )
+    result = await pq_stop(context, pq_id=["enterprise:prod:12345", "invalid:format"])
 
     assert result["success"] is False
     assert "Invalid pq_id format" in result["error"]
     assert result["isError"] is True
-
 
 
 @pytest.mark.asyncio
@@ -3821,7 +3712,6 @@ async def test_pq_stop_system_not_found():
     assert result["isError"] is True
 
 
-
 @pytest.mark.asyncio
 async def test_pq_stop_exception():
     """Test pq_stop when exception occurs."""
@@ -3842,7 +3732,6 @@ async def test_pq_stop_exception():
     assert result["success"] is False
     assert "error" in result
     assert result["isError"] is True
-
 
 
 @pytest.mark.asyncio
@@ -3898,7 +3787,6 @@ async def test_pq_restart_success():
     mock_controller.restart_query.assert_called_once_with([12345], 30)
 
 
-
 @pytest.mark.asyncio
 async def test_pq_restart_empty_list():
     """Test pq_restart with empty pq_id list."""
@@ -3917,7 +3805,6 @@ async def test_pq_restart_empty_list():
     assert result["success"] is False
     assert "At least one pq_id must be provided" in result["error"]
     assert result["isError"] is True
-
 
 
 @pytest.mark.asyncio
@@ -3940,7 +3827,6 @@ async def test_pq_restart_invalid_pq_id_in_list():
     assert result["success"] is False
     assert "Invalid pq_id format" in result["error"]
     assert result["isError"] is True
-
 
 
 @pytest.mark.asyncio
@@ -3966,7 +3852,6 @@ async def test_pq_restart_system_not_found():
     assert result["isError"] is True
 
 
-
 @pytest.mark.asyncio
 async def test_pq_restart_exception():
     """Test pq_restart when exception occurs."""
@@ -3987,7 +3872,6 @@ async def test_pq_restart_exception():
     assert result["success"] is False
     assert "error" in result
     assert result["isError"] is True
-
 
 
 @pytest.mark.asyncio
@@ -4054,7 +3938,6 @@ async def test_pq_stop_multiple():
     assert mock_controller.stop_query.call_count == 2
 
 
-
 @pytest.mark.asyncio
 async def test_pq_restart_multiple():
     """Test successful restart of multiple PQs."""
@@ -4119,7 +4002,6 @@ async def test_pq_restart_multiple():
     assert mock_controller.restart_query.call_count == 2
 
 
-
 @pytest.mark.asyncio
 async def test_pq_stop_different_systems_error():
     """Test error when trying to stop PQs from different systems."""
@@ -4141,7 +4023,6 @@ async def test_pq_stop_different_systems_error():
     assert result["success"] is False
     assert "All pq_ids must be from the same system" in result["error"]
     assert result["isError"] is True
-
 
 
 @pytest.mark.asyncio
@@ -4167,12 +4048,10 @@ async def test_pq_restart_different_systems_error():
     assert result["isError"] is True
 
 
-
 def test_parse_pq_id_invalid_format():
     """Test _parse_pq_id with invalid format (not enough parts)."""
     with pytest.raises(ValueError, match="Invalid pq_id format"):
         _parse_pq_id("invalid:format")
-
 
 
 def test_parse_pq_id_invalid_prefix():
@@ -4181,12 +4060,10 @@ def test_parse_pq_id_invalid_prefix():
         _parse_pq_id("community:system:12345")
 
 
-
 def test_parse_pq_id_invalid_serial():
     """Test _parse_pq_id with non-integer serial."""
     with pytest.raises(ValueError, match="Serial must be an integer"):
         _parse_pq_id("enterprise:system:not_a_number")
-
 
 
 def test_parse_pq_id_success():
@@ -4194,7 +4071,6 @@ def test_parse_pq_id_success():
     system_name, serial = _parse_pq_id("enterprise:prod:12345")
     assert system_name == "prod"
     assert serial == 12345
-
 
 
 def test_validate_timeout_excessive(caplog):
@@ -4207,19 +4083,16 @@ def test_validate_timeout_excessive(caplog):
     assert "exceeds recommended MCP limit" in caplog.text
 
 
-
 def test_validate_timeout_normal():
     """Test _validate_timeout with normal timeout."""
     result = _validate_timeout(30, "test_function")
     assert result == 30
 
 
-
 def test_validate_timeout_zero():
     """Test _validate_timeout with timeout=0 (fire-and-forget)."""
     result = _validate_timeout(0, "test_function")
     assert result == 0
-
 
 
 def test_validate_timeout_negative():
@@ -4232,7 +4105,6 @@ def test_validate_timeout_negative():
     assert "Use timeout_seconds=0 for fire-and-forget" in str(exc_info.value)
 
 
-
 def test_validate_max_concurrent_zero():
     """Test _validate_max_concurrent with zero raises ValueError."""
     with pytest.raises(ValueError) as exc_info:
@@ -4240,7 +4112,6 @@ def test_validate_max_concurrent_zero():
 
     assert "max_concurrent must be at least 1" in str(exc_info.value)
     assert "got 0" in str(exc_info.value)
-
 
 
 def test_validate_max_concurrent_negative():
@@ -4252,13 +4123,11 @@ def test_validate_max_concurrent_negative():
     assert "got -5" in str(exc_info.value)
 
 
-
 def test_validate_max_concurrent_valid():
     """Test _validate_max_concurrent with valid values returns the value."""
     assert _validate_max_concurrent(1, "test_function") == 1
     assert _validate_max_concurrent(20, "test_function") == 20
     assert _validate_max_concurrent(100, "test_function") == 100
-
 
 
 @pytest.mark.asyncio
@@ -4343,7 +4212,6 @@ async def test_pq_delete_parallel_execution_with_semaphore():
     assert len(ends_before_third) > 0, "Semaphore should limit concurrency to 2"
 
 
-
 @pytest.mark.asyncio
 async def test_pq_delete_handles_unexpected_exception():
     """Test that pq_delete handles unexpected exceptions with return_exceptions=True."""
@@ -4424,7 +4292,6 @@ async def test_pq_delete_handles_unexpected_exception():
     assert result["summary"]["failed"] == 1
 
 
-
 @pytest.mark.asyncio
 async def test_pq_start_parallel_execution():
     """Test that pq_start executes operations in parallel."""
@@ -4486,7 +4353,6 @@ async def test_pq_start_parallel_execution():
     # Verify parallel execution - with 5 operations and limit of 20,
     # we should see multiple operations running concurrently
     assert max_concurrent_observed > 1, "Operations should run in parallel"
-
 
 
 @pytest.mark.asyncio
@@ -4556,7 +4422,6 @@ async def test_pq_stop_parallel_with_mixed_results():
     assert result["summary"]["failed"] == 1
 
 
-
 @pytest.mark.asyncio
 async def test_pq_restart_parallel_execution():
     """Test pq_restart parallel execution."""
@@ -4610,7 +4475,6 @@ async def test_pq_restart_parallel_execution():
 
     # Verify all restart_query calls were made
     assert mock_controller.restart_query.call_count == 4
-
 
 
 @pytest.mark.asyncio
@@ -4678,7 +4542,6 @@ async def test_pq_delete_exception_escapes_to_gather(monkeypatch):
     assert result["results"][2]["success"] is True
 
 
-
 @pytest.mark.asyncio
 async def test_pq_start_exception_escapes_to_gather(monkeypatch):
     """Test pq_start handles raw Exception objects from asyncio.gather."""
@@ -4739,7 +4602,6 @@ async def test_pq_start_exception_escapes_to_gather(monkeypatch):
     assert result["results"][1]["success"] is False
     assert "Unexpected error" in result["results"][1]["error"]
     assert "ValueError" in result["results"][1]["error"]
-
 
 
 @pytest.mark.asyncio
@@ -4804,7 +4666,6 @@ async def test_pq_stop_exception_escapes_to_gather(monkeypatch):
     assert "TypeError" in result["results"][1]["error"]
 
 
-
 @pytest.mark.asyncio
 async def test_pq_restart_exception_escapes_to_gather(monkeypatch):
     """Test pq_restart handles raw Exception objects from asyncio.gather."""
@@ -4865,7 +4726,6 @@ async def test_pq_restart_exception_escapes_to_gather(monkeypatch):
     assert result["results"][1]["success"] is False
     assert "Unexpected error" in result["results"][1]["error"]
     assert "OSError" in result["results"][1]["error"]
-
 
 
 @pytest.mark.asyncio

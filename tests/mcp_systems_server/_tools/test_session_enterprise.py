@@ -9,9 +9,9 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
-
 from conftest import MockContext, create_mock_instance_tracker
 
+from deephaven_mcp import config
 from deephaven_mcp.mcp_systems_server._tools.session_enterprise import (
     _check_session_id_available,
     _check_session_limits,
@@ -21,7 +21,6 @@ from deephaven_mcp.mcp_systems_server._tools.session_enterprise import (
     session_enterprise_create,
     session_enterprise_delete,
 )
-from deephaven_mcp import config
 from deephaven_mcp.resource_manager import (
     DockerLaunchedSession,
     DynamicCommunitySessionManager,
@@ -60,7 +59,9 @@ async def test_session_enterprise_create_auto_name_no_username_and_language_tran
     full_config = {"enterprise": {"systems": enterprise_config}}
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
 
-    with patch("deephaven_mcp.mcp_systems_server._tools.session_enterprise.datetime") as mock_datetime:
+    with patch(
+        "deephaven_mcp.mcp_systems_server._tools.session_enterprise.datetime"
+    ) as mock_datetime:
         mock_datetime.now().strftime.return_value = "20241126-1500"
 
         # Enterprise factory chain
@@ -126,7 +127,6 @@ async def test_session_enterprise_create_auto_name_no_username_and_language_tran
         assert returned_session is mock_session
 
 
-
 @pytest.mark.asyncio
 async def test_session_enterprise_delete_removal_missing_in_registry():
     """Covers branch where pop returns None (lines 1959-1960)."""
@@ -150,7 +150,6 @@ async def test_session_enterprise_delete_removal_missing_in_registry():
     result = await session_enterprise_delete(context, "sys", "s1")
 
     assert result["success"] is True
-
 
 
 @pytest.mark.asyncio
@@ -178,7 +177,6 @@ async def test_session_enterprise_delete_cleanup_created_sessions_empty():
 
     assert result["success"] is True
     # Session tracking is now handled internally by the registry
-
 
 
 @pytest.mark.asyncio
@@ -211,7 +209,6 @@ async def test_session_enterprise_delete_registry_pop_raises_error():
     assert result["success"] is False
     assert result["isError"] is True
     assert "Failed to remove session" in result["error"]
-
 
 
 @pytest.mark.asyncio
@@ -251,7 +248,6 @@ async def test_session_enterprise_delete_outer_exception_logger_info_raises():
     assert result["success"] is False
     assert result["isError"] is True
     assert "log fail" in result["error"]
-
 
 
 @pytest.mark.asyncio
@@ -347,7 +343,6 @@ async def test_enterprise_systems_status_success():
     mock_factory2.liveness_status.assert_called_once_with(ensure_item=False)
 
 
-
 @pytest.mark.asyncio
 async def test_enterprise_systems_status_with_attempt_to_connect():
     """Test enterprise systems status with attempt_to_connect=True."""
@@ -389,9 +384,7 @@ async def test_enterprise_systems_status_with_attempt_to_connect():
         return_value={},
     ):
         # Call the function with attempt_to_connect=True
-        result = await enterprise_systems_status(
-            context, attempt_to_connect=True
-        )
+        result = await enterprise_systems_status(context, attempt_to_connect=True)
 
         # Verify the result
         assert result["success"] is True
@@ -406,7 +399,6 @@ async def test_enterprise_systems_status_with_attempt_to_connect():
 
         # Verify liveness_status was called with attempt_to_connect=True
         mock_factory.liveness_status.assert_called_once_with(ensure_item=True)
-
 
 
 @pytest.mark.asyncio
@@ -443,7 +435,6 @@ async def test_enterprise_systems_status_no_systems():
     # Verify the result
     assert result["success"] is True
     assert len(result["systems"]) == 0
-
 
 
 @pytest.mark.asyncio
@@ -518,7 +509,6 @@ async def test_enterprise_systems_status_all_status_types():
             assert system["is_alive"] == (status == ResourceLivenessStatus.ONLINE)
 
 
-
 @pytest.mark.asyncio
 async def test_enterprise_systems_status_config_error():
     """Test enterprise systems status when config retrieval fails."""
@@ -549,7 +539,6 @@ async def test_enterprise_systems_status_config_error():
     assert result["success"] is False
     assert result["isError"] is True
     assert "Config error" in result["error"]
-
 
 
 @pytest.mark.asyncio
@@ -587,7 +576,6 @@ async def test_enterprise_systems_status_registry_error():
     assert result["success"] is False
     assert result["isError"] is True
     assert "Registry error" in result["error"]
-
 
 
 @pytest.mark.asyncio
@@ -637,7 +625,6 @@ async def test_enterprise_systems_status_liveness_error():
         assert "Liveness error" in result["error"]
 
 
-
 @pytest.mark.asyncio
 async def test_enterprise_systems_status_no_enterprise_registry():
     """Test enterprise systems status when enterprise_registry is None."""
@@ -669,7 +656,6 @@ async def test_enterprise_systems_status_no_enterprise_registry():
     # Verify the result
     assert result["success"] is True
     assert len(result["systems"]) == 0
-
 
 
 @pytest.mark.asyncio
@@ -724,9 +710,7 @@ async def test_session_enterprise_create_success_with_defaults():
         {"config_manager": mock_config_manager, "session_registry": mock_registry}
     )
 
-    result = await session_enterprise_create(
-        context, "prod-system", "test-worker"
-    )
+    result = await session_enterprise_create(context, "prod-system", "test-worker")
 
     assert result["success"] is True
     assert result["session_id"] == "enterprise:prod-system:test-worker"
@@ -759,7 +743,6 @@ async def test_session_enterprise_create_success_with_defaults():
     call_args = mock_registry.add_session.call_args
     session_manager = call_args[0][0]  # Manager is the only argument
     assert session_manager.full_name == "enterprise:prod-system:test-worker"
-
 
 
 @pytest.mark.asyncio
@@ -840,7 +823,6 @@ async def test_session_enterprise_create_success_with_overrides():
     )
 
 
-
 @pytest.mark.asyncio
 async def test_session_enterprise_create_auto_generate_name():
     """Test session_enterprise_create auto-generates worker name when None."""
@@ -861,7 +843,9 @@ async def test_session_enterprise_create_auto_generate_name():
     full_config = {"enterprise": {"systems": enterprise_config}}
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
 
-    with patch("deephaven_mcp.mcp_systems_server._tools.session_enterprise.datetime") as mock_datetime:
+    with patch(
+        "deephaven_mcp.mcp_systems_server._tools.session_enterprise.datetime"
+    ) as mock_datetime:
         mock_datetime.now().strftime.return_value = "20241126-1430"
 
         # Mock session registry and factories
@@ -895,7 +879,6 @@ async def test_session_enterprise_create_auto_generate_name():
         assert result["session_id"] == "enterprise:test-system:mcp-test-20241126-1430"
 
 
-
 @pytest.mark.asyncio
 async def test_session_enterprise_create_system_not_found():
     """Test session_enterprise_create when enterprise system not found."""
@@ -910,14 +893,11 @@ async def test_session_enterprise_create_system_not_found():
         {"config_manager": mock_config_manager, "session_registry": mock_registry}
     )
 
-    result = await session_enterprise_create(
-        context, "nonexistent-system", "worker"
-    )
+    result = await session_enterprise_create(context, "nonexistent-system", "worker")
 
     assert result["success"] is False
     assert "Enterprise system 'nonexistent-system' not found" in result["error"]
     assert result["isError"] is True
-
 
 
 @pytest.mark.asyncio
@@ -961,16 +941,13 @@ async def test_session_enterprise_create_max_workers_exceeded():
         {"config_manager": mock_config_manager, "session_registry": mock_registry}
     )
 
-    result = await session_enterprise_create(
-        context, "limited-system", "worker3"
-    )
+    result = await session_enterprise_create(context, "limited-system", "worker3")
 
     assert result["success"] is False
     assert "Max concurrent sessions (2) reached" in result["error"]
     assert result["isError"] is True
 
     # No cleanup needed - session tracking handled by registry
-
 
 
 @pytest.mark.asyncio
@@ -1012,7 +989,6 @@ async def test_session_enterprise_create_session_conflict():
         in result["error"]
     )
     assert result["isError"] is True
-
 
 
 @pytest.mark.asyncio
@@ -1065,7 +1041,6 @@ async def test_session_enterprise_create_factory_creation_failure():
     assert result["isError"] is True
 
 
-
 @pytest.mark.asyncio
 async def test_session_enterprise_create_disabled_by_zero_max_workers():
     """Test session_enterprise_create when worker creation is disabled (max_concurrent_sessions = 0)."""
@@ -1090,14 +1065,11 @@ async def test_session_enterprise_create_disabled_by_zero_max_workers():
         {"config_manager": mock_config_manager, "session_registry": mock_registry}
     )
 
-    result = await session_enterprise_create(
-        context, "disabled-system", "test-worker"
-    )
+    result = await session_enterprise_create(context, "disabled-system", "test-worker")
 
     assert result["success"] is False
     assert "Session creation is disabled" in result["error"]
     assert result["isError"] is True
-
 
 
 @pytest.mark.asyncio
@@ -1130,9 +1102,7 @@ async def test_session_enterprise_delete_success():
         {"config_manager": mock_config_manager, "session_registry": mock_registry}
     )
 
-    result = await session_enterprise_delete(
-        context, "test-system", "test-worker"
-    )
+    result = await session_enterprise_delete(context, "test-system", "test-worker")
 
     assert result["success"] is True
     assert result["session_id"] == "enterprise:test-system:test-worker"
@@ -1145,7 +1115,6 @@ async def test_session_enterprise_delete_success():
     mock_registry.remove_session.assert_called_once_with(
         "enterprise:test-system:test-worker"
     )
-
 
 
 @pytest.mark.asyncio
@@ -1162,14 +1131,11 @@ async def test_session_enterprise_delete_system_not_found():
         {"config_manager": mock_config_manager, "session_registry": mock_registry}
     )
 
-    result = await session_enterprise_delete(
-        context, "nonexistent-system", "worker"
-    )
+    result = await session_enterprise_delete(context, "nonexistent-system", "worker")
 
     assert result["success"] is False
     assert "Enterprise system 'nonexistent-system' not found" in result["error"]
     assert result["isError"] is True
-
 
 
 @pytest.mark.asyncio
@@ -1209,7 +1175,6 @@ async def test_session_enterprise_delete_session_not_found():
     assert result["isError"] is True
 
 
-
 @pytest.mark.asyncio
 async def test_session_enterprise_delete_not_enterprise_session():
     """Test session_enterprise_delete when session is not an EnterpriseSessionManager."""
@@ -1245,7 +1210,6 @@ async def test_session_enterprise_delete_not_enterprise_session():
     assert result["success"] is False
     assert "is not an enterprise session" in result["error"]
     assert result["isError"] is True
-
 
 
 @pytest.mark.asyncio
@@ -1291,7 +1255,6 @@ async def test_session_enterprise_delete_close_failure_continues():
     mock_registry.remove_session.assert_called_once_with(
         "enterprise:test-system:failing-close-worker"
     )
-
 
 
 def test_resolve_session_parameters():
@@ -1416,7 +1379,6 @@ def test_resolve_session_parameters():
     assert result["programming_language"] == "Python"  # Built-in default
 
 
-
 @pytest.mark.asyncio
 async def test_session_enterprise_create_success():
     """Test successful enterprise session creation."""
@@ -1493,7 +1455,6 @@ async def test_session_enterprise_create_success():
     # Verify session was added (tracked automatically by add_session)
 
 
-
 @pytest.mark.asyncio
 async def test_session_enterprise_create_auto_generated_name():
     """Test enterprise session creation with auto-generated session name."""
@@ -1559,7 +1520,6 @@ async def test_session_enterprise_create_auto_generated_name():
     _created_sessions = {}
 
 
-
 @pytest.mark.asyncio
 async def test_session_enterprise_create_max_sessions_reached():
     """Test enterprise session creation when max concurrent sessions reached."""
@@ -1616,7 +1576,6 @@ async def test_session_enterprise_create_max_sessions_reached():
     _created_sessions = {}
 
 
-
 @pytest.mark.asyncio
 async def test_session_enterprise_create_disabled():
     """Test enterprise session creation when session creation is disabled."""
@@ -1654,7 +1613,6 @@ async def test_session_enterprise_create_disabled():
     assert "Session creation is disabled" in result["error"]
 
 
-
 @pytest.mark.asyncio
 async def test_session_enterprise_create_system_not_found_v2():
     """Test enterprise session creation with non-existent system."""
@@ -1680,7 +1638,6 @@ async def test_session_enterprise_create_system_not_found_v2():
     assert result["success"] is False
     assert result["isError"] is True
     assert "Enterprise system 'nonexistent-system' not found" in result["error"]
-
 
 
 @pytest.mark.asyncio
@@ -1734,7 +1691,6 @@ async def test_session_enterprise_delete_success_v2():
     # Session tracking cleanup is now handled automatically by remove_session()
 
 
-
 @pytest.mark.asyncio
 async def test_session_enterprise_delete_not_found():
     """Test enterprise session deletion when session doesn't exist."""
@@ -1771,7 +1727,6 @@ async def test_session_enterprise_delete_not_found():
     )
 
 
-
 @pytest.mark.asyncio
 async def test_session_enterprise_delete_system_not_found_v2():
     """Test enterprise session deletion with non-existent system."""
@@ -1799,7 +1754,6 @@ async def test_session_enterprise_delete_system_not_found_v2():
     assert "Enterprise system 'nonexistent-system' not found" in result["error"]
 
 
-
 @pytest.mark.asyncio
 async def test_check_session_limits_disabled():
     """Test _check_session_limits when sessions are disabled (max_sessions = 0)."""
@@ -1815,7 +1769,6 @@ async def test_check_session_limits_disabled():
     assert result["isError"] is True
 
 
-
 @pytest.mark.asyncio
 async def test_check_session_limits_under_limit():
     """Test _check_session_limits when under the session limit."""
@@ -1826,7 +1779,6 @@ async def test_check_session_limits_under_limit():
 
     assert result is None  # No error when under limit
     mock_session_registry.count_added_sessions.assert_awaited_once()
-
 
 
 @pytest.mark.asyncio
@@ -1846,7 +1798,6 @@ async def test_check_session_limits_at_limit():
     mock_session_registry.count_added_sessions.assert_awaited_once()
 
 
-
 def test_generate_session_name_if_none_with_name():
     """Test _generate_session_name_if_none when session_name is provided."""
     system_config = {"username": "testuser"}
@@ -1856,29 +1807,30 @@ def test_generate_session_name_if_none_with_name():
     assert result == "provided-name"
 
 
-
 def test_generate_session_name_if_none_with_username():
     """Test _generate_session_name_if_none when no name provided but username exists."""
     system_config = {"username": "testuser"}
 
-    with patch("deephaven_mcp.mcp_systems_server._tools.session_enterprise.datetime") as mock_datetime:
+    with patch(
+        "deephaven_mcp.mcp_systems_server._tools.session_enterprise.datetime"
+    ) as mock_datetime:
         mock_datetime.now().strftime.return_value = "20240101-1200"
         result = _generate_session_name_if_none(system_config, None)
 
     assert result == "mcp-testuser-20240101-1200"
 
 
-
 def test_generate_session_name_if_none_without_username():
     """Test _generate_session_name_if_none when no name or username provided."""
     system_config = {}  # No username
 
-    with patch("deephaven_mcp.mcp_systems_server._tools.session_enterprise.datetime") as mock_datetime:
+    with patch(
+        "deephaven_mcp.mcp_systems_server._tools.session_enterprise.datetime"
+    ) as mock_datetime:
         mock_datetime.now().strftime.return_value = "20240101-1200"
         result = _generate_session_name_if_none(system_config, None)
 
     assert result == "mcp-session-20240101-1200"
-
 
 
 @pytest.mark.asyncio
@@ -1890,7 +1842,6 @@ async def test_check_session_id_available_success():
     result = await _check_session_id_available(mock_session_registry, "test-session-id")
 
     assert result is None  # No error when session doesn't exist
-
 
 
 @pytest.mark.asyncio
@@ -1906,7 +1857,6 @@ async def test_check_session_id_available_conflict():
     assert result is not None
     assert result["error"] == "Session 'existing-session-id' already exists"
     assert result["isError"] is True
-
 
 
 def test_resolve_session_parameters_with_defaults():
@@ -1938,7 +1888,6 @@ def test_resolve_session_parameters_with_defaults():
     assert result["server"] == "default-server"
     assert result["engine"] == "DeephavenCommunity"  # Default when not specified
     assert result["programming_language"] == "Python"
-
 
 
 def test_resolve_session_parameters_with_overrides():
@@ -1977,7 +1926,6 @@ def test_resolve_session_parameters_with_overrides():
     assert result["programming_language"] == "Groovy"
 
 
-
 def test_resolve_session_parameters_zero_values():
     """Test _resolve_session_parameters handles zero values correctly."""
     defaults = {
@@ -2002,5 +1950,3 @@ def test_resolve_session_parameters_zero_values():
 
     assert result["auto_delete_timeout"] == 0  # Should use explicit 0, not default
     assert result["timeout_seconds"] == 0.0  # Should use explicit 0.0, not default
-
-

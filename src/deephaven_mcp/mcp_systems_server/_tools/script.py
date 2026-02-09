@@ -14,7 +14,6 @@ import aiofiles
 from mcp.server.fastmcp import Context
 
 from deephaven_mcp import queries
-
 from deephaven_mcp.mcp_systems_server._tools.mcp_server import (
     mcp_server,
 )
@@ -23,7 +22,6 @@ from deephaven_mcp.mcp_systems_server._tools.shared import (
 )
 
 _LOGGER = logging.getLogger(__name__)
-
 
 
 @mcp_server.tool()
@@ -157,8 +155,6 @@ async def session_script_run(
     return result
 
 
-
-
 @mcp_server.tool()
 async def session_pip_list(context: Context, session_id: str) -> dict:
     """
@@ -268,5 +264,3 @@ async def session_pip_list(context: Context, session_id: str) -> dict:
         )
         result["isError"] = True
     return result
-
-

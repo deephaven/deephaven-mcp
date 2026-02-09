@@ -17,6 +17,13 @@ from mcp.server.fastmcp import Context
 
 from deephaven_mcp._exceptions import CommunitySessionConfigurationError
 from deephaven_mcp.config import ConfigManager
+from deephaven_mcp.mcp_systems_server._tools.mcp_server import (
+    mcp_server,
+)
+from deephaven_mcp.mcp_systems_server._tools.session import (
+    DEFAULT_MAX_CONCURRENT_SESSIONS,
+    DEFAULT_PROGRAMMING_LANGUAGE,
+)
 from deephaven_mcp.resource_manager import (
     BaseItemManager,
     CombinedSessionRegistry,
@@ -31,14 +38,6 @@ from deephaven_mcp.resource_manager import (
     launch_session,
 )
 from deephaven_mcp.resource_manager._instance_tracker import InstanceTracker
-
-from deephaven_mcp.mcp_systems_server._tools.mcp_server import (
-    mcp_server,
-)
-from deephaven_mcp.mcp_systems_server._tools.session import (
-    DEFAULT_MAX_CONCURRENT_SESSIONS,
-    DEFAULT_PROGRAMMING_LANGUAGE,
-)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -76,7 +75,6 @@ DEFAULT_STARTUP_RETRIES = 3
 """Default number of connection attempts per health check when not specified in config."""
 
 
-
 # =============================================================================
 # Community Session Management Tools
 # =============================================================================
@@ -108,8 +106,6 @@ async def _get_session_creation_config(
     return defaults, max_concurrent_sessions, None
 
 
-
-
 async def _check_session_limit(
     session_registry: CombinedSessionRegistry,
     max_concurrent_sessions: int,
@@ -131,8 +127,6 @@ async def _check_session_limit(
         return {"success": False, "error": error_msg, "isError": True}
 
     return None
-
-
 
 
 def _validate_launch_method_params(
@@ -193,8 +187,6 @@ def _validate_launch_method_params(
     return None
 
 
-
-
 def _resolve_docker_image(
     programming_language: str | None,
     docker_image: str | None,
@@ -247,8 +239,6 @@ def _resolve_docker_image(
         error_msg = f"Invalid programming_language in config: '{resolved_lang}'. Must be 'Python' or 'Groovy'"
         _LOGGER.error(f"[mcp_systems_server:session_community_create] {error_msg}")
         return "", {"success": False, "error": error_msg, "isError": True}
-
-
 
 
 def _resolve_community_session_parameters(
@@ -408,8 +398,6 @@ def _resolve_community_session_parameters(
     }, None
 
 
-
-
 def _normalize_auth_type(auth_type: str) -> tuple[str, str | None]:
     """Normalize shorthand auth types to full Deephaven class names.
 
@@ -469,8 +457,6 @@ def _normalize_auth_type(auth_type: str) -> tuple[str, str | None]:
     return auth_type, None
 
 
-
-
 def _resolve_auth_token(
     auth_type: str,
     auth_token: str | None,
@@ -521,8 +507,6 @@ def _resolve_auth_token(
         "[mcp_systems_server:session_community_create] Auto-generated auth token"
     )
     return token, True
-
-
 
 
 async def _register_session_manager(
@@ -582,8 +566,6 @@ async def _register_session_manager(
     _LOGGER.info(
         f"[mcp_systems_server:session_community_create] Successfully created and registered session '{session_id}'"
     )
-
-
 
 
 async def _launch_process_and_wait_for_ready(
@@ -683,8 +665,6 @@ async def _launch_process_and_wait_for_ready(
     return launched_session, port, None
 
 
-
-
 def _build_success_response(
     session_id: str,
     session_name: str,
@@ -720,8 +700,6 @@ def _build_success_response(
     return result
 
 
-
-
 def _log_auto_generated_credentials(
     session_name: str,
     port: int,
@@ -743,8 +721,6 @@ def _log_auto_generated_credentials(
     )
     _LOGGER.warning("   in your deephaven_mcp.json configuration.")
     _LOGGER.warning("=" * 70)
-
-
 
 
 @mcp_server.tool()
@@ -1079,8 +1055,6 @@ async def session_community_create(
     return result
 
 
-
-
 @mcp_server.tool()
 async def session_community_delete(
     context: Context,
@@ -1284,8 +1258,6 @@ async def session_community_delete(
         result["isError"] = True
 
     return result
-
-
 
 
 @mcp_server.tool()

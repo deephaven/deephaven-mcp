@@ -9,16 +9,15 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
-
 from conftest import MockContext, create_mock_instance_tracker
 
+from deephaven_mcp import config
 from deephaven_mcp.mcp_systems_server._tools.shared import (
     _check_response_size,
     _get_enterprise_session,
     _get_session_from_context,
     _get_system_config,
 )
-from deephaven_mcp import config
 from deephaven_mcp.resource_manager import (
     DockerLaunchedSession,
     DynamicCommunitySessionManager,
@@ -61,7 +60,6 @@ async def test_get_session_from_context_success():
     mock_session_manager.get.assert_called_once()
 
 
-
 @pytest.mark.asyncio
 async def test_get_session_from_context_session_not_found():
     """Test _get_session_from_context raises KeyError when session not found."""
@@ -80,7 +78,6 @@ async def test_get_session_from_context_session_not_found():
 
     # Verify the registry was accessed
     mock_registry.get.assert_called_once_with("nonexistent:session")
-
 
 
 @pytest.mark.asyncio
@@ -110,12 +107,10 @@ async def test_get_session_from_context_session_connection_fails():
     mock_session_manager.get.assert_called_once()
 
 
-
 def test_check_response_size_acceptable():
     """Test _check_response_size with acceptable size."""
     result = _check_response_size("test_table", 1000000)  # 1MB
     assert result is None
-
 
 
 def test_check_response_size_warning_threshold():
@@ -127,7 +122,6 @@ def test_check_response_size_warning_threshold():
         assert "Large response (~10.0MB)" in mock_logger.warning.call_args[0][0]
 
 
-
 def test_check_response_size_over_limit():
     """Test _check_response_size with size over maximum limit."""
     result = _check_response_size("test_table", 60000000)  # 60MB
@@ -136,7 +130,6 @@ def test_check_response_size_over_limit():
         "error": "Response would be ~60.0MB (max 50MB). Please reduce max_rows.",
         "isError": True,
     }
-
 
 
 @pytest.mark.asyncio
@@ -163,7 +156,6 @@ async def test_get_system_config_success():
     assert system_config == enterprise_config["test-system"]
 
 
-
 @pytest.mark.asyncio
 async def test_get_system_config_system_not_found():
     """Test _get_system_config when system doesn't exist in configuration."""
@@ -187,7 +179,6 @@ async def test_get_system_config_system_not_found():
     assert error_response["isError"] is True
 
 
-
 @pytest.mark.asyncio
 async def test_get_system_config_handles_keyerror_from_get_config_section():
     """Covers the KeyError except block when extracting nested enterprise systems config."""
@@ -206,7 +197,6 @@ async def test_get_system_config_handles_keyerror_from_get_config_section():
     assert error_response is not None
     assert "missing-system" in error_response["error"]
     assert error_response["isError"] is True
-
 
 
 @pytest.mark.asyncio
@@ -230,7 +220,6 @@ async def test_get_system_config_empty_config():
     assert error_response["isError"] is True
 
 
-
 @pytest.mark.asyncio
 async def test_get_enterprise_session_success():
     """Test _get_enterprise_session with a valid CorePlusSession."""
@@ -252,7 +241,6 @@ async def test_get_enterprise_session_success():
 
     assert session is mock_session  # Returns the validated session
     assert error is None
-
 
 
 @pytest.mark.asyncio
@@ -280,5 +268,3 @@ async def test_get_enterprise_session_not_enterprise():
     assert "test_function only works with enterprise (Core+) sessions" in error["error"]
     assert "test-session-id" in error["error"]
     assert error["isError"] is True
-
-

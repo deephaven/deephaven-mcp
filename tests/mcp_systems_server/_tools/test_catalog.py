@@ -9,8 +9,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
-
 from conftest import MockContext, create_mock_instance_tracker
+
 
 # Test-specific helper functions (only used in this file)
 def create_mock_arrow_meta_table(
@@ -52,8 +52,6 @@ def create_mock_arrow_meta_table(
     return mock_arrow_meta
 
 
-
-
 def create_mock_catalog_schema_function(schema_data_map, error_tables=None):
     """
     Create a mock function for queries.get_catalog_meta_table that returns different
@@ -83,17 +81,13 @@ def create_mock_catalog_schema_function(schema_data_map, error_tables=None):
     return mock_get_catalog_meta_table
 
 
-
-
-
-
+from deephaven_mcp import config
 from deephaven_mcp.mcp_systems_server._tools.catalog import (
     catalog_namespaces_list,
     catalog_table_sample,
     catalog_tables_list,
     catalog_tables_schema,
 )
-from deephaven_mcp import config
 from deephaven_mcp.resource_manager import (
     DockerLaunchedSession,
     DynamicCommunitySessionManager,
@@ -141,9 +135,7 @@ async def test_catalog_tables_success_no_filters():
                 [{"Namespace": "ns1", "TableName": "t1"}],
             )
 
-            result = await catalog_tables_list(
-                context, "enterprise:prod:analytics"
-            )
+            result = await catalog_tables_list(context, "enterprise:prod:analytics")
 
             assert result["success"] is True
             assert result["session_id"] == "enterprise:prod:analytics"
@@ -156,7 +148,6 @@ async def test_catalog_tables_success_no_filters():
             mock_get_catalog.assert_called_once_with(
                 mock_session, max_rows=10000, filters=None, distinct_namespaces=False
             )
-
 
 
 @pytest.mark.asyncio
@@ -204,7 +195,6 @@ async def test_catalog_tables_success_with_filters():
             )
 
 
-
 @pytest.mark.asyncio
 async def test_catalog_tables_success_csv_format():
     """Test catalog with CSV format."""
@@ -247,7 +237,6 @@ async def test_catalog_tables_success_csv_format():
             mock_format.assert_called_once_with(mock_catalog_table, "csv")
 
 
-
 @pytest.mark.asyncio
 async def test_catalog_tables_incomplete_results():
     """Test catalog when results are incomplete (truncated by max_rows)."""
@@ -288,7 +277,6 @@ async def test_catalog_tables_incomplete_results():
             assert result["row_count"] == 1000
 
 
-
 @pytest.mark.asyncio
 async def test_catalog_tables_not_enterprise_session():
     """Test catalog with non-enterprise session (should fail)."""
@@ -317,7 +305,6 @@ async def test_catalog_tables_not_enterprise_session():
         assert result["isError"] is True
 
 
-
 @pytest.mark.asyncio
 async def test_catalog_tables_session_not_found():
     """Test catalog when session is not found."""
@@ -331,7 +318,6 @@ async def test_catalog_tables_session_not_found():
     assert result["success"] is False
     assert "Session not found" in result["error"]
     assert result["isError"] is True
-
 
 
 @pytest.mark.asyncio
@@ -358,7 +344,6 @@ async def test_catalog_tables_invalid_filter():
         assert result["success"] is False
         assert "Invalid filter syntax" in result["error"]
         assert result["isError"] is True
-
 
 
 @pytest.mark.asyncio
@@ -397,7 +382,6 @@ async def test_catalog_tables_invalid_format():
             assert result["isError"] is True
 
 
-
 @pytest.mark.asyncio
 async def test_catalog_tables_size_limit_exceeded():
     """Test catalog when response size exceeds limit."""
@@ -425,7 +409,6 @@ async def test_catalog_tables_size_limit_exceeded():
         assert result["success"] is False
         assert "50MB" in result["error"] or "max" in result["error"].lower()
         assert result["isError"] is True
-
 
 
 @pytest.mark.asyncio
@@ -459,9 +442,7 @@ async def test_catalog_namespaces_success_no_filters():
         ) as mock_format:
             mock_format.return_value = ("json-row", [{"Namespace": "market_data"}])
 
-            result = await catalog_namespaces_list(
-                context, "enterprise:prod:analytics"
-            )
+            result = await catalog_namespaces_list(context, "enterprise:prod:analytics")
 
             assert result["success"] is True
             assert result["session_id"] == "enterprise:prod:analytics"
@@ -474,7 +455,6 @@ async def test_catalog_namespaces_success_no_filters():
             mock_get_namespaces.assert_called_once_with(
                 mock_session, max_rows=1000, filters=None, distinct_namespaces=True
             )
-
 
 
 @pytest.mark.asyncio
@@ -522,7 +502,6 @@ async def test_catalog_namespaces_success_with_filters():
             )
 
 
-
 @pytest.mark.asyncio
 async def test_catalog_namespaces_success_csv_format():
     """Test catalog_namespaces with CSV format."""
@@ -565,7 +544,6 @@ async def test_catalog_namespaces_success_csv_format():
             mock_format.assert_called_once_with(namespaces_table_mock, "csv")
 
 
-
 @pytest.mark.asyncio
 async def test_catalog_namespaces_incomplete_results():
     """Test catalog_namespaces when results are incomplete (truncated by max_rows)."""
@@ -606,7 +584,6 @@ async def test_catalog_namespaces_incomplete_results():
             assert result["row_count"] == 500
 
 
-
 @pytest.mark.asyncio
 async def test_catalog_namespaces_not_enterprise_session():
     """Test catalog_namespaces with non-enterprise session (should fail)."""
@@ -635,7 +612,6 @@ async def test_catalog_namespaces_not_enterprise_session():
         assert result["isError"] is True
 
 
-
 @pytest.mark.asyncio
 async def test_catalog_namespaces_session_not_found():
     """Test catalog_namespaces when session is not found."""
@@ -649,7 +625,6 @@ async def test_catalog_namespaces_session_not_found():
     assert result["success"] is False
     assert "Session not found" in result["error"]
     assert result["isError"] is True
-
 
 
 @pytest.mark.asyncio
@@ -688,7 +663,6 @@ async def test_catalog_namespaces_invalid_format():
             assert result["isError"] is True
 
 
-
 @pytest.mark.asyncio
 async def test_catalog_namespaces_size_limit_exceeded():
     """Test catalog_namespaces when response size exceeds limit."""
@@ -711,14 +685,11 @@ async def test_catalog_namespaces_size_limit_exceeded():
     ) as mock_get_namespaces:
         mock_get_namespaces.return_value = (namespaces_table_mock, False)
 
-        result = await catalog_namespaces_list(
-            context, "enterprise:prod:analytics"
-        )
+        result = await catalog_namespaces_list(context, "enterprise:prod:analytics")
 
         assert result["success"] is False
         assert "50MB" in result["error"] or "max" in result["error"].lower()
         assert result["isError"] is True
-
 
 
 @pytest.mark.asyncio
@@ -798,7 +769,6 @@ async def test_catalog_tables_schema_success_with_namespace():
     assert "data" in result["schemas"][1]
 
 
-
 @pytest.mark.asyncio
 async def test_catalog_tables_schema_success_with_table_names():
     """Test catalog_schemas with specific table_names filter."""
@@ -852,7 +822,6 @@ async def test_catalog_tables_schema_success_with_table_names():
     assert result["count"] == 1
     assert len(result["schemas"]) == 1
     assert result["schemas"][0]["table"] == "quotes"
-
 
 
 @pytest.mark.asyncio
@@ -909,7 +878,6 @@ async def test_catalog_tables_schema_max_tables_limit():
     assert len(result["schemas"]) == 50
 
 
-
 @pytest.mark.asyncio
 async def test_catalog_tables_schema_not_enterprise_session():
     """Test catalog_schemas fails with non-enterprise session."""
@@ -932,7 +900,6 @@ async def test_catalog_tables_schema_not_enterprise_session():
     assert result["success"] is False
     assert result["isError"] is True
     assert "enterprise" in result["error"].lower() or "Core+" in result["error"]
-
 
 
 @pytest.mark.asyncio
@@ -974,9 +941,7 @@ async def test_catalog_tables_schema_mixed_success_failure():
         mock_get_catalog.return_value = (mock_catalog_table, True)
         mock_get_schema.side_effect = mock_get_catalog_meta
 
-        result = await catalog_tables_schema(
-            context, "enterprise:prod:analytics"
-        )
+        result = await catalog_tables_schema(context, "enterprise:prod:analytics")
 
     # Overall operation should succeed
     assert result["success"] is True
@@ -993,7 +958,6 @@ async def test_catalog_tables_schema_mixed_success_failure():
     assert "not found" in result["schemas"][1]["error"].lower()
 
 
-
 @pytest.mark.asyncio
 async def test_catalog_tables_schema_session_not_found():
     """Test catalog_schemas when session is not found."""
@@ -1007,7 +971,6 @@ async def test_catalog_tables_schema_session_not_found():
     assert result["success"] is False
     assert result["isError"] is True
     assert "Session not found" in result["error"]
-
 
 
 @pytest.mark.asyncio
@@ -1031,14 +994,11 @@ async def test_catalog_tables_schema_catalog_retrieval_error():
     ) as mock_get_catalog:
         mock_get_catalog.side_effect = Exception("Catalog access denied")
 
-        result = await catalog_tables_schema(
-            context, "enterprise:prod:analytics"
-        )
+        result = await catalog_tables_schema(context, "enterprise:prod:analytics")
 
     assert result["success"] is False
     assert result["isError"] is True
     assert "Catalog access denied" in result["error"]
-
 
 
 @pytest.mark.asyncio
@@ -1094,7 +1054,6 @@ async def test_catalog_tables_schema_with_filters():
     assert result["schemas"][0]["table"] == "daily_prices"
 
 
-
 @pytest.mark.asyncio
 async def test_catalog_tables_schema_empty_catalog():
     """Test catalog_schemas when catalog has no matching tables."""
@@ -1129,7 +1088,6 @@ async def test_catalog_tables_schema_empty_catalog():
     assert result["count"] == 0
     assert result["is_complete"] is True
     assert len(result["schemas"]) == 0
-
 
 
 @pytest.mark.asyncio
@@ -1179,7 +1137,6 @@ async def test_catalog_table_sample_success():
     assert "data" in result
 
 
-
 @pytest.mark.asyncio
 async def test_catalog_table_sample_with_format():
     """Test catalog_table_sample with different format."""
@@ -1221,7 +1178,6 @@ async def test_catalog_table_sample_with_format():
     assert result["is_complete"] is False
 
 
-
 @pytest.mark.asyncio
 async def test_catalog_table_sample_not_enterprise_session():
     """Test catalog_table_sample with non-enterprise session."""
@@ -1243,7 +1199,6 @@ async def test_catalog_table_sample_not_enterprise_session():
     assert result["success"] is False
     assert "only works with enterprise (Core+) sessions" in result["error"]
     assert result["isError"] is True
-
 
 
 @pytest.mark.asyncio
@@ -1272,7 +1227,6 @@ async def test_catalog_table_sample_exception():
     assert result["success"] is False
     assert "Database connection failed" in result["error"]
     assert result["isError"] is True
-
 
 
 @pytest.mark.asyncio
@@ -1308,5 +1262,3 @@ async def test_catalog_table_sample_response_too_large():
     assert "max 50MB" in result["error"]
     assert "reduce max_rows" in result["error"]
     assert result["isError"] is True
-
-

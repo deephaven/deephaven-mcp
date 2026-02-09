@@ -16,7 +16,6 @@ from mcp.server.fastmcp import Context
 
 from deephaven_mcp import queries
 from deephaven_mcp.formatters import format_table_data
-
 from deephaven_mcp.mcp_systems_server._tools.mcp_server import (
     mcp_server,
 )
@@ -46,7 +45,6 @@ The estimation assumes:
 This conservative estimate helps catch potentially problematic responses before
 expensive formatting operations. Can be tuned based on actual data patterns.
 """
-
 
 
 def _build_table_data_response(
@@ -110,8 +108,6 @@ def _build_table_data_response(
         response["table_name"] = table_name
 
     return response
-
-
 
 
 @mcp_server.tool()
@@ -288,8 +284,6 @@ async def session_tables_schema(
         return {"success": False, "error": str(e), "isError": True}
 
 
-
-
 @mcp_server.tool()
 async def session_tables_list(context: Context, session_id: str) -> dict:
     """
@@ -387,8 +381,6 @@ async def session_tables_list(context: Context, session_id: str) -> dict:
             exc_info=True,
         )
         return {"success": False, "error": str(e), "isError": True}
-
-
 
 
 @mcp_server.tool()
@@ -614,5 +606,3 @@ async def session_table_data(
         result["isError"] = True
 
     return result
-
-

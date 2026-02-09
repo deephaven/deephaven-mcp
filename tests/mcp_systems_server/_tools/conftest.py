@@ -5,12 +5,14 @@ from unittest.mock import AsyncMock, MagicMock
 
 class MockRequestContext:
     """Mock MCP request context for testing."""
+
     def __init__(self, lifespan_context):
         self.lifespan_context = lifespan_context
 
 
 class MockContext:
     """Mock MCP context for testing."""
+
     def __init__(self, lifespan_context):
         self.request_context = MockRequestContext(lifespan_context)
 

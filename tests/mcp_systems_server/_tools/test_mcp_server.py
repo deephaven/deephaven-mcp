@@ -9,14 +9,13 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
-
 from conftest import MockContext, create_mock_instance_tracker
 
+from deephaven_mcp import config
 from deephaven_mcp.mcp_systems_server._tools.mcp_server import (
     app_lifespan,
     mcp_reload,
 )
-from deephaven_mcp import config
 from deephaven_mcp.resource_manager import (
     DockerLaunchedSession,
     DynamicCommunitySessionManager,
@@ -44,7 +43,6 @@ async def test_mcp_reload_missing_context_keys():
     assert "session_registry" in result["error"]
 
 
-
 @pytest.mark.asyncio
 async def test_mcp_reload_lock_error():
     config_manager = AsyncMock()
@@ -65,7 +63,6 @@ async def test_mcp_reload_lock_error():
     assert result["success"] is False
     assert result["isError"] is True
     assert "lock error" in result["error"]
-
 
 
 @pytest.mark.filterwarnings("ignore:unclosed <socket.socket")
@@ -91,7 +88,6 @@ async def test_mcp_reload_success():
     session_registry.close.assert_awaited_once()
 
 
-
 @pytest.mark.asyncio
 async def test_mcp_reload_failure():
     config_manager = AsyncMock()
@@ -112,7 +108,6 @@ async def test_mcp_reload_failure():
     assert result["success"] is False
     assert result["isError"] is True
     assert "fail" in result["error"]
-
 
 
 @pytest.mark.asyncio
@@ -165,5 +160,3 @@ async def test_app_lifespan_yields_context_and_cleans_up():
             assert "session_registry" in context
             assert "refresh_lock" in context
         session_registry.close.assert_awaited_once()
-
-

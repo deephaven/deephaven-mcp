@@ -9,9 +9,9 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
-
 from conftest import MockContext, create_mock_instance_tracker
 
+from deephaven_mcp import config
 from deephaven_mcp.mcp_systems_server._tools.session import (
     session_details,
     sessions_list,
@@ -20,7 +20,6 @@ from deephaven_mcp.mcp_systems_server._tools.session_community import (
     session_community_create,
     session_community_delete,
 )
-from deephaven_mcp import config
 from deephaven_mcp.resource_manager import (
     DockerLaunchedSession,
     DynamicCommunitySessionManager,
@@ -265,9 +264,7 @@ class TestSessionCommunityCreateComplete:
             }
         )
 
-        result = await session_community_create(
-            context, session_name="test-session"
-        )
+        result = await session_community_create(context, session_name="test-session")
 
         assert result["success"] is False
         assert "already exists" in result["error"]
@@ -411,7 +408,6 @@ class TestSessionCommunityCreateComplete:
             assert result["process_id"] == 12345
 
 
-
 class TestSessionCommunityDeleteComplete:
     """Complete tests for session_community_delete edge cases."""
 
@@ -437,9 +433,7 @@ class TestSessionCommunityDeleteComplete:
             }
         )
 
-        result = await session_community_delete(
-            context, session_name="test-session"
-        )
+        result = await session_community_delete(context, session_name="test-session")
 
         assert result["success"] is False
         assert "not a community session" in result["error"]
@@ -473,9 +467,7 @@ class TestSessionCommunityDeleteComplete:
             }
         )
 
-        result = await session_community_delete(
-            context, session_name="test-session"
-        )
+        result = await session_community_delete(context, session_name="test-session")
 
         # Should still succeed despite close failure
         assert result["success"] is True
@@ -512,9 +504,7 @@ class TestSessionCommunityDeleteComplete:
             }
         )
 
-        result = await session_community_delete(
-            context, session_name="test-session"
-        )
+        result = await session_community_delete(context, session_name="test-session")
 
         assert result["success"] is False
         assert "Failed to remove session" in result["error"]
@@ -539,14 +529,11 @@ class TestSessionCommunityDeleteComplete:
             }
         )
 
-        result = await session_community_delete(
-            context, session_name="test-session"
-        )
+        result = await session_community_delete(context, session_name="test-session")
 
         assert result["success"] is False
         assert "Unexpected error" in result["error"]
         assert result["isError"] is True
-
 
 
 class TestSessionDetailsDynamicCommunity:
@@ -714,8 +701,6 @@ class TestSessionDetailsDynamicCommunity:
         assert session_info["container_id"] == "minimal123"
 
 
-
-
 @pytest.mark.asyncio
 async def test_session_details_logs_version_info():
     """Test that session_details logs programming language and Deephaven versions when available."""
@@ -800,7 +785,6 @@ async def test_session_details_logs_version_info():
         )
 
 
-
 @pytest.mark.asyncio
 async def test_sessions_list_success():
     """Test sessions_list with multiple sessions of different types."""
@@ -849,7 +833,6 @@ async def test_sessions_list_success():
     assert "available" not in session2  # Should not check availability
 
 
-
 @pytest.mark.asyncio
 async def test_sessions_list_with_unknown_type():
     """Test sessions_list with a session that has no system_type attribute."""
@@ -877,7 +860,6 @@ async def test_sessions_list_with_unknown_type():
     # Check that we have an error entry for this session since system_type is None
     assert result["sessions"][0]["session_id"] == "session"
     assert "error" in result["sessions"][0]
-
 
 
 @pytest.mark.asyncio
@@ -911,7 +893,6 @@ async def test_sessions_list_with_processing_error():
     assert result["sessions"][0]["session_id"] == "session"
 
 
-
 @pytest.mark.asyncio
 async def test_sessions_list_registry_error():
     """Test sessions_list when the session registry raises an exception."""
@@ -926,7 +907,6 @@ async def test_sessions_list_registry_error():
 
     # Verify results
     assert result["success"] is False
-
 
 
 @pytest.mark.asyncio
@@ -948,7 +928,6 @@ async def test_session_details_session_not_found():
     assert "error" in result
     assert "not found" in result["error"]
     assert result["isError"] is True
-
 
 
 @pytest.mark.asyncio
@@ -981,7 +960,6 @@ async def test_session_details_with_session_error():
     assert result["success"] is True
     assert "session" in result
     assert result["session"]["available"] is False
-
 
 
 @pytest.mark.asyncio
@@ -1023,7 +1001,6 @@ async def test_session_details_with_processing_error():
     assert result["isError"] is True
 
 
-
 @pytest.mark.asyncio
 async def test_session_details_registry_error():
     """Test session_details when the session registry raises an exception."""
@@ -1040,7 +1017,6 @@ async def test_session_details_registry_error():
     assert result["success"] is False
     assert "error" in result
     assert result["isError"] is True
-
 
 
 @pytest.mark.asyncio
@@ -1078,9 +1054,7 @@ async def test_session_details_success_with_programming_language():
     mock_context.request_context.lifespan_context = {"session_registry": mock_registry}
 
     # Call function
-    result = await session_details(
-        mock_context, "session1", attempt_to_connect=True
-    )
+    result = await session_details(mock_context, "session1", attempt_to_connect=True)
 
     # Verify results
     assert result["success"] is True
@@ -1093,7 +1067,6 @@ async def test_session_details_success_with_programming_language():
     assert result["session"]["liveness_status"] == "ONLINE"
     assert result["session"]["programming_language"] == "python"
     assert result["session"]["liveness_detail"] == "All systems operational"
-
 
 
 @pytest.mark.asyncio
@@ -1130,9 +1103,7 @@ async def test_session_details_success_without_programming_language():
     mock_context.request_context.lifespan_context = {"session_registry": mock_registry}
 
     # Call function
-    result = await session_details(
-        mock_context, "session1", attempt_to_connect=True
-    )
+    result = await session_details(mock_context, "session1", attempt_to_connect=True)
 
     # Verify results
     assert result["success"] is True
@@ -1145,7 +1116,6 @@ async def test_session_details_success_without_programming_language():
     assert result["session"]["liveness_status"] == "ONLINE"
     assert "programming_language" not in result["session"]
     assert result["session"]["liveness_detail"] == "All systems operational"
-
 
 
 @pytest.mark.asyncio
@@ -1186,7 +1156,6 @@ async def test_dynamic_community_session_has_correct_source():
 
     # Verify name
     assert manager.name == "test-session"
-
 
 
 @pytest.mark.asyncio
@@ -1244,5 +1213,3 @@ async def test_session_details_to_dict_exception():
         assert "connection_url" not in session_info  # This comes from to_dict()
         assert "port" not in session_info  # This comes from to_dict()
         assert "launch_method" not in session_info  # This comes from to_dict()
-
-

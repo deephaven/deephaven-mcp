@@ -9,9 +9,9 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
-
 from conftest import MockContext, create_mock_instance_tracker
 
+from deephaven_mcp import config
 from deephaven_mcp.mcp_systems_server._tools.script import (
     session_pip_list,
     session_script_run,
@@ -20,7 +20,6 @@ from deephaven_mcp.mcp_systems_server._tools.session_community import (
     session_community_create,
     session_community_delete,
 )
-from deephaven_mcp import config
 from deephaven_mcp.resource_manager import (
     DockerLaunchedSession,
     DynamicCommunitySessionManager,
@@ -239,14 +238,10 @@ class TestRemainingEdgeCases:
             }
         )
 
-        result = await session_community_delete(
-            context, session_name="test-session"
-        )
+        result = await session_community_delete(context, session_name="test-session")
 
         # Should still succeed even though removal returned None
         assert result["success"] is True
-
-
 
 
 def test_run_script_reads_script_from_file():
@@ -285,7 +280,6 @@ def test_run_script_reads_script_from_file():
         mock_session.run_script.assert_called_once_with(file_content)
 
 
-
 @pytest.mark.asyncio
 async def test_session_script_run_both_script_and_path():
     # Both script and script_path provided, should prefer script
@@ -315,7 +309,6 @@ async def test_session_script_run_both_script_and_path():
     session.run_script.assert_any_call("print('hi')")
 
 
-
 @pytest.mark.asyncio
 async def test_session_script_run_missing_session():
     # Following the pattern in _mcp.py:
@@ -328,13 +321,10 @@ async def test_session_script_run_missing_session():
     session_registry.get = AsyncMock(side_effect=Exception("no session"))
 
     context = MockContext({"session_registry": session_registry})
-    result = await session_script_run(
-        context, session_id=None, script="print('hi')"
-    )
+    result = await session_script_run(context, session_id=None, script="print('hi')")
     assert result["success"] is False
     assert result["isError"] is True
     assert "no session" in result["error"]
-
 
 
 @pytest.mark.asyncio
@@ -360,7 +350,6 @@ async def test_session_script_run_both_none():
     assert "Must provide either script or script_path" in result["error"]
 
 
-
 @pytest.mark.asyncio
 @pytest.mark.filterwarnings("ignore:unclosed <socket.socket:ResourceWarning")
 @pytest.mark.filterwarnings("ignore:unclosed event loop:ResourceWarning")
@@ -383,9 +372,7 @@ async def test_session_script_run_success():
     session_registry.get = AsyncMock(return_value=mock_session_manager)
 
     context = MockContext({"session_registry": session_registry})
-    result = await session_script_run(
-        context, session_id="worker", script="print(1)"
-    )
+    result = await session_script_run(context, session_id="worker", script="print(1)")
 
     # Check correct session access pattern
     session_registry.get.assert_awaited_once_with("worker")
@@ -394,7 +381,6 @@ async def test_session_script_run_success():
     # Verify results
     assert result["success"] is True
     assert DummySession.called == "print(1)"
-
 
 
 @pytest.mark.asyncio
@@ -413,7 +399,6 @@ async def test_session_script_run_no_script():
     assert res["success"] is False
     assert res["isError"] is True
     assert "Must provide either script or script_path." in res["error"]
-
 
 
 @pytest.mark.asyncio
@@ -442,7 +427,6 @@ async def test_session_script_run_neither_script_nor_path():
     assert "Must provide either script or script_path." in res["error"]
 
 
-
 @pytest.mark.asyncio
 @pytest.mark.filterwarnings("ignore:unclosed <socket.socket:ResourceWarning")
 @pytest.mark.filterwarnings("ignore:unclosed event loop:ResourceWarning")
@@ -453,9 +437,7 @@ async def test_session_script_run_session_error():
     session_registry.get = AsyncMock(side_effect=Exception("fail"))
 
     context = MockContext({"session_registry": session_registry})
-    res = await session_script_run(
-        context, session_id="worker", script="print(1)"
-    )
+    res = await session_script_run(context, session_id="worker", script="print(1)")
 
     # Verify the session registry was called with the correct session id
     session_registry.get.assert_awaited_once_with("worker")
@@ -464,7 +446,6 @@ async def test_session_script_run_session_error():
     assert res["success"] is False
     assert res["isError"] is True
     assert "fail" in res["error"]
-
 
 
 @pytest.mark.asyncio
@@ -519,7 +500,6 @@ async def test_session_script_run_script_path():
     assert res["success"] is True
 
 
-
 @pytest.mark.asyncio
 async def test_session_script_run_script_path_none_error():
     # Test case where neither script nor script_path is provided
@@ -539,7 +519,6 @@ async def test_session_script_run_script_path_none_error():
 
     # Verify the session registry was NOT called (validation fails before that)
     session_registry.get.assert_not_awaited()
-
 
 
 @pytest.mark.asyncio
@@ -596,7 +575,6 @@ async def test_session_pip_list_success():
         assert result["result"][0]["version"] == "1.25.0"
 
 
-
 @pytest.mark.asyncio
 async def test_session_pip_list_empty():
     """Test pip_packages with an empty table."""
@@ -635,7 +613,6 @@ async def test_session_pip_list_empty():
     mock_session_registry.get.assert_awaited_once_with("test_worker")
     mock_session_manager.get.assert_awaited_once()
     mock_get_pip_packages_table.assert_awaited_once()
-
 
 
 @pytest.mark.asyncio
@@ -685,7 +662,6 @@ async def test_session_pip_list_malformed_data():
     mock_get_pip_packages_table.assert_awaited_once()
 
 
-
 @pytest.mark.asyncio
 async def test_session_pip_list_error():
     """Test pip_packages with an error."""
@@ -726,7 +702,6 @@ async def test_session_pip_list_error():
         mock_session_manager.get.assert_awaited_once()
 
 
-
 @pytest.mark.asyncio
 async def test_session_pip_list_session_not_found():
     """Test pip_packages when the session is not found."""
@@ -747,14 +722,10 @@ async def test_session_pip_list_session_not_found():
                 "instance_tracker": create_mock_instance_tracker(),
             }
         )
-        result = await session_pip_list(
-            context, session_id="nonexistent_worker"
-        )
+        result = await session_pip_list(context, session_id="nonexistent_worker")
         assert result["success"] is False
         assert "Worker not found" in result["error"]
         assert result["isError"] is True
 
         # Verify correct session access pattern
         mock_session_registry.get.assert_awaited_once_with("nonexistent_worker")
-
-

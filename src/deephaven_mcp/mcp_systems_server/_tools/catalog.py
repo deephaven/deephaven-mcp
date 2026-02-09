@@ -18,10 +18,7 @@ from mcp.server.fastmcp import Context
 from deephaven_mcp import queries
 from deephaven_mcp._exceptions import UnsupportedOperationError
 from deephaven_mcp.client import CorePlusSession
-
-
 from deephaven_mcp.formatters import format_table_data
-
 from deephaven_mcp.mcp_systems_server._tools.mcp_server import (
     mcp_server,
 )
@@ -37,7 +34,6 @@ from deephaven_mcp.mcp_systems_server._tools.table import (
 )
 
 _LOGGER = logging.getLogger(__name__)
-
 
 
 async def _get_catalog_data(
@@ -166,8 +162,6 @@ async def _get_catalog_data(
         result["isError"] = True
 
     return result
-
-
 
 
 @mcp_server.tool()
@@ -385,8 +379,6 @@ async def catalog_tables_list(
     )
 
 
-
-
 @mcp_server.tool()
 async def catalog_namespaces_list(
     context: Context,
@@ -528,8 +520,6 @@ async def catalog_namespaces_list(
         format=format,
         tool_name="catalog_namespaces",
     )
-
-
 
 
 @mcp_server.tool()
@@ -856,8 +846,6 @@ async def catalog_tables_schema(
         return {"success": False, "error": str(e), "isError": True}
 
 
-
-
 @mcp_server.tool()
 async def catalog_table_sample(
     context: Context,
@@ -1058,5 +1046,3 @@ async def catalog_table_sample(
             exc_info=True,
         )
         return {"success": False, "error": str(e), "isError": True}
-
-
