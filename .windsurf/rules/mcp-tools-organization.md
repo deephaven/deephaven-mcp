@@ -23,6 +23,12 @@ trigger: always_on
    - Only create a new module if the tool represents a distinct new domain
    - Typical module size: 300-700 lines is healthy
 
+5. **Registering New Tool Modules**:
+   - **CRITICAL**: When creating a new tool module, you MUST add an import in `_mcp.py`
+   - Without this import, the `@mcp_server.tool()` decorators will never execute
+   - Use underscore alias and `# noqa: F401` to keep import private and prevent auto-removal
+   - Example: `from deephaven_mcp.mcp_systems_server._tools import newmodule as _newmodule  # noqa: F401`
+
 ## Required Imports for MCP Tools
 
 All files with `@mcp_server.tool()` decorated functions must import:

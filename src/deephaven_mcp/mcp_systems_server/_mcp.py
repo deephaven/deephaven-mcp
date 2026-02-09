@@ -22,20 +22,21 @@ Usage:
     mcp_server.run(transport="stdio")
 """
 
-from deephaven_mcp.mcp_systems_server._tools.mcp_server import mcp_server
-
 # Import all tool modules to execute their @mcp_server.tool() decorators
 # This registers all tools with the mcp_server instance
 # Using underscore aliases to keep imports private (not part of public API)
-from deephaven_mcp.mcp_systems_server._tools import (
-    catalog as _catalog,
-    pq as _pq,
-    script as _script,
-    session as _session,
+from deephaven_mcp.mcp_systems_server._tools import catalog as _catalog  # noqa: F401
+from deephaven_mcp.mcp_systems_server._tools import pq as _pq  # noqa: F401
+from deephaven_mcp.mcp_systems_server._tools import script as _script  # noqa: F401
+from deephaven_mcp.mcp_systems_server._tools import session as _session  # noqa: F401
+from deephaven_mcp.mcp_systems_server._tools import (  # noqa: F401
     session_community as _session_community,
-    session_enterprise as _session_enterprise,
-    table as _table,
 )
+from deephaven_mcp.mcp_systems_server._tools import (  # noqa: F401
+    session_enterprise as _session_enterprise,
+)
+from deephaven_mcp.mcp_systems_server._tools import table as _table  # noqa: F401
+from deephaven_mcp.mcp_systems_server._tools.mcp_server import mcp_server
 
 __all__ = [
     "mcp_server",
