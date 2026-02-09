@@ -10,81 +10,17 @@ Provides MCP tools for querying Deephaven Enterprise (Core+) data catalogs:
 These tools require Deephaven Enterprise (Core+) and are not available in Community.
 """
 
-import asyncio
 import logging
-import os
-from collections.abc import AsyncIterator, Awaitable, Callable
-from contextlib import asynccontextmanager
-from datetime import datetime
-from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast
+from typing import cast
 
-import aiofiles
-import pyarrow
-from mcp.server.fastmcp import Context, FastMCP
+from mcp.server.fastmcp import Context
 
 from deephaven_mcp import queries
-from deephaven_mcp._exceptions import (
-    CommunitySessionConfigurationError,
-    MissingEnterprisePackageError,
-    UnsupportedOperationError,
-)
-from deephaven_mcp.client import BaseSession, CorePlusSession
-from deephaven_mcp.client._controller_client import CorePlusControllerClient
-from deephaven_mcp.client._protobuf import (
-    CorePlusQueryConfig,
-    CorePlusQuerySerial,
-    CorePlusQueryState,
-)
+from deephaven_mcp._exceptions import UnsupportedOperationError
+from deephaven_mcp.client import CorePlusSession
 
-if TYPE_CHECKING:
-    from deephaven.proto.table_pb2 import (
-        ColumnDefinitionMessage,
-        ExportedObjectInfoMessage,
-        TableDefinitionMessage,
-    )
-    from deephaven_enterprise.proto.controller_common_pb2 import (
-        NamedStringList,
-    )
-    from deephaven_enterprise.proto.persistent_query_pb2 import (
-        ExceptionDetailsMessage,
-        PersistentQueryConfigMessage,
-        ProcessorConnectionDetailsMessage,
-        WorkerProtocolMessage,
-    )
 
-try:
-    from deephaven_enterprise.proto.persistent_query_pb2 import (
-        ExportedObjectTypeEnum,
-        RestartUsersEnum,
-    )
-except ImportError:
-    ExportedObjectTypeEnum = None
-    RestartUsersEnum = None
-
-from deephaven_mcp.config import (
-    ConfigManager,
-    get_config_section,
-    redact_enterprise_system_config,
-)
 from deephaven_mcp.formatters import format_table_data
-from deephaven_mcp.resource_manager import (
-    BaseItemManager,
-    CombinedSessionRegistry,
-    CommunitySessionManager,
-    DockerLaunchedSession,
-    DynamicCommunitySessionManager,
-    EnterpriseSessionManager,
-    LaunchedSession,
-    PythonLaunchedSession,
-    SystemType,
-    find_available_port,
-    generate_auth_token,
-    launch_session,
-)
-from deephaven_mcp.resource_manager._instance_tracker import (
-    InstanceTracker,
-    cleanup_orphaned_resources,
-)
 
 from deephaven_mcp.mcp_systems_server._tools.mcp_server import (
     mcp_server,
@@ -99,8 +35,6 @@ from deephaven_mcp.mcp_systems_server._tools.table import (
     ESTIMATED_BYTES_PER_CELL,
     _build_table_data_response,
 )
-
-T = TypeVar("T")
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -119,19 +53,28 @@ async def _get_catalog_data(
     """
     Retrieve catalog data (tables or namespaces) from an enterprise session.
 
-    This consolidates the common logic between catalog_tables and catalog_namespaces tools.
+    Internal helper function that consolidates common catalog retrieval logic.
 
     Args:
         context (Context): The MCP context object.
         session_id (str): ID of the Deephaven enterprise session to query.
         distinct_namespaces (bool): If True, retrieve distinct namespaces; if False, retrieve full catalog.
-        max_rows (int | None): Maximum number of rows to return.
-        filters (list[str] | None): Optional filters to apply.
-        format (str): Output format for data.
-        tool_name (str): Name of the calling tool for logging (e.g., "catalog_tables").
+        max_rows (int | None): Maximum number of rows to return. None for unlimited.
+        filters (list[str] | None): Optional Deephaven query language filters to apply.
+        format (str): Output format for data (e.g., "csv", "json-row", "markdown-table").
+        tool_name (str): Name of the calling tool for logging.
 
     Returns:
-        dict: Result dictionary with success/error information and data.
+        dict: Result dictionary with keys:
+            - success (bool): True if operation succeeded, False otherwise
+            - session_id (str): The session ID that was queried
+            - format (str): The actual format used for data
+            - row_count (int): Number of rows returned
+            - is_complete (bool): True if all data was returned (not truncated)
+            - columns (list[dict]): Schema information for returned data
+            - data (str): Formatted catalog data
+            - error (str, optional): Error message if success is False
+            - isError (bool, optional): True if this is an error response
     """
     result: dict[str, object] = {"success": False}
     data_type = "namespaces" if distinct_namespaces else "catalog entries"

@@ -11,82 +11,17 @@ This module initializes the MCP server and registers all Deephaven tools.
 
 import asyncio
 import logging
-import os
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import datetime
-from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast
 
-import aiofiles
-import pyarrow
 from mcp.server.fastmcp import Context, FastMCP
 
-from deephaven_mcp import queries
-from deephaven_mcp._exceptions import (
-    CommunitySessionConfigurationError,
-    MissingEnterprisePackageError,
-    UnsupportedOperationError,
-)
-from deephaven_mcp.client import BaseSession, CorePlusSession
-from deephaven_mcp.client._controller_client import CorePlusControllerClient
-from deephaven_mcp.client._protobuf import (
-    CorePlusQueryConfig,
-    CorePlusQuerySerial,
-    CorePlusQueryState,
-)
-
-if TYPE_CHECKING:
-    from deephaven.proto.table_pb2 import (
-        ColumnDefinitionMessage,
-        ExportedObjectInfoMessage,
-        TableDefinitionMessage,
-    )
-    from deephaven_enterprise.proto.controller_common_pb2 import (
-        NamedStringList,
-    )
-    from deephaven_enterprise.proto.persistent_query_pb2 import (
-        ExceptionDetailsMessage,
-        PersistentQueryConfigMessage,
-        ProcessorConnectionDetailsMessage,
-        WorkerProtocolMessage,
-    )
-
-try:
-    from deephaven_enterprise.proto.persistent_query_pb2 import (
-        ExportedObjectTypeEnum,
-        RestartUsersEnum,
-    )
-except ImportError:
-    ExportedObjectTypeEnum = None
-    RestartUsersEnum = None
-
-from deephaven_mcp.config import (
-    ConfigManager,
-    get_config_section,
-    redact_enterprise_system_config,
-)
-from deephaven_mcp.formatters import format_table_data
-from deephaven_mcp.resource_manager import (
-    BaseItemManager,
-    CombinedSessionRegistry,
-    CommunitySessionManager,
-    DockerLaunchedSession,
-    DynamicCommunitySessionManager,
-    EnterpriseSessionManager,
-    LaunchedSession,
-    PythonLaunchedSession,
-    SystemType,
-    find_available_port,
-    generate_auth_token,
-    launch_session,
-)
+from deephaven_mcp.config import ConfigManager
+from deephaven_mcp.resource_manager import CombinedSessionRegistry
 from deephaven_mcp.resource_manager._instance_tracker import (
     InstanceTracker,
     cleanup_orphaned_resources,
 )
-
-
-T = TypeVar("T")
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -127,6 +62,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
             - 'config_manager' (ConfigManager): Instance for accessing session configuration.
             - 'session_registry' (CombinedSessionRegistry): Instance for managing all session types.
             - 'refresh_lock' (asyncio.Lock): Lock for atomic refresh operations across tools.
+            - 'instance_tracker' (InstanceTracker): Instance tracker for managing server instance lifecycle.
     """
     _LOGGER.info(
         f"[mcp_systems_server:app_lifespan] Starting MCP server '{server.name}'"
@@ -178,21 +114,24 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
 
 mcp_server = FastMCP("deephaven-mcp-systems", lifespan=app_lifespan)
 """
-FastMCP Server Instance for Deephaven MCP Systems Tools
+FastMCP Server Instance for Deephaven MCP Systems Tools.
 
-This object is the singleton FastMCP server for the Deephaven MCP systems toolset. It is responsible for registering and exposing all MCP tool functions defined in this module (such as refresh, enterprise_systems_status, list_sessions, get_session_details, table_schemas, run_script, and pip_packages) to the MCP runtime environment.
+This is the singleton FastMCP server for the Deephaven MCP systems toolset. It manages
+registration and exposure of MCP tool functions to the MCP runtime environment.
+
+All functions decorated with @mcp_server.tool() across the _tools package are automatically
+registered as MCP tools and made available for remote invocation.
 
 Key Details:
-    - The server is instantiated with the name 'deephaven-mcp-systems', which uniquely identifies this toolset in the MCP ecosystem.
-    - All functions decorated with @mcp_server.tool() are automatically registered as MCP tools and made available for remote invocation.
-    - The server manages protocol compliance, tool metadata, and integration with the broader MCP infrastructure.
-    - This object should not be instantiated more than once per process/module.
+    - Server name: 'deephaven-mcp-systems' (unique identifier in the MCP ecosystem)
+    - Lifespan manager: app_lifespan (handles startup/shutdown and resource cleanup)
+    - Tools are registered via @mcp_server.tool() decorator across multiple modules
+    - Singleton instance - should not be instantiated more than once per process
 
 Usage:
-    - Do not call methods on mcp_server directly; instead, use the @mcp_server.tool() decorator to register new tools.
-    - The MCP runtime will discover and invoke registered tools as needed.
-
-See the module-level docstring for an overview of the available tools and error handling conventions.
+    - Use @mcp_server.tool() decorator to register new tools
+    - MCP runtime discovers and invokes registered tools automatically
+    - Do not call methods on mcp_server directly
 """
 
 

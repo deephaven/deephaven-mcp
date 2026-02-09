@@ -9,70 +9,20 @@ Provides MCP tools for managing Deephaven Community sessions:
 These tools work with Deephaven Community (Core) sessions only.
 """
 
-import asyncio
 import logging
 import os
-from collections.abc import AsyncIterator, Awaitable, Callable
-from contextlib import asynccontextmanager
-from datetime import datetime
-from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast
+from typing import Any, Literal, cast
 
-import aiofiles
-import pyarrow
-from mcp.server.fastmcp import Context, FastMCP
+from mcp.server.fastmcp import Context
 
-from deephaven_mcp import queries
-from deephaven_mcp._exceptions import (
-    CommunitySessionConfigurationError,
-    MissingEnterprisePackageError,
-    UnsupportedOperationError,
-)
-from deephaven_mcp.client import BaseSession, CorePlusSession
-from deephaven_mcp.client._controller_client import CorePlusControllerClient
-from deephaven_mcp.client._protobuf import (
-    CorePlusQueryConfig,
-    CorePlusQuerySerial,
-    CorePlusQueryState,
-)
-
-if TYPE_CHECKING:
-    from deephaven.proto.table_pb2 import (
-        ColumnDefinitionMessage,
-        ExportedObjectInfoMessage,
-        TableDefinitionMessage,
-    )
-    from deephaven_enterprise.proto.controller_common_pb2 import (
-        NamedStringList,
-    )
-    from deephaven_enterprise.proto.persistent_query_pb2 import (
-        ExceptionDetailsMessage,
-        PersistentQueryConfigMessage,
-        ProcessorConnectionDetailsMessage,
-        WorkerProtocolMessage,
-    )
-
-try:
-    from deephaven_enterprise.proto.persistent_query_pb2 import (
-        ExportedObjectTypeEnum,
-        RestartUsersEnum,
-    )
-except ImportError:
-    ExportedObjectTypeEnum = None
-    RestartUsersEnum = None
-
-from deephaven_mcp.config import (
-    ConfigManager,
-    get_config_section,
-    redact_enterprise_system_config,
-)
-from deephaven_mcp.formatters import format_table_data
+from deephaven_mcp._exceptions import CommunitySessionConfigurationError
+from deephaven_mcp.config import ConfigManager
 from deephaven_mcp.resource_manager import (
     BaseItemManager,
     CombinedSessionRegistry,
     CommunitySessionManager,
     DockerLaunchedSession,
     DynamicCommunitySessionManager,
-    EnterpriseSessionManager,
     LaunchedSession,
     PythonLaunchedSession,
     SystemType,
@@ -80,10 +30,7 @@ from deephaven_mcp.resource_manager import (
     generate_auth_token,
     launch_session,
 )
-from deephaven_mcp.resource_manager._instance_tracker import (
-    InstanceTracker,
-    cleanup_orphaned_resources,
-)
+from deephaven_mcp.resource_manager._instance_tracker import InstanceTracker
 
 from deephaven_mcp.mcp_systems_server._tools.mcp_server import (
     mcp_server,
@@ -92,8 +39,6 @@ from deephaven_mcp.mcp_systems_server._tools.session import (
     DEFAULT_MAX_CONCURRENT_SESSIONS,
     DEFAULT_PROGRAMMING_LANGUAGE,
 )
-
-T = TypeVar("T")
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -833,7 +778,10 @@ async def session_community_create(
     Terminology Note:
     - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
     - 'Deephaven Community' and 'Deephaven Core' are interchangeable names for the same product
+    - 'Deephaven Enterprise', 'Deephaven Core+', and 'Deephaven CorePlus' are interchangeable names for the same product
     - 'COMMUNITY' sessions run Deephaven Community (also called 'Core')
+    - In Deephaven, "schema" and "meta table" refer to the same concept - the table's column definitions including names, types, and properties.
+    - In Deephaven, "catalog" and "database" are interchangeable terms - the catalog is the database of available tables.
     - 'DHC' is shorthand for Deephaven Community (also called 'Core')
     - 'DHE' is shorthand for Deephaven Enterprise (also called 'Core+')
 
@@ -1148,7 +1096,10 @@ async def session_community_delete(
     Terminology Note:
     - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
     - 'Deephaven Community' and 'Deephaven Core' are interchangeable names for the same product
+    - 'Deephaven Enterprise', 'Deephaven Core+', and 'Deephaven CorePlus' are interchangeable names for the same product
     - 'COMMUNITY' sessions run Deephaven Community (also called 'Core')
+    - In Deephaven, "schema" and "meta table" refer to the same concept - the table's column definitions including names, types, and properties.
+    - In Deephaven, "catalog" and "database" are interchangeable terms - the catalog is the database of available tables.
     - 'DHC' is shorthand for Deephaven Community (also called 'Core')
     - 'DHE' is shorthand for Deephaven Enterprise (also called 'Core+')
 
@@ -1369,6 +1320,11 @@ async def session_community_credentials(
     Terminology Note:
     - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
     - 'Deephaven Community' and 'Deephaven Core' are interchangeable names for the same product
+    - 'Deephaven Enterprise', 'Deephaven Core+', and 'Deephaven CorePlus' are interchangeable names for the same product
+    - In Deephaven, "schema" and "meta table" refer to the same concept - the table's column definitions including names, types, and properties.
+    - In Deephaven, "catalog" and "database" are interchangeable terms - the catalog is the database of available tables.
+    - 'DHC' is shorthand for Deephaven Community (also called 'Core')
+    - 'DHE' is shorthand for Deephaven Enterprise (also called 'Core+')
 
     AI Agent Usage Guidelines:
     - **When to Call**: Only when user explicitly requests browser access, connection URL,
