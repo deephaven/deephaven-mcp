@@ -588,8 +588,8 @@ The `session_creation` key enables dynamic creation of Deephaven Community Core 
 
 **Docker Image Configuration Examples:**
 
-```json
-// ✅ CORRECT: Use programming_language for standard Deephaven images
+```json5
+// CORRECT: Use programming_language for standard Deephaven images
 {
   "session_creation": {
     "defaults": {
@@ -599,7 +599,7 @@ The `session_creation` key enables dynamic creation of Deephaven Community Core 
   }
 }
 
-// ✅ CORRECT: Use programming_language for Groovy
+// CORRECT: Use programming_language for Groovy
 {
   "session_creation": {
     "defaults": {
@@ -609,7 +609,7 @@ The `session_creation` key enables dynamic creation of Deephaven Community Core 
   }
 }
 
-// ✅ CORRECT: Use docker_image for custom images
+// CORRECT: Use docker_image for custom images
 {
   "session_creation": {
     "defaults": {
@@ -619,13 +619,13 @@ The `session_creation` key enables dynamic creation of Deephaven Community Core 
   }
 }
 
-// ❌ INCORRECT: Don't use both programming_language and docker_image together
+// INCORRECT: Don't use both programming_language and docker_image together
 {
   "session_creation": {
     "defaults": {
       "launch_method": "docker",
-      "programming_language": "Python",  // ❌ Conflict!
-      "docker_image": "custom:latest"     // ❌ Conflict!
+      "programming_language": "Python",  // Conflict!
+      "docker_image": "custom:latest"     // Conflict!
     }
   }
 }
@@ -662,7 +662,7 @@ The `session_creation` key enables dynamic creation of Deephaven Community Core 
         "connection_json_url": "https://dev-enterprise.example.com:8000/iris/connection.json",
         "auth_type": "password",  // Username/password authentication
         "username": "admin",
-        "password": "your-password-here"  // ⚠️ Consider password_env_var for security!
+        "password": "your-password-here"  // Consider password_env_var for security!
       }
     }
   }
@@ -679,7 +679,7 @@ The `session_creation` key enables dynamic creation of Deephaven Community Core 
         "connection_json_url": "https://my-enterprise.example.com:8000/iris/connection.json",
         "auth_type": "password",
         "username": "admin",
-        // ✅ RECOMMENDED: Read password from environment variable
+        // RECOMMENDED: Read password from environment variable
         // Set in shell: export DH_ENTERPRISE_PASSWORD="your-password"
         "password_env_var": "DH_ENTERPRISE_PASSWORD"
       }
@@ -826,7 +826,7 @@ Here's a complete example showing both Community and Enterprise configurations:
         "host": "secure.deephaven.example.com",
         "port": 10002,
         "auth_type": "Basic",
-        "auth_token": "username:password",  // ⚠️ Better: use auth_token_env_var!
+        "auth_token": "username:password",  // Better: use auth_token_env_var!
         "use_tls": true,
         "tls_root_certs": "/path/to/community_root.crt"  // Absolute path
       }
@@ -861,7 +861,7 @@ Here's a complete example showing both Community and Enterprise configurations:
         "connection_json_url": "https://prod.enterprise.example.com/iris/connection.json",
         "auth_type": "password",
         "username": "your_username",
-        "password_env_var": "ENTERPRISE_PASSWORD",  // ✅ Read from environment (secure)
+        "password_env_var": "ENTERPRISE_PASSWORD",  // Read from environment (secure)
         // Enable dynamic Enterprise session creation
         "session_creation": {
           "max_concurrent_sessions": 3,  // Lower limit for production stability
