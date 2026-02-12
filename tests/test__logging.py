@@ -329,24 +329,16 @@ def test_signal_handler_defensive_logging_failure():
     """Test that signal handler handles logging failures gracefully."""
     import signal
 
-    import deephaven_mcp._logging as logging_mod
-
-    importlib.reload(logging_mod)
-
-    # Get the signal handler by registering it
-    with patch.object(signal, "signal") as mock_signal:
-        logging_mod._SIGNAL_HANDLERS_INSTALLED = False
-        logging_mod.setup_signal_handler_logging()
-        # Extract the handler function from the first call
-        _signal_handler = mock_signal.call_args_list[0][0][1]
+    from deephaven_mcp._logging import _signal_handler
 
     # Mock logging to raise an exception
     with patch("logging.warning", side_effect=Exception("Logging broken")):
         # Mock sys.stderr.write to verify fallback
-        with patch.object(sys.stderr, "write") as mock_stderr_write, patch.object(
-            sys.stderr, "flush"
-        ) as mock_stderr_flush:
-            frame = object()
+        with (
+            patch.object(sys.stderr, "write") as mock_stderr_write,
+            patch.object(sys.stderr, "flush") as mock_stderr_flush,
+        ):
+            frame = None
 
             # Should not raise even though logging fails
             _signal_handler(signal.SIGTERM, frame)
@@ -366,21 +358,12 @@ def test_signal_handler_defensive_stderr_failure():
     """Test that signal handler handles complete failure gracefully (even stderr fails)."""
     import signal
 
-    import deephaven_mcp._logging as logging_mod
-
-    importlib.reload(logging_mod)
-
-    # Get the signal handler by registering it
-    with patch.object(signal, "signal") as mock_signal:
-        logging_mod._SIGNAL_HANDLERS_INSTALLED = False
-        logging_mod.setup_signal_handler_logging()
-        # Extract the handler function from the first call
-        _signal_handler = mock_signal.call_args_list[0][0][1]
+    from deephaven_mcp._logging import _signal_handler
 
     # Mock everything to fail
     with patch("logging.warning", side_effect=Exception("Logging broken")):
         with patch.object(sys.stderr, "write", side_effect=Exception("stderr broken")):
-            frame = object()
+            frame = None
 
             # Should not raise even though everything fails - last resort catch
             # This should complete without raising
@@ -389,22 +372,11 @@ def test_signal_handler_defensive_stderr_failure():
 
 def test_signal_handler_unknown_signal_number():
     """Test that signal handler handles unknown signal numbers gracefully."""
-    import signal
-
-    import deephaven_mcp._logging as logging_mod
-
-    importlib.reload(logging_mod)
-
-    # Get the signal handler by registering it
-    with patch.object(signal, "signal") as mock_signal:
-        logging_mod._SIGNAL_HANDLERS_INSTALLED = False
-        logging_mod.setup_signal_handler_logging()
-        # Extract the handler function from the first call
-        _signal_handler = mock_signal.call_args_list[0][0][1]
+    from deephaven_mcp._logging import _signal_handler
 
     # Mock logging to capture calls
     with patch("logging.warning") as mock_warning:
-        frame = object()
+        frame = None
         # Use a nonsensical signal number
         fake_signum = 9999
 

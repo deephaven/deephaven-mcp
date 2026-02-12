@@ -17,6 +17,7 @@ import logging
 import os
 import signal
 import sys
+import types
 from types import TracebackType
 from typing import Any
 
@@ -44,6 +45,68 @@ _EXC_LOGGING_INSTALLED = False
 
 # Idempotency guard for signal handler registration
 _SIGNAL_HANDLERS_INSTALLED = False
+
+
+def _signal_handler(signum: int, frame: types.FrameType | None) -> None:
+    """Signal handler to log received signals that might cause server shutdown.
+
+    This handler is registered for all catchable termination signals to provide
+    diagnostic information when the server process is being terminated. It logs
+    the signal number, name, and frame information to help with debugging shutdown-
+    related issues, particularly in containerized environments where signals may
+    be sent by orchestration systems.
+
+    The handler is defensive and catches its own exceptions to prevent the signal
+    handler from crashing during logging.
+
+    Args:
+        signum (int): The signal number that was received.
+        frame (types.FrameType | None): The current stack frame when the signal was received.
+    """
+    try:
+        signal_name = signal.Signals(signum).name
+    except (ValueError, AttributeError):
+        signal_name = f"UNKNOWN({signum})"
+
+    try:
+        logging.warning(f"[signal_handler] Received signal {signum} ({signal_name})")
+        logging.warning(f"[signal_handler] Signal frame: {frame}")
+        logging.warning("[signal_handler] Process will likely terminate soon")
+    except Exception as e:
+        # Fallback to stderr if logging fails
+        try:
+            sys.stderr.write(
+                f"[signal_handler] CRITICAL: Received signal {signum} ({signal_name}) "
+                f"but logging failed: {e}\n"
+            )
+            sys.stderr.flush()
+        except Exception:  # noqa: S110
+            pass  # Nothing more we can do - last resort fallback
+
+
+def _register_signal(signal_name: str, is_critical: bool) -> tuple[bool, str | None]:
+    """Register a signal handler for the given signal name.
+
+    Args:
+        signal_name: Name of the signal to register (e.g., 'SIGTERM')
+        is_critical: Whether this is a critical signal that should warn if missing
+
+    Returns:
+        Tuple of (success, error_message). If successful, error_message is None.
+    """
+    try:
+        if hasattr(signal, signal_name):
+            sig = getattr(signal, signal_name)
+            signal.signal(sig, _signal_handler)
+            return (True, None)
+        if is_critical:
+            return (False, f"{signal_name} (not available on this platform)")
+        return (False, None)
+    except (OSError, RuntimeError, ValueError) as e:
+        # OSError: Signal not supported on this platform
+        # RuntimeError: Signal already registered by another handler
+        # ValueError: Invalid signal
+        return (False, f"{signal_name} ({e})")
 
 
 def setup_global_exception_logging() -> None:
@@ -165,7 +228,7 @@ def log_process_state(log_tag: str, context: str) -> None:
 
 
 def setup_signal_handler_logging() -> None:
-    """
+    r"""
     Set up logging for all catchable termination signals.
 
     This function registers handlers for all catchable signals that might terminate the process:
@@ -216,44 +279,6 @@ def setup_signal_handler_logging() -> None:
         return
     _SIGNAL_HANDLERS_INSTALLED = True
 
-    # Signal handler to log received signals that might cause server shutdown
-    def _signal_handler(signum: int, frame: object) -> None:
-        """
-        Signal handler to log received signals that might cause server shutdown.
-
-        This handler is registered for all catchable termination signals to provide
-        diagnostic information when the server process is being terminated. It logs
-        the signal number, name, and frame information to help with debugging shutdown-
-        related issues, particularly in containerized environments where signals may
-        be sent by orchestration systems.
-
-        The handler is defensive and catches its own exceptions to prevent the signal
-        handler from crashing during logging.
-
-        Args:
-            signum (int): The signal number that was received.
-            frame (object): The current stack frame when the signal was received.
-        """
-        try:
-            signal_name = signal.Signals(signum).name
-        except (ValueError, AttributeError):
-            signal_name = f"UNKNOWN({signum})"
-
-        try:
-            logging.warning(f"[signal_handler] Received signal {signum} ({signal_name})")
-            logging.warning(f"[signal_handler] Signal frame: {frame}")
-            logging.warning("[signal_handler] Process will likely terminate soon")
-        except Exception as e:
-            # Fallback to stderr if logging fails
-            try:
-                sys.stderr.write(
-                    f"[signal_handler] CRITICAL: Received signal {signum} ({signal_name}) "
-                    f"but logging failed: {e}\n"
-                )
-                sys.stderr.flush()
-            except Exception:
-                pass  # Nothing more we can do
-
     # Register signal handlers for all catchable termination signals
     registered_signals = []
     failed_signals = []
@@ -278,19 +303,11 @@ def setup_signal_handler_logging() -> None:
     ]
 
     for signal_name, is_critical in signals_to_register:
-        try:
-            if hasattr(signal, signal_name):
-                sig = getattr(signal, signal_name)
-                signal.signal(sig, _signal_handler)
-                registered_signals.append(signal_name)
-            elif is_critical:
-                # Critical signal missing from platform
-                failed_signals.append(f"{signal_name} (not available on this platform)")
-        except (OSError, RuntimeError, ValueError) as e:
-            # OSError: Signal not supported on this platform
-            # RuntimeError: Signal already registered by another handler
-            # ValueError: Invalid signal
-            failed_signals.append(f"{signal_name} ({e})")
+        success, error_msg = _register_signal(signal_name, is_critical)
+        if success:
+            registered_signals.append(signal_name)
+        elif error_msg:
+            failed_signals.append(error_msg)
 
     # Log registration results
     if registered_signals:
