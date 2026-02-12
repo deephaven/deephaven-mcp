@@ -329,7 +329,7 @@ def test_signal_handler_defensive_logging_failure():
     """Test that signal handler handles logging failures gracefully."""
     import signal
 
-    from deephaven_mcp._logging import _signal_handler
+    import deephaven_mcp._logging as logging_mod
 
     # Mock logging to raise an exception
     with patch("logging.warning", side_effect=Exception("Logging broken")):
@@ -341,7 +341,7 @@ def test_signal_handler_defensive_logging_failure():
             frame = None
 
             # Should not raise even though logging fails
-            _signal_handler(signal.SIGTERM, frame)
+            logging_mod._signal_handler(signal.SIGTERM, frame)
 
             # Verify fallback to stderr was attempted
             assert mock_stderr_write.call_count >= 1
@@ -358,7 +358,7 @@ def test_signal_handler_defensive_stderr_failure():
     """Test that signal handler handles complete failure gracefully (even stderr fails)."""
     import signal
 
-    from deephaven_mcp._logging import _signal_handler
+    import deephaven_mcp._logging as logging_mod
 
     # Mock everything to fail
     with patch("logging.warning", side_effect=Exception("Logging broken")):
@@ -367,12 +367,12 @@ def test_signal_handler_defensive_stderr_failure():
 
             # Should not raise even though everything fails - last resort catch
             # This should complete without raising
-            _signal_handler(signal.SIGTERM, frame)
+            logging_mod._signal_handler(signal.SIGTERM, frame)
 
 
 def test_signal_handler_unknown_signal_number():
     """Test that signal handler handles unknown signal numbers gracefully."""
-    from deephaven_mcp._logging import _signal_handler
+    import deephaven_mcp._logging as logging_mod
 
     # Mock logging to capture calls
     with patch("logging.warning") as mock_warning:
@@ -381,7 +381,7 @@ def test_signal_handler_unknown_signal_number():
         fake_signum = 9999
 
         # Should not raise
-        _signal_handler(fake_signum, frame)
+        logging_mod._signal_handler(fake_signum, frame)
 
         # Verify it logged with UNKNOWN
         assert mock_warning.call_count == 3
