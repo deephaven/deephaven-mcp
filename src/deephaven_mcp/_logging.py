@@ -285,7 +285,8 @@ def setup_signal_handler_logging() -> None:
 
     # List of signals to register (Unix/Linux/macOS + Windows)
     # Format: (signal_name, is_critical)
-    # is_critical = True means log warning if registration fails, False means debug only
+    # is_critical = True means registration failures produce an error message (logged at debug),
+    #                 False means unavailable signals are ignored without logging.
     signals_to_register = [
         # Critical signals present on all platforms
         ("SIGTERM", True),  # Standard termination
