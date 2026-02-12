@@ -18,7 +18,6 @@ import os
 import signal
 import sys
 import types
-from types import TracebackType
 from typing import Any
 
 import psutil
@@ -72,6 +71,9 @@ def _signal_handler(signum: int, frame: types.FrameType | None) -> None:
         logging.warning(f"[signal_handler] Received signal {signum} ({signal_name})")
         logging.warning(f"[signal_handler] Signal frame: {frame}")
         logging.warning("[signal_handler] Process will likely terminate soon")
+        # Flush all handlers to ensure logs are written before potential termination
+        for handler in logging.root.handlers:
+            handler.flush()
     except Exception as e:
         # Fallback to stderr if logging fails
         try:
@@ -134,7 +136,7 @@ def setup_global_exception_logging() -> None:
     def _log_unhandled_exception(
         exc_type: type[BaseException],
         exc_value: BaseException,
-        exc_traceback: TracebackType | None,
+        exc_traceback: types.TracebackType | None,
     ) -> None:
         if issubclass(exc_type, KeyboardInterrupt):
             return
