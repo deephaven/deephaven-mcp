@@ -588,7 +588,7 @@ The `session_creation` key enables dynamic creation of Deephaven Community Core 
 
 **Docker Image Configuration Examples:**
 
-```json5
+```json
 // ✅ CORRECT: Use programming_language for standard Deephaven images
 {
   "session_creation": {
