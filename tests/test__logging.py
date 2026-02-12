@@ -204,6 +204,9 @@ def test_signal_handler_coverage(caplog):
         assert (
             registration_msg
         ), "Expected registration message with 'Signal handlers registered'"
+        # Verify multiple signals were registered
+        assert "SIGTERM" in registration_msg
+        assert "SIGINT" in registration_msg
 
         # Reset mocks to test actual handler calls
         mock_warning.reset_mock()
@@ -243,15 +246,17 @@ def test_signal_handler_logging_registration_failure(monkeypatch):
         raise ValueError("Signal registration failed")
 
     with patch("signal.signal", side_effect=mock_signal_raises):
-        with patch("logging.warning") as mock_warning:
+        with patch("logging.debug") as mock_debug:
             # Reset the flag to ensure handler registration is attempted
             logging_mod._SIGNAL_HANDLERS_INSTALLED = False
             logging_mod.setup_signal_handler_logging()
 
-            # Check that the failure was logged properly
-            mock_warning.assert_called_with(
-                "[signal_handler] Failed to register signal handlers: Signal registration failed"
-            )
+            # Check that the failures were logged to debug
+            # All signals should fail with our mock
+            assert mock_debug.call_count >= 1
+            # Verify debug log contains failed signal information
+            debug_calls = [str(call) for call in mock_debug.call_args_list]
+            assert any("Failed to register handlers" in call for call in debug_calls)
 
 
 def test_log_process_state_standard(monkeypatch):
@@ -318,3 +323,225 @@ def test_log_process_state_exception_handling(monkeypatch):
         mock_error.assert_called_with(
             "[test_tag] Error getting test process state: Process access failed"
         )
+
+
+def test_signal_handler_defensive_logging_failure():
+    """Test that signal handler handles logging failures gracefully."""
+    import signal
+
+    import deephaven_mcp._logging as logging_mod
+
+    # Mock logging to raise an exception
+    with patch("logging.warning", side_effect=Exception("Logging broken")):
+        # Mock sys.stderr.write to verify fallback
+        with (
+            patch.object(sys.stderr, "write") as mock_stderr_write,
+            patch.object(sys.stderr, "flush") as mock_stderr_flush,
+        ):
+            frame = None
+
+            # Should not raise even though logging fails
+            logging_mod._signal_handler(signal.SIGTERM, frame)
+
+            # Verify fallback to stderr was attempted
+            assert mock_stderr_write.call_count >= 1
+            stderr_output = "".join(
+                str(call[0][0]) for call in mock_stderr_write.call_args_list
+            )
+            assert "CRITICAL" in stderr_output
+            assert "SIGTERM" in stderr_output
+            assert "Logging broken" in stderr_output
+            mock_stderr_flush.assert_called()
+
+
+def test_signal_handler_defensive_stderr_failure():
+    """Test that signal handler handles complete failure gracefully (even stderr fails)."""
+    import signal
+
+    import deephaven_mcp._logging as logging_mod
+
+    # Mock everything to fail
+    with patch("logging.warning", side_effect=Exception("Logging broken")):
+        with patch.object(sys.stderr, "write", side_effect=Exception("stderr broken")):
+            frame = None
+
+            # Should not raise even though everything fails - last resort catch
+            # This should complete without raising
+            logging_mod._signal_handler(signal.SIGTERM, frame)
+
+
+def test_signal_handler_unknown_signal_number():
+    """Test that signal handler handles unknown signal numbers gracefully."""
+    import deephaven_mcp._logging as logging_mod
+
+    # Mock logging to capture calls
+    with patch("logging.warning") as mock_warning:
+        frame = None
+        # Use a nonsensical signal number
+        fake_signum = 9999
+
+        # Should not raise
+        logging_mod._signal_handler(fake_signum, frame)
+
+        # Verify it logged with UNKNOWN
+        assert mock_warning.call_count == 3
+        messages = [args[0] for args, _ in mock_warning.call_args_list]
+        assert any("9999" in msg and "UNKNOWN" in msg for msg in messages)
+
+
+def test_signal_handler_platform_specific_signals():
+    """Test that platform-specific signals are handled correctly."""
+    import signal
+
+    import deephaven_mcp._logging as logging_mod
+
+    importlib.reload(logging_mod)
+
+    with patch("logging.info") as mock_info, patch("logging.debug") as mock_debug:
+        logging_mod._SIGNAL_HANDLERS_INSTALLED = False
+        logging_mod.setup_signal_handler_logging()
+
+        # Verify registration was logged
+        assert mock_info.call_count >= 1
+
+        # Find the registration message
+        registration_msg = None
+        for call_args in mock_info.call_args_list:
+            args, _ = call_args
+            if args and "Signal handlers registered" in args[0]:
+                registration_msg = args[0]
+                break
+
+        assert registration_msg is not None
+
+        # Verify critical signals are registered (present on all platforms)
+        assert "SIGTERM" in registration_msg
+        assert "SIGINT" in registration_msg
+        assert "SIGABRT" in registration_msg
+
+        # Platform-specific signals may or may not be present
+        # On Unix-like systems (Linux/macOS), these should be present
+        if hasattr(signal, "SIGHUP"):
+            assert "SIGHUP" in registration_msg
+        if hasattr(signal, "SIGQUIT"):
+            assert "SIGQUIT" in registration_msg
+        if hasattr(signal, "SIGUSR1"):
+            assert "SIGUSR1" in registration_msg
+
+
+def test_signal_handler_multiple_signals_registered():
+    """Test that multiple signals are registered and share the same handler."""
+    import signal
+
+    import deephaven_mcp._logging as logging_mod
+
+    importlib.reload(logging_mod)
+
+    with patch.object(signal, "signal") as mock_signal:
+        logging_mod._SIGNAL_HANDLERS_INSTALLED = False
+        logging_mod.setup_signal_handler_logging()
+
+        # Should have registered multiple signals
+        assert mock_signal.call_count >= 3  # At least SIGTERM, SIGINT, SIGABRT
+
+        # Extract all registered signal numbers and handlers
+        registered_handlers = {}
+        for call_args in mock_signal.call_args_list:
+            sig_num, handler = call_args[0]
+            registered_handlers[sig_num] = handler
+
+        # Verify SIGTERM and SIGINT use the same handler function
+        assert signal.SIGTERM in registered_handlers
+        assert signal.SIGINT in registered_handlers
+        assert registered_handlers[signal.SIGTERM] is registered_handlers[signal.SIGINT]
+
+
+def test_signal_handler_os_error_handling():
+    """Test that OSError during signal registration is handled properly."""
+    import deephaven_mcp._logging as logging_mod
+
+    importlib.reload(logging_mod)
+
+    # Create a mock that fails only for specific signals
+    call_count = [0]
+
+    def selective_signal_mock(sig, handler):
+        call_count[0] += 1
+        # Fail on the second call (let first succeed)
+        if call_count[0] == 2:
+            raise OSError("Signal not supported on this platform")
+        return None
+
+    with patch("signal.signal", side_effect=selective_signal_mock):
+        with patch("logging.info") as mock_info, patch("logging.debug") as mock_debug:
+            logging_mod._SIGNAL_HANDLERS_INSTALLED = False
+            logging_mod.setup_signal_handler_logging()
+
+            # Should have logged successes and failures
+            assert mock_info.call_count >= 1  # At least one success
+            assert mock_debug.call_count >= 1  # At least one failure
+
+            # Check that failure was logged to debug
+            debug_calls = [str(call) for call in mock_debug.call_args_list]
+            assert any("Failed to register handlers" in call for call in debug_calls)
+
+
+def test_signal_handler_runtime_error_handling():
+    """Test that RuntimeError during signal registration is handled properly."""
+    import deephaven_mcp._logging as logging_mod
+
+    importlib.reload(logging_mod)
+
+    # Simulate signal already registered by another handler
+    def signal_already_registered(sig, handler):
+        raise RuntimeError("Signal already registered")
+
+    with patch("signal.signal", side_effect=signal_already_registered):
+        with patch("logging.debug") as mock_debug:
+            logging_mod._SIGNAL_HANDLERS_INSTALLED = False
+            logging_mod.setup_signal_handler_logging()
+
+            # All registrations should fail, should be logged to debug
+            assert mock_debug.call_count >= 1
+            debug_calls = [str(call) for call in mock_debug.call_args_list]
+            assert any("Failed to register handlers" in call for call in debug_calls)
+
+
+def test_signal_handler_critical_signal_missing_from_platform():
+    """Test that critical signals missing from platform are logged properly."""
+    import signal
+
+    import deephaven_mcp._logging as logging_mod
+
+    importlib.reload(logging_mod)
+
+    # Mock hasattr to simulate a critical signal missing from the platform
+    original_hasattr = hasattr
+
+    def mock_hasattr(obj, name):
+        # Simulate SIGTERM not being available on this platform
+        if obj is signal and name == "SIGTERM":
+            return False
+        return original_hasattr(obj, name)
+
+    with patch("builtins.hasattr", side_effect=mock_hasattr):
+        with patch("logging.info") as mock_info, patch("logging.debug") as mock_debug:
+            logging_mod._SIGNAL_HANDLERS_INSTALLED = False
+            logging_mod.setup_signal_handler_logging()
+
+            # Should have logged failures to debug
+            assert mock_debug.call_count >= 1
+
+            # Find the debug message with failed signals
+            debug_messages = [str(call) for call in mock_debug.call_args_list]
+            failed_signals_logged = False
+            for msg in debug_messages:
+                if "Failed to register handlers" in msg and "SIGTERM" in msg:
+                    # Verify it has the "not available on this platform" message
+                    assert "not available on this platform" in msg
+                    failed_signals_logged = True
+                    break
+
+            assert (
+                failed_signals_logged
+            ), "Expected debug log for SIGTERM not available on platform"

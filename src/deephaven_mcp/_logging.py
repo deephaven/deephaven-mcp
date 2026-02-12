@@ -4,11 +4,12 @@ Logging and global exception handling utilities for Deephaven MCP servers.
 This module provides functions to:
 - Set up root logger configuration early in process startup (`setup_logging`).
 - Ensure all unhandled synchronous and asynchronous exceptions are logged (`setup_global_exception_logging`).
-- Set up logging for common termination signals (`setup_signal_handler_logging`).
+- Set up logging for all catchable termination signals (`setup_signal_handler_logging`).
 - Log process resource state for diagnostic purposes (`log_process_state`).
 
 Call `setup_logging()` before any other imports in your main entrypoint to ensure all loggers are configured correctly.
 Call `setup_global_exception_logging()` once at process startup to guarantee robust error visibility.
+Call `setup_signal_handler_logging()` to register handlers for all catchable signals (SIGTERM, SIGINT, SIGHUP, etc.).
 """
 
 import asyncio
@@ -16,6 +17,7 @@ import logging
 import os
 import signal
 import sys
+import types
 from types import TracebackType
 from typing import Any
 
@@ -43,6 +45,68 @@ _EXC_LOGGING_INSTALLED = False
 
 # Idempotency guard for signal handler registration
 _SIGNAL_HANDLERS_INSTALLED = False
+
+
+def _signal_handler(signum: int, frame: types.FrameType | None) -> None:
+    """Signal handler to log received signals that might cause server shutdown.
+
+    This handler is registered for all catchable termination signals to provide
+    diagnostic information when the server process is being terminated. It logs
+    the signal number, name, and frame information to help with debugging shutdown-
+    related issues, particularly in containerized environments where signals may
+    be sent by orchestration systems.
+
+    The handler is defensive and catches its own exceptions to prevent the signal
+    handler from crashing during logging.
+
+    Args:
+        signum (int): The signal number that was received.
+        frame (types.FrameType | None): The current stack frame when the signal was received.
+    """
+    try:
+        signal_name = signal.Signals(signum).name
+    except (ValueError, AttributeError):
+        signal_name = f"UNKNOWN({signum})"
+
+    try:
+        logging.warning(f"[signal_handler] Received signal {signum} ({signal_name})")
+        logging.warning(f"[signal_handler] Signal frame: {frame}")
+        logging.warning("[signal_handler] Process will likely terminate soon")
+    except Exception as e:
+        # Fallback to stderr if logging fails
+        try:
+            sys.stderr.write(
+                f"[signal_handler] CRITICAL: Received signal {signum} ({signal_name}) "
+                f"but logging failed: {e}\n"
+            )
+            sys.stderr.flush()
+        except Exception:  # noqa: S110
+            pass  # Nothing more we can do - last resort fallback
+
+
+def _register_signal(signal_name: str, is_critical: bool) -> tuple[bool, str | None]:
+    """Register a signal handler for the given signal name.
+
+    Args:
+        signal_name: Name of the signal to register (e.g., 'SIGTERM')
+        is_critical: Whether to generate an error message if the signal is not available on this platform
+
+    Returns:
+        Tuple of (success, error_message). If successful, error_message is None.
+    """
+    try:
+        if hasattr(signal, signal_name):
+            sig = getattr(signal, signal_name)
+            signal.signal(sig, _signal_handler)
+            return (True, None)
+        if is_critical:
+            return (False, f"{signal_name} (not available on this platform)")
+        return (False, None)
+    except (OSError, RuntimeError, ValueError) as e:
+        # OSError: Signal not supported on this platform
+        # RuntimeError: Signal already registered by another handler
+        # ValueError: Invalid signal
+        return (False, f"{signal_name} ({e})")
 
 
 def setup_global_exception_logging() -> None:
@@ -164,19 +228,38 @@ def log_process_state(log_tag: str, context: str) -> None:
 
 
 def setup_signal_handler_logging() -> None:
-    """
-    Set up logging for common termination signals.
+    r"""
+    Set up logging for all catchable termination signals.
 
-    This function registers handlers for the following signals to log information when received:
+    This function registers handlers for all catchable signals that might terminate the process:
+
+    **Unix/Linux/macOS signals:**
       - SIGTERM: Standard termination signal (e.g., from container orchestrators or service managers)
       - SIGINT: Keyboard interrupt signal (e.g., from Ctrl+C in terminal)
-      - SIGHUP: Hangup signal (if available on the platform)
+      - SIGHUP: Hangup signal (terminal disconnect)
+      - SIGQUIT: Quit signal (e.g., from Ctrl+\\ in terminal)
+      - SIGABRT: Abort signal (from abort() calls or assertion failures)
+      - SIGUSR1: User-defined signal 1
+      - SIGUSR2: User-defined signal 2
+      - SIGALRM: Alarm clock signal
+      - SIGPIPE: Broken pipe signal
+
+    **Windows signals:**
+      - SIGTERM: Termination signal (limited use on Windows)
+      - SIGINT: Keyboard interrupt (Ctrl+C)
+      - SIGBREAK: Break signal (Ctrl+Break on Windows)
+      - SIGABRT: Abort signal
+
+    **NOT catchable (handled by OS directly):**
+      - SIGKILL: Immediate termination (cannot be caught)
+      - SIGSTOP: Stop process (cannot be caught)
 
     The handlers log the signal number, name, and frame information before the process terminates.
     This is particularly useful for debugging unexpected shutdowns in containerized environments,
     Cloud Run instances, or any environment where signals may be sent by orchestration systems.
 
-    The function is idempotent and can be safely called multiple times.
+    The function is idempotent and can be safely called multiple times. Signal handler registration
+    failures are logged but do not raise exceptions.
 
     Example usage:
         # In your main application entry point
@@ -196,39 +279,44 @@ def setup_signal_handler_logging() -> None:
         return
     _SIGNAL_HANDLERS_INSTALLED = True
 
-    # Signal handler to log received signals that might cause server shutdown
-    def _signal_handler(signum: int, frame: object) -> None:
-        """
-        Signal handler to log received signals that might cause server shutdown.
+    # Register signal handlers for all catchable termination signals
+    registered_signals = []
+    failed_signals = []
 
-        This handler is registered for SIGTERM, SIGINT, and SIGHUP signals to provide
-        diagnostic information when the server process is being terminated. It logs
-        the signal number, name, and frame information to help with debugging shutdown-
-        related issues, particularly in containerized environments where signals may
-        be sent by orchestration systems.
+    # List of signals to register (Unix/Linux/macOS + Windows)
+    # Format: (signal_name, is_critical)
+    # is_critical = True means registration failures produce an error message (logged at debug),
+    #                 False means unavailable signals are ignored without logging.
+    signals_to_register = [
+        # Critical signals present on all platforms
+        ("SIGTERM", True),  # Standard termination
+        ("SIGINT", True),  # Keyboard interrupt
+        ("SIGABRT", True),  # Abort signal
+        # Unix/Linux/macOS signals
+        ("SIGHUP", False),  # Hangup
+        ("SIGQUIT", False),  # Quit
+        ("SIGUSR1", False),  # User-defined 1
+        ("SIGUSR2", False),  # User-defined 2
+        ("SIGALRM", False),  # Alarm clock
+        ("SIGPIPE", False),  # Broken pipe
+        # Windows-specific
+        ("SIGBREAK", False),  # Ctrl+Break on Windows
+    ]
 
-        Args:
-            signum (int): The signal number that was received.
-            frame (object): The current stack frame when the signal was received.
-        """
-        logging.warning(
-            f"[signal_handler] Received signal {signum} ({signal.Signals(signum).name})"
-        )
-        logging.warning(f"[signal_handler] Signal frame: {frame}")
-        logging.warning("[signal_handler] Process will likely terminate soon")
+    for signal_name, is_critical in signals_to_register:
+        success, error_msg = _register_signal(signal_name, is_critical)
+        if success:
+            registered_signals.append(signal_name)
+        elif error_msg:
+            failed_signals.append(error_msg)
 
-    # Register signal handlers for common termination signals
-    try:
-        registered_signals = []
-        signal.signal(signal.SIGTERM, _signal_handler)
-        registered_signals.append("SIGTERM")
-        signal.signal(signal.SIGINT, _signal_handler)
-        registered_signals.append("SIGINT")
-        if hasattr(signal, "SIGHUP"):
-            signal.signal(signal.SIGHUP, _signal_handler)
-            registered_signals.append("SIGHUP")
+    # Log registration results
+    if registered_signals:
         logging.info(
             f"[signal_handler] Signal handlers registered for: {', '.join(registered_signals)}"
         )
-    except Exception as e:
-        logging.warning(f"[signal_handler] Failed to register signal handlers: {e}")
+
+    if failed_signals:
+        logging.debug(
+            f"[signal_handler] Failed to register handlers for: {', '.join(failed_signals)}"
+        )
