@@ -89,7 +89,7 @@ def _register_signal(signal_name: str, is_critical: bool) -> tuple[bool, str | N
 
     Args:
         signal_name: Name of the signal to register (e.g., 'SIGTERM')
-        is_critical: Whether this is a critical signal that should warn if missing
+        is_critical: Whether to generate an error message if the signal is not available on this platform
 
     Returns:
         Tuple of (success, error_message). If successful, error_message is None.
