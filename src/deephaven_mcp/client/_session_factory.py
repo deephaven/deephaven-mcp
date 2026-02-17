@@ -510,7 +510,15 @@ class CorePlusSessionFactory(
             )
 
         # Subscribe to controller client for persistent query operations
+        _LOGGER.info(
+            f"[CorePlusSessionFactory:from_config] Subscribing to controller for persistent query state (auth_type={auth_type})"
+        )
+        subscribe_start = time.monotonic()
         await instance._controller_client.subscribe()
+        subscribe_elapsed = time.monotonic() - subscribe_start
+        _LOGGER.info(
+            f"[CorePlusSessionFactory:from_config] Controller subscription completed in {subscribe_elapsed:.2f}s"
+        )
 
         _LOGGER.info(
             f"[CorePlusSessionFactory:from_config] Successfully created and authenticated SessionManager from config (auth_type={auth_type})"

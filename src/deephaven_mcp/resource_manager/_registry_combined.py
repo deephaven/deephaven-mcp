@@ -42,6 +42,7 @@ Usage:
 import asyncio
 import logging
 import sys
+import time
 from typing import TYPE_CHECKING, NamedTuple, cast
 
 if TYPE_CHECKING:
@@ -305,9 +306,14 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             self._initialized = True
 
             # Update enterprise sessions from controller clients
+            _LOGGER.info(
+                f"[{self.__class__.__name__}] Updating enterprise sessions from controllers..."
+            )
+            update_start = time.monotonic()
             await self._update_enterprise_sessions()
-            _LOGGER.debug(
-                f"[{self.__class__.__name__}] populated enterprise sessions from controllers"
+            update_elapsed = time.monotonic() - update_start
+            _LOGGER.info(
+                f"[{self.__class__.__name__}] Enterprise session update completed in {update_elapsed:.2f}s"
             )
 
             _LOGGER.info(f"[{self.__class__.__name__}] initialization complete")
@@ -491,12 +497,14 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
         client = factory_instance.controller_client
 
         # Subscribe to persistent query state immediately after creation
-        _LOGGER.debug(
-            f"[{self.__class__.__name__}] subscribing controller client to query state for factory '{factory_name}'"
+        _LOGGER.info(
+            f"[{self.__class__.__name__}] Subscribing controller client to query state for factory '{factory_name}'"
         )
+        subscribe_start = time.monotonic()
         await client.subscribe()
-        _LOGGER.debug(
-            f"[{self.__class__.__name__}] controller client subscribed for factory '{factory_name}'"
+        subscribe_elapsed = time.monotonic() - subscribe_start
+        _LOGGER.info(
+            f"[{self.__class__.__name__}] Controller subscription completed for factory '{factory_name}' in {subscribe_elapsed:.2f}s"
         )
 
         # Cache the client
