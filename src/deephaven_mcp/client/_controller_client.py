@@ -53,14 +53,6 @@ from deephaven_mcp._exceptions import (
 )
 
 from ._base import ClientObjectWrapper
-from ._protobuf import (
-    CorePlusQueryConfig,
-    CorePlusQueryInfo,
-    CorePlusQuerySerial,
-)
-
-_LOGGER = logging.getLogger(__name__)
-
 from ._constants import (
     NO_WAIT_SECONDS,
     PQ_OPERATION_TIMEOUT_SECONDS,
@@ -68,6 +60,13 @@ from ._constants import (
     QUICK_OPERATION_TIMEOUT_SECONDS,
     SUBSCRIBE_TIMEOUT_SECONDS,
 )
+from ._protobuf import (
+    CorePlusQueryConfig,
+    CorePlusQueryInfo,
+    CorePlusQuerySerial,
+)
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class CorePlusControllerClient(
@@ -177,7 +176,7 @@ class CorePlusControllerClient(
                 asyncio.to_thread(self.wrapped.ping),
                 timeout=timeout_seconds,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             _LOGGER.error(
                 f"[CorePlusControllerClient:ping] Timed out after {timeout_seconds}s"
             )
@@ -257,7 +256,7 @@ class CorePlusControllerClient(
             _LOGGER.debug(
                 "[CorePlusControllerClient:subscribe] Successfully subscribed to query state"
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             _LOGGER.error(
                 f"[CorePlusControllerClient:subscribe] Subscription timed out after {timeout_seconds}s"
             )
@@ -718,7 +717,7 @@ class CorePlusControllerClient(
                 timeout=timeout_seconds,
             )
             return cast(CorePlusQuerySerial, result)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             _LOGGER.error(
                 f"[CorePlusControllerClient:add_query] Timed out after {timeout_seconds}s"
             )
@@ -997,7 +996,7 @@ class CorePlusControllerClient(
             _LOGGER.debug(
                 f"[CorePlusControllerClient:delete_query] Query {serial} deleted successfully"
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             _LOGGER.error(
                 f"[CorePlusControllerClient:delete_query] Timed out after {timeout_seconds}s"
             )
@@ -1091,7 +1090,7 @@ class CorePlusControllerClient(
             _LOGGER.debug(
                 f"[CorePlusControllerClient:modify_query] Query {pb.serial} modified successfully"
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             _LOGGER.error(
                 f"[CorePlusControllerClient:modify_query] Timed out after {timeout_seconds}s"
             )

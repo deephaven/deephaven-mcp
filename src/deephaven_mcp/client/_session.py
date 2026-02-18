@@ -103,9 +103,8 @@ from deephaven_mcp.config import (
 )
 from deephaven_mcp.io import load_bytes
 
-from ._constants import CONNECTION_TIMEOUT_SECONDS
-
 from ._base import ClientObjectWrapper
+from ._constants import CONNECTION_TIMEOUT_SECONDS
 from ._protobuf import CorePlusQueryInfo
 
 _LOGGER = logging.getLogger(__name__)
@@ -1186,7 +1185,7 @@ class CoreSession(BaseSession[Session]):
                 f"[CoreSession:from_config] Successfully created Deephaven Community (Core) Session: {session}"
             )
             return cls(session, programming_language=programming_language)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             _LOGGER.error(
                 f"[CoreSession:from_config] Connection timed out after {timeout_seconds}s"
             )

@@ -27,7 +27,7 @@ import enum
 import logging
 import sys
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Generic, TypeVar
 
 if TYPE_CHECKING:

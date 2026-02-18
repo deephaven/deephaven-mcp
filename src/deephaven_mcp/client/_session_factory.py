@@ -87,21 +87,19 @@ from ._auth_client import CorePlusAuthClient
 
 # Local application imports
 from ._base import ClientObjectWrapper, is_enterprise_available
-from ._controller_client import CorePlusControllerClient, CorePlusQuerySerial
-from ._session import CorePlusSession
-
-# Define the logger for this module
-_LOGGER = logging.getLogger(__name__)
-
 from ._constants import (
     AUTH_TIMEOUT_SECONDS,
     CONNECTION_TIMEOUT_SECONDS,
     PQ_CONNECTION_TIMEOUT_SECONDS,
     QUICK_OPERATION_TIMEOUT_SECONDS,
     SAML_AUTH_TIMEOUT_SECONDS,
-    SUBSCRIBE_TIMEOUT_SECONDS,
     WORKER_CREATION_TIMEOUT_SECONDS,
 )
+from ._controller_client import CorePlusControllerClient, CorePlusQuerySerial
+from ._session import CorePlusSession
+
+# Define the logger for this module
+_LOGGER = logging.getLogger(__name__)
 
 
 class CorePlusSessionFactory(
@@ -315,7 +313,7 @@ class CorePlusSessionFactory(
                     asyncio.to_thread(SessionManager, url),
                     timeout=timeout_seconds,
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 _LOGGER.error(
                     f"[CorePlusSessionFactory:from_url] Connection to {url} timed out after {timeout_seconds}s"
                 )
@@ -482,7 +480,7 @@ class CorePlusSessionFactory(
                 asyncio.to_thread(SessionManager, url),
                 timeout=timeout_seconds,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             _LOGGER.error(
                 f"[CorePlusSessionFactory:from_config] Connection to {url} timed out after {timeout_seconds}s"
             )
@@ -1087,7 +1085,7 @@ class CorePlusSessionFactory(
                 session
             )
             return CorePlusSession(session, programming_language)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             _LOGGER.error(
                 f"[CorePlusSessionFactory:connect_to_persistent_query] Timed out after {timeout_seconds}s"
             )
@@ -1196,7 +1194,7 @@ class CorePlusSessionFactory(
             _LOGGER.debug(
                 "[CorePlusSessionFactory:delete_key] Successfully deleted public key"
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             _LOGGER.error(
                 f"[CorePlusSessionFactory:delete_key] Timed out after {timeout_seconds}s"
             )
@@ -1299,7 +1297,7 @@ class CorePlusSessionFactory(
             _LOGGER.debug(
                 "[CorePlusSessionFactory:password] Successfully authenticated"
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             _LOGGER.error(
                 f"[CorePlusSessionFactory:password] Authentication timed out after {timeout_seconds}s"
             )
@@ -1385,7 +1383,7 @@ class CorePlusSessionFactory(
             )
             _LOGGER.debug(f"[CorePlusSessionFactory:ping] Ping result: {result}")
             return cast(bool, result)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             _LOGGER.error(
                 f"[CorePlusSessionFactory:ping] Timed out after {timeout_seconds}s"
             )
@@ -1484,7 +1482,7 @@ class CorePlusSessionFactory(
             _LOGGER.debug(
                 "[CorePlusSessionFactory:private_key] Successfully authenticated with private key"
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             _LOGGER.error(
                 f"[CorePlusSessionFactory:private_key] Authentication timed out after {timeout_seconds}s"
             )
@@ -1594,7 +1592,7 @@ class CorePlusSessionFactory(
             _LOGGER.debug(
                 "[CorePlusSessionFactory:saml] Successfully authenticated using SAML"
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             _LOGGER.error(
                 f"[CorePlusSessionFactory:saml] SAML authentication timed out after {timeout_seconds}s"
             )
@@ -1694,7 +1692,7 @@ class CorePlusSessionFactory(
             _LOGGER.debug(
                 "[CorePlusSessionFactory:upload_key] Successfully uploaded public key"
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             _LOGGER.error(
                 f"[CorePlusSessionFactory:upload_key] Timed out after {timeout_seconds}s"
             )
