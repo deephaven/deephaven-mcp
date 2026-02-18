@@ -1,6 +1,25 @@
 """Timeout constants for the Deephaven client API.
 
-All timeout values are in seconds for consistency across the API.
+All timeout values are in seconds (float) for consistency across the API.
+These constants define default timeouts for various network operations.
+
+Connection Timeouts:
+    CONNECTION_TIMEOUT_SECONDS: Initial connection to Deephaven server (60s).
+    SUBSCRIBE_TIMEOUT_SECONDS: Subscribing to controller state updates (60s).
+    PQ_CONNECTION_TIMEOUT_SECONDS: Connecting to persistent queries (60s).
+    WORKER_CREATION_TIMEOUT_SECONDS: Creating new workers (60s).
+
+Authentication Timeouts:
+    AUTH_TIMEOUT_SECONDS: Password and private key authentication (60s).
+    SAML_AUTH_TIMEOUT_SECONDS: SAML authentication with browser interaction (120s).
+
+Persistent Query Operation Timeouts:
+    PQ_OPERATION_TIMEOUT_SECONDS: Query management operations (60s).
+    QUICK_OPERATION_TIMEOUT_SECONDS: Quick operations like ping (30s).
+    PQ_WAIT_TIMEOUT_SECONDS: Waiting for query state changes (120s).
+
+Special Values:
+    NO_WAIT_SECONDS: Return immediately without waiting (0s).
 """
 
 # =============================================================================

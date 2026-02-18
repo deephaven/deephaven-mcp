@@ -26,19 +26,19 @@ Example:
     # Create a Core+ session factory connected to a server
     async def main():
         # Create a session factory using the from_url classmethod
-        manager = await CorePlusSessionFactory.from_url("https://myserver.example.com/iris/connection.json")
+        factory = await CorePlusSessionFactory.from_url("https://myserver.example.com/iris/connection.json")
 
         # Authenticate
-        await manager.password("username", "password")
+        await factory.password("username", "password")
 
         # Connect to a new worker
-        session = await manager.connect_to_new_worker()
+        session = await factory.connect_to_new_worker()
 
         # Use the session
-        table = session.empty_table()
+        table = await session.empty_table(10)
 
-        # Close the manager when done
-        await manager.close()
+        # Close the factory when done
+        await factory.close()
 
     asyncio.run(main())
 
@@ -847,7 +847,7 @@ class CorePlusSessionFactory(
 
             async def create_basic_worker():
                 # Create and authenticate the session manager
-                factory = CorePlusSessionFactory.from_url("https://myserver.example.com/iris/connection.json")
+                factory = await CorePlusSessionFactory.from_url("https://myserver.example.com/iris/connection.json")
                 await factory.password("username", "password")
 
                 # Create a default worker and get a session
@@ -864,7 +864,7 @@ class CorePlusSessionFactory(
             ```python
             async def create_specialized_worker():
                 # Create and authenticate the session manager
-                factory = CorePlusSessionFactory.from_url("https://myserver.example.com/iris/connection.json")
+                factory = await CorePlusSessionFactory.from_url("https://myserver.example.com/iris/connection.json")
                 await factory.password("username", "password")
 
                 # Create a high-memory worker with custom settings
@@ -1022,7 +1022,7 @@ class CorePlusSessionFactory(
 
             async def connect_to_existing_worker():
                 # Create and authenticate the session manager
-                factory = CorePlusSessionFactory.from_url("https://myserver.example.com/iris/connection.json")
+                factory = await CorePlusSessionFactory.from_url("https://myserver.example.com/iris/connection.json")
                 await factory.password("username", "password")
 
                 # Connect to an existing worker by name
@@ -1040,7 +1040,7 @@ class CorePlusSessionFactory(
         Example - Connecting by serial number:
             ```python
             async def connect_with_serial():
-                factory = CorePlusSessionFactory.from_url("https://myserver.example.com/iris/connection.json")
+                factory = await CorePlusSessionFactory.from_url("https://myserver.example.com/iris/connection.json")
                 await factory.password("username", "password")
 
                 # Get the serial number from somewhere (e.g., stored from previous session)
@@ -1162,7 +1162,7 @@ class CorePlusSessionFactory(
 
             async def revoke_key_access():
                 # Create and authenticate the session manager
-                factory = CorePlusSessionFactory.from_url("https://example.com/iris/connection.json")
+                factory = await CorePlusSessionFactory.from_url("https://example.com/iris/connection.json")
                 await factory.password("username", "password")
 
                 # The public key to remove (as previously uploaded)
@@ -1264,20 +1264,20 @@ class CorePlusSessionFactory(
             from deephaven_mcp.client import CorePlusSessionFactory
 
             async def authenticate_and_work():
-                # Create the session manager
-                manager = CorePlusSessionFactory.from_url("https://myserver.example.com/iris/connection.json")
+                # Create the session factory
+                factory = await CorePlusSessionFactory.from_url("https://myserver.example.com/iris/connection.json")
 
                 # Authenticate with username/password
-                await manager.password("username", "my_secure_password")
+                await factory.password("username", "my_secure_password")
 
                 # Now we can connect to workers, etc.
-                session = await manager.connect_to_new_worker(name="my_worker")
+                session = await factory.connect_to_new_worker(name="my_worker")
 
                 # Do work with the session
-                table = session.empty_table()
+                table = await session.empty_table(10)
 
                 # Close when done
-                await manager.close()
+                await factory.close()
             ```
 
         See Also:
@@ -1356,7 +1356,7 @@ class CorePlusSessionFactory(
             from deephaven_mcp.client import CorePlusSessionFactory
 
             async def check_connection():
-                factory = CorePlusSessionFactory.from_url("https://server.example.com/iris/connection.json")
+                factory = await CorePlusSessionFactory.from_url("https://server.example.com/iris/connection.json")
                 await factory.password("username", "password")
 
                 # Check if connection is still active
@@ -1440,14 +1440,14 @@ class CorePlusSessionFactory(
             import asyncio
 
             async def use_private_key_auth():
-                # Create the session manager
-                manager = CorePlusSessionFactory.from_url("https://myserver.example.com/iris/connection.json")
+                # Create the session factory
+                factory = await CorePlusSessionFactory.from_url("https://myserver.example.com/iris/connection.json")
 
                 # Authenticate using a private key file
-                await manager.private_key("/path/to/private_key.pem")
+                await factory.private_key("/path/to/private_key.pem")
 
-                # Use the authenticated session manager
-                session = await manager.connect_to_new_worker()
+                # Use the authenticated session factory
+                session = await factory.connect_to_new_worker()
             ```
 
         Example with StringIO:
@@ -1459,7 +1459,7 @@ class CorePlusSessionFactory(
             key_io = io.StringIO(key_data)
 
             # Authenticate using the in-memory key
-            await manager.private_key(key_io)
+            await factory.private_key(key_io)
             ```
 
         See Also:
@@ -1564,17 +1564,17 @@ class CorePlusSessionFactory(
             from deephaven_mcp.client import CorePlusSessionFactory
 
             async def authenticate_with_saml():
-                # Create the session manager
-                manager = await CorePlusSessionFactory.from_url("https://myserver.example.com/iris/connection.json")
+                # Create the session factory
+                factory = await CorePlusSessionFactory.from_url("https://myserver.example.com/iris/connection.json")
 
                 # Authenticate using SAML - this may open a browser window for SSO login
-                await manager.saml()
+                await factory.saml()
 
-                # Now we can use the authenticated session manager
-                session = await manager.connect_to_new_worker()
+                # Now we can use the authenticated session factory
+                session = await factory.connect_to_new_worker()
 
                 # Use the session to work with tables
-                table = session.empty_table()
+                table = await session.empty_table(10)
             ```
 
         See Also:

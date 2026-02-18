@@ -1,7 +1,7 @@
 """Asynchronous Deephaven authentication client wrapper for MCP.
 
 This module provides an async interface to the Deephaven AuthClient, enabling non-blocking token
-management for Deephaven services. It is primarily used by the CorePlusSessionManager and related
+management for Deephaven services. It is primarily used by the CorePlusSessionFactory and related
 components that require authentication with Deephaven Enterprise servers.
 
 Key Features:
@@ -27,14 +27,14 @@ Service Token Usage:
 
 Example:
     import asyncio
-    from deephaven_mcp.client import CorePlusSessionManager
+    from deephaven_mcp.client import CorePlusSessionFactory
 
     async def token_example():
-        manager = CorePlusSessionManager.from_url("https://myserver.example.com/connection.json")
-        auth_client = manager.auth_client
+        factory = await CorePlusSessionFactory.from_url("https://myserver.example.com/iris/connection.json")
+        await factory.password("username", "password")
+        auth_client = factory.auth_client
         service_token = await auth_client.create_token("PersistentQueryController", duration_seconds=3600)
-        controller = await manager.create_controller_client()
-        # Use the token with the controller
+        # Use the token with other services
 """
 
 import asyncio
@@ -63,7 +63,7 @@ class CorePlusAuthClient(
     responsiveness and prevent I/O operations from blocking the main asyncio event loop.
 
     Typical Usage:
-        - Instantiate via CorePlusSessionManager (not directly).
+        - Instantiate via CorePlusSessionFactory (not directly).
         - Create service-specific tokens for downstream authentication.
         - Pass tokens to other client components that need authentication.
         - Set appropriate token duration based on expected usage lifetime.
@@ -80,14 +80,14 @@ class CorePlusAuthClient(
 
     Example:
         import asyncio
-        from deephaven_mcp.client import CorePlusSessionManager
+        from deephaven_mcp.client import CorePlusSessionFactory
 
         async def token_example():
-            manager = CorePlusSessionManager.from_url("https://myserver.example.com/connection.json")
-            auth_client = manager.auth_client
+            factory = await CorePlusSessionFactory.from_url("https://myserver.example.com/iris/connection.json")
+            await factory.password("username", "password")
+            auth_client = factory.auth_client
             service_token = await auth_client.create_token("PersistentQueryController", duration_seconds=3600)
-            controller = await manager.create_controller_client()
-            # Use the token with the controller
+            # Use the token with other services
     """
 
     def __init__(
@@ -99,7 +99,7 @@ class CorePlusAuthClient(
             auth_client (deephaven_enterprise.client.auth.AuthClient): The synchronous Deephaven AuthClient instance to wrap.
 
         Note:
-            This constructor is intended for use by CorePlusSessionManager. Users should not instantiate
+            This constructor is intended for use by CorePlusSessionFactory. Users should not instantiate
             this class directly.
         """
         super().__init__(auth_client, is_enterprise=True)
