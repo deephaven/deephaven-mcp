@@ -209,6 +209,21 @@ async def test_ping_other_error(coreplus_controller_client, dummy_controller_cli
 
 
 @pytest.mark.asyncio
+async def test_ping_timeout(coreplus_controller_client, dummy_controller_client):
+    """Test that ping() raises DeephavenConnectionError on timeout."""
+    import time
+
+    def slow_ping():
+        time.sleep(0.5)
+
+    dummy_controller_client.ping.side_effect = slow_ping
+
+    with pytest.raises(DeephavenConnectionError) as exc_info:
+        await coreplus_controller_client.ping(timeout_seconds=0.01)
+    assert "timed out" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
 async def test_wait_for_change_success(
     coreplus_controller_client, dummy_controller_client
 ):
@@ -785,6 +800,25 @@ async def test_subscribe_other_error(
     dummy_controller_client.subscribe.side_effect = Exception("fail")
     with pytest.raises(QueryError):
         await coreplus_controller_client.subscribe()
+
+
+@pytest.mark.asyncio
+async def test_subscribe_timeout(
+    coreplus_controller_client, dummy_controller_client
+):
+    """Test that subscribe() raises DeephavenConnectionError on timeout."""
+    import time
+
+    def slow_subscribe():
+        time.sleep(0.5)  # Simulate slow blocking response
+
+    dummy_controller_client.subscribe.side_effect = slow_subscribe
+
+    # Use a very short timeout to trigger timeout quickly
+    with pytest.raises(DeephavenConnectionError) as exc_info:
+        await coreplus_controller_client.subscribe(timeout_seconds=0.01)
+
+    assert "timed out" in str(exc_info.value)
 
 
 @pytest.mark.asyncio

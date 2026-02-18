@@ -93,6 +93,16 @@ from ._session import CorePlusSession
 # Define the logger for this module
 _LOGGER = logging.getLogger(__name__)
 
+from ._constants import (
+    AUTH_TIMEOUT_SECONDS,
+    CONNECTION_TIMEOUT_SECONDS,
+    PQ_CONNECTION_TIMEOUT_SECONDS,
+    QUICK_OPERATION_TIMEOUT_SECONDS,
+    SAML_AUTH_TIMEOUT_SECONDS,
+    SUBSCRIBE_TIMEOUT_SECONDS,
+    WORKER_CREATION_TIMEOUT_SECONDS,
+)
+
 
 class CorePlusSessionFactory(
     ClientObjectWrapper["deephaven_enterprise.client.session_manager.SessionManager"]
@@ -227,7 +237,9 @@ class CorePlusSessionFactory(
             ) from e
 
     @classmethod
-    async def from_url(cls, url: str) -> "CorePlusSessionFactory":
+    async def from_url(
+        cls, url: str, timeout_seconds: float = CONNECTION_TIMEOUT_SECONDS
+    ) -> "CorePlusSessionFactory":
         """Create a CorePlusSessionFactory connected to a Deephaven server specified by URL.
 
         This is the recommended and most convenient way to create a CorePlusSessionFactory when you
@@ -248,6 +260,8 @@ class CorePlusSessionFactory(
             url (str): The URL to the Deephaven server's connection.json file. This is typically in
                 the format: https://your-server:port/iris/connection.json
                 For example: "https://deephaven.example.com:10000/iris/connection.json"
+            timeout_seconds (float): Maximum time in seconds to wait for connection.
+                Defaults to CONNECTION_TIMEOUT_SECONDS.
 
         Returns:
             CorePlusSessionFactory: A new factory instance connected to the specified server,
@@ -297,7 +311,18 @@ class CorePlusSessionFactory(
             try:
                 # Run the blocking SessionManager constructor in a background thread so
                 # that this method is cancellable and doesn't block the event loop.
-                manager = await asyncio.to_thread(SessionManager, url)
+                manager = await asyncio.wait_for(
+                    asyncio.to_thread(SessionManager, url),
+                    timeout=timeout_seconds,
+                )
+            except asyncio.TimeoutError:
+                _LOGGER.error(
+                    f"[CorePlusSessionFactory:from_url] Connection to {url} timed out after {timeout_seconds}s"
+                )
+                raise DeephavenConnectionError(
+                    f"Connection to Deephaven at {url} timed out after {timeout_seconds} seconds. "
+                    f"The server may be unreachable."
+                ) from None
             except Exception as e:
                 elapsed = time.monotonic() - start_time
                 _LOGGER.error(
@@ -314,12 +339,16 @@ class CorePlusSessionFactory(
             instance = cls(manager)
 
             # Subscribe to controller client for persistent query operations
-            await instance._controller_client.subscribe()
+            await instance._controller_client.subscribe(
+                timeout_seconds=timeout_seconds
+            )
 
             return instance
 
     @classmethod
-    async def from_config(cls, worker_cfg: dict[str, Any]) -> "CorePlusSessionFactory":
+    async def from_config(
+        cls, worker_cfg: dict[str, Any], timeout_seconds: float = CONNECTION_TIMEOUT_SECONDS
+    ) -> "CorePlusSessionFactory":
         """
         Create and authenticate a CorePlusSessionFactory from a configuration dictionary.
 
@@ -359,6 +388,8 @@ class CorePlusSessionFactory(
         Args:
             worker_cfg (dict[str, Any]): Configuration dictionary for the enterprise system connection.
                 Must contain the required fields as described above.
+            timeout_seconds (float): Maximum time in seconds to wait for connection.
+                Defaults to CONNECTION_TIMEOUT_SECONDS.
 
         Returns:
             CorePlusSessionFactory: A fully initialized and authenticated factory instance
@@ -446,9 +477,19 @@ class CorePlusSessionFactory(
         start_time = time.monotonic()
         try:
             # Run the blocking SessionManager constructor in a background thread so
-            # that Enterprise factory creation obeys the configured connection_timeout
-            # enforced by asyncio.wait_for in CorePlusSessionFactoryManager.
-            manager = await asyncio.to_thread(SessionManager, url)
+            # that this method is cancellable and doesn't block the event loop.
+            manager = await asyncio.wait_for(
+                asyncio.to_thread(SessionManager, url),
+                timeout=timeout_seconds,
+            )
+        except asyncio.TimeoutError:
+            _LOGGER.error(
+                f"[CorePlusSessionFactory:from_config] Connection to {url} timed out after {timeout_seconds}s"
+            )
+            raise DeephavenConnectionError(
+                f"Connection to Deephaven at {url} timed out after {timeout_seconds} seconds. "
+                f"The server may be unreachable."
+            ) from None
         except Exception as e:
             elapsed = time.monotonic() - start_time
             _LOGGER.error(
@@ -514,7 +555,9 @@ class CorePlusSessionFactory(
             f"[CorePlusSessionFactory:from_config] Subscribing to controller for persistent query state (auth_type={auth_type})"
         )
         subscribe_start = time.monotonic()
-        await instance._controller_client.subscribe()
+        await instance._controller_client.subscribe(
+            timeout_seconds=timeout_seconds
+        )
         subscribe_elapsed = time.monotonic() - subscribe_start
         _LOGGER.info(
             f"[CorePlusSessionFactory:from_config] Controller subscription completed in {subscribe_elapsed:.2f}s"
@@ -729,7 +772,7 @@ class CorePlusSessionFactory(
         auto_delete_timeout: int | None = 600,
         admin_groups: list[str] | None = None,
         viewer_groups: list[str] | None = None,
-        timeout_seconds: float = 60,
+        timeout_seconds: float = WORKER_CREATION_TIMEOUT_SECONDS,
         configuration_transformer: Callable[..., Any] | None = None,
         session_arguments: dict[str, Any] | None = None,
     ) -> CorePlusSession:
@@ -863,6 +906,7 @@ class CorePlusSessionFactory(
             _LOGGER.debug(
                 "[CorePlusSessionFactory:connect_to_new_worker] Creating new worker and connecting to it"
             )
+            # SDK handles timeout internally via timeout_seconds parameter
             session = await asyncio.to_thread(
                 self.wrapped.connect_to_new_worker,
                 name=name,
@@ -885,6 +929,14 @@ class CorePlusSessionFactory(
                 session
             )
             return CorePlusSession(session, programming_language)
+        except TimeoutError:
+            _LOGGER.error(
+                f"[CorePlusSessionFactory:connect_to_new_worker] Timed out after {timeout_seconds}s"
+            )
+            raise DeephavenConnectionError(
+                f"Worker creation timed out after {timeout_seconds} seconds. "
+                f"The server may be overloaded or unreachable."
+            ) from None
         except ConnectionError as e:
             _LOGGER.error(
                 f"[CorePlusSessionFactory:connect_to_new_worker] Connection error while creating new worker: {e}"
@@ -911,6 +963,7 @@ class CorePlusSessionFactory(
         name: str | None = None,
         serial: CorePlusQuerySerial | None = None,
         session_arguments: dict[str, Any] | None = None,
+        timeout_seconds: float = PQ_CONNECTION_TIMEOUT_SECONDS,
     ) -> CorePlusSession:
         """Connect to an existing persistent query (worker) by name or serial number.
 
@@ -942,6 +995,8 @@ class CorePlusSessionFactory(
                 pydeephaven.Session constructor. This allows customization of session behavior
                 such as setting chunk_size for data transfer or configuring query processing options.
                 Common options include `disable_open_table_listener` or `chunk_size`.
+            timeout_seconds (float): Maximum time in seconds to wait for connection.
+                Defaults to PQ_CONNECTION_TIMEOUT_SECONDS.
 
         Returns:
             CorePlusSession: A fully initialized session object connected to the existing worker.
@@ -1016,11 +1071,14 @@ class CorePlusSessionFactory(
             _LOGGER.debug(
                 f"[CorePlusSessionFactory:connect_to_persistent_query] Connecting to persistent query (name={name}, serial={serial})"
             )
-            session = await asyncio.to_thread(
-                self.wrapped.connect_to_persistent_query,
-                name=name,
-                serial=serial,
-                session_arguments=session_arguments,
+            session = await asyncio.wait_for(
+                asyncio.to_thread(
+                    self.wrapped.connect_to_persistent_query,
+                    name=name,
+                    serial=serial,
+                    session_arguments=session_arguments,
+                ),
+                timeout=timeout_seconds,
             )
             _LOGGER.debug(
                 "[CorePlusSessionFactory:connect_to_persistent_query] Successfully connected to persistent query"
@@ -1029,6 +1087,14 @@ class CorePlusSessionFactory(
                 session
             )
             return CorePlusSession(session, programming_language)
+        except asyncio.TimeoutError:
+            _LOGGER.error(
+                f"[CorePlusSessionFactory:connect_to_persistent_query] Timed out after {timeout_seconds}s"
+            )
+            raise DeephavenConnectionError(
+                f"Connection to persistent query timed out after {timeout_seconds} seconds. "
+                f"The server may be overloaded or unreachable."
+            ) from None
         except ValueError:
             # Re-raise input validation exceptions unchanged
             raise
@@ -1052,7 +1118,11 @@ class CorePlusSessionFactory(
                 f"Failed to establish connection to persistent query: {e}"
             ) from e
 
-    async def delete_key(self, public_key_text: str) -> None:
+    async def delete_key(
+        self,
+        public_key_text: str,
+        timeout_seconds: float = QUICK_OPERATION_TIMEOUT_SECONDS,
+    ) -> None:
         """Delete a previously uploaded public key from the Deephaven server's authentication system.
 
         This method is used for managing SSH key-based authentication in Deephaven Enterprise.
@@ -1075,13 +1145,15 @@ class CorePlusSessionFactory(
                 uploaded. This should include the full key string including any key type prefix
                 (e.g., "ssh-rsa AAAA...") and comment suffix if present. The key text must match
                 exactly what was registered in the system for successful deletion.
+            timeout_seconds (float): Maximum time in seconds to wait for the operation.
+                Defaults to QUICK_OPERATION_TIMEOUT_SECONDS.
 
         Raises:
             ResourceError: If the key cannot be deleted due to issues such as the key not being
                 found in the system, insufficient permissions to delete the key, or other
                 server-side key storage problems.
             DeephavenConnectionError: If there is a problem connecting to the server during the
-                deletion operation, such as network issues or server unavailability.
+                deletion operation, such as network issues, server unavailability, or timeout.
             AuthenticationError: If the current authentication is invalid or has expired,
                 requiring re-authentication before key management operations can be performed.
 
@@ -1117,10 +1189,20 @@ class CorePlusSessionFactory(
         """
         try:
             _LOGGER.debug("[CorePlusSessionFactory:delete_key] Deleting public key")
-            await asyncio.to_thread(self.wrapped.delete_key, public_key_text)
+            await asyncio.wait_for(
+                asyncio.to_thread(self.wrapped.delete_key, public_key_text),
+                timeout=timeout_seconds,
+            )
             _LOGGER.debug(
                 "[CorePlusSessionFactory:delete_key] Successfully deleted public key"
             )
+        except asyncio.TimeoutError:
+            _LOGGER.error(
+                f"[CorePlusSessionFactory:delete_key] Timed out after {timeout_seconds}s"
+            )
+            raise DeephavenConnectionError(
+                f"Key deletion timed out after {timeout_seconds} seconds."
+            ) from None
         except ConnectionError as e:
             _LOGGER.error(
                 f"[CorePlusSessionFactory:delete_key] Connection error when deleting key: {e}"
@@ -1135,7 +1217,11 @@ class CorePlusSessionFactory(
             raise ResourceError(f"Failed to delete authentication key: {e}") from e
 
     async def password(
-        self, user: str, password: str, effective_user: str | None = None
+        self,
+        user: str,
+        password: str,
+        effective_user: str | None = None,
+        timeout_seconds: float = AUTH_TIMEOUT_SECONDS,
     ) -> None:
         """Authenticate to the server using username and password credentials.
 
@@ -1161,6 +1247,8 @@ class CorePlusSessionFactory(
                 means the authenticated user will be used. This parameter enables authentication
                 as one user but performing operations as another (requires appropriate permissions,
                 typically admin or impersonation rights).
+            timeout_seconds (float): Maximum time in seconds to wait for authentication.
+                Defaults to AUTH_TIMEOUT_SECONDS.
 
         Raises:
             AuthenticationError: If authentication fails due to invalid credentials, expired
@@ -1202,12 +1290,23 @@ class CorePlusSessionFactory(
             _LOGGER.debug(
                 f"[CorePlusSessionFactory:password] Authenticating as user: {user} (effective user: {effective_user or user})"
             )
-            await asyncio.to_thread(
-                self.wrapped.password, user, password, effective_user
+            await asyncio.wait_for(
+                asyncio.to_thread(
+                    self.wrapped.password, user, password, effective_user
+                ),
+                timeout=timeout_seconds,
             )
             _LOGGER.debug(
                 "[CorePlusSessionFactory:password] Successfully authenticated"
             )
+        except asyncio.TimeoutError:
+            _LOGGER.error(
+                f"[CorePlusSessionFactory:password] Authentication timed out after {timeout_seconds}s"
+            )
+            raise DeephavenConnectionError(
+                f"Authentication timed out after {timeout_seconds} seconds. "
+                f"The server may be overloaded or unreachable."
+            ) from None
         except ConnectionError as e:
             _LOGGER.error(
                 f"[CorePlusSessionFactory:password] Failed to connect to authentication server: {e}"
@@ -1221,7 +1320,9 @@ class CorePlusSessionFactory(
             )
             raise AuthenticationError(f"Failed to authenticate user {user}: {e}") from e
 
-    async def ping(self) -> bool:
+    async def ping(
+        self, timeout_seconds: float = QUICK_OPERATION_TIMEOUT_SECONDS
+    ) -> bool:
         """Send a connectivity check ping to verify the connection to Deephaven services.
 
         This method tests the connectivity to both the authentication server and the controller
@@ -1237,6 +1338,10 @@ class CorePlusSessionFactory(
 
         This method asynchronously delegates to the underlying session manager's ping method,
         running it in a separate thread to avoid blocking the event loop.
+
+        Args:
+            timeout_seconds (float): Maximum time in seconds to wait for the ping.
+                Defaults to QUICK_OPERATION_TIMEOUT_SECONDS.
 
         Returns:
             bool: True if both the authentication server and controller successfully responded
@@ -1274,14 +1379,26 @@ class CorePlusSessionFactory(
             _LOGGER.debug(
                 "[CorePlusSessionFactory:ping] Sending ping to authentication server and controller"
             )
-            result = await asyncio.to_thread(self.wrapped.ping)
+            result = await asyncio.wait_for(
+                asyncio.to_thread(self.wrapped.ping),
+                timeout=timeout_seconds,
+            )
             _LOGGER.debug(f"[CorePlusSessionFactory:ping] Ping result: {result}")
             return cast(bool, result)
+        except asyncio.TimeoutError:
+            _LOGGER.error(
+                f"[CorePlusSessionFactory:ping] Timed out after {timeout_seconds}s"
+            )
+            raise DeephavenConnectionError(
+                f"Ping timed out after {timeout_seconds} seconds."
+            ) from None
         except Exception as e:
             _LOGGER.error(f"[CorePlusSessionFactory:ping] Ping failed: {e}")
             raise DeephavenConnectionError(f"Failed to ping server: {e}") from e
 
-    async def private_key(self, file: str | io.StringIO) -> None:
+    async def private_key(
+        self, file: str | io.StringIO, timeout_seconds: float = AUTH_TIMEOUT_SECONDS
+    ) -> None:
         r"""Authenticate to the server using a Deephaven format private key file.
 
         This method performs certificate-based authentication with the Deephaven server using
@@ -1297,6 +1414,8 @@ class CorePlusSessionFactory(
                 the Deephaven generate-iris-keys tool, or alternatively an io.StringIO instance
                 containing the key data directly. If an io.StringIO is provided, it may be closed
                 after this method is called as the contents are read fully before returning.
+            timeout_seconds (float): Maximum time in seconds to wait for authentication.
+                Defaults to AUTH_TIMEOUT_SECONDS.
 
         Raises:
             AuthenticationError: If authentication with the private key fails due to an invalid key,
@@ -1358,10 +1477,21 @@ class CorePlusSessionFactory(
             _LOGGER.debug(
                 "[CorePlusSessionFactory:private_key] Authenticating with private key"
             )
-            await asyncio.to_thread(self.wrapped.private_key, file)
+            await asyncio.wait_for(
+                asyncio.to_thread(self.wrapped.private_key, file),
+                timeout=timeout_seconds,
+            )
             _LOGGER.debug(
                 "[CorePlusSessionFactory:private_key] Successfully authenticated with private key"
             )
+        except asyncio.TimeoutError:
+            _LOGGER.error(
+                f"[CorePlusSessionFactory:private_key] Authentication timed out after {timeout_seconds}s"
+            )
+            raise DeephavenConnectionError(
+                f"Authentication timed out after {timeout_seconds} seconds. "
+                f"The server may be overloaded or unreachable."
+            ) from None
         except FileNotFoundError as e:
             _LOGGER.error(
                 f"[CorePlusSessionFactory:private_key] Private key file not found: {e}"
@@ -1382,7 +1512,7 @@ class CorePlusSessionFactory(
                 f"Failed to authenticate with private key: {e}"
             ) from e
 
-    async def saml(self) -> None:
+    async def saml(self, timeout_seconds: float = SAML_AUTH_TIMEOUT_SECONDS) -> None:
         """Authenticate asynchronously using SAML-based Single Sign-On (SSO).
 
         This method initiates SAML-based single sign-on authentication with the Deephaven server,
@@ -1399,6 +1529,11 @@ class CorePlusSessionFactory(
         2. The user will be redirected to their organization's identity provider login page
         3. After successful authentication with the IdP, the user is redirected back to Deephaven
         4. Authentication tokens are established and stored for subsequent API calls
+
+        Args:
+            timeout_seconds (float): Maximum time in seconds to wait for SAML authentication.
+                Defaults to SAML_AUTH_TIMEOUT_SECONDS. SAML uses a longer timeout due to
+                potential browser interaction during SSO.
 
         Raises:
             AuthenticationError: If SAML authentication fails due to configuration issues, incorrect
@@ -1452,10 +1587,21 @@ class CorePlusSessionFactory(
             _LOGGER.debug(
                 "[CorePlusSessionFactory:saml] Starting SAML authentication flow"
             )
-            await asyncio.to_thread(self.wrapped.saml)
+            await asyncio.wait_for(
+                asyncio.to_thread(self.wrapped.saml),
+                timeout=timeout_seconds,
+            )
             _LOGGER.debug(
                 "[CorePlusSessionFactory:saml] Successfully authenticated using SAML"
             )
+        except asyncio.TimeoutError:
+            _LOGGER.error(
+                f"[CorePlusSessionFactory:saml] SAML authentication timed out after {timeout_seconds}s"
+            )
+            raise DeephavenConnectionError(
+                f"SAML authentication timed out after {timeout_seconds} seconds. "
+                f"The authentication flow may have been abandoned or the server is unreachable."
+            ) from None
         except ConnectionError as e:
             _LOGGER.error(
                 f"[CorePlusSessionFactory:saml] Failed to connect to authentication server or SAML provider: {e}"
@@ -1474,7 +1620,11 @@ class CorePlusSessionFactory(
             )
             raise AuthenticationError(f"Failed to authenticate via SAML: {e}") from e
 
-    async def upload_key(self, public_key_text: str) -> None:
+    async def upload_key(
+        self,
+        public_key_text: str,
+        timeout_seconds: float = QUICK_OPERATION_TIMEOUT_SECONDS,
+    ) -> None:
         """Upload a public key to the Deephaven server for certificate-based authentication.
 
         This method registers a public key with the Deephaven server, associating it with your
@@ -1498,12 +1648,14 @@ class CorePlusSessionFactory(
             public_key_text (str): The full text representation of the public key to upload. This should be
                 the complete PEM-encoded public key, including the header and footer lines
                 (e.g., "-----BEGIN PUBLIC KEY-----" and "-----END PUBLIC KEY-----").
+            timeout_seconds (float): Maximum time in seconds to wait for the operation.
+                Defaults to QUICK_OPERATION_TIMEOUT_SECONDS.
 
         Raises:
             ResourceError: If uploading the key fails due to issues such as invalid key format,
                 malformed PEM data, server-side key storage problems, or permission issues.
             DeephavenConnectionError: If there is a problem connecting to the authentication server
-                such as network issues or server unavailability.
+                such as network issues, server unavailability, or timeout.
             AuthenticationError: If the current session is not authenticated or lacks the necessary
                 permissions to upload keys.
 
@@ -1535,10 +1687,20 @@ class CorePlusSessionFactory(
         """
         try:
             _LOGGER.debug("[CorePlusSessionFactory:upload_key] Uploading public key")
-            await asyncio.to_thread(self.wrapped.upload_key, public_key_text)
+            await asyncio.wait_for(
+                asyncio.to_thread(self.wrapped.upload_key, public_key_text),
+                timeout=timeout_seconds,
+            )
             _LOGGER.debug(
                 "[CorePlusSessionFactory:upload_key] Successfully uploaded public key"
             )
+        except asyncio.TimeoutError:
+            _LOGGER.error(
+                f"[CorePlusSessionFactory:upload_key] Timed out after {timeout_seconds}s"
+            )
+            raise DeephavenConnectionError(
+                f"Key upload timed out after {timeout_seconds} seconds."
+            ) from None
         except ConnectionError as e:
             _LOGGER.error(
                 f"[CorePlusSessionFactory:upload_key] Connection error when uploading key: {e}"

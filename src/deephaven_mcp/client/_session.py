@@ -103,6 +103,8 @@ from deephaven_mcp.config import (
 )
 from deephaven_mcp.io import load_bytes
 
+from ._constants import CONNECTION_TIMEOUT_SECONDS
+
 from ._base import ClientObjectWrapper
 from ._protobuf import CorePlusQueryInfo
 
@@ -1044,7 +1046,11 @@ class CoreSession(BaseSession[Session]):
         )
 
     @classmethod
-    async def from_config(cls, worker_cfg: dict[str, Any]) -> "CoreSession":
+    async def from_config(
+        cls,
+        worker_cfg: dict[str, Any],
+        timeout_seconds: float = CONNECTION_TIMEOUT_SECONDS,
+    ) -> "CoreSession":
         """
         Asynchronously create a CoreSession from a community (core) session configuration dictionary.
 
@@ -1056,12 +1062,15 @@ class CoreSession(BaseSession[Session]):
 
         Args:
             worker_cfg (dict): The worker's community session configuration.
+            timeout_seconds (float): Maximum time in seconds to wait for connection.
+                Defaults to CONNECTION_TIMEOUT_SECONDS.
 
         Returns:
             CoreSession: A new CoreSession instance wrapping a pydeephaven Session.
 
         Raises:
             CommunitySessionConfigurationError: If the configuration is invalid.
+            DeephavenConnectionError: If connection times out.
             SessionCreationError: If session creation fails for any reason.
         """
         try:
@@ -1169,11 +1178,21 @@ class CoreSession(BaseSession[Session]):
             _LOGGER.info(
                 f"[CoreSession:from_config] Creating new Deephaven Community (Core) Session with config: {log_cfg}"
             )
-            session = await asyncio.to_thread(Session, **session_config)
+            session = await asyncio.wait_for(
+                asyncio.to_thread(Session, **session_config),
+                timeout=timeout_seconds,
+            )
             _LOGGER.info(
                 f"[CoreSession:from_config] Successfully created Deephaven Community (Core) Session: {session}"
             )
             return cls(session, programming_language=programming_language)
+        except asyncio.TimeoutError:
+            _LOGGER.error(
+                f"[CoreSession:from_config] Connection timed out after {timeout_seconds}s"
+            )
+            raise DeephavenConnectionError(
+                f"Connection to Deephaven Community server timed out after {timeout_seconds} seconds."
+            ) from None
         except Exception as e:
             _LOGGER.warning(
                 f"[CoreSession:from_config] Failed to create Deephaven Community (Core) Session with config: {log_cfg}: {e}"

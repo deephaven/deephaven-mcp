@@ -110,7 +110,7 @@ class CorePlusAuthClient(
         service: str,
         username: str = "",
         duration_seconds: int = 3600,
-        timeout: float | None = None,
+        timeout_seconds: float | None = None,
     ) -> CorePlusToken:
         """Create a service-specific authentication token asynchronously.
 
@@ -125,9 +125,9 @@ class CorePlusAuthClient(
             duration_seconds (int, optional): Token validity period in seconds. Default is 3600 (1 hour).
                 Consider shorter durations for security-sensitive operations and longer durations for
                 long-running background processes.
-            timeout (float | None, optional): Timeout in seconds for the token creation request. If None,
-                uses the client's default timeout. The timeout applies to the entire operation including
-                network communication.
+            timeout_seconds (float | None, optional): Timeout in seconds for the token creation request.
+                If None, uses the client's default timeout. The timeout applies to the entire
+                operation including network communication.
 
         Returns:
             CorePlusToken: Token scoped to the requested service. This is a wrapper around the native
@@ -169,7 +169,7 @@ class CorePlusAuthClient(
         )
         try:
             result = await asyncio.to_thread(
-                self.wrapped.create_token, service, username, duration_seconds, timeout
+                self.wrapped.create_token, service, username, duration_seconds, timeout_seconds
             )
             _LOGGER.debug(
                 "[CorePlusAuthClient] Service token for '%s' created successfully.",
