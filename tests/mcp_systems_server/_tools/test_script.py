@@ -12,6 +12,7 @@ import pytest
 from conftest import MockContext, create_mock_instance_tracker
 
 from deephaven_mcp import config
+from deephaven_mcp._exceptions import RegistryItemNotFoundError
 from deephaven_mcp.mcp_systems_server._tools.script import (
     session_pip_list,
     session_script_run,
@@ -20,7 +21,6 @@ from deephaven_mcp.mcp_systems_server._tools.session_community import (
     session_community_create,
     session_community_delete,
 )
-from deephaven_mcp._exceptions import RegistryItemNotFoundError
 from deephaven_mcp.resource_manager import (
     DockerLaunchedSession,
     DynamicCommunitySessionManager,
@@ -53,7 +53,9 @@ class TestRemainingEdgeCases:
         mock_config_manager.get_config = AsyncMock(return_value=full_config)
         mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
         mock_session_registry.add_session = AsyncMock()
-        mock_session_registry.get = AsyncMock(side_effect=RegistryItemNotFoundError("not found"))
+        mock_session_registry.get = AsyncMock(
+            side_effect=RegistryItemNotFoundError("not found")
+        )
 
         mock_process = MagicMock()
         mock_process.pid = 99999
@@ -121,7 +123,9 @@ class TestRemainingEdgeCases:
         mock_config_manager.get_config = AsyncMock(return_value=full_config)
         mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
         mock_session_registry.add_session = AsyncMock()
-        mock_session_registry.get = AsyncMock(side_effect=RegistryItemNotFoundError("not found"))
+        mock_session_registry.get = AsyncMock(
+            side_effect=RegistryItemNotFoundError("not found")
+        )
 
         context = MockContext(
             {
@@ -158,7 +162,9 @@ class TestRemainingEdgeCases:
         full_config = {"community": community_config}
         mock_config_manager.get_config = AsyncMock(return_value=full_config)
         mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
-        mock_session_registry.get = AsyncMock(side_effect=RegistryItemNotFoundError("not found"))
+        mock_session_registry.get = AsyncMock(
+            side_effect=RegistryItemNotFoundError("not found")
+        )
 
         mock_launched_session = MagicMock(spec=DockerLaunchedSession)
         mock_launched_session.port = 10000

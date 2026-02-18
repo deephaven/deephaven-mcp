@@ -1068,7 +1068,9 @@ class TestGetAndGetAll:
         """Test that get error has no init context when initialization completed cleanly."""
         from deephaven_mcp._exceptions import RegistryItemNotFoundError
 
-        with pytest.raises(RegistryItemNotFoundError, match="No item with name") as exc_info:
+        with pytest.raises(
+            RegistryItemNotFoundError, match="No item with name"
+        ) as exc_info:
             await initialized_registry.get("community:source:nonexistent")
         assert "Note:" not in str(exc_info.value)
 
@@ -1089,9 +1091,7 @@ class TestGetAndGetAll:
         """Test that get error includes targeted factory error when factory matches."""
         from deephaven_mcp._exceptions import RegistryItemNotFoundError
 
-        initialized_registry._init_errors = {
-            "factory1": "Connection refused"
-        }
+        initialized_registry._init_errors = {"factory1": "Connection refused"}
         initialized_registry._update_enterprise_sessions = AsyncMock()
         with pytest.raises(RegistryItemNotFoundError) as exc_info:
             await initialized_registry.get("enterprise:factory1:session1")
@@ -1106,9 +1106,7 @@ class TestGetAndGetAll:
         """Test that get error includes all factory errors when factory doesn't match."""
         from deephaven_mcp._exceptions import RegistryItemNotFoundError
 
-        initialized_registry._init_errors = {
-            "other_factory": "Connection timeout"
-        }
+        initialized_registry._init_errors = {"other_factory": "Connection timeout"}
         initialized_registry._update_enterprise_sessions = AsyncMock()
         with pytest.raises(RegistryItemNotFoundError) as exc_info:
             await initialized_registry.get("enterprise:factory1:session1")
@@ -1124,9 +1122,7 @@ class TestGetAndGetAll:
         from deephaven_mcp._exceptions import RegistryItemNotFoundError
 
         initialized_registry._init_phase = InitializationPhase.LOADING
-        initialized_registry._init_errors = {
-            "factory1": "Connection refused"
-        }
+        initialized_registry._init_errors = {"factory1": "Connection refused"}
         with pytest.raises(RegistryItemNotFoundError) as exc_info:
             await initialized_registry.get("enterprise:factory1:session1")
         error_msg = str(exc_info.value)
@@ -1602,11 +1598,13 @@ class TestConnectionErrorHandling:
 
         # Mock enterprise registry to return multiple factories
         initialized_registry._enterprise_registry.get_all = AsyncMock(
-            return_value=RegistrySnapshot.simple(items={
-                "factory1": mock_factory1,
-                "factory2": mock_factory2,
-                "factory3": mock_factory3,
-            })
+            return_value=RegistrySnapshot.simple(
+                items={
+                    "factory1": mock_factory1,
+                    "factory2": mock_factory2,
+                    "factory3": mock_factory3,
+                }
+            )
         )
 
         initialized_registry._items = {}
@@ -1657,11 +1655,13 @@ class TestConnectionErrorHandling:
 
         # Mock enterprise registry
         initialized_registry._enterprise_registry.get_all = AsyncMock(
-            return_value=RegistrySnapshot.simple(items={
-                "factory1": mock_factory1,
-                "factory2": mock_factory2,
-                "factory3": mock_factory3,
-            })
+            return_value=RegistrySnapshot.simple(
+                items={
+                    "factory1": mock_factory1,
+                    "factory2": mock_factory2,
+                    "factory3": mock_factory3,
+                }
+            )
         )
 
         initialized_registry._items = {}
@@ -1706,10 +1706,12 @@ class TestConnectionErrorHandling:
 
         # Mock enterprise registry
         initialized_registry._enterprise_registry.get_all = AsyncMock(
-            return_value=RegistrySnapshot.simple(items={
-                "factory1": mock_factory1,
-                "factory2": mock_factory2,
-            })
+            return_value=RegistrySnapshot.simple(
+                items={
+                    "factory1": mock_factory1,
+                    "factory2": mock_factory2,
+                }
+            )
         )
 
         initialized_registry._items = {}
@@ -1916,7 +1918,9 @@ class TestUpdateEnterpriseFactorySessions:
     async def test_update_enterprise_sessions_no_factories(self, initialized_registry):
         """Test update when no factories are configured (empty registry)."""
         # Mock enterprise registry to return empty dict
-        initialized_registry._enterprise_registry.get_all = AsyncMock(return_value=RegistrySnapshot.simple(items={}))
+        initialized_registry._enterprise_registry.get_all = AsyncMock(
+            return_value=RegistrySnapshot.simple(items={})
+        )
 
         # Should log and return early without error
         await initialized_registry._update_enterprise_sessions()
@@ -1940,10 +1944,12 @@ class TestUpdateEnterpriseFactorySessions:
 
         # Mock enterprise registry
         initialized_registry._enterprise_registry.get_all = AsyncMock(
-            return_value=RegistrySnapshot.simple(items={
-                "factory1": mock_factory1,
-                "factory2": mock_factory2,
-            })
+            return_value=RegistrySnapshot.simple(
+                items={
+                    "factory1": mock_factory1,
+                    "factory2": mock_factory2,
+                }
+            )
         )
 
         # Mock _calculate_factory_session_changes to succeed for both
@@ -2041,14 +2047,18 @@ class TestInitializationStatus:
         assert errors == {}
 
     @pytest.mark.asyncio
-    async def test_initialization_status_completed_no_errors(self, initialized_registry):
+    async def test_initialization_status_completed_no_errors(
+        self, initialized_registry
+    ):
         """Test initialization_status returns COMPLETED with no errors."""
         phase, errors = await initialized_registry.initialization_status()
         assert phase == InitializationPhase.COMPLETED
         assert errors == {}
 
     @pytest.mark.asyncio
-    async def test_initialization_status_completed_with_errors(self, initialized_registry):
+    async def test_initialization_status_completed_with_errors(
+        self, initialized_registry
+    ):
         """Test initialization_status returns errors when present."""
         initialized_registry._init_errors = {"factory1": "Connection failed: timeout"}
         phase, errors = await initialized_registry.initialization_status()
@@ -2076,7 +2086,9 @@ class TestDiscoverEnterpriseSessions:
     """Test _discover_enterprise_sessions background task."""
 
     @pytest.mark.asyncio
-    async def test_discover_factory_snapshot_unexpected_phase(self, initialized_registry):
+    async def test_discover_factory_snapshot_unexpected_phase(
+        self, initialized_registry
+    ):
         """Test discovery raises InternalError when factory snapshot has unexpected phase."""
         initialized_registry._enterprise_registry.get_all = AsyncMock(
             return_value=RegistrySnapshot.with_initialization(
@@ -2096,7 +2108,10 @@ class TestDiscoverEnterpriseSessions:
         # InternalError is caught by the except Exception handler and recorded
         assert initialized_registry._init_phase == InitializationPhase.COMPLETED
         assert "enterprise_discovery" in initialized_registry._init_errors
-        assert "expected SIMPLE" in initialized_registry._init_errors["enterprise_discovery"]
+        assert (
+            "expected SIMPLE"
+            in initialized_registry._init_errors["enterprise_discovery"]
+        )
 
     @pytest.mark.asyncio
     async def test_discover_factory_snapshot_with_errors(self, initialized_registry):
@@ -2121,12 +2136,17 @@ class TestDiscoverEnterpriseSessions:
         # InternalError is caught by the except Exception handler and recorded
         assert initialized_registry._init_phase == InitializationPhase.COMPLETED
         assert "enterprise_discovery" in initialized_registry._init_errors
-        assert "unexpected errors" in initialized_registry._init_errors["enterprise_discovery"]
+        assert (
+            "unexpected errors"
+            in initialized_registry._init_errors["enterprise_discovery"]
+        )
 
     @pytest.mark.asyncio
     async def test_discover_no_factories(self, initialized_registry):
         """Test discovery when no enterprise factories are configured."""
-        initialized_registry._enterprise_registry.get_all = AsyncMock(return_value=RegistrySnapshot.simple(items={}))
+        initialized_registry._enterprise_registry.get_all = AsyncMock(
+            return_value=RegistrySnapshot.simple(items={})
+        )
         initialized_registry._init_phase = InitializationPhase.PARTIAL
 
         await initialized_registry._discover_enterprise_sessions()
@@ -2147,20 +2167,26 @@ class TestDiscoverEnterpriseSessions:
         )
         initialized_registry._init_phase = InitializationPhase.PARTIAL
 
-        with patch.object(
-            initialized_registry,
-            "_calculate_factory_session_changes",
-            AsyncMock(return_value=_FactorySessionChanges(
-                mock_factory, "factory1", set(), set()
-            )),
-        ), patch.object(
-            initialized_registry,
-            "_apply_factory_session_changes",
-            AsyncMock(),
-        ), patch.object(
-            initialized_registry,
-            "_detect_unreachable_factories",
-            AsyncMock(),
+        with (
+            patch.object(
+                initialized_registry,
+                "_calculate_factory_session_changes",
+                AsyncMock(
+                    return_value=_FactorySessionChanges(
+                        mock_factory, "factory1", set(), set()
+                    )
+                ),
+            ),
+            patch.object(
+                initialized_registry,
+                "_apply_factory_session_changes",
+                AsyncMock(),
+            ),
+            patch.object(
+                initialized_registry,
+                "_detect_unreachable_factories",
+                AsyncMock(),
+            ),
         ):
             await initialized_registry._discover_enterprise_sessions()
 
@@ -2181,21 +2207,30 @@ class TestDiscoverEnterpriseSessions:
         initialized_registry._init_phase = InitializationPhase.PARTIAL
 
         # Return changes with connection_error set
-        with patch.object(
-            initialized_registry,
-            "_calculate_factory_session_changes",
-            AsyncMock(return_value=_FactorySessionChanges(
-                mock_factory, "factory1", set(), set(),
-                connection_error="Failed to establish connection to Deephaven at https://example.com after 30.12s: Connection refused",
-            )),
-        ), patch.object(
-            initialized_registry,
-            "_apply_factory_session_changes",
-            AsyncMock(),
-        ), patch.object(
-            initialized_registry,
-            "_detect_unreachable_factories",
-            AsyncMock(),
+        with (
+            patch.object(
+                initialized_registry,
+                "_calculate_factory_session_changes",
+                AsyncMock(
+                    return_value=_FactorySessionChanges(
+                        mock_factory,
+                        "factory1",
+                        set(),
+                        set(),
+                        connection_error="Failed to establish connection to Deephaven at https://example.com after 30.12s: Connection refused",
+                    )
+                ),
+            ),
+            patch.object(
+                initialized_registry,
+                "_apply_factory_session_changes",
+                AsyncMock(),
+            ),
+            patch.object(
+                initialized_registry,
+                "_detect_unreachable_factories",
+                AsyncMock(),
+            ),
         ):
             await initialized_registry._discover_enterprise_sessions()
 
@@ -2215,21 +2250,29 @@ class TestDiscoverEnterpriseSessions:
         )
         initialized_registry._init_phase = InitializationPhase.PARTIAL
 
-        with patch.object(
-            initialized_registry,
-            "_calculate_factory_session_changes",
-            AsyncMock(side_effect=AuthenticationError("Failed to authenticate user admin")),
-        ), patch.object(
-            initialized_registry,
-            "_detect_unreachable_factories",
-            AsyncMock(),
+        with (
+            patch.object(
+                initialized_registry,
+                "_calculate_factory_session_changes",
+                AsyncMock(
+                    side_effect=AuthenticationError("Failed to authenticate user admin")
+                ),
+            ),
+            patch.object(
+                initialized_registry,
+                "_detect_unreachable_factories",
+                AsyncMock(),
+            ),
         ):
             await initialized_registry._discover_enterprise_sessions()
 
         assert initialized_registry._init_phase == InitializationPhase.COMPLETED
         assert "factory1" in initialized_registry._init_errors
         assert "AuthenticationError" in initialized_registry._init_errors["factory1"]
-        assert "Failed to authenticate user admin" in initialized_registry._init_errors["factory1"]
+        assert (
+            "Failed to authenticate user admin"
+            in initialized_registry._init_errors["factory1"]
+        )
 
     @pytest.mark.asyncio
     async def test_discover_mixed_factory_results(self, initialized_registry):
@@ -2241,7 +2284,9 @@ class TestDiscoverEnterpriseSessions:
         mock_factory1 = MagicMock(spec=CorePlusSessionFactoryManager)
         mock_factory2 = MagicMock(spec=CorePlusSessionFactoryManager)
         initialized_registry._enterprise_registry.get_all = AsyncMock(
-            return_value=RegistrySnapshot.simple(items={"factory1": mock_factory1, "factory2": mock_factory2})
+            return_value=RegistrySnapshot.simple(
+                items={"factory1": mock_factory1, "factory2": mock_factory2}
+            )
         )
         initialized_registry._init_phase = InitializationPhase.PARTIAL
 
@@ -2253,18 +2298,22 @@ class TestDiscoverEnterpriseSessions:
                 raise ValueError("Config error")
             return _FactorySessionChanges(factory, fname, set(), set())
 
-        with patch.object(
-            initialized_registry,
-            "_calculate_factory_session_changes",
-            side_effect=mock_calculate,
-        ), patch.object(
-            initialized_registry,
-            "_apply_factory_session_changes",
-            AsyncMock(),
-        ), patch.object(
-            initialized_registry,
-            "_detect_unreachable_factories",
-            AsyncMock(),
+        with (
+            patch.object(
+                initialized_registry,
+                "_calculate_factory_session_changes",
+                side_effect=mock_calculate,
+            ),
+            patch.object(
+                initialized_registry,
+                "_apply_factory_session_changes",
+                AsyncMock(),
+            ),
+            patch.object(
+                initialized_registry,
+                "_detect_unreachable_factories",
+                AsyncMock(),
+            ),
         ):
             await initialized_registry._discover_enterprise_sessions()
 
@@ -2417,8 +2466,13 @@ class TestDiscoverOuterException:
 
         assert initialized_registry._init_phase == InitializationPhase.COMPLETED
         assert "enterprise_discovery" in initialized_registry._init_errors
-        assert "RuntimeError" in initialized_registry._init_errors["enterprise_discovery"]
-        assert "Registry corrupted" in initialized_registry._init_errors["enterprise_discovery"]
+        assert (
+            "RuntimeError" in initialized_registry._init_errors["enterprise_discovery"]
+        )
+        assert (
+            "Registry corrupted"
+            in initialized_registry._init_errors["enterprise_discovery"]
+        )
 
 
 class TestDetectUnreachableFactoriesException:
@@ -2457,7 +2511,9 @@ class TestGetDuringDiscovery:
     """Test get() and get_all() behavior during LOADING phase."""
 
     @pytest.mark.asyncio
-    async def test_get_returns_existing_session_during_discovery(self, initialized_registry):
+    async def test_get_returns_existing_session_during_discovery(
+        self, initialized_registry
+    ):
         """Test get() returns sessions already in _items during discovery."""
         initialized_registry._init_phase = InitializationPhase.LOADING
         mock_item = MagicMock(spec=BaseItemManager)
@@ -2467,7 +2523,9 @@ class TestGetDuringDiscovery:
         assert result == mock_item
 
     @pytest.mark.asyncio
-    async def test_get_skips_enterprise_update_during_discovery(self, initialized_registry):
+    async def test_get_skips_enterprise_update_during_discovery(
+        self, initialized_registry
+    ):
         """Test get() does NOT call _update_enterprise_sessions during discovery."""
         initialized_registry._init_phase = InitializationPhase.LOADING
         initialized_registry._update_enterprise_sessions = AsyncMock()
@@ -2478,7 +2536,9 @@ class TestGetDuringDiscovery:
         initialized_registry._update_enterprise_sessions.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_get_triggers_enterprise_update_after_completed(self, initialized_registry):
+    async def test_get_triggers_enterprise_update_after_completed(
+        self, initialized_registry
+    ):
         """Test get() calls _update_enterprise_sessions when COMPLETED."""
         assert initialized_registry._init_phase == InitializationPhase.COMPLETED
         initialized_registry._update_enterprise_sessions = AsyncMock()
@@ -2491,7 +2551,9 @@ class TestGetDuringDiscovery:
         )
 
     @pytest.mark.asyncio
-    async def test_get_all_skips_enterprise_update_during_discovery(self, initialized_registry):
+    async def test_get_all_skips_enterprise_update_during_discovery(
+        self, initialized_registry
+    ):
         """Test get_all() does NOT call _update_enterprise_sessions during discovery."""
         initialized_registry._init_phase = InitializationPhase.LOADING
         initialized_registry._update_enterprise_sessions = AsyncMock()
@@ -2503,7 +2565,9 @@ class TestGetDuringDiscovery:
         assert result.initialization_errors == {}
 
     @pytest.mark.asyncio
-    async def test_get_all_triggers_enterprise_update_after_completed(self, initialized_registry):
+    async def test_get_all_triggers_enterprise_update_after_completed(
+        self, initialized_registry
+    ):
         """Test get_all() calls _update_enterprise_sessions when COMPLETED."""
         assert initialized_registry._init_phase == InitializationPhase.COMPLETED
         initialized_registry._update_enterprise_sessions = AsyncMock()
@@ -2530,6 +2594,7 @@ class TestCloseWithBackgroundTask:
     @pytest.mark.asyncio
     async def test_close_cancels_running_task(self, initialized_registry):
         """Test that close() cancels a running background task."""
+
         # Create a task that will block until cancelled
         async def long_running():
             await asyncio.sleep(100)
@@ -2545,6 +2610,7 @@ class TestCloseWithBackgroundTask:
     @pytest.mark.asyncio
     async def test_close_handles_completed_task(self, initialized_registry):
         """Test that close() handles an already-completed task gracefully."""
+
         async def completed():
             pass
 
@@ -2557,7 +2623,9 @@ class TestCloseWithBackgroundTask:
         assert initialized_registry._enterprise_discovery_task is None
 
     @pytest.mark.asyncio
-    async def test_close_concurrent_second_close_returns_early(self, initialized_registry):
+    async def test_close_concurrent_second_close_returns_early(
+        self, initialized_registry
+    ):
         """Test that concurrent close() calls don't double-cleanup.
 
         Simulates the scenario where close-2 passes the first lock block
@@ -2626,7 +2694,9 @@ class TestCloseWithBackgroundTask:
         assert initialized_registry._initialized is False
 
     @pytest.mark.asyncio
-    async def test_close_then_reinitialize(self, initialized_registry, mock_config_manager):
+    async def test_close_then_reinitialize(
+        self, initialized_registry, mock_config_manager
+    ):
         """Test that close() allows reinitialization."""
         mock_community = initialized_registry._community_registry
         mock_community.close = AsyncMock()
@@ -2679,9 +2749,7 @@ class TestFactorySessionChangesConnectionError:
             _FactorySessionChanges,
         )
 
-        changes = _FactorySessionChanges(
-            MagicMock(), "factory1", set(), set()
-        )
+        changes = _FactorySessionChanges(MagicMock(), "factory1", set(), set())
         assert changes.connection_error is None
 
     def test_connection_error_preserved(self):
@@ -2691,13 +2759,21 @@ class TestFactorySessionChangesConnectionError:
         )
 
         changes = _FactorySessionChanges(
-            MagicMock(), "factory1", set(), set(),
+            MagicMock(),
+            "factory1",
+            set(),
+            set(),
             connection_error="Failed to connect to auth server: Connection refused",
         )
-        assert changes.connection_error == "Failed to connect to auth server: Connection refused"
+        assert (
+            changes.connection_error
+            == "Failed to connect to auth server: Connection refused"
+        )
 
     @pytest.mark.asyncio
-    async def test_calculate_success_has_no_connection_error(self, initialized_registry):
+    async def test_calculate_success_has_no_connection_error(
+        self, initialized_registry
+    ):
         """Test that successful calculation returns connection_error=None."""
         mock_factory = MagicMock(spec=CorePlusSessionFactoryManager)
         mock_client = MagicMock(spec=CorePlusControllerClient)

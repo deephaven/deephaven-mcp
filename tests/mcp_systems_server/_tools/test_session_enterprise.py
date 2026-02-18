@@ -88,7 +88,9 @@ async def test_session_enterprise_create_auto_name_no_username_and_language_tran
         mock_factory.connect_to_new_worker = AsyncMock(side_effect=capture_transformer)
 
         # Mock the session registry operations
-        mock_registry.get = AsyncMock(side_effect=RegistryItemNotFoundError("Session not found"))
+        mock_registry.get = AsyncMock(
+            side_effect=RegistryItemNotFoundError("Session not found")
+        )
         mock_registry.add_session = AsyncMock()
         mock_registry.count_added_sessions = AsyncMock(return_value=0)
 
@@ -272,7 +274,9 @@ async def test_enterprise_systems_status_success():
     # Mock enterprise registry
     mock_enterprise_registry = AsyncMock()
     mock_enterprise_registry.get_all = AsyncMock(
-        return_value=RegistrySnapshot.simple(items={"system1": mock_factory1, "system2": mock_factory2})
+        return_value=RegistrySnapshot.simple(
+            items={"system1": mock_factory1, "system2": mock_factory2}
+        )
     )
 
     # Mock session registry
@@ -423,7 +427,9 @@ async def test_enterprise_systems_status_no_systems():
     """Test enterprise systems status with no systems available."""
     # Mock enterprise registry with no systems
     mock_enterprise_registry = AsyncMock()
-    mock_enterprise_registry.get_all = AsyncMock(return_value=RegistrySnapshot.simple(items={}))
+    mock_enterprise_registry.get_all = AsyncMock(
+        return_value=RegistrySnapshot.simple(items={})
+    )
 
     # Mock session registry
     mock_session_registry = MagicMock()
@@ -488,7 +494,9 @@ async def test_enterprise_systems_status_all_status_types():
 
     # Mock enterprise registry
     mock_enterprise_registry = AsyncMock()
-    mock_enterprise_registry.get_all = AsyncMock(return_value=RegistrySnapshot.simple(items=factories))
+    mock_enterprise_registry.get_all = AsyncMock(
+        return_value=RegistrySnapshot.simple(items=factories)
+    )
 
     # Mock session registry
     mock_session_registry = MagicMock()
@@ -1219,7 +1227,9 @@ async def test_session_enterprise_create_max_workers_exceeded():
         ]:
             return MagicMock(spec=EnterpriseSessionManager)
         elif session_id == "enterprise:limited-system:worker3":
-            raise RegistryItemNotFoundError("Session not found")  # New session doesn't exist yet
+            raise RegistryItemNotFoundError(
+                "Session not found"
+            )  # New session doesn't exist yet
         else:
             raise RegistryItemNotFoundError("Session not found")
 
@@ -1300,7 +1310,9 @@ async def test_session_enterprise_create_factory_creation_failure():
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
 
     # Mock session registry - no conflict
-    mock_registry.get = AsyncMock(side_effect=RegistryItemNotFoundError("No session found"))
+    mock_registry.get = AsyncMock(
+        side_effect=RegistryItemNotFoundError("No session found")
+    )
     mock_registry.get_all = AsyncMock(return_value={})
     mock_registry.count_added_sessions = AsyncMock(return_value=0)
 
@@ -1445,7 +1457,9 @@ async def test_session_enterprise_delete_session_not_found():
     full_config = {"enterprise": {"systems": enterprise_config}}
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
 
-    mock_registry.get = AsyncMock(side_effect=RegistryItemNotFoundError("Session not found"))
+    mock_registry.get = AsyncMock(
+        side_effect=RegistryItemNotFoundError("Session not found")
+    )
 
     context = MockContext(
         {"config_manager": mock_config_manager, "session_registry": mock_registry}
@@ -1687,7 +1701,9 @@ async def test_session_enterprise_create_success():
     mock_session_registry.add_session = AsyncMock()
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
     # Mock session registry get to raise RegistryItemNotFoundError for non-existent sessions
-    mock_session_registry.get = AsyncMock(side_effect=RegistryItemNotFoundError("Session not found"))
+    mock_session_registry.get = AsyncMock(
+        side_effect=RegistryItemNotFoundError("Session not found")
+    )
 
     # Mock config
     enterprise_config = {
@@ -1763,7 +1779,9 @@ async def test_session_enterprise_create_auto_generated_name():
     mock_session_registry.add_session = AsyncMock()
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
     # Mock session registry get to raise RegistryItemNotFoundError for non-existent sessions
-    mock_session_registry.get = AsyncMock(side_effect=RegistryItemNotFoundError("Session not found"))
+    mock_session_registry.get = AsyncMock(
+        side_effect=RegistryItemNotFoundError("Session not found")
+    )
 
     # Mock config with username
     enterprise_config = {
@@ -1993,7 +2011,9 @@ async def test_session_enterprise_delete_not_found():
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
 
     # Mock session registry to return RegistryItemNotFoundError for non-existent session
-    mock_session_registry.get = AsyncMock(side_effect=RegistryItemNotFoundError("Session not found"))
+    mock_session_registry.get = AsyncMock(
+        side_effect=RegistryItemNotFoundError("Session not found")
+    )
 
     context = MockContext(
         {
@@ -2125,7 +2145,9 @@ def test_generate_session_name_if_none_without_username():
 async def test_check_session_id_available_success():
     """Test _check_session_id_available when session ID is available."""
     mock_session_registry = MagicMock()
-    mock_session_registry.get = AsyncMock(side_effect=RegistryItemNotFoundError("Session not found"))
+    mock_session_registry.get = AsyncMock(
+        side_effect=RegistryItemNotFoundError("Session not found")
+    )
 
     result = await _check_session_id_available(mock_session_registry, "test-session-id")
 

@@ -1173,7 +1173,9 @@ class CorePlusControllerClient(
             raise QueryError(f"Failed to restart query(s): {e}") from e
 
     async def start_and_wait(
-        self, serial: CorePlusQuerySerial, timeout_seconds: float = PQ_WAIT_TIMEOUT_SECONDS
+        self,
+        serial: CorePlusQuerySerial,
+        timeout_seconds: float = PQ_WAIT_TIMEOUT_SECONDS,
     ) -> None:
         """Start the given query and wait for it to become running asynchronously.
 
@@ -1284,7 +1286,9 @@ class CorePlusControllerClient(
             raise QueryError(f"Failed to stop query(s): {e}") from e
 
     async def stop_and_wait(
-        self, serial: CorePlusQuerySerial, timeout_seconds: float = PQ_WAIT_TIMEOUT_SECONDS
+        self,
+        serial: CorePlusQuerySerial,
+        timeout_seconds: float = PQ_WAIT_TIMEOUT_SECONDS,
     ) -> None:
         """Stop the given query and wait for it to become terminal asynchronously.
 

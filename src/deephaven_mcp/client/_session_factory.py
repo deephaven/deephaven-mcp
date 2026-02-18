@@ -337,15 +337,68 @@ class CorePlusSessionFactory(
             instance = cls(manager)
 
             # Subscribe to controller client for persistent query operations
-            await instance._controller_client.subscribe(
-                timeout_seconds=timeout_seconds
-            )
+            await instance._controller_client.subscribe(timeout_seconds=timeout_seconds)
 
             return instance
 
+    @staticmethod
+    def _resolve_password(
+        worker_cfg: dict[str, Any],
+        log_prefix: str = "[CorePlusSessionFactory:from_config]",
+    ) -> str:
+        """Resolve password from config dictionary or environment variable.
+
+        This helper extracts the password for enterprise system authentication.
+        It supports two configuration approaches:
+
+        1. Direct password: Use 'password' key with the password value
+        2. Environment variable: Use 'password_env_var' key with the name of an
+           environment variable containing the password (recommended for security)
+
+        If 'password_env_var' is specified and 'password' is None, the environment
+        variable is used. Unlike auth tokens, passwords are required - an
+        AuthenticationError is raised if no password can be resolved.
+
+        Args:
+            worker_cfg: Configuration dictionary containing 'password' and/or
+                'password_env_var' keys.
+            log_prefix: Prefix for log messages (default: "[CorePlusSessionFactory:from_config]").
+
+        Returns:
+            The resolved password string.
+
+        Raises:
+            AuthenticationError: If the specified environment variable is not set,
+                or if no password is provided at all.
+        """
+        import os
+
+        password = worker_cfg.get("password")
+        password_env_var = worker_cfg.get("password_env_var")
+
+        if password is None and password_env_var is not None:
+            password = os.environ.get(password_env_var)
+            if password is None:
+                _LOGGER.error(
+                    f"{log_prefix} Environment variable '{password_env_var}' not set for password authentication."
+                )
+                raise AuthenticationError(
+                    f"Environment variable '{password_env_var}' not set for password authentication."
+                )
+        if password is None:
+            _LOGGER.error(
+                f"{log_prefix} No password provided for password authentication."
+            )
+            raise AuthenticationError(
+                "No password provided for password authentication."
+            )
+        return str(password)
+
     @classmethod
     async def from_config(
-        cls, worker_cfg: dict[str, Any], timeout_seconds: float = CONNECTION_TIMEOUT_SECONDS
+        cls,
+        worker_cfg: dict[str, Any],
+        timeout_seconds: float = CONNECTION_TIMEOUT_SECONDS,
     ) -> "CorePlusSessionFactory":
         """
         Create and authenticate a CorePlusSessionFactory from a configuration dictionary.
@@ -507,32 +560,9 @@ class CorePlusSessionFactory(
         # Perform authentication if credentials are provided
         if auth_type == "password":
             username = worker_cfg.get("username")
-            password = worker_cfg.get("password")
-            password_env_var = worker_cfg.get("password_env_var")
+            password = cls._resolve_password(worker_cfg)
             effective_user = worker_cfg.get("effective_user")
-
-            # Prefer password_env_var if present
-            if password is None and password_env_var is not None:
-                import os
-
-                password = os.environ.get(password_env_var)
-                if password is None:
-                    _LOGGER.error(
-                        f"[CorePlusSessionFactory:from_config] Environment variable '{password_env_var}' not set for password authentication."
-                    )
-                    raise AuthenticationError(
-                        f"Environment variable '{password_env_var}' not set for password authentication."
-                    )
-            if password is None:
-                _LOGGER.error(
-                    "[CorePlusSessionFactory:from_config] No password provided for password authentication."
-                )
-                raise AuthenticationError(
-                    "No password provided for password authentication."
-                )
-            await instance.password(
-                cast(str, username), cast(str, password), effective_user
-            )
+            await instance.password(cast(str, username), password, effective_user)
         elif auth_type == "private_key":
             private_key_path = worker_cfg.get("private_key_path")
             if private_key_path is None:
@@ -553,9 +583,7 @@ class CorePlusSessionFactory(
             f"[CorePlusSessionFactory:from_config] Subscribing to controller for persistent query state (auth_type={auth_type})"
         )
         subscribe_start = time.monotonic()
-        await instance._controller_client.subscribe(
-            timeout_seconds=timeout_seconds
-        )
+        await instance._controller_client.subscribe(timeout_seconds=timeout_seconds)
         subscribe_elapsed = time.monotonic() - subscribe_start
         _LOGGER.info(
             f"[CorePlusSessionFactory:from_config] Controller subscription completed in {subscribe_elapsed:.2f}s"

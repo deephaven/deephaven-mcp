@@ -65,7 +65,9 @@ async def test_get_session_from_context_session_not_found():
     """Test _get_session_from_context propagates RegistryItemNotFoundError from registry."""
     mock_registry = MagicMock()
     mock_registry.get = AsyncMock(
-        side_effect=RegistryItemNotFoundError("No item with name 'nonexistent:session' found")
+        side_effect=RegistryItemNotFoundError(
+            "No item with name 'nonexistent:session' found"
+        )
     )
 
     context = MockContext({"session_registry": mock_registry})

@@ -391,9 +391,7 @@ async def test_add_query_other_error(
 
 
 @pytest.mark.asyncio
-async def test_add_query_timeout(
-    coreplus_controller_client, dummy_controller_client
-):
+async def test_add_query_timeout(coreplus_controller_client, dummy_controller_client):
     """Test that add_query() raises DeephavenConnectionError on timeout."""
     import time
 
@@ -839,9 +837,7 @@ async def test_subscribe_other_error(
 
 
 @pytest.mark.asyncio
-async def test_subscribe_timeout(
-    coreplus_controller_client, dummy_controller_client
-):
+async def test_subscribe_timeout(coreplus_controller_client, dummy_controller_client):
     """Test that subscribe() raises DeephavenConnectionError on timeout."""
     import time
 

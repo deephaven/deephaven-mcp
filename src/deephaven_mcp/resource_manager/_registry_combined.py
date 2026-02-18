@@ -706,7 +706,10 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             # If we can't connect, return no new sessions and all existing sessions as removals
             existing_keys = self._find_session_keys_for_factory(factory_name)
             return _FactorySessionChanges(
-                factory, factory_name, set(), existing_keys,
+                factory,
+                factory_name,
+                set(),
+                existing_keys,
                 connection_error=str(e),
             )
 
@@ -819,11 +822,15 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             self._init_phase = InitializationPhase.LOADING
 
         start = time.monotonic()
-        _LOGGER.info(f"[{self.__class__.__name__}] Starting enterprise session discovery...")
+        _LOGGER.info(
+            f"[{self.__class__.__name__}] Starting enterprise session discovery..."
+        )
 
         errors: dict[str, str] = {}
 
-        async def _init_factory(fname: str, factory: CorePlusSessionFactoryManager) -> None:
+        async def _init_factory(
+            fname: str, factory: CorePlusSessionFactoryManager
+        ) -> None:
             """Initialize a single factory — calculate changes and apply immediately.
 
             Connection errors (DeephavenConnectionError) are caught inside
@@ -890,7 +897,10 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
 
             if factory_snapshot.items:
                 await asyncio.gather(
-                    *(_init_factory(fname, factory) for fname, factory in factory_snapshot.items.items())
+                    *(
+                        _init_factory(fname, factory)
+                        for fname, factory in factory_snapshot.items.items()
+                    )
                 )
 
             elapsed = time.monotonic() - start
@@ -952,7 +962,10 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             )
             all_factories_snapshot = await enterprise_registry.get_all()
 
-            if all_factories_snapshot.initialization_phase != InitializationPhase.SIMPLE:
+            if (
+                all_factories_snapshot.initialization_phase
+                != InitializationPhase.SIMPLE
+            ):
                 _LOGGER.error(
                     f"[{self.__class__.__name__}] Factory registry returned unexpected phase "
                     f"{all_factories_snapshot.initialization_phase.value!r} (expected SIMPLE)"

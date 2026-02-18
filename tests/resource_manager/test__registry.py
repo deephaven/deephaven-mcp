@@ -87,7 +87,9 @@ def test_snapshot_direct_construction_requires_all_fields():
     with pytest.raises(TypeError):
         RegistrySnapshot(items={})  # missing phase and errors
     with pytest.raises(TypeError):
-        RegistrySnapshot(items={}, initialization_phase=InitializationPhase.COMPLETED)  # missing errors
+        RegistrySnapshot(
+            items={}, initialization_phase=InitializationPhase.COMPLETED
+        )  # missing errors
 
 
 def test_snapshot_frozen_immutability():

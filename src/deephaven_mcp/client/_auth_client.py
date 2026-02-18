@@ -169,7 +169,11 @@ class CorePlusAuthClient(
         )
         try:
             result = await asyncio.to_thread(
-                self.wrapped.create_token, service, username, duration_seconds, timeout_seconds
+                self.wrapped.create_token,
+                service,
+                username,
+                duration_seconds,
+                timeout_seconds,
             )
             _LOGGER.debug(
                 "[CorePlusAuthClient] Service token for '%s' created successfully.",
