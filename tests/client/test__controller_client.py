@@ -181,6 +181,23 @@ async def test_delete_query_other_error(
         await coreplus_controller_client.delete_query("serial")
 
 
+@pytest.mark.asyncio
+async def test_delete_query_timeout(
+    coreplus_controller_client, dummy_controller_client
+):
+    """Test that delete_query() raises DeephavenConnectionError on timeout."""
+    import time
+
+    def slow_delete(serial):
+        time.sleep(0.1)
+
+    dummy_controller_client.delete_query.side_effect = slow_delete
+
+    with pytest.raises(DeephavenConnectionError) as exc_info:
+        await coreplus_controller_client.delete_query("serial", timeout_seconds=0.01)
+    assert "timed out" in str(exc_info.value)
+
+
 # --- Additional Coverage Tests ---
 import builtins
 
@@ -371,6 +388,25 @@ async def test_add_query_other_error(
     dummy_controller_client.add_query.side_effect = Exception("fail")
     with pytest.raises(QueryError):
         await coreplus_controller_client.add_query(query_config)
+
+
+@pytest.mark.asyncio
+async def test_add_query_timeout(
+    coreplus_controller_client, dummy_controller_client
+):
+    """Test that add_query() raises DeephavenConnectionError on timeout."""
+    import time
+
+    def slow_add(config):
+        time.sleep(0.1)
+
+    query_config = MagicMock()
+    query_config.pb = MagicMock()
+    dummy_controller_client.add_query.side_effect = slow_add
+
+    with pytest.raises(DeephavenConnectionError) as exc_info:
+        await coreplus_controller_client.add_query(query_config, timeout_seconds=0.01)
+    assert "timed out" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
@@ -965,6 +1001,32 @@ async def test_modify_query_other_error(
     with pytest.raises(QueryError) as exc_info:
         await coreplus_controller_client.modify_query(mock_config, restart=False)
     assert "Failed to modify query" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_modify_query_timeout(
+    coreplus_controller_client, dummy_controller_client
+):
+    """Test that modify_query() raises DeephavenConnectionError on timeout."""
+    import time
+
+    from deephaven_mcp.client._protobuf import CorePlusQueryConfig
+
+    def slow_modify(config, restart):
+        time.sleep(0.1)
+
+    mock_config = MagicMock(spec=CorePlusQueryConfig)
+    mock_config.pb = MagicMock()
+    mock_config.pb.serial = 12345
+    mock_config.pb.name = "test_query"
+
+    dummy_controller_client.modify_query = slow_modify
+
+    with pytest.raises(DeephavenConnectionError) as exc_info:
+        await coreplus_controller_client.modify_query(
+            mock_config, restart=False, timeout_seconds=0.01
+        )
+    assert "timed out" in str(exc_info.value)
 
 
 # --- map_and_version() tests ---

@@ -987,6 +987,58 @@ async def test_from_url_connection_error(monkeypatch):
             await CorePlusSessionFactory.from_url("http://fake")
 
 
+@pytest.mark.asyncio
+async def test_from_url_timeout(monkeypatch):
+    """Test that from_url() raises DeephavenConnectionError on timeout."""
+    import time
+
+    monkeypatch.setattr("deephaven_mcp.client._base.is_enterprise_available", True)
+
+    def slow_init(url):
+        time.sleep(0.1)
+
+    with patch("deephaven_mcp.client._session_factory.is_enterprise_available", True):
+        with patch(
+            "deephaven_enterprise.client.session_manager.SessionManager",
+            side_effect=slow_init,
+        ):
+            with pytest.raises(exc.DeephavenConnectionError) as exc_info:
+                await CorePlusSessionFactory.from_url(
+                    "http://fake", timeout_seconds=0.01
+                )
+            assert "timed out" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_from_config_timeout(monkeypatch):
+    """Test that from_config() raises DeephavenConnectionError on timeout."""
+    import time
+
+    monkeypatch.setattr("deephaven_mcp.client._base.is_enterprise_available", True)
+    worker_cfg = {
+        "connection_json_url": "https://server/iris/connection.json",
+        "auth_type": "password",
+        "username": "alice",
+        "password": "pw",
+    }
+
+    def slow_init(url):
+        time.sleep(0.1)
+
+    with patch("deephaven_mcp.client._session_factory.is_enterprise_available", True):
+        with patch(
+            "deephaven_enterprise.client.session_manager.SessionManager",
+            side_effect=slow_init,
+        ):
+            import deephaven_mcp.client._session_factory as sm_mod
+
+            with pytest.raises(exc.DeephavenConnectionError) as exc_info:
+                await sm_mod.CorePlusSessionFactory.from_config(
+                    worker_cfg, timeout_seconds=0.01
+                )
+            assert "timed out" in str(exc_info.value)
+
+
 # --- Coverage for unreachable error/warning branches in from_config ---
 
 
