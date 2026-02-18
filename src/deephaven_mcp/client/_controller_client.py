@@ -271,6 +271,10 @@ class CorePlusControllerClient(
                        invalidated.
         """
         if not self._subscribed:
+            _LOGGER.error(
+                "[CorePlusControllerClient:map] subscribe() must be called before map(). "
+                "This indicates a programming bug - the controller client was not properly initialized."
+            )
             raise InternalError(
                 "subscribe() must be called before map(). This indicates a programming bug - "
                 "the controller client was not properly initialized."
@@ -321,6 +325,10 @@ class CorePlusControllerClient(
             InternalError: If subscribe() was not called before this method
         """
         if not self._subscribed:
+            _LOGGER.error(
+                "[CorePlusControllerClient:map_and_version] subscribe() must be called before map_and_version(). "
+                "This indicates a programming bug - the controller client was not properly initialized."
+            )
             raise InternalError(
                 "subscribe() must be called before map_and_version(). This indicates a programming bug - "
                 "the controller client was not properly initialized."
@@ -390,6 +398,10 @@ class CorePlusControllerClient(
             InternalError: If subscribe() was not called before this method.
         """
         if not self._subscribed:
+            _LOGGER.error(
+                "[CorePlusControllerClient:get_serial_for_name] subscribe() must be called before get_serial_for_name(). "
+                "This indicates a programming bug - the controller client was not properly initialized."
+            )
             raise InternalError(
                 "subscribe() must be called before get_serial_for_name(). This indicates a programming bug - "
                 "the controller client was not properly initialized."

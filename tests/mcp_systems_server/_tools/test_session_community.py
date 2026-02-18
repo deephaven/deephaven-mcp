@@ -19,6 +19,7 @@ from deephaven_mcp.mcp_systems_server._tools.session_community import (
     session_community_credentials,
     session_community_delete,
 )
+from deephaven_mcp._exceptions import RegistryItemNotFoundError
 from deephaven_mcp.resource_manager import (
     DockerLaunchedSession,
     DynamicCommunitySessionManager,
@@ -51,7 +52,7 @@ async def test_session_community_create_success():
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
     mock_session_registry.add_session = AsyncMock()
-    mock_session_registry.get_all = AsyncMock(return_value={})
+    mock_session_registry.get = AsyncMock(side_effect=RegistryItemNotFoundError("not found"))
 
     # Mock launcher
     mock_launched_session = MagicMock(spec=DockerLaunchedSession)
@@ -154,7 +155,7 @@ async def test_session_community_create_sessions_disabled():
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
     mock_session_registry.add_session = AsyncMock()
-    mock_session_registry.get_all = AsyncMock(return_value={})
+    mock_session_registry.get = AsyncMock(side_effect=RegistryItemNotFoundError("not found"))
 
     mock_launched_session = MagicMock(spec=DockerLaunchedSession)
     mock_launched_session.port = 10000
@@ -259,7 +260,7 @@ async def test_session_community_create_launch_failure():
     full_config = {"community": community_config}
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
-    mock_session_registry.get_all = AsyncMock(return_value={})
+    mock_session_registry.get = AsyncMock(side_effect=RegistryItemNotFoundError("not found"))
 
     with (
         patch(
@@ -397,7 +398,7 @@ async def test_session_community_delete_not_found():
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock()
 
-    mock_session_registry.get = AsyncMock(side_effect=KeyError("Not found"))
+    mock_session_registry.get = AsyncMock(side_effect=RegistryItemNotFoundError("Not found"))
 
     context = MockContext(
         {
@@ -930,7 +931,7 @@ async def test_session_community_create_explicit_docker_image():
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
     mock_session_registry.add_session = AsyncMock()
-    mock_session_registry.get_all = AsyncMock(return_value={})
+    mock_session_registry.get = AsyncMock(side_effect=RegistryItemNotFoundError("not found"))
 
     mock_launched_session = MagicMock(spec=DockerLaunchedSession)
     mock_launched_session.port = 10000
@@ -1000,7 +1001,7 @@ async def test_session_community_create_groovy_programming_language():
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
     mock_session_registry.add_session = AsyncMock()
-    mock_session_registry.get_all = AsyncMock(return_value={})
+    mock_session_registry.get = AsyncMock(side_effect=RegistryItemNotFoundError("not found"))
 
     mock_launched_session = MagicMock(spec=DockerLaunchedSession)
     mock_launched_session.port = 10000
@@ -1069,7 +1070,7 @@ async def test_session_community_create_unsupported_programming_language():
     full_config = {"community": community_config}
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
-    mock_session_registry.get_all = AsyncMock(return_value={})
+    mock_session_registry.get = AsyncMock(side_effect=RegistryItemNotFoundError("not found"))
 
     context = MockContext(
         {
@@ -1111,7 +1112,7 @@ async def test_session_community_create_groovy_from_config_defaults():
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
     mock_session_registry.add_session = AsyncMock()
-    mock_session_registry.get_all = AsyncMock(return_value={})
+    mock_session_registry.get = AsyncMock(side_effect=RegistryItemNotFoundError("not found"))
 
     mock_launched_session = MagicMock(spec=DockerLaunchedSession)
     mock_launched_session.port = 10000
@@ -1181,7 +1182,7 @@ async def test_session_community_create_invalid_config_programming_language():
     full_config = {"community": community_config}
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
-    mock_session_registry.get_all = AsyncMock(return_value={})
+    mock_session_registry.get = AsyncMock(side_effect=RegistryItemNotFoundError("not found"))
 
     context = MockContext(
         {
@@ -1223,7 +1224,7 @@ async def test_session_community_create_missing_auth_token_env_var():
     full_config = {"community": community_config}
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
-    mock_session_registry.get_all = AsyncMock(return_value={})
+    mock_session_registry.get = AsyncMock(side_effect=RegistryItemNotFoundError("not found"))
 
     context = MockContext(
         {
@@ -1447,7 +1448,7 @@ async def test_session_community_credentials_session_not_found():
     mock_config_manager.get_config = AsyncMock(return_value=config)
 
     # Session not found
-    mock_session_registry.get = AsyncMock(side_effect=KeyError("Session not found"))
+    mock_session_registry.get = AsyncMock(side_effect=RegistryItemNotFoundError("Session not found"))
 
     context = MockContext(
         {
@@ -1944,7 +1945,7 @@ async def test_session_community_create_groovy_session_type_in_config():
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
     mock_session_registry.add_session = AsyncMock()
-    mock_session_registry.get_all = AsyncMock(return_value={})
+    mock_session_registry.get = AsyncMock(side_effect=RegistryItemNotFoundError("not found"))
 
     mock_launched_session = MagicMock(spec=DockerLaunchedSession)
     mock_launched_session.port = 10000
@@ -2039,7 +2040,7 @@ async def test_session_community_create_python_session_type_in_config():
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
     mock_session_registry.add_session = AsyncMock()
-    mock_session_registry.get_all = AsyncMock(return_value={})
+    mock_session_registry.get = AsyncMock(side_effect=RegistryItemNotFoundError("not found"))
 
     mock_launched_session = MagicMock(spec=DockerLaunchedSession)
     mock_launched_session.port = 10000
@@ -2121,7 +2122,7 @@ async def test_session_community_create_default_session_type_in_config():
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
     mock_session_registry.add_session = AsyncMock()
-    mock_session_registry.get_all = AsyncMock(return_value={})
+    mock_session_registry.get = AsyncMock(side_effect=RegistryItemNotFoundError("not found"))
 
     mock_launched_session = MagicMock(spec=DockerLaunchedSession)
     mock_launched_session.port = 10000

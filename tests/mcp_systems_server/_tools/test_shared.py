@@ -12,6 +12,8 @@ import pytest
 from conftest import MockContext, create_mock_instance_tracker
 
 from deephaven_mcp import config
+from deephaven_mcp._exceptions import RegistryItemNotFoundError
+from deephaven_mcp.client import BaseSession, CorePlusSession
 from deephaven_mcp.mcp_systems_server._tools.shared import (
     _check_response_size,
     _get_enterprise_session,
@@ -31,8 +33,6 @@ from deephaven_mcp.resource_manager import (
 @pytest.mark.asyncio
 async def test_get_session_from_context_success():
     """Test _get_session_from_context successfully retrieves a session."""
-    from deephaven_mcp.mcp_systems_server._tools.shared import _get_session_from_context
-
     # Create mock session
     mock_session = MagicMock()
 
@@ -62,29 +62,36 @@ async def test_get_session_from_context_success():
 
 @pytest.mark.asyncio
 async def test_get_session_from_context_session_not_found():
-    """Test _get_session_from_context raises KeyError when session not found."""
-    from deephaven_mcp.mcp_systems_server._tools.shared import _get_session_from_context
+    """Test _get_session_from_context propagates RegistryItemNotFoundError from registry."""
+    mock_registry = MagicMock()
+    mock_registry.get = AsyncMock(
+        side_effect=RegistryItemNotFoundError("No item with name 'nonexistent:session' found")
+    )
 
-    # Create mock session registry that raises KeyError
+    context = MockContext({"session_registry": mock_registry})
+
+    with pytest.raises(RegistryItemNotFoundError, match="No item with name"):
+        await _get_session_from_context("test_function", context, "nonexistent:session")
+
+    mock_registry.get.assert_called_once_with("nonexistent:session")
+
+
+@pytest.mark.asyncio
+async def test_get_session_from_context_keyerror_still_propagates():
+    """Test _get_session_from_context still propagates KeyError (non-RegistryItemNotFoundError)."""
+    # Create mock session registry that raises KeyError (different from RegistryItemNotFoundError)
     mock_registry = MagicMock()
     mock_registry.get = AsyncMock(side_effect=KeyError("Session not found"))
 
-    # Create context with registry
     context = MockContext({"session_registry": mock_registry})
 
-    # Call the helper and expect KeyError
     with pytest.raises(KeyError, match="Session not found"):
         await _get_session_from_context("test_function", context, "nonexistent:session")
-
-    # Verify the registry was accessed
-    mock_registry.get.assert_called_once_with("nonexistent:session")
 
 
 @pytest.mark.asyncio
 async def test_get_session_from_context_session_connection_fails():
     """Test _get_session_from_context propagates exception when session.get() fails."""
-    from deephaven_mcp.mcp_systems_server._tools.shared import _get_session_from_context
-
     # Create mock session manager that fails on get()
     mock_session_manager = MagicMock()
     mock_session_manager.get = AsyncMock(
@@ -223,9 +230,6 @@ async def test_get_system_config_empty_config():
 @pytest.mark.asyncio
 async def test_get_enterprise_session_success():
     """Test _get_enterprise_session with a valid CorePlusSession."""
-    from deephaven_mcp.client import CorePlusSession
-    from deephaven_mcp.mcp_systems_server._tools.shared import _get_enterprise_session
-
     mock_session = MagicMock(spec=CorePlusSession)
     mock_session_manager = MagicMock()
     mock_session_manager.get = AsyncMock(return_value=mock_session)
@@ -246,9 +250,6 @@ async def test_get_enterprise_session_success():
 @pytest.mark.asyncio
 async def test_get_enterprise_session_not_enterprise():
     """Test _get_enterprise_session with a non-enterprise session."""
-    from deephaven_mcp.client import BaseSession
-    from deephaven_mcp.mcp_systems_server._tools.shared import _get_enterprise_session
-
     mock_session = MagicMock(spec=BaseSession)
     mock_session_manager = MagicMock()
     mock_session_manager.get = AsyncMock(return_value=mock_session)

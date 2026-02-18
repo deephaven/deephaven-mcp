@@ -23,8 +23,85 @@ from deephaven_mcp.resource_manager import (
     CommunitySessionManager,
     CommunitySessionRegistry,
     CorePlusSessionFactoryRegistry,
+    InitializationPhase,
+    RegistrySnapshot,
 )
 from deephaven_mcp.resource_manager._registry import BaseRegistry
+
+# --- RegistrySnapshot Tests ---
+
+
+def test_snapshot_simple_sets_phase_and_empty_errors():
+    """Test that simple() sets SIMPLE phase and empty errors dict."""
+    snapshot = RegistrySnapshot.simple(items={"a": 1, "b": 2})
+    assert snapshot.items == {"a": 1, "b": 2}
+    assert snapshot.initialization_phase == InitializationPhase.SIMPLE
+    assert snapshot.initialization_errors == {}
+
+
+def test_snapshot_simple_empty_items():
+    """Test simple() with an empty items dict."""
+    snapshot = RegistrySnapshot.simple(items={})
+    assert snapshot.items == {}
+    assert snapshot.initialization_phase == InitializationPhase.SIMPLE
+    assert snapshot.initialization_errors == {}
+
+
+def test_snapshot_with_initialization_loading_phase():
+    """Test with_initialization() during LOADING phase."""
+    snapshot = RegistrySnapshot.with_initialization(
+        items={"x": 10},
+        phase=InitializationPhase.LOADING,
+        errors={"src1": "Connection refused"},
+    )
+    assert snapshot.items == {"x": 10}
+    assert snapshot.initialization_phase == InitializationPhase.LOADING
+    assert snapshot.initialization_errors == {"src1": "Connection refused"}
+
+
+def test_snapshot_with_initialization_partial_phase():
+    """Test with_initialization() during PARTIAL phase."""
+    snapshot = RegistrySnapshot.with_initialization(
+        items={},
+        phase=InitializationPhase.PARTIAL,
+        errors={},
+    )
+    assert snapshot.initialization_phase == InitializationPhase.PARTIAL
+    assert snapshot.initialization_errors == {}
+
+
+def test_snapshot_with_initialization_completed_with_errors():
+    """Test with_initialization() in COMPLETED phase with errors."""
+    errors = {"src1": "timeout", "src2": "auth failed"}
+    snapshot = RegistrySnapshot.with_initialization(
+        items={"a": 1},
+        phase=InitializationPhase.COMPLETED,
+        errors=errors,
+    )
+    assert snapshot.initialization_phase == InitializationPhase.COMPLETED
+    assert snapshot.initialization_errors == errors
+
+
+def test_snapshot_direct_construction_requires_all_fields():
+    """Test that omitting any field raises TypeError."""
+    with pytest.raises(TypeError):
+        RegistrySnapshot(items={})  # missing phase and errors
+    with pytest.raises(TypeError):
+        RegistrySnapshot(items={}, initialization_phase=InitializationPhase.COMPLETED)  # missing errors
+
+
+def test_snapshot_frozen_immutability():
+    """Test that RegistrySnapshot fields cannot be reassigned."""
+    from dataclasses import FrozenInstanceError
+
+    snapshot = RegistrySnapshot.simple(items={"a": 1})
+    with pytest.raises(FrozenInstanceError):
+        snapshot.items = {}
+    with pytest.raises(FrozenInstanceError):
+        snapshot.initialization_phase = InitializationPhase.NOT_STARTED
+    with pytest.raises(FrozenInstanceError):
+        snapshot.initialization_errors = {"x": "y"}
+
 
 # --- Base Registry Tests ---
 
@@ -130,28 +207,32 @@ async def test_get_all_raises_before_initialize(registry):
 
 
 @pytest.mark.asyncio
-async def test_get_all_returns_all_items(registry, mock_base_config_manager):
-    """Test that get_all() returns all items after initialization."""
+async def test_get_all_returns_snapshot(registry, mock_base_config_manager):
+    """Test that get_all() returns a RegistrySnapshot after initialization."""
     await registry.initialize(mock_base_config_manager)
-    all_items = await registry.get_all()
+    snapshot = await registry.get_all()
 
-    # Should return a dictionary with both configured items
-    assert isinstance(all_items, dict)
-    assert len(all_items) == 2
-    assert "item1" in all_items
-    assert "item2" in all_items
-    assert all_items["item1"].name == "alpha"
-    assert all_items["item2"].name == "beta"
+    # Should return a RegistrySnapshot with both configured items
+    assert isinstance(snapshot, RegistrySnapshot)
+    assert snapshot.initialization_phase == InitializationPhase.SIMPLE
+    assert snapshot.initialization_errors == {}
+    assert len(snapshot.items) == 2
+    assert "item1" in snapshot.items
+    assert "item2" in snapshot.items
+    assert snapshot.items["item1"].name == "alpha"
+    assert snapshot.items["item2"].name == "beta"
 
 
 @pytest.mark.asyncio
 async def test_get_all_returns_copy(registry, mock_base_config_manager):
     """Test that get_all() returns a copy of items, not the original dict."""
     await registry.initialize(mock_base_config_manager)
-    all_items = await registry.get_all()
+    snapshot = await registry.get_all()
+    assert snapshot.initialization_phase == InitializationPhase.SIMPLE
+    assert snapshot.initialization_errors == {}
 
     # Modify the returned dict
-    all_items["new_item"] = MockItem("new")
+    snapshot.items["new_item"] = MockItem("new")
 
     # Original registry should be unchanged
     from deephaven_mcp._exceptions import RegistryItemNotFoundError
@@ -160,9 +241,11 @@ async def test_get_all_returns_copy(registry, mock_base_config_manager):
         await registry.get("new_item")
 
     # Getting all items again should not include our modification
-    fresh_items = await registry.get_all()
-    assert "new_item" not in fresh_items
-    assert len(fresh_items) == 2
+    fresh_snapshot = await registry.get_all()
+    assert fresh_snapshot.initialization_phase == InitializationPhase.SIMPLE
+    assert fresh_snapshot.initialization_errors == {}
+    assert "new_item" not in fresh_snapshot.items
+    assert len(fresh_snapshot.items) == 2
 
 
 @pytest.mark.asyncio
@@ -175,9 +258,11 @@ async def test_get_all_empty_registry():
     registry = ConcreteRegistry()
     await registry.initialize(empty_config_manager)
 
-    all_items = await registry.get_all()
-    assert isinstance(all_items, dict)
-    assert len(all_items) == 0
+    snapshot = await registry.get_all()
+    assert isinstance(snapshot, RegistrySnapshot)
+    assert snapshot.initialization_phase == InitializationPhase.SIMPLE
+    assert snapshot.initialization_errors == {}
+    assert len(snapshot.items) == 0
 
 
 @pytest.mark.asyncio

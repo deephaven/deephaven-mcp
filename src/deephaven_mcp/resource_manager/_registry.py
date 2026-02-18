@@ -23,9 +23,11 @@ Usage:
 
 import abc
 import asyncio
+import enum
 import logging
 import sys
 import time
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Generic, TypeVar
 
 if TYPE_CHECKING:
@@ -53,6 +55,110 @@ from ._manager import (
 _LOGGER = logging.getLogger(__name__)
 
 T = TypeVar("T")
+
+
+class InitializationPhase(enum.Enum):
+    """Lifecycle phase of a registry's initialization.
+
+    Simple registries (e.g. CommunitySessionRegistry, CorePlusSessionFactoryRegistry)
+    always return ``SIMPLE`` — they have no initialization lifecycle.
+
+    Complex registries (e.g. CombinedSessionRegistry) progress through phases:
+    NOT_STARTED → PARTIAL → LOADING → COMPLETED (or FAILED).
+    """
+
+    SIMPLE = "simple"
+    """Registry has no initialization lifecycle — always fully available.
+    Used by simple registries like CommunitySessionRegistry and
+    CorePlusSessionFactoryRegistry."""
+
+    NOT_STARTED = "not_started"
+    """Registry has not been initialized yet."""
+
+    PARTIAL = "partial"
+    """Core items are loaded and the registry is usable, but background
+    initialization work has not yet started."""
+
+    LOADING = "loading"
+    """Background initialization is actively running.  Items may become
+    available progressively as each unit of work completes."""
+
+    COMPLETED = "completed"
+    """All initialization has finished (successfully or with errors).
+    On-demand updates resume in ``get()`` / ``get_all()``.  Only used by
+    complex registries with an initialization lifecycle."""
+
+    FAILED = "failed"
+    """Initialization failed critically.  The registry may have partial data."""
+
+
+@dataclass(frozen=True)
+class RegistrySnapshot(Generic[T]):
+    """Atomic snapshot of registry items and initialization state.
+
+    Returned by :meth:`BaseRegistry.get_all` to provide a consistent view
+    captured under a single lock acquisition.
+
+    All fields are required — use the class methods :meth:`simple` and
+    :meth:`with_initialization` for convenient construction.
+
+    Attributes:
+        items: Copy of the registry items dictionary mapping names to their
+            corresponding manager instances.
+        initialization_phase: Current lifecycle phase of the registry.
+        initialization_errors: Errors recorded during background
+            initialization.  Maps source names to error descriptions.
+            Empty dict means no errors.
+    """
+
+    items: dict[str, T]
+    initialization_phase: InitializationPhase
+    initialization_errors: dict[str, str]
+
+    @classmethod
+    def simple(cls, items: dict[str, T]) -> "RegistrySnapshot[T]":
+        """Create a snapshot for a registry without initialization lifecycle.
+
+        Intended for simple registries (CommunitySessionRegistry,
+        CorePlusSessionFactoryRegistry) that are always fully available.
+
+        Args:
+            items: Copy of the registry items dictionary.
+
+        Returns:
+            A snapshot with phase SIMPLE and no initialization errors.
+        """
+        return cls(
+            items=items,
+            initialization_phase=InitializationPhase.SIMPLE,
+            initialization_errors={},
+        )
+
+    @classmethod
+    def with_initialization(
+        cls,
+        items: dict[str, T],
+        phase: InitializationPhase,
+        errors: dict[str, str],
+    ) -> "RegistrySnapshot[T]":
+        """Create a snapshot that includes initialization state.
+
+        Intended for CombinedSessionRegistry, which tracks enterprise
+        discovery progress and per-factory errors.
+
+        Args:
+            items: Copy of the registry items dictionary.
+            phase: Current initialization lifecycle phase.
+            errors: Per-factory error descriptions from enterprise discovery.
+
+        Returns:
+            A snapshot with the given initialization state.
+        """
+        return cls(
+            items=items,
+            initialization_phase=phase,
+            initialization_errors=errors,
+        )
 
 
 class BaseRegistry(abc.ABC, Generic[T]):
@@ -92,6 +198,9 @@ class BaseRegistry(abc.ABC, Generic[T]):
             InternalError: If the registry has not been initialized.
         """
         if not self._initialized:
+            _LOGGER.error(
+                f"[{self.__class__.__name__}] Not initialized. Call 'await initialize()' after construction."
+            )
             raise InternalError(
                 f"{self.__class__.__name__} not initialized. Call 'await initialize()' after construction."
             )
@@ -154,12 +263,20 @@ class BaseRegistry(abc.ABC, Generic[T]):
 
             return self._items[name]
 
-    async def get_all(self) -> dict[str, T]:
+    async def get_all(self) -> RegistrySnapshot[T]:
         """
-        Retrieve all items from the registry.
+        Retrieve all items from the registry as an atomic snapshot.
 
         Returns:
-            A copy of the items dictionary containing all registered items.
+            RegistrySnapshot[T]: An atomic snapshot containing:
+
+                - **items** — ``dict[str, T]`` copy of all registered items.
+                - **initialization_phase** — the current
+                  :class:`InitializationPhase` lifecycle value.
+                  Always ``SIMPLE`` for simple registries.
+                - **initialization_errors** — ``dict[str, str]`` mapping
+                  source names to error descriptions.  Always empty for
+                  simple registries.
 
         Raises:
             InternalError: If the registry has not been initialized.
@@ -168,7 +285,7 @@ class BaseRegistry(abc.ABC, Generic[T]):
             self._check_initialized()
 
             # Return a copy to avoid external modification
-            return self._items.copy()
+            return RegistrySnapshot.simple(items=self._items.copy())
 
     async def close(self) -> None:
         """

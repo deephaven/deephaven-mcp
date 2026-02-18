@@ -34,7 +34,7 @@ Usage:
     ```python
     registry = CombinedSessionRegistry()
     await registry.initialize(config_manager)
-    sessions = await registry.get_all()  # Gets all sessions across community and enterprise
+    snapshot = await registry.get_all()  # Returns RegistrySnapshot with .items, .initialization_phase, .initialization_errors
     await registry.close()  # Properly closes all resources and manages resource cleanup
     ```
 """
@@ -67,6 +67,8 @@ from ._registry import (
     CommunitySessionRegistry,
     CorePlusSessionFactoryManager,
     CorePlusSessionFactoryRegistry,
+    InitializationPhase,
+    RegistrySnapshot,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -76,16 +78,21 @@ class _FactorySessionChanges(NamedTuple):
     """Changes needed for a factory's sessions.
 
     Attributes:
-        factory (CorePlusSessionFactoryManager): The factory manager instance.
-        factory_name (str): Name of the factory.
-        session_names_to_add (set[str]): Set of bare session names to create.
-        session_keys_to_remove (set[str]): Set of full session keys to remove.
+        factory: The factory manager instance.
+        factory_name: Name of the factory.
+        session_names_to_add: Set of bare session names to create.
+        session_keys_to_remove: Set of full session keys to remove.
+        connection_error: Original error detail when a DeephavenConnectionError
+            occurred during factory query. None if no connection error. Preserved so callers
+            can surface the specific failure reason (wrong URL, TLS error, timeout, etc.)
+            rather than a generic "unreachable" message.
     """
 
     factory: CorePlusSessionFactoryManager
     factory_name: str
     session_names_to_add: set[str]
     session_keys_to_remove: set[str]
+    connection_error: str | None = None
 
 
 class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
@@ -121,7 +128,7 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
         await registry.initialize(config_manager)
 
         # Get all available sessions
-        all_sessions = await registry.get_all()
+        snapshot = await registry.get_all()
 
         # Get a specific session
         session = await registry.get("enterprise:factory1:session1")
@@ -222,7 +229,7 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             await registry.initialize(config_manager)
 
             # Now ready for use
-            sessions = await registry.get_all()
+            snapshot = await registry.get_all()
             ```
         """
         super().__init__()
@@ -234,19 +241,27 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
         # Track sessions added to this registry instance
         # Format: {session_id1, session_id2, ...}
         self._added_sessions: set[str] = set()
+        # Non-blocking initialization state
+        self._init_phase: InitializationPhase = InitializationPhase.NOT_STARTED
+        self._init_errors: dict[str, str] = {}
+        self._enterprise_discovery_task: asyncio.Task[None] | None = None
 
     async def initialize(self, config_manager: ConfigManager) -> None:
         """
         Initialize community and enterprise registries from configuration.
 
-        This method discovers and initializes both community session registries
-        and enterprise session factory registries based on the provided
-        configuration manager. It performs the following steps:
+        This method performs a fast, non-blocking initialization:
 
-        1. Creates and initializes the community session registry
-        2. Creates and initializes the enterprise session factory registry
-        3. Loads static community sessions into the registry
-        4. Updates enterprise sessions by querying all available factories
+        Phase 1 (synchronous, under lock):
+            1. Creates and initializes the community session registry
+            2. Creates and initializes the enterprise session factory registry
+            3. Loads static community sessions into the registry
+            4. Launches a background task for enterprise session discovery
+
+        Phase 2 (background task, without lock):
+            The background task discovers enterprise sessions from all configured
+            factories in parallel. Sessions become available progressively as each
+            factory completes — fast factories don't wait for slow ones.
 
         The initialization process is thread-safe and idempotent - calling this method
         multiple times will only perform the initialization once.
@@ -286,12 +301,30 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
 
             # Load static community sessions into _items
             _LOGGER.debug(f"[{self.__class__.__name__}] loading community sessions")
-            community_sessions = await self._community_registry.get_all()
+            community_snapshot = await self._community_registry.get_all()
+            if community_snapshot.initialization_phase != InitializationPhase.SIMPLE:
+                _LOGGER.error(
+                    f"[{self.__class__.__name__}] Community registry returned unexpected phase "
+                    f"{community_snapshot.initialization_phase.value!r} (expected SIMPLE)"
+                )
+                raise InternalError(
+                    f"Community registry returned unexpected phase "
+                    f"{community_snapshot.initialization_phase.value!r} (expected SIMPLE)"
+                )
+            if community_snapshot.initialization_errors:
+                _LOGGER.error(
+                    f"[{self.__class__.__name__}] Community registry returned unexpected errors: "
+                    f"{community_snapshot.initialization_errors}"
+                )
+                raise InternalError(
+                    f"Community registry returned unexpected errors: "
+                    f"{community_snapshot.initialization_errors}"
+                )
             _LOGGER.debug(
-                f"[{self.__class__.__name__}] loading {len(community_sessions)} community sessions"
+                f"[{self.__class__.__name__}] loading {len(community_snapshot.items)} community sessions"
             )
 
-            for name, session in community_sessions.items():
+            for name, session in community_snapshot.items.items():
                 _LOGGER.debug(
                     f"[{self.__class__.__name__}] loading community session '{name}'"
                 )
@@ -299,24 +332,23 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
                 self._items[session.full_name] = session
 
             _LOGGER.debug(
-                f"[{self.__class__.__name__}] loaded {len(community_sessions)} community sessions"
+                f"[{self.__class__.__name__}] loaded {len(community_snapshot.items)} community sessions"
             )
 
-            # Mark as initialized before updating enterprise sessions since they check initialization
+            # Mark as initialized — community sessions are now available
             self._initialized = True
+            self._init_phase = InitializationPhase.PARTIAL
 
-            # Update enterprise sessions from controller clients
             _LOGGER.info(
-                f"[{self.__class__.__name__}] Updating enterprise sessions from controllers..."
-            )
-            update_start = time.monotonic()
-            await self._update_enterprise_sessions()
-            update_elapsed = time.monotonic() - update_start
-            _LOGGER.info(
-                f"[{self.__class__.__name__}] Enterprise session update completed in {update_elapsed:.2f}s"
+                f"[{self.__class__.__name__}] Phase 1 complete: "
+                f"{len(community_snapshot.items)} community sessions loaded. "
+                f"Starting enterprise discovery in background."
             )
 
-            _LOGGER.info(f"[{self.__class__.__name__}] initialization complete")
+            # Launch background task for enterprise discovery (non-blocking)
+            self._enterprise_discovery_task = asyncio.create_task(
+                self._discover_enterprise_sessions()
+            )
 
     @override
     async def _load_items(self, config_manager: ConfigManager) -> None:
@@ -328,6 +360,9 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
         Raises:
             InternalError: Always raised to indicate this method should not be used.
         """
+        _LOGGER.error(
+            f"[{self.__class__.__name__}] _load_items() should not be called; use initialize() to set up sub-registries."
+        )
         raise InternalError(
             "CombinedSessionRegistry does not support _load_items; use initialize() to set up sub-registries."
         )
@@ -365,13 +400,16 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             community_reg = await combined_registry.community_registry()
 
             # Perform community-specific operations
-            community_sessions = await community_reg.get_all()
-            for session_id, manager in community_sessions.items():
+            snapshot = await community_reg.get_all()
+            for session_id, manager in snapshot.items.items():
                 print(f"Community session: {session_id}")
             ```
         """
         async with self._lock:
             if not self._initialized:
+                _LOGGER.error(
+                    f"[{self.__class__.__name__}] Not initialized. Call 'await initialize()' after construction."
+                )
                 raise InternalError(
                     f"{self.__class__.__name__} not initialized. Call 'await initialize()' after construction."
                 )
@@ -413,8 +451,8 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             enterprise_reg = await combined_registry.enterprise_registry()
 
             # Perform enterprise-specific operations
-            factories = await enterprise_reg.get_all()
-            for factory_name, factory_manager in factories.items():
+            snapshot = await enterprise_reg.get_all()
+            for factory_name, factory_manager in snapshot.items.items():
                 print(f"Enterprise factory: {factory_name}")
                 # Get the actual factory instance
                 factory = await factory_manager.get()
@@ -425,6 +463,9 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
         """
         async with self._lock:
             if not self._initialized:
+                _LOGGER.error(
+                    f"[{self.__class__.__name__}] Not initialized. Call 'await initialize()' after construction."
+                )
                 raise InternalError(
                     f"{self.__class__.__name__} not initialized. Call 'await initialize()' after construction."
                 )
@@ -664,7 +705,10 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             )
             # If we can't connect, return no new sessions and all existing sessions as removals
             existing_keys = self._find_session_keys_for_factory(factory_name)
-            return _FactorySessionChanges(factory, factory_name, set(), existing_keys)
+            return _FactorySessionChanges(
+                factory, factory_name, set(), existing_keys,
+                connection_error=str(e),
+            )
 
         # If we successfully connected, proceed with normal session update
         session_names_from_controller = [
@@ -719,9 +763,11 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
         to the registry's internal state. It modifies self._items by creating new session
         managers for new sessions and removing stale session managers.
 
-        This method performs writes to the registry state and must be called serially (not
-        in parallel) to maintain thread safety. It is typically called from
-        _update_enterprise_sessions after parallel calculation of changes.
+        Concurrency:
+            Callers MUST hold self._lock before calling this method.  The lock
+            cannot be acquired internally because asyncio.Lock is not reentrant
+            and one call path (get_all → _update_enterprise_sessions) already
+            holds it.
 
         Args:
             changes (_FactorySessionChanges): _FactorySessionChanges containing the factory,
@@ -745,6 +791,217 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
                 f"[{self.__class__.__name__}] Removing {len(changes.session_keys_to_remove)} sessions for factory '{changes.factory_name}'"
             )
             await self._close_stale_enterprise_sessions(changes.session_keys_to_remove)
+
+    async def _discover_enterprise_sessions(self) -> None:
+        """Background task: discover enterprise sessions from all configured factories.
+
+        Each factory is initialized independently and in parallel. As soon as a factory's
+        controller query completes, its sessions are applied to self._items immediately —
+        there is no waiting for other factories. This means:
+        - If factory A responds in 1s and factory B takes 30s, A's sessions are available at 1s
+        - Connection failures on one factory don't delay sessions from other factories
+
+        Ownership Model:
+            During LOADING phase, this task is the sole writer to self._items
+            for enterprise sessions. get()/get_all() skip enterprise updates during this
+            phase, preventing concurrent _update_enterprise_sessions() calls.
+
+        Locking:
+            - Phase/error transitions use self._lock for consistency with initialization_status()
+            - Per-factory calculate runs WITHOUT self._lock (network I/O)
+            - Per-factory apply runs WITH self._lock (writes to self._items)
+
+        Cancellation:
+            CancelledError propagates through asyncio.gather() and is re-raised.
+            Phase stays LOADING until close() resets it under the lock.
+        """
+        async with self._lock:
+            self._init_phase = InitializationPhase.LOADING
+
+        start = time.monotonic()
+        _LOGGER.info(f"[{self.__class__.__name__}] Starting enterprise session discovery...")
+
+        errors: dict[str, str] = {}
+
+        async def _init_factory(fname: str, factory: CorePlusSessionFactoryManager) -> None:
+            """Initialize a single factory — calculate changes and apply immediately.
+
+            Connection errors (DeephavenConnectionError) are caught inside
+            _calculate_factory_session_changes() and returned via the connection_error
+            field of _FactorySessionChanges, preserving the original error detail
+            (wrong URL, TLS failure, timeout, etc.) for user-facing error messages.
+            """
+            factory_start = time.monotonic()
+            try:
+                # Calculate runs WITHOUT the lock: it does network I/O (ping,
+                # subscribe, map) that can take seconds, and each factory only
+                # reads/writes its own disjoint key prefix in _items and
+                # _controller_clients, so no cross-factory conflicts.
+                changes = await self._calculate_factory_session_changes(factory, fname)
+                # Apply runs WITH the lock: it mutates self._items.
+                async with self._lock:
+                    await self._apply_factory_session_changes(changes)
+
+                factory_elapsed = time.monotonic() - factory_start
+
+                if changes.connection_error:
+                    # Connection failed — preserve the detailed error for the user
+                    errors[fname] = f"Connection failed: {changes.connection_error}"
+                    _LOGGER.warning(
+                        f"[{self.__class__.__name__}] Factory '{fname}' connection failed "
+                        f"in {factory_elapsed:.2f}s: {changes.connection_error}"
+                    )
+                else:
+                    _LOGGER.info(
+                        f"[{self.__class__.__name__}] Factory '{fname}' discovery complete "
+                        f"in {factory_elapsed:.2f}s"
+                    )
+            except Exception as e:
+                factory_elapsed = time.monotonic() - factory_start
+                errors[fname] = f"{type(e).__name__}: {e}"
+                _LOGGER.error(
+                    f"[{self.__class__.__name__}] Factory '{fname}' discovery failed "
+                    f"in {factory_elapsed:.2f}s: {e}",
+                    exc_info=True,
+                )
+
+        try:
+            registry = cast(CorePlusSessionFactoryRegistry, self._enterprise_registry)
+            factory_snapshot = await registry.get_all()
+
+            if factory_snapshot.initialization_phase != InitializationPhase.SIMPLE:
+                _LOGGER.error(
+                    f"[{self.__class__.__name__}] Factory registry returned unexpected phase "
+                    f"{factory_snapshot.initialization_phase.value!r} (expected SIMPLE)"
+                )
+                raise InternalError(
+                    f"Factory registry returned unexpected phase "
+                    f"{factory_snapshot.initialization_phase.value!r} (expected SIMPLE)"
+                )
+            if factory_snapshot.initialization_errors:
+                _LOGGER.error(
+                    f"[{self.__class__.__name__}] Factory registry returned unexpected errors: "
+                    f"{factory_snapshot.initialization_errors}"
+                )
+                raise InternalError(
+                    f"Factory registry returned unexpected errors: "
+                    f"{factory_snapshot.initialization_errors}"
+                )
+
+            if factory_snapshot.items:
+                await asyncio.gather(
+                    *(_init_factory(fname, factory) for fname, factory in factory_snapshot.items.items())
+                )
+
+            elapsed = time.monotonic() - start
+            _LOGGER.info(
+                f"[{self.__class__.__name__}] Enterprise discovery completed in {elapsed:.2f}s"
+            )
+
+        except asyncio.CancelledError:
+            _LOGGER.info(
+                f"[{self.__class__.__name__}] Enterprise discovery cancelled (shutdown)"
+            )
+            raise  # Exits method — code below never runs
+
+        except Exception as e:
+            elapsed = time.monotonic() - start
+            errors["enterprise_discovery"] = f"{type(e).__name__}: {e}"
+            _LOGGER.error(
+                f"[{self.__class__.__name__}] Enterprise discovery failed "
+                f"in {elapsed:.2f}s: {e}",
+                exc_info=True,
+            )
+
+        # Only reached if NOT cancelled
+        await self._detect_unreachable_factories(errors)
+
+        # Atomic transition: errors + phase written together under lock
+        async with self._lock:
+            self._init_errors = errors
+            self._init_phase = InitializationPhase.COMPLETED
+
+        if errors:
+            _LOGGER.error(
+                f"[{self.__class__.__name__}] Initialization errors: {errors}"
+            )
+        else:
+            _LOGGER.info(f"[{self.__class__.__name__}] Enterprise discovery: no errors")
+
+    async def _detect_unreachable_factories(self, errors: dict[str, str]) -> None:
+        """Detect configured enterprise factories that failed to connect.
+
+        This is a fallback check for edge cases where a factory has no sessions and
+        no error was recorded by the primary _init_factory() path. The primary path
+        records detailed connection errors via _FactorySessionChanges.connection_error.
+
+        Distinguishes between:
+        - Connection failure: factory NOT in _controller_clients → error
+        - Connected, zero PQs: factory IN _controller_clients → informational, not error
+
+        Args:
+            errors: Mutable dict to add error entries to. Written atomically to
+                self._init_errors by the caller under self._lock.
+        """
+        if self._enterprise_registry is None:
+            return
+
+        try:
+            enterprise_registry = cast(
+                CorePlusSessionFactoryRegistry, self._enterprise_registry
+            )
+            all_factories_snapshot = await enterprise_registry.get_all()
+
+            if all_factories_snapshot.initialization_phase != InitializationPhase.SIMPLE:
+                _LOGGER.error(
+                    f"[{self.__class__.__name__}] Factory registry returned unexpected phase "
+                    f"{all_factories_snapshot.initialization_phase.value!r} (expected SIMPLE)"
+                )
+                raise InternalError(
+                    f"Factory registry returned unexpected phase "
+                    f"{all_factories_snapshot.initialization_phase.value!r} (expected SIMPLE)"
+                )
+            if all_factories_snapshot.initialization_errors:
+                _LOGGER.error(
+                    f"[{self.__class__.__name__}] Factory registry returned unexpected errors: "
+                    f"{all_factories_snapshot.initialization_errors}"
+                )
+                raise InternalError(
+                    f"Factory registry returned unexpected errors: "
+                    f"{all_factories_snapshot.initialization_errors}"
+                )
+
+            for factory_name in all_factories_snapshot.items:
+                prefix = BaseItemManager.make_full_name(
+                    SystemType.ENTERPRISE, factory_name, ""
+                )
+                has_sessions = any(k.startswith(prefix) for k in self._items)
+
+                if not has_sessions and factory_name not in errors:
+                    if factory_name in self._controller_clients:
+                        _LOGGER.info(
+                            f"[{self.__class__.__name__}] Factory '{factory_name}' is online "
+                            f"but has no running persistent queries"
+                        )
+                    else:
+                        errors[factory_name] = (
+                            f"Failed to connect to enterprise system '{factory_name}'. "
+                            f"The system may be offline or unreachable. "
+                            f"Use enterprise_systems_status tool to diagnose."
+                        )
+                        _LOGGER.warning(
+                            f"[{self.__class__.__name__}] Failed to connect to "
+                            f"configured factory '{factory_name}'"
+                        )
+        except InternalError:
+            # Programming bug — let it propagate to the outer handler
+            raise
+        except Exception as e:
+            # Runtime errors during this fallback check are non-fatal but should be visible
+            errors["enterprise_connectivity_check"] = f"{type(e).__name__}: {e}"
+            _LOGGER.warning(
+                f"[{self.__class__.__name__}] Could not check for unreachable factories: {e}"
+            )
 
     async def _update_enterprise_sessions(
         self, factory_name: str | None = None
@@ -785,7 +1042,26 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             _LOGGER.info(
                 f"[{self.__class__.__name__}] Updating enterprise sessions for all factories"
             )
-            factories = await registry.get_all()
+            factory_snapshot = await registry.get_all()
+            if factory_snapshot.initialization_phase != InitializationPhase.SIMPLE:
+                _LOGGER.error(
+                    f"[{self.__class__.__name__}] Factory registry returned unexpected phase "
+                    f"{factory_snapshot.initialization_phase.value!r} (expected SIMPLE)"
+                )
+                raise InternalError(
+                    f"Factory registry returned unexpected phase "
+                    f"{factory_snapshot.initialization_phase.value!r} (expected SIMPLE)"
+                )
+            if factory_snapshot.initialization_errors:
+                _LOGGER.error(
+                    f"[{self.__class__.__name__}] Factory registry returned unexpected errors: "
+                    f"{factory_snapshot.initialization_errors}"
+                )
+                raise InternalError(
+                    f"Factory registry returned unexpected errors: "
+                    f"{factory_snapshot.initialization_errors}"
+                )
+            factories = factory_snapshot.items
             _LOGGER.debug(f"[{self.__class__.__name__}] Got {len(factories)} factories")
 
         if not factories:
@@ -839,6 +1115,48 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             _LOGGER.info(
                 f"[{self.__class__.__name__}] Updated enterprise sessions for all factories"
             )
+
+    def _build_not_found_context(self, name: str) -> str:
+        """Build a context suffix for "not found" error messages.
+
+        Inspects the current initialization phase and any recorded errors to
+        produce a human-readable suffix explaining *why* a session might be
+        missing.  Attempts to match the factory name extracted from *name*
+        to provide a targeted error instead of dumping all factory errors.
+
+        Must be called while holding ``self._lock``.
+
+        Args:
+            name: The fully qualified session name (used to extract factory).
+
+        Returns:
+            A suffix string starting with ``" Note: "`` or empty if there is
+            nothing to report.
+        """
+        notes: list[str] = []
+        if self._init_phase != InitializationPhase.COMPLETED:
+            notes.append(
+                "enterprise session discovery is still in progress — "
+                "the session may appear shortly"
+            )
+        if self._init_errors:
+            factory_name = None
+            parts = name.split(":", 2)
+            if len(parts) == 3:
+                factory_name = parts[1]
+
+            if factory_name and factory_name in self._init_errors:
+                notes.append(
+                    f"factory '{factory_name}' had an initialization error: "
+                    f"{self._init_errors[factory_name]}"
+                )
+            else:
+                notes.append(
+                    f"initialization errors were detected for "
+                    f"{len(self._init_errors)} factory(ies): "
+                    f"{'; '.join(f'{k}: {v}' for k, v in self._init_errors.items())}"
+                )
+        return f" Note: {'; '.join(notes)}." if notes else ""
 
     @override
     async def get(self, name: str) -> BaseItemManager:
@@ -895,56 +1213,75 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             # (avoid calling super().get() which would try to acquire the lock again)
             self._check_initialized()
 
-            # For enterprise sessions, update only the specific factory (not all)
-            # For community sessions, no update needed (static config)
-            try:
-                system_type, source, _ = BaseItemManager.parse_full_name(name)
-                if system_type == SystemType.ENTERPRISE:
-                    await self._update_enterprise_sessions(factory_name=source)
-            except InvalidSessionNameError:
-                # Expected: Malformed session name, continue to session RegistryItemNotFoundError below
-                pass
-            except RegistryItemNotFoundError:
-                # Expected: Registry item (factory) not found/offline, continue to session RegistryItemNotFoundError below
-                pass
-            # ExceptionGroup NOT caught → real bugs propagate
+            # Only trigger on-demand enterprise update after initial discovery completes.
+            # During LOADING, the background task is the sole writer to
+            # enterprise entries in _items — see _discover_enterprise_sessions() docstring.
+            if self._init_phase == InitializationPhase.COMPLETED:
+                # For enterprise sessions, update only the specific factory (not all)
+                # For community sessions, no update needed (static config)
+                try:
+                    system_type, source, _ = BaseItemManager.parse_full_name(name)
+                    if system_type == SystemType.ENTERPRISE:
+                        await self._update_enterprise_sessions(factory_name=source)
+                except InvalidSessionNameError:
+                    # Expected: Malformed session name, continue to session RegistryItemNotFoundError below
+                    pass
+                except RegistryItemNotFoundError:
+                    # Expected: Registry item (factory) not found/offline, continue to session RegistryItemNotFoundError below
+                    pass
+                # ExceptionGroup NOT caught → real bugs propagate
 
             if name not in self._items:
-                raise RegistryItemNotFoundError(
-                    f"No item with name '{name}' found in {self.__class__.__name__}"
-                )
+                msg = f"No item with name '{name}' found in {self.__class__.__name__}"
+                msg += self._build_not_found_context(name)
+                raise RegistryItemNotFoundError(msg)
 
             return self._items[name]
 
     @override
-    async def get_all(self) -> dict[str, BaseItemManager]:
-        """Retrieve all session managers from both community and enterprise registries.
+    async def get_all(self) -> RegistrySnapshot[BaseItemManager]:
+        """Retrieve all session managers and initialization state as an atomic snapshot.
 
         This method returns a unified view of all available sessions across both
-        community and enterprise registries. Before returning the results, it updates
-        the enterprise sessions by querying all controller clients to ensure that
-        the most current session state is available, including any newly created
-        sessions that may have been added since the last update.
+        community and enterprise registries, together with the current initialization
+        phase and any initialization errors.  All three are captured under a single
+        lock acquisition so they are guaranteed to be mutually consistent.
 
-        The returned dictionary includes:
+        Before returning the results, it updates the enterprise sessions by
+        querying all controller clients to ensure that the most current session
+        state is available, including any newly created sessions that may have
+        been added since the last update.
+
+        The ``items`` dictionary includes:
+
         - All community sessions loaded from configuration during initialization
         - All enterprise sessions discovered from controller clients
         - Both explicitly tracked sessions (added via add_session) and discovered sessions
 
-        The returned dictionary is a copy, so modifications to it will not affect
-        the registry's internal state. This ensures safe iteration and manipulation
-        without affecting the registry's consistency.
+        The ``items`` dictionary is a copy, so modifications to it will not
+        affect the registry's internal state.  This ensures safe iteration and
+        manipulation without affecting the registry's consistency.
 
         Returns:
-            dict[str, BaseItemManager]: A dictionary mapping fully qualified session
-                names to their corresponding session manager instances. Keys follow
-                the format "<system_type>:<source>:<name>" and values are either
-                CommunitySessionManager or EnterpriseSessionManager instances.
+            RegistrySnapshot[BaseItemManager]: An atomic snapshot with three fields:
+
+                - **items** — ``dict[str, BaseItemManager]`` mapping fully
+                  qualified session names to their corresponding session manager
+                  instances.  Keys follow the format
+                  ``"<system_type>:<source>:<name>"`` and values are either
+                  ``CommunitySessionManager`` or ``EnterpriseSessionManager``
+                  instances.
+                - **initialization_phase** — the current
+                  :class:`InitializationPhase` lifecycle value.
+                - **initialization_errors** — ``dict[str, str]`` mapping factory
+                  names to error descriptions for factories that failed during
+                  enterprise session discovery.  Empty when no errors occurred.
 
         Raises:
             InternalError: If the registry has not been initialized via initialize().
-            ExceptionGroup: If any factory updates fail with non-connection exceptions during
-                the enterprise session update. Contains all exceptions from failed factories.
+            ExceptionGroup: If any factory updates fail with non-connection exceptions
+                during the enterprise session update.  Contains all exceptions from
+                failed factories.
 
         Thread Safety:
             This method is coroutine-safe and can be called concurrently.
@@ -953,11 +1290,11 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
 
         Example:
             ```python
-            # Get all available sessions
-            all_sessions = await registry.get_all()
+            # Get all available sessions with initialization state
+            snapshot = await registry.get_all()
 
             # Iterate through all sessions
-            for session_id, manager in all_sessions.items():
+            for session_id, manager in snapshot.items.items():
                 print(f"Found session: {session_id}")
                 if session_id.startswith("enterprise:"):
                     print("  Type: Enterprise session")
@@ -966,24 +1303,36 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
 
             # Filter for specific system
             prod_sessions = {
-                k: v for k, v in all_sessions.items()
+                k: v for k, v in snapshot.items.items()
                 if ":prod-factory:" in k
             }
+
+            # Check initialization state
+            if snapshot.initialization_phase != InitializationPhase.COMPLETED:
+                print("Discovery still in progress")
+            if snapshot.initialization_errors:
+                print(f"Errors: {snapshot.initialization_errors}")
             ```
         """
         async with self._lock:
             # Check initialization first
             self._check_initialized()
 
-            # Update enterprise sessions before retrieving (lock is already held)
-            # This also checks initialization status
-            _LOGGER.info(
-                f"[{self.__class__.__name__}] Updating enterprise sessions before retrieving"
-            )
-            await self._update_enterprise_sessions()
+            # Only trigger on-demand enterprise update after initial discovery completes.
+            # During LOADING, the background task is the sole writer to
+            # enterprise entries in _items — see _discover_enterprise_sessions() docstring.
+            if self._init_phase == InitializationPhase.COMPLETED:
+                _LOGGER.info(
+                    f"[{self.__class__.__name__}] Updating enterprise sessions before retrieving"
+                )
+                await self._update_enterprise_sessions()
 
             _LOGGER.info(f"[{self.__class__.__name__}] Returning all sessions")
-            return self._items.copy()
+            return RegistrySnapshot.with_initialization(
+                items=self._items.copy(),
+                phase=self._init_phase,
+                errors=self._init_errors.copy(),
+            )
 
     async def add_session(self, manager: BaseItemManager) -> None:
         """Add a session manager to the registry with tracking.
@@ -1213,6 +1562,22 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             self._check_initialized()
             return session_id in self._added_sessions
 
+    async def initialization_status(self) -> tuple[InitializationPhase, dict[str, str]]:
+        """Return initialization phase and errors as a consistent snapshot.
+
+        Returns:
+            Tuple of (phase, errors_copy). Phase indicates current lifecycle state.
+            Errors dict maps factory names (or error keys) to error descriptions.
+            Empty dict means no errors.
+
+        Thread Safety:
+            Acquires self._lock. Phase and errors are written atomically under
+            the same lock by _discover_enterprise_sessions() and close(),
+            guaranteeing a consistent pair.
+        """
+        async with self._lock:
+            return self._init_phase, self._init_errors.copy()
+
     @override
     async def close(self) -> None:
         """Close the registry and release all resources managed by it.
@@ -1244,11 +1609,36 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             This method is coroutine-safe and can be called concurrently.
             It acquires the registry lock to ensure thread safety during closure.
         """
+        # Atomically grab and clear the task reference under the lock so we
+        # cannot race with initialize() creating the task after we read None.
         async with self._lock:
             if not self._initialized:
+                _LOGGER.error(
+                    f"[{self.__class__.__name__}] Not initialized. Call 'await initialize()' after construction."
+                )
                 raise InternalError(
                     f"{self.__class__.__name__} not initialized. Call 'await initialize()' after construction."
                 )
+            task = self._enterprise_discovery_task
+            self._enterprise_discovery_task = None
+
+        # Cancel/await OUTSIDE the lock.  The discovery task acquires
+        # self._lock for phase/error transitions, so awaiting it while
+        # holding the lock would deadlock.
+        if task is not None and not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            _LOGGER.info(
+                f"[{self.__class__.__name__}] cancelled background enterprise discovery"
+            )
+
+        async with self._lock:
+            if not self._initialized:
+                # Another concurrent close() already completed cleanup
+                return
 
             _LOGGER.info(f"[{self.__class__.__name__}] closing...")
 
@@ -1286,8 +1676,13 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             # Clear the controller clients dictionary
             self._controller_clients.clear()
 
-            # Reset initialization flag to allow reinitialization
+            # Clear all session entries to prevent stale data on reinitialization
+            self._items.clear()
+
+            # Reset initialization and phase state to allow reinitialization
             self._initialized = False
+            self._init_phase = InitializationPhase.NOT_STARTED
+            self._init_errors = {}
 
             # Clear our session tracking
             session_count = len(self._added_sessions)

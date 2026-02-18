@@ -165,7 +165,12 @@ from ._manager import (
     StaticCommunitySessionManager,
     SystemType,
 )
-from ._registry import CommunitySessionRegistry, CorePlusSessionFactoryRegistry
+from ._registry import (
+    CommunitySessionRegistry,
+    CorePlusSessionFactoryRegistry,
+    InitializationPhase,
+    RegistrySnapshot,
+)
 from ._registry_combined import CombinedSessionRegistry
 from ._utils import find_available_port, generate_auth_token
 
@@ -181,6 +186,8 @@ __all__ = [
     "CommunitySessionRegistry",
     "CorePlusSessionFactoryRegistry",
     "CombinedSessionRegistry",
+    "InitializationPhase",
+    "RegistrySnapshot",
     "LaunchedSession",
     "DockerLaunchedSession",
     "PythonLaunchedSession",

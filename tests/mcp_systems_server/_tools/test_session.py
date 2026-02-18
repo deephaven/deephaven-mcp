@@ -12,6 +12,7 @@ import pytest
 from conftest import MockContext, create_mock_instance_tracker
 
 from deephaven_mcp import config
+from deephaven_mcp._exceptions import RegistryItemNotFoundError
 from deephaven_mcp.mcp_systems_server._tools.session import (
     session_details,
     sessions_list,
@@ -24,8 +25,10 @@ from deephaven_mcp.resource_manager import (
     DockerLaunchedSession,
     DynamicCommunitySessionManager,
     EnterpriseSessionManager,
+    InitializationPhase,
     PythonLaunchedSession,
     ResourceLivenessStatus,
+    RegistrySnapshot,
     SystemType,
 )
 
@@ -53,7 +56,7 @@ class TestSessionCommunityCreateComplete:
         mock_config_manager.get_config = AsyncMock(return_value=full_config)
         mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
         mock_session_registry.add_session = AsyncMock()
-        mock_session_registry.get_all = AsyncMock(return_value={})
+        mock_session_registry.get = AsyncMock(side_effect=RegistryItemNotFoundError("not found"))
 
         mock_launched_session = MagicMock(spec=DockerLaunchedSession)
         mock_launched_session.port = 10000
@@ -121,7 +124,7 @@ class TestSessionCommunityCreateComplete:
         mock_config_manager.get_config = AsyncMock(return_value=full_config)
         mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
         mock_session_registry.add_session = AsyncMock()
-        mock_session_registry.get_all = AsyncMock(return_value={})
+        mock_session_registry.get = AsyncMock(side_effect=RegistryItemNotFoundError("not found"))
 
         mock_launched_session = MagicMock(spec=DockerLaunchedSession)
         mock_launched_session.port = 10000
@@ -188,7 +191,7 @@ class TestSessionCommunityCreateComplete:
         mock_config_manager.get_config = AsyncMock(return_value=full_config)
         mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
         mock_session_registry.add_session = AsyncMock()
-        mock_session_registry.get_all = AsyncMock(return_value={})
+        mock_session_registry.get = AsyncMock(side_effect=RegistryItemNotFoundError("not found"))
 
         mock_launched_session = MagicMock(spec=DockerLaunchedSession)
         mock_launched_session.port = 10000
@@ -251,10 +254,8 @@ class TestSessionCommunityCreateComplete:
         full_config = {"community": community_config}
         mock_config_manager.get_config = AsyncMock(return_value=full_config)
         mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
-        # Session already exists
-        mock_session_registry.get_all = AsyncMock(
-            return_value={"community:dynamic:test-session": MagicMock()}
-        )
+        # Session already exists — get() returns successfully (no exception)
+        mock_session_registry.get = AsyncMock(return_value=MagicMock())
 
         context = MockContext(
             {
@@ -286,7 +287,7 @@ class TestSessionCommunityCreateComplete:
         full_config = {"community": community_config}
         mock_config_manager.get_config = AsyncMock(return_value=full_config)
         mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
-        mock_session_registry.get_all = AsyncMock(return_value={})
+        mock_session_registry.get = AsyncMock(side_effect=RegistryItemNotFoundError("not found"))
 
         mock_launched_session = MagicMock(spec=DockerLaunchedSession)
         mock_launched_session.port = 10000
@@ -358,7 +359,7 @@ class TestSessionCommunityCreateComplete:
         mock_config_manager.get_config = AsyncMock(return_value=full_config)
         mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
         mock_session_registry.add_session = AsyncMock()
-        mock_session_registry.get_all = AsyncMock(return_value={})
+        mock_session_registry.get = AsyncMock(side_effect=RegistryItemNotFoundError("not found"))
 
         mock_process = MagicMock()
         mock_process.pid = 12345
@@ -802,10 +803,12 @@ async def test_sessions_list_success():
     mock_session_mgr2.source = "source2"
     mock_session_mgr2.name = "session2"
 
-    mock_registry.get_all.return_value = {
-        "session1": mock_session_mgr1,
-        "session2": mock_session_mgr2,
-    }
+    mock_registry.get_all.return_value = RegistrySnapshot.simple(
+        items={
+            "session1": mock_session_mgr1,
+            "session2": mock_session_mgr2,
+        },
+    )
 
     # Mock context
     mock_context = MagicMock()
@@ -832,6 +835,9 @@ async def test_sessions_list_success():
     assert session2["session_name"] == "session2"
     assert "available" not in session2  # Should not check availability
 
+    # COMPLETED with no errors should not include initialization info
+    assert "initialization" not in result
+
 
 @pytest.mark.asyncio
 async def test_sessions_list_with_unknown_type():
@@ -845,7 +851,9 @@ async def test_sessions_list_with_unknown_type():
     mock_session_mgr.source = "source"
     mock_session_mgr.name = "session"
 
-    mock_registry.get_all.return_value = {"session": mock_session_mgr}
+    mock_registry.get_all.return_value = RegistrySnapshot.simple(
+        items={"session": mock_session_mgr},
+    )
 
     # Mock context
     mock_context = MagicMock()
@@ -860,6 +868,8 @@ async def test_sessions_list_with_unknown_type():
     # Check that we have an error entry for this session since system_type is None
     assert result["sessions"][0]["session_id"] == "session"
     assert "error" in result["sessions"][0]
+    # COMPLETED with no errors should not include initialization info
+    assert "initialization" not in result
 
 
 @pytest.mark.asyncio
@@ -877,7 +887,9 @@ async def test_sessions_list_with_processing_error():
     )
     mock_session_mgr.system_type = mock_system_type
 
-    mock_registry.get_all.return_value = {"session": mock_session_mgr}
+    mock_registry.get_all.return_value = RegistrySnapshot.simple(
+        items={"session": mock_session_mgr},
+    )
 
     # Mock context
     mock_context = MagicMock()
@@ -891,6 +903,8 @@ async def test_sessions_list_with_processing_error():
     assert len(result["sessions"]) == 1
     assert "error" in result["sessions"][0]
     assert result["sessions"][0]["session_id"] == "session"
+    # COMPLETED with no errors should not include initialization info
+    assert "initialization" not in result
 
 
 @pytest.mark.asyncio
@@ -912,18 +926,14 @@ async def test_sessions_list_registry_error():
 @pytest.mark.asyncio
 async def test_session_details_session_not_found():
     """Test session_details for a non-existent session."""
-    # Mock session registry
     mock_registry = AsyncMock()
     mock_registry.get.side_effect = Exception("Session not found")
 
-    # Mock context
     mock_context = MagicMock()
     mock_context.request_context.lifespan_context = {"session_registry": mock_registry}
 
-    # Call function
     result = await session_details(mock_context, "nonexistent")
 
-    # Verify results
     assert result["success"] is False
     assert "error" in result
     assert "not found" in result["error"]
@@ -1213,3 +1223,147 @@ async def test_session_details_to_dict_exception():
         assert "connection_url" not in session_info  # This comes from to_dict()
         assert "port" not in session_info  # This comes from to_dict()
         assert "launch_method" not in session_info  # This comes from to_dict()
+
+
+class TestSessionsListInitializationStatus:
+    """Test sessions_list surfaces initialization status and errors."""
+
+    @pytest.mark.asyncio
+    async def test_sessions_list_discovery_in_progress(self):
+        """Test sessions_list shows status message when discovery is in progress."""
+        mock_session_registry = MagicMock()
+        mock_session_registry.get_all = AsyncMock(
+            return_value=RegistrySnapshot.with_initialization(
+                items={},
+                phase=InitializationPhase.LOADING,
+                errors={},
+            )
+        )
+
+        context = MockContext(
+            {
+                "config_manager": MagicMock(),
+                "session_registry": mock_session_registry,
+                "instance_tracker": create_mock_instance_tracker(),
+            }
+        )
+
+        result = await sessions_list(context)
+
+        assert result["success"] is True
+        assert "initialization" in result
+        assert "still in progress" in result["initialization"]["status"]
+
+    @pytest.mark.asyncio
+    async def test_sessions_list_discovery_in_progress_with_errors(self):
+        """Test sessions_list shows both in-progress status and errors simultaneously."""
+        mock_session_registry = MagicMock()
+        mock_session_registry.get_all = AsyncMock(
+            return_value=RegistrySnapshot.with_initialization(
+                items={},
+                phase=InitializationPhase.LOADING,
+                errors={"factory1": "Connection refused"},
+            )
+        )
+
+        context = MockContext(
+            {
+                "config_manager": MagicMock(),
+                "session_registry": mock_session_registry,
+                "instance_tracker": create_mock_instance_tracker(),
+            }
+        )
+
+        result = await sessions_list(context)
+
+        assert result["success"] is True
+        assert "initialization" in result
+        assert "still in progress" in result["initialization"]["status"]
+        assert "errors" in result["initialization"]
+        assert "factory1" in result["initialization"]["errors"]
+
+    @pytest.mark.asyncio
+    async def test_sessions_list_completed_with_errors(self):
+        """Test sessions_list shows initialization errors when discovery completed with failures."""
+        mock_session_registry = MagicMock()
+        mock_session_registry.get_all = AsyncMock(
+            return_value=RegistrySnapshot.with_initialization(
+                items={},
+                phase=InitializationPhase.COMPLETED,
+                errors={"factory1": "Connection failed: Connection refused"},
+            )
+        )
+
+        context = MockContext(
+            {
+                "config_manager": MagicMock(),
+                "session_registry": mock_session_registry,
+                "instance_tracker": create_mock_instance_tracker(),
+            }
+        )
+
+        result = await sessions_list(context)
+
+        assert result["success"] is True
+        assert "initialization" in result
+        assert "errors" in result["initialization"]
+        assert "factory1" in result["initialization"]["errors"]
+        assert "connection issues" in result["initialization"]["status"]
+
+    @pytest.mark.asyncio
+    async def test_sessions_list_completed_no_errors(self):
+        """Test sessions_list does not include status when everything is fine."""
+        mock_session_registry = MagicMock()
+        mock_session_registry.get_all = AsyncMock(
+            return_value=RegistrySnapshot.simple(
+                items={},
+            )
+        )
+
+        context = MockContext(
+            {
+                "config_manager": MagicMock(),
+                "session_registry": mock_session_registry,
+                "instance_tracker": create_mock_instance_tracker(),
+            }
+        )
+
+        result = await sessions_list(context)
+
+        assert result["success"] is True
+        assert "initialization" not in result
+
+    @pytest.mark.asyncio
+    async def test_sessions_list_shows_errors_even_with_sessions(self):
+        """Test sessions_list always shows init_errors since they are set once during discovery."""
+        # Create mock enterprise session manager
+        mock_mgr = MagicMock()
+        mock_mgr.full_name = "enterprise:factory1:session1"
+        mock_mgr.system_type = SystemType.ENTERPRISE
+        mock_mgr.source = "factory1"
+        mock_mgr.name = "session1"
+
+        mock_session_registry = MagicMock()
+        mock_session_registry.get_all = AsyncMock(
+            return_value=RegistrySnapshot.with_initialization(
+                items={"enterprise:factory1:session1": mock_mgr},
+                phase=InitializationPhase.COMPLETED,
+                errors={"factory1": "Connection failed: timeout"},
+            )
+        )
+
+        context = MockContext(
+            {
+                "config_manager": MagicMock(),
+                "session_registry": mock_session_registry,
+                "instance_tracker": create_mock_instance_tracker(),
+            }
+        )
+
+        result = await sessions_list(context)
+
+        assert result["success"] is True
+        # init_errors are set once during discovery and not cleared, so always shown
+        assert "initialization" in result
+        assert "errors" in result["initialization"]
+        assert "factory1" in result["initialization"]["errors"]
