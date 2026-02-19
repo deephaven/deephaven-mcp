@@ -301,8 +301,12 @@ class BaseSession(ClientObjectWrapper[T], Generic[T]):
         """
         _LOGGER.debug("[CoreSession:time_table] Called")
         try:
+            # pydeephaven type hints incorrectly omit None for start_time
             return await asyncio.to_thread(
-                self.wrapped.time_table, period, start_time, blink_table
+                self.wrapped.time_table,
+                period,
+                start_time,  # type: ignore[arg-type]
+                blink_table,
             )
         except ConnectionError as e:
             _LOGGER.error(
@@ -571,8 +575,13 @@ class BaseSession(ClientObjectWrapper[T], Generic[T]):
         """
         _LOGGER.debug("[CoreSession:input_table] Called")
         try:
+            # pydeephaven type hints incorrectly omit None for init_table and key_cols
             return await asyncio.to_thread(
-                self.wrapped.input_table, schema, init_table, key_cols, blink_table
+                self.wrapped.input_table,
+                schema,
+                init_table,  # type: ignore[arg-type]
+                key_cols,  # type: ignore[arg-type]
+                blink_table,
             )
         except ValueError:
             # Re-raise ValueError directly for invalid inputs

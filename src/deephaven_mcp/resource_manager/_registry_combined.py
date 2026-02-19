@@ -957,9 +957,7 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             return
 
         try:
-            enterprise_registry = cast(
-                CorePlusSessionFactoryRegistry, self._enterprise_registry
-            )
+            enterprise_registry = self._enterprise_registry
             all_factories_snapshot = await enterprise_registry.get_all()
 
             if (
@@ -1649,9 +1647,10 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             )
 
         async with self._lock:
+            # Check again - another concurrent close() may have completed cleanup
+            # between releasing and re-acquiring the lock above.
             if not self._initialized:
-                # Another concurrent close() already completed cleanup
-                return
+                return  # type: ignore[unreachable]
 
             _LOGGER.info(f"[{self.__class__.__name__}] closing...")
 
