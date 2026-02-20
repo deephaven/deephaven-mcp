@@ -1140,3 +1140,13 @@ async def test_wait_for_change_from_version_other_error(
     with pytest.raises(QueryError) as exc_info:
         await coreplus_controller_client.wait_for_change_from_version(42, 10.0)
     assert "Failed to wait for version change from 42" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad_timeout", [0, -1, -0.001])
+async def test_wait_for_change_from_version_invalid_timeout(
+    coreplus_controller_client, dummy_controller_client, bad_timeout
+):
+    with pytest.raises(ValueError, match="timeout_seconds must be a positive value"):
+        await coreplus_controller_client.wait_for_change_from_version(42, bad_timeout)
+    dummy_controller_client.wait_for_change_from_version.assert_not_called()

@@ -532,9 +532,15 @@ class CorePlusControllerClient(
     ) -> bool:
         """Wait for query map version to increment beyond specified version.
 
-        This method blocks until the subscription map version becomes greater than the
-        specified version, indicating that changes have occurred. This is the proper
-        way to detect when cached data becomes stale.
+        This method blocks the calling thread until the subscription map version
+        becomes greater than ``map_version``, or until ``timeout_seconds`` elapses.
+        It is a **long-poll** API — the underlying Java call holds the thread for up
+        to ``timeout_seconds``.
+
+        **Important**: ``timeout_seconds`` must be a positive value.  Passing ``0``
+        has undefined behavior at the Java layer and must not be used.  This method
+        is not suitable for non-blocking staleness checks; call ``map_and_version()``
+        directly and compare the returned version yourself instead.
 
         The version number is monotonically increasing and increments every time the
         subscription map changes (query created, deleted, or state modified).
@@ -549,15 +555,20 @@ class CorePlusControllerClient(
             map_version (int): The version number to wait to exceed. Typically obtained
                               from a previous map_and_version() call.
             timeout_seconds (float): Maximum time to wait for version change, in seconds.
-                                    Must be positive.
+                                    Must be a positive value — zero is not supported.
 
         Returns:
             bool: True if version changed (version > map_version), False if timeout occurred
 
         Raises:
-            DeephavenConnectionError: If unable to connect to controller service
-            QueryError: If subscription state is invalid
+            ValueError: If ``timeout_seconds`` is not a positive value.
+            DeephavenConnectionError: If unable to connect to controller service.
+            QueryError: If subscription state is invalid.
         """
+        if timeout_seconds <= 0:
+            raise ValueError(
+                f"timeout_seconds must be a positive value, got {timeout_seconds!r}"
+            )
         _LOGGER.debug(
             f"[CorePlusControllerClient:wait_for_change_from_version] "
             f"Waiting for version > {map_version}, timeout={timeout_seconds}s"

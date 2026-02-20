@@ -280,8 +280,9 @@ async def test_close_calls_close_on_items(registry, mock_base_config_manager):
     item1.close.assert_awaited_once()
     item2.close.assert_awaited_once()
 
-    # Ensure registry state is maintained after close
-    assert registry._initialized
+    # close() resets _initialized and clears _items to allow reinitialization
+    assert not registry._initialized
+    assert registry._items == {}
 
 
 # --- Community Session Registry Tests ---
@@ -392,13 +393,9 @@ async def test_community_registry_close_calls_close_on_managers(
     manager1.close.assert_awaited_once()
     manager2.close.assert_awaited_once()
 
-    # The registry should still be initialized and sessions should be present
-    assert community_session_registry._initialized
-    assert "worker1" in community_session_registry._items
-
-    # Getting a manager should still work
-    manager = await community_session_registry.get("worker1")
-    assert manager is manager1
+    # close() resets _initialized and clears _items to allow reinitialization
+    assert not community_session_registry._initialized
+    assert community_session_registry._items == {}
 
 
 @pytest.mark.asyncio
@@ -523,58 +520,3 @@ async def test_factory_registry_enterprise_not_available_raises_config_error():
         assert "Python package" in str(exc_info.value)
 
 
-# --- Error Handling Tests ---
-
-
-class InvalidItemNoClose:
-    """A mock item that has no close() method."""
-
-    def __repr__(self):
-        return "InvalidItemNoClose"
-
-
-class InvalidItemSyncClose:
-    """A mock item with a synchronous close() method."""
-
-    def close(self):
-        """A non-coroutine close method."""
-        pass
-
-    def __repr__(self):
-        return "InvalidItemSyncClose"
-
-
-@pytest.mark.parametrize(
-    "invalid_item",
-    [
-        InvalidItemNoClose(),
-        InvalidItemSyncClose(),
-    ],
-    ids=["no_close_method", "sync_close_method"],
-)
-@pytest.mark.asyncio
-async def test_close_raises_error_for_invalid_item(
-    registry, mock_base_config_manager, invalid_item, caplog
-):
-    """
-    Test that close() raises InternalError for items with invalid close methods.
-
-    - Item has no close() method.
-    - Item has a synchronous (non-coroutine) close() method.
-    """
-    await registry.initialize(mock_base_config_manager)
-
-    # Replace a valid item with our invalid one to trigger the error path
-    registry._items["item1"] = invalid_item
-
-    with pytest.raises(
-        InternalError,
-        match=f"Item {invalid_item} does not have a close method or the method is not a coroutine function.",
-    ):
-        await registry.close()
-
-    # Verify that the error was logged
-    assert (
-        f"Item {invalid_item} does not have a close method or the method is not a coroutine function."
-        in caplog.text
-    )

@@ -47,6 +47,7 @@ from deephaven_mcp._exceptions import (
 from deephaven_mcp.client import is_enterprise_available
 
 from ._manager import (
+    AsyncClosable,
     CommunitySessionManager,
     CorePlusSessionFactoryManager,
     StaticCommunitySessionManager,
@@ -54,7 +55,7 @@ from ._manager import (
 
 _LOGGER = logging.getLogger(__name__)
 
-T = TypeVar("T")
+T = TypeVar("T", bound=AsyncClosable)
 
 
 class InitializationPhase(enum.Enum):
@@ -186,10 +187,7 @@ class BaseRegistry(abc.ABC, Generic[T]):
         self._items: dict[str, T] = {}
         self._lock = asyncio.Lock()
         self._initialized = False
-        _LOGGER.info(
-            "[%s] created (must call and await initialize() after construction)",
-            self.__class__.__name__,
-        )
+        _LOGGER.info(f"[{self.__class__.__name__}] created (must call and await initialize() after construction)")
 
     def _check_initialized(self) -> None:
         """Check if the registry is initialized and raise an error if not.
@@ -230,14 +228,10 @@ class BaseRegistry(abc.ABC, Generic[T]):
             if self._initialized:
                 return
 
-            _LOGGER.info("[%s] initializing...", self.__class__.__name__)
+            _LOGGER.info(f"[{self.__class__.__name__}] initializing...")
             await self._load_items(config_manager)
             self._initialized = True
-            _LOGGER.info(
-                "[%s] initialized with %d items",
-                self.__class__.__name__,
-                len(self._items),
-            )
+            _LOGGER.info(f"[{self.__class__.__name__}] initialized with {len(self._items)} items")
 
     async def get(self, name: str) -> T:
         """
@@ -289,38 +283,31 @@ class BaseRegistry(abc.ABC, Generic[T]):
 
     async def close(self) -> None:
         """
-        Close all managed items in the registry.
+        Close all managed items in the registry and reset state for reinitialization.
 
-        This method iterates through all items and calls their `close` method.
+        This method iterates through all items and calls their `close` method,
+        then resets `_initialized` and clears `_items` so the registry can be
+        reinitialized via `initialize()` if needed.
 
-        Raises:
-            InternalError: If any item in the registry does not have a compliant
-                async `close` method.
+        Note:
+            This method is intended as a terminal shutdown operation. It holds
+            ``self._lock`` for the duration of closing all items, which includes
+            network calls. It is not safe to call concurrently with other operations.
         """
         async with self._lock:
             self._check_initialized()
 
             start_time = time.time()
-            _LOGGER.info("[%s] closing all items...", self.__class__.__name__)
+            _LOGGER.info(f"[{self.__class__.__name__}] closing all items...")
             num_items = len(self._items)
 
             for item in self._items.values():
-                if hasattr(item, "close") and asyncio.iscoroutinefunction(item.close):
-                    await item.close()
-                else:
-                    _LOGGER.error(
-                        f"Item {item} does not have a close method or the method is not a coroutine function."
-                    )
-                    raise InternalError(
-                        f"Item {item} does not have a close method or the method is not a coroutine function."
-                    )
+                await item.close()
 
-            _LOGGER.info(
-                "[%s] close command sent to all items. Processed %d items in %.2fs",
-                self.__class__.__name__,
-                num_items,
-                time.time() - start_time,
-            )
+            self._items.clear()
+            self._initialized = False
+
+            _LOGGER.info(f"[{self.__class__.__name__}] closed all items. Processed {num_items} items in {time.time() - start_time:.2f}s")
 
 
 class CommunitySessionRegistry(BaseRegistry[CommunitySessionManager]):
@@ -342,18 +329,10 @@ class CommunitySessionRegistry(BaseRegistry[CommunitySessionManager]):
         config_data = await config_manager.get_config()
         community_sessions_config = config_data.get("community", {}).get("sessions", {})
 
-        _LOGGER.info(
-            "[%s] Found %d community session configurations to load.",
-            self.__class__.__name__,
-            len(community_sessions_config),
-        )
+        _LOGGER.info(f"[{self.__class__.__name__}] Found {len(community_sessions_config)} community session configurations to load.")
 
         for session_name, session_config in community_sessions_config.items():
-            _LOGGER.info(
-                "[%s] Loading session configuration for '%s'...",
-                self.__class__.__name__,
-                session_name,
-            )
+            _LOGGER.info(f"[{self.__class__.__name__}] Loading session configuration for '{session_name}'...")
             self._items[session_name] = StaticCommunitySessionManager(
                 session_name, session_config
             )
@@ -386,18 +365,10 @@ class CorePlusSessionFactoryRegistry(BaseRegistry[CorePlusSessionFactoryManager]
                 "or remove the enterprise factory configurations from your config file."
             ) from MissingEnterprisePackageError()
 
-        _LOGGER.info(
-            "[%s] Found %d core+ factory configurations to load.",
-            self.__class__.__name__,
-            len(factories_config),
-        )
+        _LOGGER.info(f"[{self.__class__.__name__}] Found {len(factories_config)} core+ factory configurations to load.")
 
         for factory_name, factory_config in factories_config.items():
-            _LOGGER.info(
-                "[%s] Loading factory configuration for '%s'...",
-                self.__class__.__name__,
-                factory_name,
-            )
+            _LOGGER.info(f"[{self.__class__.__name__}] Loading factory configuration for '{factory_name}'...")
             self._items[factory_name] = CorePlusSessionFactoryManager(
                 factory_name, factory_config
             )
