@@ -69,5 +69,4 @@ PQ_WAIT_TIMEOUT_SECONDS: float = 120.0
 # =============================================================================
 
 # Value of 0 means "return immediately without waiting" in the SDK.
-# Used for get() and get_serial_for_name() to check current state without blocking.
 NO_WAIT_SECONDS: float = 0.0
