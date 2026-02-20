@@ -231,7 +231,7 @@ async def test_ping_timeout(coreplus_controller_client, dummy_controller_client)
     import time
 
     def slow_ping():
-        time.sleep(0.5)
+        time.sleep(0.05)
 
     dummy_controller_client.ping.side_effect = slow_ping
 
@@ -842,7 +842,7 @@ async def test_subscribe_timeout(coreplus_controller_client, dummy_controller_cl
     import time
 
     def slow_subscribe():
-        time.sleep(0.5)  # Simulate slow blocking response
+        time.sleep(0.05)  # Simulate slow blocking response
 
     dummy_controller_client.subscribe.side_effect = slow_subscribe
 

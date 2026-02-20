@@ -82,7 +82,7 @@ async def test_ping_timeout(coreplus_session_manager, dummy_session_manager):
     import time
 
     def slow_ping():
-        time.sleep(0.5)
+        time.sleep(0.05)
 
     dummy_session_manager.ping.side_effect = slow_ping
 
@@ -211,7 +211,7 @@ async def test_upload_key_timeout(coreplus_session_manager, dummy_session_manage
     import time
 
     def slow_upload_key(key):
-        time.sleep(0.5)
+        time.sleep(0.05)
 
     dummy_session_manager.upload_key.side_effect = slow_upload_key
 
@@ -248,7 +248,7 @@ async def test_delete_key_timeout(coreplus_session_manager, dummy_session_manage
     import time
 
     def slow_delete_key(key):
-        time.sleep(0.5)
+        time.sleep(0.05)
 
     dummy_session_manager.delete_key.side_effect = slow_delete_key
 
@@ -1255,7 +1255,7 @@ async def test_password_timeout(coreplus_session_manager, dummy_session_manager)
     import time
 
     def slow_password(*args):
-        time.sleep(0.5)
+        time.sleep(0.05)
 
     dummy_session_manager.password.side_effect = slow_password
 
@@ -1271,7 +1271,7 @@ async def test_private_key_timeout(coreplus_session_manager, dummy_session_manag
     import time
 
     def slow_auth(*args):
-        time.sleep(0.5)
+        time.sleep(0.05)
 
     dummy_session_manager.private_key.side_effect = slow_auth
 
@@ -1286,7 +1286,7 @@ async def test_saml_timeout(coreplus_session_manager, dummy_session_manager):
     import time
 
     def slow_auth():
-        time.sleep(0.5)
+        time.sleep(0.05)
 
     dummy_session_manager.saml.side_effect = slow_auth
 
@@ -1318,7 +1318,7 @@ async def test_connect_to_persistent_query_timeout(
     import time
 
     def slow_connect(*args, **kwargs):
-        time.sleep(0.5)
+        time.sleep(0.05)
 
     dummy_session_manager.connect_to_persistent_query.side_effect = slow_connect
 

@@ -388,7 +388,7 @@ async def test_core_from_config_timeout(monkeypatch):
 
     class SlowPDHSession:
         def __init__(self, *args, **kwargs):
-            time.sleep(0.5)
+            time.sleep(0.05)
 
     monkeypatch.setattr("deephaven_mcp.client._session.Session", SlowPDHSession)
     with pytest.raises(DeephavenConnectionError) as exc_info:
