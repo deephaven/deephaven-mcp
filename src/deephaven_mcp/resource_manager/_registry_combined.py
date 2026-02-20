@@ -150,7 +150,7 @@ async def _fetch_factory_pqs(
         3. Call ``map()`` to get the current PQ list.
 
     Args:
-        snapshot: Per-factory state captured in Phase 1.
+        snapshot (_FactorySnapshot): Per-factory state captured in Phase 1.
 
     Returns:
         ``_FactoryQueryResult`` on success, ``_FactoryQueryError`` on failure.
@@ -223,9 +223,11 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
         """Create an ``EnterpriseSessionManager`` that lazily connects to a PQ.
 
         Args:
-            factory: Factory manager used to obtain a connected factory instance.
-            factory_name: Source name for the session (e.g. ``"prod-system"``).
-            session_name: PQ name to connect to.
+            factory (CorePlusSessionFactoryManager): Factory manager used to
+                obtain a connected factory instance.
+            factory_name (str): Source name for the session (e.g.
+                ``"prod-system"``).
+            session_name (str): PQ name to connect to.
 
         Returns:
             An ``EnterpriseSessionManager`` whose creation function calls
@@ -296,7 +298,9 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             self._items[session.full_name] = session
 
         self._phase = InitializationPhase.PARTIAL
-        _LOGGER.info(f"[{self.__class__.__name__}] loaded {len(community_snapshot.items)} community sessions")
+        _LOGGER.info(
+            f"[{self.__class__.__name__}] loaded {len(community_snapshot.items)} community sessions"
+        )
 
     @override
     async def initialize(self, config_manager: ConfigManager) -> None:
@@ -368,20 +372,26 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
                 await task
             except asyncio.CancelledError:
                 pass
-            _LOGGER.info(f"[{self.__class__.__name__}] cancelled background enterprise discovery")
+            _LOGGER.info(
+                f"[{self.__class__.__name__}] cancelled background enterprise discovery"
+            )
 
         # Step 4: close sub-registries via local refs captured under the lock.
         if community is not None:
             try:
                 await community.close()
             except Exception as e:
-                _LOGGER.error(f"[{self.__class__.__name__}] error closing community registry: {e}")
+                _LOGGER.error(
+                    f"[{self.__class__.__name__}] error closing community registry: {e}"
+                )
 
         if enterprise is not None:
             try:
                 await enterprise.close()
             except Exception as e:
-                _LOGGER.error(f"[{self.__class__.__name__}] error closing enterprise registry: {e}")
+                _LOGGER.error(
+                    f"[{self.__class__.__name__}] error closing enterprise registry: {e}"
+                )
 
         # Step 5: clear remaining state and collect items to close.
         # We do not call super().close() because _initialized is already False
@@ -399,7 +409,11 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             try:
                 await item.close()
             except Exception as e:
-                _LOGGER.error(f"[{self.__class__.__name__}] error closing item '{item.full_name}': {e}")
+                _LOGGER.error(
+                    f"[{self.__class__.__name__}] error closing item '{item.full_name}': {e}"
+                )
+
+        _LOGGER.info(f"[{self.__class__.__name__}] closed")
 
     # ------------------------------------------------------------------
     # BaseRegistry overrides — read interface
@@ -484,6 +498,42 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
                 errors=self._errors.copy(),
             )
 
+    async def community_registry(self) -> CommunitySessionRegistry:
+        """Return the community session registry.
+
+        Returns:
+            CommunitySessionRegistry: The community session registry.
+
+        Raises:
+            InternalError: If the registry has not been initialized or the
+                community registry is not available.
+        """
+        async with self._lock:
+            self._check_initialized()
+            if self._community_registry is None:
+                raise InternalError(
+                    f"{self.__class__.__name__} community registry is not available"
+                )
+            return self._community_registry
+
+    async def enterprise_registry(self) -> CorePlusSessionFactoryRegistry:
+        """Return the enterprise factory registry.
+
+        Returns:
+            CorePlusSessionFactoryRegistry: The enterprise factory registry.
+
+        Raises:
+            InternalError: If the registry has not been initialized or the
+                enterprise registry is not available.
+        """
+        async with self._lock:
+            self._check_initialized()
+            if self._enterprise_registry is None:
+                raise InternalError(
+                    f"{self.__class__.__name__} enterprise registry is not available"
+                )
+            return self._enterprise_registry
+
     # ------------------------------------------------------------------
     # Mutation interface
     # ------------------------------------------------------------------
@@ -533,7 +583,9 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             manager = self._items.pop(session_id, None)
             if manager is not None:
                 self._added_session_ids.discard(session_id)
-                _LOGGER.debug(f"[{self.__class__.__name__}] removed session '{session_id}'")
+                _LOGGER.debug(
+                    f"[{self.__class__.__name__}] removed session '{session_id}'"
+                )
             return manager
 
     async def count_added_sessions(
@@ -568,7 +620,11 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
                     raise InternalError(
                         f"Malformed session ID {sid!r} found in _added_session_ids: {e}"
                     ) from e
-                if s_type == system_type.value and s_source == system_name and sid in self._items:
+                if (
+                    s_type == system_type.value
+                    and s_source == system_name
+                    and sid in self._items
+                ):
                     count += 1
             return count
 
@@ -608,9 +664,11 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             4. Close stale managers (no lock).
 
         Args:
-            factory_names: Factory names to refresh.
+            factory_names (list[str]): Factory names to refresh.
         """
-        _LOGGER.debug(f"[{self.__class__.__name__}] refreshing {len(factory_names)} factory(ies): {factory_names}")
+        _LOGGER.debug(
+            f"[{self.__class__.__name__}] refreshing {len(factory_names)} factory(ies): {factory_names}"
+        )
         async with self._refresh_lock:
             snapshots = await self._snapshot_factory_state(factory_names)
 
@@ -632,7 +690,9 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
                 *(_fetch_factory_pqs(s) for s in snapshots),
                 return_exceptions=False,
             )
-            results: list[_FactoryQueryResult | _FactoryQueryError] = list(raw) + missing_errors
+            results: list[_FactoryQueryResult | _FactoryQueryError] = (
+                list(raw) + missing_errors
+            )
 
             async with self._lock:
                 managers_to_close = self._apply_results(results, snapshots)
@@ -641,7 +701,9 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             try:
                 await manager.close()
             except Exception as e:
-                _LOGGER.warning(f"[{self.__class__.__name__}] error closing stale session '{manager.full_name}': {e}")
+                _LOGGER.warning(
+                    f"[{self.__class__.__name__}] error closing stale session '{manager.full_name}': {e}"
+                )
 
     async def _snapshot_factory_state(
         self, factory_names: list[str]
@@ -694,10 +756,10 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
         Synchronous — no ``await``.  Must be called under ``self._lock``.
 
         Args:
-            factory_name: The enterprise factory name to match.
+            factory_name (str): The enterprise factory name to match.
 
         Returns:
-            Set of full-name keys in ``_items`` that belong to this factory.
+            set[str]: Full-name keys in ``_items`` that belong to this factory.
 
         Raises:
             InternalError: If any key in ``_items`` is malformed (indicates
@@ -715,20 +777,19 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
                 keys.add(key)
         return keys
 
-    def _remove_factory_sessions_by_keys(
-        self, keys: set[str]
-    ) -> list[BaseItemManager]:
+    def _remove_factory_sessions_by_keys(self, keys: set[str]) -> list[BaseItemManager]:
         """Remove a specific set of session keys from ``_items``.
 
         Synchronous — no ``await``.  Must be called under ``self._lock``.
         Keeps ``_added_session_ids`` consistent with ``_items``.
 
         Args:
-            keys: Full-name keys to remove.  Keys not present in ``_items``
-                are silently ignored.
+            keys (set[str]): Full-name keys to remove.  Keys not present in
+                ``_items`` are silently ignored.
 
         Returns:
-            Removed managers; caller must close them outside the lock.
+            list[BaseItemManager]: Removed managers; caller must close them
+                outside the lock.
         """
         managers_to_close: list[BaseItemManager] = []
         for key in keys:
@@ -738,24 +799,26 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
                 managers_to_close.append(mgr)
         return managers_to_close
 
-    def _remove_factory_sessions(
-        self, factory_name: str
-    ) -> list[BaseItemManager]:
+    def _remove_factory_sessions(self, factory_name: str) -> list[BaseItemManager]:
         """Remove all sessions for *factory_name* from ``_items``.
 
         Synchronous — no ``await``.  Must be called under ``self._lock``.
 
         Args:
-            factory_name: The enterprise factory whose sessions should be removed.
+            factory_name (str): The enterprise factory whose sessions should
+                be removed.
 
         Returns:
-            Removed managers; caller must close them outside the lock.
+            list[BaseItemManager]: Removed managers; caller must close them
+                outside the lock.
 
         Raises:
             InternalError: If any key in ``_items`` is malformed (indicates
                 a programming bug — keys must always be valid full names).
         """
-        return self._remove_factory_sessions_by_keys(self._get_factory_keys(factory_name))
+        return self._remove_factory_sessions_by_keys(
+            self._get_factory_keys(factory_name)
+        )
 
     def _apply_factory_success(
         self,
@@ -772,14 +835,17 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
         - Clears any previous error recorded for this factory.
 
         Args:
-            result: Successful query result containing the current PQ names.
-            factory_manager: Factory manager used to create new session managers.
-                Must not be ``None`` — a ``_FactoryQueryResult`` is only produced
-                by ``_fetch_factory_pqs``, which always has a corresponding
+            result (_FactoryQueryResult): Successful query result containing
+                the current PQ names.
+            factory_manager (CorePlusSessionFactoryManager): Factory manager
+                used to create new session managers.  Must not be ``None`` —
+                a ``_FactoryQueryResult`` is only produced by
+                ``_fetch_factory_pqs``, which always has a corresponding
                 snapshot and therefore a valid factory manager.
 
         Returns:
-            Managers removed as stale; caller must close them outside the lock.
+            list[BaseItemManager]: Managers removed as stale; caller must
+                close them outside the lock.
         """
         name = result.factory_name
 
@@ -802,7 +868,9 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
         # Add sessions the controller knows about that we don't have yet.
         for full_key in keys_to_add:
             _, _, session_name = BaseItemManager.parse_full_name(full_key)
-            mgr = self._make_enterprise_session_manager(factory_manager, name, session_name)
+            mgr = self._make_enterprise_session_manager(
+                factory_manager, name, session_name
+            )
             self._items[mgr.full_name] = mgr
 
         # Remove stale sessions and collect them for closing.
@@ -812,9 +880,13 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
         self._errors.pop(name, None)
 
         if keys_to_add:
-            _LOGGER.debug(f"[{self.__class__.__name__}] factory '{name}': added {len(keys_to_add)} sessions")
+            _LOGGER.debug(
+                f"[{self.__class__.__name__}] factory '{name}': added {len(keys_to_add)} sessions"
+            )
         if keys_to_remove:
-            _LOGGER.debug(f"[{self.__class__.__name__}] factory '{name}': removed {len(keys_to_remove)} stale sessions")
+            _LOGGER.debug(
+                f"[{self.__class__.__name__}] factory '{name}': removed {len(keys_to_remove)} stale sessions"
+            )
 
         return managers_to_close
 
@@ -833,11 +905,13 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
         - Removes all sessions for the factory from ``_items``.
 
         Args:
-            result: Failed query result containing the factory name, error
-                message, and optionally a newly created client.
+            result (_FactoryQueryError): Failed query result containing the
+                factory name, error message, and optionally a newly created
+                client.
 
         Returns:
-            Managers removed; caller must close them outside the lock.
+            list[BaseItemManager]: Removed managers; caller must close them
+                outside the lock.
         """
         name = result.factory_name
 
@@ -855,7 +929,9 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
 
         managers_to_close = self._remove_factory_sessions(name)
 
-        _LOGGER.warning(f"[{self.__class__.__name__}] factory '{name}' query failed: {result.error}")
+        _LOGGER.warning(
+            f"[{self.__class__.__name__}] factory '{name}' query failed: {result.error}"
+        )
 
         return managers_to_close
 
@@ -893,7 +969,9 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
                         f"No snapshot found for successful result from factory "
                         f"'{result.factory_name}'; this indicates a programming bug"
                     )
-                managers_to_close += self._apply_factory_success(result, factory_manager)
+                managers_to_close += self._apply_factory_success(
+                    result, factory_manager
+                )
             elif isinstance(result, _FactoryQueryError):
                 managers_to_close += self._apply_factory_error(result)
             else:
@@ -917,7 +995,9 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
         and re-raises.
         """
         start = time.monotonic()
-        _LOGGER.info(f"[{self.__class__.__name__}] starting enterprise session discovery")
+        _LOGGER.info(
+            f"[{self.__class__.__name__}] starting enterprise session discovery"
+        )
 
         try:
             # Set LOADING and read _enterprise_registry atomically under the lock.
@@ -933,17 +1013,23 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
                     await self._sync_enterprise_sessions(factory_names)
 
             elapsed = time.monotonic() - start
-            _LOGGER.info(f"[{self.__class__.__name__}] enterprise discovery completed in {elapsed:.2f}s")
+            _LOGGER.info(
+                f"[{self.__class__.__name__}] enterprise discovery completed in {elapsed:.2f}s"
+            )
 
             async with self._lock:
                 self._phase = InitializationPhase.COMPLETED
                 if self._errors:
-                    _LOGGER.warning(f"[{self.__class__.__name__}] discovery completed with errors: {self._errors}")
+                    _LOGGER.warning(
+                        f"[{self.__class__.__name__}] discovery completed with errors: {self._errors}"
+                    )
 
         except asyncio.CancelledError:
             async with self._lock:
                 self._phase = InitializationPhase.FAILED
-            _LOGGER.info(f"[{self.__class__.__name__}] enterprise discovery cancelled (shutdown)")
+            _LOGGER.info(
+                f"[{self.__class__.__name__}] enterprise discovery cancelled (shutdown)"
+            )
             raise
 
         except Exception as e:
@@ -966,13 +1052,13 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
         Must be called while holding ``self._lock``.
 
         Args:
-            name: The fully qualified session name that was not found.
+            name (str): The fully qualified session name that was not found.
                 Must be a valid ``type:source:name`` string — callers are
                 responsible for validating via ``parse_full_name`` before
                 calling this method.
 
         Returns:
-            Error message string.
+            str: Error message string.
 
         Raises:
             InternalError: If *name* is not in ``type:source:name`` format

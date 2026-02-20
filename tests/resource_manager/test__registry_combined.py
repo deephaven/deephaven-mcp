@@ -52,7 +52,6 @@ from deephaven_mcp.resource_manager._registry_combined import (
     _fetch_factory_pqs,
 )
 
-
 # ---------------------------------------------------------------------------
 # Shared fixtures
 # ---------------------------------------------------------------------------
@@ -390,9 +389,9 @@ class TestClose:
 
         await initialized_registry.close()
 
-        assert close_called_while_locked == [False], (
-            "item.close() was called while self._lock was held"
-        )
+        assert close_called_while_locked == [
+            False
+        ], "item.close() was called while self._lock was held"
 
     @pytest.mark.asyncio
     async def test_close_item_error_does_not_propagate(self, initialized_registry):
@@ -443,6 +442,7 @@ class TestClose:
             await close_task
 
         assert not initialized_registry._initialized
+
 
 # ---------------------------------------------------------------------------
 # TestGet
@@ -715,7 +715,9 @@ class TestCountAddedSessions:
         initialized_registry._items["enterprise:f1:valid"] = MagicMock()
         initialized_registry._added_session_ids.add("enterprise:f1:valid")
 
-        count = await initialized_registry.count_added_sessions(SystemType.ENTERPRISE, "f1")
+        count = await initialized_registry.count_added_sessions(
+            SystemType.ENTERPRISE, "f1"
+        )
         assert count == 1
 
     @pytest.mark.asyncio
@@ -727,7 +729,9 @@ class TestCountAddedSessions:
 
     @pytest.mark.asyncio
     async def test_count_zero_when_empty(self, initialized_registry):
-        count = await initialized_registry.count_added_sessions(SystemType.ENTERPRISE, "f1")
+        count = await initialized_registry.count_added_sessions(
+            SystemType.ENTERPRISE, "f1"
+        )
         assert count == 0
 
 
@@ -749,9 +753,54 @@ class TestIsAddedSession:
 
     @pytest.mark.asyncio
     async def test_false_for_not_added(self, initialized_registry):
-        assert (
-            await initialized_registry.is_added_session("enterprise:f1:s1") is False
-        )
+        assert await initialized_registry.is_added_session("enterprise:f1:s1") is False
+
+
+# ---------------------------------------------------------------------------
+# TestCommunityRegistry
+# ---------------------------------------------------------------------------
+
+
+class TestCommunityRegistry:
+    @pytest.mark.asyncio
+    async def test_not_initialized_raises(self, registry):
+        with pytest.raises(InternalError):
+            await registry.community_registry()
+
+    @pytest.mark.asyncio
+    async def test_returns_community_registry(self, initialized_registry):
+        result = await initialized_registry.community_registry()
+        assert result is initialized_registry._community_registry
+
+    @pytest.mark.asyncio
+    async def test_raises_when_community_registry_none(self, initialized_registry):
+        initialized_registry._community_registry = None
+        with pytest.raises(InternalError, match="community registry is not available"):
+            await initialized_registry.community_registry()
+
+
+# ---------------------------------------------------------------------------
+# TestEnterpriseRegistry
+# ---------------------------------------------------------------------------
+
+
+class TestEnterpriseRegistry:
+    @pytest.mark.asyncio
+    async def test_not_initialized_raises(self, registry):
+        with pytest.raises(InternalError):
+            await registry.enterprise_registry()
+
+    @pytest.mark.asyncio
+    async def test_returns_enterprise_registry(self, initialized_registry):
+        result = await initialized_registry.enterprise_registry()
+        assert result is initialized_registry._enterprise_registry
+
+    @pytest.mark.asyncio
+    async def test_raises_when_enterprise_registry_none(self, initialized_registry):
+        initialized_registry._enterprise_registry = None
+        with pytest.raises(InternalError, match="enterprise registry is not available"):
+            await initialized_registry.enterprise_registry()
+
 
 # ---------------------------------------------------------------------------
 # TestSyncEnterpriseSessions
@@ -776,9 +825,13 @@ class TestSyncEnterpriseSessions:
         assert initialized_registry._controller_clients.get("f1") is mock_client
 
     @pytest.mark.asyncio
-    async def test_sync_cleans_up_sessions_for_disappeared_factory(self, initialized_registry):
+    async def test_sync_cleans_up_sessions_for_disappeared_factory(
+        self, initialized_registry
+    ):
         """Sessions for a factory that disappeared from the registry are removed."""
-        stale_key = BaseItemManager.make_full_name(SystemType.ENTERPRISE, "nonexistent", "s1")
+        stale_key = BaseItemManager.make_full_name(
+            SystemType.ENTERPRISE, "nonexistent", "s1"
+        )
         stale_mgr = MagicMock(spec=BaseItemManager)
         stale_mgr.full_name = stale_key
         stale_mgr.close = AsyncMock()
@@ -837,7 +890,9 @@ class TestSyncEnterpriseSessions:
         stale_mgr.close.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_stale_manager_close_error_does_not_propagate(self, initialized_registry):
+    async def test_stale_manager_close_error_does_not_propagate(
+        self, initialized_registry
+    ):
         """Errors from closing stale managers are logged, not propagated."""
         stale_key = BaseItemManager.make_full_name(SystemType.ENTERPRISE, "f1", "old")
         stale_mgr = MagicMock(spec=BaseItemManager)
@@ -846,7 +901,9 @@ class TestSyncEnterpriseSessions:
         initialized_registry._items[stale_key] = stale_mgr
 
         mock_factory = _make_mock_factory_manager()
-        initialized_registry._enterprise_registry.get = AsyncMock(return_value=mock_factory)
+        initialized_registry._enterprise_registry.get = AsyncMock(
+            return_value=mock_factory
+        )
         mock_client = _make_mock_controller_client()
         mock_factory.get.return_value.controller_client = mock_client
 
@@ -909,7 +966,9 @@ class TestSyncEnterpriseSessions:
 
 class TestSnapshotFactoryState:
     @pytest.mark.asyncio
-    async def test_returns_empty_when_no_enterprise_registry(self, initialized_registry):
+    async def test_returns_empty_when_no_enterprise_registry(
+        self, initialized_registry
+    ):
         initialized_registry._enterprise_registry = None
         result = await initialized_registry._snapshot_factory_state(["f1"])
         assert result == []
@@ -937,7 +996,6 @@ class TestSnapshotFactoryState:
         assert snapshots[0].client is mock_client
 
 
-
 # ---------------------------------------------------------------------------
 # TestGetFactoryKeys
 # ---------------------------------------------------------------------------
@@ -963,10 +1021,14 @@ class TestGetFactoryKeys:
         assert keys == {key_f1}
         assert key_f2 not in keys
 
-    def test_excludes_community_sessions_with_same_source_name(self, initialized_registry):
+    def test_excludes_community_sessions_with_same_source_name(
+        self, initialized_registry
+    ):
         """Bug #4: community sessions whose source matches factory_name must not match."""
         community_key = BaseItemManager.make_full_name(SystemType.COMMUNITY, "f1", "s1")
-        enterprise_key = BaseItemManager.make_full_name(SystemType.ENTERPRISE, "f1", "s1")
+        enterprise_key = BaseItemManager.make_full_name(
+            SystemType.ENTERPRISE, "f1", "s1"
+        )
         initialized_registry._items[community_key] = MagicMock(spec=BaseItemManager)
         initialized_registry._items[enterprise_key] = MagicMock(spec=BaseItemManager)
 
@@ -1011,7 +1073,9 @@ class TestRemoveFactorySessionsByKeys:
         assert key not in initialized_registry._added_session_ids
 
     def test_tolerates_missing_keys(self, initialized_registry):
-        result = initialized_registry._remove_factory_sessions_by_keys({"enterprise:f1:gone"})
+        result = initialized_registry._remove_factory_sessions_by_keys(
+            {"enterprise:f1:gone"}
+        )
         assert result == []
 
     def test_returns_empty_for_empty_input(self, initialized_registry):
@@ -1050,7 +1114,9 @@ class TestRemoveFactorySessions:
     def test_does_not_remove_community_same_source(self, initialized_registry):
         """Community sessions with the same source name must not be removed."""
         community_key = BaseItemManager.make_full_name(SystemType.COMMUNITY, "f1", "s1")
-        enterprise_key = BaseItemManager.make_full_name(SystemType.ENTERPRISE, "f1", "s1")
+        enterprise_key = BaseItemManager.make_full_name(
+            SystemType.ENTERPRISE, "f1", "s1"
+        )
         initialized_registry._items[community_key] = MagicMock(spec=BaseItemManager)
         initialized_registry._items[enterprise_key] = MagicMock(spec=BaseItemManager)
 
@@ -1085,8 +1151,14 @@ class TestApplyFactorySuccess:
         )
 
         assert managers_to_close == []
-        assert BaseItemManager.make_full_name(SystemType.ENTERPRISE, "f1", "s1") in initialized_registry._items
-        assert BaseItemManager.make_full_name(SystemType.ENTERPRISE, "f1", "s2") in initialized_registry._items
+        assert (
+            BaseItemManager.make_full_name(SystemType.ENTERPRISE, "f1", "s1")
+            in initialized_registry._items
+        )
+        assert (
+            BaseItemManager.make_full_name(SystemType.ENTERPRISE, "f1", "s2")
+            in initialized_registry._items
+        )
         assert initialized_registry._controller_clients["f1"] is mock_client
 
     def test_removes_stale_sessions(self, initialized_registry):
@@ -1095,7 +1167,9 @@ class TestApplyFactorySuccess:
         initialized_registry._items[stale_key] = stale_mgr
 
         result = _FactoryQueryResult(
-            factory_name="f1", new_client=_make_mock_controller_client(), query_names=set()
+            factory_name="f1",
+            new_client=_make_mock_controller_client(),
+            query_names=set(),
         )
         managers_to_close = initialized_registry._apply_factory_success(
             result, self._make_snapshot().factory_manager
@@ -1110,18 +1184,26 @@ class TestApplyFactorySuccess:
         initialized_registry._items[key] = existing_mgr
 
         result = _FactoryQueryResult(
-            factory_name="f1", new_client=_make_mock_controller_client(), query_names={"s1"}
+            factory_name="f1",
+            new_client=_make_mock_controller_client(),
+            query_names={"s1"},
         )
-        initialized_registry._apply_factory_success(result, self._make_snapshot().factory_manager)
+        initialized_registry._apply_factory_success(
+            result, self._make_snapshot().factory_manager
+        )
 
         assert initialized_registry._items[key] is existing_mgr
 
     def test_clears_previous_error(self, initialized_registry):
         initialized_registry._errors["f1"] = "previous error"
         result = _FactoryQueryResult(
-            factory_name="f1", new_client=_make_mock_controller_client(), query_names=set()
+            factory_name="f1",
+            new_client=_make_mock_controller_client(),
+            query_names=set(),
         )
-        initialized_registry._apply_factory_success(result, self._make_snapshot().factory_manager)
+        initialized_registry._apply_factory_success(
+            result, self._make_snapshot().factory_manager
+        )
 
         assert "f1" not in initialized_registry._errors
 
@@ -1131,9 +1213,13 @@ class TestApplyFactorySuccess:
         initialized_registry._added_session_ids.add(stale_key)
 
         result = _FactoryQueryResult(
-            factory_name="f1", new_client=_make_mock_controller_client(), query_names=set()
+            factory_name="f1",
+            new_client=_make_mock_controller_client(),
+            query_names=set(),
         )
-        initialized_registry._apply_factory_success(result, self._make_snapshot().factory_manager)
+        initialized_registry._apply_factory_success(
+            result, self._make_snapshot().factory_manager
+        )
 
         assert stale_key not in initialized_registry._added_session_ids
 
@@ -1162,7 +1248,9 @@ class TestApplyFactoryError:
 
     def test_caches_new_client_when_present(self, initialized_registry):
         new_client = _make_mock_controller_client()
-        result = _FactoryQueryError(factory_name="f1", new_client=new_client, error="boom")
+        result = _FactoryQueryError(
+            factory_name="f1", new_client=new_client, error="boom"
+        )
         initialized_registry._apply_factory_error(result)
         assert initialized_registry._controller_clients["f1"] is new_client
 
@@ -1207,7 +1295,10 @@ class TestApplyResults:
         managers_to_close = initialized_registry._apply_results([result], [snapshot])
 
         assert managers_to_close == []
-        assert BaseItemManager.make_full_name(SystemType.ENTERPRISE, "f1", "s1") in initialized_registry._items
+        assert (
+            BaseItemManager.make_full_name(SystemType.ENTERPRISE, "f1", "s1")
+            in initialized_registry._items
+        )
 
     def test_dispatches_error_result(self, initialized_registry):
         key = BaseItemManager.make_full_name(SystemType.ENTERPRISE, "f1", "s1")
@@ -1291,9 +1382,7 @@ class TestDiscoverEnterpriseSessions:
 
         initialized_registry._enterprise_registry.get_all = AsyncMock(side_effect=slow)
 
-        task = asyncio.create_task(
-            initialized_registry._discover_enterprise_sessions()
-        )
+        task = asyncio.create_task(initialized_registry._discover_enterprise_sessions())
         await asyncio.sleep(0)
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
@@ -1341,7 +1430,9 @@ class TestDiscoverEnterpriseSessions:
         assert "RuntimeError" in initialized_registry._errors["enterprise_discovery"]
 
     @pytest.mark.asyncio
-    async def test_completed_with_prior_errors_stays_completed(self, initialized_registry):
+    async def test_completed_with_prior_errors_stays_completed(
+        self, initialized_registry
+    ):
         """Discovery completing with pre-existing errors still sets phase to COMPLETED."""
         initialized_registry._phase = InitializationPhase.PARTIAL
         initialized_registry._enterprise_registry.get_all = AsyncMock(
@@ -1387,7 +1478,9 @@ class TestDiscoverEnterpriseSessions:
             side_effect=check_lock_on_get_all
         )
 
-        with patch.object(initialized_registry, "_sync_enterprise_sessions", AsyncMock()):
+        with patch.object(
+            initialized_registry, "_sync_enterprise_sessions", AsyncMock()
+        ):
             await initialized_registry._discover_enterprise_sessions()
 
         # The lock should NOT be held when get_all() is called (only the read
@@ -1449,11 +1542,14 @@ class TestBuildNotFoundMessage:
         assert "still in progress" in msg
         assert "f1" in msg
 
-    @pytest.mark.parametrize("phase", [
-        InitializationPhase.FAILED,
-        InitializationPhase.NOT_STARTED,
-        InitializationPhase.PARTIAL,
-    ])
+    @pytest.mark.parametrize(
+        "phase",
+        [
+            InitializationPhase.FAILED,
+            InitializationPhase.NOT_STARTED,
+            InitializationPhase.PARTIAL,
+        ],
+    )
     def test_non_loading_incomplete_phase_note(self, initialized_registry, phase):
         """FAILED/NOT_STARTED/PARTIAL produce 'has not completed' note, not 'in progress'."""
         initialized_registry._phase = phase
@@ -1463,7 +1559,9 @@ class TestBuildNotFoundMessage:
         assert phase.value in msg
         assert "still in progress" not in msg
 
-    def test_malformed_name_with_errors_raises_internal_error(self, initialized_registry):
+    def test_malformed_name_with_errors_raises_internal_error(
+        self, initialized_registry
+    ):
         """Malformed name raises InternalError — caller is responsible for validation."""
         initialized_registry._errors = {"f1": "boom"}
         with pytest.raises(InternalError, match="malformed name"):

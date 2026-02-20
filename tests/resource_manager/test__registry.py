@@ -518,5 +518,3 @@ async def test_factory_registry_enterprise_not_available_raises_config_error():
         assert "deephaven-coreplus-client" in str(exc_info.value)
         assert "install" in str(exc_info.value).lower()
         assert "Python package" in str(exc_info.value)
-
-

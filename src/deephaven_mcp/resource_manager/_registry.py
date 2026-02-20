@@ -187,7 +187,9 @@ class BaseRegistry(abc.ABC, Generic[T]):
         self._items: dict[str, T] = {}
         self._lock = asyncio.Lock()
         self._initialized = False
-        _LOGGER.info(f"[{self.__class__.__name__}] created (must call and await initialize() after construction)")
+        _LOGGER.info(
+            f"[{self.__class__.__name__}] created (must call and await initialize() after construction)"
+        )
 
     def _check_initialized(self) -> None:
         """Check if the registry is initialized and raise an error if not.
@@ -231,7 +233,9 @@ class BaseRegistry(abc.ABC, Generic[T]):
             _LOGGER.info(f"[{self.__class__.__name__}] initializing...")
             await self._load_items(config_manager)
             self._initialized = True
-            _LOGGER.info(f"[{self.__class__.__name__}] initialized with {len(self._items)} items")
+            _LOGGER.info(
+                f"[{self.__class__.__name__}] initialized with {len(self._items)} items"
+            )
 
     async def get(self, name: str) -> T:
         """
@@ -307,7 +311,9 @@ class BaseRegistry(abc.ABC, Generic[T]):
             self._items.clear()
             self._initialized = False
 
-            _LOGGER.info(f"[{self.__class__.__name__}] closed all items. Processed {num_items} items in {time.time() - start_time:.2f}s")
+            _LOGGER.info(
+                f"[{self.__class__.__name__}] closed all items. Processed {num_items} items in {time.time() - start_time:.2f}s"
+            )
 
 
 class CommunitySessionRegistry(BaseRegistry[CommunitySessionManager]):
@@ -329,10 +335,14 @@ class CommunitySessionRegistry(BaseRegistry[CommunitySessionManager]):
         config_data = await config_manager.get_config()
         community_sessions_config = config_data.get("community", {}).get("sessions", {})
 
-        _LOGGER.info(f"[{self.__class__.__name__}] Found {len(community_sessions_config)} community session configurations to load.")
+        _LOGGER.info(
+            f"[{self.__class__.__name__}] Found {len(community_sessions_config)} community session configurations to load."
+        )
 
         for session_name, session_config in community_sessions_config.items():
-            _LOGGER.info(f"[{self.__class__.__name__}] Loading session configuration for '{session_name}'...")
+            _LOGGER.info(
+                f"[{self.__class__.__name__}] Loading session configuration for '{session_name}'..."
+            )
             self._items[session_name] = StaticCommunitySessionManager(
                 session_name, session_config
             )
@@ -365,10 +375,14 @@ class CorePlusSessionFactoryRegistry(BaseRegistry[CorePlusSessionFactoryManager]
                 "or remove the enterprise factory configurations from your config file."
             ) from MissingEnterprisePackageError()
 
-        _LOGGER.info(f"[{self.__class__.__name__}] Found {len(factories_config)} core+ factory configurations to load.")
+        _LOGGER.info(
+            f"[{self.__class__.__name__}] Found {len(factories_config)} core+ factory configurations to load."
+        )
 
         for factory_name, factory_config in factories_config.items():
-            _LOGGER.info(f"[{self.__class__.__name__}] Loading factory configuration for '{factory_name}'...")
+            _LOGGER.info(
+                f"[{self.__class__.__name__}] Loading factory configuration for '{factory_name}'..."
+            )
             self._items[factory_name] = CorePlusSessionFactoryManager(
                 factory_name, factory_config
             )
