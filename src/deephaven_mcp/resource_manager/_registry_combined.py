@@ -537,17 +537,6 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
         factory_instance = await factory.get()
         client = factory_instance.controller_client
 
-        # Subscribe to persistent query state immediately after creation
-        _LOGGER.info(
-            f"[{self.__class__.__name__}] Subscribing controller client to query state for factory '{factory_name}'"
-        )
-        subscribe_start = time.monotonic()
-        await client.subscribe()
-        subscribe_elapsed = time.monotonic() - subscribe_start
-        _LOGGER.info(
-            f"[{self.__class__.__name__}] Controller subscription completed for factory '{factory_name}' in {subscribe_elapsed:.2f}s"
-        )
-
         # Cache the client
         self._controller_clients[factory_name] = client
         return client
