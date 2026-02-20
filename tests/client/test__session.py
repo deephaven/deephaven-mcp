@@ -382,6 +382,21 @@ async def test_core_from_config_session_creation_error(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_core_from_config_timeout(monkeypatch):
+    """Test that from_config() raises DeephavenConnectionError on timeout."""
+    import time
+
+    class SlowPDHSession:
+        def __init__(self, *args, **kwargs):
+            time.sleep(0.05)
+
+    monkeypatch.setattr("deephaven_mcp.client._session.Session", SlowPDHSession)
+    with pytest.raises(DeephavenConnectionError) as exc_info:
+        await CoreSession.from_config({"host": "localhost"}, timeout_seconds=0.01)
+    assert "timed out" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
 async def test_core_session_error_logging_configuration_constants(monkeypatch, caplog):
     """Test error logging for 'failed to get the configuration constants' error."""
 

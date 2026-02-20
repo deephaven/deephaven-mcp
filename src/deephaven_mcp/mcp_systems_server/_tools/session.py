@@ -17,6 +17,9 @@ from mcp.server.fastmcp import Context
 from deephaven_mcp import queries
 from deephaven_mcp.client import BaseSession
 from deephaven_mcp.mcp_systems_server._tools.mcp_server import mcp_server
+from deephaven_mcp.mcp_systems_server._tools.shared import (
+    _format_initialization_status,
+)
 from deephaven_mcp.resource_manager import (
     BaseItemManager,
     CombinedSessionRegistry,
@@ -76,6 +79,12 @@ async def sessions_list(context: Context) -> dict:
                 - 'type' (str): Session type ("COMMUNITY" or "ENTERPRISE")
                 - 'source' (str): Source system name
                 - 'session_name' (str): Session name within the source
+            - 'initialization' (dict, optional): Present when enterprise session discovery is
+                still in progress or completed with errors. Contains:
+                - 'status' (str): Human-readable description of the initialization state.
+                - 'errors' (dict[str, str], optional): Present when one or more enterprise systems
+                    had connection errors during initial discovery. Keys are factory names, values
+                    are error descriptions.
             - 'error' (str, optional): Error message if retrieval failed.
             - 'isError' (bool, optional): Present and True if this is an error response.
 
@@ -117,14 +126,21 @@ async def sessions_list(context: Context) -> dict:
         _LOGGER.debug(
             "[mcp_systems_server:sessions_list] Retrieving all sessions from registry"
         )
-        sessions = await session_registry.get_all()
+        snapshot = await session_registry.get_all()
 
         _LOGGER.info(
-            f"[mcp_systems_server:sessions_list] Found {len(sessions)} sessions."
+            f"[mcp_systems_server:sessions_list] Found {len(snapshot.items)} sessions, "
+            f"init_phase={snapshot.initialization_phase.value}, "
+            f"init_errors={len(snapshot.initialization_errors)}"
         )
+        if snapshot.initialization_errors:
+            _LOGGER.warning(
+                f"[mcp_systems_server:sessions_list] Initialization errors: "
+                f"{snapshot.initialization_errors}"
+            )
 
         results = []
-        for fq_name, mgr in sessions.items():
+        for fq_name, mgr in snapshot.items.items():
             _LOGGER.debug(
                 f"[mcp_systems_server:sessions_list] Processing session '{fq_name}'"
             )
@@ -148,7 +164,16 @@ async def sessions_list(context: Context) -> dict:
                     f"[mcp_systems_server:sessions_list] Could not process session '{fq_name}': {e!r}"
                 )
                 results.append({"session_id": fq_name, "error": str(e)})
-        return {"success": True, "sessions": results}
+        response: dict[str, object] = {"success": True, "sessions": results}
+
+        # Surface initialization status from the same atomic snapshot
+        init_info = _format_initialization_status(
+            snapshot.initialization_phase, snapshot.initialization_errors
+        )
+        if init_info:
+            response["initialization"] = init_info
+
+        return response
     except Exception as e:
         _LOGGER.error(
             f"[mcp_systems_server:sessions_list] Failed: {e!r}", exc_info=True
@@ -390,7 +415,7 @@ async def session_details(
         except Exception as e:
             return {
                 "success": False,
-                "error": f"Session with ID '{session_id}' not found: {str(e)}",
+                "error": f"Session with ID '{session_id}' not found: {e}",
                 "isError": True,
             }
 

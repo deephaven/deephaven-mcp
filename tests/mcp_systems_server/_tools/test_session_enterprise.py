@@ -12,6 +12,7 @@ import pytest
 from conftest import MockContext, create_mock_instance_tracker
 
 from deephaven_mcp import config
+from deephaven_mcp._exceptions import RegistryItemNotFoundError
 from deephaven_mcp.mcp_systems_server._tools.session_enterprise import (
     _check_session_id_available,
     _check_session_limits,
@@ -25,7 +26,9 @@ from deephaven_mcp.resource_manager import (
     DockerLaunchedSession,
     DynamicCommunitySessionManager,
     EnterpriseSessionManager,
+    InitializationPhase,
     PythonLaunchedSession,
+    RegistrySnapshot,
     ResourceLivenessStatus,
     SystemType,
 )
@@ -85,7 +88,9 @@ async def test_session_enterprise_create_auto_name_no_username_and_language_tran
         mock_factory.connect_to_new_worker = AsyncMock(side_effect=capture_transformer)
 
         # Mock the session registry operations
-        mock_registry.get = AsyncMock(side_effect=KeyError("Session not found"))
+        mock_registry.get = AsyncMock(
+            side_effect=RegistryItemNotFoundError("Session not found")
+        )
         mock_registry.add_session = AsyncMock()
         mock_registry.count_added_sessions = AsyncMock(return_value=0)
 
@@ -269,13 +274,18 @@ async def test_enterprise_systems_status_success():
     # Mock enterprise registry
     mock_enterprise_registry = AsyncMock()
     mock_enterprise_registry.get_all = AsyncMock(
-        return_value={"system1": mock_factory1, "system2": mock_factory2}
+        return_value=RegistrySnapshot.simple(
+            items={"system1": mock_factory1, "system2": mock_factory2}
+        )
     )
 
     # Mock session registry
     mock_session_registry = MagicMock()
     mock_session_registry.enterprise_registry = AsyncMock(
         return_value=mock_enterprise_registry
+    )
+    mock_session_registry.get_all = AsyncMock(
+        return_value=RegistrySnapshot.simple(items={})
     )
 
     # Mock config manager
@@ -338,6 +348,9 @@ async def test_enterprise_systems_status_success():
     assert system2["config"]["url"] == "http://example2.com"
     assert system2["config"]["password"] == "[REDACTED]"
 
+    # COMPLETED with no errors should not include initialization info
+    assert "initialization" not in result
+
     # Verify liveness_status was called with attempt_to_connect=False
     mock_factory1.liveness_status.assert_called_once_with(ensure_item=False)
     mock_factory2.liveness_status.assert_called_once_with(ensure_item=False)
@@ -355,12 +368,17 @@ async def test_enterprise_systems_status_with_attempt_to_connect():
 
     # Mock enterprise registry
     mock_enterprise_registry = AsyncMock()
-    mock_enterprise_registry.get_all = AsyncMock(return_value={"system1": mock_factory})
+    mock_enterprise_registry.get_all = AsyncMock(
+        return_value=RegistrySnapshot.simple(items={"system1": mock_factory})
+    )
 
     # Mock session registry
     mock_session_registry = MagicMock()
     mock_session_registry.enterprise_registry = AsyncMock(
         return_value=mock_enterprise_registry
+    )
+    mock_session_registry.get_all = AsyncMock(
+        return_value=RegistrySnapshot.simple(items={})
     )
 
     # Mock config manager
@@ -397,6 +415,9 @@ async def test_enterprise_systems_status_with_attempt_to_connect():
         assert "liveness_detail" not in system1  # No detail was provided
         assert system1["is_alive"] is True
 
+        # COMPLETED with no errors should not include initialization info
+        assert "initialization" not in result
+
         # Verify liveness_status was called with attempt_to_connect=True
         mock_factory.liveness_status.assert_called_once_with(ensure_item=True)
 
@@ -406,18 +427,23 @@ async def test_enterprise_systems_status_no_systems():
     """Test enterprise systems status with no systems available."""
     # Mock enterprise registry with no systems
     mock_enterprise_registry = AsyncMock()
-    mock_enterprise_registry.get_all = AsyncMock(return_value={})
+    mock_enterprise_registry.get_all = AsyncMock(
+        return_value=RegistrySnapshot.simple(items={})
+    )
 
     # Mock session registry
     mock_session_registry = MagicMock()
     mock_session_registry.enterprise_registry = AsyncMock(
         return_value=mock_enterprise_registry
     )
+    mock_session_registry.get_all = AsyncMock(
+        return_value=RegistrySnapshot.simple(items={})
+    )
 
     # Mock config manager
     mock_config_manager = AsyncMock()
     mock_config_manager.get_config = AsyncMock(
-        return_value={"enterprise": {"factories": {}}}
+        return_value={"enterprise": {"systems": {}}}
     )
 
     # Create context
@@ -435,6 +461,8 @@ async def test_enterprise_systems_status_no_systems():
     # Verify the result
     assert result["success"] is True
     assert len(result["systems"]) == 0
+    # COMPLETED with no errors should not include initialization info
+    assert "initialization" not in result
 
 
 @pytest.mark.asyncio
@@ -466,12 +494,17 @@ async def test_enterprise_systems_status_all_status_types():
 
     # Mock enterprise registry
     mock_enterprise_registry = AsyncMock()
-    mock_enterprise_registry.get_all = AsyncMock(return_value=factories)
+    mock_enterprise_registry.get_all = AsyncMock(
+        return_value=RegistrySnapshot.simple(items=factories)
+    )
 
     # Mock session registry
     mock_session_registry = MagicMock()
     mock_session_registry.enterprise_registry = AsyncMock(
         return_value=mock_enterprise_registry
+    )
+    mock_session_registry.get_all = AsyncMock(
+        return_value=RegistrySnapshot.simple(items={})
     )
 
     # Mock config manager with empty configs
@@ -508,6 +541,9 @@ async def test_enterprise_systems_status_all_status_types():
             assert system["liveness_detail"] == detail
             assert system["is_alive"] == (status == ResourceLivenessStatus.ONLINE)
 
+        # COMPLETED with no errors should not include initialization info
+        assert "initialization" not in result
+
 
 @pytest.mark.asyncio
 async def test_enterprise_systems_status_config_error():
@@ -515,8 +551,14 @@ async def test_enterprise_systems_status_config_error():
     # Mock session registry
     mock_session_registry = MagicMock()
     mock_enterprise_registry = AsyncMock()
+    mock_enterprise_registry.get_all = AsyncMock(
+        return_value=RegistrySnapshot.simple(items={})
+    )
     mock_session_registry.enterprise_registry = AsyncMock(
         return_value=mock_enterprise_registry
+    )
+    mock_session_registry.get_all = AsyncMock(
+        return_value=RegistrySnapshot.simple(items={})
     )
 
     # Mock config manager that raises an exception
@@ -553,6 +595,9 @@ async def test_enterprise_systems_status_registry_error():
     mock_session_registry.enterprise_registry = AsyncMock(
         return_value=mock_enterprise_registry
     )
+    mock_session_registry.get_all = AsyncMock(
+        return_value=RegistrySnapshot.simple(items={})
+    )
 
     # Mock config manager
     mock_config_manager = AsyncMock()
@@ -588,12 +633,17 @@ async def test_enterprise_systems_status_liveness_error():
 
     # Mock enterprise registry
     mock_enterprise_registry = AsyncMock()
-    mock_enterprise_registry.get_all = AsyncMock(return_value={"system1": mock_factory})
+    mock_enterprise_registry.get_all = AsyncMock(
+        return_value=RegistrySnapshot.simple(items={"system1": mock_factory})
+    )
 
     # Mock session registry
     mock_session_registry = MagicMock()
     mock_session_registry.enterprise_registry = AsyncMock(
         return_value=mock_enterprise_registry
+    )
+    mock_session_registry.get_all = AsyncMock(
+        return_value=RegistrySnapshot.simple(items={})
     )
 
     # Mock config manager
@@ -632,7 +682,10 @@ async def test_enterprise_systems_status_no_enterprise_registry():
     mock_session_registry = MagicMock()
     mock_session_registry.enterprise_registry = AsyncMock(return_value=AsyncMock())
     mock_session_registry.enterprise_registry.return_value.get_all = AsyncMock(
-        return_value={}
+        return_value=RegistrySnapshot.simple(items={})
+    )
+    mock_session_registry.get_all = AsyncMock(
+        return_value=RegistrySnapshot.simple(items={})
     )
 
     # Mock config manager
@@ -656,6 +709,254 @@ async def test_enterprise_systems_status_no_enterprise_registry():
     # Verify the result
     assert result["success"] is True
     assert len(result["systems"]) == 0
+    # COMPLETED with no errors should not include initialization info
+    assert "initialization" not in result
+
+
+@pytest.mark.asyncio
+async def test_enterprise_systems_status_factory_snapshot_unexpected_phase():
+    """Test enterprise_systems_status raises InternalError for unexpected phase."""
+    from deephaven_mcp.resource_manager import InitializationPhase
+
+    mock_enterprise_registry = AsyncMock()
+    mock_enterprise_registry.get_all = AsyncMock(
+        return_value=RegistrySnapshot.with_initialization(
+            items={}, phase=InitializationPhase.LOADING, errors={}
+        )
+    )
+
+    mock_session_registry = MagicMock()
+    mock_session_registry.enterprise_registry = AsyncMock(
+        return_value=mock_enterprise_registry
+    )
+    mock_session_registry.get_all = AsyncMock(
+        return_value=RegistrySnapshot.simple(items={})
+    )
+
+    mock_config_manager = AsyncMock()
+    mock_config_manager.get_config = AsyncMock(
+        return_value={"enterprise": {"systems": {}}}
+    )
+
+    context = MockContext(
+        {
+            "session_registry": mock_session_registry,
+            "config_manager": mock_config_manager,
+            "instance_tracker": create_mock_instance_tracker(),
+        }
+    )
+
+    result = await enterprise_systems_status(context)
+
+    # InternalError is caught by the tool's except Exception handler
+    assert result["success"] is False
+    assert "expected SIMPLE" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_enterprise_systems_status_factory_snapshot_with_errors():
+    """Test enterprise_systems_status raises InternalError for factory snapshot errors."""
+    from deephaven_mcp.resource_manager import InitializationPhase
+
+    mock_enterprise_registry = AsyncMock()
+    mock_enterprise_registry.get_all = AsyncMock(
+        return_value=RegistrySnapshot.with_initialization(
+            items={},
+            phase=InitializationPhase.SIMPLE,
+            errors={"factory_reg": "something broke"},
+        )
+    )
+
+    mock_session_registry = MagicMock()
+    mock_session_registry.enterprise_registry = AsyncMock(
+        return_value=mock_enterprise_registry
+    )
+    mock_session_registry.get_all = AsyncMock(
+        return_value=RegistrySnapshot.simple(items={})
+    )
+
+    mock_config_manager = AsyncMock()
+    mock_config_manager.get_config = AsyncMock(
+        return_value={"enterprise": {"systems": {}}}
+    )
+
+    context = MockContext(
+        {
+            "session_registry": mock_session_registry,
+            "config_manager": mock_config_manager,
+            "instance_tracker": create_mock_instance_tracker(),
+        }
+    )
+
+    result = await enterprise_systems_status(context)
+
+    # Simple registry should never have errors - InternalError caught by handler
+    assert result["success"] is False
+    assert "unexpected errors" in result["error"]
+
+
+# =============================================================================
+# enterprise_systems_status initialization status tests
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_enterprise_systems_status_discovery_in_progress():
+    """Test enterprise_systems_status shows status when discovery is in progress."""
+    mock_enterprise_registry = AsyncMock()
+    mock_enterprise_registry.get_all = AsyncMock(
+        return_value=RegistrySnapshot.simple(items={})
+    )
+
+    mock_session_registry = MagicMock()
+    mock_session_registry.enterprise_registry = AsyncMock(
+        return_value=mock_enterprise_registry
+    )
+    mock_session_registry.get_all = AsyncMock(
+        return_value=RegistrySnapshot.with_initialization(
+            items={},
+            phase=InitializationPhase.LOADING,
+            errors={},
+        )
+    )
+
+    mock_config_manager = AsyncMock()
+    mock_config_manager.get_config = AsyncMock(
+        return_value={"enterprise": {"systems": {}}}
+    )
+
+    context = MockContext(
+        {
+            "session_registry": mock_session_registry,
+            "config_manager": mock_config_manager,
+            "instance_tracker": create_mock_instance_tracker(),
+        }
+    )
+
+    result = await enterprise_systems_status(context)
+
+    assert result["success"] is True
+    assert "initialization" in result
+    assert "still in progress" in result["initialization"]["status"]
+
+
+@pytest.mark.asyncio
+async def test_enterprise_systems_status_discovery_in_progress_with_errors():
+    """Test enterprise_systems_status shows both status and errors during discovery."""
+    mock_enterprise_registry = AsyncMock()
+    mock_enterprise_registry.get_all = AsyncMock(
+        return_value=RegistrySnapshot.simple(items={})
+    )
+
+    mock_session_registry = MagicMock()
+    mock_session_registry.enterprise_registry = AsyncMock(
+        return_value=mock_enterprise_registry
+    )
+    mock_session_registry.get_all = AsyncMock(
+        return_value=RegistrySnapshot.with_initialization(
+            items={},
+            phase=InitializationPhase.LOADING,
+            errors={"factory1": "Connection refused"},
+        )
+    )
+
+    mock_config_manager = AsyncMock()
+    mock_config_manager.get_config = AsyncMock(
+        return_value={"enterprise": {"systems": {}}}
+    )
+
+    context = MockContext(
+        {
+            "session_registry": mock_session_registry,
+            "config_manager": mock_config_manager,
+            "instance_tracker": create_mock_instance_tracker(),
+        }
+    )
+
+    result = await enterprise_systems_status(context)
+
+    assert result["success"] is True
+    assert "initialization" in result
+    assert "still in progress" in result["initialization"]["status"]
+    assert "errors" in result["initialization"]
+    assert "factory1" in result["initialization"]["errors"]
+
+
+@pytest.mark.asyncio
+async def test_enterprise_systems_status_completed_with_errors():
+    """Test enterprise_systems_status shows init_errors."""
+    mock_enterprise_registry = AsyncMock()
+    mock_enterprise_registry.get_all = AsyncMock(
+        return_value=RegistrySnapshot.simple(items={})
+    )
+
+    mock_session_registry = MagicMock()
+    mock_session_registry.enterprise_registry = AsyncMock(
+        return_value=mock_enterprise_registry
+    )
+    mock_session_registry.get_all = AsyncMock(
+        return_value=RegistrySnapshot.with_initialization(
+            items={},
+            phase=InitializationPhase.COMPLETED,
+            errors={"factory1": "Connection failed: Connection refused"},
+        )
+    )
+
+    mock_config_manager = AsyncMock()
+    mock_config_manager.get_config = AsyncMock(
+        return_value={"enterprise": {"systems": {}}}
+    )
+
+    context = MockContext(
+        {
+            "session_registry": mock_session_registry,
+            "config_manager": mock_config_manager,
+            "instance_tracker": create_mock_instance_tracker(),
+        }
+    )
+
+    result = await enterprise_systems_status(context)
+
+    assert result["success"] is True
+    assert "initialization" in result
+    assert "errors" in result["initialization"]
+    assert "factory1" in result["initialization"]["errors"]
+    assert "connection issues" in result["initialization"]["status"]
+
+
+@pytest.mark.asyncio
+async def test_enterprise_systems_status_completed_no_errors():
+    """Test enterprise_systems_status omits init fields when no errors."""
+    mock_enterprise_registry = AsyncMock()
+    mock_enterprise_registry.get_all = AsyncMock(
+        return_value=RegistrySnapshot.simple(items={})
+    )
+
+    mock_session_registry = MagicMock()
+    mock_session_registry.enterprise_registry = AsyncMock(
+        return_value=mock_enterprise_registry
+    )
+    mock_session_registry.get_all = AsyncMock(
+        return_value=RegistrySnapshot.simple(items={})
+    )
+
+    mock_config_manager = AsyncMock()
+    mock_config_manager.get_config = AsyncMock(
+        return_value={"enterprise": {"systems": {}}}
+    )
+
+    context = MockContext(
+        {
+            "session_registry": mock_session_registry,
+            "config_manager": mock_config_manager,
+            "instance_tracker": create_mock_instance_tracker(),
+        }
+    )
+
+    result = await enterprise_systems_status(context)
+
+    assert result["success"] is True
+    assert "initialization" not in result
 
 
 @pytest.mark.asyncio
@@ -701,7 +1002,7 @@ async def test_session_enterprise_create_success_with_defaults():
     # Mock no existing workers (under limit)
     mock_registry.get_all = AsyncMock(return_value={})
     mock_registry.get = AsyncMock(
-        side_effect=KeyError("Session not found")
+        side_effect=RegistryItemNotFoundError("Session not found")
     )  # No conflict
     mock_registry.add_session = AsyncMock()
     mock_registry.count_added_sessions = AsyncMock(return_value=0)
@@ -782,7 +1083,7 @@ async def test_session_enterprise_create_success_with_overrides():
 
     mock_registry.get_all = AsyncMock(return_value={})
     mock_registry.get = AsyncMock(
-        side_effect=KeyError("Session not found")
+        side_effect=RegistryItemNotFoundError("Session not found")
     )  # No conflict
     mock_registry.add_session = AsyncMock()
     mock_registry.count_added_sessions = AsyncMock(return_value=0)
@@ -863,7 +1164,7 @@ async def test_session_enterprise_create_auto_generate_name():
 
         mock_registry.get_all = AsyncMock(return_value={})
         mock_registry.get = AsyncMock(
-            side_effect=KeyError("Session not found")
+            side_effect=RegistryItemNotFoundError("Session not found")
         )  # No conflict
         mock_registry.add_session = AsyncMock()
         mock_registry.count_added_sessions = AsyncMock(return_value=0)
@@ -931,9 +1232,11 @@ async def test_session_enterprise_create_max_workers_exceeded():
         ]:
             return MagicMock(spec=EnterpriseSessionManager)
         elif session_id == "enterprise:limited-system:worker3":
-            raise KeyError("Session not found")  # New session doesn't exist yet
+            raise RegistryItemNotFoundError(
+                "Session not found"
+            )  # New session doesn't exist yet
         else:
-            raise KeyError("Session not found")
+            raise RegistryItemNotFoundError("Session not found")
 
     mock_registry.get = AsyncMock(side_effect=mock_session_get)
 
@@ -1012,7 +1315,9 @@ async def test_session_enterprise_create_factory_creation_failure():
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
 
     # Mock session registry - no conflict
-    mock_registry.get = AsyncMock(side_effect=KeyError("No session found"))
+    mock_registry.get = AsyncMock(
+        side_effect=RegistryItemNotFoundError("No session found")
+    )
     mock_registry.get_all = AsyncMock(return_value={})
     mock_registry.count_added_sessions = AsyncMock(return_value=0)
 
@@ -1157,7 +1462,9 @@ async def test_session_enterprise_delete_session_not_found():
     full_config = {"enterprise": {"systems": enterprise_config}}
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
 
-    mock_registry.get = AsyncMock(side_effect=KeyError("Session not found"))
+    mock_registry.get = AsyncMock(
+        side_effect=RegistryItemNotFoundError("Session not found")
+    )
 
     context = MockContext(
         {"config_manager": mock_config_manager, "session_registry": mock_registry}
@@ -1398,8 +1705,10 @@ async def test_session_enterprise_create_success():
     mock_factory.connect_to_new_worker = AsyncMock(return_value=mock_session)
     mock_session_registry.add_session = AsyncMock()
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
-    # Mock session registry get to raise KeyError for non-existent sessions (indicates session doesn't exist yet)
-    mock_session_registry.get = AsyncMock(side_effect=KeyError("Session not found"))
+    # Mock session registry get to raise RegistryItemNotFoundError for non-existent sessions
+    mock_session_registry.get = AsyncMock(
+        side_effect=RegistryItemNotFoundError("Session not found")
+    )
 
     # Mock config
     enterprise_config = {
@@ -1474,8 +1783,10 @@ async def test_session_enterprise_create_auto_generated_name():
     mock_factory.connect_to_new_worker = AsyncMock(return_value=mock_session)
     mock_session_registry.add_session = AsyncMock()
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
-    # Mock session registry get to raise KeyError for non-existent sessions (indicates session doesn't exist yet)
-    mock_session_registry.get = AsyncMock(side_effect=KeyError("Session not found"))
+    # Mock session registry get to raise RegistryItemNotFoundError for non-existent sessions
+    mock_session_registry.get = AsyncMock(
+        side_effect=RegistryItemNotFoundError("Session not found")
+    )
 
     # Mock config with username
     enterprise_config = {
@@ -1557,7 +1868,7 @@ async def test_session_enterprise_create_max_sessions_reached():
             "enterprise:test-system:session2",
         ]:
             return MagicMock()
-        raise KeyError(f"Session {session_id} not found")
+        raise RegistryItemNotFoundError(f"Session {session_id} not found")
 
     mock_session_registry.get = AsyncMock(side_effect=mock_get)
 
@@ -1704,8 +2015,10 @@ async def test_session_enterprise_delete_not_found():
     full_config = {"enterprise": {"systems": enterprise_config}}
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
 
-    # Mock session registry to return KeyError for non-existent session
-    mock_session_registry.get = AsyncMock(side_effect=KeyError("Session not found"))
+    # Mock session registry to return RegistryItemNotFoundError for non-existent session
+    mock_session_registry.get = AsyncMock(
+        side_effect=RegistryItemNotFoundError("Session not found")
+    )
 
     context = MockContext(
         {
@@ -1837,7 +2150,9 @@ def test_generate_session_name_if_none_without_username():
 async def test_check_session_id_available_success():
     """Test _check_session_id_available when session ID is available."""
     mock_session_registry = MagicMock()
-    mock_session_registry.get = AsyncMock(side_effect=KeyError("Session not found"))
+    mock_session_registry.get = AsyncMock(
+        side_effect=RegistryItemNotFoundError("Session not found")
+    )
 
     result = await _check_session_id_available(mock_session_registry, "test-session-id")
 

@@ -1,17 +1,37 @@
 """
-Tests for CombinedSessionRegistry.
+Tests for CombinedSessionRegistry and _fetch_factory_pqs.
 
-This module contains comprehensive tests for the CombinedSessionRegistry class, which
-manages both community and enterprise session registries with proper BaseRegistry inheritance,
-controller client caching, and lifecycle management.
+Structure:
+  TestConstruction               — __init__ state
+  TestLoadItems                  — _load_items (called by super().initialize)
+  TestInitialize                 — initialize() lifecycle + background task
+  TestClose                      — close() lifecycle
+  TestGet                        — get() with refresh logic
+  TestGetAll                     — get_all() with refresh logic
+  TestAddSession                 — add_session()
+  TestRemoveSession              — remove_session()
+  TestCountAddedSessions         — count_added_sessions()
+  TestIsAddedSession             — is_added_session()
+  TestSyncEnterpriseSessions     — _sync_enterprise_sessions() orchestration
+  TestSnapshotFactoryState       — _snapshot_factory_state()
+  TestGetFactoryKeys             — _get_factory_keys()
+  TestRemoveFactorySessionsByKeys — _remove_factory_sessions_by_keys()
+  TestRemoveFactorySessions      — _remove_factory_sessions()
+  TestApplyFactorySuccess        — _apply_factory_success()
+  TestApplyFactoryError          — _apply_factory_error()
+  TestApplyResults               — _apply_results() dispatch
+  TestDiscoverEnterpriseSessions — _discover_enterprise_sessions()
+  TestBuildNotFoundMessage       — _build_not_found_message()
+  TestMakeEnterpriseSessionManager — static helper
+  TestQueryFactory               — module-level _fetch_factory_pqs()
 """
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, Mock, PropertyMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from deephaven_mcp._exceptions import DeephavenConnectionError, InternalError
+from deephaven_mcp._exceptions import InternalError, RegistryItemNotFoundError
 from deephaven_mcp.client import CorePlusControllerClient
 from deephaven_mcp.config import ConfigManager
 from deephaven_mcp.resource_manager import (
@@ -21,1771 +41,1674 @@ from deephaven_mcp.resource_manager import (
     CorePlusSessionFactoryManager,
     CorePlusSessionFactoryRegistry,
     EnterpriseSessionManager,
+    InitializationPhase,
+    RegistrySnapshot,
     SystemType,
 )
+from deephaven_mcp.resource_manager._registry_combined import (
+    _FactoryQueryError,
+    _FactoryQueryResult,
+    _FactorySnapshot,
+    _fetch_factory_pqs,
+)
+
+# ---------------------------------------------------------------------------
+# Shared fixtures
+# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
-def mock_config_manager():
-    """Create a mock config manager for testing."""
-    config_manager = MagicMock(spec=ConfigManager)
-    return config_manager
-
-
-@pytest.fixture
-def combined_registry():
-    """Create a CombinedSessionRegistry instance for testing."""
+def registry():
+    """Uninitialized CombinedSessionRegistry."""
     return CombinedSessionRegistry()
 
 
 @pytest.fixture
-def initialized_registry(combined_registry, mock_config_manager):
-    """Create a properly initialized CombinedSessionRegistry instance for testing."""
-    # Set up mocks for initialization
-    combined_registry._community_registry = MagicMock(spec=CommunitySessionRegistry)
-    combined_registry._community_registry.initialize = AsyncMock()
-
-    combined_registry._enterprise_registry = MagicMock(
-        spec=CorePlusSessionFactoryRegistry
-    )
-    combined_registry._enterprise_registry.initialize = AsyncMock()
-
-    # Mark as initialized
-    combined_registry._initialized = True
-
-    return combined_registry
-
-
-class TestCombinedSessionRegistryConstruction:
-    """Test CombinedSessionRegistry construction and basic properties."""
-
-    def test_construction(self, combined_registry):
-        """Test that CombinedSessionRegistry can be constructed."""
-        assert combined_registry is not None
-        assert combined_registry._community_registry is None
-        assert combined_registry._enterprise_registry is None
-        assert combined_registry._controller_clients == {}
-
-    def test_inherits_from_base_registry(self, combined_registry):
-        """Test that CombinedSessionRegistry properly inherits from BaseRegistry."""
-        # Should have base registry attributes
-        assert hasattr(combined_registry, "_lock")
-        assert hasattr(combined_registry, "_items")
-        assert hasattr(combined_registry, "_initialized")
-
-
-class TestCombinedSessionRegistryInitialization:
-    """Test CombinedSessionRegistry initialization."""
-
-    @pytest.mark.asyncio
-    async def test_initialize_success(self, combined_registry, mock_config_manager):
-        """Test successful initialization of both registries."""
-        # Patch the registries and update_enterprise_sessions
-        with (
-            patch.object(
-                CommunitySessionRegistry,
-                "__new__",
-                return_value=MagicMock(spec=CommunitySessionRegistry),
-            ) as mock_community_cls,
-            patch.object(
-                CorePlusSessionFactoryRegistry,
-                "__new__",
-                return_value=MagicMock(spec=CorePlusSessionFactoryRegistry),
-            ) as mock_enterprise_cls,
-            patch.object(
-                combined_registry, "_update_enterprise_sessions", AsyncMock()
-            ) as mock_update,
-        ):
-
-            # Set up mocks for initialize
-            mock_community_registry = mock_community_cls.return_value
-            mock_community_registry.initialize = AsyncMock()
-            mock_community_registry.get_all = AsyncMock(return_value={})
-
-            mock_enterprise_registry = mock_enterprise_cls.return_value
-            mock_enterprise_registry.initialize = AsyncMock()
-
-            # Call initialize
-            await combined_registry.initialize(mock_config_manager)
-
-            # Allow the event loop to process any pending tasks
-            await asyncio.sleep(0)
-
-            # Verify correct calls were made
-            mock_community_registry.initialize.assert_called_once_with(
-                mock_config_manager
-            )
-            mock_enterprise_registry.initialize.assert_called_once_with(
-                mock_config_manager
-            )
-            mock_update.assert_awaited_once()
-
-            # Verify registry was marked as initialized
-            assert combined_registry._initialized is True
-
-    @pytest.mark.asyncio
-    async def test_initialize_community_failure(
-        self, combined_registry, mock_config_manager
-    ):
-        """Test handling of community registry initialization failure."""
-        # Patch the registries and update_enterprise_sessions
-        combined_registry._update_enterprise_sessions = AsyncMock()
-        mock_update = combined_registry._update_enterprise_sessions
-
-        with (
-            patch(
-                "deephaven_mcp.resource_manager._registry_combined.CommunitySessionRegistry"
-            ) as mock_community_cls,
-            patch(
-                "deephaven_mcp.resource_manager._registry_combined.CorePlusSessionFactoryRegistry"
-            ) as mock_enterprise_cls,
-        ):
-
-            # Set up community registry to fail initialization
-            mock_community_registry = mock_community_cls.return_value
-            mock_community_registry.initialize = AsyncMock(
-                side_effect=Exception("Community initialization failed")
-            )
-
-            # Set up enterprise registry
-            mock_enterprise_registry = mock_enterprise_cls.return_value
-            mock_enterprise_registry.initialize = AsyncMock()
-
-            # Try to initialize the registry (should raise)
-            with pytest.raises(Exception, match="Community initialization failed"):
-                await combined_registry.initialize(mock_config_manager)
-
-            # Verify registries were created but only community was initialized
-            mock_community_registry.initialize.assert_awaited_once_with(
-                mock_config_manager
-            )
-            mock_enterprise_registry.initialize.assert_not_called()
-            mock_update.assert_not_awaited()
-
-            # Verify registry was not marked as initialized
-            assert combined_registry._initialized is False
-
-    @pytest.mark.asyncio
-    async def test_initialize_enterprise_failure(
-        self, combined_registry, mock_config_manager
-    ):
-        """Test handling of enterprise registry initialization failure."""
-        # Patch the registries and update_enterprise_sessions
-        with (
-            patch.object(combined_registry, "_community_registry", None),
-            patch.object(combined_registry, "_enterprise_registry", None),
-            patch.object(
-                combined_registry, "_update_enterprise_sessions", AsyncMock()
-            ) as mock_update,
-            patch(
-                "deephaven_mcp.resource_manager._registry_combined.CommunitySessionRegistry"
-            ) as mock_community_cls,
-            patch(
-                "deephaven_mcp.resource_manager._registry_combined.CorePlusSessionFactoryRegistry"
-            ) as mock_enterprise_cls,
-        ):
-
-            # Set up community registry
-            mock_community_registry = mock_community_cls.return_value
-            mock_community_registry.initialize = AsyncMock()
-
-            # Set up enterprise registry to fail initialization
-            mock_enterprise_registry = mock_enterprise_cls.return_value
-            mock_enterprise_registry.initialize = AsyncMock(
-                side_effect=Exception("Enterprise initialization failed")
-            )
-
-            # Try to initialize the registry (should raise)
-            with pytest.raises(Exception, match="Enterprise initialization failed"):
-                await combined_registry.initialize(mock_config_manager)
-
-            # Verify registries were created and initialize was attempted
-            mock_community_registry.initialize.assert_awaited_once_with(
-                mock_config_manager
-            )
-            mock_enterprise_registry.initialize.assert_awaited_once_with(
-                mock_config_manager
-            )
-
-            # Verify enterprise sessions were not updated
-            mock_update.assert_not_awaited()
-
-            # Verify registry was not marked as initialized
-            assert combined_registry._initialized is False
-
-    @pytest.mark.asyncio
-    async def test_double_initialization_warning(
-        self, combined_registry, mock_config_manager
-    ):
-        """Test that initializing an already initialized registry is handled properly."""
-        # First initialization
-        with (
-            patch.object(
-                CommunitySessionRegistry,
-                "__new__",
-                return_value=MagicMock(spec=CommunitySessionRegistry),
-            ) as mock_community_cls,
-            patch.object(
-                CorePlusSessionFactoryRegistry,
-                "__new__",
-                return_value=MagicMock(spec=CorePlusSessionFactoryRegistry),
-            ) as mock_enterprise_cls,
-            patch.object(
-                combined_registry, "_update_enterprise_sessions", AsyncMock()
-            ) as mock_update,
-        ):
-
-            mock_community_registry = mock_community_cls.return_value
-            mock_community_registry.initialize = AsyncMock()
-            mock_community_registry.get_all = AsyncMock(return_value={})
-
-            mock_enterprise_registry = mock_enterprise_cls.return_value
-            mock_enterprise_registry.initialize = AsyncMock()
-
-            await combined_registry.initialize(mock_config_manager)
-
-        # Second initialization should be a no-op
-        with patch.object(
-            combined_registry, "_update_enterprise_sessions", AsyncMock()
-        ) as mock_update:
-            with patch(
-                "deephaven_mcp.resource_manager._registry_combined._LOGGER.warning"
-            ) as mock_warn:
-                await combined_registry.initialize(mock_config_manager)
-
-                # Verify warning was logged
-                assert mock_warn.called
-
-                # Verify enterprise sessions were not updated again
-                mock_update.assert_not_awaited()
-
-    @pytest.mark.asyncio
-    async def test_initialize_with_community_sessions(
-        self, combined_registry, mock_config_manager
-    ):
-        """Test initialization when community registry has sessions to load."""
-        # Create mock session managers with proper full_name attributes
-        mock_session1 = MagicMock()
-        mock_session1.full_name = "community:local:session1"
-        mock_session2 = MagicMock()
-        mock_session2.full_name = "community:local:session2"
-        community_sessions = {
-            "community:local:session1": mock_session1,
-            "community:local:session2": mock_session2,
-        }
-
-        with (
-            patch.object(
-                CommunitySessionRegistry,
-                "__new__",
-                return_value=MagicMock(spec=CommunitySessionRegistry),
-            ) as mock_community_cls,
-            patch.object(
-                CorePlusSessionFactoryRegistry,
-                "__new__",
-                return_value=MagicMock(spec=CorePlusSessionFactoryRegistry),
-            ) as mock_enterprise_cls,
-            patch.object(
-                combined_registry, "_update_enterprise_sessions", AsyncMock()
-            ) as mock_update,
-        ):
-
-            # Set up mocks for initialize
-            mock_community_registry = mock_community_cls.return_value
-            mock_community_registry.initialize = AsyncMock()
-            mock_community_registry.get_all = AsyncMock(return_value=community_sessions)
-
-            mock_enterprise_registry = mock_enterprise_cls.return_value
-            mock_enterprise_registry.initialize = AsyncMock()
-
-            # Call initialize
-            await combined_registry.initialize(mock_config_manager)
-
-            # Verify community sessions were loaded into _items
-            assert len(combined_registry._items) == 2
-            assert combined_registry._items["community:local:session1"] == mock_session1
-            assert combined_registry._items["community:local:session2"] == mock_session2
-
-            # Verify correct calls were made
-            mock_community_registry.initialize.assert_called_once_with(
-                mock_config_manager
-            )
-            mock_community_registry.get_all.assert_called_once()
-            mock_enterprise_registry.initialize.assert_called_once_with(
-                mock_config_manager
-            )
-            mock_update.assert_awaited_once()
-
-            # Verify registry was marked as initialized
-            assert combined_registry._initialized is True
-
-    @pytest.mark.asyncio
-    async def test_initialize_community_get_all_failure(
-        self, combined_registry, mock_config_manager
-    ):
-        """Test initialization when community registry get_all() fails."""
-        with (
-            patch.object(
-                CommunitySessionRegistry,
-                "__new__",
-                return_value=MagicMock(spec=CommunitySessionRegistry),
-            ) as mock_community_cls,
-            patch.object(
-                CorePlusSessionFactoryRegistry,
-                "__new__",
-                return_value=MagicMock(spec=CorePlusSessionFactoryRegistry),
-            ) as mock_enterprise_cls,
-            patch.object(
-                combined_registry, "_update_enterprise_sessions", AsyncMock()
-            ) as mock_update,
-        ):
-
-            # Set up mocks for initialize
-            mock_community_registry = mock_community_cls.return_value
-            mock_community_registry.initialize = AsyncMock()
-            mock_community_registry.get_all = AsyncMock(
-                side_effect=Exception("Community get_all failed")
-            )
-
-            mock_enterprise_registry = mock_enterprise_cls.return_value
-            mock_enterprise_registry.initialize = AsyncMock()
-
-            # Call initialize should propagate the exception
-            with pytest.raises(Exception, match="Community get_all failed"):
-                await combined_registry.initialize(mock_config_manager)
-
-            # Verify registry was not marked as initialized due to failure
-            assert combined_registry._initialized is False
-
-    @pytest.mark.asyncio
-    async def test_initialize_with_empty_community_sessions(
-        self, combined_registry, mock_config_manager
-    ):
-        """Test initialization when community registry returns empty sessions dict."""
-        with (
-            patch.object(
-                CommunitySessionRegistry,
-                "__new__",
-                return_value=MagicMock(spec=CommunitySessionRegistry),
-            ) as mock_community_cls,
-            patch.object(
-                CorePlusSessionFactoryRegistry,
-                "__new__",
-                return_value=MagicMock(spec=CorePlusSessionFactoryRegistry),
-            ) as mock_enterprise_cls,
-            patch.object(
-                combined_registry, "_update_enterprise_sessions", AsyncMock()
-            ) as mock_update,
-        ):
-
-            # Set up mocks for initialize with empty community sessions
-            mock_community_registry = mock_community_cls.return_value
-            mock_community_registry.initialize = AsyncMock()
-            mock_community_registry.get_all = AsyncMock(return_value={})
-
-            mock_enterprise_registry = mock_enterprise_cls.return_value
-            mock_enterprise_registry.initialize = AsyncMock()
-
-            # Call initialize
-            await combined_registry.initialize(mock_config_manager)
-
-            # Verify no community sessions were loaded (empty _items initially)
-            # Note: _items may contain enterprise sessions after _update_enterprise_sessions
-            # but should not contain any community sessions
-            community_items = {
-                k: v
-                for k, v in combined_registry._items.items()
-                if k.startswith("community:")
-            }
-            assert len(community_items) == 0
-
-            # Verify correct calls were made
-            mock_community_registry.get_all.assert_called_once()
-            mock_update.assert_awaited_once()
-            assert combined_registry._initialized is True
-
-    @pytest.mark.asyncio
-    async def test_initialize_community_sessions_overwrite_behavior(
-        self, combined_registry, mock_config_manager
-    ):
-        """Test that community sessions properly overwrite any existing items with same keys."""
-        # Pre-populate _items with some existing data
-        existing_session = MagicMock()
-        combined_registry._items["community:local:session1"] = existing_session
-
-        # Create new mock session managers with proper full_name attributes
-        new_mock_session1 = MagicMock()
-        new_mock_session1.full_name = "community:local:session1"
-        new_mock_session2 = MagicMock()
-        new_mock_session2.full_name = "community:local:session2"
-        community_sessions = {
-            "community:local:session1": new_mock_session1,  # Should overwrite existing
-            "community:local:session2": new_mock_session2,  # Should be new
-        }
-
-        with (
-            patch.object(
-                CommunitySessionRegistry,
-                "__new__",
-                return_value=MagicMock(spec=CommunitySessionRegistry),
-            ) as mock_community_cls,
-            patch.object(
-                CorePlusSessionFactoryRegistry,
-                "__new__",
-                return_value=MagicMock(spec=CorePlusSessionFactoryRegistry),
-            ) as mock_enterprise_cls,
-            patch.object(
-                combined_registry, "_update_enterprise_sessions", AsyncMock()
-            ) as mock_update,
-        ):
-
-            # Set up mocks for initialize
-            mock_community_registry = mock_community_cls.return_value
-            mock_community_registry.initialize = AsyncMock()
-            mock_community_registry.get_all = AsyncMock(return_value=community_sessions)
-
-            mock_enterprise_registry = mock_enterprise_cls.return_value
-            mock_enterprise_registry.initialize = AsyncMock()
-
-            # Call initialize
-            await combined_registry.initialize(mock_config_manager)
-
-            # Verify community sessions were loaded and overwrote existing
-            assert (
-                combined_registry._items["community:local:session1"]
-                == new_mock_session1
-            )  # Overwritten
-            assert (
-                combined_registry._items["community:local:session1"] != existing_session
-            )  # Not the old one
-            assert (
-                combined_registry._items["community:local:session2"]
-                == new_mock_session2
-            )  # New
-
-            # Verify correct calls were made
-            mock_community_registry.get_all.assert_called_once()
-            assert combined_registry._initialized is True
-
-
-class TestCombinedSessionRegistryAccessors:
-    """Test CombinedSessionRegistry registry accessor methods."""
-
-    @pytest.mark.asyncio
-    async def test_community_registry_not_initialized(self, combined_registry):
-        """Test that accessing community registry before initialization raises InternalError."""
-        with pytest.raises(InternalError):
-            await combined_registry.community_registry()
-
-    @pytest.mark.asyncio
-    async def test_enterprise_registry_not_initialized(self, combined_registry):
-        """Test that accessing enterprise registry before initialization raises InternalError."""
-        with pytest.raises(InternalError):
-            await combined_registry.enterprise_registry()
-
-    @pytest.mark.asyncio
-    async def test_community_registry_after_initialize(self, initialized_registry):
-        """Test getting community registry after initialization."""
-        community_registry = await initialized_registry.community_registry()
-        assert community_registry == initialized_registry._community_registry
-
-    @pytest.mark.asyncio
-    async def test_enterprise_registry_after_initialize(self, initialized_registry):
-        """Test getting enterprise registry after initialization."""
-        enterprise_registry = await initialized_registry.enterprise_registry()
-        assert enterprise_registry == initialized_registry._enterprise_registry
-
-
-class TestControllerClientCaching:
-    """Test controller client caching and lifecycle management."""
-
-    @pytest.mark.asyncio
-    async def test_get_or_create_controller_client_new(self, combined_registry):
-        """Test creating a new controller client when none exists."""
-        # Setup mocks
-        mock_factory = MagicMock(spec=CorePlusSessionFactoryManager)
-        mock_factory_instance = MagicMock()
-        mock_client = MagicMock(spec=CorePlusControllerClient)
-        mock_client.subscribe = AsyncMock()
-
-        # Mock successful client creation
-        mock_factory.get = AsyncMock(return_value=mock_factory_instance)
-        type(mock_factory_instance).controller_client = PropertyMock(
-            return_value=mock_client
-        )
-        # Call the method
-        client = await combined_registry._get_or_create_controller_client(
-            mock_factory, "test_factory"
-        )
-
-        # Verify client was created, subscribed, and cached
-        mock_factory.get.assert_awaited_once()
-        assert mock_factory_instance.controller_client == mock_client
-        mock_client.subscribe.assert_awaited_once()
-        assert client == mock_client
-        assert combined_registry._controller_clients["test_factory"] == mock_client
-        assert client == mock_client
-
-    @pytest.mark.asyncio
-    async def test_get_or_create_controller_client_reuse_healthy(
-        self, combined_registry
-    ):
-        """Test reusing an existing healthy controller client."""
-        # Setup mocks
-        mock_client = MagicMock(spec=CorePlusControllerClient)
-        mock_client.ping = AsyncMock(return_value=True)
-
-        # First create a client and add to cache
-        combined_registry._controller_clients["test_factory"] = mock_client
-
-        # Set up the factory with mocked methods
-        factory = MagicMock(spec=CorePlusSessionFactoryManager)
-        mock_factory_instance = MagicMock()
-        factory.get = AsyncMock(return_value=mock_factory_instance)
-
-        # Call should reuse the client since it's healthy
-        client = await combined_registry._get_or_create_controller_client(
-            factory, "test_factory"
-        )
-
-        # Verify the client was reused not recreated
-        factory.get.assert_not_called()
-        assert client == mock_client
-        mock_client.ping.assert_awaited_once()
-
-    @pytest.mark.asyncio
-    async def test_get_or_create_controller_client_recreate_dead(
-        self, combined_registry
-    ):
-        """Test recreating a controller client when the cached one is dead."""
-        # Setup mocks
-        mock_factory = MagicMock(spec=CorePlusSessionFactoryManager)
-        mock_factory_instance = MagicMock()
-        mock_old_client = MagicMock(spec=CorePlusControllerClient)
-        mock_old_client.ping = AsyncMock(
-            side_effect=DeephavenConnectionError("Dead client")
-        )
-        mock_factory_instance = MagicMock()
-        mock_new_client = MagicMock(spec=CorePlusControllerClient)
-        mock_new_client.subscribe = AsyncMock()
-
-        # Pre-populate cache with a dead client
-        combined_registry._controller_clients["test_factory"] = mock_old_client
-
-        mock_factory.get = AsyncMock(return_value=mock_factory_instance)
-        type(mock_factory_instance).controller_client = PropertyMock(
-            return_value=mock_new_client
-        )
-
-        # Call the method
-        client = await combined_registry._get_or_create_controller_client(
-            mock_factory, "test_factory"
-        )
-
-        # Verify new client was created, subscribed, and old client was replaced
-        mock_factory.get.assert_awaited_once()
-        mock_new_client.subscribe.assert_awaited_once()
-        # Access the controller_client property
-        assert client == mock_new_client
-        assert combined_registry._controller_clients["test_factory"] == mock_new_client
-        assert client == mock_new_client
-
-    @pytest.mark.asyncio
-    async def test_get_or_create_controller_client_close_exception(
-        self, combined_registry
-    ):
-        """Test handling of exceptions when closing a dead controller client."""
-        # Setup mocks
-        mock_factory = MagicMock(spec=CorePlusSessionFactoryManager)
-        mock_factory_instance = MagicMock()
-        mock_old_client = MagicMock(spec=CorePlusControllerClient)
-        mock_new_client = MagicMock(spec=CorePlusControllerClient)
-        mock_new_client.subscribe = AsyncMock()
-
-        # Pre-populate cache with a dead client
-        combined_registry._controller_clients["test_factory"] = mock_old_client
-
-        # Mock failed health check (False result)
-        mock_old_client.ping = AsyncMock(return_value=False)
-
-        mock_factory.get = AsyncMock(return_value=mock_factory_instance)
-        # Mock property instead of method
-        type(mock_factory_instance).controller_client = PropertyMock(
-            return_value=mock_new_client
-        )
-
-        # Call the method
-        client = await combined_registry._get_or_create_controller_client(
-            mock_factory, "test_factory"
-        )
-
-        # Verify new client was created and subscribed
-        mock_factory.get.assert_awaited_once()
-        mock_new_client.subscribe.assert_awaited_once()
-
-        # Verify cache was updated
-        assert combined_registry._controller_clients["test_factory"] == mock_new_client
-        assert client == mock_new_client
-
-
-class TestEnterpriseSessionUpdate:
-    """Test the _update_enterprise_sessions method."""
-
-    @pytest.mark.asyncio
-    async def test_update_enterprise_sessions_not_initialized(self, combined_registry):
-        """Test that updating enterprise sessions before initialization raises InternalError."""
-        with pytest.raises(InternalError):
-            await combined_registry._update_enterprise_sessions()
-
-    @pytest.mark.asyncio
-    async def test_update_enterprise_sessions_success(self, initialized_registry):
-        """Test successful enterprise session update."""
-        # Setup mocks
-        mock_factory = MagicMock(spec=CorePlusSessionFactoryManager)
-        mock_client = MagicMock(spec=CorePlusControllerClient)
-        mock_session = MagicMock(spec=EnterpriseSessionManager)
-
-        # Mock enterprise registry responses
-        initialized_registry._enterprise_registry.get_all = AsyncMock(
-            return_value={"factory1": mock_factory}
-        )
-        initialized_registry._enterprise_registry.get = AsyncMock(
-            return_value=mock_factory
-        )
-
-        # Make sure the _items dict exists
-        initialized_registry._items = {}
-
-        # Mock controller client
-        with patch.object(
-            initialized_registry,
-            "_get_or_create_controller_client",
-            AsyncMock(return_value=mock_client),
-        ):
-            # Mock session map from controller with proper structure
-            mock_session_info = MagicMock()
-            mock_session_info.config.pb.name = "session1"
-            mock_client.map = AsyncMock(return_value={"session1": mock_session_info})
-            mock_client.ping = AsyncMock(return_value=True)
-
-            # Mock session creation
-            with patch.object(
-                CombinedSessionRegistry,
-                "_make_enterprise_session_manager",
-                return_value=mock_session,
-            ) as mock_make_session:
-                # Update sessions
-                await initialized_registry._update_enterprise_sessions()
-
-                # Verify session was created and added
-                mock_make_session.assert_called_once_with(
-                    mock_factory, "factory1", "session1"
-                )
-
-                # Verify session was added to items using the session's full_name property
-                assert (
-                    initialized_registry._items[mock_session.full_name] == mock_session
-                )
-
-    @pytest.mark.asyncio
-    async def test_update_enterprise_sessions_reuses_existing(
-        self, initialized_registry
-    ):
-        """Test that _update_enterprise_sessions reuses existing session managers (covers line 401)."""
-        # Setup mock factory and client
-        mock_factory = MagicMock(spec=CorePlusSessionFactoryManager)
-        mock_factory.name = "factory1"
-
-        # Mock get_all to return our mock factory
-        initialized_registry._enterprise_registry.get_all = AsyncMock(
-            return_value={"factory1": mock_factory}
-        )
-
-        # Mock controller client
-        mock_client = AsyncMock(spec=CorePlusControllerClient)
-        mock_client.ping = AsyncMock(return_value=True)
-
-        # Setup existing session manager that will be reused
-        session_key = BaseItemManager.make_full_name(
-            SystemType.ENTERPRISE, "factory1", "session1"
-        )
-        session_manager = AsyncMock(spec=EnterpriseSessionManager)
-        session_manager.full_name = session_key
-
-        # Add existing session to registry
-        initialized_registry._items = {session_key: session_manager}
-
-        # Create a spy on _make_enterprise_session_manager to track when it's called
-        with patch.object(
-            initialized_registry,
-            "_make_enterprise_session_manager",
-            wraps=initialized_registry._make_enterprise_session_manager,
-        ) as make_spy:
-
-            # Mock controller client's map() to return sessions including our existing one
-            mock_session_info = MagicMock()
-            mock_session_info.config.pb.name = "session1"
-            mock_client.map = AsyncMock(return_value={"session1": mock_session_info})
-
-            # Create a controller client to be reused
-            initialized_registry._controller_clients = {"factory1": mock_client}
-
-            # Run update sessions
-            await initialized_registry._update_enterprise_sessions()
-
-            # Verify session is still in registry
-            assert session_key in initialized_registry._items
-            assert initialized_registry._items[session_key] == session_manager
-
-            # Verify make_session wasn't called for our existing session
-            for call in make_spy.mock_calls:
-                # Extract the session_name from the call args
-                # The order is (factory, factory_name, session_name)
-                if len(call[1]) >= 3 and call[1][2] == "session1":
-                    assert (
-                        False
-                    ), "_make_enterprise_session_manager was called for session1 when it should be reused"
-
-            # The method might be called for other sessions, but not for our reused session
-
-    @pytest.mark.asyncio
-    async def test_close_stale_sessions_ignores_nonexistent_key(
-        self, initialized_registry
-    ):
-        """Test that _close_stale_enterprise_sessions handles keys that are not in the registry."""
-        # Arrange
-        non_existent_key = "enterprise/factory1/non_existent_session"
-        initialized_registry._items = {}
-
-        # Act
-        # Call the method with a key that doesn't exist. It should not raise an error.
-        await initialized_registry._close_stale_enterprise_sessions({non_existent_key})
-
-        # Assert
-        # No assertion needed, the test passes if no exception is raised.
-        pass
-
-    @pytest.mark.asyncio
-    async def test_update_enterprise_sessions_removes_stale(self, initialized_registry):
-        """Test that update removes stale enterprise sessions."""
-        # Setup mocks
-        mock_factory = MagicMock(spec=CorePlusSessionFactoryManager)
-        mock_client = MagicMock(spec=CorePlusControllerClient)
-        mock_old_session = MagicMock(spec=EnterpriseSessionManager)
-
-        # Mock enterprise registry response
-        initialized_registry._enterprise_registry.get_all = AsyncMock(
-            return_value={"factory1": mock_factory}
-        )
-
-        # Add a "stale" session that should be removed
-        stale_key = BaseItemManager.make_full_name(
-            SystemType.ENTERPRISE, "factory1", "old_session"
-        )
-        initialized_registry._items[stale_key] = mock_old_session
-        mock_old_session.close = AsyncMock()
-
-        # Create a mock session info object with config.pb.name attribute
-        mock_session_info = MagicMock()
-        mock_session_info.config.pb.name = "session1"
-
-        # Mock controller client with properly mocked map() method
-        mock_client.map = AsyncMock(return_value={"session1": mock_session_info})
-
-        with patch.object(
-            initialized_registry,
-            "_get_or_create_controller_client",
-            AsyncMock(return_value=mock_client),
-        ):
-            # Call the method under test
-            await initialized_registry._update_enterprise_sessions()
-
-            # Verify stale session was closed and removed
-            mock_old_session.close.assert_awaited_once()
-            assert stale_key not in initialized_registry._items
-
-
-# ============================================================================
-# Additional Enterprise Session Tests
-# ============================================================================
-
-
-def test_add_new_enterprise_sessions(initialized_registry):
-    """Test that new session managers are created for new sessions."""
-    # Arrange
-    factory = MagicMock(spec=CorePlusSessionFactoryManager)
-    factory_name = "factory1"
-    new_sessions = {"session1", "session2"}
-    initialized_registry._items = {}
-
-    def mock_make_manager_side_effect(factory, factory_name, session_name):
-        manager = MagicMock(spec=EnterpriseSessionManager)
-        manager.full_name = BaseItemManager.make_full_name(
-            SystemType.ENTERPRISE, factory_name, session_name
-        )
-        return manager
-
-    with patch.object(
-        initialized_registry,
-        "_make_enterprise_session_manager",
-        side_effect=mock_make_manager_side_effect,
-    ) as mock_make_manager:
-        # Act
-        initialized_registry._add_new_enterprise_sessions(
-            factory, factory_name, new_sessions
-        )
-
-        # Assert
-        assert mock_make_manager.call_count == 2
-        key1 = BaseItemManager.make_full_name(
-            SystemType.ENTERPRISE, factory_name, "session1"
-        )
-        key2 = BaseItemManager.make_full_name(
-            SystemType.ENTERPRISE, factory_name, "session2"
-        )
-        assert key1 in initialized_registry._items
-        assert key2 in initialized_registry._items
-
-
-def test_add_new_enterprise_sessions_skips_existing(initialized_registry):
-    """Test that existing session managers are not recreated."""
-    # Arrange
-    factory = MagicMock(spec=CorePlusSessionFactoryManager)
-    factory_name = "factory1"
-    # session1 already exists, session2 is new
-    sessions = {"session1", "session2"}
-    existing_key = BaseItemManager.make_full_name(
-        SystemType.ENTERPRISE, factory_name, "session1"
-    )
-    initialized_registry._items = {existing_key: MagicMock()}
-
-    def mock_make_manager_side_effect(factory, factory_name, session_name):
-        manager = MagicMock(spec=EnterpriseSessionManager)
-        manager.full_name = BaseItemManager.make_full_name(
-            SystemType.ENTERPRISE, factory_name, session_name
-        )
-        return manager
-
-    with patch.object(
-        initialized_registry,
-        "_make_enterprise_session_manager",
-        side_effect=mock_make_manager_side_effect,
-    ) as mock_make_manager:
-        # Act
-        initialized_registry._add_new_enterprise_sessions(
-            factory, factory_name, sessions
-        )
-
-        # Assert
-        # The creation method was only called for the new session.
-        mock_make_manager.assert_called_once_with(factory, factory_name, "session2")
-        assert existing_key in initialized_registry._items
-        new_key = BaseItemManager.make_full_name(
-            SystemType.ENTERPRISE, factory_name, "session2"
-        )
-        assert new_key in initialized_registry._items
-
-
-@pytest.mark.asyncio
-async def test_close_stale_enterprise_sessions(initialized_registry):
-    """Test that stale session managers are closed and removed."""
-    # Arrange
-    stale_key = "enterprise/factory1/stale_session"
-    mock_manager = MagicMock(spec=EnterpriseSessionManager)
-    mock_manager.close = AsyncMock()
-    initialized_registry._items = {stale_key: mock_manager}
-
-    # Act
-    await initialized_registry._close_stale_enterprise_sessions({stale_key})
-
-    # Assert
-    mock_manager.close.assert_awaited_once()
-    assert stale_key not in initialized_registry._items
-
-
-@pytest.mark.asyncio
-async def test_find_session_keys_for_factory(initialized_registry):
-    """Test that _find_session_keys_for_factory correctly identifies session keys for a factory."""
-    # Arrange
-    factory_name = "test_factory"
-
-    # Create session keys with different prefixes
-    factory_prefix = BaseItemManager.make_full_name(
-        SystemType.ENTERPRISE, factory_name, ""
-    )
-    session1_key = f"{factory_prefix}session1"
-    session2_key = f"{factory_prefix}session2"
-    other_factory_key = BaseItemManager.make_full_name(
-        SystemType.ENTERPRISE, "other_factory", "session3"
-    )
-    community_key = BaseItemManager.make_full_name(
-        SystemType.COMMUNITY, "community", "session4"
-    )
-
-    # Add sessions to the registry
-    initialized_registry._items = {
-        session1_key: MagicMock(),
-        session2_key: MagicMock(),
-        other_factory_key: MagicMock(),
-        community_key: MagicMock(),
-    }
-
-    # Act
-    result = initialized_registry._find_session_keys_for_factory(factory_name)
-
-    # Assert
-    assert len(result) == 2
-    assert session1_key in result
-    assert session2_key in result
-    assert other_factory_key not in result
-    assert community_key not in result
-
-
-class TestGetAndGetAll:
-    """Test get and get_all methods."""
-
-    @pytest.mark.asyncio
-    async def test_get_not_initialized(self, combined_registry):
-        """Test that get before initialization raises InternalError."""
-        with pytest.raises(InternalError):
-            await combined_registry.get("community:source:name")
-
-    @pytest.mark.asyncio
-    async def test_get_all_not_initialized(self, combined_registry):
-        """Test that get_all before initialization raises InternalError."""
-        with pytest.raises(InternalError):
-            await combined_registry.get_all()
-
-    @pytest.mark.asyncio
-    async def test_get_item_not_found(self, initialized_registry):
-        """Test that get raises RegistryItemNotFoundError when item not found."""
-        from deephaven_mcp._exceptions import RegistryItemNotFoundError
-
-        # Community session - no update should happen
-        with pytest.raises(RegistryItemNotFoundError):
-            await initialized_registry.get("community:source:nonexistent")
-
-    @pytest.mark.asyncio
-    async def test_get_success(self, initialized_registry):
-        """Test successful get of community session (no update triggered)."""
-        # Add a community item to the registry
-        mock_item = MagicMock(spec=BaseItemManager)
-        initialized_registry._items["community:source:name"] = mock_item
-
-        # Get the item
-        item = await initialized_registry.get("community:source:name")
-
-        # Verify item was returned
-        assert item == mock_item
-
-    @pytest.mark.asyncio
-    async def test_get_enterprise_session_triggers_factory_update(
-        self, initialized_registry
-    ):
-        """Test that getting an enterprise session updates only that factory."""
-        # Mock the update method
-        initialized_registry._update_enterprise_sessions = AsyncMock()
-
-        # Add an enterprise item to the registry
-        mock_item = MagicMock(spec=BaseItemManager)
-        initialized_registry._items["enterprise:factory1:session1"] = mock_item
-
-        # Get the enterprise item
-        item = await initialized_registry.get("enterprise:factory1:session1")
-
-        # Verify item was returned and only factory1 was updated
-        assert item == mock_item
-        initialized_registry._update_enterprise_sessions.assert_awaited_once_with(
-            factory_name="factory1"
-        )
-
-    @pytest.mark.asyncio
-    async def test_get_all_success(self, initialized_registry):
-        """Test successful get_all after initialization."""
-        # Set up for _update_enterprise_sessions to be called
-        initialized_registry._update_enterprise_sessions = AsyncMock()
-
-        # Add some items to the registry
-        mock_item1 = MagicMock(spec=BaseItemManager)
-        mock_item2 = MagicMock(spec=BaseItemManager)
-        initialized_registry._items["community:source:name1"] = mock_item1
-        initialized_registry._items["enterprise:factory:name2"] = mock_item2
-
-        # Get all items
-        items = await initialized_registry.get_all()
-
-        # Verify items were returned and enterprise sessions were updated
-        assert items == {
-            "community:source:name1": mock_item1,
-            "enterprise:factory:name2": mock_item2,
-        }
-        initialized_registry._update_enterprise_sessions.assert_awaited_once()
-
-        # Verify returned dict is a copy
-        assert items is not initialized_registry._items
-
-
-class TestClose:
-    """Test close functionality."""
-
-    @pytest.mark.asyncio
-    async def test_close_not_initialized(self, combined_registry):
-        """Test that close before initialization raises InternalError."""
-        with pytest.raises(InternalError):
-            await combined_registry.close()
-
-    @pytest.mark.asyncio
-    async def test_close_success(self, initialized_registry):
-        """Test successful close operation."""
-        # Setup mocks
-        mock_community_registry = initialized_registry._community_registry
-        mock_community_registry.close = AsyncMock()
-
-        mock_enterprise_registry = initialized_registry._enterprise_registry
-        mock_enterprise_registry.close = AsyncMock()
-
-        # Add some controller clients
-        mock_client1 = MagicMock(spec=CorePlusControllerClient)
-        mock_client2 = MagicMock(spec=CorePlusControllerClient)
-
-        initialized_registry._controller_clients = {
-            "factory1": mock_client1,
-            "factory2": mock_client2,
-        }
-
-        # Close the registry
-        await initialized_registry.close()
-
-        # Verify both registries were closed
-        mock_community_registry.close.assert_awaited_once()
-        mock_enterprise_registry.close.assert_awaited_once()
-
-        # Verify controller clients dictionary was cleared
-        assert initialized_registry._controller_clients == {}
-
-    @pytest.mark.asyncio
-    async def test_close_handles_exceptions(self, initialized_registry):
-        """Test that close handles exceptions from sub-components."""
-        # Setup mocks
-        mock_community_registry = initialized_registry._community_registry
-        mock_community_registry.close = AsyncMock(
-            side_effect=Exception("Community close failed")
-        )
-
-        mock_enterprise_registry = initialized_registry._enterprise_registry
-        mock_enterprise_registry.close = AsyncMock(
-            side_effect=Exception("Enterprise close failed")
-        )
-
-        # Add a controller client
-        mock_client = MagicMock(spec=CorePlusControllerClient)
-
-        initialized_registry._controller_clients = {"factory1": mock_client}
-
-        # Close should complete despite exceptions
-        with patch(
-            "deephaven_mcp.resource_manager._registry_combined._LOGGER.error"
-        ) as mock_error:
-            await initialized_registry.close()
-
-            # Verify errors were logged for each registry component
-            assert mock_error.call_count >= 2
-
-        # Verify controller clients dictionary was still cleared
-        assert initialized_registry._controller_clients == {}
+def mock_community_registry():
+    m = MagicMock(spec=CommunitySessionRegistry)
+    m.initialize = AsyncMock()
+    m.close = AsyncMock()
+    m.get_all = AsyncMock(return_value=RegistrySnapshot.simple(items={}))
+    return m
+
+
+@pytest.fixture
+def mock_enterprise_registry():
+    m = MagicMock(spec=CorePlusSessionFactoryRegistry)
+    m.initialize = AsyncMock()
+    m.close = AsyncMock()
+    m.get_all = AsyncMock(return_value=RegistrySnapshot.simple(items={}))
+    return m
+
+
+@pytest.fixture
+def initialized_registry(registry, mock_community_registry, mock_enterprise_registry):
+    """Registry with _initialized=True and COMPLETED phase, no background task."""
+    registry._community_registry = mock_community_registry
+    registry._enterprise_registry = mock_enterprise_registry
+    registry._initialized = True
+    registry._phase = InitializationPhase.COMPLETED
+    return registry
+
+
+def _make_mock_factory_manager() -> MagicMock:
+    m = MagicMock(spec=CorePlusSessionFactoryManager)
+    m.get = AsyncMock()
+    return m
+
+
+def _make_mock_controller_client() -> MagicMock:
+    m = MagicMock(spec=CorePlusControllerClient)
+    m.ping = AsyncMock(return_value=True)
+    m.map = AsyncMock(return_value={})
+    return m
+
+
+# ---------------------------------------------------------------------------
+# TestConstruction
+# ---------------------------------------------------------------------------
+
+
+class TestConstruction:
+    def test_initial_state(self, registry):
+        assert registry._community_registry is None
+        assert registry._enterprise_registry is None
+        assert registry._controller_clients == {}
+        assert registry._added_session_ids == set()
+        assert registry._phase == InitializationPhase.NOT_STARTED
+        assert registry._errors == {}
+        assert registry._discovery_task is None
+        assert not registry._initialized
+
+    def test_inherits_base_registry(self, registry):
+        from deephaven_mcp.resource_manager._registry import BaseRegistry
+
+        assert isinstance(registry, BaseRegistry)
+        assert hasattr(registry, "_lock")
+        assert hasattr(registry, "_items")
+
+
+# ---------------------------------------------------------------------------
+# TestLoadItems
+# ---------------------------------------------------------------------------
 
 
 class TestLoadItems:
-    """Test that _load_items correctly raises InternalError."""
+    @pytest.mark.asyncio
+    async def test_loads_community_sessions(
+        self, registry, mock_community_registry, mock_enterprise_registry
+    ):
+        """_load_items copies community sessions into _items and sets PARTIAL phase."""
+        mock_mgr = MagicMock(spec=BaseItemManager)
+        mock_mgr.full_name = "community:src:s1"
+        mock_community_registry.get_all = AsyncMock(
+            return_value=RegistrySnapshot.simple(items={"community:src:s1": mock_mgr})
+        )
+
+        with (
+            patch(
+                "deephaven_mcp.resource_manager._registry_combined.CommunitySessionRegistry",
+                return_value=mock_community_registry,
+            ),
+            patch(
+                "deephaven_mcp.resource_manager._registry_combined.CorePlusSessionFactoryRegistry",
+                return_value=mock_enterprise_registry,
+            ),
+        ):
+            await registry._load_items(MagicMock(spec=ConfigManager))
+
+        assert "community:src:s1" in registry._items
+        assert registry._items["community:src:s1"] is mock_mgr
+        assert registry._phase == InitializationPhase.PARTIAL
 
     @pytest.mark.asyncio
-    async def test_load_items_raises_internal_error(self):
-        """Test that _load_items raises InternalError as expected."""
-        registry = CombinedSessionRegistry()
+    async def test_raises_on_unexpected_community_phase(
+        self, registry, mock_community_registry, mock_enterprise_registry
+    ):
+        mock_community_registry.get_all = AsyncMock(
+            return_value=RegistrySnapshot.with_initialization(
+                items={},
+                phase=InitializationPhase.LOADING,
+                errors={},
+            )
+        )
+        with (
+            patch(
+                "deephaven_mcp.resource_manager._registry_combined.CommunitySessionRegistry",
+                return_value=mock_community_registry,
+            ),
+            patch(
+                "deephaven_mcp.resource_manager._registry_combined.CorePlusSessionFactoryRegistry",
+                return_value=mock_enterprise_registry,
+            ),
+            pytest.raises(InternalError, match="unexpected phase"),
+        ):
+            await registry._load_items(MagicMock(spec=ConfigManager))
 
-        # _load_items should never be called for CombinedSessionRegistry
+    @pytest.mark.asyncio
+    async def test_raises_on_community_errors(
+        self, registry, mock_community_registry, mock_enterprise_registry
+    ):
+        mock_community_registry.get_all = AsyncMock(
+            return_value=RegistrySnapshot.with_initialization(
+                items={},
+                phase=InitializationPhase.SIMPLE,
+                errors={"src": "boom"},
+            )
+        )
+        with (
+            patch(
+                "deephaven_mcp.resource_manager._registry_combined.CommunitySessionRegistry",
+                return_value=mock_community_registry,
+            ),
+            patch(
+                "deephaven_mcp.resource_manager._registry_combined.CorePlusSessionFactoryRegistry",
+                return_value=mock_enterprise_registry,
+            ),
+            pytest.raises(InternalError, match="unexpected errors"),
+        ):
+            await registry._load_items(MagicMock(spec=ConfigManager))
+
+
+# ---------------------------------------------------------------------------
+# TestInitialize
+# ---------------------------------------------------------------------------
+
+
+class TestInitialize:
+    @pytest.mark.asyncio
+    async def test_initialize_creates_discovery_task(
+        self, registry, mock_community_registry, mock_enterprise_registry
+    ):
+        with (
+            patch(
+                "deephaven_mcp.resource_manager._registry_combined.CommunitySessionRegistry",
+                return_value=mock_community_registry,
+            ),
+            patch(
+                "deephaven_mcp.resource_manager._registry_combined.CorePlusSessionFactoryRegistry",
+                return_value=mock_enterprise_registry,
+            ),
+            patch.object(
+                registry,
+                "_discover_enterprise_sessions",
+                AsyncMock(),
+            ),
+        ):
+            await registry.initialize(MagicMock(spec=ConfigManager))
+            assert registry._initialized is True
+            assert registry._discovery_task is not None
+            # Let the task finish
+            await registry._discovery_task
+
+    @pytest.mark.asyncio
+    async def test_initialize_idempotent(
+        self, registry, mock_community_registry, mock_enterprise_registry
+    ):
+        """Second call to initialize() is a no-op."""
+        with (
+            patch(
+                "deephaven_mcp.resource_manager._registry_combined.CommunitySessionRegistry",
+                return_value=mock_community_registry,
+            ),
+            patch(
+                "deephaven_mcp.resource_manager._registry_combined.CorePlusSessionFactoryRegistry",
+                return_value=mock_enterprise_registry,
+            ),
+            patch.object(registry, "_discover_enterprise_sessions", AsyncMock()),
+        ):
+            cfg = MagicMock(spec=ConfigManager)
+            await registry.initialize(cfg)
+            task1 = registry._discovery_task
+            await registry.initialize(cfg)
+            assert registry._discovery_task is task1  # same task, not replaced
+
+    @pytest.mark.asyncio
+    async def test_initialize_propagates_load_error(
+        self, registry, mock_community_registry, mock_enterprise_registry
+    ):
+        mock_community_registry.initialize = AsyncMock(
+            side_effect=RuntimeError("load failed")
+        )
+        with (
+            patch(
+                "deephaven_mcp.resource_manager._registry_combined.CommunitySessionRegistry",
+                return_value=mock_community_registry,
+            ),
+            patch(
+                "deephaven_mcp.resource_manager._registry_combined.CorePlusSessionFactoryRegistry",
+                return_value=mock_enterprise_registry,
+            ),
+            pytest.raises(RuntimeError, match="load failed"),
+        ):
+            await registry.initialize(MagicMock(spec=ConfigManager))
+        assert not registry._initialized
+
+
+# ---------------------------------------------------------------------------
+# TestClose
+# ---------------------------------------------------------------------------
+
+
+class TestClose:
+    @pytest.mark.asyncio
+    async def test_close_not_initialized_raises(self, registry):
         with pytest.raises(InternalError):
-            await registry._load_items(Mock(spec=ConfigManager))
+            await registry.close()
+
+    @pytest.mark.asyncio
+    async def test_close_cancels_discovery_task(self, initialized_registry):
+        """close() cancels a running discovery task."""
+        never_done = asyncio.create_task(asyncio.sleep(9999))
+        initialized_registry._discovery_task = never_done
+        # Add a dummy item so super().close() has something to close
+        mock_item = MagicMock(spec=BaseItemManager)
+        mock_item.close = AsyncMock()
+        initialized_registry._items["community:x:y"] = mock_item
+
+        await initialized_registry.close()
+
+        assert never_done.cancelled()
+        assert not initialized_registry._initialized
+
+    @pytest.mark.asyncio
+    async def test_close_closes_sub_registries(self, initialized_registry):
+        mock_community = initialized_registry._community_registry
+        mock_enterprise = initialized_registry._enterprise_registry
+        mock_item = MagicMock(spec=BaseItemManager)
+        mock_item.close = AsyncMock()
+        initialized_registry._items["community:x:y"] = mock_item
+
+        await initialized_registry.close()
+
+        mock_community.close.assert_awaited_once()
+        mock_enterprise.close.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_close_handles_sub_registry_errors(self, initialized_registry):
+        """Errors from sub-registry close() are logged, not propagated."""
+        initialized_registry._community_registry.close = AsyncMock(
+            side_effect=RuntimeError("community boom")
+        )
+        initialized_registry._enterprise_registry.close = AsyncMock(
+            side_effect=RuntimeError("enterprise boom")
+        )
+        mock_item = MagicMock(spec=BaseItemManager)
+        mock_item.close = AsyncMock()
+        initialized_registry._items["community:x:y"] = mock_item
+
+        # Should not raise
+        await initialized_registry.close()
+        assert not initialized_registry._initialized
+
+    @pytest.mark.asyncio
+    async def test_close_resets_state(self, initialized_registry):
+        """After close(), extra state is cleared."""
+        initialized_registry._controller_clients["f1"] = MagicMock()
+        initialized_registry._added_session_ids.add("enterprise:f1:s1")
+        initialized_registry._errors["f1"] = "err"
+        mock_item = MagicMock(spec=BaseItemManager)
+        mock_item.close = AsyncMock()
+        initialized_registry._items["community:x:y"] = mock_item
+
+        await initialized_registry.close()
+
+        assert initialized_registry._controller_clients == {}
+        assert initialized_registry._added_session_ids == set()
+        assert initialized_registry._errors == {}
+        assert initialized_registry._phase == InitializationPhase.NOT_STARTED
+        assert initialized_registry._items == {}
+        assert not initialized_registry._initialized
+
+    @pytest.mark.asyncio
+    async def test_close_closes_items(self, initialized_registry):
+        """Items in _items are closed (outside the lock — close() may do I/O)."""
+        mock_item = MagicMock(spec=BaseItemManager)
+        mock_item.close = AsyncMock()
+        initialized_registry._items["community:x:y"] = mock_item
+
+        await initialized_registry.close()
+
+        mock_item.close.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_close_items_outside_lock(self, initialized_registry):
+        """Items are closed after _items is cleared from the lock, not while holding it."""
+        close_called_while_locked = []
+
+        async def check_lock_during_close():
+            # If the lock is held during close(), acquiring it here would deadlock.
+            # Use try_acquire (non-blocking) to detect if lock is held.
+            acquired = initialized_registry._lock.locked()
+            close_called_while_locked.append(acquired)
+
+        mock_item = MagicMock(spec=BaseItemManager)
+        mock_item.full_name = "community:x:y"
+        mock_item.close = AsyncMock(side_effect=check_lock_during_close)
+        initialized_registry._items["community:x:y"] = mock_item
+
+        await initialized_registry.close()
+
+        assert close_called_while_locked == [
+            False
+        ], "item.close() was called while self._lock was held"
+
+    @pytest.mark.asyncio
+    async def test_close_item_error_does_not_propagate(self, initialized_registry):
+        """Errors from item.close() are logged, not propagated."""
+        mock_item = MagicMock(spec=BaseItemManager)
+        mock_item.full_name = "community:x:y"
+        mock_item.close = AsyncMock(side_effect=RuntimeError("item close boom"))
+        initialized_registry._items["community:x:y"] = mock_item
+
+        # Should not raise
+        await initialized_registry.close()
+        assert not initialized_registry._initialized
+
+    @pytest.mark.asyncio
+    async def test_close_gates_concurrent_caller(self, initialized_registry):
+        """A second concurrent close() call raises InternalError immediately."""
+        mock_item = MagicMock(spec=BaseItemManager)
+        mock_item.close = AsyncMock()
+        initialized_registry._items["community:x:y"] = mock_item
+
+        # First close succeeds; second should raise because _initialized=False.
+        await initialized_registry.close()
+        with pytest.raises(InternalError):
+            await initialized_registry.close()
+
+    @pytest.mark.asyncio
+    async def test_close_waits_for_in_flight_sync(self, initialized_registry):
+        """close() waits for an in-flight _sync_enterprise_sessions via _refresh_lock."""
+        sync_started = asyncio.Event()
+        sync_may_finish = asyncio.Event()
+
+        async def slow_sync(*_args, **_kwargs):
+            sync_started.set()
+            await sync_may_finish.wait()
+
+        with patch(
+            "deephaven_mcp.resource_manager._registry_combined.CombinedSessionRegistry._sync_enterprise_sessions",
+            side_effect=slow_sync,
+        ):
+            # Simulate a sync holding _refresh_lock
+            async with initialized_registry._refresh_lock:
+                sync_started.set()
+                close_task = asyncio.create_task(initialized_registry.close())
+                # Give close() a chance to reach the _refresh_lock barrier
+                await asyncio.sleep(0)
+                assert not close_task.done()
+            # Now release the lock — close() should proceed
+            await close_task
+
+        assert not initialized_registry._initialized
 
 
-class TestMakeEnterpriseSessionManager:
-    """Test the _make_enterprise_session_manager static method."""
+# ---------------------------------------------------------------------------
+# TestGet
+# ---------------------------------------------------------------------------
 
-    def test_make_enterprise_session_manager(self):
-        """Test that _make_enterprise_session_manager creates correct session manager."""
-        # Setup mocks
-        mock_factory = MagicMock(spec=CorePlusSessionFactoryManager)
-        mock_factory_instance = MagicMock()
-        mock_factory.get = AsyncMock(return_value=mock_factory_instance)
-        mock_factory_instance.connect_to_persistent_query = AsyncMock()
 
-        # Create session manager
-        session_manager = CombinedSessionRegistry._make_enterprise_session_manager(
-            mock_factory, "factory1", "session1"
+class TestGet:
+    @pytest.mark.asyncio
+    async def test_get_not_initialized_raises(self, registry):
+        with pytest.raises(InternalError):
+            await registry.get("community:src:name")
+
+    @pytest.mark.asyncio
+    async def test_get_community_session_no_refresh(self, initialized_registry):
+        """Community sessions are returned without triggering a refresh."""
+        mock_item = MagicMock(spec=BaseItemManager)
+        initialized_registry._items["community:src:name"] = mock_item
+
+        with patch.object(
+            initialized_registry, "_sync_enterprise_sessions", AsyncMock()
+        ) as mock_sync:
+            result = await initialized_registry.get("community:src:name")
+
+        assert result is mock_item
+        mock_sync.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_get_enterprise_session_triggers_refresh(self, initialized_registry):
+        """Enterprise sessions trigger _sync_enterprise_sessions for that factory."""
+        mock_item = MagicMock(spec=BaseItemManager)
+        initialized_registry._items["enterprise:factory1:session1"] = mock_item
+
+        with patch.object(
+            initialized_registry, "_sync_enterprise_sessions", AsyncMock()
+        ) as mock_sync:
+            result = await initialized_registry.get("enterprise:factory1:session1")
+
+        assert result is mock_item
+        mock_sync.assert_awaited_once_with(["factory1"])
+
+    @pytest.mark.asyncio
+    async def test_get_enterprise_no_refresh_during_loading(self, initialized_registry):
+        """No refresh during LOADING phase — background task is sole writer."""
+        initialized_registry._phase = InitializationPhase.LOADING
+        mock_item = MagicMock(spec=BaseItemManager)
+        initialized_registry._items["enterprise:factory1:session1"] = mock_item
+
+        with patch.object(
+            initialized_registry, "_sync_enterprise_sessions", AsyncMock()
+        ) as mock_sync:
+            result = await initialized_registry.get("enterprise:factory1:session1")
+
+        assert result is mock_item
+        mock_sync.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_get_not_found_raises(self, initialized_registry):
+        with pytest.raises(RegistryItemNotFoundError, match="No item with name"):
+            await initialized_registry.get("community:src:nonexistent")
+
+    @pytest.mark.asyncio
+    async def test_get_malformed_name_raises(self, initialized_registry):
+        """Malformed session name raises InvalidSessionNameError, no refresh triggered."""
+        from deephaven_mcp._exceptions import InvalidSessionNameError
+
+        with patch.object(
+            initialized_registry, "_sync_enterprise_sessions", AsyncMock()
+        ) as mock_sync:
+            with pytest.raises(InvalidSessionNameError):
+                await initialized_registry.get("bad-name")
+        mock_sync.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_get_not_found_message_during_loading(self, initialized_registry):
+        initialized_registry._phase = InitializationPhase.LOADING
+        with pytest.raises(RegistryItemNotFoundError) as exc_info:
+            await initialized_registry.get("enterprise:factory1:session1")
+        assert "still in progress" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_get_not_found_message_with_matching_factory_error(
+        self, initialized_registry
+    ):
+        initialized_registry._errors = {"factory1": "Connection refused"}
+        with patch.object(
+            initialized_registry, "_sync_enterprise_sessions", AsyncMock()
+        ):
+            with pytest.raises(RegistryItemNotFoundError) as exc_info:
+                await initialized_registry.get("enterprise:factory1:session1")
+        assert "factory1" in str(exc_info.value)
+        assert "Connection refused" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_get_not_found_message_with_other_factory_error(
+        self, initialized_registry
+    ):
+        initialized_registry._errors = {"other_factory": "Timeout"}
+        with patch.object(
+            initialized_registry, "_sync_enterprise_sessions", AsyncMock()
+        ):
+            with pytest.raises(RegistryItemNotFoundError) as exc_info:
+                await initialized_registry.get("enterprise:factory1:session1")
+        assert "1 factory" in str(exc_info.value)
+        assert "other_factory" in str(exc_info.value)
+
+
+# ---------------------------------------------------------------------------
+# TestGetAll
+# ---------------------------------------------------------------------------
+
+
+class TestGetAll:
+    @pytest.mark.asyncio
+    async def test_get_all_not_initialized_raises(self, registry):
+        with pytest.raises(InternalError):
+            await registry.get_all()
+
+    @pytest.mark.asyncio
+    async def test_get_all_returns_snapshot(self, initialized_registry):
+        mock_item = MagicMock(spec=BaseItemManager)
+        initialized_registry._items["community:src:s1"] = mock_item
+
+        with patch.object(
+            initialized_registry, "_sync_enterprise_sessions", AsyncMock()
+        ):
+            snapshot = await initialized_registry.get_all()
+
+        assert "community:src:s1" in snapshot.items
+        assert snapshot.items["community:src:s1"] is mock_item
+        assert snapshot.initialization_phase == InitializationPhase.COMPLETED
+        assert snapshot.initialization_errors == {}
+
+    @pytest.mark.asyncio
+    async def test_get_all_returns_copy(self, initialized_registry):
+        with patch.object(
+            initialized_registry, "_sync_enterprise_sessions", AsyncMock()
+        ):
+            snapshot = await initialized_registry.get_all()
+        assert snapshot.items is not initialized_registry._items
+
+    @pytest.mark.asyncio
+    async def test_get_all_triggers_refresh_when_completed(self, initialized_registry):
+        mock_factory = _make_mock_factory_manager()
+        initialized_registry._enterprise_registry.get_all = AsyncMock(
+            return_value=RegistrySnapshot.simple(items={"f1": mock_factory})
         )
 
-        # Verify session manager was created with correct parameters
-        assert isinstance(session_manager, EnterpriseSessionManager)
-        assert session_manager._source == "factory1"
-        assert session_manager._name == "session1"
+        with patch.object(
+            initialized_registry, "_sync_enterprise_sessions", AsyncMock()
+        ) as mock_sync:
+            await initialized_registry.get_all()
 
-        # Verify creation function was set up correctly
-        creation_function = session_manager._creation_function
-        asyncio.run(creation_function("factory1", "session1"))
-        mock_factory.get.assert_awaited_once()
-        mock_factory_instance.connect_to_persistent_query.assert_awaited_once_with(
-            "session1"
-        )
+        mock_sync.assert_awaited_once_with(["f1"])
+
+    @pytest.mark.asyncio
+    async def test_get_all_no_refresh_during_loading(self, initialized_registry):
+        initialized_registry._phase = InitializationPhase.LOADING
+
+        with patch.object(
+            initialized_registry, "_sync_enterprise_sessions", AsyncMock()
+        ) as mock_sync:
+            await initialized_registry.get_all()
+
+        mock_sync.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_get_all_includes_errors(self, initialized_registry):
+        initialized_registry._errors = {"f1": "boom"}
+
+        with patch.object(
+            initialized_registry, "_sync_enterprise_sessions", AsyncMock()
+        ):
+            snapshot = await initialized_registry.get_all()
+
+        assert snapshot.initialization_errors == {"f1": "boom"}
 
 
-class TestPublicAPIMethods:
-    """Tests for public API methods (add_session, remove_session, count_added_sessions, is_added_session)."""
+# ---------------------------------------------------------------------------
+# TestAddSession
+# ---------------------------------------------------------------------------
+
+
+class TestAddSession:
+    @pytest.mark.asyncio
+    async def test_add_session_not_initialized_raises(self, registry):
+        m = MagicMock(spec=BaseItemManager)
+        m.full_name = "enterprise:f1:s1"
+        with pytest.raises(InternalError):
+            await registry.add_session(m)
 
     @pytest.mark.asyncio
     async def test_add_session_success(self, initialized_registry):
-        """Test successfully adding a session to the registry."""
-        # Create a mock session manager
-        mock_manager = MagicMock(spec=EnterpriseSessionManager)
-        mock_manager.full_name = "enterprise:factory1:session1"
-
-        # Add the session
-        await initialized_registry.add_session(mock_manager)
-
-        # Verify it was added to both _items and _added_sessions
-        assert "enterprise:factory1:session1" in initialized_registry._items
-        assert "enterprise:factory1:session1" in initialized_registry._added_sessions
-        assert (
-            initialized_registry._items["enterprise:factory1:session1"] == mock_manager
-        )
+        m = MagicMock(spec=BaseItemManager)
+        m.full_name = "enterprise:f1:s1"
+        await initialized_registry.add_session(m)
+        assert "enterprise:f1:s1" in initialized_registry._items
+        assert "enterprise:f1:s1" in initialized_registry._added_session_ids
 
     @pytest.mark.asyncio
-    async def test_add_session_duplicate_raises_error(self, initialized_registry):
-        """Test that adding a duplicate session raises ValueError."""
-        # Create a mock session manager
-        mock_manager = MagicMock(spec=EnterpriseSessionManager)
-        mock_manager.full_name = "enterprise:factory1:session1"
+    async def test_add_session_duplicate_raises(self, initialized_registry):
+        m = MagicMock(spec=BaseItemManager)
+        m.full_name = "enterprise:f1:s1"
+        await initialized_registry.add_session(m)
+        with pytest.raises(ValueError, match="already exists"):
+            await initialized_registry.add_session(m)
 
-        # Add the session once
-        await initialized_registry.add_session(mock_manager)
 
-        # Try to add it again - should raise ValueError
-        with pytest.raises(ValueError, match="Session.*already exists"):
-            await initialized_registry.add_session(mock_manager)
+# ---------------------------------------------------------------------------
+# TestRemoveSession
+# ---------------------------------------------------------------------------
 
+
+class TestRemoveSession:
     @pytest.mark.asyncio
-    async def test_add_session_not_initialized_raises_error(self):
-        """Test that add_session raises InternalError if not initialized."""
-        registry = CombinedSessionRegistry()
-        mock_manager = MagicMock(spec=EnterpriseSessionManager)
-        mock_manager.full_name = "enterprise:factory1:session1"
-
-        with pytest.raises(InternalError, match="not initialized"):
-            await registry.add_session(mock_manager)
+    async def test_remove_session_not_initialized_raises(self, registry):
+        with pytest.raises(InternalError):
+            await registry.remove_session("enterprise:f1:s1")
 
     @pytest.mark.asyncio
     async def test_remove_session_exists(self, initialized_registry):
-        """Test removing a session that exists."""
-        # Add a session first
-        mock_manager = MagicMock(spec=EnterpriseSessionManager)
-        mock_manager.full_name = "enterprise:factory1:session1"
-        initialized_registry._items["enterprise:factory1:session1"] = mock_manager
-        initialized_registry._added_sessions.add("enterprise:factory1:session1")
+        m = MagicMock(spec=BaseItemManager)
+        m.full_name = "enterprise:f1:s1"
+        initialized_registry._items["enterprise:f1:s1"] = m
+        initialized_registry._added_session_ids.add("enterprise:f1:s1")
 
-        # Remove it
-        removed = await initialized_registry.remove_session(
-            "enterprise:factory1:session1"
-        )
+        result = await initialized_registry.remove_session("enterprise:f1:s1")
 
-        # Verify it was removed and returned
-        assert removed == mock_manager
-        assert "enterprise:factory1:session1" not in initialized_registry._items
-        assert (
-            "enterprise:factory1:session1" not in initialized_registry._added_sessions
-        )
+        assert result is m
+        assert "enterprise:f1:s1" not in initialized_registry._items
+        assert "enterprise:f1:s1" not in initialized_registry._added_session_ids
 
     @pytest.mark.asyncio
-    async def test_remove_session_not_exists(self, initialized_registry):
-        """Test removing a session that doesn't exist returns None."""
-        removed = await initialized_registry.remove_session(
-            "enterprise:factory1:nonexistent"
-        )
-        assert removed is None
+    async def test_remove_session_not_exists_returns_none(self, initialized_registry):
+        result = await initialized_registry.remove_session("enterprise:f1:nonexistent")
+        assert result is None
 
     @pytest.mark.asyncio
-    async def test_remove_session_not_initialized_raises_error(self):
-        """Test that remove_session raises InternalError if not initialized."""
-        registry = CombinedSessionRegistry()
+    async def test_remove_session_idempotent(self, initialized_registry):
+        result1 = await initialized_registry.remove_session("enterprise:f1:s1")
+        result2 = await initialized_registry.remove_session("enterprise:f1:s1")
+        assert result1 is None
+        assert result2 is None
 
-        with pytest.raises(InternalError, match="not initialized"):
-            await registry.remove_session("enterprise:factory1:session1")
+
+# ---------------------------------------------------------------------------
+# TestCountAddedSessions
+# ---------------------------------------------------------------------------
+
+
+class TestCountAddedSessions:
+    @pytest.mark.asyncio
+    async def test_count_not_initialized_raises(self, registry):
+        with pytest.raises(InternalError):
+            await registry.count_added_sessions(SystemType.ENTERPRISE, "f1")
 
     @pytest.mark.asyncio
-    async def test_count_added_sessions_with_string(self, initialized_registry):
-        """Test count_added_sessions with string system_type."""
-        # Add some sessions
-        mock_manager1 = MagicMock(spec=EnterpriseSessionManager)
-        mock_manager1.full_name = "enterprise:factory1:session1"
-        mock_manager2 = MagicMock(spec=EnterpriseSessionManager)
-        mock_manager2.full_name = "enterprise:factory1:session2"
-        mock_manager3 = MagicMock(spec=EnterpriseSessionManager)
-        mock_manager3.full_name = "enterprise:factory2:session3"
+    async def test_count_with_enum_type(self, initialized_registry):
+        initialized_registry._items["enterprise:f1:s1"] = MagicMock()
+        initialized_registry._added_session_ids.add("enterprise:f1:s1")
 
-        initialized_registry._items["enterprise:factory1:session1"] = mock_manager1
-        initialized_registry._items["enterprise:factory1:session2"] = mock_manager2
-        initialized_registry._items["enterprise:factory2:session3"] = mock_manager3
-        initialized_registry._added_sessions.add("enterprise:factory1:session1")
-        initialized_registry._added_sessions.add("enterprise:factory1:session2")
-        initialized_registry._added_sessions.add("enterprise:factory2:session3")
-
-        # Count for factory1
         count = await initialized_registry.count_added_sessions(
-            "enterprise", "factory1"
-        )
-        assert count == 2
-
-        # Count for factory2
-        count = await initialized_registry.count_added_sessions(
-            "enterprise", "factory2"
+            SystemType.ENTERPRISE, "f1"
         )
         assert count == 1
 
     @pytest.mark.asyncio
-    async def test_count_added_sessions_with_enum(self, initialized_registry):
-        """Test count_added_sessions with SystemType enum."""
-        # Add some sessions
-        mock_manager = MagicMock(spec=EnterpriseSessionManager)
-        mock_manager.full_name = "enterprise:factory1:session1"
+    async def test_count_excludes_sessions_not_in_items(self, initialized_registry):
+        """Sessions in _added_session_ids but not in _items are not counted."""
+        initialized_registry._added_session_ids.add("enterprise:f1:gone")
+        initialized_registry._items["enterprise:f1:valid"] = MagicMock()
+        initialized_registry._added_session_ids.add("enterprise:f1:valid")
 
-        initialized_registry._items["enterprise:factory1:session1"] = mock_manager
-        initialized_registry._added_sessions.add("enterprise:factory1:session1")
-
-        # Count using enum
         count = await initialized_registry.count_added_sessions(
-            SystemType.ENTERPRISE, "factory1"
+            SystemType.ENTERPRISE, "f1"
         )
         assert count == 1
 
     @pytest.mark.asyncio
-    async def test_count_added_sessions_with_stale_sessions(self, initialized_registry):
-        """Test count_added_sessions removes stale sessions."""
-        # Add a session to _added_sessions but not to _items (stale)
-        initialized_registry._added_sessions.add("enterprise:factory1:stale_session")
-
-        # Also add a valid session
-        mock_manager = MagicMock(spec=EnterpriseSessionManager)
-        mock_manager.full_name = "enterprise:factory1:valid_session"
-        initialized_registry._items["enterprise:factory1:valid_session"] = mock_manager
-        initialized_registry._added_sessions.add("enterprise:factory1:valid_session")
-
-        # Count - should be 1 and stale session should be removed
-        count = await initialized_registry.count_added_sessions(
-            "enterprise", "factory1"
-        )
-        assert count == 1
-        assert (
-            "enterprise:factory1:stale_session"
-            not in initialized_registry._added_sessions
-        )
-        assert (
-            "enterprise:factory1:valid_session" in initialized_registry._added_sessions
-        )
+    async def test_count_malformed_id_raises_internal_error(self, initialized_registry):
+        """Malformed IDs in _added_session_ids indicate a programming bug."""
+        initialized_registry._added_session_ids.add("bad-format")
+        with pytest.raises(InternalError):
+            await initialized_registry.count_added_sessions(SystemType.ENTERPRISE, "f1")
 
     @pytest.mark.asyncio
-    async def test_count_added_sessions_with_invalid_format(self, initialized_registry):
-        """Test count_added_sessions handles invalid session ID format."""
-        # Add a session with invalid format
-        initialized_registry._added_sessions.add("invalid_session_id")
-
-        # Count - should handle the error and remove invalid session
+    async def test_count_zero_when_empty(self, initialized_registry):
         count = await initialized_registry.count_added_sessions(
-            "enterprise", "factory1"
+            SystemType.ENTERPRISE, "f1"
         )
         assert count == 0
-        assert "invalid_session_id" not in initialized_registry._added_sessions
 
+
+# ---------------------------------------------------------------------------
+# TestIsAddedSession
+# ---------------------------------------------------------------------------
+
+
+class TestIsAddedSession:
     @pytest.mark.asyncio
-    async def test_is_added_session_true(self, initialized_registry):
-        """Test is_added_session returns True for added sessions."""
-        initialized_registry._added_sessions.add("enterprise:factory1:session1")
-
-        result = await initialized_registry.is_added_session(
-            "enterprise:factory1:session1"
-        )
-        assert result is True
-
-    @pytest.mark.asyncio
-    async def test_is_added_session_false(self, initialized_registry):
-        """Test is_added_session returns False for non-added sessions."""
-        result = await initialized_registry.is_added_session(
-            "enterprise:factory1:nonexistent"
-        )
-        assert result is False
-
-
-class TestConnectionErrorHandling:
-    """Tests for connection error handling in enterprise session updates."""
-
-    @pytest.mark.asyncio
-    async def test_calculate_factory_session_changes_connection_error(
-        self, initialized_registry
-    ):
-        """Test that connection errors trigger session removal."""
-        mock_factory = MagicMock(spec=CorePlusSessionFactoryManager)
-        factory_name = "factory1"
-
-        # Add some sessions for this factory
-        mock_session1 = MagicMock(spec=EnterpriseSessionManager)
-        mock_session1.close = AsyncMock()
-        mock_session2 = MagicMock(spec=EnterpriseSessionManager)
-        mock_session2.close = AsyncMock()
-
-        key1 = BaseItemManager.make_full_name(
-            SystemType.ENTERPRISE, factory_name, "session1"
-        )
-        key2 = BaseItemManager.make_full_name(
-            SystemType.ENTERPRISE, factory_name, "session2"
-        )
-
-        initialized_registry._items[key1] = mock_session1
-        initialized_registry._items[key2] = mock_session2
-
-        # Mock _get_or_create_controller_client to raise DeephavenConnectionError
-        with patch.object(
-            initialized_registry,
-            "_get_or_create_controller_client",
-            AsyncMock(side_effect=DeephavenConnectionError("Connection failed")),
-        ):
-            # Call the method - should return empty new sessions and existing sessions as removals
-            changes = await initialized_registry._calculate_factory_session_changes(
-                mock_factory, factory_name
-            )
-
-            # Verify it returned correct values
-            assert changes.session_names_to_add == set()
-            assert changes.session_keys_to_remove == {key1, key2}
-
-            # Apply the removals to verify cleanup works
-            await initialized_registry._close_stale_enterprise_sessions(
-                changes.session_keys_to_remove
-            )
-
-            # Verify sessions were closed and removed
-            mock_session1.close.assert_awaited_once()
-            mock_session2.close.assert_awaited_once()
-            assert key1 not in initialized_registry._items
-            assert key2 not in initialized_registry._items
-
-    @pytest.mark.asyncio
-    async def test_remove_all_sessions_for_factory(self, initialized_registry):
-        """Test _remove_all_sessions_for_factory removes all sessions for a factory."""
-        factory_name = "factory1"
-
-        # Add sessions for this factory
-        mock_session1 = MagicMock(spec=EnterpriseSessionManager)
-        mock_session1.close = AsyncMock()
-        mock_session2 = MagicMock(spec=EnterpriseSessionManager)
-        mock_session2.close = AsyncMock()
-
-        # Also add a session for a different factory
-        mock_session3 = MagicMock(spec=EnterpriseSessionManager)
-        mock_session3.close = AsyncMock()
-
-        key1 = BaseItemManager.make_full_name(
-            SystemType.ENTERPRISE, factory_name, "session1"
-        )
-        key2 = BaseItemManager.make_full_name(
-            SystemType.ENTERPRISE, factory_name, "session2"
-        )
-        key3 = BaseItemManager.make_full_name(
-            SystemType.ENTERPRISE, "factory2", "session3"
-        )
-
-        initialized_registry._items[key1] = mock_session1
-        initialized_registry._items[key2] = mock_session2
-        initialized_registry._items[key3] = mock_session3
-
-        # Remove all sessions for factory1
-        await initialized_registry._remove_all_sessions_for_factory(factory_name)
-
-        # Verify only factory1 sessions were removed
-        mock_session1.close.assert_awaited_once()
-        mock_session2.close.assert_awaited_once()
-        mock_session3.close.assert_not_awaited()
-
-        assert key1 not in initialized_registry._items
-        assert key2 not in initialized_registry._items
-        assert key3 in initialized_registry._items
-
-    @pytest.mark.asyncio
-    async def test_update_enterprise_sessions_multiple_factories_parallel(
-        self, initialized_registry
-    ):
-        """Test that multiple factories update in parallel and all succeed."""
-        # Create multiple mock factories
-        mock_factory1 = MagicMock(spec=CorePlusSessionFactoryManager)
-        mock_factory2 = MagicMock(spec=CorePlusSessionFactoryManager)
-        mock_factory3 = MagicMock(spec=CorePlusSessionFactoryManager)
-
-        # Mock enterprise registry to return multiple factories
-        initialized_registry._enterprise_registry.get_all = AsyncMock(
-            return_value={
-                "factory1": mock_factory1,
-                "factory2": mock_factory2,
-                "factory3": mock_factory3,
-            }
-        )
-
-        initialized_registry._items = {}
-
-        # Track call order to verify parallel execution
-        call_order = []
-
-        async def mock_update_factory(factory, factory_name):
-            """Mock that tracks when each factory update is called."""
-            from deephaven_mcp.resource_manager._registry_combined import (
-                _FactorySessionChanges,
-            )
-
-            call_order.append(f"start_{factory_name}")
-            # Simulate some async work
-            await asyncio.sleep(0.01)
-            call_order.append(f"end_{factory_name}")
-            return _FactorySessionChanges(
-                factory, factory_name, set(), set()
-            )  # Return empty changes
-
-        with patch.object(
-            initialized_registry,
-            "_calculate_factory_session_changes",
-            side_effect=mock_update_factory,
-        ):
-            await initialized_registry._update_enterprise_sessions()
-
-        # Verify all factories were called
-        assert len(call_order) == 6
-        # All starts should happen before any ends (parallel execution)
-        start_indices = [i for i, x in enumerate(call_order) if x.startswith("start_")]
-        end_indices = [i for i, x in enumerate(call_order) if x.startswith("end_")]
-        # In parallel execution, all starts happen first, then all ends
-        assert max(start_indices) < min(end_indices)
-
-    @pytest.mark.asyncio
-    async def test_update_enterprise_sessions_mixed_connection_errors(
-        self, initialized_registry
-    ):
-        """Test that connection errors in some factories don't block others."""
-        mock_factory1 = MagicMock(spec=CorePlusSessionFactoryManager)
-        mock_factory2 = MagicMock(spec=CorePlusSessionFactoryManager)
-        mock_factory3 = MagicMock(spec=CorePlusSessionFactoryManager)
-
-        # Mock enterprise registry
-        initialized_registry._enterprise_registry.get_all = AsyncMock(
-            return_value={
-                "factory1": mock_factory1,
-                "factory2": mock_factory2,
-                "factory3": mock_factory3,
-            }
-        )
-
-        initialized_registry._items = {}
-
-        # Track which factories completed
-        completed_factories = []
-
-        async def mock_update_factory(factory, factory_name):
-            """Mock that simulates connection error for factory2."""
-            from deephaven_mcp.resource_manager._registry_combined import (
-                _FactorySessionChanges,
-            )
-
-            await asyncio.sleep(0.01)
-            if factory_name != "factory2":
-                completed_factories.append(factory_name)
-            return _FactorySessionChanges(
-                factory, factory_name, set(), set()
-            )  # Return empty changes
-
-        with patch.object(
-            initialized_registry,
-            "_calculate_factory_session_changes",
-            side_effect=mock_update_factory,
-        ):
-            await initialized_registry._update_enterprise_sessions()
-
-        # Verify factories 1 and 3 completed despite factory 2 issue
-        assert "factory1" in completed_factories
-        assert "factory3" in completed_factories
-        # Factory 2 may or may not be in list depending on error handling
-
-    @pytest.mark.asyncio
-    async def test_update_enterprise_sessions_raises_exception_group(
-        self, initialized_registry
-    ):
-        """Test that bulk updates raise ExceptionGroup when any factory fails."""
-        mock_factory1 = MagicMock(spec=CorePlusSessionFactoryManager)
-        mock_factory2 = MagicMock(spec=CorePlusSessionFactoryManager)
-
-        # Mock enterprise registry
-        initialized_registry._enterprise_registry.get_all = AsyncMock(
-            return_value={
-                "factory1": mock_factory1,
-                "factory2": mock_factory2,
-            }
-        )
-
-        initialized_registry._items = {}
-
-        async def mock_update_factory(factory, factory_name):
-            """Mock that raises ValueError for factory2."""
-            from deephaven_mcp.resource_manager._registry_combined import (
-                _FactorySessionChanges,
-            )
-
-            await asyncio.sleep(0.01)
-            if factory_name == "factory2":
-                raise ValueError(f"Test error from {factory_name}")
-            return _FactorySessionChanges(
-                factory, factory_name, set(), set()
-            )  # Return empty changes for successful factories
-
-        with patch.object(
-            initialized_registry,
-            "_calculate_factory_session_changes",
-            side_effect=mock_update_factory,
-        ):
-            # Bulk update should raise ExceptionGroup with the failure
-            with pytest.raises(ExceptionGroup) as exc_info:
-                await initialized_registry._update_enterprise_sessions()
-
-            # Verify the ExceptionGroup contains the ValueError
-            assert len(exc_info.value.exceptions) == 1
-            assert isinstance(exc_info.value.exceptions[0], ValueError)
-            assert "factory2" in str(exc_info.value.exceptions[0])
-
-    @pytest.mark.asyncio
-    async def test_update_single_factory_exception_propagates(
-        self, initialized_registry
-    ):
-        """Test that single-factory updates raise ExceptionGroup with the failure."""
-        mock_factory = MagicMock(spec=CorePlusSessionFactoryManager)
-
-        # Mock enterprise registry to return the factory
-        initialized_registry._enterprise_registry.get = AsyncMock(
-            return_value=mock_factory
-        )
-
-        initialized_registry._items = {}
-
-        async def mock_update_factory(factory, factory_name):
-            """Mock that raises ValueError."""
-            raise ValueError(f"Test error from {factory_name}")
-
-        with patch.object(
-            initialized_registry,
-            "_calculate_factory_session_changes",
-            side_effect=mock_update_factory,
-        ):
-            # Single-factory update should raise ExceptionGroup
-            with pytest.raises(ExceptionGroup) as exc_info:
-                await initialized_registry._update_enterprise_sessions(
-                    factory_name="factory1"
-                )
-
-            # Verify the ExceptionGroup contains the ValueError
-            assert len(exc_info.value.exceptions) == 1
-            assert isinstance(exc_info.value.exceptions[0], ValueError)
-            assert "factory1" in str(exc_info.value.exceptions[0])
-
-
-class TestUpdateEnterpriseFactorySessions:
-    """Tests for _update_enterprise_sessions with factory_name parameter (single factory updates)."""
-
-    @pytest.mark.asyncio
-    async def test_update_single_factory_success(self, initialized_registry):
-        """Test successful update of a single factory."""
-        mock_factory = MagicMock(spec=CorePlusSessionFactoryManager)
-        factory_name = "factory1"
-
-        # Mock enterprise registry get() to return the factory
-        initialized_registry._enterprise_registry.get = AsyncMock(
-            return_value=mock_factory
-        )
-
-        # Mock the _calculate_factory_session_changes method
-        with patch.object(
-            initialized_registry,
-            "_calculate_factory_session_changes",
-            AsyncMock(return_value=None),  # Will be set below
-        ) as mock_update:
-            from deephaven_mcp.resource_manager._registry_combined import (
-                _FactorySessionChanges,
-            )
-
-            mock_update.return_value = _FactorySessionChanges(
-                mock_factory, factory_name, set(), set()
-            )
-            await initialized_registry._update_enterprise_sessions(
-                factory_name=factory_name
-            )
-
-            # Verify only the specific factory was updated
-            mock_update.assert_awaited_once_with(mock_factory, factory_name)
-            # Verify we called get() not get_all()
-            initialized_registry._enterprise_registry.get.assert_awaited_once_with(
-                factory_name
-            )
-
-    @pytest.mark.asyncio
-    async def test_update_single_factory_not_found(self, initialized_registry):
-        """Test that RegistryItemNotFoundError is raised for non-existent factory."""
-        from deephaven_mcp._exceptions import RegistryItemNotFoundError
-
-        # Mock enterprise registry get() to raise RegistryItemNotFoundError (like the real registry does)
-        initialized_registry._enterprise_registry.get = AsyncMock(
-            side_effect=RegistryItemNotFoundError(
-                "No item with name 'nonexistent' found"
-            )
-        )
-
-        # Try to update non-existent factory - RegistryItemNotFoundError should be caught gracefully
-        # The exception is expected and handled, so get() should return RegistryItemNotFoundError for the session
-        with pytest.raises(
-            RegistryItemNotFoundError,
-            match="No item with name 'enterprise:nonexistent:session' found",
-        ):
-            await initialized_registry.get("enterprise:nonexistent:session")
-
-    @pytest.mark.asyncio
-    async def test_update_single_factory_not_initialized(self, combined_registry):
-        """Test that InternalError is raised if registry not initialized."""
+    async def test_not_initialized_raises(self, registry):
         with pytest.raises(InternalError):
-            await combined_registry._update_enterprise_sessions(factory_name="factory1")
+            await registry.is_added_session("enterprise:f1:s1")
 
     @pytest.mark.asyncio
-    async def test_update_single_factory_connection_error(self, initialized_registry):
-        """Test that connection errors are handled gracefully for single factory."""
-        mock_factory = MagicMock(spec=CorePlusSessionFactoryManager)
-        factory_name = "factory1"
+    async def test_true_for_added(self, initialized_registry):
+        initialized_registry._added_session_ids.add("enterprise:f1:s1")
+        assert await initialized_registry.is_added_session("enterprise:f1:s1") is True
 
-        # Mock enterprise registry get() to return the factory
+    @pytest.mark.asyncio
+    async def test_false_for_not_added(self, initialized_registry):
+        assert await initialized_registry.is_added_session("enterprise:f1:s1") is False
+
+
+# ---------------------------------------------------------------------------
+# TestCommunityRegistry
+# ---------------------------------------------------------------------------
+
+
+class TestCommunityRegistry:
+    @pytest.mark.asyncio
+    async def test_not_initialized_raises(self, registry):
+        with pytest.raises(InternalError):
+            await registry.community_registry()
+
+    @pytest.mark.asyncio
+    async def test_returns_community_registry(self, initialized_registry):
+        result = await initialized_registry.community_registry()
+        assert result is initialized_registry._community_registry
+
+    @pytest.mark.asyncio
+    async def test_raises_when_community_registry_none(self, initialized_registry):
+        initialized_registry._community_registry = None
+        with pytest.raises(InternalError, match="community registry is not available"):
+            await initialized_registry.community_registry()
+
+
+# ---------------------------------------------------------------------------
+# TestEnterpriseRegistry
+# ---------------------------------------------------------------------------
+
+
+class TestEnterpriseRegistry:
+    @pytest.mark.asyncio
+    async def test_not_initialized_raises(self, registry):
+        with pytest.raises(InternalError):
+            await registry.enterprise_registry()
+
+    @pytest.mark.asyncio
+    async def test_returns_enterprise_registry(self, initialized_registry):
+        result = await initialized_registry.enterprise_registry()
+        assert result is initialized_registry._enterprise_registry
+
+    @pytest.mark.asyncio
+    async def test_raises_when_enterprise_registry_none(self, initialized_registry):
+        initialized_registry._enterprise_registry = None
+        with pytest.raises(InternalError, match="enterprise registry is not available"):
+            await initialized_registry.enterprise_registry()
+
+
+# ---------------------------------------------------------------------------
+# TestSyncEnterpriseSessions
+# ---------------------------------------------------------------------------
+
+
+class TestSyncEnterpriseSessions:
+    @pytest.mark.asyncio
+    async def test_sync_calls_snapshot_query_apply(self, initialized_registry):
+        """_sync_enterprise_sessions orchestrates the four phases."""
+        mock_factory = _make_mock_factory_manager()
+        mock_client = _make_mock_controller_client()
+        # Pre-seed the client cache so _fetch_factory_pqs takes the cached-client path
+        initialized_registry._controller_clients["f1"] = mock_client
+
         initialized_registry._enterprise_registry.get = AsyncMock(
             return_value=mock_factory
         )
 
-        # Add sessions for this factory
-        mock_session = MagicMock(spec=EnterpriseSessionManager)
-        mock_session.close = AsyncMock()
-        key = BaseItemManager.make_full_name(
-            SystemType.ENTERPRISE, factory_name, "session1"
-        )
-        initialized_registry._items[key] = mock_session
+        await initialized_registry._sync_enterprise_sessions(["f1"])
 
-        # Mock _calculate_factory_session_changes to return empty changes (connection errors handled internally)
-        from deephaven_mcp.resource_manager._registry_combined import (
-            _FactorySessionChanges,
-        )
-
-        with patch.object(
-            initialized_registry,
-            "_calculate_factory_session_changes",
-            AsyncMock(
-                return_value=_FactorySessionChanges(
-                    mock_factory, factory_name, set(), set()
-                )
-            ),
-        ):
-            # This should not raise - connection errors are handled internally
-            await initialized_registry._update_enterprise_sessions(
-                factory_name=factory_name
-            )
+        assert initialized_registry._controller_clients.get("f1") is mock_client
 
     @pytest.mark.asyncio
-    async def test_update_enterprise_sessions_no_factories(self, initialized_registry):
-        """Test update when no factories are configured (empty registry)."""
-        # Mock enterprise registry to return empty dict
-        initialized_registry._enterprise_registry.get_all = AsyncMock(return_value={})
-
-        # Should log and return early without error
-        await initialized_registry._update_enterprise_sessions()
-
-        # Verify early return - no items should be added
-        assert len(initialized_registry._items) == 0
-
-    @pytest.mark.asyncio
-    async def test_update_enterprise_sessions_application_failure(
+    async def test_sync_cleans_up_sessions_for_disappeared_factory(
         self, initialized_registry
     ):
-        """Test that application failures are collected in ExceptionGroup."""
-        from deephaven_mcp.resource_manager._registry_combined import (
-            _FactorySessionChanges,
+        """Sessions for a factory that disappeared from the registry are removed."""
+        stale_key = BaseItemManager.make_full_name(
+            SystemType.ENTERPRISE, "nonexistent", "s1"
         )
+        stale_mgr = MagicMock(spec=BaseItemManager)
+        stale_mgr.full_name = stale_key
+        stale_mgr.close = AsyncMock()
+        initialized_registry._items[stale_key] = stale_mgr
 
-        mock_factory1 = MagicMock(spec=CorePlusSessionFactoryManager)
-        mock_factory2 = MagicMock(spec=CorePlusSessionFactoryManager)
-
-        # Mock enterprise registry
-        initialized_registry._enterprise_registry.get_all = AsyncMock(
-            return_value={
-                "factory1": mock_factory1,
-                "factory2": mock_factory2,
-            }
+        initialized_registry._enterprise_registry.get = AsyncMock(
+            side_effect=RegistryItemNotFoundError("nonexistent")
         )
+        await initialized_registry._sync_enterprise_sessions(["nonexistent"])
 
-        # Mock _calculate_factory_session_changes to succeed for both
-        changes1 = _FactorySessionChanges(
-            mock_factory1, "factory1", {"session1"}, set()
-        )
-        changes2 = _FactorySessionChanges(
-            mock_factory2, "factory2", {"session2"}, set()
-        )
-
-        with patch.object(
-            initialized_registry,
-            "_calculate_factory_session_changes",
-            side_effect=[changes1, changes2],
-        ):
-            # Mock _apply_factory_session_changes to fail for factory1
-            original_apply = initialized_registry._apply_factory_session_changes
-            call_count = [0]
-
-            async def failing_apply(changes):
-                call_count[0] += 1
-                if call_count[0] == 1:  # First call fails
-                    raise RuntimeError("Application failed for factory1")
-                # Second call succeeds
-                await original_apply(changes)
-
-            with patch.object(
-                initialized_registry,
-                "_apply_factory_session_changes",
-                side_effect=failing_apply,
-            ):
-                # Should raise ExceptionGroup containing the application error
-                with pytest.raises(ExceptionGroup) as exc_info:
-                    await initialized_registry._update_enterprise_sessions()
-
-                # Verify the exception group contains our application error
-                assert len(exc_info.value.exceptions) == 1
-                assert isinstance(exc_info.value.exceptions[0], RuntimeError)
-                assert "Application failed for factory1" in str(
-                    exc_info.value.exceptions[0]
-                )
+        assert stale_key not in initialized_registry._items
+        stale_mgr.close.assert_awaited_once()
+        assert "nonexistent" in initialized_registry._errors
 
     @pytest.mark.asyncio
-    async def test_get_with_invalid_session_name(self, initialized_registry):
-        """Test get() with malformed session name catches InvalidSessionNameError."""
-        from deephaven_mcp._exceptions import (
-            InvalidSessionNameError,
-            RegistryItemNotFoundError,
+    async def test_sync_adds_new_sessions(self, initialized_registry):
+        """New sessions from controller are added to _items."""
+        mock_factory = _make_mock_factory_manager()
+        mock_client = _make_mock_controller_client()
+
+        session_info = MagicMock()
+        session_info.config.pb.name = "pq1"
+        mock_client.map = AsyncMock(return_value={"k": session_info})
+
+        initialized_registry._enterprise_registry.get = AsyncMock(
+            return_value=mock_factory
+        )
+        initialized_registry._controller_clients["f1"] = mock_client
+
+        await initialized_registry._sync_enterprise_sessions(["f1"])
+
+        key = BaseItemManager.make_full_name(SystemType.ENTERPRISE, "f1", "pq1")
+        assert key in initialized_registry._items
+
+    @pytest.mark.asyncio
+    async def test_sync_removes_stale_sessions(self, initialized_registry):
+        """Sessions no longer in controller are removed and closed."""
+        mock_factory = _make_mock_factory_manager()
+        mock_client = _make_mock_controller_client()
+        mock_client.map = AsyncMock(return_value={})
+
+        stale_key = BaseItemManager.make_full_name(SystemType.ENTERPRISE, "f1", "old")
+        stale_mgr = MagicMock(spec=BaseItemManager)
+        stale_mgr.full_name = stale_key
+        stale_mgr.close = AsyncMock()
+        initialized_registry._items[stale_key] = stale_mgr
+
+        initialized_registry._enterprise_registry.get = AsyncMock(
+            return_value=mock_factory
+        )
+        initialized_registry._controller_clients["f1"] = mock_client
+
+        await initialized_registry._sync_enterprise_sessions(["f1"])
+
+        assert stale_key not in initialized_registry._items
+        stale_mgr.close.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_stale_manager_close_error_does_not_propagate(
+        self, initialized_registry
+    ):
+        """Errors from closing stale managers are logged, not propagated."""
+        stale_key = BaseItemManager.make_full_name(SystemType.ENTERPRISE, "f1", "old")
+        stale_mgr = MagicMock(spec=BaseItemManager)
+        stale_mgr.full_name = stale_key
+        stale_mgr.close = AsyncMock(side_effect=RuntimeError("close boom"))
+        initialized_registry._items[stale_key] = stale_mgr
+
+        mock_factory = _make_mock_factory_manager()
+        initialized_registry._enterprise_registry.get = AsyncMock(
+            return_value=mock_factory
+        )
+        mock_client = _make_mock_controller_client()
+        mock_factory.get.return_value.controller_client = mock_client
+
+        # Should not raise despite stale_mgr.close() raising.
+        await initialized_registry._sync_enterprise_sessions(["f1"])
+
+        stale_mgr.close.assert_awaited_once()
+        assert stale_key not in initialized_registry._items
+
+    @pytest.mark.asyncio
+    async def test_sync_records_error_on_failure(self, initialized_registry):
+        """Query failure is recorded in _errors, sessions removed."""
+        mock_factory = _make_mock_factory_manager()
+        mock_factory.get = AsyncMock(side_effect=RuntimeError("connection refused"))
+
+        initialized_registry._enterprise_registry.get = AsyncMock(
+            return_value=mock_factory
         )
 
-        # Mock parse_full_name to raise InvalidSessionNameError
-        with patch.object(
-            BaseItemManager,
-            "parse_full_name",
-            side_effect=InvalidSessionNameError("Malformed session name"),
+        await initialized_registry._sync_enterprise_sessions(["f1"])
+
+        assert "f1" in initialized_registry._errors
+        assert "RuntimeError" in initialized_registry._errors["f1"]
+
+    @pytest.mark.asyncio
+    async def test_sync_parallel_execution(self, initialized_registry):
+        """Multiple factories are queried in parallel."""
+        call_order: list[str] = []
+
+        async def slow_query(snapshot: _FactorySnapshot):
+            call_order.append(f"start_{snapshot.factory_name}")
+            await asyncio.sleep(0.01)
+            call_order.append(f"end_{snapshot.factory_name}")
+            return _FactoryQueryResult(
+                factory_name=snapshot.factory_name,
+                new_client=_make_mock_controller_client(),
+                query_names=set(),
+            )
+
+        factories = {f"f{i}": _make_mock_factory_manager() for i in range(3)}
+        initialized_registry._enterprise_registry.get = AsyncMock(
+            side_effect=lambda name: factories[name]
+        )
+
+        with patch(
+            "deephaven_mcp.resource_manager._registry_combined._fetch_factory_pqs",
+            side_effect=slow_query,
         ):
-            # Should catch InvalidSessionNameError and continue
-            # Then raise RegistryItemNotFoundError for the session not found
-            with pytest.raises(RegistryItemNotFoundError):
-                await initialized_registry.get("invalid:::name")
+            await initialized_registry._sync_enterprise_sessions(list(factories.keys()))
+
+        starts = [i for i, x in enumerate(call_order) if x.startswith("start_")]
+        ends = [i for i, x in enumerate(call_order) if x.startswith("end_")]
+        assert max(starts) < min(ends)
+
+
+# ---------------------------------------------------------------------------
+# TestSnapshotFactoryState
+# ---------------------------------------------------------------------------
+
+
+class TestSnapshotFactoryState:
+    @pytest.mark.asyncio
+    async def test_returns_empty_when_no_enterprise_registry(
+        self, initialized_registry
+    ):
+        initialized_registry._enterprise_registry = None
+        result = await initialized_registry._snapshot_factory_state(["f1"])
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_skips_unknown_factories(self, initialized_registry):
+        initialized_registry._enterprise_registry.get = AsyncMock(
+            side_effect=RegistryItemNotFoundError("nonexistent")
+        )
+        result = await initialized_registry._snapshot_factory_state(["nonexistent"])
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_captures_cached_client(self, initialized_registry):
+        mock_factory = _make_mock_factory_manager()
+        mock_client = _make_mock_controller_client()
+        initialized_registry._enterprise_registry.get = AsyncMock(
+            return_value=mock_factory
+        )
+        initialized_registry._controller_clients["f1"] = mock_client
+
+        snapshots = await initialized_registry._snapshot_factory_state(["f1"])
+
+        assert len(snapshots) == 1
+        assert snapshots[0].client is mock_client
+
+
+# ---------------------------------------------------------------------------
+# TestGetFactoryKeys
+# ---------------------------------------------------------------------------
+
+
+class TestGetFactoryKeys:
+    def test_returns_matching_enterprise_keys(self, initialized_registry):
+        key = BaseItemManager.make_full_name(SystemType.ENTERPRISE, "f1", "s1")
+        initialized_registry._items[key] = MagicMock(spec=BaseItemManager)
+
+        keys = initialized_registry._get_factory_keys("f1")
+
+        assert keys == {key}
+
+    def test_excludes_different_factory(self, initialized_registry):
+        key_f1 = BaseItemManager.make_full_name(SystemType.ENTERPRISE, "f1", "s1")
+        key_f2 = BaseItemManager.make_full_name(SystemType.ENTERPRISE, "f2", "s1")
+        initialized_registry._items[key_f1] = MagicMock(spec=BaseItemManager)
+        initialized_registry._items[key_f2] = MagicMock(spec=BaseItemManager)
+
+        keys = initialized_registry._get_factory_keys("f1")
+
+        assert keys == {key_f1}
+        assert key_f2 not in keys
+
+    def test_excludes_community_sessions_with_same_source_name(
+        self, initialized_registry
+    ):
+        """Bug #4: community sessions whose source matches factory_name must not match."""
+        community_key = BaseItemManager.make_full_name(SystemType.COMMUNITY, "f1", "s1")
+        enterprise_key = BaseItemManager.make_full_name(
+            SystemType.ENTERPRISE, "f1", "s1"
+        )
+        initialized_registry._items[community_key] = MagicMock(spec=BaseItemManager)
+        initialized_registry._items[enterprise_key] = MagicMock(spec=BaseItemManager)
+
+        keys = initialized_registry._get_factory_keys("f1")
+
+        assert keys == {enterprise_key}
+        assert community_key not in keys
+
+    def test_returns_empty_when_no_matching_keys(self, initialized_registry):
+        assert initialized_registry._get_factory_keys("nonexistent") == set()
+
+    def test_raises_on_malformed_key(self, initialized_registry):
+        initialized_registry._items["bad-key"] = MagicMock(spec=BaseItemManager)
+        with pytest.raises(InternalError, match="Malformed key"):
+            initialized_registry._get_factory_keys("f1")
+
+
+# ---------------------------------------------------------------------------
+# TestRemoveFactorySessionsByKeys
+# ---------------------------------------------------------------------------
+
+
+class TestRemoveFactorySessionsByKeys:
+    def test_removes_specified_keys(self, initialized_registry):
+        key = BaseItemManager.make_full_name(SystemType.ENTERPRISE, "f1", "s1")
+        mgr = MagicMock(spec=BaseItemManager)
+        initialized_registry._items[key] = mgr
+
+        result = initialized_registry._remove_factory_sessions_by_keys({key})
+
+        assert key not in initialized_registry._items
+        assert mgr in result
+
+    def test_discards_from_added_session_ids(self, initialized_registry):
+        key = BaseItemManager.make_full_name(SystemType.ENTERPRISE, "f1", "s1")
+        mgr = MagicMock(spec=BaseItemManager)
+        initialized_registry._items[key] = mgr
+        initialized_registry._added_session_ids.add(key)
+
+        initialized_registry._remove_factory_sessions_by_keys({key})
+
+        assert key not in initialized_registry._added_session_ids
+
+    def test_tolerates_missing_keys(self, initialized_registry):
+        result = initialized_registry._remove_factory_sessions_by_keys(
+            {"enterprise:f1:gone"}
+        )
+        assert result == []
+
+    def test_returns_empty_for_empty_input(self, initialized_registry):
+        assert initialized_registry._remove_factory_sessions_by_keys(set()) == []
+
+
+# ---------------------------------------------------------------------------
+# TestRemoveFactorySessions
+# ---------------------------------------------------------------------------
+
+
+class TestRemoveFactorySessions:
+    def test_removes_all_sessions_for_factory(self, initialized_registry):
+        k1 = BaseItemManager.make_full_name(SystemType.ENTERPRISE, "f1", "s1")
+        k2 = BaseItemManager.make_full_name(SystemType.ENTERPRISE, "f1", "s2")
+        m1, m2 = MagicMock(spec=BaseItemManager), MagicMock(spec=BaseItemManager)
+        initialized_registry._items[k1] = m1
+        initialized_registry._items[k2] = m2
+
+        result = initialized_registry._remove_factory_sessions("f1")
+
+        assert k1 not in initialized_registry._items
+        assert k2 not in initialized_registry._items
+        assert set(result) == {m1, m2}
+
+    def test_does_not_remove_other_factory(self, initialized_registry):
+        k1 = BaseItemManager.make_full_name(SystemType.ENTERPRISE, "f1", "s1")
+        k2 = BaseItemManager.make_full_name(SystemType.ENTERPRISE, "f2", "s1")
+        initialized_registry._items[k1] = MagicMock(spec=BaseItemManager)
+        initialized_registry._items[k2] = MagicMock(spec=BaseItemManager)
+
+        initialized_registry._remove_factory_sessions("f1")
+
+        assert k2 in initialized_registry._items
+
+    def test_does_not_remove_community_same_source(self, initialized_registry):
+        """Community sessions with the same source name must not be removed."""
+        community_key = BaseItemManager.make_full_name(SystemType.COMMUNITY, "f1", "s1")
+        enterprise_key = BaseItemManager.make_full_name(
+            SystemType.ENTERPRISE, "f1", "s1"
+        )
+        initialized_registry._items[community_key] = MagicMock(spec=BaseItemManager)
+        initialized_registry._items[enterprise_key] = MagicMock(spec=BaseItemManager)
+
+        initialized_registry._remove_factory_sessions("f1")
+
+        assert community_key in initialized_registry._items
+        assert enterprise_key not in initialized_registry._items
+
+
+# ---------------------------------------------------------------------------
+# TestApplyFactorySuccess
+# ---------------------------------------------------------------------------
+
+
+class TestApplyFactorySuccess:
+    def _make_snapshot(self, factory_name: str = "f1") -> _FactorySnapshot:
+        return _FactorySnapshot(
+            factory_name=factory_name,
+            factory_manager=_make_mock_factory_manager(),
+            client=None,
+        )
+
+    def test_adds_new_sessions(self, initialized_registry):
+        mock_client = _make_mock_controller_client()
+        result = _FactoryQueryResult(
+            factory_name="f1", new_client=mock_client, query_names={"s1", "s2"}
+        )
+        snapshot = self._make_snapshot()
+
+        managers_to_close = initialized_registry._apply_factory_success(
+            result, snapshot.factory_manager
+        )
+
+        assert managers_to_close == []
+        assert (
+            BaseItemManager.make_full_name(SystemType.ENTERPRISE, "f1", "s1")
+            in initialized_registry._items
+        )
+        assert (
+            BaseItemManager.make_full_name(SystemType.ENTERPRISE, "f1", "s2")
+            in initialized_registry._items
+        )
+        assert initialized_registry._controller_clients["f1"] is mock_client
+
+    def test_removes_stale_sessions(self, initialized_registry):
+        stale_key = BaseItemManager.make_full_name(SystemType.ENTERPRISE, "f1", "old")
+        stale_mgr = MagicMock(spec=BaseItemManager)
+        initialized_registry._items[stale_key] = stale_mgr
+
+        result = _FactoryQueryResult(
+            factory_name="f1",
+            new_client=_make_mock_controller_client(),
+            query_names=set(),
+        )
+        managers_to_close = initialized_registry._apply_factory_success(
+            result, self._make_snapshot().factory_manager
+        )
+
+        assert stale_mgr in managers_to_close
+        assert stale_key not in initialized_registry._items
+
+    def test_does_not_recreate_existing_sessions(self, initialized_registry):
+        key = BaseItemManager.make_full_name(SystemType.ENTERPRISE, "f1", "s1")
+        existing_mgr = MagicMock(spec=BaseItemManager)
+        initialized_registry._items[key] = existing_mgr
+
+        result = _FactoryQueryResult(
+            factory_name="f1",
+            new_client=_make_mock_controller_client(),
+            query_names={"s1"},
+        )
+        initialized_registry._apply_factory_success(
+            result, self._make_snapshot().factory_manager
+        )
+
+        assert initialized_registry._items[key] is existing_mgr
+
+    def test_clears_previous_error(self, initialized_registry):
+        initialized_registry._errors["f1"] = "previous error"
+        result = _FactoryQueryResult(
+            factory_name="f1",
+            new_client=_make_mock_controller_client(),
+            query_names=set(),
+        )
+        initialized_registry._apply_factory_success(
+            result, self._make_snapshot().factory_manager
+        )
+
+        assert "f1" not in initialized_registry._errors
+
+    def test_discard_stale_from_added_session_ids(self, initialized_registry):
+        stale_key = BaseItemManager.make_full_name(SystemType.ENTERPRISE, "f1", "old")
+        initialized_registry._items[stale_key] = MagicMock(spec=BaseItemManager)
+        initialized_registry._added_session_ids.add(stale_key)
+
+        result = _FactoryQueryResult(
+            factory_name="f1",
+            new_client=_make_mock_controller_client(),
+            query_names=set(),
+        )
+        initialized_registry._apply_factory_success(
+            result, self._make_snapshot().factory_manager
+        )
+
+        assert stale_key not in initialized_registry._added_session_ids
+
+
+# ---------------------------------------------------------------------------
+# TestApplyFactoryError
+# ---------------------------------------------------------------------------
+
+
+class TestApplyFactoryError:
+    def test_records_error(self, initialized_registry):
+        result = _FactoryQueryError(factory_name="f1", new_client=None, error="boom")
+        initialized_registry._apply_factory_error(result)
+        assert initialized_registry._errors["f1"] == "boom"
+
+    def test_removes_all_sessions(self, initialized_registry):
+        key = BaseItemManager.make_full_name(SystemType.ENTERPRISE, "f1", "s1")
+        mgr = MagicMock(spec=BaseItemManager)
+        initialized_registry._items[key] = mgr
+
+        result = _FactoryQueryError(factory_name="f1", new_client=None, error="boom")
+        managers_to_close = initialized_registry._apply_factory_error(result)
+
+        assert mgr in managers_to_close
+        assert key not in initialized_registry._items
+
+    def test_caches_new_client_when_present(self, initialized_registry):
+        new_client = _make_mock_controller_client()
+        result = _FactoryQueryError(
+            factory_name="f1", new_client=new_client, error="boom"
+        )
+        initialized_registry._apply_factory_error(result)
+        assert initialized_registry._controller_clients["f1"] is new_client
+
+    def test_evicts_dead_client_when_no_new_client(self, initialized_registry):
+        """When new_client is None, the stale cached client is evicted."""
+        initialized_registry._controller_clients["f1"] = _make_mock_controller_client()
+        result = _FactoryQueryError(factory_name="f1", new_client=None, error="boom")
+        initialized_registry._apply_factory_error(result)
+        assert "f1" not in initialized_registry._controller_clients
+
+    def test_discards_from_added_session_ids(self, initialized_registry):
+        key = BaseItemManager.make_full_name(SystemType.ENTERPRISE, "f1", "s1")
+        initialized_registry._items[key] = MagicMock(spec=BaseItemManager)
+        initialized_registry._added_session_ids.add(key)
+
+        result = _FactoryQueryError(factory_name="f1", new_client=None, error="boom")
+        initialized_registry._apply_factory_error(result)
+
+        assert key not in initialized_registry._added_session_ids
+
+
+# ---------------------------------------------------------------------------
+# TestApplyResults
+# ---------------------------------------------------------------------------
+
+
+class TestApplyResults:
+    def _make_snapshot(self, factory_name: str = "f1") -> _FactorySnapshot:
+        return _FactorySnapshot(
+            factory_name=factory_name,
+            factory_manager=_make_mock_factory_manager(),
+            client=None,
+        )
+
+    def test_dispatches_success_result(self, initialized_registry):
+        mock_client = _make_mock_controller_client()
+        result = _FactoryQueryResult(
+            factory_name="f1", new_client=mock_client, query_names={"s1"}
+        )
+        snapshot = self._make_snapshot()
+
+        managers_to_close = initialized_registry._apply_results([result], [snapshot])
+
+        assert managers_to_close == []
+        assert (
+            BaseItemManager.make_full_name(SystemType.ENTERPRISE, "f1", "s1")
+            in initialized_registry._items
+        )
+
+    def test_dispatches_error_result(self, initialized_registry):
+        key = BaseItemManager.make_full_name(SystemType.ENTERPRISE, "f1", "s1")
+        initialized_registry._items[key] = MagicMock(spec=BaseItemManager)
+
+        result = _FactoryQueryError(factory_name="f1", new_client=None, error="boom")
+        managers_to_close = initialized_registry._apply_results([result], [])
+
+        assert key not in initialized_registry._items
+        assert len(managers_to_close) == 1
+
+    def test_raises_on_unexpected_result_type(self, initialized_registry):
+        """Unexpected result type raises InternalError."""
+        bad_result = MagicMock()
+        bad_result.factory_name = "f1"
+        with pytest.raises(InternalError, match="Unexpected result type"):
+            initialized_registry._apply_results([bad_result], [])
+
+    def test_raises_when_success_result_has_no_snapshot(self, initialized_registry):
+        """_FactoryQueryResult with no matching snapshot raises InternalError."""
+        result = _FactoryQueryResult(
+            factory_name="f1",
+            new_client=_make_mock_controller_client(),
+            query_names={"s1"},
+        )
+        # Pass empty snapshots list — no snapshot for f1.
+        with pytest.raises(InternalError, match="No snapshot found"):
+            initialized_registry._apply_results([result], [])
+
+    def test_collects_managers_from_multiple_factories(self, initialized_registry):
+        k1 = BaseItemManager.make_full_name(SystemType.ENTERPRISE, "f1", "old")
+        k2 = BaseItemManager.make_full_name(SystemType.ENTERPRISE, "f2", "old")
+        m1, m2 = MagicMock(spec=BaseItemManager), MagicMock(spec=BaseItemManager)
+        initialized_registry._items[k1] = m1
+        initialized_registry._items[k2] = m2
+
+        results = [
+            _FactoryQueryResult(
+                factory_name="f1",
+                new_client=_make_mock_controller_client(),
+                query_names=set(),
+            ),
+            _FactoryQueryResult(
+                factory_name="f2",
+                new_client=_make_mock_controller_client(),
+                query_names=set(),
+            ),
+        ]
+        snapshots = [
+            self._make_snapshot("f1"),
+            self._make_snapshot("f2"),
+        ]
+        managers_to_close = initialized_registry._apply_results(results, snapshots)
+
+        assert set(managers_to_close) == {m1, m2}
+
+
+# ---------------------------------------------------------------------------
+# TestDiscoverEnterpriseSessions
+# ---------------------------------------------------------------------------
+
+
+class TestDiscoverEnterpriseSessions:
+    @pytest.mark.asyncio
+    async def test_sets_loading_then_completed(self, initialized_registry):
+        initialized_registry._phase = InitializationPhase.PARTIAL
+        initialized_registry._enterprise_registry.get_all = AsyncMock(
+            return_value=RegistrySnapshot.simple(items={})
+        )
+
+        await initialized_registry._discover_enterprise_sessions()
+
+        assert initialized_registry._phase == InitializationPhase.COMPLETED
+
+    @pytest.mark.asyncio
+    async def test_cancelled_sets_failed_phase(self, initialized_registry):
+        initialized_registry._phase = InitializationPhase.PARTIAL
+
+        async def slow():
+            await asyncio.sleep(9999)
+
+        initialized_registry._enterprise_registry.get_all = AsyncMock(side_effect=slow)
+
+        task = asyncio.create_task(initialized_registry._discover_enterprise_sessions())
+        await asyncio.sleep(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        assert initialized_registry._phase == InitializationPhase.FAILED
+
+    @pytest.mark.asyncio
+    async def test_cancelled_before_lock_sets_failed_phase(self, initialized_registry):
+        """CancelledError raised while waiting for self._lock still sets FAILED.
+
+        Previously the first lock acquire was outside the try block, so a
+        cancellation at that point would leave _phase in its pre-discovery state.
+        """
+        initialized_registry._phase = InitializationPhase.PARTIAL
+
+        # Hold the lock so the task blocks on the very first acquire.
+        async with initialized_registry._lock:
+            task = asyncio.create_task(
+                initialized_registry._discover_enterprise_sessions()
+            )
+            # Yield so the task starts and blocks on the lock.
+            await asyncio.sleep(0)
+            assert not task.done()
+            task.cancel()
+            # Yield again so the cancellation is delivered while the lock is held.
+            await asyncio.sleep(0)
+        # Lock released — task should now handle CancelledError.
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        assert initialized_registry._phase == InitializationPhase.FAILED
+
+    @pytest.mark.asyncio
+    async def test_exception_records_error_and_completes(self, initialized_registry):
+        initialized_registry._phase = InitializationPhase.PARTIAL
+        initialized_registry._enterprise_registry.get_all = AsyncMock(
+            side_effect=RuntimeError("discovery boom")
+        )
+
+        await initialized_registry._discover_enterprise_sessions()
+
+        assert initialized_registry._phase == InitializationPhase.COMPLETED
+        assert "enterprise_discovery" in initialized_registry._errors
+        assert "RuntimeError" in initialized_registry._errors["enterprise_discovery"]
+
+    @pytest.mark.asyncio
+    async def test_completed_with_prior_errors_stays_completed(
+        self, initialized_registry
+    ):
+        """Discovery completing with pre-existing errors still sets phase to COMPLETED."""
+        initialized_registry._phase = InitializationPhase.PARTIAL
+        initialized_registry._enterprise_registry.get_all = AsyncMock(
+            return_value=RegistrySnapshot.simple(items={})
+        )
+        # Pre-seed an error to exercise the warning branch (line 847).
+        initialized_registry._errors["f1"] = "some prior error"
+
+        await initialized_registry._discover_enterprise_sessions()
+
+        assert initialized_registry._phase == InitializationPhase.COMPLETED
+        assert initialized_registry._errors["f1"] == "some prior error"
+
+    @pytest.mark.asyncio
+    async def test_calls_sync_for_all_factories(self, initialized_registry):
+        mock_f1 = _make_mock_factory_manager()
+        mock_f2 = _make_mock_factory_manager()
+        initialized_registry._enterprise_registry.get_all = AsyncMock(
+            return_value=RegistrySnapshot.simple(items={"f1": mock_f1, "f2": mock_f2})
+        )
+
+        with patch.object(
+            initialized_registry, "_sync_enterprise_sessions", AsyncMock()
+        ) as mock_sync:
+            await initialized_registry._discover_enterprise_sessions()
+
+        mock_sync.assert_awaited_once()
+        called_names = set(mock_sync.call_args[0][0])
+        assert called_names == {"f1", "f2"}
+
+    @pytest.mark.asyncio
+    async def test_reads_enterprise_registry_under_lock(self, initialized_registry):
+        """_enterprise_registry is read under self._lock so close() cannot race it."""
+        read_while_locked = []
+
+        original_get_all = initialized_registry._enterprise_registry.get_all
+
+        async def check_lock_on_get_all():
+            read_while_locked.append(initialized_registry._lock.locked())
+            return RegistrySnapshot.simple(items={})
+
+        initialized_registry._enterprise_registry.get_all = AsyncMock(
+            side_effect=check_lock_on_get_all
+        )
+
+        with patch.object(
+            initialized_registry, "_sync_enterprise_sessions", AsyncMock()
+        ):
+            await initialized_registry._discover_enterprise_sessions()
+
+        # The lock should NOT be held when get_all() is called (only the read
+        # of _enterprise_registry itself is under the lock, not the I/O call).
+        assert read_while_locked == [False]
+
+    @pytest.mark.asyncio
+    async def test_skips_sync_when_enterprise_registry_none(self, initialized_registry):
+        """If _enterprise_registry is None (closed concurrently), no sync is attempted."""
+        initialized_registry._enterprise_registry = None
+
+        with patch.object(
+            initialized_registry, "_sync_enterprise_sessions", AsyncMock()
+        ) as mock_sync:
+            await initialized_registry._discover_enterprise_sessions()
+
+        mock_sync.assert_not_awaited()
+        assert initialized_registry._phase == InitializationPhase.COMPLETED
+
+
+# ---------------------------------------------------------------------------
+# TestBuildNotFoundMessage
+# ---------------------------------------------------------------------------
+
+
+class TestBuildNotFoundMessage:
+    def test_basic_message(self, initialized_registry):
+        msg = initialized_registry._build_not_found_message("enterprise:f1:s1")
+        assert "enterprise:f1:s1" in msg
+        assert "CombinedSessionRegistry" in msg
+
+    def test_includes_loading_note(self, initialized_registry):
+        initialized_registry._phase = InitializationPhase.LOADING
+        msg = initialized_registry._build_not_found_message("enterprise:f1:s1")
+        assert "still in progress" in msg
+
+    def test_no_note_when_completed(self, initialized_registry):
+        initialized_registry._phase = InitializationPhase.COMPLETED
+        initialized_registry._errors = {}
+        msg = initialized_registry._build_not_found_message("enterprise:f1:s1")
+        assert "Note:" not in msg
+
+    def test_includes_matching_factory_error(self, initialized_registry):
+        initialized_registry._errors = {"f1": "Connection refused"}
+        msg = initialized_registry._build_not_found_message("enterprise:f1:s1")
+        assert "factory 'f1'" in msg
+        assert "Connection refused" in msg
+
+    def test_includes_other_factory_errors(self, initialized_registry):
+        initialized_registry._errors = {"other": "Timeout"}
+        msg = initialized_registry._build_not_found_message("enterprise:f1:s1")
+        assert "1 factory" in msg
+        assert "other" in msg
+
+    def test_includes_both_loading_and_error(self, initialized_registry):
+        initialized_registry._phase = InitializationPhase.LOADING
+        initialized_registry._errors = {"f1": "boom"}
+        msg = initialized_registry._build_not_found_message("enterprise:f1:s1")
+        assert "still in progress" in msg
+        assert "f1" in msg
+
+    @pytest.mark.parametrize(
+        "phase",
+        [
+            InitializationPhase.FAILED,
+            InitializationPhase.NOT_STARTED,
+            InitializationPhase.PARTIAL,
+        ],
+    )
+    def test_non_loading_incomplete_phase_note(self, initialized_registry, phase):
+        """FAILED/NOT_STARTED/PARTIAL produce 'has not completed' note, not 'in progress'."""
+        initialized_registry._phase = phase
+        initialized_registry._errors = {}
+        msg = initialized_registry._build_not_found_message("enterprise:f1:s1")
+        assert "has not completed" in msg
+        assert phase.value in msg
+        assert "still in progress" not in msg
+
+    def test_malformed_name_with_errors_raises_internal_error(
+        self, initialized_registry
+    ):
+        """Malformed name raises InternalError — caller is responsible for validation."""
+        initialized_registry._errors = {"f1": "boom"}
+        with pytest.raises(InternalError, match="malformed name"):
+            initialized_registry._build_not_found_message("bad-name")
+
+
+# ---------------------------------------------------------------------------
+# TestMakeEnterpriseSessionManager
+# ---------------------------------------------------------------------------
+
+
+class TestMakeEnterpriseSessionManager:
+    def test_creates_enterprise_session_manager(self):
+        mock_factory = _make_mock_factory_manager()
+        mgr = CombinedSessionRegistry._make_enterprise_session_manager(
+            mock_factory, "f1", "s1"
+        )
+        assert isinstance(mgr, EnterpriseSessionManager)
+        assert mgr._source == "f1"
+        assert mgr._name == "s1"
+
+    @pytest.mark.asyncio
+    async def test_creation_function_calls_connect(self):
+        mock_factory_instance = MagicMock()
+        mock_factory_instance.connect_to_persistent_query = AsyncMock(
+            return_value=MagicMock()
+        )
+        mock_factory = _make_mock_factory_manager()
+        mock_factory.get = AsyncMock(return_value=mock_factory_instance)
+
+        mgr = CombinedSessionRegistry._make_enterprise_session_manager(
+            mock_factory, "f1", "s1"
+        )
+        await mgr._creation_function("f1", "s1")
+
+        mock_factory.get.assert_awaited_once()
+        mock_factory_instance.connect_to_persistent_query.assert_awaited_once_with("s1")
+
+
+# ---------------------------------------------------------------------------
+# TestQueryFactory
+# ---------------------------------------------------------------------------
+
+
+class TestQueryFactory:
+    def _make_snapshot(
+        self,
+        factory_name: str = "f1",
+        client=None,
+    ) -> _FactorySnapshot:
+        mock_factory = _make_mock_factory_manager()
+        factory_instance = MagicMock()
+        factory_instance.controller_client = client or _make_mock_controller_client()
+        mock_factory.get = AsyncMock(return_value=factory_instance)
+        return _FactorySnapshot(
+            factory_name=factory_name,
+            factory_manager=mock_factory,
+            client=client,
+        )
+
+    @pytest.mark.asyncio
+    async def test_creates_client_when_none(self):
+        mock_client = _make_mock_controller_client()
+        snapshot = self._make_snapshot(client=None)
+        snapshot.factory_manager.get.return_value.controller_client = mock_client
+
+        result = await _fetch_factory_pqs(snapshot)
+
+        assert isinstance(result, _FactoryQueryResult)
+        assert result.new_client is mock_client
+
+    @pytest.mark.asyncio
+    async def test_uses_cached_client(self):
+        mock_client = _make_mock_controller_client()
+        snapshot = self._make_snapshot(client=mock_client)
+
+        result = await _fetch_factory_pqs(snapshot)
+
+        assert isinstance(result, _FactoryQueryResult)
+        assert result.new_client is mock_client
+
+    @pytest.mark.asyncio
+    async def test_ping_returns_false_recreates_client(self):
+        """ping() returning False triggers client recreation (line 145)."""
+        dead_client = _make_mock_controller_client()
+        dead_client.ping = AsyncMock(return_value=False)  # False, not exception
+
+        new_client = _make_mock_controller_client()
+        snapshot = self._make_snapshot(client=dead_client)
+        snapshot.factory_manager.get.return_value.controller_client = new_client
+
+        result = await _fetch_factory_pqs(snapshot)
+
+        assert isinstance(result, _FactoryQueryResult)
+        assert result.new_client is new_client
+
+    @pytest.mark.asyncio
+    async def test_recreates_dead_client(self):
+        dead_client = _make_mock_controller_client()
+        dead_client.ping = AsyncMock(side_effect=RuntimeError("dead"))
+
+        new_client = _make_mock_controller_client()
+        snapshot = self._make_snapshot(client=dead_client)
+        snapshot.factory_manager.get.return_value.controller_client = new_client
+
+        result = await _fetch_factory_pqs(snapshot)
+
+        assert isinstance(result, _FactoryQueryResult)
+        assert result.new_client is new_client
+
+    @pytest.mark.asyncio
+    async def test_extracts_pq_names_from_map(self):
+        mock_client = _make_mock_controller_client()
+        session_info = MagicMock()
+        session_info.config.pb.name = "pq1"
+        mock_client.map = AsyncMock(return_value={"k": session_info})
+        snapshot = self._make_snapshot(client=mock_client)
+
+        result = await _fetch_factory_pqs(snapshot)
+
+        assert isinstance(result, _FactoryQueryResult)
+        assert "pq1" in result.query_names
+
+    @pytest.mark.asyncio
+    async def test_returns_error_on_exception(self):
+        snapshot = self._make_snapshot(client=None)
+        snapshot.factory_manager.get = AsyncMock(
+            side_effect=RuntimeError("connection refused")
+        )
+
+        result = await _fetch_factory_pqs(snapshot)
+
+        assert isinstance(result, _FactoryQueryError)
+        assert "RuntimeError" in result.error
+        assert "connection refused" in result.error
+
+    @pytest.mark.asyncio
+    async def test_extracts_multiple_pq_names_from_map(self):
+        mock_client = _make_mock_controller_client()
+        info1 = MagicMock()
+        info1.config.pb.name = "alpha"
+        info2 = MagicMock()
+        info2.config.pb.name = "beta"
+        mock_client.map = AsyncMock(return_value={"k1": info1, "k2": info2})
+        snapshot = self._make_snapshot(client=mock_client)
+
+        result = await _fetch_factory_pqs(snapshot)
+
+        assert isinstance(result, _FactoryQueryResult)
+        assert result.query_names == {"alpha", "beta"}

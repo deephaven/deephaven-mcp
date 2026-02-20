@@ -16,9 +16,54 @@ from mcp.server.fastmcp import Context
 
 from deephaven_mcp.client import BaseSession, CorePlusSession
 from deephaven_mcp.config import ConfigManager, get_config_section
-from deephaven_mcp.resource_manager import CombinedSessionRegistry
+from deephaven_mcp.resource_manager import (
+    CombinedSessionRegistry,
+    InitializationPhase,
+)
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _format_initialization_status(
+    phase: InitializationPhase,
+    init_errors: dict[str, str],
+) -> dict[str, object] | None:
+    """Format initialization phase and errors into a response-ready dict.
+
+    Pure formatting function — does not query any registry.  Callers are
+    responsible for obtaining *phase* and *init_errors* from the same
+    atomic snapshot (e.g. via ``CombinedSessionRegistry.get_all()`` on the shared
+    registry instance).
+
+    Returns ``None`` when there is nothing to report (completed without
+    errors), so callers can simply do::
+
+        init_info = _format_initialization_status(phase, errors)
+        if init_info:
+            response["initialization"] = init_info
+
+    Args:
+        phase: The current initialization phase.
+        init_errors: Dict mapping factory names to error descriptions.
+
+    Returns:
+        A dict with ``status`` (str, always) and ``errors``
+        (dict[str, str], only when present), or ``None`` if initialization
+        completed cleanly.
+    """
+    init_info: dict[str, object] = {}
+    if phase not in (InitializationPhase.SIMPLE, InitializationPhase.COMPLETED):
+        init_info["status"] = (
+            "Enterprise session discovery is still in progress. "
+            "Some sessions or systems may not yet be visible."
+        )
+    elif init_errors:
+        init_info["status"] = (
+            "Some enterprise systems had connection issues during discovery."
+        )
+    if init_errors:
+        init_info["errors"] = init_errors
+    return init_info or None
 
 
 async def _get_session_from_context(

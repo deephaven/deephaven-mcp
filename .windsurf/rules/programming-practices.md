@@ -26,3 +26,4 @@ trigger: always_on
 8. A python file named <file>.py should have a single test file named test_<file>.py.  An exception is made for integration tests which are named test_<file>_integration.py.
 9. "Any" is generally a bad type hint.  If you need to use it, please justify why it is necessary.  Specific type hints should be used when possible.
 10. The use of "hasattr" and "getattr" is generally a bad practice.  If you need to use it, please justify why it is necessary.  They mask bugs.
+11. Use American English spelling throughout all code, comments, docstrings, and documentation.  For example: "initialized" not "initialised", "recognized" not "recognised", "color" not "colour".
