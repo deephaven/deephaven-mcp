@@ -591,6 +591,19 @@ class TestCombinedSessionRegistryAccessors:
         enterprise_registry = await initialized_registry.enterprise_registry()
         assert enterprise_registry == initialized_registry._enterprise_registry
 
+    @pytest.mark.asyncio
+    async def test_enterprise_registry_none_after_initialized_flag(
+        self, combined_registry
+    ):
+        """Test defensive check when _initialized is True but _enterprise_registry is None."""
+        # This is a defensive check that should never happen in practice,
+        # but we test it for coverage
+        combined_registry._initialized = True
+        combined_registry._enterprise_registry = None
+
+        with pytest.raises(InternalError, match="Enterprise registry not initialized"):
+            await combined_registry.enterprise_registry()
+
 
 class TestControllerClientCaching:
     """Test controller client caching and lifecycle management."""
@@ -720,6 +733,66 @@ class TestControllerClientCaching:
         assert client == mock_new_client
 
 
+class TestGetFactorySnapshot:
+    """Test the _get_factory_snapshot helper method."""
+
+    @pytest.mark.asyncio
+    async def test_get_factory_snapshot_not_initialized(self, combined_registry):
+        """Test that _get_factory_snapshot raises InternalError when registry is None."""
+        # Ensure enterprise registry is None
+        combined_registry._enterprise_registry = None
+
+        with pytest.raises(InternalError, match="Enterprise registry not initialized"):
+            await combined_registry._get_factory_snapshot()
+
+    @pytest.mark.asyncio
+    async def test_get_factory_snapshot_success(self, initialized_registry):
+        """Test successful _get_factory_snapshot call."""
+        mock_factory = MagicMock(spec=CorePlusSessionFactoryManager)
+        expected_snapshot = RegistrySnapshot.simple(items={"factory1": mock_factory})
+
+        initialized_registry._enterprise_registry.get_all = AsyncMock(
+            return_value=expected_snapshot
+        )
+
+        result = await initialized_registry._get_factory_snapshot()
+
+        assert result == expected_snapshot
+        initialized_registry._enterprise_registry.get_all.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_get_factory_snapshot_unexpected_phase(self, initialized_registry):
+        """Test that _get_factory_snapshot raises InternalError for unexpected phase."""
+        # Create snapshot with non-SIMPLE phase
+        snapshot = RegistrySnapshot(
+            items={},
+            initialization_phase=InitializationPhase.LOADING,
+            initialization_errors={},
+        )
+        initialized_registry._enterprise_registry.get_all = AsyncMock(
+            return_value=snapshot
+        )
+
+        with pytest.raises(InternalError, match="unexpected phase"):
+            await initialized_registry._get_factory_snapshot()
+
+    @pytest.mark.asyncio
+    async def test_get_factory_snapshot_with_errors(self, initialized_registry):
+        """Test that _get_factory_snapshot raises InternalError when snapshot has errors."""
+        # Create snapshot with initialization errors
+        snapshot = RegistrySnapshot(
+            items={},
+            initialization_phase=InitializationPhase.SIMPLE,
+            initialization_errors={"factory1": "Connection failed"},
+        )
+        initialized_registry._enterprise_registry.get_all = AsyncMock(
+            return_value=snapshot
+        )
+
+        with pytest.raises(InternalError, match="unexpected errors"):
+            await initialized_registry._get_factory_snapshot()
+
+
 class TestEnterpriseSessionUpdate:
     """Test the _update_enterprise_sessions method."""
 
@@ -728,6 +801,19 @@ class TestEnterpriseSessionUpdate:
         """Test that updating enterprise sessions before initialization raises InternalError."""
         with pytest.raises(InternalError):
             await combined_registry._update_enterprise_sessions()
+
+    @pytest.mark.asyncio
+    async def test_update_enterprise_sessions_single_factory_registry_none(
+        self, combined_registry
+    ):
+        """Test defensive check when updating single factory but _enterprise_registry is None."""
+        # This is a defensive check that should never happen in practice,
+        # but we test it for coverage
+        combined_registry._initialized = True
+        combined_registry._enterprise_registry = None
+
+        with pytest.raises(InternalError, match="Enterprise registry not initialized"):
+            await combined_registry._update_enterprise_sessions(factory_name="factory1")
 
     @pytest.mark.asyncio
     async def test_update_enterprise_sessions_success(self, initialized_registry):
