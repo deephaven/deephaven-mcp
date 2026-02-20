@@ -32,236 +32,304 @@ from deephaven_mcp.resource_manager import (
     SystemType,
 )
 
+# =============================================================================
+# session_community_create edge case tests
+# =============================================================================
 
-class TestSessionCommunityCreateComplete:
-    """Complete tests for session_community_create edge cases."""
 
-    @pytest.mark.asyncio
-    async def test_create_with_auth_token_parameter(self):
-        """Test lines 3740: auth_token parameter takes precedence."""
-        mock_config_manager = MagicMock()
-        mock_session_registry = MagicMock()
+@pytest.mark.asyncio
+async def test_session_community_create_with_auth_token_parameter():
+    """Test lines 3740: auth_token parameter takes precedence."""
+    mock_config_manager = MagicMock()
+    mock_session_registry = MagicMock()
 
-        community_config = {
-            "session_creation": {
-                "max_concurrent_sessions": 5,
-                "defaults": {
-                    "auth_token": "default_token",
-                    "auth_token_env_var": "SOME_VAR",
-                },
-            }
+    community_config = {
+        "session_creation": {
+            "max_concurrent_sessions": 5,
+            "defaults": {
+                "auth_token": "default_token",
+                "auth_token_env_var": "SOME_VAR",
+            },
         }
+    }
 
-        full_config = {"community": community_config}
-        mock_config_manager.get_config = AsyncMock(return_value=full_config)
-        mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
-        mock_session_registry.add_session = AsyncMock()
-        mock_session_registry.get = AsyncMock(
-            side_effect=RegistryItemNotFoundError("not found")
-        )
+    full_config = {"community": community_config}
+    mock_config_manager.get_config = AsyncMock(return_value=full_config)
+    mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
+    mock_session_registry.add_session = AsyncMock()
+    mock_session_registry.get = AsyncMock(
+        side_effect=RegistryItemNotFoundError("not found")
+    )
 
-        mock_launched_session = MagicMock(spec=DockerLaunchedSession)
-        mock_launched_session.port = 10000
-        mock_launched_session.launch_method = "docker"
-        mock_launched_session.connection_url = "http://localhost:10000"
-        mock_launched_session.connection_url_with_auth = (
-            "http://localhost:10000/?psk=test_token"
-        )
-        mock_launched_session.container_id = "test"
-        mock_launched_session.auth_type = "psk"
-        mock_launched_session.auth_token = "test_token"
+    mock_launched_session = MagicMock(spec=DockerLaunchedSession)
+    mock_launched_session.port = 10000
+    mock_launched_session.launch_method = "docker"
+    mock_launched_session.connection_url = "http://localhost:10000"
+    mock_launched_session.connection_url_with_auth = (
+        "http://localhost:10000/?psk=test_token"
+    )
+    mock_launched_session.container_id = "test"
+    mock_launched_session.auth_type = "psk"
+    mock_launched_session.auth_token = "test_token"
 
-        with (
-            patch(
-                "deephaven_mcp.mcp_systems_server._tools.session_community.launch_session"
-            ) as mock_launch_session,
-            patch(
-                "deephaven_mcp.mcp_systems_server._tools.session_community.find_available_port",
-                return_value=10000,
-            ),
-            patch.object(
-                mock_launched_session,
-                "wait_until_ready",
-                new=AsyncMock(return_value=True),
-            ),
-        ):
+    with (
+        patch(
+            "deephaven_mcp.mcp_systems_server._tools.session_community.launch_session"
+        ) as mock_launch_session,
+        patch(
+            "deephaven_mcp.mcp_systems_server._tools.session_community.find_available_port",
+            return_value=10000,
+        ),
+        patch.object(
+            mock_launched_session,
+            "wait_until_ready",
+            new=AsyncMock(return_value=True),
+        ),
+    ):
 
-            mock_launch_session.return_value = mock_launched_session
+        mock_launch_session.return_value = mock_launched_session
 
-            context = MockContext(
-                {
-                    "config_manager": mock_config_manager,
-                    "session_registry": mock_session_registry,
-                    "instance_tracker": create_mock_instance_tracker(),
-                }
-            )
-
-            result = await session_community_create(
-                context,
-                session_name="test-session",
-                auth_token="explicit_token",  # This should take precedence
-            )
-
-            assert result["success"] is True
-            # Verify explicit token was used
-            launch_call = mock_launch_session.call_args
-            assert launch_call[1]["auth_token"] == "explicit_token"
-
-    @pytest.mark.asyncio
-    async def test_create_with_auth_token_env_var_set(self):
-        """Test lines 3742-3746: auth_token_env_var when env var exists."""
-        mock_config_manager = MagicMock()
-        mock_session_registry = MagicMock()
-
-        community_config = {
-            "session_creation": {
-                "max_concurrent_sessions": 5,
-                "defaults": {
-                    "auth_token_env_var": "TEST_AUTH_TOKEN",
-                },
+        context = MockContext(
+            {
+                "config_manager": mock_config_manager,
+                "session_registry": mock_session_registry,
+                "instance_tracker": create_mock_instance_tracker(),
             }
+        )
+
+        result = await session_community_create(
+            context,
+            session_name="test-session",
+            auth_token="explicit_token",  # This should take precedence
+        )
+
+        assert result["success"] is True
+        # Verify explicit token was used
+        launch_call = mock_launch_session.call_args
+        assert launch_call[1]["auth_token"] == "explicit_token"
+
+
+@pytest.mark.asyncio
+async def test_session_community_create_with_auth_token_env_var_set():
+    """Test lines 3742-3746: auth_token_env_var when env var exists."""
+    mock_config_manager = MagicMock()
+    mock_session_registry = MagicMock()
+
+    community_config = {
+        "session_creation": {
+            "max_concurrent_sessions": 5,
+            "defaults": {
+                "auth_token_env_var": "TEST_AUTH_TOKEN",
+            },
         }
+    }
 
-        full_config = {"community": community_config}
-        mock_config_manager.get_config = AsyncMock(return_value=full_config)
-        mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
-        mock_session_registry.add_session = AsyncMock()
-        mock_session_registry.get = AsyncMock(
-            side_effect=RegistryItemNotFoundError("not found")
-        )
+    full_config = {"community": community_config}
+    mock_config_manager.get_config = AsyncMock(return_value=full_config)
+    mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
+    mock_session_registry.add_session = AsyncMock()
+    mock_session_registry.get = AsyncMock(
+        side_effect=RegistryItemNotFoundError("not found")
+    )
 
-        mock_launched_session = MagicMock(spec=DockerLaunchedSession)
-        mock_launched_session.port = 10000
-        mock_launched_session.launch_method = "docker"
-        mock_launched_session.connection_url = "http://localhost:10000"
-        mock_launched_session.connection_url_with_auth = (
-            "http://localhost:10000/?psk=test_token"
-        )
-        mock_launched_session.container_id = "test"
-        mock_launched_session.auth_type = "psk"
-        mock_launched_session.auth_token = "test_token"
+    mock_launched_session = MagicMock(spec=DockerLaunchedSession)
+    mock_launched_session.port = 10000
+    mock_launched_session.launch_method = "docker"
+    mock_launched_session.connection_url = "http://localhost:10000"
+    mock_launched_session.connection_url_with_auth = (
+        "http://localhost:10000/?psk=test_token"
+    )
+    mock_launched_session.container_id = "test"
+    mock_launched_session.auth_type = "psk"
+    mock_launched_session.auth_token = "test_token"
 
-        with (
-            patch(
-                "deephaven_mcp.mcp_systems_server._tools.session_community.launch_session"
-            ) as mock_launch_session,
-            patch(
-                "deephaven_mcp.mcp_systems_server._tools.session_community.find_available_port",
-                return_value=10000,
-            ),
-            patch.object(
-                mock_launched_session,
-                "wait_until_ready",
-                new=AsyncMock(return_value=True),
-            ),
-            patch.dict(os.environ, {"TEST_AUTH_TOKEN": "env_token_value"}),
-        ):
+    with (
+        patch(
+            "deephaven_mcp.mcp_systems_server._tools.session_community.launch_session"
+        ) as mock_launch_session,
+        patch(
+            "deephaven_mcp.mcp_systems_server._tools.session_community.find_available_port",
+            return_value=10000,
+        ),
+        patch.object(
+            mock_launched_session,
+            "wait_until_ready",
+            new=AsyncMock(return_value=True),
+        ),
+        patch.dict(os.environ, {"TEST_AUTH_TOKEN": "env_token_value"}),
+    ):
 
-            mock_launch_session.return_value = mock_launched_session
+        mock_launch_session.return_value = mock_launched_session
 
-            context = MockContext(
-                {
-                    "config_manager": mock_config_manager,
-                    "session_registry": mock_session_registry,
-                    "instance_tracker": create_mock_instance_tracker(),
-                }
-            )
-
-            result = await session_community_create(
-                context, session_name="test-session"
-            )
-
-            assert result["success"] is True
-            # Verify env var token was used
-            launch_call = mock_launch_session.call_args
-            assert launch_call[1]["auth_token"] == "env_token_value"
-
-    @pytest.mark.asyncio
-    async def test_create_with_auth_token_from_defaults(self):
-        """Test line 3750: auth_token from defaults."""
-        mock_config_manager = MagicMock()
-        mock_session_registry = MagicMock()
-
-        community_config = {
-            "session_creation": {
-                "max_concurrent_sessions": 5,
-                "defaults": {
-                    "auth_token": "default_token",
-                },
+        context = MockContext(
+            {
+                "config_manager": mock_config_manager,
+                "session_registry": mock_session_registry,
+                "instance_tracker": create_mock_instance_tracker(),
             }
+        )
+
+        result = await session_community_create(context, session_name="test-session")
+
+        assert result["success"] is True
+        # Verify env var token was used
+        launch_call = mock_launch_session.call_args
+        assert launch_call[1]["auth_token"] == "env_token_value"
+
+
+@pytest.mark.asyncio
+async def test_session_community_create_with_auth_token_from_defaults():
+    """Test line 3750: auth_token from defaults."""
+    mock_config_manager = MagicMock()
+    mock_session_registry = MagicMock()
+
+    community_config = {
+        "session_creation": {
+            "max_concurrent_sessions": 5,
+            "defaults": {
+                "auth_token": "default_token",
+            },
         }
+    }
 
-        full_config = {"community": community_config}
-        mock_config_manager.get_config = AsyncMock(return_value=full_config)
-        mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
-        mock_session_registry.add_session = AsyncMock()
-        mock_session_registry.get = AsyncMock(
-            side_effect=RegistryItemNotFoundError("not found")
-        )
+    full_config = {"community": community_config}
+    mock_config_manager.get_config = AsyncMock(return_value=full_config)
+    mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
+    mock_session_registry.add_session = AsyncMock()
+    mock_session_registry.get = AsyncMock(
+        side_effect=RegistryItemNotFoundError("not found")
+    )
 
-        mock_launched_session = MagicMock(spec=DockerLaunchedSession)
-        mock_launched_session.port = 10000
-        mock_launched_session.launch_method = "docker"
-        mock_launched_session.connection_url = "http://localhost:10000"
-        mock_launched_session.connection_url_with_auth = (
-            "http://localhost:10000/?psk=test_token"
-        )
-        mock_launched_session.container_id = "test"
-        mock_launched_session.auth_type = "psk"
-        mock_launched_session.auth_token = "test_token"
+    mock_launched_session = MagicMock(spec=DockerLaunchedSession)
+    mock_launched_session.port = 10000
+    mock_launched_session.launch_method = "docker"
+    mock_launched_session.connection_url = "http://localhost:10000"
+    mock_launched_session.connection_url_with_auth = (
+        "http://localhost:10000/?psk=test_token"
+    )
+    mock_launched_session.container_id = "test"
+    mock_launched_session.auth_type = "psk"
+    mock_launched_session.auth_token = "test_token"
 
-        with (
-            patch(
-                "deephaven_mcp.mcp_systems_server._tools.session_community.launch_session"
-            ) as mock_launch_session,
-            patch(
-                "deephaven_mcp.mcp_systems_server._tools.session_community.find_available_port",
-                return_value=10000,
-            ),
-            patch.object(
-                mock_launched_session,
-                "wait_until_ready",
-                new=AsyncMock(return_value=True),
-            ),
-        ):
+    with (
+        patch(
+            "deephaven_mcp.mcp_systems_server._tools.session_community.launch_session"
+        ) as mock_launch_session,
+        patch(
+            "deephaven_mcp.mcp_systems_server._tools.session_community.find_available_port",
+            return_value=10000,
+        ),
+        patch.object(
+            mock_launched_session,
+            "wait_until_ready",
+            new=AsyncMock(return_value=True),
+        ),
+    ):
 
-            mock_launch_session.return_value = mock_launched_session
+        mock_launch_session.return_value = mock_launched_session
 
-            context = MockContext(
-                {
-                    "config_manager": mock_config_manager,
-                    "session_registry": mock_session_registry,
-                    "instance_tracker": create_mock_instance_tracker(),
-                }
-            )
-
-            result = await session_community_create(
-                context, session_name="test-session"
-            )
-
-            assert result["success"] is True
-            # Verify default token was used
-            launch_call = mock_launch_session.call_args
-            assert launch_call[1]["auth_token"] == "default_token"
-
-    @pytest.mark.asyncio
-    async def test_create_session_already_exists(self):
-        """Test lines 3766-3770: session ID already exists."""
-        mock_config_manager = MagicMock()
-        mock_session_registry = MagicMock()
-
-        community_config = {
-            "session_creation": {
-                "max_concurrent_sessions": 5,
-                "defaults": {},
+        context = MockContext(
+            {
+                "config_manager": mock_config_manager,
+                "session_registry": mock_session_registry,
+                "instance_tracker": create_mock_instance_tracker(),
             }
-        }
+        )
 
-        full_config = {"community": community_config}
-        mock_config_manager.get_config = AsyncMock(return_value=full_config)
-        mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
-        # Session already exists — get() returns successfully (no exception)
-        mock_session_registry.get = AsyncMock(return_value=MagicMock())
+        result = await session_community_create(context, session_name="test-session")
+
+        assert result["success"] is True
+        # Verify default token was used
+        launch_call = mock_launch_session.call_args
+        assert launch_call[1]["auth_token"] == "default_token"
+
+
+@pytest.mark.asyncio
+async def test_session_community_create_session_already_exists():
+    """Test lines 3766-3770: session ID already exists."""
+    mock_config_manager = MagicMock()
+    mock_session_registry = MagicMock()
+
+    community_config = {
+        "session_creation": {
+            "max_concurrent_sessions": 5,
+            "defaults": {},
+        }
+    }
+
+    full_config = {"community": community_config}
+    mock_config_manager.get_config = AsyncMock(return_value=full_config)
+    mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
+    # Session already exists — get() returns successfully (no exception)
+    mock_session_registry.get = AsyncMock(return_value=MagicMock())
+
+    context = MockContext(
+        {
+            "config_manager": mock_config_manager,
+            "session_registry": mock_session_registry,
+            "instance_tracker": create_mock_instance_tracker(),
+        }
+    )
+
+    result = await session_community_create(context, session_name="test-session")
+
+    assert result["success"] is False
+    assert "already exists" in result["error"]
+    assert result["isError"] is True
+
+
+@pytest.mark.asyncio
+async def test_session_community_create_health_check_timeout_with_cleanup():
+    """Test lines 3819-3832: health check timeout with successful cleanup."""
+    mock_config_manager = MagicMock()
+    mock_session_registry = MagicMock()
+
+    community_config = {
+        "session_creation": {
+            "max_concurrent_sessions": 5,
+            "defaults": {},
+        }
+    }
+
+    full_config = {"community": community_config}
+    mock_config_manager.get_config = AsyncMock(return_value=full_config)
+    mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
+    mock_session_registry.get = AsyncMock(
+        side_effect=RegistryItemNotFoundError("not found")
+    )
+
+    mock_launched_session = MagicMock(spec=DockerLaunchedSession)
+    mock_launched_session.port = 10000
+    mock_launched_session.launch_method = "docker"
+    mock_launched_session.connection_url = "http://localhost:10000"
+    mock_launched_session.connection_url_with_auth = (
+        "http://localhost:10000/?psk=test_token"
+    )
+    mock_launched_session.container_id = "test"
+    mock_launched_session.auth_type = "psk"
+    mock_launched_session.auth_token = "test_token"
+
+    with (
+        patch(
+            "deephaven_mcp.mcp_systems_server._tools.session_community.launch_session"
+        ) as mock_launch_session,
+        patch(
+            "deephaven_mcp.mcp_systems_server._tools.session_community.find_available_port",
+            return_value=10000,
+        ),
+        patch(
+            "deephaven_mcp.mcp_systems_server._tools.session_community.generate_auth_token",
+            return_value="token",
+        ),
+        patch.object(
+            mock_launched_session,
+            "wait_until_ready",
+            new=AsyncMock(return_value=False),
+        ),
+    ):
+
+        mock_launch_session.return_value = mock_launched_session
+        mock_launched_session.stop = AsyncMock()  # Cleanup succeeds
 
         context = MockContext(
             {
@@ -274,167 +342,66 @@ class TestSessionCommunityCreateComplete:
         result = await session_community_create(context, session_name="test-session")
 
         assert result["success"] is False
-        assert "already exists" in result["error"]
+        assert "failed to start" in result["error"].lower()
         assert result["isError"] is True
+        # Verify cleanup was attempted
+        mock_launched_session.stop.assert_called_once()
 
-    @pytest.mark.asyncio
-    async def test_create_health_check_timeout_with_cleanup(self):
-        """Test lines 3819-3832: health check timeout with successful cleanup."""
-        mock_config_manager = MagicMock()
-        mock_session_registry = MagicMock()
 
-        community_config = {
-            "session_creation": {
-                "max_concurrent_sessions": 5,
-                "defaults": {},
-            }
+@pytest.mark.asyncio
+async def test_session_community_create_with_python_launch_method():
+    """Test lines 3891-3892: python launch method sets process_id."""
+    mock_config_manager = MagicMock()
+    mock_session_registry = MagicMock()
+
+    community_config = {
+        "session_creation": {
+            "max_concurrent_sessions": 5,
+            "defaults": {
+                "launch_method": "python",
+            },
         }
+    }
 
-        full_config = {"community": community_config}
-        mock_config_manager.get_config = AsyncMock(return_value=full_config)
-        mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
-        mock_session_registry.get = AsyncMock(
-            side_effect=RegistryItemNotFoundError("not found")
-        )
+    full_config = {"community": community_config}
+    mock_config_manager.get_config = AsyncMock(return_value=full_config)
+    mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
+    mock_session_registry.add_session = AsyncMock()
+    mock_session_registry.get = AsyncMock(
+        side_effect=RegistryItemNotFoundError("not found")
+    )
 
-        mock_launched_session = MagicMock(spec=DockerLaunchedSession)
-        mock_launched_session.port = 10000
-        mock_launched_session.launch_method = "docker"
-        mock_launched_session.connection_url = "http://localhost:10000"
-        mock_launched_session.connection_url_with_auth = (
-            "http://localhost:10000/?psk=test_token"
-        )
-        mock_launched_session.container_id = "test"
-        mock_launched_session.auth_type = "psk"
-        mock_launched_session.auth_token = "test_token"
+    mock_process = MagicMock()
+    mock_process.pid = 12345
+    mock_launched_session = MagicMock(spec=PythonLaunchedSession)
+    mock_launched_session.port = 10000
+    mock_launched_session.launch_method = "python"
+    mock_launched_session.connection_url = "http://localhost:10000"
+    mock_launched_session.connection_url_with_auth = "http://localhost:10000"
+    mock_launched_session.process = mock_process
+    mock_launched_session.auth_type = "anonymous"
+    mock_launched_session.auth_token = None
 
-        with (
-            patch(
-                "deephaven_mcp.mcp_systems_server._tools.session_community.launch_session"
-            ) as mock_launch_session,
-            patch(
-                "deephaven_mcp.mcp_systems_server._tools.session_community.find_available_port",
-                return_value=10000,
-            ),
-            patch(
-                "deephaven_mcp.mcp_systems_server._tools.session_community.generate_auth_token",
-                return_value="token",
-            ),
-            patch.object(
-                mock_launched_session,
-                "wait_until_ready",
-                new=AsyncMock(return_value=False),
-            ),
-        ):
+    with (
+        patch(
+            "deephaven_mcp.mcp_systems_server._tools.session_community.launch_session"
+        ) as mock_launch_session,
+        patch(
+            "deephaven_mcp.mcp_systems_server._tools.session_community.find_available_port",
+            return_value=10000,
+        ),
+        patch(
+            "deephaven_mcp.mcp_systems_server._tools.session_community.generate_auth_token",
+            return_value="token",
+        ),
+        patch.object(
+            mock_launched_session,
+            "wait_until_ready",
+            new=AsyncMock(return_value=True),
+        ),
+    ):
 
-            mock_launch_session.return_value = mock_launched_session
-            mock_launched_session.stop = AsyncMock()  # Cleanup succeeds
-
-            context = MockContext(
-                {
-                    "config_manager": mock_config_manager,
-                    "session_registry": mock_session_registry,
-                    "instance_tracker": create_mock_instance_tracker(),
-                }
-            )
-
-            result = await session_community_create(
-                context, session_name="test-session"
-            )
-
-            assert result["success"] is False
-            assert "failed to start" in result["error"].lower()
-            assert result["isError"] is True
-            # Verify cleanup was attempted
-            mock_launched_session.stop.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_create_with_python_launch_method(self):
-        """Test lines 3891-3892: python launch method sets process_id."""
-        mock_config_manager = MagicMock()
-        mock_session_registry = MagicMock()
-
-        community_config = {
-            "session_creation": {
-                "max_concurrent_sessions": 5,
-                "defaults": {
-                    "launch_method": "python",
-                },
-            }
-        }
-
-        full_config = {"community": community_config}
-        mock_config_manager.get_config = AsyncMock(return_value=full_config)
-        mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
-        mock_session_registry.add_session = AsyncMock()
-        mock_session_registry.get = AsyncMock(
-            side_effect=RegistryItemNotFoundError("not found")
-        )
-
-        mock_process = MagicMock()
-        mock_process.pid = 12345
-        mock_launched_session = MagicMock(spec=PythonLaunchedSession)
-        mock_launched_session.port = 10000
-        mock_launched_session.launch_method = "python"
-        mock_launched_session.connection_url = "http://localhost:10000"
-        mock_launched_session.connection_url_with_auth = "http://localhost:10000"
-        mock_launched_session.process = mock_process
-        mock_launched_session.auth_type = "anonymous"
-        mock_launched_session.auth_token = None
-
-        with (
-            patch(
-                "deephaven_mcp.mcp_systems_server._tools.session_community.launch_session"
-            ) as mock_launch_session,
-            patch(
-                "deephaven_mcp.mcp_systems_server._tools.session_community.find_available_port",
-                return_value=10000,
-            ),
-            patch(
-                "deephaven_mcp.mcp_systems_server._tools.session_community.generate_auth_token",
-                return_value="token",
-            ),
-            patch.object(
-                mock_launched_session,
-                "wait_until_ready",
-                new=AsyncMock(return_value=True),
-            ),
-        ):
-
-            mock_launch_session.return_value = mock_launched_session
-
-            context = MockContext(
-                {
-                    "config_manager": mock_config_manager,
-                    "session_registry": mock_session_registry,
-                    "instance_tracker": create_mock_instance_tracker(),
-                }
-            )
-
-            result = await session_community_create(
-                context, session_name="test-session"
-            )
-
-            assert result["success"] is True
-            assert result["process_id"] == 12345
-
-
-class TestSessionCommunityDeleteComplete:
-    """Complete tests for session_community_delete edge cases."""
-
-    @pytest.mark.asyncio
-    async def test_delete_non_community_session(self):
-        """Test lines 4005-4009: trying to delete non-community session."""
-        mock_config_manager = MagicMock()
-        mock_session_registry = MagicMock()
-
-        mock_manager = MagicMock()
-        mock_manager.full_name = "enterprise:system:test-session"
-        mock_manager._name = "test-session"
-        mock_manager.source = "dynamic"
-        mock_manager.system_type = SystemType.ENTERPRISE  # Not COMMUNITY
-
-        mock_session_registry.get = AsyncMock(return_value=mock_manager)
+        mock_launch_session.return_value = mock_launched_session
 
         context = MockContext(
             {
@@ -444,272 +411,304 @@ class TestSessionCommunityDeleteComplete:
             }
         )
 
-        result = await session_community_delete(context, session_name="test-session")
+        result = await session_community_create(context, session_name="test-session")
 
-        assert result["success"] is False
-        assert "not a community session" in result["error"]
-        assert result["isError"] is True
-
-    @pytest.mark.asyncio
-    async def test_delete_close_fails_but_continues(self):
-        """Test lines 4034-4047: close fails but removal continues."""
-        mock_config_manager = MagicMock()
-        mock_session_registry = MagicMock()
-
-        mock_launched_session = MagicMock(spec=DockerLaunchedSession)
-        mock_launched_session.launch_method = "docker"
-
-        mock_manager = MagicMock(spec=DynamicCommunitySessionManager)
-        mock_manager.full_name = "community:dynamic:test-session"
-        mock_manager._name = "test-session"
-        mock_manager.source = "dynamic"
-        mock_manager.system_type = SystemType.COMMUNITY
-        mock_manager.launched_session = mock_launched_session
-        mock_manager.close = AsyncMock(side_effect=Exception("Close failed"))
-
-        mock_session_registry.get = AsyncMock(return_value=mock_manager)
-        mock_session_registry.remove_session = AsyncMock(return_value=mock_manager)
-
-        context = MockContext(
-            {
-                "config_manager": mock_config_manager,
-                "session_registry": mock_session_registry,
-                "instance_tracker": create_mock_instance_tracker(),
-            }
-        )
-
-        result = await session_community_delete(context, session_name="test-session")
-
-        # Should still succeed despite close failure
         assert result["success"] is True
-        # Verify removal was still attempted
-        mock_session_registry.remove_session.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_delete_removal_fails(self):
-        """Test lines 4055-4060: removal from registry fails."""
-        mock_config_manager = MagicMock()
-        mock_session_registry = MagicMock()
-
-        mock_launched_session = MagicMock(spec=DockerLaunchedSession)
-        mock_launched_session.launch_method = "docker"
-
-        mock_manager = MagicMock(spec=DynamicCommunitySessionManager)
-        mock_manager.full_name = "community:dynamic:test-session"
-        mock_manager._name = "test-session"
-        mock_manager.source = "dynamic"
-        mock_manager.system_type = SystemType.COMMUNITY
-        mock_manager.launched_session = mock_launched_session
-        mock_manager.close = AsyncMock()
-
-        mock_session_registry.get = AsyncMock(return_value=mock_manager)
-        mock_session_registry.remove_session = AsyncMock(
-            side_effect=Exception("Removal failed")
-        )
-
-        context = MockContext(
-            {
-                "config_manager": mock_config_manager,
-                "session_registry": mock_session_registry,
-                "instance_tracker": create_mock_instance_tracker(),
-            }
-        )
-
-        result = await session_community_delete(context, session_name="test-session")
-
-        assert result["success"] is False
-        assert "Failed to remove session" in result["error"]
-        assert result["isError"] is True
-
-    @pytest.mark.asyncio
-    async def test_delete_unexpected_exception(self):
-        """Test lines 4075-4081: unexpected exception during delete."""
-        mock_config_manager = MagicMock()
-        mock_session_registry = MagicMock()
-
-        # Make get() raise an unexpected exception
-        mock_session_registry.get = AsyncMock(
-            side_effect=RuntimeError("Unexpected error")
-        )
-
-        context = MockContext(
-            {
-                "config_manager": mock_config_manager,
-                "session_registry": mock_session_registry,
-                "instance_tracker": create_mock_instance_tracker(),
-            }
-        )
-
-        result = await session_community_delete(context, session_name="test-session")
-
-        assert result["success"] is False
-        assert "Unexpected error" in result["error"]
-        assert result["isError"] is True
+        assert result["process_id"] == 12345
 
 
-class TestSessionDetailsDynamicCommunity:
-    """Test session_details with dynamic community sessions."""
+# =============================================================================
+# session_community_delete edge case tests
+# =============================================================================
 
-    @pytest.mark.asyncio
-    async def test_session_details_with_all_dynamic_fields(self):
-        """Test lines 975-998: all dynamic session fields present."""
-        mock_config_manager = MagicMock()
-        mock_session_registry = MagicMock()
 
-        # Create a mock DynamicCommunitySessionManager with all fields
-        mock_launched_session = MagicMock(spec=DockerLaunchedSession)
-        mock_launched_session.port = 10000
-        mock_launched_session.launch_method = "docker"
-        mock_launched_session.connection_url = "http://localhost:10000"
-        mock_launched_session.connection_url_with_auth = (
-            "http://localhost:10000/?psk=abc123"
-        )
-        mock_launched_session.container_id = "de18601a1657"
-        mock_launched_session.auth_type = "psk"
-        mock_launched_session.auth_token = "abc123"
+@pytest.mark.asyncio
+async def test_session_community_delete_non_community_session():
+    """Test lines 4005-4009: trying to delete non-community session."""
+    mock_config_manager = MagicMock()
+    mock_session_registry = MagicMock()
 
-        session_config = {
-            "host": "localhost",
-            "port": 10000,
-            "auth_type": "PSK",
+    mock_manager = MagicMock()
+    mock_manager.full_name = "enterprise:system:test-session"
+    mock_manager._name = "test-session"
+    mock_manager.source = "dynamic"
+    mock_manager.system_type = SystemType.ENTERPRISE  # Not COMMUNITY
+
+    mock_session_registry.get = AsyncMock(return_value=mock_manager)
+
+    context = MockContext(
+        {
+            "config_manager": mock_config_manager,
+            "session_registry": mock_session_registry,
+            "instance_tracker": create_mock_instance_tracker(),
         }
+    )
 
-        # Create actual manager instance
-        manager = DynamicCommunitySessionManager(
-            name="test-session",
-            config=session_config,
-            launched_session=mock_launched_session,
-        )
+    result = await session_community_delete(context, session_name="test-session")
 
-        mock_session_registry.get = AsyncMock(return_value=manager)
+    assert result["success"] is False
+    assert "not a community session" in result["error"]
+    assert result["isError"] is True
 
-        context = MockContext(
-            {
-                "config_manager": mock_config_manager,
-                "session_registry": mock_session_registry,
-                "instance_tracker": create_mock_instance_tracker(),
-            }
-        )
 
-        result = await session_details(
-            context, session_id="community:dynamic:test-session"
-        )
+@pytest.mark.asyncio
+async def test_session_community_delete_close_fails_but_continues():
+    """Test lines 4034-4047: close fails but removal continues."""
+    mock_config_manager = MagicMock()
+    mock_session_registry = MagicMock()
 
-        # Verify all dynamic fields were added
-        assert result["success"] is True
-        session_info = result["session"]
-        assert "connection_url" in session_info
-        # Note: connection_url_with_auth removed from to_dict() for security
-        assert session_info["auth_type"] == "PSK"
-        assert session_info["launch_method"] == "docker"
-        assert session_info["port"] == 10000
-        assert session_info["container_id"] == "de18601a1657"
+    mock_launched_session = MagicMock(spec=DockerLaunchedSession)
+    mock_launched_session.launch_method = "docker"
 
-    @pytest.mark.asyncio
-    async def test_session_details_with_python_process_id(self):
-        """Test lines 994-997: process_id field for python launch method."""
-        mock_config_manager = MagicMock()
-        mock_session_registry = MagicMock()
+    mock_manager = MagicMock(spec=DynamicCommunitySessionManager)
+    mock_manager.full_name = "community:dynamic:test-session"
+    mock_manager._name = "test-session"
+    mock_manager.source = "dynamic"
+    mock_manager.system_type = SystemType.COMMUNITY
+    mock_manager.launched_session = mock_launched_session
+    mock_manager.close = AsyncMock(side_effect=Exception("Close failed"))
 
-        # Create a python-launched session with process
-        mock_process = MagicMock()
-        mock_process.pid = 54321
+    mock_session_registry.get = AsyncMock(return_value=mock_manager)
+    mock_session_registry.remove_session = AsyncMock(return_value=mock_manager)
 
-        mock_launched_session = MagicMock(spec=PythonLaunchedSession)
-        mock_launched_session.port = 10001
-        mock_launched_session.launch_method = "python"
-        mock_launched_session.connection_url = "http://localhost:10001"
-        mock_launched_session.connection_url_with_auth = "http://localhost:10001"
-        mock_launched_session.process = mock_process
-        mock_launched_session.auth_type = "anonymous"
-        mock_launched_session.auth_token = None
-
-        session_config = {
-            "host": "localhost",
-            "port": 10001,
-            "auth_type": "anonymous",
+    context = MockContext(
+        {
+            "config_manager": mock_config_manager,
+            "session_registry": mock_session_registry,
+            "instance_tracker": create_mock_instance_tracker(),
         }
+    )
 
-        # Create actual manager instance
-        manager = DynamicCommunitySessionManager(
-            name="pip-session",
-            config=session_config,
-            launched_session=mock_launched_session,
-        )
+    result = await session_community_delete(context, session_name="test-session")
 
-        mock_session_registry.get = AsyncMock(return_value=manager)
+    # Should still succeed despite close failure
+    assert result["success"] is True
+    # Verify removal was still attempted
+    mock_session_registry.remove_session.assert_called_once()
 
-        context = MockContext(
-            {
-                "config_manager": mock_config_manager,
-                "session_registry": mock_session_registry,
-                "instance_tracker": create_mock_instance_tracker(),
-            }
-        )
 
-        result = await session_details(
-            context, session_id="community:dynamic:pip-session"
-        )
+@pytest.mark.asyncio
+async def test_session_community_delete_removal_fails():
+    """Test lines 4055-4060: removal from registry fails."""
+    mock_config_manager = MagicMock()
+    mock_session_registry = MagicMock()
 
-        # Verify process_id was added
-        assert result["success"] is True
-        session_info = result["session"]
-        assert session_info["launch_method"] == "python"
-        assert session_info["process_id"] == 54321
-        assert (
-            "container_id" not in session_info
-        )  # Should not have container_id for pip
+    mock_launched_session = MagicMock(spec=DockerLaunchedSession)
+    mock_launched_session.launch_method = "docker"
 
-    @pytest.mark.asyncio
-    async def test_session_details_with_partial_fields(self):
-        """Test lines 975-998: only some dynamic fields present."""
-        mock_config_manager = MagicMock()
-        mock_session_registry = MagicMock()
+    mock_manager = MagicMock(spec=DynamicCommunitySessionManager)
+    mock_manager.full_name = "community:dynamic:test-session"
+    mock_manager._name = "test-session"
+    mock_manager.source = "dynamic"
+    mock_manager.system_type = SystemType.COMMUNITY
+    mock_manager.launched_session = mock_launched_session
+    mock_manager.close = AsyncMock()
 
-        # Create a session with minimal fields
-        mock_launched_session = MagicMock(spec=DockerLaunchedSession)
-        mock_launched_session.port = 10002
-        mock_launched_session.launch_method = "docker"
-        mock_launched_session.connection_url = "http://localhost:10002"
-        mock_launched_session.connection_url_with_auth = "http://localhost:10002"
-        mock_launched_session.container_id = "minimal123"
-        mock_launched_session.auth_type = "anonymous"
-        mock_launched_session.auth_token = None
+    mock_session_registry.get = AsyncMock(return_value=mock_manager)
+    mock_session_registry.remove_session = AsyncMock(
+        side_effect=Exception("Removal failed")
+    )
 
-        session_config = {
-            "host": "localhost",
-            "port": 10002,
-            "auth_type": "anonymous",
+    context = MockContext(
+        {
+            "config_manager": mock_config_manager,
+            "session_registry": mock_session_registry,
+            "instance_tracker": create_mock_instance_tracker(),
         }
+    )
 
-        # Create actual manager instance
-        manager = DynamicCommunitySessionManager(
-            name="minimal-session",
-            config=session_config,
-            launched_session=mock_launched_session,
-        )
+    result = await session_community_delete(context, session_name="test-session")
 
-        mock_session_registry.get = AsyncMock(return_value=manager)
+    assert result["success"] is False
+    assert "Failed to remove session" in result["error"]
+    assert result["isError"] is True
 
-        context = MockContext(
-            {
-                "config_manager": mock_config_manager,
-                "session_registry": mock_session_registry,
-                "instance_tracker": create_mock_instance_tracker(),
-            }
-        )
 
-        result = await session_details(
-            context, session_id="community:dynamic:minimal-session"
-        )
+@pytest.mark.asyncio
+async def test_session_community_delete_unexpected_exception():
+    """Test lines 4075-4081: unexpected exception during delete."""
+    mock_config_manager = MagicMock()
+    mock_session_registry = MagicMock()
 
-        # Verify fields that should be present
-        assert result["success"] is True
-        session_info = result["session"]
-        assert "connection_url" in session_info
-        assert session_info["launch_method"] == "docker"
-        assert session_info["port"] == 10002
-        assert session_info["container_id"] == "minimal123"
+    # Make get() raise an unexpected exception
+    mock_session_registry.get = AsyncMock(side_effect=RuntimeError("Unexpected error"))
+
+    context = MockContext(
+        {
+            "config_manager": mock_config_manager,
+            "session_registry": mock_session_registry,
+            "instance_tracker": create_mock_instance_tracker(),
+        }
+    )
+
+    result = await session_community_delete(context, session_name="test-session")
+
+    assert result["success"] is False
+    assert "Unexpected error" in result["error"]
+    assert result["isError"] is True
+
+
+# =============================================================================
+# session_details with dynamic community sessions tests
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_session_details_dynamic_community_with_all_fields():
+    """Test lines 975-998: all dynamic session fields present."""
+    mock_config_manager = MagicMock()
+    mock_session_registry = MagicMock()
+
+    # Create a mock DynamicCommunitySessionManager with all fields
+    mock_launched_session = MagicMock(spec=DockerLaunchedSession)
+    mock_launched_session.port = 10000
+    mock_launched_session.launch_method = "docker"
+    mock_launched_session.connection_url = "http://localhost:10000"
+    mock_launched_session.connection_url_with_auth = (
+        "http://localhost:10000/?psk=abc123"
+    )
+    mock_launched_session.container_id = "de18601a1657"
+    mock_launched_session.auth_type = "psk"
+    mock_launched_session.auth_token = "abc123"
+
+    session_config = {
+        "host": "localhost",
+        "port": 10000,
+        "auth_type": "PSK",
+    }
+
+    # Create actual manager instance
+    manager = DynamicCommunitySessionManager(
+        name="test-session",
+        config=session_config,
+        launched_session=mock_launched_session,
+    )
+
+    mock_session_registry.get = AsyncMock(return_value=manager)
+
+    context = MockContext(
+        {
+            "config_manager": mock_config_manager,
+            "session_registry": mock_session_registry,
+            "instance_tracker": create_mock_instance_tracker(),
+        }
+    )
+
+    result = await session_details(context, session_id="community:dynamic:test-session")
+
+    # Verify all dynamic fields were added
+    assert result["success"] is True
+    session_info = result["session"]
+    assert "connection_url" in session_info
+    # Note: connection_url_with_auth removed from to_dict() for security
+    assert session_info["auth_type"] == "PSK"
+    assert session_info["launch_method"] == "docker"
+    assert session_info["port"] == 10000
+    assert session_info["container_id"] == "de18601a1657"
+
+
+@pytest.mark.asyncio
+async def test_session_details_dynamic_community_with_python_process_id():
+    """Test lines 994-997: process_id field for python launch method."""
+    mock_config_manager = MagicMock()
+    mock_session_registry = MagicMock()
+
+    # Create a python-launched session with process
+    mock_process = MagicMock()
+    mock_process.pid = 54321
+
+    mock_launched_session = MagicMock(spec=PythonLaunchedSession)
+    mock_launched_session.port = 10001
+    mock_launched_session.launch_method = "python"
+    mock_launched_session.connection_url = "http://localhost:10001"
+    mock_launched_session.connection_url_with_auth = "http://localhost:10001"
+    mock_launched_session.process = mock_process
+    mock_launched_session.auth_type = "anonymous"
+    mock_launched_session.auth_token = None
+
+    session_config = {
+        "host": "localhost",
+        "port": 10001,
+        "auth_type": "anonymous",
+    }
+
+    # Create actual manager instance
+    manager = DynamicCommunitySessionManager(
+        name="pip-session",
+        config=session_config,
+        launched_session=mock_launched_session,
+    )
+
+    mock_session_registry.get = AsyncMock(return_value=manager)
+
+    context = MockContext(
+        {
+            "config_manager": mock_config_manager,
+            "session_registry": mock_session_registry,
+            "instance_tracker": create_mock_instance_tracker(),
+        }
+    )
+
+    result = await session_details(context, session_id="community:dynamic:pip-session")
+
+    # Verify process_id was added
+    assert result["success"] is True
+    session_info = result["session"]
+    assert session_info["launch_method"] == "python"
+    assert session_info["process_id"] == 54321
+    assert "container_id" not in session_info  # Should not have container_id for pip
+
+
+@pytest.mark.asyncio
+async def test_session_details_dynamic_community_with_partial_fields():
+    """Test lines 975-998: only some dynamic fields present."""
+    mock_config_manager = MagicMock()
+    mock_session_registry = MagicMock()
+
+    # Create a session with minimal fields
+    mock_launched_session = MagicMock(spec=DockerLaunchedSession)
+    mock_launched_session.port = 10002
+    mock_launched_session.launch_method = "docker"
+    mock_launched_session.connection_url = "http://localhost:10002"
+    mock_launched_session.connection_url_with_auth = "http://localhost:10002"
+    mock_launched_session.container_id = "minimal123"
+    mock_launched_session.auth_type = "anonymous"
+    mock_launched_session.auth_token = None
+
+    session_config = {
+        "host": "localhost",
+        "port": 10002,
+        "auth_type": "anonymous",
+    }
+
+    # Create actual manager instance
+    manager = DynamicCommunitySessionManager(
+        name="minimal-session",
+        config=session_config,
+        launched_session=mock_launched_session,
+    )
+
+    mock_session_registry.get = AsyncMock(return_value=manager)
+
+    context = MockContext(
+        {
+            "config_manager": mock_config_manager,
+            "session_registry": mock_session_registry,
+            "instance_tracker": create_mock_instance_tracker(),
+        }
+    )
+
+    result = await session_details(
+        context, session_id="community:dynamic:minimal-session"
+    )
+
+    # Verify fields that should be present
+    assert result["success"] is True
+    session_info = result["session"]
+    assert "connection_url" in session_info
+    assert session_info["launch_method"] == "docker"
+    assert session_info["port"] == 10002
+    assert session_info["container_id"] == "minimal123"
 
 
 @pytest.mark.asyncio
@@ -1235,145 +1234,151 @@ async def test_session_details_to_dict_exception():
         assert "launch_method" not in session_info  # This comes from to_dict()
 
 
-class TestSessionsListInitializationStatus:
-    """Test sessions_list surfaces initialization status and errors."""
+# =============================================================================
+# sessions_list initialization status tests
+# =============================================================================
 
-    @pytest.mark.asyncio
-    async def test_sessions_list_discovery_in_progress(self):
-        """Test sessions_list shows status message when discovery is in progress."""
-        mock_session_registry = MagicMock()
-        mock_session_registry.get_all = AsyncMock(
-            return_value=RegistrySnapshot.with_initialization(
-                items={},
-                phase=InitializationPhase.LOADING,
-                errors={},
-            )
+
+@pytest.mark.asyncio
+async def test_sessions_list_discovery_in_progress():
+    """Test sessions_list shows status message when discovery is in progress."""
+    mock_session_registry = MagicMock()
+    mock_session_registry.get_all = AsyncMock(
+        return_value=RegistrySnapshot.with_initialization(
+            items={},
+            phase=InitializationPhase.LOADING,
+            errors={},
         )
+    )
 
-        context = MockContext(
-            {
-                "config_manager": MagicMock(),
-                "session_registry": mock_session_registry,
-                "instance_tracker": create_mock_instance_tracker(),
-            }
+    context = MockContext(
+        {
+            "config_manager": MagicMock(),
+            "session_registry": mock_session_registry,
+            "instance_tracker": create_mock_instance_tracker(),
+        }
+    )
+
+    result = await sessions_list(context)
+
+    assert result["success"] is True
+    assert "initialization" in result
+    assert "still in progress" in result["initialization"]["status"]
+
+
+@pytest.mark.asyncio
+async def test_sessions_list_discovery_in_progress_with_errors():
+    """Test sessions_list shows both in-progress status and errors simultaneously."""
+    mock_session_registry = MagicMock()
+    mock_session_registry.get_all = AsyncMock(
+        return_value=RegistrySnapshot.with_initialization(
+            items={},
+            phase=InitializationPhase.LOADING,
+            errors={"factory1": "Connection refused"},
         )
+    )
 
-        result = await sessions_list(context)
+    context = MockContext(
+        {
+            "config_manager": MagicMock(),
+            "session_registry": mock_session_registry,
+            "instance_tracker": create_mock_instance_tracker(),
+        }
+    )
 
-        assert result["success"] is True
-        assert "initialization" in result
-        assert "still in progress" in result["initialization"]["status"]
+    result = await sessions_list(context)
 
-    @pytest.mark.asyncio
-    async def test_sessions_list_discovery_in_progress_with_errors(self):
-        """Test sessions_list shows both in-progress status and errors simultaneously."""
-        mock_session_registry = MagicMock()
-        mock_session_registry.get_all = AsyncMock(
-            return_value=RegistrySnapshot.with_initialization(
-                items={},
-                phase=InitializationPhase.LOADING,
-                errors={"factory1": "Connection refused"},
-            )
+    assert result["success"] is True
+    assert "initialization" in result
+    assert "still in progress" in result["initialization"]["status"]
+    assert "errors" in result["initialization"]
+    assert "factory1" in result["initialization"]["errors"]
+
+
+@pytest.mark.asyncio
+async def test_sessions_list_completed_with_errors():
+    """Test sessions_list shows initialization errors when discovery completed with failures."""
+    mock_session_registry = MagicMock()
+    mock_session_registry.get_all = AsyncMock(
+        return_value=RegistrySnapshot.with_initialization(
+            items={},
+            phase=InitializationPhase.COMPLETED,
+            errors={"factory1": "Connection failed: Connection refused"},
         )
+    )
 
-        context = MockContext(
-            {
-                "config_manager": MagicMock(),
-                "session_registry": mock_session_registry,
-                "instance_tracker": create_mock_instance_tracker(),
-            }
+    context = MockContext(
+        {
+            "config_manager": MagicMock(),
+            "session_registry": mock_session_registry,
+            "instance_tracker": create_mock_instance_tracker(),
+        }
+    )
+
+    result = await sessions_list(context)
+
+    assert result["success"] is True
+    assert "initialization" in result
+    assert "errors" in result["initialization"]
+    assert "factory1" in result["initialization"]["errors"]
+    assert "connection issues" in result["initialization"]["status"]
+
+
+@pytest.mark.asyncio
+async def test_sessions_list_completed_no_errors():
+    """Test sessions_list does not include status when everything is fine."""
+    mock_session_registry = MagicMock()
+    mock_session_registry.get_all = AsyncMock(
+        return_value=RegistrySnapshot.simple(
+            items={},
         )
+    )
 
-        result = await sessions_list(context)
+    context = MockContext(
+        {
+            "config_manager": MagicMock(),
+            "session_registry": mock_session_registry,
+            "instance_tracker": create_mock_instance_tracker(),
+        }
+    )
 
-        assert result["success"] is True
-        assert "initialization" in result
-        assert "still in progress" in result["initialization"]["status"]
-        assert "errors" in result["initialization"]
-        assert "factory1" in result["initialization"]["errors"]
+    result = await sessions_list(context)
 
-    @pytest.mark.asyncio
-    async def test_sessions_list_completed_with_errors(self):
-        """Test sessions_list shows initialization errors when discovery completed with failures."""
-        mock_session_registry = MagicMock()
-        mock_session_registry.get_all = AsyncMock(
-            return_value=RegistrySnapshot.with_initialization(
-                items={},
-                phase=InitializationPhase.COMPLETED,
-                errors={"factory1": "Connection failed: Connection refused"},
-            )
+    assert result["success"] is True
+    assert "initialization" not in result
+
+
+@pytest.mark.asyncio
+async def test_sessions_list_shows_errors_even_with_sessions():
+    """Test sessions_list always shows init_errors since they are set once during discovery."""
+    # Create mock enterprise session manager
+    mock_mgr = MagicMock()
+    mock_mgr.full_name = "enterprise:factory1:session1"
+    mock_mgr.system_type = SystemType.ENTERPRISE
+    mock_mgr.source = "factory1"
+    mock_mgr.name = "session1"
+
+    mock_session_registry = MagicMock()
+    mock_session_registry.get_all = AsyncMock(
+        return_value=RegistrySnapshot.with_initialization(
+            items={"enterprise:factory1:session1": mock_mgr},
+            phase=InitializationPhase.COMPLETED,
+            errors={"factory1": "Connection failed: timeout"},
         )
+    )
 
-        context = MockContext(
-            {
-                "config_manager": MagicMock(),
-                "session_registry": mock_session_registry,
-                "instance_tracker": create_mock_instance_tracker(),
-            }
-        )
+    context = MockContext(
+        {
+            "config_manager": MagicMock(),
+            "session_registry": mock_session_registry,
+            "instance_tracker": create_mock_instance_tracker(),
+        }
+    )
 
-        result = await sessions_list(context)
+    result = await sessions_list(context)
 
-        assert result["success"] is True
-        assert "initialization" in result
-        assert "errors" in result["initialization"]
-        assert "factory1" in result["initialization"]["errors"]
-        assert "connection issues" in result["initialization"]["status"]
-
-    @pytest.mark.asyncio
-    async def test_sessions_list_completed_no_errors(self):
-        """Test sessions_list does not include status when everything is fine."""
-        mock_session_registry = MagicMock()
-        mock_session_registry.get_all = AsyncMock(
-            return_value=RegistrySnapshot.simple(
-                items={},
-            )
-        )
-
-        context = MockContext(
-            {
-                "config_manager": MagicMock(),
-                "session_registry": mock_session_registry,
-                "instance_tracker": create_mock_instance_tracker(),
-            }
-        )
-
-        result = await sessions_list(context)
-
-        assert result["success"] is True
-        assert "initialization" not in result
-
-    @pytest.mark.asyncio
-    async def test_sessions_list_shows_errors_even_with_sessions(self):
-        """Test sessions_list always shows init_errors since they are set once during discovery."""
-        # Create mock enterprise session manager
-        mock_mgr = MagicMock()
-        mock_mgr.full_name = "enterprise:factory1:session1"
-        mock_mgr.system_type = SystemType.ENTERPRISE
-        mock_mgr.source = "factory1"
-        mock_mgr.name = "session1"
-
-        mock_session_registry = MagicMock()
-        mock_session_registry.get_all = AsyncMock(
-            return_value=RegistrySnapshot.with_initialization(
-                items={"enterprise:factory1:session1": mock_mgr},
-                phase=InitializationPhase.COMPLETED,
-                errors={"factory1": "Connection failed: timeout"},
-            )
-        )
-
-        context = MockContext(
-            {
-                "config_manager": MagicMock(),
-                "session_registry": mock_session_registry,
-                "instance_tracker": create_mock_instance_tracker(),
-            }
-        )
-
-        result = await sessions_list(context)
-
-        assert result["success"] is True
-        # init_errors are set once during discovery and not cleared, so always shown
-        assert "initialization" in result
-        assert "errors" in result["initialization"]
-        assert "factory1" in result["initialization"]["errors"]
+    assert result["success"] is True
+    # init_errors are set once during discovery and not cleared, so always shown
+    assert "initialization" in result
+    assert "errors" in result["initialization"]
+    assert "factory1" in result["initialization"]["errors"]

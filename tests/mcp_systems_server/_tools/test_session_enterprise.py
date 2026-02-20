@@ -795,163 +795,168 @@ async def test_enterprise_systems_status_factory_snapshot_with_errors():
     assert "unexpected errors" in result["error"]
 
 
-class TestEnterpriseSystemsStatusInitialization:
-    """Test enterprise_systems_status surfaces initialization status and errors."""
+# =============================================================================
+# enterprise_systems_status initialization status tests
+# =============================================================================
 
-    @pytest.mark.asyncio
-    async def test_enterprise_systems_status_discovery_in_progress(self):
-        """Test enterprise_systems_status shows status when discovery is in progress."""
-        mock_enterprise_registry = AsyncMock()
-        mock_enterprise_registry.get_all = AsyncMock(
-            return_value=RegistrySnapshot.simple(items={})
+
+@pytest.mark.asyncio
+async def test_enterprise_systems_status_discovery_in_progress():
+    """Test enterprise_systems_status shows status when discovery is in progress."""
+    mock_enterprise_registry = AsyncMock()
+    mock_enterprise_registry.get_all = AsyncMock(
+        return_value=RegistrySnapshot.simple(items={})
+    )
+
+    mock_session_registry = MagicMock()
+    mock_session_registry.enterprise_registry = AsyncMock(
+        return_value=mock_enterprise_registry
+    )
+    mock_session_registry.get_all = AsyncMock(
+        return_value=RegistrySnapshot.with_initialization(
+            items={},
+            phase=InitializationPhase.LOADING,
+            errors={},
         )
+    )
 
-        mock_session_registry = MagicMock()
-        mock_session_registry.enterprise_registry = AsyncMock(
-            return_value=mock_enterprise_registry
+    mock_config_manager = AsyncMock()
+    mock_config_manager.get_config = AsyncMock(
+        return_value={"enterprise": {"systems": {}}}
+    )
+
+    context = MockContext(
+        {
+            "session_registry": mock_session_registry,
+            "config_manager": mock_config_manager,
+            "instance_tracker": create_mock_instance_tracker(),
+        }
+    )
+
+    result = await enterprise_systems_status(context)
+
+    assert result["success"] is True
+    assert "initialization" in result
+    assert "still in progress" in result["initialization"]["status"]
+
+
+@pytest.mark.asyncio
+async def test_enterprise_systems_status_discovery_in_progress_with_errors():
+    """Test enterprise_systems_status shows both status and errors during discovery."""
+    mock_enterprise_registry = AsyncMock()
+    mock_enterprise_registry.get_all = AsyncMock(
+        return_value=RegistrySnapshot.simple(items={})
+    )
+
+    mock_session_registry = MagicMock()
+    mock_session_registry.enterprise_registry = AsyncMock(
+        return_value=mock_enterprise_registry
+    )
+    mock_session_registry.get_all = AsyncMock(
+        return_value=RegistrySnapshot.with_initialization(
+            items={},
+            phase=InitializationPhase.LOADING,
+            errors={"factory1": "Connection refused"},
         )
-        mock_session_registry.get_all = AsyncMock(
-            return_value=RegistrySnapshot.with_initialization(
-                items={},
-                phase=InitializationPhase.LOADING,
-                errors={},
-            )
+    )
+
+    mock_config_manager = AsyncMock()
+    mock_config_manager.get_config = AsyncMock(
+        return_value={"enterprise": {"systems": {}}}
+    )
+
+    context = MockContext(
+        {
+            "session_registry": mock_session_registry,
+            "config_manager": mock_config_manager,
+            "instance_tracker": create_mock_instance_tracker(),
+        }
+    )
+
+    result = await enterprise_systems_status(context)
+
+    assert result["success"] is True
+    assert "initialization" in result
+    assert "still in progress" in result["initialization"]["status"]
+    assert "errors" in result["initialization"]
+    assert "factory1" in result["initialization"]["errors"]
+
+
+@pytest.mark.asyncio
+async def test_enterprise_systems_status_completed_with_errors():
+    """Test enterprise_systems_status shows init_errors."""
+    mock_enterprise_registry = AsyncMock()
+    mock_enterprise_registry.get_all = AsyncMock(
+        return_value=RegistrySnapshot.simple(items={})
+    )
+
+    mock_session_registry = MagicMock()
+    mock_session_registry.enterprise_registry = AsyncMock(
+        return_value=mock_enterprise_registry
+    )
+    mock_session_registry.get_all = AsyncMock(
+        return_value=RegistrySnapshot.with_initialization(
+            items={},
+            phase=InitializationPhase.COMPLETED,
+            errors={"factory1": "Connection failed: Connection refused"},
         )
+    )
 
-        mock_config_manager = AsyncMock()
-        mock_config_manager.get_config = AsyncMock(
-            return_value={"enterprise": {"systems": {}}}
-        )
+    mock_config_manager = AsyncMock()
+    mock_config_manager.get_config = AsyncMock(
+        return_value={"enterprise": {"systems": {}}}
+    )
 
-        context = MockContext(
-            {
-                "session_registry": mock_session_registry,
-                "config_manager": mock_config_manager,
-                "instance_tracker": create_mock_instance_tracker(),
-            }
-        )
+    context = MockContext(
+        {
+            "session_registry": mock_session_registry,
+            "config_manager": mock_config_manager,
+            "instance_tracker": create_mock_instance_tracker(),
+        }
+    )
 
-        result = await enterprise_systems_status(context)
+    result = await enterprise_systems_status(context)
 
-        assert result["success"] is True
-        assert "initialization" in result
-        assert "still in progress" in result["initialization"]["status"]
+    assert result["success"] is True
+    assert "initialization" in result
+    assert "errors" in result["initialization"]
+    assert "factory1" in result["initialization"]["errors"]
+    assert "connection issues" in result["initialization"]["status"]
 
-    @pytest.mark.asyncio
-    async def test_enterprise_systems_status_discovery_in_progress_with_errors(self):
-        """Test enterprise_systems_status shows both status and errors during discovery."""
-        mock_enterprise_registry = AsyncMock()
-        mock_enterprise_registry.get_all = AsyncMock(
-            return_value=RegistrySnapshot.simple(items={})
-        )
 
-        mock_session_registry = MagicMock()
-        mock_session_registry.enterprise_registry = AsyncMock(
-            return_value=mock_enterprise_registry
-        )
-        mock_session_registry.get_all = AsyncMock(
-            return_value=RegistrySnapshot.with_initialization(
-                items={},
-                phase=InitializationPhase.LOADING,
-                errors={"factory1": "Connection refused"},
-            )
-        )
+@pytest.mark.asyncio
+async def test_enterprise_systems_status_completed_no_errors():
+    """Test enterprise_systems_status omits init fields when no errors."""
+    mock_enterprise_registry = AsyncMock()
+    mock_enterprise_registry.get_all = AsyncMock(
+        return_value=RegistrySnapshot.simple(items={})
+    )
 
-        mock_config_manager = AsyncMock()
-        mock_config_manager.get_config = AsyncMock(
-            return_value={"enterprise": {"systems": {}}}
-        )
+    mock_session_registry = MagicMock()
+    mock_session_registry.enterprise_registry = AsyncMock(
+        return_value=mock_enterprise_registry
+    )
+    mock_session_registry.get_all = AsyncMock(
+        return_value=RegistrySnapshot.simple(items={})
+    )
 
-        context = MockContext(
-            {
-                "session_registry": mock_session_registry,
-                "config_manager": mock_config_manager,
-                "instance_tracker": create_mock_instance_tracker(),
-            }
-        )
+    mock_config_manager = AsyncMock()
+    mock_config_manager.get_config = AsyncMock(
+        return_value={"enterprise": {"systems": {}}}
+    )
 
-        result = await enterprise_systems_status(context)
+    context = MockContext(
+        {
+            "session_registry": mock_session_registry,
+            "config_manager": mock_config_manager,
+            "instance_tracker": create_mock_instance_tracker(),
+        }
+    )
 
-        assert result["success"] is True
-        assert "initialization" in result
-        assert "still in progress" in result["initialization"]["status"]
-        assert "errors" in result["initialization"]
-        assert "factory1" in result["initialization"]["errors"]
+    result = await enterprise_systems_status(context)
 
-    @pytest.mark.asyncio
-    async def test_enterprise_systems_status_completed_with_errors(self):
-        """Test enterprise_systems_status shows init_errors."""
-        mock_enterprise_registry = AsyncMock()
-        mock_enterprise_registry.get_all = AsyncMock(
-            return_value=RegistrySnapshot.simple(items={})
-        )
-
-        mock_session_registry = MagicMock()
-        mock_session_registry.enterprise_registry = AsyncMock(
-            return_value=mock_enterprise_registry
-        )
-        mock_session_registry.get_all = AsyncMock(
-            return_value=RegistrySnapshot.with_initialization(
-                items={},
-                phase=InitializationPhase.COMPLETED,
-                errors={"factory1": "Connection failed: Connection refused"},
-            )
-        )
-
-        mock_config_manager = AsyncMock()
-        mock_config_manager.get_config = AsyncMock(
-            return_value={"enterprise": {"systems": {}}}
-        )
-
-        context = MockContext(
-            {
-                "session_registry": mock_session_registry,
-                "config_manager": mock_config_manager,
-                "instance_tracker": create_mock_instance_tracker(),
-            }
-        )
-
-        result = await enterprise_systems_status(context)
-
-        assert result["success"] is True
-        assert "initialization" in result
-        assert "errors" in result["initialization"]
-        assert "factory1" in result["initialization"]["errors"]
-        assert "connection issues" in result["initialization"]["status"]
-
-    @pytest.mark.asyncio
-    async def test_enterprise_systems_status_completed_no_errors(self):
-        """Test enterprise_systems_status omits init fields when no errors."""
-        mock_enterprise_registry = AsyncMock()
-        mock_enterprise_registry.get_all = AsyncMock(
-            return_value=RegistrySnapshot.simple(items={})
-        )
-
-        mock_session_registry = MagicMock()
-        mock_session_registry.enterprise_registry = AsyncMock(
-            return_value=mock_enterprise_registry
-        )
-        mock_session_registry.get_all = AsyncMock(
-            return_value=RegistrySnapshot.simple(items={})
-        )
-
-        mock_config_manager = AsyncMock()
-        mock_config_manager.get_config = AsyncMock(
-            return_value={"enterprise": {"systems": {}}}
-        )
-
-        context = MockContext(
-            {
-                "session_registry": mock_session_registry,
-                "config_manager": mock_config_manager,
-                "instance_tracker": create_mock_instance_tracker(),
-            }
-        )
-
-        result = await enterprise_systems_status(context)
-
-        assert result["success"] is True
-        assert "initialization" not in result
+    assert result["success"] is True
+    assert "initialization" not in result
 
 
 @pytest.mark.asyncio
