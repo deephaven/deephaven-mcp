@@ -32,8 +32,8 @@ def _format_initialization_status(
 
     Pure formatting function — does not query any registry.  Callers are
     responsible for obtaining *phase* and *init_errors* from the same
-    atomic snapshot (e.g. via ``get_all()`` or
-    ``initialization_status()``).
+    atomic snapshot (e.g. via ``CombinedSessionRegistry.get_all()`` on the shared
+    registry instance).
 
     Returns ``None`` when there is nothing to report (completed without
     errors), so callers can simply do::
