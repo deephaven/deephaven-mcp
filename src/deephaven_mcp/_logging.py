@@ -90,20 +90,22 @@ def _register_signal(signal_name: str, is_critical: bool) -> tuple[bool, str | N
     """Register a signal handler for the given signal name.
 
     Args:
-        signal_name: Name of the signal to register (e.g., 'SIGTERM')
-        is_critical: Whether to generate an error message if the signal is not available on this platform
+        signal_name (str): Name of the signal to register (e.g., 'SIGTERM').
+        is_critical (bool): Whether to produce an error message if the signal is not
+            available on this platform.
 
     Returns:
-        Tuple of (success, error_message). If successful, error_message is None.
+        tuple[bool, str | None]: (success, error_message). If successful, error_message is None.
     """
     try:
-        if hasattr(signal, signal_name):
-            sig = getattr(signal, signal_name)
-            signal.signal(sig, _signal_handler)
-            return (True, None)
-        if is_critical:
-            return (False, f"{signal_name} (not available on this platform)")
-        return (False, None)
+        try:
+            sig = signal.Signals[signal_name]
+        except KeyError:
+            if is_critical:
+                return (False, f"{signal_name} (not available on this platform)")
+            return (False, None)
+        signal.signal(sig, _signal_handler)
+        return (True, None)
     except (OSError, RuntimeError, ValueError) as e:
         # OSError: Signal not supported on this platform
         # RuntimeError: Signal already registered by another handler
@@ -185,8 +187,8 @@ def log_process_state(log_tag: str, context: str) -> None:
     Records key metrics about the current process to help diagnose resource issues:
       - Memory usage in MB (via RSS - Resident Set Size)
       - CPU utilization percentage
-      - Number of open file descriptors
-      - Process ID (only during startup)
+      - Number of open file descriptors (Unix/macOS) or open handles (Windows)
+      - Process ID (startup and non-shutdown contexts only)
 
     This function is particularly useful for monitoring resource consumption during
     server lifecycle events, identifying memory leaks, resource exhaustion, or
@@ -209,7 +211,7 @@ def log_process_state(log_tag: str, context: str) -> None:
         log_process_state("health_monitor", "hourly_check")
 
     Note:
-        Process ID is only logged during startup to avoid log spam during shutdown.
+        Process ID is logged for all contexts except "shutdown" to avoid log spam.
         All exceptions are caught and logged to prevent diagnostic failures from
         affecting server operation.
     """
@@ -220,7 +222,17 @@ def log_process_state(log_tag: str, context: str) -> None:
             f"[{log_tag}] {prefix}memory usage: {process.memory_info().rss / 1024 / 1024:.2f} MB"
         )
         logging.info(f"[{log_tag}] {prefix}CPU percent: {process.cpu_percent()}%")
-        logging.info(f"[{log_tag}] {prefix}open file descriptors: {process.num_fds()}")
+        # psutil exposes different APIs per platform:
+        #   - num_fds()     is available on Unix/macOS (counts open file descriptors)
+        #   - num_handles() is available on Windows   (counts open OS handles)
+        # Attempt the Unix call first; fall back to the Windows call on AttributeError.
+        try:
+            fd_count = process.num_fds()
+            fd_label = "open file descriptors"
+        except AttributeError:
+            fd_count = process.num_handles()
+            fd_label = "open handles"
+        logging.info(f"[{log_tag}] {prefix}{fd_label}: {fd_count}")
 
         # Only log PID during startup
         if context != "shutdown":
@@ -272,9 +284,6 @@ def setup_signal_handler_logging() -> None:
 
         # Set up signal handlers for improved shutdown diagnostics
         setup_signal_handler_logging()
-
-    Returns:
-        None
     """
     global _SIGNAL_HANDLERS_INSTALLED
     if _SIGNAL_HANDLERS_INSTALLED:

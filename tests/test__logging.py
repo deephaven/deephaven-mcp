@@ -272,7 +272,7 @@ def test_log_process_state_standard(monkeypatch):
         patch("psutil.Process") as mock_process,
     ):
 
-        # Set up return values for the mocks
+        # Set up return values for the mocks (Unix path: num_fds available)
         mock_process_instance = MagicMock()
         mock_process_instance.memory_info.return_value.rss = 104857600  # 100MB
         mock_process_instance.cpu_percent.return_value = 5.5
@@ -301,6 +301,35 @@ def test_log_process_state_standard(monkeypatch):
         mock_info.assert_any_call("[test_tag] Final memory usage: 100.00 MB")
         mock_info.assert_any_call("[test_tag] Final CPU percent: 5.5%")
         mock_info.assert_any_call("[test_tag] Final open file descriptors: 42")
+
+
+def test_log_process_state_windows_num_handles_fallback(monkeypatch):
+    """Test log_process_state uses num_handles() on Windows when num_fds() is unavailable."""
+    import deephaven_mcp._logging as logging_mod
+
+    importlib.reload(logging_mod)
+
+    with (
+        patch("logging.info") as mock_info,
+        patch("logging.warning") as mock_warning,
+        patch("psutil.Process") as mock_process,
+    ):
+        # Simulate Windows: num_fds raises AttributeError, num_handles returns a value
+        mock_process_instance = MagicMock()
+        mock_process_instance.memory_info.return_value.rss = 52428800  # 50MB
+        mock_process_instance.cpu_percent.return_value = 2.0
+        mock_process_instance.num_fds.side_effect = AttributeError("num_fds not available on Windows")
+        mock_process_instance.num_handles.return_value = 99
+        mock_process_instance.pid = 42
+        mock_process.return_value = mock_process_instance
+
+        logging_mod.log_process_state("win_tag", "startup")
+
+        assert mock_info.call_count == 4, "Should produce 4 info logs for startup"
+        mock_info.assert_any_call("[win_tag] memory usage: 50.00 MB")
+        mock_info.assert_any_call("[win_tag] CPU percent: 2.0%")
+        mock_info.assert_any_call("[win_tag] open handles: 99")
+        mock_info.assert_any_call("[win_tag] Process PID: 42")
 
 
 def test_log_process_state_exception_handling(monkeypatch):
@@ -515,16 +544,17 @@ def test_signal_handler_critical_signal_missing_from_platform():
 
     importlib.reload(logging_mod)
 
-    # Mock hasattr to simulate a critical signal missing from the platform
-    original_hasattr = hasattr
+    # Simulate SIGTERM not being available on this platform by replacing signal.Signals
+    # in the _logging module with a mapping that raises KeyError for "SIGTERM".
+    class _MockSignals:
+        def __getitem__(self, name):
+            if name == "SIGTERM":
+                raise KeyError(name)
+            return signal.Signals[name]
 
-    def mock_hasattr(obj, name):
-        # Simulate SIGTERM not being available on this platform
-        if obj is signal and name == "SIGTERM":
-            return False
-        return original_hasattr(obj, name)
-
-    with patch("builtins.hasattr", side_effect=mock_hasattr):
+    with patch("deephaven_mcp._logging.signal") as mock_signal_mod:
+        mock_signal_mod.Signals = _MockSignals()
+        mock_signal_mod.signal = signal.signal
         with patch("logging.info") as mock_info, patch("logging.debug") as mock_debug:
             logging_mod._SIGNAL_HANDLERS_INSTALLED = False
             logging_mod.setup_signal_handler_logging()

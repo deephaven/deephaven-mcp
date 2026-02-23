@@ -39,10 +39,11 @@ import asyncio
 import json
 import logging
 import os
-import signal
 import uuid
 from datetime import datetime
 from pathlib import Path
+
+import psutil
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -176,7 +177,8 @@ class InstanceTracker:
         Stop tracking a python-launched session process.
 
         Removes the process from the instance metadata, typically called when
-        the session is stopped normally.
+        the session is stopped normally. If the session name is not currently
+        tracked, this method is a no-op.
 
         Args:
             session_name (str): Name of the session to stop tracking.
@@ -243,9 +245,8 @@ def is_process_running(pid: int) -> bool:
     """
     Check if a process with the given PID is currently running.
 
-    Uses os.kill(pid, 0) which sends signal 0 to check process existence
-    without actually sending a signal. This is the standard Unix way to
-    check if a process is alive.
+    Uses psutil.pid_exists() for cross-platform compatibility. This works
+    correctly on Windows, Linux, and macOS.
 
     Args:
         pid (int): Process ID to check.
@@ -254,14 +255,12 @@ def is_process_running(pid: int) -> bool:
         bool: True if the process is running, False otherwise.
 
     Note:
-        Returns False if the process doesn't exist OR if we don't have
-        permission to check its status (e.g., process owned by another user).
+        Returns False only if the process does not exist. Unlike the old
+        os.kill(pid, 0) approach, psutil.pid_exists() does not return False
+        due to permission errors - it returns True whenever the process exists,
+        regardless of ownership.
     """
-    try:
-        os.kill(pid, 0)
-        return True
-    except OSError:
-        return False
+    return psutil.pid_exists(pid)
 
 
 async def cleanup_orphaned_resources() -> None:
@@ -273,14 +272,15 @@ async def cleanup_orphaned_resources() -> None:
     2. Checks if each instance's process is still running
     3. For dead instances, cleans up their orphaned resources:
        - Stops and removes Docker containers (via instance label)
-       - Kills python processes (from instance metadata)
+       - Terminates python processes (from instance metadata)
     4. Removes instance metadata files for dead instances
 
     The cleanup is safe for concurrent server instances - only resources from
     dead servers are cleaned up. Running servers are left untouched.
 
-    This handles the SIGKILL case where a server is forcibly terminated without
-    a chance to clean up its resources in the finally block.
+    This handles the case where a server is forcibly terminated (e.g. SIGKILL on
+    Unix, or a forced kill on Windows) without a chance to clean up its resources
+    in the finally block.
 
     Example:
         ```python
@@ -414,7 +414,11 @@ async def _cleanup_docker_containers_for_instance(instance_id: str) -> None:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            await stop_process.communicate()
+            _, stop_stderr = await stop_process.communicate()
+            if stop_process.returncode != 0:
+                _LOGGER.debug(
+                    f"[InstanceTracker] docker stop returned non-zero for container {container_id[:12]}: {stop_stderr.decode().strip()}"
+                )
 
             # Remove the container
             rm_process = await asyncio.create_subprocess_exec(
@@ -441,9 +445,10 @@ async def _cleanup_python_processes_for_instance(tracker: InstanceTracker) -> No
     """
     Clean up python processes for a specific server instance.
 
-    Terminates all python processes tracked in the instance metadata. Sends SIGTERM
-    to each tracked process after verifying it's still running. Processes that
-    are already dead are logged and skipped.
+    Terminates all python processes tracked in the instance metadata. Calls
+    psutil.Process.terminate() on each tracked process after verifying it's still
+    running, which sends SIGTERM on Unix/macOS and calls TerminateProcess() on Windows.
+    Processes that are already dead are logged and skipped.
 
     Args:
         tracker (InstanceTracker): The instance tracker with python process information.
@@ -469,14 +474,17 @@ async def _cleanup_python_processes_for_instance(tracker: InstanceTracker) -> No
         try:
             if is_process_running(pid):
                 _LOGGER.info(
-                    f"[InstanceTracker] Killing orphaned python process {pid} (session: {session_name})"
+                    f"[InstanceTracker] Terminating orphaned python process {pid} (session: {session_name})"
                 )
-                os.kill(pid, signal.SIGTERM)
+                # Use psutil for cross-platform process termination.
+                # On Unix this sends SIGTERM; on Windows it calls TerminateProcess().
+                proc = psutil.Process(pid)
+                proc.terminate()
             else:
                 _LOGGER.debug(
                     f"[InstanceTracker] Python process {pid} (session: {session_name}) already dead"
                 )
         except Exception as e:
             _LOGGER.warning(
-                f"[InstanceTracker] Error killing python process {pid} (session: {session_name}): {e}"
+                f"[InstanceTracker] Error terminating python process {pid} (session: {session_name}): {e}"
             )
