@@ -181,6 +181,23 @@ async def test_delete_query_other_error(
         await coreplus_controller_client.delete_query("serial")
 
 
+@pytest.mark.asyncio
+async def test_delete_query_timeout(
+    coreplus_controller_client, dummy_controller_client
+):
+    """Test that delete_query() raises DeephavenConnectionError on timeout."""
+    import time
+
+    def slow_delete(serial):
+        time.sleep(0.1)
+
+    dummy_controller_client.delete_query.side_effect = slow_delete
+
+    with pytest.raises(DeephavenConnectionError) as exc_info:
+        await coreplus_controller_client.delete_query("serial", timeout_seconds=0.01)
+    assert "timed out" in str(exc_info.value)
+
+
 # --- Additional Coverage Tests ---
 import builtins
 
@@ -206,6 +223,21 @@ async def test_ping_other_error(coreplus_controller_client, dummy_controller_cli
     dummy_controller_client.ping.side_effect = Exception("fail")
     with pytest.raises(DeephavenConnectionError):
         await coreplus_controller_client.ping()
+
+
+@pytest.mark.asyncio
+async def test_ping_timeout(coreplus_controller_client, dummy_controller_client):
+    """Test that ping() raises DeephavenConnectionError on timeout."""
+    import time
+
+    def slow_ping():
+        time.sleep(0.05)
+
+    dummy_controller_client.ping.side_effect = slow_ping
+
+    with pytest.raises(DeephavenConnectionError) as exc_info:
+        await coreplus_controller_client.ping(timeout_seconds=0.01)
+    assert "timed out" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
@@ -356,6 +388,23 @@ async def test_add_query_other_error(
     dummy_controller_client.add_query.side_effect = Exception("fail")
     with pytest.raises(QueryError):
         await coreplus_controller_client.add_query(query_config)
+
+
+@pytest.mark.asyncio
+async def test_add_query_timeout(coreplus_controller_client, dummy_controller_client):
+    """Test that add_query() raises DeephavenConnectionError on timeout."""
+    import time
+
+    def slow_add(config):
+        time.sleep(0.1)
+
+    query_config = MagicMock()
+    query_config.pb = MagicMock()
+    dummy_controller_client.add_query.side_effect = slow_add
+
+    with pytest.raises(DeephavenConnectionError) as exc_info:
+        await coreplus_controller_client.add_query(query_config, timeout_seconds=0.01)
+    assert "timed out" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
@@ -788,6 +837,23 @@ async def test_subscribe_other_error(
 
 
 @pytest.mark.asyncio
+async def test_subscribe_timeout(coreplus_controller_client, dummy_controller_client):
+    """Test that subscribe() raises DeephavenConnectionError on timeout."""
+    import time
+
+    def slow_subscribe():
+        time.sleep(0.05)  # Simulate slow blocking response
+
+    dummy_controller_client.subscribe.side_effect = slow_subscribe
+
+    # Use a very short timeout to trigger timeout quickly
+    with pytest.raises(DeephavenConnectionError) as exc_info:
+        await coreplus_controller_client.subscribe(timeout_seconds=0.01)
+
+    assert "timed out" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
 async def test_subscribe_idempotent(
     coreplus_controller_client, dummy_controller_client
 ):
@@ -933,6 +999,32 @@ async def test_modify_query_other_error(
     assert "Failed to modify query" in str(exc_info.value)
 
 
+@pytest.mark.asyncio
+async def test_modify_query_timeout(
+    coreplus_controller_client, dummy_controller_client
+):
+    """Test that modify_query() raises DeephavenConnectionError on timeout."""
+    import time
+
+    from deephaven_mcp.client._protobuf import CorePlusQueryConfig
+
+    def slow_modify(config, restart):
+        time.sleep(0.1)
+
+    mock_config = MagicMock(spec=CorePlusQueryConfig)
+    mock_config.pb = MagicMock()
+    mock_config.pb.serial = 12345
+    mock_config.pb.name = "test_query"
+
+    dummy_controller_client.modify_query = slow_modify
+
+    with pytest.raises(DeephavenConnectionError) as exc_info:
+        await coreplus_controller_client.modify_query(
+            mock_config, restart=False, timeout_seconds=0.01
+        )
+    assert "timed out" in str(exc_info.value)
+
+
 # --- map_and_version() tests ---
 
 
@@ -1048,3 +1140,13 @@ async def test_wait_for_change_from_version_other_error(
     with pytest.raises(QueryError) as exc_info:
         await coreplus_controller_client.wait_for_change_from_version(42, 10.0)
     assert "Failed to wait for version change from 42" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad_timeout", [0, -1, -0.001])
+async def test_wait_for_change_from_version_invalid_timeout(
+    coreplus_controller_client, dummy_controller_client, bad_timeout
+):
+    with pytest.raises(ValueError, match="timeout_seconds must be a positive value"):
+        await coreplus_controller_client.wait_for_change_from_version(42, bad_timeout)
+    dummy_controller_client.wait_for_change_from_version.assert_not_called()

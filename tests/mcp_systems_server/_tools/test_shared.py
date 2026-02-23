@@ -12,8 +12,11 @@ import pytest
 from conftest import MockContext, create_mock_instance_tracker
 
 from deephaven_mcp import config
+from deephaven_mcp._exceptions import RegistryItemNotFoundError
+from deephaven_mcp.client import BaseSession, CorePlusSession
 from deephaven_mcp.mcp_systems_server._tools.shared import (
     _check_response_size,
+    _format_initialization_status,
     _get_enterprise_session,
     _get_session_from_context,
     _get_system_config,
@@ -22,17 +25,99 @@ from deephaven_mcp.resource_manager import (
     DockerLaunchedSession,
     DynamicCommunitySessionManager,
     EnterpriseSessionManager,
+    InitializationPhase,
     PythonLaunchedSession,
     ResourceLivenessStatus,
     SystemType,
 )
 
+# ===========================================================================
+# _format_initialization_status tests
+# ===========================================================================
+
+
+def test_format_initialization_status_simple_no_errors():
+    """SIMPLE phase with no errors returns None."""
+    assert _format_initialization_status(InitializationPhase.SIMPLE, {}) is None
+
+
+def test_format_initialization_status_completed_no_errors():
+    """COMPLETED phase with no errors returns None."""
+    assert _format_initialization_status(InitializationPhase.COMPLETED, {}) is None
+
+
+def test_format_initialization_status_completed_with_errors():
+    """COMPLETED phase with errors reports connection issues."""
+    errors = {"prod": "timeout"}
+    result = _format_initialization_status(InitializationPhase.COMPLETED, errors)
+    assert result is not None
+    assert "connection issues" in result["status"]
+    assert result["errors"] == errors
+
+
+def test_format_initialization_status_simple_with_errors():
+    """SIMPLE phase with errors reports connection issues."""
+    errors = {"sys": "unreachable"}
+    result = _format_initialization_status(InitializationPhase.SIMPLE, errors)
+    assert result is not None
+    assert "connection issues" in result["status"]
+    assert result["errors"] == errors
+
+
+def test_format_initialization_status_not_started():
+    """NOT_STARTED phase reports discovery has not yet started."""
+    result = _format_initialization_status(InitializationPhase.NOT_STARTED, {})
+    assert result is not None
+    assert "not yet started" in result["status"]
+    assert "errors" not in result
+
+
+def test_format_initialization_status_partial():
+    """PARTIAL phase reports discovery has not yet started."""
+    result = _format_initialization_status(InitializationPhase.PARTIAL, {})
+    assert result is not None
+    assert "not yet started" in result["status"]
+    assert "errors" not in result
+
+
+def test_format_initialization_status_loading():
+    """LOADING phase reports discovery is actively running."""
+    result = _format_initialization_status(InitializationPhase.LOADING, {})
+    assert result is not None
+    assert "actively running" in result["status"]
+    assert "errors" not in result
+
+
+def test_format_initialization_status_failed():
+    """FAILED phase reports critical failure, not in-progress."""
+    result = _format_initialization_status(InitializationPhase.FAILED, {})
+    assert result is not None
+    assert "failed critically" in result["status"]
+    assert "in progress" not in result["status"]
+    assert "errors" not in result
+
+
+def test_format_initialization_status_failed_with_errors():
+    """FAILED phase with errors includes both status and errors."""
+    errors = {"sys": "cancelled"}
+    result = _format_initialization_status(InitializationPhase.FAILED, errors)
+    assert result is not None
+    assert "failed critically" in result["status"]
+    assert result["errors"] == errors
+
+
+def test_format_initialization_status_loading_with_errors():
+    """LOADING phase with errors includes both status and errors."""
+    errors = {"sys": "partial failure"}
+    result = _format_initialization_status(InitializationPhase.LOADING, errors)
+    assert result is not None
+    assert "actively running" in result["status"]
+    assert result["errors"] == errors
+
 
 @pytest.mark.asyncio
 async def test_get_session_from_context_success():
     """Test _get_session_from_context successfully retrieves a session."""
-    from deephaven_mcp.mcp_systems_server._tools.shared import _get_session_from_context
-
     # Create mock session
     mock_session = MagicMock()
 
@@ -62,29 +147,38 @@ async def test_get_session_from_context_success():
 
 @pytest.mark.asyncio
 async def test_get_session_from_context_session_not_found():
-    """Test _get_session_from_context raises KeyError when session not found."""
-    from deephaven_mcp.mcp_systems_server._tools.shared import _get_session_from_context
+    """Test _get_session_from_context propagates RegistryItemNotFoundError from registry."""
+    mock_registry = MagicMock()
+    mock_registry.get = AsyncMock(
+        side_effect=RegistryItemNotFoundError(
+            "No item with name 'nonexistent:session' found"
+        )
+    )
 
-    # Create mock session registry that raises KeyError
+    context = MockContext({"session_registry": mock_registry})
+
+    with pytest.raises(RegistryItemNotFoundError, match="No item with name"):
+        await _get_session_from_context("test_function", context, "nonexistent:session")
+
+    mock_registry.get.assert_called_once_with("nonexistent:session")
+
+
+@pytest.mark.asyncio
+async def test_get_session_from_context_keyerror_still_propagates():
+    """Test _get_session_from_context still propagates KeyError (non-RegistryItemNotFoundError)."""
+    # Create mock session registry that raises KeyError (different from RegistryItemNotFoundError)
     mock_registry = MagicMock()
     mock_registry.get = AsyncMock(side_effect=KeyError("Session not found"))
 
-    # Create context with registry
     context = MockContext({"session_registry": mock_registry})
 
-    # Call the helper and expect KeyError
     with pytest.raises(KeyError, match="Session not found"):
         await _get_session_from_context("test_function", context, "nonexistent:session")
-
-    # Verify the registry was accessed
-    mock_registry.get.assert_called_once_with("nonexistent:session")
 
 
 @pytest.mark.asyncio
 async def test_get_session_from_context_session_connection_fails():
     """Test _get_session_from_context propagates exception when session.get() fails."""
-    from deephaven_mcp.mcp_systems_server._tools.shared import _get_session_from_context
-
     # Create mock session manager that fails on get()
     mock_session_manager = MagicMock()
     mock_session_manager.get = AsyncMock(
@@ -223,9 +317,6 @@ async def test_get_system_config_empty_config():
 @pytest.mark.asyncio
 async def test_get_enterprise_session_success():
     """Test _get_enterprise_session with a valid CorePlusSession."""
-    from deephaven_mcp.client import CorePlusSession
-    from deephaven_mcp.mcp_systems_server._tools.shared import _get_enterprise_session
-
     mock_session = MagicMock(spec=CorePlusSession)
     mock_session_manager = MagicMock()
     mock_session_manager.get = AsyncMock(return_value=mock_session)
@@ -246,9 +337,6 @@ async def test_get_enterprise_session_success():
 @pytest.mark.asyncio
 async def test_get_enterprise_session_not_enterprise():
     """Test _get_enterprise_session with a non-enterprise session."""
-    from deephaven_mcp.client import BaseSession
-    from deephaven_mcp.mcp_systems_server._tools.shared import _get_enterprise_session
-
     mock_session = MagicMock(spec=BaseSession)
     mock_session_manager = MagicMock()
     mock_session_manager.get = AsyncMock(return_value=mock_session)

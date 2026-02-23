@@ -77,6 +77,21 @@ async def test_ping_failure(coreplus_session_manager, dummy_session_manager):
 
 
 @pytest.mark.asyncio
+async def test_ping_timeout(coreplus_session_manager, dummy_session_manager):
+    """Test that ping() raises DeephavenConnectionError on timeout."""
+    import time
+
+    def slow_ping():
+        time.sleep(0.05)
+
+    dummy_session_manager.ping.side_effect = slow_ping
+
+    with pytest.raises(exc.DeephavenConnectionError) as exc_info:
+        await coreplus_session_manager.ping(timeout_seconds=0.01)
+    assert "timed out" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
 async def test_password_success(coreplus_session_manager, dummy_session_manager):
     await coreplus_session_manager.password("user", "pw")
     dummy_session_manager.password.assert_called_once_with("user", "pw", None)
@@ -191,6 +206,21 @@ async def test_upload_key_other_error(coreplus_session_manager, dummy_session_ma
 
 
 @pytest.mark.asyncio
+async def test_upload_key_timeout(coreplus_session_manager, dummy_session_manager):
+    """Test that upload_key() raises DeephavenConnectionError on timeout."""
+    import time
+
+    def slow_upload_key(key):
+        time.sleep(0.05)
+
+    dummy_session_manager.upload_key.side_effect = slow_upload_key
+
+    with pytest.raises(exc.DeephavenConnectionError) as exc_info:
+        await coreplus_session_manager.upload_key("pubkey", timeout_seconds=0.01)
+    assert "timed out" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
 async def test_delete_key_success(coreplus_session_manager, dummy_session_manager):
     await coreplus_session_manager.delete_key("pubkey")
     dummy_session_manager.delete_key.assert_called_once_with("pubkey")
@@ -210,6 +240,21 @@ async def test_delete_key_other_error(coreplus_session_manager, dummy_session_ma
     dummy_session_manager.delete_key.side_effect = Exception("fail")
     with pytest.raises(exc.ResourceError):
         await coreplus_session_manager.delete_key("pubkey")
+
+
+@pytest.mark.asyncio
+async def test_delete_key_timeout(coreplus_session_manager, dummy_session_manager):
+    """Test that delete_key() raises DeephavenConnectionError on timeout."""
+    import time
+
+    def slow_delete_key(key):
+        time.sleep(0.05)
+
+    dummy_session_manager.delete_key.side_effect = slow_delete_key
+
+    with pytest.raises(exc.DeephavenConnectionError) as exc_info:
+        await coreplus_session_manager.delete_key("pubkey", timeout_seconds=0.01)
+    assert "timed out" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
@@ -942,6 +987,58 @@ async def test_from_url_connection_error(monkeypatch):
             await CorePlusSessionFactory.from_url("http://fake")
 
 
+@pytest.mark.asyncio
+async def test_from_url_timeout(monkeypatch):
+    """Test that from_url() raises DeephavenConnectionError on timeout."""
+    import time
+
+    monkeypatch.setattr("deephaven_mcp.client._base.is_enterprise_available", True)
+
+    def slow_init(url):
+        time.sleep(0.1)
+
+    with patch("deephaven_mcp.client._session_factory.is_enterprise_available", True):
+        with patch(
+            "deephaven_enterprise.client.session_manager.SessionManager",
+            side_effect=slow_init,
+        ):
+            with pytest.raises(exc.DeephavenConnectionError) as exc_info:
+                await CorePlusSessionFactory.from_url(
+                    "http://fake", timeout_seconds=0.01
+                )
+            assert "timed out" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_from_config_timeout(monkeypatch):
+    """Test that from_config() raises DeephavenConnectionError on timeout."""
+    import time
+
+    monkeypatch.setattr("deephaven_mcp.client._base.is_enterprise_available", True)
+    worker_cfg = {
+        "connection_json_url": "https://server/iris/connection.json",
+        "auth_type": "password",
+        "username": "alice",
+        "password": "pw",
+    }
+
+    def slow_init(url):
+        time.sleep(0.1)
+
+    with patch("deephaven_mcp.client._session_factory.is_enterprise_available", True):
+        with patch(
+            "deephaven_enterprise.client.session_manager.SessionManager",
+            side_effect=slow_init,
+        ):
+            import deephaven_mcp.client._session_factory as sm_mod
+
+            with pytest.raises(exc.DeephavenConnectionError) as exc_info:
+                await sm_mod.CorePlusSessionFactory.from_config(
+                    worker_cfg, timeout_seconds=0.01
+                )
+            assert "timed out" in str(exc_info.value)
+
+
 # --- Coverage for unreachable error/warning branches in from_config ---
 
 
@@ -1145,3 +1242,88 @@ async def test_from_url_when_enterprise_not_available(monkeypatch):
         )
 
     assert "deephaven-coreplus-client" in str(excinfo.value)
+
+
+# =============================================================================
+# Timeout Tests
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_password_timeout(coreplus_session_manager, dummy_session_manager):
+    """Test that password() raises DeephavenConnectionError on timeout."""
+    import time
+
+    def slow_password(*args):
+        time.sleep(0.05)
+
+    dummy_session_manager.password.side_effect = slow_password
+
+    # Use the timeout_seconds parameter directly
+    with pytest.raises(exc.DeephavenConnectionError) as exc_info:
+        await coreplus_session_manager.password("user", "pw", timeout_seconds=0.01)
+    assert "timed out" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_private_key_timeout(coreplus_session_manager, dummy_session_manager):
+    """Test that private_key() raises DeephavenConnectionError on timeout."""
+    import time
+
+    def slow_auth(*args):
+        time.sleep(0.05)
+
+    dummy_session_manager.private_key.side_effect = slow_auth
+
+    with pytest.raises(exc.DeephavenConnectionError) as exc_info:
+        await coreplus_session_manager.private_key("/fake/path", timeout_seconds=0.01)
+    assert "timed out" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_saml_timeout(coreplus_session_manager, dummy_session_manager):
+    """Test that saml() raises DeephavenConnectionError on timeout."""
+    import time
+
+    def slow_auth():
+        time.sleep(0.05)
+
+    dummy_session_manager.saml.side_effect = slow_auth
+
+    with pytest.raises(exc.DeephavenConnectionError) as exc_info:
+        await coreplus_session_manager.saml(timeout_seconds=0.01)
+    assert "timed out" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_connect_to_new_worker_timeout(
+    coreplus_session_manager, dummy_session_manager
+):
+    """Test that connect_to_new_worker() raises DeephavenConnectionError on SDK timeout."""
+    # SDK raises TimeoutError when its internal timeout fires
+    dummy_session_manager.connect_to_new_worker.side_effect = TimeoutError(
+        "SDK timeout"
+    )
+
+    with pytest.raises(exc.DeephavenConnectionError) as exc_info:
+        await coreplus_session_manager.connect_to_new_worker(timeout_seconds=60.0)
+    assert "timed out" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_connect_to_persistent_query_timeout(
+    coreplus_session_manager, dummy_session_manager
+):
+    """Test that connect_to_persistent_query() raises DeephavenConnectionError on timeout."""
+    import time
+
+    def slow_connect(*args, **kwargs):
+        time.sleep(0.05)
+
+    dummy_session_manager.connect_to_persistent_query.side_effect = slow_connect
+
+    with pytest.raises(exc.DeephavenConnectionError) as exc_info:
+        await coreplus_session_manager.connect_to_persistent_query(
+            name="test", timeout_seconds=0.01
+        )
+    assert "timed out" in str(exc_info.value)

@@ -2820,12 +2820,12 @@ from deephaven_mcp.mcp_systems_server import mcp_server
 # Tools are organized in modules under _tools/:
 #   - _tools.mcp_server: mcp_reload
 #   - _tools.session: sessions_list, session_details
-#   - _tools.session_enterprise: session_enterprise_create, session_enterprise_delete
+#   - _tools.session_enterprise: enterprise_systems_status, session_enterprise_create, session_enterprise_delete
 #   - _tools.session_community: session_community_create, session_community_delete, session_community_credentials
 #   - _tools.table: session_tables_schema, session_tables_list, session_table_data
 #   - _tools.script: session_script_run, session_pip_list
-#   - _tools.catalog: catalog_tables_list, catalog_tables_schema, catalog_table_data
-#   - _tools.pq: pq_list, pq_create, pq_delete, pq_get, pq_update, pq_start, pq_stop, pq_restart
+#   - _tools.catalog: catalog_tables_list, catalog_namespaces_list, catalog_tables_schema, catalog_table_sample
+#   - _tools.pq: pq_name_to_id, pq_list, pq_details, pq_create, pq_delete, pq_modify, pq_start, pq_stop, pq_restart
 
 # Start the server (tools are accessible via MCP protocol)
 from deephaven_mcp.mcp_systems_server.main import run_server

@@ -15,7 +15,10 @@ from typing import Any, Literal, cast
 
 from mcp.server.fastmcp import Context
 
-from deephaven_mcp._exceptions import CommunitySessionConfigurationError
+from deephaven_mcp._exceptions import (
+    CommunitySessionConfigurationError,
+    RegistryItemNotFoundError,
+)
 from deephaven_mcp.config import ConfigManager
 from deephaven_mcp.mcp_systems_server._tools.mcp_server import (
     mcp_server,
@@ -967,12 +970,15 @@ async def session_community_create(
         session_id = BaseItemManager.make_full_name(
             SystemType.COMMUNITY, "dynamic", session_name
         )
-        if session_id in await session_registry.get_all():
+        try:
+            await session_registry.get(session_id)
             error_msg = f"Session '{session_id}' already exists in registry"
             _LOGGER.error(f"[mcp_systems_server:session_community_create] {error_msg}")
             result["error"] = error_msg
             result["isError"] = True
             return result
+        except RegistryItemNotFoundError:
+            pass  # Expected — session doesn't exist yet, proceed with creation
 
         _LOGGER.info(
             f"[mcp_systems_server:session_community_create] Creating session '{session_name}' "
@@ -1160,8 +1166,8 @@ async def session_community_delete(
         # Check if session exists in registry
         try:
             session_manager = await session_registry.get(session_id)
-        except KeyError:
-            error_msg = f"Session '{session_id}' not found"
+        except RegistryItemNotFoundError as e:
+            error_msg = f"Session '{session_id}' not found: {e}"
             _LOGGER.error(f"[mcp_systems_server:session_community_delete] {error_msg}")
             result["error"] = error_msg
             result["isError"] = True

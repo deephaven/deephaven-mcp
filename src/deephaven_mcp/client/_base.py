@@ -158,6 +158,10 @@ class ClientObjectWrapper(Generic[T]):
         self._wrapped = wrapped
 
         if is_enterprise and not is_enterprise_available:
+            _LOGGER.error(
+                "[ClientObjectWrapper] Constructor called with enterprise=True when enterprise features are not available. "
+                "Please report this issue."
+            )
             raise InternalError(
                 "ClientObjectWrapper constructor called with enterprise=True when enterprise features are not available. Please report this issue."
             )

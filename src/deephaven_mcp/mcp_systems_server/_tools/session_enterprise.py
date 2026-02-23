@@ -15,6 +15,7 @@ from typing import Any
 
 from mcp.server.fastmcp import Context
 
+from deephaven_mcp._exceptions import InternalError, RegistryItemNotFoundError
 from deephaven_mcp.client import CorePlusSession
 from deephaven_mcp.client._protobuf import CorePlusQueryConfig
 from deephaven_mcp.config import (
@@ -30,12 +31,14 @@ from deephaven_mcp.mcp_systems_server._tools.session import (
     DEFAULT_PROGRAMMING_LANGUAGE,
 )
 from deephaven_mcp.mcp_systems_server._tools.shared import (
+    _format_initialization_status,
     _get_system_config,
 )
 from deephaven_mcp.resource_manager import (
     BaseItemManager,
     CombinedSessionRegistry,
     EnterpriseSessionManager,
+    InitializationPhase,
     SystemType,
 )
 
@@ -112,6 +115,12 @@ async def enterprise_systems_status(
                 - 'liveness_detail' (str, optional): Explanation message for the status, useful for troubleshooting
                 - 'is_alive' (bool): Simple boolean indicating if the system is responsive
                 - 'config' (dict): System configuration with sensitive fields redacted
+            - 'initialization' (dict, optional): Present when enterprise session discovery is
+                still in progress or completed with errors. Contains:
+                - 'status' (str): Human-readable description of the initialization state.
+                - 'errors' (dict[str, str], optional): Present when one or more enterprise systems
+                    had connection errors during initial discovery. Keys are factory names, values
+                    are error descriptions.
             - 'error' (str, optional): Error message if retrieval failed.
             - 'isError' (bool, optional): Present and True if this is an error response.
 
@@ -144,9 +153,30 @@ async def enterprise_systems_status(
         config_manager: ConfigManager = context.request_context.lifespan_context[
             "config_manager"
         ]
+        # Get atomic snapshot for initialization state
+        snapshot = await session_registry.get_all()
+
         # Get all factories (enterprise systems)
         enterprise_registry = await session_registry.enterprise_registry()
-        factories = await enterprise_registry.get_all()
+        factory_snapshot = await enterprise_registry.get_all()
+        if factory_snapshot.initialization_phase != InitializationPhase.SIMPLE:
+            _LOGGER.error(
+                f"[mcp_systems_server:enterprise_systems_status] Factory registry returned unexpected phase "
+                f"{factory_snapshot.initialization_phase.value!r} (expected SIMPLE)"
+            )
+            raise InternalError(
+                f"Factory registry returned unexpected phase "
+                f"{factory_snapshot.initialization_phase.value!r} (expected SIMPLE)"
+            )
+        if factory_snapshot.initialization_errors:
+            _LOGGER.error(
+                f"[mcp_systems_server:enterprise_systems_status] Factory registry returned unexpected errors: "
+                f"{factory_snapshot.initialization_errors}"
+            )
+            raise InternalError(
+                f"Factory registry returned unexpected errors: "
+                f"{factory_snapshot.initialization_errors}"
+            )
         config = await config_manager.get_config()
 
         try:
@@ -155,7 +185,7 @@ async def enterprise_systems_status(
             systems_config = {}
 
         systems = []
-        for name, factory in factories.items():
+        for name, factory in factory_snapshot.items.items():
             # Use liveness_status() for detailed health information
             status_enum, liveness_detail = await factory.liveness_status(
                 ensure_item=attempt_to_connect
@@ -181,7 +211,17 @@ async def enterprise_systems_status(
                 system_info["liveness_detail"] = liveness_detail
 
             systems.append(system_info)
-        return {"success": True, "systems": systems}
+
+        response: dict[str, object] = {"success": True, "systems": systems}
+
+        # Surface initialization status from the combined registry snapshot
+        init_info = _format_initialization_status(
+            snapshot.initialization_phase, snapshot.initialization_errors
+        )
+        if init_info:
+            response["initialization"] = init_info
+
+        return response
     except Exception as e:
         _LOGGER.error(
             f"[mcp_systems_server:enterprise_systems_status] Failed: {e!r}",
@@ -270,7 +310,7 @@ async def _check_session_id_available(
         error_msg = f"Session '{session_id}' already exists"
         _LOGGER.error(f"[mcp_systems_server:_check_session_id_available] {error_msg}")
         return {"error": error_msg, "isError": True}
-    except KeyError:
+    except RegistryItemNotFoundError:
         return None  # Good - session doesn't exist yet
 
 
@@ -763,8 +803,8 @@ async def session_enterprise_delete(
         # Check if session exists in registry
         try:
             session_manager = await session_registry.get(session_id)
-        except KeyError:
-            error_msg = f"Session '{session_id}' not found"
+        except RegistryItemNotFoundError as e:
+            error_msg = f"Session '{session_id}' not found: {e}"
             _LOGGER.error(f"[mcp_systems_server:session_enterprise_delete] {error_msg}")
             result["error"] = error_msg
             result["isError"] = True

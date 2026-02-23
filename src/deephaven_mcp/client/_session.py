@@ -104,6 +104,7 @@ from deephaven_mcp.config import (
 from deephaven_mcp.io import load_bytes
 
 from ._base import ClientObjectWrapper
+from ._constants import CONNECTION_TIMEOUT_SECONDS
 from ._protobuf import CorePlusQueryInfo
 
 _LOGGER = logging.getLogger(__name__)
@@ -301,7 +302,10 @@ class BaseSession(ClientObjectWrapper[T], Generic[T]):
         _LOGGER.debug("[CoreSession:time_table] Called")
         try:
             return await asyncio.to_thread(
-                self.wrapped.time_table, period, start_time, blink_table
+                self.wrapped.time_table,
+                period,
+                start_time,  # type: ignore[arg-type,unused-ignore]
+                blink_table,
             )
         except ConnectionError as e:
             _LOGGER.error(
@@ -571,7 +575,11 @@ class BaseSession(ClientObjectWrapper[T], Generic[T]):
         _LOGGER.debug("[CoreSession:input_table] Called")
         try:
             return await asyncio.to_thread(
-                self.wrapped.input_table, schema, init_table, key_cols, blink_table
+                self.wrapped.input_table,
+                schema,
+                init_table,  # type: ignore[arg-type,unused-ignore]
+                key_cols,  # type: ignore[arg-type,unused-ignore]
+                blink_table,
             )
         except ValueError:
             # Re-raise ValueError directly for invalid inputs
@@ -1043,8 +1051,55 @@ class CoreSession(BaseSession[Session]):
             session, is_enterprise=False, programming_language=programming_language
         )
 
+    @staticmethod
+    def _resolve_auth_token(
+        worker_cfg: dict[str, Any], log_prefix: str = "[CoreSession:from_config]"
+    ) -> str:
+        """Resolve auth token from config dictionary or environment variable.
+
+        This helper extracts the authentication token for community session connections.
+        It supports two configuration approaches:
+
+        1. Direct token: Use 'auth_token' key with the token value
+        2. Environment variable: Use 'auth_token_env_var' key with the name of an
+           environment variable containing the token (more secure for production)
+
+        If 'auth_token_env_var' is specified, it takes precedence over 'auth_token'.
+        If the environment variable is not set, an empty string is returned with a warning.
+
+        Args:
+            worker_cfg: Configuration dictionary containing 'auth_token' and/or
+                'auth_token_env_var' keys.
+            log_prefix: Prefix for log messages (default: "[CoreSession:from_config]").
+
+        Returns:
+            The resolved authentication token string. Returns empty string if no token
+            is configured or if the specified environment variable is not set.
+        """
+        auth_token = worker_cfg.get("auth_token")
+        auth_token_env_var = worker_cfg.get("auth_token_env_var")
+        if auth_token_env_var:
+            _LOGGER.info(
+                f"{log_prefix} Attempting to read auth token from environment variable: {auth_token_env_var}"
+            )
+            token_from_env = os.getenv(auth_token_env_var)
+            if token_from_env is not None:
+                _LOGGER.info(
+                    f"{log_prefix} Successfully read auth token from environment variable {auth_token_env_var}."
+                )
+                return token_from_env
+            _LOGGER.warning(
+                f"{log_prefix} Environment variable {auth_token_env_var} specified for auth_token but not found. Using empty token."
+            )
+            return ""
+        return auth_token if auth_token is not None else ""
+
     @classmethod
-    async def from_config(cls, worker_cfg: dict[str, Any]) -> "CoreSession":
+    async def from_config(
+        cls,
+        worker_cfg: dict[str, Any],
+        timeout_seconds: float = CONNECTION_TIMEOUT_SECONDS,
+    ) -> "CoreSession":
         """
         Asynchronously create a CoreSession from a community (core) session configuration dictionary.
 
@@ -1056,12 +1111,15 @@ class CoreSession(BaseSession[Session]):
 
         Args:
             worker_cfg (dict): The worker's community session configuration.
+            timeout_seconds (float): Maximum time in seconds to wait for connection.
+                Defaults to CONNECTION_TIMEOUT_SECONDS.
 
         Returns:
             CoreSession: A new CoreSession instance wrapping a pydeephaven Session.
 
         Raises:
             CommunitySessionConfigurationError: If the configuration is invalid.
+            DeephavenConnectionError: If connection times out.
             SessionCreationError: If session creation fails for any reason.
         """
         try:
@@ -1087,25 +1145,7 @@ class CoreSession(BaseSession[Session]):
         host = worker_cfg.get("host", None)
         port = worker_cfg.get("port", None)
         auth_type = worker_cfg.get("auth_type", "Anonymous")
-        auth_token = worker_cfg.get("auth_token")
-        auth_token_env_var = worker_cfg.get("auth_token_env_var")
-        if auth_token_env_var:
-            _LOGGER.info(
-                f"[CoreSession:from_config] Attempting to read auth token from environment variable: {auth_token_env_var}"
-            )
-            token_from_env = os.getenv(auth_token_env_var)
-            if token_from_env is not None:
-                auth_token = token_from_env
-                _LOGGER.info(
-                    f"[CoreSession:from_config] Successfully read auth token from environment variable {auth_token_env_var}."
-                )
-            else:
-                auth_token = ""
-                _LOGGER.warning(
-                    f"[CoreSession:from_config] Environment variable {auth_token_env_var} specified for auth_token but not found. Using empty token."
-                )
-        elif auth_token is None:
-            auth_token = ""
+        auth_token = cls._resolve_auth_token(worker_cfg)
         never_timeout = worker_cfg.get("never_timeout", False)
         session_type = worker_cfg.get("session_type", "python")
         programming_language = session_type
@@ -1169,11 +1209,21 @@ class CoreSession(BaseSession[Session]):
             _LOGGER.info(
                 f"[CoreSession:from_config] Creating new Deephaven Community (Core) Session with config: {log_cfg}"
             )
-            session = await asyncio.to_thread(Session, **session_config)
+            session = await asyncio.wait_for(
+                asyncio.to_thread(Session, **session_config),
+                timeout=timeout_seconds,
+            )
             _LOGGER.info(
                 f"[CoreSession:from_config] Successfully created Deephaven Community (Core) Session: {session}"
             )
             return cls(session, programming_language=programming_language)
+        except TimeoutError:
+            _LOGGER.error(
+                f"[CoreSession:from_config] Connection timed out after {timeout_seconds}s"
+            )
+            raise DeephavenConnectionError(
+                f"Connection to Deephaven Community server timed out after {timeout_seconds} seconds."
+            ) from None
         except Exception as e:
             _LOGGER.warning(
                 f"[CoreSession:from_config] Failed to create Deephaven Community (Core) Session with config: {log_cfg}: {e}"
