@@ -732,7 +732,13 @@ async def _setup_batch_pq_operation(
     # Get enterprise registry and factory
     enterprise_registry = await session_registry.enterprise_registry()
     factory_manager = await enterprise_registry.get(system_name)
+    _LOGGER.debug(
+        f"[mcp_systems_server:{function_name}] Connecting to enterprise factory for system '{system_name}'"
+    )
     factory = await factory_manager.get()
+    _LOGGER.debug(
+        f"[mcp_systems_server:{function_name}] Connected to enterprise factory for system '{system_name}'"
+    )
 
     # Get controller client
     controller = factory.controller_client
@@ -916,13 +922,22 @@ async def pq_name_to_id(
         # Get enterprise registry and factory
         enterprise_registry = await session_registry.enterprise_registry()
         factory_manager = await enterprise_registry.get(system_name)
+        _LOGGER.debug(
+            f"[mcp_systems_server:pq_name_to_id] Connecting to enterprise factory for system '{system_name}'"
+        )
         factory = await factory_manager.get()
+        _LOGGER.debug(
+            f"[mcp_systems_server:pq_name_to_id] Connected to enterprise factory for system '{system_name}'"
+        )
 
         # Get controller client
         controller = factory.controller_client
 
         # Look up serial by name
         try:
+            _LOGGER.debug(
+                f"[mcp_systems_server:pq_name_to_id] Looking up serial for PQ '{pq_name}' on system '{system_name}'"
+            )
             serial = await controller.get_serial_for_name(pq_name)
         except Exception as e:
             error_msg = f"PQ '{pq_name}' not found on system '{system_name}': {e}"
@@ -1052,13 +1067,25 @@ async def pq_list(
         # Get enterprise registry and factory
         enterprise_registry = await session_registry.enterprise_registry()
         factory_manager = await enterprise_registry.get(system_name)
+        _LOGGER.debug(
+            f"[mcp_systems_server:pq_list] Connecting to enterprise factory for system '{system_name}'"
+        )
         factory = await factory_manager.get()
+        _LOGGER.debug(
+            f"[mcp_systems_server:pq_list] Connected to enterprise factory for system '{system_name}'"
+        )
 
         # Get controller client
         controller = factory.controller_client
 
         # Get all PQs from controller
+        _LOGGER.debug(
+            f"[mcp_systems_server:pq_list] Fetching PQ map from controller for system '{system_name}'"
+        )
         pq_map = await controller.map()
+        _LOGGER.debug(
+            f"[mcp_systems_server:pq_list] Received {len(pq_map)} PQ(s) from controller for system '{system_name}'"
+        )
 
         # Format PQ list with trimmed summary fields
         # NOTE: pq_info is PersistentQueryInfoMessage
@@ -1367,14 +1394,26 @@ async def pq_details(
         # Get enterprise registry and factory
         enterprise_registry = await session_registry.enterprise_registry()
         factory_manager = await enterprise_registry.get(system_name)
+        _LOGGER.debug(
+            f"[mcp_systems_server:pq_details] Connecting to enterprise factory for system '{system_name}'"
+        )
         factory = await factory_manager.get()
+        _LOGGER.debug(
+            f"[mcp_systems_server:pq_details] Connected to enterprise factory for system '{system_name}'"
+        )
 
         # Get controller client
         controller = factory.controller_client
 
         # Get all PQs from controller (ensures subscription is ready)
         # Then extract the specific PQ by serial
+        _LOGGER.debug(
+            f"[mcp_systems_server:pq_details] Fetching PQ map from controller for system '{system_name}'"
+        )
         pq_map = await controller.map()
+        _LOGGER.debug(
+            f"[mcp_systems_server:pq_details] Received {len(pq_map)} PQ(s) from controller for system '{system_name}'"
+        )
 
         if serial not in pq_map:
             error_msg = f"PQ with serial {serial} not found on system '{system_name}'"
@@ -1597,7 +1636,13 @@ async def pq_create(
         # Get enterprise registry and factory
         enterprise_registry = await session_registry.enterprise_registry()
         factory_manager = await enterprise_registry.get(system_name)
+        _LOGGER.debug(
+            f"[mcp_systems_server:pq_create] Connecting to enterprise factory for system '{system_name}'"
+        )
         factory = await factory_manager.get()
+        _LOGGER.debug(
+            f"[mcp_systems_server:pq_create] Connected to enterprise factory for system '{system_name}'"
+        )
 
         # Get controller client
         controller = factory.controller_client
@@ -1630,7 +1675,13 @@ async def pq_create(
         )
 
         # Add the PQ to controller
+        _LOGGER.debug(
+            f"[mcp_systems_server:pq_create] Submitting PQ '{pq_name}' to controller on system '{system_name}'"
+        )
         serial = await controller.add_query(pq_config)
+        _LOGGER.debug(
+            f"[mcp_systems_server:pq_create] Controller accepted PQ '{pq_name}' with serial {serial}"
+        )
 
         # Construct pq_id (serial-based)
         pq_id = _make_pq_id(system_name, serial)
@@ -2298,14 +2349,26 @@ async def pq_modify(
         # Get enterprise registry and factory
         enterprise_registry = await session_registry.enterprise_registry()
         factory_manager = await enterprise_registry.get(system_name)
+        _LOGGER.debug(
+            f"[mcp_systems_server:pq_modify] Connecting to enterprise factory for system '{system_name}'"
+        )
         factory = await factory_manager.get()
+        _LOGGER.debug(
+            f"[mcp_systems_server:pq_modify] Connected to enterprise factory for system '{system_name}'"
+        )
 
         # Get controller client
         controller = factory.controller_client
 
         # Get all PQs from controller (ensures subscription is ready)
         # Then extract the specific PQ by serial
+        _LOGGER.debug(
+            f"[mcp_systems_server:pq_modify] Fetching PQ map from controller for system '{system_name}'"
+        )
         pq_map = await controller.map()
+        _LOGGER.debug(
+            f"[mcp_systems_server:pq_modify] Received {len(pq_map)} PQ(s) from controller for system '{system_name}'"
+        )
 
         if serial not in pq_map:
             error_msg = f"PQ with serial {serial} not found on system '{system_name}'"
@@ -2531,7 +2594,13 @@ async def pq_start(
 
             try:
                 # Start the PQ and wait
+                _LOGGER.debug(
+                    f"[mcp_systems_server:pq_start] Calling start_and_wait for PQ {pid} (timeout={validated_timeout}s)"
+                )
                 await controller.start_and_wait(serial, validated_timeout)
+                _LOGGER.debug(
+                    f"[mcp_systems_server:pq_start] start_and_wait completed for PQ {pid}"
+                )
 
                 # Get updated info
                 pq_info = await controller.get(
@@ -2785,7 +2854,13 @@ async def pq_stop(
 
             try:
                 # Stop the PQ and wait
+                _LOGGER.debug(
+                    f"[mcp_systems_server:pq_stop] Calling stop_query for PQ {pid} (timeout={validated_timeout}s)"
+                )
                 await controller.stop_query([serial], validated_timeout)
+                _LOGGER.debug(
+                    f"[mcp_systems_server:pq_stop] stop_query completed for PQ {pid}"
+                )
 
                 # Get updated info
                 pq_info = await controller.get(
@@ -3035,7 +3110,13 @@ async def pq_restart(
 
             try:
                 # Restart the PQ (and wait if requested)
+                _LOGGER.debug(
+                    f"[mcp_systems_server:pq_restart] Calling restart_query for PQ {pid} (timeout={validated_timeout}s)"
+                )
                 await controller.restart_query([serial], validated_timeout)
+                _LOGGER.debug(
+                    f"[mcp_systems_server:pq_restart] restart_query completed for PQ {pid}"
+                )
 
                 # Get updated info
                 pq_info = await controller.get(

@@ -713,9 +713,16 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
                 if name not in snapshot_names
             ]
 
+            _LOGGER.debug(
+                f"[{self.__class__.__name__}:_sync_enterprise_sessions] querying {len(snapshots)} factory(ies) in parallel"
+            )
+            t0 = time.monotonic()
             raw = await asyncio.gather(
                 *(_fetch_factory_pqs(s) for s in snapshots),
                 return_exceptions=False,
+            )
+            _LOGGER.debug(
+                f"[{self.__class__.__name__}:_sync_enterprise_sessions] factory queries completed in {time.monotonic()-t0:.2f}s"
             )
             results: list[_FactoryQueryResult | _FactoryQueryError] = (
                 list(raw) + missing_errors
