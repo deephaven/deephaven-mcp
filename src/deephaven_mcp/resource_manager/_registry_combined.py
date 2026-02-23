@@ -18,11 +18,16 @@ Architecture
 - ``_discovery_task`` — background task for initial enterprise discovery.
 - ``_refresh_lock`` — serializes concurrent enterprise refresh operations.
 
-Locking contract (two rules, no exceptions)
--------------------------------------------
+Locking contract (strict ordering, no exceptions)
+--------------------------------------------------
 ``self._lock``    — protects all mutable state; held only for fast operations.
-``_refresh_lock`` — serializes enterprise refresh; **never held simultaneously
-                    with** ``self._lock``.
+``_refresh_lock`` — serializes enterprise refresh.
+
+Lock ordering rule: ``_refresh_lock`` is always the **outer** lock.
+It is permitted to acquire ``self._lock`` briefly while already holding
+``_refresh_lock`` (phases 1 and 3 of the refresh do exactly this).
+The reverse — acquiring ``_refresh_lock`` while holding ``self._lock`` —
+is **never** allowed, as it would risk deadlock.
 
 Enterprise refresh is a four-phase operation:
 

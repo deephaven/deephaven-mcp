@@ -52,12 +52,23 @@ def _format_initialization_status(
         completed cleanly.
     """
     init_info: dict[str, object] = {}
-    if phase not in (InitializationPhase.SIMPLE, InitializationPhase.COMPLETED):
+    if phase == InitializationPhase.FAILED:
         init_info["status"] = (
-            "Enterprise session discovery is still in progress. "
+            "Enterprise session discovery failed critically (e.g. cancelled during shutdown). "
+            "The registry may have partial or no data."
+        )
+    elif phase in (InitializationPhase.NOT_STARTED, InitializationPhase.PARTIAL):
+        init_info["status"] = (
+            "Enterprise session discovery has not yet started. "
+            "Some sessions or systems may not yet be visible."
+        )
+    elif phase == InitializationPhase.LOADING:
+        init_info["status"] = (
+            "Enterprise session discovery is actively running. "
             "Some sessions or systems may not yet be visible."
         )
     elif init_errors:
+        # SIMPLE or COMPLETED — only report if there were errors
         init_info["status"] = (
             "Some enterprise systems had connection issues during discovery."
         )

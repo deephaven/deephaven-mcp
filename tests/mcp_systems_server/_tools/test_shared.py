@@ -16,6 +16,7 @@ from deephaven_mcp._exceptions import RegistryItemNotFoundError
 from deephaven_mcp.client import BaseSession, CorePlusSession
 from deephaven_mcp.mcp_systems_server._tools.shared import (
     _check_response_size,
+    _format_initialization_status,
     _get_enterprise_session,
     _get_session_from_context,
     _get_system_config,
@@ -24,10 +25,95 @@ from deephaven_mcp.resource_manager import (
     DockerLaunchedSession,
     DynamicCommunitySessionManager,
     EnterpriseSessionManager,
+    InitializationPhase,
     PythonLaunchedSession,
     ResourceLivenessStatus,
     SystemType,
 )
+
+
+# ===========================================================================
+# _format_initialization_status tests
+# ===========================================================================
+
+
+def test_format_initialization_status_simple_no_errors():
+    """SIMPLE phase with no errors returns None."""
+    assert _format_initialization_status(InitializationPhase.SIMPLE, {}) is None
+
+
+def test_format_initialization_status_completed_no_errors():
+    """COMPLETED phase with no errors returns None."""
+    assert _format_initialization_status(InitializationPhase.COMPLETED, {}) is None
+
+
+def test_format_initialization_status_completed_with_errors():
+    """COMPLETED phase with errors reports connection issues."""
+    errors = {"prod": "timeout"}
+    result = _format_initialization_status(InitializationPhase.COMPLETED, errors)
+    assert result is not None
+    assert "connection issues" in result["status"]
+    assert result["errors"] == errors
+
+
+def test_format_initialization_status_simple_with_errors():
+    """SIMPLE phase with errors reports connection issues."""
+    errors = {"sys": "unreachable"}
+    result = _format_initialization_status(InitializationPhase.SIMPLE, errors)
+    assert result is not None
+    assert "connection issues" in result["status"]
+    assert result["errors"] == errors
+
+
+def test_format_initialization_status_not_started():
+    """NOT_STARTED phase reports discovery has not yet started."""
+    result = _format_initialization_status(InitializationPhase.NOT_STARTED, {})
+    assert result is not None
+    assert "not yet started" in result["status"]
+    assert "errors" not in result
+
+
+def test_format_initialization_status_partial():
+    """PARTIAL phase reports discovery has not yet started."""
+    result = _format_initialization_status(InitializationPhase.PARTIAL, {})
+    assert result is not None
+    assert "not yet started" in result["status"]
+    assert "errors" not in result
+
+
+def test_format_initialization_status_loading():
+    """LOADING phase reports discovery is actively running."""
+    result = _format_initialization_status(InitializationPhase.LOADING, {})
+    assert result is not None
+    assert "actively running" in result["status"]
+    assert "errors" not in result
+
+
+def test_format_initialization_status_failed():
+    """FAILED phase reports critical failure, not in-progress."""
+    result = _format_initialization_status(InitializationPhase.FAILED, {})
+    assert result is not None
+    assert "failed critically" in result["status"]
+    assert "in progress" not in result["status"]
+    assert "errors" not in result
+
+
+def test_format_initialization_status_failed_with_errors():
+    """FAILED phase with errors includes both status and errors."""
+    errors = {"sys": "cancelled"}
+    result = _format_initialization_status(InitializationPhase.FAILED, errors)
+    assert result is not None
+    assert "failed critically" in result["status"]
+    assert result["errors"] == errors
+
+
+def test_format_initialization_status_loading_with_errors():
+    """LOADING phase with errors includes both status and errors."""
+    errors = {"sys": "partial failure"}
+    result = _format_initialization_status(InitializationPhase.LOADING, errors)
+    assert result is not None
+    assert "actively running" in result["status"]
+    assert result["errors"] == errors
 
 
 @pytest.mark.asyncio

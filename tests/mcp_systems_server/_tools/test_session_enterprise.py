@@ -837,7 +837,7 @@ async def test_enterprise_systems_status_discovery_in_progress():
 
     assert result["success"] is True
     assert "initialization" in result
-    assert "still in progress" in result["initialization"]["status"]
+    assert "actively running" in result["initialization"]["status"]
 
 
 @pytest.mark.asyncio
@@ -877,7 +877,7 @@ async def test_enterprise_systems_status_discovery_in_progress_with_errors():
 
     assert result["success"] is True
     assert "initialization" in result
-    assert "still in progress" in result["initialization"]["status"]
+    assert "actively running" in result["initialization"]["status"]
     assert "errors" in result["initialization"]
     assert "factory1" in result["initialization"]["errors"]
 
