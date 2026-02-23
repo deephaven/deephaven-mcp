@@ -31,7 +31,6 @@ from deephaven_mcp.resource_manager import (
     SystemType,
 )
 
-
 # ===========================================================================
 # _format_initialization_status tests
 # ===========================================================================
