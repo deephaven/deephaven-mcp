@@ -363,7 +363,7 @@ class CorePlusControllerClient(
                 - Version number (int) representing the current map state
 
         Raises:
-            DeephavenConnectionError: If unable to connect to the controller service
+            DeephavenConnectionError: If unable to connect to the controller service.
             QueryError: If not subscribed or subscription state is invalid
             InternalError: If subscribe() was not called before this method
         """

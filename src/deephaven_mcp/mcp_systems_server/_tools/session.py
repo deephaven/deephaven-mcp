@@ -9,6 +9,7 @@ These tools work with both Community and Enterprise sessions.
 """
 
 import logging
+import time
 from collections.abc import Awaitable, Callable
 from typing import TypeVar
 
@@ -408,9 +409,10 @@ async def session_details(
             f"[mcp_systems_server:session_details] Retrieving session manager for '{session_id}'"
         )
         try:
+            _t0 = time.monotonic()
             mgr = await session_registry.get(session_id)
             _LOGGER.debug(
-                f"[mcp_systems_server:session_details] Successfully retrieved session manager for '{session_id}'"
+                f"[mcp_systems_server:session_details] Retrieved session manager for '{session_id}' in {time.monotonic() - _t0:.2f}s"
             )
         except Exception as e:
             return {
@@ -435,8 +437,12 @@ async def session_details(
             _LOGGER.debug(
                 f"[mcp_systems_server:session_details] Checking liveness for session '{session_id}' (attempt_to_connect={attempt_to_connect})"
             )
+            _t1 = time.monotonic()
             available, liveness_status, liveness_detail = (
                 await _get_session_liveness_info(mgr, session_id, attempt_to_connect)
+            )
+            _LOGGER.debug(
+                f"[mcp_systems_server:session_details] Liveness check for '{session_id}' took {time.monotonic() - _t1:.2f}s"
             )
 
             # Get session properties using helper functions

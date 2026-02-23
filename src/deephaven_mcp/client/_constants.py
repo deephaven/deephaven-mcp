@@ -5,7 +5,7 @@ These constants define default timeouts for various network operations.
 
 Connection Timeouts:
     CONNECTION_TIMEOUT_SECONDS: Initial connection to Deephaven server (60s).
-    SUBSCRIBE_TIMEOUT_SECONDS: Subscribing to controller state updates (60s).
+    SUBSCRIBE_TIMEOUT_SECONDS: Subscribing to controller state updates (30s).
     PQ_CONNECTION_TIMEOUT_SECONDS: Connecting to persistent queries (60s).
     WORKER_CREATION_TIMEOUT_SECONDS: Creating new workers (60s).
 
@@ -15,7 +15,7 @@ Authentication Timeouts:
 
 Persistent Query Operation Timeouts:
     PQ_OPERATION_TIMEOUT_SECONDS: Query management operations (60s).
-    QUICK_OPERATION_TIMEOUT_SECONDS: Quick operations like ping (30s).
+    QUICK_OPERATION_TIMEOUT_SECONDS: Quick operations like ping (5s).
     PQ_WAIT_TIMEOUT_SECONDS: Waiting for query state changes (120s).
 
 Special Values:
@@ -31,7 +31,7 @@ Special Values:
 CONNECTION_TIMEOUT_SECONDS: float = 60.0
 
 # Timeout for subscribing to controller state updates.
-SUBSCRIBE_TIMEOUT_SECONDS: float = 60.0
+SUBSCRIBE_TIMEOUT_SECONDS: float = 30.0
 
 # Timeout for connecting to persistent queries.
 PQ_CONNECTION_TIMEOUT_SECONDS: float = 60.0
@@ -58,7 +58,7 @@ SAML_AUTH_TIMEOUT_SECONDS: float = 120.0
 PQ_OPERATION_TIMEOUT_SECONDS: float = 60.0
 
 # Timeout for quick network operations like ping, delete_key, upload_key.
-QUICK_OPERATION_TIMEOUT_SECONDS: float = 30.0
+QUICK_OPERATION_TIMEOUT_SECONDS: float = 5.0
 
 # Timeout for waiting on query state changes (start_and_wait, stop_and_wait).
 # These operations wait for workers to reach a target state.

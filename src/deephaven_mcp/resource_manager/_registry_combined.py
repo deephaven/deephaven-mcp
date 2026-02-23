@@ -161,24 +161,42 @@ async def _fetch_factory_pqs(
 
     try:
         if client is None:
+            _LOGGER.debug(f"[_fetch_factory_pqs] '{name}': no cached client, creating")
+            t0 = time.monotonic()
             factory_instance = await snapshot.factory_manager.get()
             client = factory_instance.controller_client
             new_client = client
-            _LOGGER.debug(f"[_fetch_factory_pqs] created new client for '{name}'")
+            _LOGGER.debug(
+                f"[_fetch_factory_pqs] '{name}': client created in {time.monotonic()-t0:.2f}s"
+            )
         else:
             try:
+                _LOGGER.debug(f"[_fetch_factory_pqs] '{name}': pinging cached client")
+                t0 = time.monotonic()
                 ping_ok = await client.ping()
+                _LOGGER.debug(
+                    f"[_fetch_factory_pqs] '{name}': ping={'ok' if ping_ok else 'False'} in {time.monotonic()-t0:.2f}s"
+                )
                 if not ping_ok:
                     raise _PingFailed("ping returned False")
             except Exception as ping_err:
                 _LOGGER.warning(
                     f"[_fetch_factory_pqs] cached client for '{name}' dead ({ping_err}); recreating"
                 )
+                t0 = time.monotonic()
                 factory_instance = await snapshot.factory_manager.get()
                 client = factory_instance.controller_client
                 new_client = client
+                _LOGGER.debug(
+                    f"[_fetch_factory_pqs] '{name}': client recreated in {time.monotonic()-t0:.2f}s"
+                )
 
+        _LOGGER.debug(f"[_fetch_factory_pqs] '{name}': calling map()")
+        t0 = time.monotonic()
         query_map = await client.map()
+        _LOGGER.debug(
+            f"[_fetch_factory_pqs] '{name}': map() returned {len(query_map)} entries in {time.monotonic()-t0:.2f}s"
+        )
         query_names = {info.config.pb.name for info in query_map.values()}
         _LOGGER.debug(f"[_fetch_factory_pqs] factory '{name}': {len(query_names)} PQs")
         return _FactoryQueryResult(
@@ -453,7 +471,13 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             async with self._lock:
                 phase = self._phase
             if phase == InitializationPhase.COMPLETED:
+                _LOGGER.debug(
+                    f"[{self.__class__.__name__}:get] enterprise sync starting for '{name}' (acquiring _refresh_lock)"
+                )
                 await self._sync_enterprise_sessions([source])
+                _LOGGER.debug(
+                    f"[{self.__class__.__name__}:get] enterprise sync complete for '{name}'"
+                )
 
         async with self._lock:
             self._check_initialized()
@@ -667,9 +691,12 @@ class CombinedSessionRegistry(BaseRegistry[BaseItemManager]):
             factory_names (list[str]): Factory names to refresh.
         """
         _LOGGER.debug(
-            f"[{self.__class__.__name__}] refreshing {len(factory_names)} factory(ies): {factory_names}"
+            f"[{self.__class__.__name__}:_sync_enterprise_sessions] waiting for _refresh_lock, factories={factory_names}"
         )
         async with self._refresh_lock:
+            _LOGGER.debug(
+                f"[{self.__class__.__name__}:_sync_enterprise_sessions] acquired _refresh_lock, refreshing {len(factory_names)} factory(ies): {factory_names}"
+            )
             snapshots = await self._snapshot_factory_state(factory_names)
 
             # Factories that disappeared from the enterprise registry produce no
