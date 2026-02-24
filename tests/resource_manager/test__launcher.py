@@ -1141,8 +1141,12 @@ class TestPythonLauncherEdgeCases:
             # The command should use deephaven from custom venv.
             # Path is platform-dependent: Scripts/deephaven.exe on Windows, bin/deephaven on Unix.
             import sys as _sys
+
             if _sys.platform == "win32":
-                assert "\\custom\\venv\\Scripts\\deephaven.exe" in call_args[0] or "/custom/venv/Scripts/deephaven.exe" in call_args[0]
+                assert (
+                    "\\custom\\venv\\Scripts\\deephaven.exe" in call_args[0]
+                    or "/custom/venv/Scripts/deephaven.exe" in call_args[0]
+                )
             else:
                 assert "/custom/venv/bin/deephaven" in call_args[0]
 
@@ -1220,6 +1224,7 @@ class TestPythonLauncherEdgeCases:
     def test_find_deephaven_executable_windows_uses_scripts_dir(self):
         """Test _find_deephaven_executable uses Scripts/ and .exe on Windows."""
         import sys as _sys
+
         from deephaven_mcp.resource_manager._launcher import _find_deephaven_executable
 
         with (

@@ -600,7 +600,9 @@ class TestCleanupOrphanedResources:
             with patch("asyncio.create_subprocess_exec", return_value=mock_ps):
                 # Mock psutil.Process.terminate() to raise exception
                 mock_psutil_process = MagicMock()
-                mock_psutil_process.terminate.side_effect = PermissionError("Access denied")
+                mock_psutil_process.terminate.side_effect = PermissionError(
+                    "Access denied"
+                )
                 with patch(
                     "deephaven_mcp.resource_manager._instance_tracker.psutil.Process",
                     return_value=mock_psutil_process,

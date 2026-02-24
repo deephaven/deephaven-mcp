@@ -42,6 +42,7 @@ import os
 import uuid
 from datetime import datetime
 from pathlib import Path
+from typing import cast
 
 import psutil
 
@@ -260,7 +261,7 @@ def is_process_running(pid: int) -> bool:
         due to permission errors - it returns True whenever the process exists,
         regardless of ownership.
     """
-    return psutil.pid_exists(pid)
+    return cast(bool, psutil.pid_exists(pid))
 
 
 async def cleanup_orphaned_resources() -> None:

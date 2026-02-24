@@ -318,7 +318,9 @@ def test_log_process_state_windows_num_handles_fallback(monkeypatch):
         mock_process_instance = MagicMock()
         mock_process_instance.memory_info.return_value.rss = 52428800  # 50MB
         mock_process_instance.cpu_percent.return_value = 2.0
-        mock_process_instance.num_fds.side_effect = AttributeError("num_fds not available on Windows")
+        mock_process_instance.num_fds.side_effect = AttributeError(
+            "num_fds not available on Windows"
+        )
         mock_process_instance.num_handles.return_value = 99
         mock_process_instance.pid = 42
         mock_process.return_value = mock_process_instance
