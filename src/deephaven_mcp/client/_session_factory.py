@@ -89,10 +89,10 @@ from ._auth_client import CorePlusAuthClient
 from ._base import ClientObjectWrapper, is_enterprise_available
 from ._constants import (
     AUTH_TIMEOUT_SECONDS,
-    CONNECTION_TIMEOUT_SECONDS,
     PQ_CONNECTION_TIMEOUT_SECONDS,
     QUICK_OPERATION_TIMEOUT_SECONDS,
     SAML_AUTH_TIMEOUT_SECONDS,
+    SESSION_CONNECT_TIMEOUT_SECONDS,
     WORKER_CREATION_TIMEOUT_SECONDS,
 )
 from ._controller_client import CorePlusControllerClient, CorePlusQuerySerial
@@ -236,7 +236,7 @@ class CorePlusSessionFactory(
 
     @classmethod
     async def from_url(
-        cls, url: str, timeout_seconds: float = CONNECTION_TIMEOUT_SECONDS
+        cls, url: str, timeout_seconds: float = SESSION_CONNECT_TIMEOUT_SECONDS
     ) -> "CorePlusSessionFactory":
         """Create a CorePlusSessionFactory connected to a Deephaven server specified by URL.
 
@@ -259,7 +259,7 @@ class CorePlusSessionFactory(
                 the format: https://your-server:port/iris/connection.json
                 For example: "https://deephaven.example.com:10000/iris/connection.json"
             timeout_seconds (float): Maximum time in seconds to wait for connection.
-                Defaults to CONNECTION_TIMEOUT_SECONDS.
+                Defaults to SESSION_CONNECT_TIMEOUT_SECONDS.
 
         Returns:
             CorePlusSessionFactory: A new factory instance connected to the specified server,
@@ -398,7 +398,7 @@ class CorePlusSessionFactory(
     async def from_config(
         cls,
         worker_cfg: dict[str, Any],
-        timeout_seconds: float = CONNECTION_TIMEOUT_SECONDS,
+        timeout_seconds: float = SESSION_CONNECT_TIMEOUT_SECONDS,
     ) -> "CorePlusSessionFactory":
         """
         Create and authenticate a CorePlusSessionFactory from a configuration dictionary.
@@ -440,7 +440,7 @@ class CorePlusSessionFactory(
             worker_cfg (dict[str, Any]): Configuration dictionary for the enterprise system connection.
                 Must contain the required fields as described above.
             timeout_seconds (float): Maximum time in seconds to wait for connection.
-                Defaults to CONNECTION_TIMEOUT_SECONDS.
+                Defaults to SESSION_CONNECT_TIMEOUT_SECONDS.
 
         Returns:
             CorePlusSessionFactory: A fully initialized and authenticated factory instance

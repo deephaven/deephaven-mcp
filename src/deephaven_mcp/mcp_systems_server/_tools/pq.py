@@ -17,6 +17,7 @@ These tools require Deephaven Enterprise (Core+) and are not available in Commun
 
 import asyncio
 import logging
+import os
 from typing import TYPE_CHECKING, cast
 
 from mcp.server.fastmcp import Context
@@ -119,12 +120,27 @@ def _make_pq_id(system_name: str, serial: CorePlusQuerySerial) -> str:
     return f"enterprise:{system_name}:{serial}"
 
 
-# MCP-safe timeout limits
-MAX_MCP_SAFE_TIMEOUT = 60  # Conservative limit to prevent client timeouts
-DEFAULT_PQ_TIMEOUT = 30  # Default for PQ lifecycle operations
-DEFAULT_MAX_CONCURRENT = (
-    20  # Default concurrency limit for parallel PQ batch operations
+MCP_TIMEOUT_WARNING_THRESHOLD: int = int(
+    os.environ.get("DH_MCP_TIMEOUT_WARNING_THRESHOLD", "60")
 )
+"""Timeout (seconds) above which MCP tool operations generate a warning.
+
+MCP clients typically have their own connection timeouts; operations exceeding
+this threshold may be cut off by the client before they complete.
+Environment variable override: DH_MCP_TIMEOUT_WARNING_THRESHOLD
+"""
+
+DEFAULT_PQ_TIMEOUT: int = int(os.environ.get("DH_MCP_DEFAULT_PQ_TIMEOUT", "30"))
+"""Default timeout (seconds) for PQ lifecycle operations (start, stop, restart)
+when the caller does not supply an explicit value.
+Environment variable override: DH_MCP_DEFAULT_PQ_TIMEOUT
+"""
+
+DEFAULT_MAX_CONCURRENT: int = int(os.environ.get("DH_MCP_DEFAULT_MAX_CONCURRENT", "20"))
+"""Default cap on the number of PQ operations that may run in parallel within a
+single batch tool call.
+Environment variable override: DH_MCP_DEFAULT_MAX_CONCURRENT
+"""
 
 
 def _validate_timeout(timeout_seconds: int, function_name: str) -> int:
@@ -149,10 +165,10 @@ def _validate_timeout(timeout_seconds: int, function_name: str) -> int:
             f"Use timeout_seconds=0 for fire-and-forget (no wait) behavior."
         )
 
-    if timeout_seconds > MAX_MCP_SAFE_TIMEOUT:
+    if timeout_seconds > MCP_TIMEOUT_WARNING_THRESHOLD:
         _LOGGER.warning(
             f"[mcp_systems_server:{function_name}] Timeout {timeout_seconds}s exceeds "
-            f"recommended MCP limit of {MAX_MCP_SAFE_TIMEOUT}s - may cause client timeouts"
+            f"recommended MCP limit of {MCP_TIMEOUT_WARNING_THRESHOLD}s - may cause client timeouts"
         )
     return timeout_seconds
 
@@ -162,7 +178,7 @@ def _validate_max_concurrent(max_concurrent: int, function_name: str) -> int:
 
     Args:
         max_concurrent (int): Maximum number of concurrent operations (must be >= 1).
-        function_name (str): Name of calling function for logging
+        function_name (str): Name of calling function, included in the error message for context.
 
     Returns:
         int: The validated max_concurrent value
@@ -172,13 +188,13 @@ def _validate_max_concurrent(max_concurrent: int, function_name: str) -> int:
     """
     if max_concurrent < 1:
         raise ValueError(
-            f"max_concurrent must be at least 1, got {max_concurrent}. "
+            f"[{function_name}] max_concurrent must be at least 1, got {max_concurrent}. "
             f"Use a positive integer to control parallelism (e.g., 20 for moderate concurrency)."
         )
     return max_concurrent
 
 
-def _format_pq_config(config: CorePlusQueryConfig) -> dict:
+def _format_pq_config(config: CorePlusQueryConfig) -> dict[str, object]:
     """Format PersistentQueryConfigMessage into MCP-compatible dictionary.
 
     Extracts ALL 38 fields from PersistentQueryConfigMessage protobuf and formats them
@@ -199,7 +215,8 @@ def _format_pq_config(config: CorePlusQueryConfig) -> dict:
         config (CorePlusQueryConfig): Wrapper around PersistentQueryConfigMessage protobuf
 
     Returns:
-        dict: All 38 config fields formatted for MCP API, with optional fields converted to None when empty
+        dict[str, object]: All 38 config fields formatted for MCP API, with optional fields
+            converted to None when empty
     """
     pb = config.pb
 
@@ -270,7 +287,7 @@ def _format_pq_config(config: CorePlusQueryConfig) -> dict:
     }
 
 
-def _format_named_string_list(nsl: "NamedStringList") -> dict:
+def _format_named_string_list(nsl: "NamedStringList") -> dict[str, object]:
     """Format NamedStringList protobuf into dict.
 
     Protobuf reference:
@@ -281,10 +298,10 @@ def _format_named_string_list(nsl: "NamedStringList") -> dict:
     - values (repeated string)
 
     Args:
-        nsl: NamedStringList protobuf object
+        nsl (NamedStringList): NamedStringList protobuf object
 
     Returns:
-        dict: Formatted named string list with snake_case keys
+        dict[str, object]: Formatted named string list with snake_case keys
     """
     return {
         "name": nsl.name,
@@ -292,7 +309,7 @@ def _format_named_string_list(nsl: "NamedStringList") -> dict:
     }
 
 
-def _format_column_definition(col: "ColumnDefinitionMessage") -> dict:
+def _format_column_definition(col: "ColumnDefinitionMessage") -> dict[str, object]:
     """Format ColumnDefinitionMessage protobuf into dict.
 
     Protobuf reference:
@@ -310,10 +327,10 @@ def _format_column_definition(col: "ColumnDefinitionMessage") -> dict:
     - objectWidthBytes (int32)
 
     Args:
-        col: ColumnDefinitionMessage protobuf object
+        col (ColumnDefinitionMessage): ColumnDefinitionMessage protobuf object
 
     Returns:
-        dict: Formatted column definition with snake_case keys
+        dict[str, object]: Formatted column definition with snake_case keys
     """
     return {
         "name": col.name,
@@ -328,7 +345,7 @@ def _format_column_definition(col: "ColumnDefinitionMessage") -> dict:
     }
 
 
-def _format_table_definition(td: "TableDefinitionMessage") -> dict:
+def _format_table_definition(td: "TableDefinitionMessage") -> dict[str, object]:
     """Format TableDefinitionMessage protobuf into dict.
 
     Protobuf reference:
@@ -341,10 +358,10 @@ def _format_table_definition(td: "TableDefinitionMessage") -> dict:
     - storageType (StorageTypeEnum, optional)
 
     Args:
-        td: TableDefinitionMessage protobuf object
+        td (TableDefinitionMessage): TableDefinitionMessage protobuf object
 
     Returns:
-        dict: Formatted table definition with snake_case keys
+        dict[str, object]: Formatted table definition with snake_case keys
     """
     columns = [_format_column_definition(col) for col in td.columns]
     return {
@@ -355,7 +372,7 @@ def _format_table_definition(td: "TableDefinitionMessage") -> dict:
     }
 
 
-def _format_exported_object_info(obj: "ExportedObjectInfoMessage") -> dict:
+def _format_exported_object_info(obj: "ExportedObjectInfoMessage") -> dict[str, object]:
     """Format ExportedObjectInfoMessage protobuf into dict.
 
     Protobuf reference:
@@ -368,10 +385,10 @@ def _format_exported_object_info(obj: "ExportedObjectInfoMessage") -> dict:
     - originalType (string)
 
     Args:
-        obj: ExportedObjectInfoMessage protobuf object
+        obj (ExportedObjectInfoMessage): ExportedObjectInfoMessage protobuf object
 
     Returns:
-        dict: Formatted exported object info with snake_case keys
+        dict[str, object]: Formatted exported object info with snake_case keys
     """
     # Get enum name using protobuf enum class Name() method
     # Handle unknown enum values (server may have newer proto than client)
@@ -395,7 +412,7 @@ def _format_exported_object_info(obj: "ExportedObjectInfoMessage") -> dict:
     }
 
 
-def _format_worker_protocol(wp: "WorkerProtocolMessage") -> dict:
+def _format_worker_protocol(wp: "WorkerProtocolMessage") -> dict[str, object]:
     """Format WorkerProtocolMessage protobuf into dict.
 
     Protobuf reference:
@@ -406,10 +423,10 @@ def _format_worker_protocol(wp: "WorkerProtocolMessage") -> dict:
     - port (int32)
 
     Args:
-        wp: WorkerProtocolMessage protobuf object
+        wp (WorkerProtocolMessage): WorkerProtocolMessage protobuf object
 
     Returns:
-        dict: Formatted worker protocol with snake_case keys
+        dict[str, object]: Formatted worker protocol with snake_case keys
     """
     return {
         "name": wp.name,
@@ -417,7 +434,9 @@ def _format_worker_protocol(wp: "WorkerProtocolMessage") -> dict:
     }
 
 
-def _format_connection_details(cd: "ProcessorConnectionDetailsMessage") -> dict:
+def _format_connection_details(
+    cd: "ProcessorConnectionDetailsMessage",
+) -> dict[str, object]:
     """Format ProcessorConnectionDetailsMessage protobuf into dict.
 
     Protobuf reference:
@@ -434,10 +453,10 @@ def _format_connection_details(cd: "ProcessorConnectionDetailsMessage") -> dict:
     - enterpriseWebSocketUrl (string)
 
     Args:
-        cd: ProcessorConnectionDetailsMessage protobuf object
+        cd (ProcessorConnectionDetailsMessage): ProcessorConnectionDetailsMessage protobuf object
 
     Returns:
-        dict: Formatted connection details with snake_case keys
+        dict[str, object]: Formatted connection details with snake_case keys
     """
     protocols = [_format_worker_protocol(p) for p in cd.protocols]
     return {
@@ -452,7 +471,7 @@ def _format_connection_details(cd: "ProcessorConnectionDetailsMessage") -> dict:
     }
 
 
-def _format_exception_details(ed: "ExceptionDetailsMessage") -> dict:
+def _format_exception_details(ed: "ExceptionDetailsMessage") -> dict[str, object]:
     """Format ExceptionDetailsMessage protobuf into dict.
 
     Protobuf reference:
@@ -464,10 +483,10 @@ def _format_exception_details(ed: "ExceptionDetailsMessage") -> dict:
     - shortCauses (string)
 
     Args:
-        ed: ExceptionDetailsMessage protobuf object
+        ed (ExceptionDetailsMessage): ExceptionDetailsMessage protobuf object
 
     Returns:
-        dict: Formatted exception details with snake_case keys
+        dict[str, object]: Formatted exception details with snake_case keys
     """
     return {
         "error_message": ed.errorMessage or None,
@@ -476,7 +495,7 @@ def _format_exception_details(ed: "ExceptionDetailsMessage") -> dict:
     }
 
 
-def _format_pq_state(state: CorePlusQueryState | None) -> dict | None:
+def _format_pq_state(state: CorePlusQueryState | None) -> dict[str, object] | None:
     """Format PersistentQueryStateMessage into MCP-compatible dictionary.
 
     Extracts ALL 25 fields from PersistentQueryStateMessage protobuf and formats them
@@ -519,8 +538,8 @@ def _format_pq_state(state: CorePlusQueryState | None) -> dict | None:
                                           or None if no state available
 
     Returns:
-        dict | None: All 25 state fields formatted for MCP API, with optional fields converted
-                    to None when empty, or None if state not available
+        dict[str, object] | None: All 25 state fields formatted for MCP API, with optional
+            fields converted to None when empty, or None if state not available
     """
     if state is None:
         return None
@@ -579,7 +598,7 @@ def _format_pq_state(state: CorePlusQueryState | None) -> dict | None:
     return result
 
 
-def _format_pq_replicas(replicas: list[CorePlusQueryState]) -> list[dict]:
+def _format_pq_replicas(replicas: list[CorePlusQueryState]) -> list[dict[str, object]]:
     """Format list of replica PersistentQueryStateMessage objects.
 
     Applies _format_pq_state to each replica in the list, filtering out None entries.
@@ -589,8 +608,8 @@ def _format_pq_replicas(replicas: list[CorePlusQueryState]) -> list[dict]:
         replicas (list[CorePlusQueryState]): List of CorePlusQueryState wrappers for replica states
 
     Returns:
-        list[dict]: List of formatted replica state dictionaries (36 fields each), or empty list
-                   if no replicas provided
+        list[dict[str, object]]: List of formatted replica state dictionaries (25 fields each),
+            or empty list if no replicas provided
     """
     if not replicas:
         return []
@@ -601,7 +620,7 @@ def _format_pq_replicas(replicas: list[CorePlusQueryState]) -> list[dict]:
     return [f for f in formatted if f is not None]
 
 
-def _format_pq_spares(spares: list[CorePlusQueryState]) -> list[dict]:
+def _format_pq_spares(spares: list[CorePlusQueryState]) -> list[dict[str, object]]:
     """Format list of spare PersistentQueryStateMessage objects.
 
     Applies _format_pq_state to each spare in the list, filtering out None entries.
@@ -611,8 +630,8 @@ def _format_pq_spares(spares: list[CorePlusQueryState]) -> list[dict]:
         spares (list[CorePlusQueryState]): List of CorePlusQueryState wrappers for spare states
 
     Returns:
-        list[dict]: List of formatted spare state dictionaries (36 fields each), or empty list
-                   if no spares provided
+        list[dict[str, object]]: List of formatted spare state dictionaries (25 fields each),
+            or empty list if no spares provided
     """
     if not spares:
         return []
@@ -622,16 +641,20 @@ def _format_pq_spares(spares: list[CorePlusQueryState]) -> list[dict]:
 
 
 def _normalize_programming_language(language: str) -> str:
-    """Normalize and validate programming language string.
+    """Normalize and validate a programming language string for PQ configuration.
+
+    Accepts case-insensitive input and returns the canonical capitalized form
+    expected by the Deephaven Enterprise controller API.
 
     Args:
-        language (str): Programming language string (case-insensitive)
+        language (str): Programming language string, case-insensitive
+            (e.g., "python", "Python", "PYTHON", "groovy", "Groovy")
 
     Returns:
-        str: Normalized language string ("Python" or "Groovy")
+        str: Canonical form accepted by the controller: "Python" or "Groovy"
 
     Raises:
-        ValueError: If language is not "Python" or "Groovy" (case-insensitive)
+        ValueError: If language is not a case-insensitive match for "Python" or "Groovy"
     """
     lang_lower = language.lower()
     if lang_lower == "python":
@@ -665,11 +688,11 @@ async def _setup_batch_pq_operation(
     Consolidates validation and setup boilerplate across pq_delete, pq_start, pq_stop, pq_restart.
 
     Args:
-        context: MCP context object
-        pq_id: Single pq_id string or list of pq_id strings
-        function_name: Name of calling function for logging
-        timeout_seconds: Timeout in seconds for operations (validated >= 0)
-        max_concurrent: Maximum concurrent operations (validated >= 1)
+        context (Context): MCP context object
+        pq_id (str | list[str]): Single pq_id string or list of pq_id strings
+        function_name (str): Name of calling function, used in log messages and error strings
+        timeout_seconds (int): Timeout in seconds for operations (must be >= 0)
+        max_concurrent (int): Maximum concurrent operations (must be >= 1)
 
     Returns:
         tuple: (parsed_pqs, system_name, controller, validated_timeout, validated_max_concurrent, error_response)
@@ -759,13 +782,15 @@ def _validate_and_parse_pq_ids(
     """Validate and parse pq_id(s) for batch operations.
 
     Args:
-        pq_id: Single pq_id string or list of pq_id strings
+        pq_id (str | list[str]): Single pq_id string or list of pq_id strings in
+            format 'enterprise:{system_name}:{serial}'. All IDs must belong to the
+            same enterprise system.
 
     Returns:
-        tuple: (parsed_pqs, system_name, error_message)
-               - parsed_pqs: list of (pq_id, serial) tuples on success, None on failure
-               - system_name: system name on success, None on failure
-               - error_message: None on success, error string on failure
+        tuple[list[tuple[str, CorePlusQuerySerial]] | None, str | None, str | None]:
+            (parsed_pqs, system_name, error_message)
+            - On success: ([(pq_id, serial), ...], system_name, None)
+            - On failure: (None, None, error_string)
     """
     # Normalize to list
     pq_ids = [pq_id] if isinstance(pq_id, str) else pq_id
@@ -834,10 +859,10 @@ def _add_session_id_if_running(
     pq_list, pq_details, pq_start, and pq_restart.
 
     Args:
-        result_dict: Result dictionary to modify in-place
-        state_name: Current PQ state (e.g., "RUNNING", "STOPPED", "INITIALIZING")
-        system_name: Enterprise system name
-        pq_name: PQ name (NOT serial number)
+        result_dict (dict[str, object]): Result dictionary to modify in-place
+        state_name (str): Current PQ state (e.g., "RUNNING", "STOPPED", "INITIALIZING")
+        system_name (str): Enterprise system name
+        pq_name (str): PQ name (NOT serial number)
     """
     if state_name in ["RUNNING", "INITIALIZING"]:
         session_id = BaseItemManager.make_full_name(
@@ -854,8 +879,9 @@ async def pq_name_to_id(
 ) -> dict:
     """MCP Tool: Convert PQ name to pq_id format.
 
-    Helper tool to look up a persistent query by name and return its pq_id.
-    This is useful when you know the PQ name but need the pq_id for other operations.
+    Looks up a persistent query by name and returns its pq_id (the canonical
+    identifier used by all other PQ management tools). Use this when you know
+    the human-readable PQ name but need the pq_id for other operations.
 
     Terminology Note:
     - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
@@ -876,12 +902,12 @@ async def pq_name_to_id(
     - If the PQ doesn't exist, you'll get an error
 
     Args:
-        context: MCP context object
-        system_name: Name of the enterprise system
-        pq_name: Name of the persistent query
+        context (Context): MCP context object
+        system_name (str): Name of the enterprise system
+        pq_name (str): Human-readable name of the persistent query
 
     Returns:
-        Success response:
+        dict: Success response:
         {
             "success": True,
             "pq_id": "enterprise:prod:12345",
@@ -890,7 +916,7 @@ async def pq_name_to_id(
             "system_name": "prod"
         }
 
-        Error response:
+        dict: Error response:
         {
             "success": False,
             "error": "PQ 'nonexistent' not found on system 'prod'",
@@ -1004,10 +1030,11 @@ async def pq_list(
     - session_id field only present when status is RUNNING or INITIALIZING
     - Use pq_details(pq_id) to get full configuration and state for a specific PQ
     - Empty pqs list is valid - indicates no PQs configured on the system
+    - num_failures is the cumulative lifetime failure count for the PQ (not reset on restart)
 
     Args:
         context (Context): MCP context object
-        system_name (str): Name of the enterprise system
+        system_name (str): Name of the enterprise system to list PQs for
 
     Returns:
         dict: Success response:
@@ -1174,13 +1201,16 @@ async def pq_details(
     - Use pq_id from pq_list to identify the PQ
     - If you only have a PQ name, use pq_name_to_id to look up the pq_id first
     - session_id only present when state is RUNNING or INITIALIZING
-    - Worker connection details (host, port) available in state_details.worker_host and state_details.worker_port
-    - Use session_id with other session tools to interact with running PQ
-    - null script_path means inline script_body (or vice versa)
-    - Empty arrays ([]) indicate optional features disabled (scheduling, admin_groups, etc.)
-    - jvm_profile null means default JVM settings
+    - Worker host available at state_details.connection_details.processor_host
+    - Worker port available at state_details.connection_details.protocols[*].port
+    - connection_details is null when PQ is not running
+    - Use session_id with other session tools to interact with a running PQ
+    - null script_path means inline script_body is used (or vice versa)
+    - Empty arrays ([]) indicate optional features are disabled (scheduling, admin_groups, etc.)
+    - jvm_profile null means default JVM settings are used
     - replicas array contains state of all active replicas (load-balanced instances)
     - spares array contains state of spare instances ready to replace failed replicas
+    - num_failures in state_details is the cumulative lifetime failure count
 
     Args:
         context (Context): MCP context object
@@ -1239,78 +1269,65 @@ async def pq_details(
                 "serial": 12345,
                 "version": 5,
                 "status": "RUNNING",
-                "initialization_time_nanos": 1734467100000000000,
-                "last_update_time_nanos": 1734467200000000000,
-                "start_time_nanos": 1734467100000000000,
-                "worker_host": "worker-01.example.com",
-                "worker_port": 10000,
-                "process_info_id": "pid-12345",
+                "initialization_start_nanos": 1734467100000000000,
+                "initialization_complete_nanos": 1734467110000000000,
+                "last_update_nanos": 1734467200000000000,
                 "dispatcher_host": "dispatcher.example.com",
+                "table_groups": [],
+                "scope_types": [],
+                "connection_details": {
+                    "protocols": [{"name": "grpc", "port": 10000}],
+                    "worker_name": "worker-01",
+                    "process_info_id": "pid-12345",
+                    "processor_host": "worker-01.example.com",
+                    "envoy_prefix": null,
+                    "grpc_url": "grpc://worker-01.example.com:10000",
+                    "static_url": null,
+                    "enterprise_web_socket_url": null
+                },
+                "exception_details": null,
+                "type_specific_state_json": null,
+                "last_authenticated_user": "admin_user",
+                "last_effective_user": "admin_user",
+                "script_loader_state_json": null,
+                "has_progress": false,
+                "progress_value": 0,
+                "progress_message": null,
+                "engine_version": "0.35.0",
                 "dispatcher_port": 8080,
-                "replica_id": null,
-                "is_replica": false,
-                "last_error_message": null,
-                "environment_variables": [],
-                "exported_objects": [],
-                "processor_details_host": null,
-                "processor_details_port": null,
-                "exception_type": null,
-                "exception_message": null,
-                "metadata_json": null,
-                "grpc_session_id": null,
-                "flight_session_id": null,
-                "session_token": null,
-                "token_expiration_time_nanos": null,
-                "query_info_json": null,
-                "temp_query_id": 0,
-                "total_memory_mb": 0,
-                "grpc_address": null,
-                "flight_address": null,
-                "http_port": null,
-                "last_activity_time_nanos": null,
-                "assigned_dispatcher_id": 0,
-                "kill_time_nanos": null,
-                "assigned_worker_group_id": 0,
-                "config_id": null
+                "should_stop_nanos": null,
+                "num_failures": 0,
+                "last_failure_time_nanos": null,
+                "replica_slot": 0,
+                "status_details": null
             },
             "replicas": [
                 {
                     "serial": 12345,
                     "version": 5,
                     "status": "RUNNING",
-                    "initialization_time_nanos": 1734467100000000000,
-                    "last_update_time_nanos": 1734467200000000000,
-                    "start_time_nanos": 1734467100000000000,
-                    "worker_host": "worker-02.example.com",
-                    "worker_port": 10001,
-                    "process_info_id": "pid-12346",
+                    "initialization_start_nanos": 1734467100000000000,
+                    "initialization_complete_nanos": 1734467110000000000,
+                    "last_update_nanos": 1734467200000000000,
                     "dispatcher_host": "dispatcher.example.com",
+                    "table_groups": [],
+                    "scope_types": [],
+                    "connection_details": null,
+                    "exception_details": null,
+                    "type_specific_state_json": null,
+                    "last_authenticated_user": "admin_user",
+                    "last_effective_user": "admin_user",
+                    "script_loader_state_json": null,
+                    "has_progress": false,
+                    "progress_value": 0,
+                    "progress_message": null,
+                    "engine_version": "0.35.0",
                     "dispatcher_port": 8080,
-                    "replica_id": "replica-1",
-                    "is_replica": true,
-                    "last_error_message": null,
-                    "environment_variables": [],
-                    "exported_objects": [],
-                    "processor_details_host": null,
-                    "processor_details_port": null,
-                    "exception_type": null,
-                    "exception_message": null,
-                    "metadata_json": null,
-                    "grpc_session_id": null,
-                    "flight_session_id": null,
-                    "session_token": null,
-                    "token_expiration_time_nanos": null,
-                    "query_info_json": null,
-                    "temp_query_id": 0,
-                    "total_memory_mb": 0,
-                    "grpc_address": null,
-                    "flight_address": null,
-                    "http_port": null,
-                    "last_activity_time_nanos": null,
-                    "assigned_dispatcher_id": 0,
-                    "kill_time_nanos": null,
-                    "assigned_worker_group_id": 0,
-                    "config_id": null
+                    "should_stop_nanos": null,
+                    "num_failures": 0,
+                    "last_failure_time_nanos": null,
+                    "replica_slot": 1,
+                    "status_details": null
                 }
             ],
             "spares": [
@@ -1318,39 +1335,28 @@ async def pq_details(
                     "serial": 12345,
                     "version": 5,
                     "status": "INITIALIZING",
-                    "initialization_time_nanos": 1734467150000000000,
-                    "last_update_time_nanos": 1734467200000000000,
-                    "start_time_nanos": 1734467150000000000,
-                    "worker_host": "worker-03.example.com",
-                    "worker_port": 10002,
-                    "process_info_id": "pid-12347",
+                    "initialization_start_nanos": 1734467150000000000,
+                    "initialization_complete_nanos": null,
+                    "last_update_nanos": 1734467200000000000,
                     "dispatcher_host": "dispatcher.example.com",
+                    "table_groups": [],
+                    "scope_types": [],
+                    "connection_details": null,
+                    "exception_details": null,
+                    "type_specific_state_json": null,
+                    "last_authenticated_user": "admin_user",
+                    "last_effective_user": "admin_user",
+                    "script_loader_state_json": null,
+                    "has_progress": true,
+                    "progress_value": 42,
+                    "progress_message": "Loading script",
+                    "engine_version": "0.35.0",
                     "dispatcher_port": 8080,
-                    "replica_id": "spare-1",
-                    "is_replica": false,
-                    "last_error_message": null,
-                    "environment_variables": [],
-                    "exported_objects": [],
-                    "processor_details_host": null,
-                    "processor_details_port": null,
-                    "exception_type": null,
-                    "exception_message": null,
-                    "metadata_json": null,
-                    "grpc_session_id": null,
-                    "flight_session_id": null,
-                    "session_token": null,
-                    "token_expiration_time_nanos": null,
-                    "query_info_json": null,
-                    "temp_query_id": 0,
-                    "total_memory_mb": 0,
-                    "grpc_address": null,
-                    "flight_address": null,
-                    "http_port": null,
-                    "last_activity_time_nanos": null,
-                    "assigned_dispatcher_id": 0,
-                    "kill_time_nanos": null,
-                    "assigned_worker_group_id": 0,
-                    "config_id": null
+                    "should_stop_nanos": null,
+                    "num_failures": 0,
+                    "last_failure_time_nanos": null,
+                    "replica_slot": 0,
+                    "status_details": null
                 }
             ]
         }
@@ -1763,9 +1769,9 @@ async def pq_delete(
     - Running PQs will be stopped automatically before deletion
 
     Args:
-        context: MCP context object
+        context (Context): MCP context object
         pq_id (str | list[str]): PQ identifier or list of identifiers in format 'enterprise:{system_name}:{serial}'
-        timeout_seconds: Max seconds to retrieve PQ information (default: 10)
+        timeout_seconds (int): Max seconds per delete operation (default: 10)
         max_concurrent (int): Maximum concurrent delete operations (default: 20)
 
     Returns:
@@ -1974,7 +1980,7 @@ def _apply_pq_config_simple_fields(
         config_pb (PersistentQueryConfigMessage): Protobuf config object to modify in-place
         pq_name (str | None): New PQ name → protobuf field: config_pb.name
         heap_size_gb (float | int | None): Worker heap size in GB → protobuf field: config_pb.heapSizeGb
-        configuration_type (str | None): Config type (e.g., "python", "groovy") → protobuf field: config_pb.configurationType
+        configuration_type (str | None): Config type (e.g., "Script", "RunAndDone") → protobuf field: config_pb.configurationType
         enabled (bool | None): Whether PQ is enabled → protobuf field: config_pb.enabled
         server (str | None): Target server name → protobuf field: config_pb.serverName
         engine (str | None): Worker kind/engine type → protobuf field: config_pb.workerKind
@@ -2111,30 +2117,35 @@ def _apply_pq_config_modifications(
     Only non-None parameters are applied.
 
     Args:
-        config_pb: PersistentQueryConfigMessage protobuf object from deephaven_enterprise
-        pq_name: New PQ name
-        heap_size_gb: New heap size in GB
-        script_body: New inline script code
-        script_path: New script path
-        programming_language: New programming language
-        configuration_type: New configuration type
-        enabled: New enabled status
-        schedule: New schedule list
-        server: New server name
-        engine: New engine/worker kind
-        jvm_profile: New JVM profile
-        extra_jvm_args: New extra JVM arguments list
-        extra_class_path: New extra classpath list
-        python_virtual_environment: New Python venv
-        extra_environment_vars: New environment variables list
-        init_timeout_nanos: New init timeout
-        auto_delete_timeout: New auto-delete timeout
-        admin_groups: New admin groups list
-        viewer_groups: New viewer groups list
-        restart_users: New restart users setting
+        config_pb (PersistentQueryConfigMessage): Protobuf config object to modify in-place
+        pq_name (str | None): New PQ name
+        heap_size_gb (float | int | None): New heap size in GB
+        script_body (str | None): New inline script code. Caller must ensure this and
+            script_path are not both non-None.
+        script_path (str | None): New Git script path. Caller must ensure this and
+            script_body are not both non-None.
+        programming_language (str | None): New programming language (case-insensitive
+            "Python" or "Groovy")
+        configuration_type (str | None): New configuration type ("Script" or "RunAndDone")
+        enabled (bool | None): New enabled status
+        schedule (list[str] | None): New schedule list (replaces existing)
+        server (str | None): New server name
+        engine (str | None): New engine/worker kind
+        jvm_profile (str | None): New JVM profile
+        extra_jvm_args (list[str] | None): New extra JVM arguments list (replaces existing)
+        extra_class_path (list[str] | None): New extra classpath list (replaces existing)
+        python_virtual_environment (str | None): New Python venv
+        extra_environment_vars (list[str] | None): New environment variables list
+            (replaces existing)
+        init_timeout_nanos (int | None): New init timeout in nanoseconds
+        auto_delete_timeout (int | None): New auto-delete timeout in seconds
+            (converted to nanoseconds internally; 0 = no expiration)
+        admin_groups (list[str] | None): New admin groups list (replaces existing)
+        viewer_groups (list[str] | None): New viewer groups list (replaces existing)
+        restart_users (str | None): New restart users setting
 
     Returns:
-        bool: True if any changes were made, False otherwise
+        bool: True if any changes were made, False if all parameters were None
     """
     has_changes = False
 
@@ -2502,7 +2513,7 @@ async def pq_start(
     Args:
         context (Context): MCP context object
         pq_id (str | list[str]): PQ identifier or list of identifiers in format 'enterprise:{system_name}:{serial}'
-        timeout_seconds: Max seconds to wait for start (default: 30, max recommended: 60).
+        timeout_seconds (int): Max seconds to wait for start (default: 30, max recommended: 60).
                         Set to 0 for fire-and-forget (starts PQ without waiting for RUNNING state).
         max_concurrent (int): Maximum concurrent start operations (default: 20)
 
@@ -2766,7 +2777,7 @@ async def pq_stop(
     Args:
         context (Context): MCP context object
         pq_id (str | list[str]): PQ identifier or list of identifiers in format 'enterprise:{system_name}:{serial}'
-        timeout_seconds: Max seconds to wait for stop (default: 30, max recommended: 60).
+        timeout_seconds (int): Max seconds to wait for stop (default: 30, max recommended: 60).
                         Set to 0 for fire-and-forget (stops PQ without waiting for STOPPED state).
         max_concurrent (int): Maximum concurrent stop operations (default: 20)
 
@@ -3018,7 +3029,7 @@ async def pq_restart(
     Args:
         context (Context): MCP context object
         pq_id (str | list[str]): PQ identifier or list of identifiers in format 'enterprise:{system_name}:{serial}'
-        timeout_seconds: Max seconds to wait for restart (default: 30, max recommended: 60).
+        timeout_seconds (int): Max seconds to wait for restart (default: 30, max recommended: 60).
                         Set to 0 for fire-and-forget (restarts PQ without waiting for RUNNING state).
         max_concurrent (int): Maximum concurrent restart operations (default: 20)
 
