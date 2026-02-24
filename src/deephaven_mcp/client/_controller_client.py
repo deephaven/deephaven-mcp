@@ -55,8 +55,8 @@ from deephaven_mcp._exceptions import (
 from ._base import ClientObjectWrapper
 from ._constants import (
     NO_WAIT_SECONDS,
-    PQ_OPERATION_TIMEOUT_SECONDS,
-    PQ_WAIT_TIMEOUT_SECONDS,
+    PQ_MANAGEMENT_TIMEOUT_SECONDS,
+    PQ_STATE_CHANGE_TIMEOUT_SECONDS,
     QUICK_OPERATION_TIMEOUT_SECONDS,
     SUBSCRIBE_TIMEOUT_SECONDS,
 )
@@ -670,7 +670,7 @@ class CorePlusControllerClient(
     async def add_query(
         self,
         query_config: CorePlusQueryConfig,
-        timeout_seconds: float = PQ_OPERATION_TIMEOUT_SECONDS,
+        timeout_seconds: float = PQ_MANAGEMENT_TIMEOUT_SECONDS,
     ) -> CorePlusQuerySerial:
         """Add a persistent query asynchronously.
 
@@ -697,7 +697,7 @@ class CorePlusControllerClient(
                         Consider using make_pq_config() to create a properly configured
                         configuration object.
             timeout_seconds (float): Maximum time in seconds to wait for the operation.
-                Defaults to PQ_OPERATION_TIMEOUT_SECONDS.
+                Defaults to PQ_MANAGEMENT_TIMEOUT_SECONDS.
 
         Returns:
             CorePlusQuerySerial: The serial number of the newly added query. This CorePlusQuerySerial uniquely
@@ -964,7 +964,7 @@ class CorePlusControllerClient(
     async def delete_query(
         self,
         serial: CorePlusQuerySerial,
-        timeout_seconds: float = PQ_OPERATION_TIMEOUT_SECONDS,
+        timeout_seconds: float = PQ_MANAGEMENT_TIMEOUT_SECONDS,
     ) -> None:
         """Delete a query asynchronously.
 
@@ -986,7 +986,7 @@ class CorePlusControllerClient(
             serial (CorePlusQuerySerial): The serial number of the query to delete. This must reference a valid,
                    existing query that the authenticated user has permission to delete.
             timeout_seconds (float): Maximum time in seconds to wait for the operation.
-                Defaults to PQ_OPERATION_TIMEOUT_SECONDS.
+                Defaults to PQ_MANAGEMENT_TIMEOUT_SECONDS.
 
         Raises:
             DeephavenConnectionError: If not authenticated or unable to connect to the controller
@@ -1034,7 +1034,7 @@ class CorePlusControllerClient(
         self,
         updated_config: CorePlusQueryConfig,
         restart: bool = False,
-        timeout_seconds: float = PQ_OPERATION_TIMEOUT_SECONDS,
+        timeout_seconds: float = PQ_MANAGEMENT_TIMEOUT_SECONDS,
     ) -> None:
         """Modify a persistent query configuration asynchronously.
 
@@ -1063,7 +1063,7 @@ class CorePlusControllerClient(
             restart (bool): Whether to restart the query after modifying the configuration.
                         Defaults to False. Set to True to apply changes immediately.
             timeout_seconds (float): Maximum time in seconds to wait for the operation.
-                Defaults to PQ_OPERATION_TIMEOUT_SECONDS.
+                Defaults to PQ_MANAGEMENT_TIMEOUT_SECONDS.
 
         Raises:
             DeephavenConnectionError: If not authenticated or unable to connect to the controller
@@ -1186,7 +1186,7 @@ class CorePlusControllerClient(
     async def start_and_wait(
         self,
         serial: CorePlusQuerySerial,
-        timeout_seconds: float = PQ_WAIT_TIMEOUT_SECONDS,
+        timeout_seconds: float = PQ_STATE_CHANGE_TIMEOUT_SECONDS,
     ) -> None:
         """Start the given query and wait for it to become running asynchronously.
 
@@ -1299,7 +1299,7 @@ class CorePlusControllerClient(
     async def stop_and_wait(
         self,
         serial: CorePlusQuerySerial,
-        timeout_seconds: float = PQ_WAIT_TIMEOUT_SECONDS,
+        timeout_seconds: float = PQ_STATE_CHANGE_TIMEOUT_SECONDS,
     ) -> None:
         """Stop the given query and wait for it to become terminal asynchronously.
 

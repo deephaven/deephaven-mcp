@@ -917,16 +917,17 @@ When launched by an LLM tool, the [MCP Systems Server](#systems-server-architect
 
 > **⚠️ Security Warning**: Environment variables containing sensitive information like API keys and authentication tokens should be handled securely and never committed to version control.
 
-#### Systems Server Environment Variables
+For the full reference of all supported environment variables — including credential variables, timeout tuning, and Docs Server configuration — see **[docs/ENV.md](docs/ENV.md)**.
 
-- **`DH_MCP_CONFIG_FILE`**: Path to your [`deephaven_mcp.json`](#configuring-deephaven_mcpjson) configuration file
+The variables needed to get started are:
+
+- **`DH_MCP_CONFIG_FILE`** *(required)*: Path to your [`deephaven_mcp.json`](#configuring-deephaven_mcpjson) configuration file
   - Example: `DH_MCP_CONFIG_FILE=/path/to/your/deephaven_mcp.json`
-  - Default: Looks for `deephaven_mcp.json` in the current directory
 
 - **`PYTHONLOGLEVEL`**: Controls the verbosity of logging output
   - Values: `DEBUG`, `INFO`, `WARNING`, `ERROR`
-  - Example: `PYTHONLOGLEVEL=DEBUG`
   - Default: `INFO`
+  - Example: `PYTHONLOGLEVEL=DEBUG`
 
 - **Custom authentication variables**: Any environment variable specified in your [`deephaven_mcp.json`](#configuring-deephaven_mcpjson) configuration's `auth_token_env_var` field will be used to source authentication tokens
   - Example: If config specifies `"auth_token_env_var": "MY_AUTH_TOKEN"`, then `MY_AUTH_TOKEN=username:password`

@@ -3,6 +3,7 @@ Tests for deephaven_mcp.mcp_systems_server._tools.pq.
 """
 
 import asyncio
+import importlib
 import os
 import warnings
 from types import SimpleNamespace
@@ -115,6 +116,7 @@ def create_mock_pq_info(serial, name, state="RUNNING", heap_size=8.0):
     return mock_pq_info
 
 
+import deephaven_mcp.mcp_systems_server._tools.pq as _pq_module
 from deephaven_mcp import config
 from deephaven_mcp.mcp_systems_server._tools.pq import (
     _format_column_definition,
@@ -4112,6 +4114,7 @@ def test_validate_max_concurrent_zero():
 
     assert "max_concurrent must be at least 1" in str(exc_info.value)
     assert "got 0" in str(exc_info.value)
+    assert "test_function" in str(exc_info.value)
 
 
 def test_validate_max_concurrent_negative():
@@ -4121,6 +4124,7 @@ def test_validate_max_concurrent_negative():
 
     assert "max_concurrent must be at least 1" in str(exc_info.value)
     assert "got -5" in str(exc_info.value)
+    assert "test_function" in str(exc_info.value)
 
 
 def test_validate_max_concurrent_valid():
@@ -4753,3 +4757,76 @@ async def test_pq_create_script_body_and_path_mutually_exclusive():
     assert result["success"] is False
     assert "mutually exclusive" in result["error"]
     assert result["isError"] is True
+
+
+class TestPqConstantsEnvVarOverrides:
+    """Test that PQ module constants can be overridden via environment variables."""
+
+    def _reload(self):
+        importlib.reload(_pq_module)
+
+    def test_mcp_timeout_warning_threshold_default(self, monkeypatch):
+        """MCP_TIMEOUT_WARNING_THRESHOLD default is 60."""
+        monkeypatch.delenv("DH_MCP_TIMEOUT_WARNING_THRESHOLD", raising=False)
+        self._reload()
+        assert _pq_module.MCP_TIMEOUT_WARNING_THRESHOLD == 60
+
+    def test_mcp_timeout_warning_threshold_env_override(self, monkeypatch):
+        """DH_MCP_TIMEOUT_WARNING_THRESHOLD overrides MCP_TIMEOUT_WARNING_THRESHOLD."""
+        monkeypatch.setenv("DH_MCP_TIMEOUT_WARNING_THRESHOLD", "120")
+        self._reload()
+        assert _pq_module.MCP_TIMEOUT_WARNING_THRESHOLD == 120
+
+    def test_default_pq_timeout_default(self, monkeypatch):
+        """DEFAULT_PQ_TIMEOUT default is 30."""
+        monkeypatch.delenv("DH_MCP_DEFAULT_PQ_TIMEOUT", raising=False)
+        self._reload()
+        assert _pq_module.DEFAULT_PQ_TIMEOUT == 30
+
+    def test_default_pq_timeout_env_override(self, monkeypatch):
+        """DH_MCP_DEFAULT_PQ_TIMEOUT overrides DEFAULT_PQ_TIMEOUT."""
+        monkeypatch.setenv("DH_MCP_DEFAULT_PQ_TIMEOUT", "45")
+        self._reload()
+        assert _pq_module.DEFAULT_PQ_TIMEOUT == 45
+
+    def test_default_max_concurrent_default(self, monkeypatch):
+        """DEFAULT_MAX_CONCURRENT default is 20."""
+        monkeypatch.delenv("DH_MCP_DEFAULT_MAX_CONCURRENT", raising=False)
+        self._reload()
+        assert _pq_module.DEFAULT_MAX_CONCURRENT == 20
+
+    def test_default_max_concurrent_env_override(self, monkeypatch):
+        """DH_MCP_DEFAULT_MAX_CONCURRENT overrides DEFAULT_MAX_CONCURRENT."""
+        monkeypatch.setenv("DH_MCP_DEFAULT_MAX_CONCURRENT", "50")
+        self._reload()
+        assert _pq_module.DEFAULT_MAX_CONCURRENT == 50
+
+    def test_mcp_timeout_warning_threshold_invalid_env_raises_value_error(
+        self, monkeypatch
+    ):
+        """A non-integer value for DH_MCP_TIMEOUT_WARNING_THRESHOLD raises ValueError."""
+        monkeypatch.setenv("DH_MCP_TIMEOUT_WARNING_THRESHOLD", "not_an_int")
+        with pytest.raises(ValueError):
+            self._reload()
+
+    def test_default_pq_timeout_invalid_env_raises_value_error(self, monkeypatch):
+        """A non-integer value for DH_MCP_DEFAULT_PQ_TIMEOUT raises ValueError."""
+        monkeypatch.setenv("DH_MCP_DEFAULT_PQ_TIMEOUT", "not_an_int")
+        with pytest.raises(ValueError):
+            self._reload()
+
+    def test_default_max_concurrent_invalid_env_raises_value_error(self, monkeypatch):
+        """A non-integer value for DH_MCP_DEFAULT_MAX_CONCURRENT raises ValueError."""
+        monkeypatch.setenv("DH_MCP_DEFAULT_MAX_CONCURRENT", "not_an_int")
+        with pytest.raises(ValueError):
+            self._reload()
+
+    def test_constants_are_int_type(self, monkeypatch):
+        """MCP_TIMEOUT_WARNING_THRESHOLD, DEFAULT_PQ_TIMEOUT, and DEFAULT_MAX_CONCURRENT are ints."""
+        monkeypatch.delenv("DH_MCP_TIMEOUT_WARNING_THRESHOLD", raising=False)
+        monkeypatch.delenv("DH_MCP_DEFAULT_PQ_TIMEOUT", raising=False)
+        monkeypatch.delenv("DH_MCP_DEFAULT_MAX_CONCURRENT", raising=False)
+        self._reload()
+        assert isinstance(_pq_module.MCP_TIMEOUT_WARNING_THRESHOLD, int)
+        assert isinstance(_pq_module.DEFAULT_PQ_TIMEOUT, int)
+        assert isinstance(_pq_module.DEFAULT_MAX_CONCURRENT, int)

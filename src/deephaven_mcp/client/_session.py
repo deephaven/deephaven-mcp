@@ -104,7 +104,7 @@ from deephaven_mcp.config import (
 from deephaven_mcp.io import load_bytes
 
 from ._base import ClientObjectWrapper
-from ._constants import CONNECTION_TIMEOUT_SECONDS
+from ._constants import SESSION_CONNECT_TIMEOUT_SECONDS
 from ._protobuf import CorePlusQueryInfo
 
 _LOGGER = logging.getLogger(__name__)
@@ -1098,7 +1098,7 @@ class CoreSession(BaseSession[Session]):
     async def from_config(
         cls,
         worker_cfg: dict[str, Any],
-        timeout_seconds: float = CONNECTION_TIMEOUT_SECONDS,
+        timeout_seconds: float = SESSION_CONNECT_TIMEOUT_SECONDS,
     ) -> "CoreSession":
         """
         Asynchronously create a CoreSession from a community (core) session configuration dictionary.
@@ -1112,7 +1112,7 @@ class CoreSession(BaseSession[Session]):
         Args:
             worker_cfg (dict): The worker's community session configuration.
             timeout_seconds (float): Maximum time in seconds to wait for connection.
-                Defaults to CONNECTION_TIMEOUT_SECONDS.
+                Defaults to SESSION_CONNECT_TIMEOUT_SECONDS.
 
         Returns:
             CoreSession: A new CoreSession instance wrapping a pydeephaven Session.
