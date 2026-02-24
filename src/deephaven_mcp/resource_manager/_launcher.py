@@ -154,11 +154,16 @@ def _find_deephaven_executable(custom_venv_path: str | None) -> str:
     deephaven command is not found in the specified venv, it raises an error with
     instructions on how to install it.
 
+    On Windows, executables are located in the 'Scripts' subdirectory and have a '.exe'
+    extension. On Unix/macOS, they are in the 'bin' subdirectory with no extension.
+
     Args:
         custom_venv_path (str | None): Path to a custom Python venv directory, or None.
-            If provided, will look for deephaven at {venv}/bin/deephaven.
+            If provided, will look for deephaven at {venv}/bin/deephaven (Unix) or
+            {venv}/Scripts/deephaven.exe (Windows).
             If None, will look for deephaven in the current Python's venv at
-            {sys.executable parent}/deephaven.
+            {sys.executable parent}/deephaven (Unix) or
+            {sys.executable parent}/deephaven.exe (Windows).
 
     Returns:
         str: Absolute path to the deephaven executable.
@@ -171,6 +176,12 @@ def _find_deephaven_executable(custom_venv_path: str | None) -> str:
     Note:
         This is a private helper function. Use PythonLaunchedSession.launch() for public API.
     """
+    # On Windows, venv executables live in 'Scripts' and have '.exe' extension.
+    # On Unix/macOS, they live in 'bin' with no extension.
+    is_windows = sys.platform == "win32"
+    bin_dir = "Scripts" if is_windows else "bin"
+    exe_suffix = ".exe" if is_windows else ""
+
     # Determine venv path and construct deephaven executable path
     if custom_venv_path:
         # Custom venv: validate it exists and is a directory
@@ -183,14 +194,14 @@ def _find_deephaven_executable(custom_venv_path: str | None) -> str:
             raise SessionLaunchError(
                 f"Custom python_venv_path is not a directory: {custom_venv_path}"
             )
-        deephaven_executable = venv_path / "bin" / "deephaven"
-        pip_executable = venv_path / "bin" / "pip"
+        deephaven_executable = venv_path / bin_dir / f"deephaven{exe_suffix}"
+        pip_executable = venv_path / bin_dir / f"pip{exe_suffix}"
         venv_description = f"custom venv at {custom_venv_path}"
     else:
-        # Current Python's venv: sys.executable is already in the bin directory
+        # Current Python's venv: sys.executable is already in the bin/Scripts directory
         python_executable = Path(sys.executable)
-        deephaven_executable = python_executable.parent / "deephaven"
-        pip_executable = python_executable.parent / "pip"
+        deephaven_executable = python_executable.parent / f"deephaven{exe_suffix}"
+        pip_executable = python_executable.parent / f"pip{exe_suffix}"
         venv_description = f"current venv at {python_executable.parent}"
 
     # Check if deephaven executable exists
@@ -580,7 +591,8 @@ class DockerLaunchedSession(LaunchedSession):
             docker_cpu_limit (float | None): Container CPU limit in cores, or None for no limit.
             docker_volumes (list[str]): Volume mounts in format ["host:container:mode"] (empty list for none).
             instance_id (str | None): MCP server instance ID for tracking orphaned containers.
-                If provided, the container will be labeled for cleanup on server crash/SIGKILL.
+                If provided, the container will be labeled for cleanup if the server is forcibly
+                terminated (e.g. SIGKILL on Unix, or a forced kill on Windows).
 
         Returns:
             DockerLaunchedSession: The launched Docker session.
@@ -1129,7 +1141,8 @@ async def launch_session(
         instance_id (str | None): MCP server instance ID for orphan tracking (docker only).
 
     Returns:
-        LaunchedSession: The launched session (DockerLaunchedSession or PythonLaunchedSession).
+        DockerLaunchedSession | PythonLaunchedSession: The launched session, typed according
+            to the launch_method argument.
 
     Raises:
         ValueError: If launch_method is not supported, or if method-specific parameters

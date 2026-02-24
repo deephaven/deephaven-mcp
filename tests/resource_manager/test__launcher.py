@@ -173,6 +173,43 @@ class TestPythonLaunchedSession:
         assert session.launch_method == "python"
         assert session.process == mock_process
 
+    def test_check_process_crashed_false_when_running(self):
+        """Test _check_process_crashed returns False when process is still running."""
+        mock_process = MagicMock()
+        mock_process.returncode = None  # Process still running
+        session = PythonLaunchedSession(
+            host="localhost",
+            port=10000,
+            auth_type="anonymous",
+            auth_token=None,
+            process=mock_process,
+        )
+        assert session._check_process_crashed() is False
+
+    def test_check_process_crashed_true_when_exited(self):
+        """Test _check_process_crashed returns True when process has exited."""
+        mock_process = MagicMock()
+        mock_process.returncode = 1  # Process has exited
+        session = PythonLaunchedSession(
+            host="localhost",
+            port=10000,
+            auth_type="anonymous",
+            auth_token=None,
+            process=mock_process,
+        )
+        assert session._check_process_crashed() is True
+
+    def test_check_process_crashed_false_for_docker_session(self):
+        """Test _check_process_crashed returns False for DockerLaunchedSession (no process attribute)."""
+        session = DockerLaunchedSession(
+            host="localhost",
+            port=10000,
+            auth_type="anonymous",
+            auth_token=None,
+            container_id="test",
+        )
+        assert session._check_process_crashed() is False
+
 
 # ============================================================================
 # DockerLaunchedSession Launch Tests
@@ -1101,8 +1138,17 @@ class TestPythonLauncherEdgeCases:
             # Verify subprocess was called with deephaven from custom venv
             mock_subprocess.assert_called_once()
             call_args = mock_subprocess.call_args[0]
-            # The command should use deephaven from custom venv
-            assert "/custom/venv/bin/deephaven" in call_args[0]
+            # The command should use deephaven from custom venv.
+            # Path is platform-dependent: Scripts/deephaven.exe on Windows, bin/deephaven on Unix.
+            import sys as _sys
+
+            if _sys.platform == "win32":
+                assert (
+                    "\\custom\\venv\\Scripts\\deephaven.exe" in call_args[0]
+                    or "/custom/venv/Scripts/deephaven.exe" in call_args[0]
+                )
+            else:
+                assert "/custom/venv/bin/deephaven" in call_args[0]
 
     @pytest.mark.asyncio
     async def test_launch_with_custom_venv_path_not_exists(self):
@@ -1149,6 +1195,7 @@ class TestPythonLauncherEdgeCases:
 
         with (
             patch("deephaven_mcp.resource_manager._launcher.Path") as mock_path_class,
+            patch("deephaven_mcp.resource_manager._launcher.sys.platform", "linux"),
         ):
             # Create mock for venv path - exists and is a directory
             mock_venv_path = MagicMock()
@@ -1173,6 +1220,26 @@ class TestPythonLauncherEdgeCases:
                 match="'deephaven' command not found at",
             ):
                 _find_deephaven_executable("/custom/venv")
+
+    def test_find_deephaven_executable_windows_uses_scripts_dir(self):
+        """Test _find_deephaven_executable uses Scripts/ and .exe on Windows."""
+        import sys as _sys
+
+        from deephaven_mcp.resource_manager._launcher import _find_deephaven_executable
+
+        with (
+            patch("deephaven_mcp.resource_manager._launcher.sys.platform", "win32"),
+            patch("pathlib.Path.exists") as mock_exists,
+            patch("pathlib.Path.is_dir") as mock_is_dir,
+        ):
+            mock_is_dir.return_value = True
+            # First call (venv_path.exists) returns True, second (deephaven.exists) returns True
+            mock_exists.side_effect = [True, True]
+
+            result = _find_deephaven_executable("/custom/venv")
+            # On Windows the path should contain 'Scripts' and end with '.exe'
+            assert "Scripts" in result
+            assert result.endswith(".exe")
 
 
 class TestDynamicManagerEdgeCases:

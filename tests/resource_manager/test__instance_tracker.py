@@ -344,6 +344,10 @@ class TestCleanupOrphanedResources:
         instance_file.write_text(json.dumps(data))
 
         # Mock Docker cleanup
+        mock_terminate = MagicMock()
+        mock_psutil_process = MagicMock()
+        mock_psutil_process.terminate = mock_terminate
+
         with (
             patch(
                 "deephaven_mcp.resource_manager._instance_tracker._cleanup_docker_containers_for_instance"
@@ -351,7 +355,10 @@ class TestCleanupOrphanedResources:
             patch(
                 "deephaven_mcp.resource_manager._instance_tracker.is_process_running"
             ) as mock_is_running,
-            patch("os.kill") as mock_kill,
+            patch(
+                "deephaven_mcp.resource_manager._instance_tracker.psutil.Process",
+                return_value=mock_psutil_process,
+            ),
         ):
 
             mock_docker.return_value = AsyncMock()
@@ -365,10 +372,8 @@ class TestCleanupOrphanedResources:
 
             await cleanup_orphaned_resources()
 
-            # Verify we tried to kill the pip processes
-            assert mock_kill.call_count == 2
-            mock_kill.assert_any_call(88888, 15)  # SIGTERM = 15
-            mock_kill.assert_any_call(99999, 15)
+            # Verify we tried to terminate the pip processes via psutil
+            assert mock_terminate.call_count == 2
 
         # Instance file should be removed
         assert not instance_file.exists()
@@ -550,18 +555,22 @@ class TestCleanupOrphanedResources:
             mock_ps.communicate = AsyncMock(return_value=(b"", b""))
 
             with patch("asyncio.create_subprocess_exec", return_value=mock_ps):
-                # Mock os.kill to check if it's called
-                with patch("os.kill") as mock_kill:
+                # Mock psutil.Process to check if terminate() is called
+                mock_psutil_process = MagicMock()
+                with patch(
+                    "deephaven_mcp.resource_manager._instance_tracker.psutil.Process",
+                    return_value=mock_psutil_process,
+                ):
                     await cleanup_orphaned_resources()
-                    # Should not call os.kill since process is already dead
-                    mock_kill.assert_not_called()
+                    # Should not call terminate() since process is already dead
+                    mock_psutil_process.terminate.assert_not_called()
 
         # Instance file should be removed
         assert not instance_file.exists()
 
     @pytest.mark.asyncio
     async def test_cleanup_python_process_kill_error(self, temp_instances_dir):
-        """Test cleanup handles os.kill errors gracefully (lines 450-453)."""
+        """Test cleanup handles process termination errors gracefully."""
         instance_file = temp_instances_dir / "dead-instance-id.json"
         data = {
             "instance_id": "dead-instance-id",
@@ -589,8 +598,15 @@ class TestCleanupOrphanedResources:
             mock_ps.communicate = AsyncMock(return_value=(b"", b""))
 
             with patch("asyncio.create_subprocess_exec", return_value=mock_ps):
-                # Mock os.kill to raise exception
-                with patch("os.kill", side_effect=PermissionError("Access denied")):
+                # Mock psutil.Process.terminate() to raise exception
+                mock_psutil_process = MagicMock()
+                mock_psutil_process.terminate.side_effect = PermissionError(
+                    "Access denied"
+                )
+                with patch(
+                    "deephaven_mcp.resource_manager._instance_tracker.psutil.Process",
+                    return_value=mock_psutil_process,
+                ):
                     # Should not raise
                     await cleanup_orphaned_resources()
 
