@@ -142,12 +142,14 @@ def _log_asyncio_and_thread_state(
                                      should have completed. Defaults to False.
 
     Note:
-        Event loop status and main thread info are only logged when ``context`` is not
-        ``"shutdown"`` (e.g. they are logged during ``"startup"`` and
-        ``"exception_group_time"`` but suppressed during ``"shutdown"``).  Running tasks
-        at shutdown are logged as warnings to highlight potential cleanup issues.  A
-        ``RuntimeError`` from ``asyncio.get_running_loop()`` (no running event loop) is
-        caught and logged at INFO; all other exceptions propagate.
+        When ``context`` is not ``"shutdown"`` (e.g. ``"startup"`` or
+        ``"exception_group_time"``): the event loop running-state and the main thread
+        name are logged at DEBUG.
+        When ``context`` is ``"shutdown"``: those two items are suppressed, and instead
+        any non-daemon, non-main threads still alive are logged as warnings (potential
+        resource leaks).
+        A ``RuntimeError`` from ``asyncio.get_running_loop()`` (no running event loop)
+        is caught and logged at INFO; all other exceptions propagate.
     """
     # Log asyncio state
     try:
@@ -749,10 +751,7 @@ async def docs_chat(
                 # Retry with supported language or omit parameter
                 pass
             elif "OpenAIClientError" in error_msg:
-                # Log API issue, potentially retry after delay
-                pass
-            elif "timeout" in error_msg.lower():
-                # Retry with simpler query or handle timeout
+                # All API failures (including timeouts and closed-resource) surface here
                 pass
         ```
 
