@@ -573,6 +573,63 @@ async def test_dependency_version_logging_exception(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_docs_chat_cancelled_error(monkeypatch):
+    """Test docs_chat handles CancelledError (client disconnect) with WARNING log and re-raise."""
+    monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
+    sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
+    import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
+
+    dummy_client = DummyOpenAIClient(exc=asyncio.CancelledError())
+
+    with (
+        patch("deephaven_mcp.mcp_docs_server._mcp._LOGGER") as mock_logger,
+        patch(
+            "deephaven_mcp.mcp_docs_server._mcp.OpenAIClient", return_value=dummy_client
+        ),
+    ):
+        with pytest.raises(asyncio.CancelledError):
+            await mcp_mod.docs_chat(context={}, prompt="test", history=None)
+
+        # Verify logged at WARNING (not error/exception) with elapsed time
+        calls = mock_logger.warning.call_args_list
+        cancel_calls = [c for c in calls if "cancelled" in c.args[0].lower()]
+        assert len(cancel_calls) == 1
+        assert "after" in cancel_calls[0].args[0]
+        assert "client disconnected" in cancel_calls[0].args[0]
+
+
+@pytest.mark.asyncio
+async def test_docs_chat_closed_resource_error(monkeypatch):
+    """Test docs_chat handles ClosedResourceError (client disconnected early) with WARNING log."""
+    import anyio
+
+    monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
+    sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
+    import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
+
+    dummy_client = DummyOpenAIClient(exc=anyio.ClosedResourceError())
+
+    with (
+        patch("deephaven_mcp.mcp_docs_server._mcp._LOGGER") as mock_logger,
+        patch(
+            "deephaven_mcp.mcp_docs_server._mcp.OpenAIClient", return_value=dummy_client
+        ),
+    ):
+        result = await mcp_mod.docs_chat(context={}, prompt="test", history=None)
+
+        assert result["success"] is False
+        assert "ClosedResourceError" in result["error"]
+        assert result["isError"] is True
+
+        # Verify logged at WARNING (not error/exception) with elapsed time
+        calls = mock_logger.warning.call_args_list
+        closed_calls = [c for c in calls if "transport closed" in c.args[0].lower()]
+        assert len(closed_calls) == 1
+        assert "after" in closed_calls[0].args[0]
+        assert "disconnected early" in closed_calls[0].args[0]
+
+
+@pytest.mark.asyncio
 async def test_docs_chat_timeout_error(monkeypatch):
     """Test docs_chat handles TimeoutError with elapsed time logging."""
     monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")

@@ -860,6 +860,18 @@ async def docs_chat(
             )
             return {"success": True, "response": response}
 
+    except asyncio.CancelledError:
+        _elapsed = time.monotonic() - _t_request_start
+        _LOGGER.warning(
+            f"[mcp_docs_server:docs_chat] Request cancelled after {_elapsed:.2f}s (client disconnected or upstream timeout)"
+        )
+        raise
+    except anyio.ClosedResourceError as exc:
+        _elapsed = time.monotonic() - _t_request_start
+        _LOGGER.warning(
+            f"[mcp_docs_server:docs_chat] Client transport closed after {_elapsed:.2f}s (client disconnected early): {exc}"
+        )
+        return {"success": False, "error": f"ClosedResourceError: {exc}", "isError": True}
     except TimeoutError as exc:
         _elapsed = time.monotonic() - _t_request_start
         _LOGGER.error(
