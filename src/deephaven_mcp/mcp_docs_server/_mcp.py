@@ -32,7 +32,7 @@ MCP Tools (AI Agent Interface):
 AI Agent Integration:
     This module is specifically designed for AI agent consumption with:
     - Structured response format: All tools return dict with 'success' boolean
-    - Comprehensive error handling: No exceptions propagated to MCP layer
+    - Comprehensive error handling: only ``asyncio.CancelledError`` propagates (on cancellation); all other errors returned as structured dicts
     - Detailed parameter validation with descriptive error messages
     - Context-aware responses based on Deephaven version and programming language
     - Multi-turn conversation support via history parameter
@@ -44,7 +44,7 @@ Usage Patterns:
 
     **Direct Tool Invocation:**
     >>> from deephaven_mcp.mcp_docs_server._mcp import docs_chat
-    >>> context = {}  # Context not currently used but required by MCP protocol
+    >>> # context is injected by the MCP framework; pass a mock when testing directly
     >>>
     >>> # Basic query
     >>> result = await docs_chat(context=context, prompt="How do I install Deephaven?")
@@ -129,8 +129,9 @@ def _log_asyncio_and_thread_state(
 ) -> None:
     """Log current asyncio and threading state for debugging.
 
-    Logs active asyncio tasks, event loop status, pending/running tasks, and
-    active thread count to help diagnose concurrency issues and resource leaks.
+    Logs active asyncio tasks, event loop status, pending/running tasks,
+    active thread count, and (for non-shutdown contexts) main thread name to
+    help diagnose concurrency issues and resource leaks.
     This is particularly useful for identifying stuck tasks or threading problems
     during server lifecycle events.
 
@@ -141,9 +142,12 @@ def _log_asyncio_and_thread_state(
                                      should have completed. Defaults to False.
 
     Note:
-        Event loop status and main thread info are only logged during startup.
-        During shutdown, running tasks are logged as warnings to highlight potential
-        cleanup issues. All exceptions are caught to prevent diagnostic failures.
+        Event loop status and main thread info are only logged when ``context`` is not
+        ``"shutdown"`` (e.g. they are logged during ``"startup"`` and
+        ``"exception_group_time"`` but suppressed during ``"shutdown"``).  Running tasks
+        at shutdown are logged as warnings to highlight potential cleanup issues.  A
+        ``RuntimeError`` from ``asyncio.get_running_loop()`` (no running event loop) is
+        caught and logged at INFO; all other exceptions propagate.
     """
     # Log asyncio state
     try:
@@ -152,7 +156,7 @@ def _log_asyncio_and_thread_state(
         _LOGGER.info(
             f"[mcp_docs_server:_log_asyncio_and_thread_state] {context} active asyncio tasks: {len(tasks)}"
         )
-        if context != "shutdown":  # Only log loop status during startup
+        if context != "shutdown":  # Only log loop status for non-shutdown contexts
             _LOGGER.info(
                 f"[mcp_docs_server:_log_asyncio_and_thread_state] Event loop running: {loop.is_running()}"
             )
@@ -185,7 +189,7 @@ def _log_asyncio_and_thread_state(
     _LOGGER.info(
         f"[mcp_docs_server:_log_asyncio_and_thread_state] {context} active threads: {threading.active_count()}"
     )
-    if context != "shutdown":  # Only log main thread info during startup
+    if context != "shutdown":  # Only log main thread info for non-shutdown contexts
         _LOGGER.debug(
             f"[mcp_docs_server:_log_asyncio_and_thread_state] Main thread: {threading.current_thread().name}"
         )
@@ -214,7 +218,9 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
         - Enhanced exception logging with traceback information
 
     Args:
-        server (FastMCP): The FastMCP server instance being managed.
+        server (FastMCP): The FastMCP server instance being managed. This argument
+                          is required by the FastMCP lifespan protocol but is not
+                          used directly by this function.
 
     Yields:
         dict[str, object]: An empty context dictionary. OpenAI clients are created
@@ -222,8 +228,9 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
                           and prevent resource leaks during sustained operations.
 
     Raises:
-        Exception: Re-raises any exceptions that occur during the lifespan context
-                  after logging detailed diagnostic information.
+        ExceptionGroup: Re-raises the exception group if any exception occurs during
+                        the lifespan context, after logging detailed diagnostic information
+                        for each exception in the group.
 
     Note:
         This function is automatically called by FastMCP during server startup and shutdown.
@@ -388,7 +395,6 @@ Session Management:
 
 Architecture Features:
     - Per-request OpenAI client creation prevents connection pool exhaustion
-    - Signal handlers for diagnostic logging during unexpected shutdowns
     - Process and asyncio state monitoring for resource leak detection
     - Comprehensive startup/shutdown logging for debugging
     - Structured error responses optimized for AI agent consumption
@@ -417,7 +423,8 @@ async def health_check(request: Request) -> JSONResponse:
         - Intended for use as a liveness or readiness probe in deployment environments (e.g., Kubernetes, Cloud Run).
 
     Args:
-        request (Request): The HTTP request object (not used but required by FastMCP).
+        request (Request): The incoming HTTP request. Not used but required by the
+                           Starlette route handler signature.
 
     Returns:
         JSONResponse: HTTP 200 response with JSON body {"status": "ok"}.
@@ -527,10 +534,19 @@ async def docs_chat(
 
     This tool provides conversational access to the Deephaven documentation assistant, powered by Inkeep LLM APIs. It creates a fresh OpenAI client per request to ensure connection stability and prevent timeout errors during high-volume usage. Responses are optimized for AI agent consumption with structured success/error indicators.
 
+    Terminology Note:
+        - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
+        - 'Deephaven Community' and 'Deephaven Core' are interchangeable names for the same product
+        - 'Deephaven Enterprise', 'Deephaven Core+', and 'Deephaven CorePlus' are interchangeable names for the same product
+        - In Deephaven, "schema" and "meta table" refer to the same concept - the table's column definitions including names, types, and properties.
+        - In Deephaven, "catalog" and "database" are interchangeable terms - the catalog is the database of available tables.
+        - 'DHC' is shorthand for Deephaven Community (also called 'Core')
+        - 'DHE' is shorthand for Deephaven Enterprise (also called 'Core+')
+
     AI Agent Optimization:
         This tool is specifically designed for AI agent consumption with the following features:
         - **Structured Response Format**: Always returns dict with 'success' boolean for reliable parsing
-        - **Comprehensive Error Handling**: Detailed error messages with specific error types (never raises exceptions)
+        - **Comprehensive Error Handling**: Detailed error messages with specific error types (raises ``asyncio.CancelledError`` on cancellation; all other errors returned as structured dicts)
         - **Context-Aware Responses**: Tailors answers based on Deephaven version and programming language
         - **Multi-Turn Conversation Support**: Maintains context through history parameter for follow-up questions
         - **Orchestration Framework Ready**: Compatible with LLM orchestration tools and agent frameworks
@@ -538,8 +554,8 @@ async def docs_chat(
 
     Parameters:
         context (Context):
-            The MCP context for this tool call. Currently unused but required by MCP protocol.
-            AI agents should pass an empty dict: {}
+            The MCP context for this tool call. Injected automatically by the MCP framework;
+            AI agents do not construct or pass this value directly.
         prompt (str):
             The user's query or question for the documentation assistant. Should be a clear,
             specific natural language string describing what the user wants to know about Deephaven.
@@ -619,8 +635,9 @@ async def docs_chat(
 
     Returns:
         dict[str, object]: Structured result object optimized for AI agent parsing and error handling.
-                          Always contains 'success' (bool) field. On success, contains 'response' (str).
-                          On error, contains 'error' (str) and 'isError' (bool) fields.
+                          Always contains 'success' (bool) field when a dict is returned. On success,
+                          contains 'response' (str). On error, contains 'error' (str) and 'isError' (bool)
+                          fields. Note: ``asyncio.CancelledError`` is re-raised rather than returned.
 
         **Success Response Structure:**
         {
@@ -636,8 +653,8 @@ async def docs_chat(
         }
 
         **Field Descriptions:**
-        - 'success' (bool): **Always present**. True if query completed successfully, False on any error.
-                           AI agents should check this field first before accessing other fields.
+        - 'success' (bool): **Always present when a dict is returned**. True if query completed successfully,
+                           False on any error. AI agents should check this field first before accessing other fields.
         - 'response' (str): **Present only when success=True**. The documentation assistant's natural
                            language answer. Content is suitable for direct display to users or further
                            processing by AI agents. May include code examples, explanations, and links.
@@ -665,24 +682,23 @@ async def docs_chat(
         This tool implements comprehensive error handling designed for reliable AI agent integration:
 
         **Critical Safety Guarantees:**
-        - **Never raises exceptions** - all errors return structured dict responses
         - **Always includes 'success' field** - reliable for programmatic error detection
         - **Consistent error format** - predictable structure for error handling logic
+        - **Exception note**: ``asyncio.CancelledError`` is re-raised (not returned) when the
+          request is cancelled by the caller or an upstream timeout; all other errors are
+          returned as structured dict responses.
 
         **Common Error Categories:**
         1. **API Communication Errors:**
            - "OpenAIClientError: <details>" - Issues with Inkeep/OpenAI API communication
-           - "Request timeout" - API response exceeded 300-second timeout
-           - "Connection failed" - Network connectivity issues
+           - "TimeoutError: <details>" - Server-side timeout (Inkeep API exceeded 300s read timeout or 30s connect/write timeout)
+           - "ClosedResourceError: <details>" - Client disconnected before the response was delivered
 
         2. **Parameter Validation Errors:**
            - "Unsupported programming language: <lang>" - Invalid programming_language value
-           - "Invalid history format" - Malformed history parameter structure
-           - "Empty prompt" - Missing or empty prompt parameter
 
-        3. **System Configuration Errors:**
-           - "Missing INKEEP_API_KEY" - Required environment variable not set
-           - "Client initialization failed" - OpenAI client setup issues
+        3. **Unexpected Errors:**
+           - "<ExceptionType>: <details>" - Unexpected server-side error; full stack trace is logged
 
         **AI Agent Error Handling Best Practices:**
         ```python
@@ -705,7 +721,9 @@ async def docs_chat(
     Performance Characteristics:
         - Creates fresh OpenAI client per request (prevents connection pool exhaustion)
         - Typical response time: 5-30 seconds depending on query complexity
-        - Timeout: 300 seconds (5 minutes) for complex documentation queries
+        - Read timeout: 300 seconds (5 minutes) for complex documentation queries
+        - Connect timeout: 30 seconds to establish connection to Inkeep API
+        - Write timeout: 30 seconds to send the request to Inkeep API
         - Optimized parameters for faster, more deterministic responses
 
     Usage Notes for AI Agents:
@@ -763,7 +781,7 @@ async def docs_chat(
         ...     prompt="Complex query about advanced features"
         ... )
         >>> print(result)
-        {'success': False, 'error': 'OpenAIClientError: Request timeout after 300 seconds', 'isError': True}
+        {'success': False, 'error': 'TimeoutError: ', 'isError': True}
 
         AI Agent error handling pattern:
         >>> result = await docs_chat(context={}, prompt="How do I use aggregations?")
@@ -784,7 +802,6 @@ async def docs_chat(
     )
 
     try:
-
         # Build system prompts for context-aware responses
         system_prompts = [
             _prompt_basic,
@@ -879,9 +896,6 @@ async def docs_chat(
         )
         return {"success": False, "error": f"TimeoutError: {exc}", "isError": True}
     except OpenAIClientError as exc:
-        # This could be logged at a lower level since it is potentially not a problem with the MCP server itself,
-        # but rather an issue with the OpenAI client or API.
-        # However, we log it at the exception level to ensure visibility in case of issues.
         _elapsed = time.monotonic() - _t_request_start
         _LOGGER.exception(
             f"[mcp_docs_server:docs_chat] OpenAI client error after {_elapsed:.2f}s: {exc}"
