@@ -355,6 +355,38 @@ def test_log_asyncio_runtime_error_handling(monkeypatch):
             )
 
 
+def test_log_asyncio_shutdown_non_daemon_thread_warning(monkeypatch):
+    """Test _log_asyncio_and_thread_state warns about non-daemon threads at shutdown."""
+    import threading
+
+    monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
+    sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
+    import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
+
+    # Create a real non-daemon thread that stays alive during the call
+    barrier = threading.Barrier(2)
+    done = threading.Event()
+
+    def _worker():
+        barrier.wait()
+        done.wait()
+
+    t = threading.Thread(target=_worker, name="LeakedThread", daemon=False)
+    t.start()
+    try:
+        barrier.wait()  # ensure thread is running before we log
+        with patch("deephaven_mcp.mcp_docs_server._mcp._LOGGER") as mock_logger:
+            mcp_mod._log_asyncio_and_thread_state("shutdown")
+        warning_calls = [str(c) for c in mock_logger.warning.call_args_list]
+        assert any(
+            "LeakedThread" in c and "potential resource leak" in c
+            for c in warning_calls
+        )
+    finally:
+        done.set()
+        t.join(timeout=5)
+
+
 @pytest.mark.asyncio
 async def test_app_lifespan_exception_in_context(monkeypatch):
     """Test app_lifespan exception handling during context execution."""

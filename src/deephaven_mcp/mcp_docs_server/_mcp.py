@@ -130,7 +130,7 @@ def _log_asyncio_and_thread_state(
     """Log current asyncio and threading state for debugging.
 
     Logs active asyncio tasks, event loop status, pending/running tasks,
-    active thread count, and (for non-shutdown contexts) main thread name to
+    active thread count, all thread names, and (for non-shutdown contexts) main thread name to
     help diagnose concurrency issues and resource leaks.
     This is particularly useful for identifying stuck tasks or threading problems
     during server lifecycle events.
@@ -186,13 +186,28 @@ def _log_asyncio_and_thread_state(
         )
 
     # Log threading state
+    all_threads = threading.enumerate()
     _LOGGER.info(
-        f"[mcp_docs_server:_log_asyncio_and_thread_state] {context} active threads: {threading.active_count()}"
+        f"[mcp_docs_server:_log_asyncio_and_thread_state] {context} active threads: {len(all_threads)}"
+    )
+    _LOGGER.debug(
+        f"[mcp_docs_server:_log_asyncio_and_thread_state] Active threads: {[t.name for t in all_threads]}"
     )
     if context != "shutdown":  # Only log main thread info for non-shutdown contexts
         _LOGGER.debug(
-            f"[mcp_docs_server:_log_asyncio_and_thread_state] Main thread: {threading.current_thread().name}"
+            f"[mcp_docs_server:_log_asyncio_and_thread_state] Main thread: {threading.main_thread().name}"
         )
+    else:
+        # At shutdown, non-daemon threads (other than main) indicate potential resource leaks
+        leaked = [
+            t.name
+            for t in all_threads
+            if t is not threading.main_thread() and not t.daemon
+        ]
+        if leaked:
+            _LOGGER.warning(
+                f"[mcp_docs_server:_log_asyncio_and_thread_state] Non-daemon threads still running at shutdown (potential resource leak): {leaked}"
+            )
 
 
 def _log_lifespan_exception(exc: BaseException) -> None:
@@ -803,7 +818,7 @@ async def docs_chat(
         ...     prompt="Complex query about advanced features"
         ... )
         >>> print(result)
-        {'success': False, 'error': 'TimeoutError: ', 'isError': True}
+        {'success': False, 'error': 'TimeoutError: timed out waiting for server response', 'isError': True}
 
         AI Agent error handling pattern:
         >>> result = await docs_chat(context={}, prompt="How do I use aggregations?")
@@ -819,11 +834,11 @@ async def docs_chat(
         ...         # Parameter validation error
     """
     _t_request_start = time.monotonic()
-    _LOGGER.info(
-        f"[mcp_docs_server:docs_chat] Processing documentation query | prompt_len={len(prompt)} | has_history={history is not None} | programming_language={programming_language}"
-    )
 
     try:
+        _LOGGER.info(
+            f"[mcp_docs_server:docs_chat] Processing documentation query | prompt_len={len(prompt)} | has_history={history is not None} | programming_language={programming_language}"
+        )
         # Build system prompts for context-aware responses
         system_prompts = [
             _prompt_basic,
