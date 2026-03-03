@@ -374,7 +374,8 @@ def test_log_asyncio_shutdown_non_daemon_thread_warning(monkeypatch):
     t = threading.Thread(target=_worker, name="LeakedThread", daemon=False)
     t.start()
     try:
-        barrier.wait()  # ensure thread is running before we log
+        barrier.wait(timeout=5)  # ensure thread is running before we log
+        assert not barrier.broken, "Barrier timed out; worker thread did not start"
         with patch("deephaven_mcp.mcp_docs_server._mcp._LOGGER") as mock_logger:
             mcp_mod._log_asyncio_and_thread_state("shutdown")
         warning_calls = [str(c) for c in mock_logger.warning.call_args_list]
@@ -385,6 +386,9 @@ def test_log_asyncio_shutdown_non_daemon_thread_warning(monkeypatch):
     finally:
         done.set()
         t.join(timeout=5)
+        assert (
+            not t.is_alive()
+        ), "Worker thread did not terminate; may leak into subsequent tests"
 
 
 @pytest.mark.asyncio
