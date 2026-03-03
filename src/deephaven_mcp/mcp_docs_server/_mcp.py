@@ -815,7 +815,7 @@ async def docs_chat(
         ...     programming_language="javascript"
         ... )
         >>> print(result)
-        {'success': False, 'error': 'Unsupported programming language: javascript. Supported languages are: python, groovy', 'isError': True}
+        {'success': False, 'error': 'Unsupported programming language: javascript. Supported languages are: groovy, python.', 'isError': True}
 
         Error response - API timeout (surfaced as OpenAIClientError):
         >>> result = await docs_chat(
