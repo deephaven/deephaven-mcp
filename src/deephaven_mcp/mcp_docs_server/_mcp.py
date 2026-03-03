@@ -94,13 +94,13 @@ _LOGGER = logging.getLogger(__name__)
 try:
     _INKEEP_API_KEY: str = os.environ["INKEEP_API_KEY"]
     """str: The API key for authenticating with the Inkeep-powered LLM API.
-    
+
     This environment variable must be set for the docs server to function. The API key
     is used to authenticate requests to the Inkeep documentation assistant service.
-    
+
     Environment Variable:
         INKEEP_API_KEY: Required. The API key provided by Inkeep for documentation queries.
-    
+
     Raises:
         RuntimeError: If the INKEEP_API_KEY environment variable is not set.
     """
@@ -173,7 +173,7 @@ def _log_asyncio_and_thread_state(
             # Log first few tasks for debugging
             max_tasks = 3 if warn_on_running_tasks else 5
             for i, task in enumerate(incomplete_tasks[:max_tasks]):
-                task_info = f"{task.get_name()}"
+                task_info = task.get_name()
                 if not warn_on_running_tasks:  # Include coroutine info during startup
                     task_info += f" - {task.get_coro()}"
                 log_func(
@@ -193,6 +193,56 @@ def _log_asyncio_and_thread_state(
         _LOGGER.debug(
             f"[mcp_docs_server:_log_asyncio_and_thread_state] Main thread: {threading.current_thread().name}"
         )
+
+
+def _log_lifespan_exception(exc: BaseException) -> None:
+    """Log a single exception from the app_lifespan exception group with appropriate level and context.
+
+    Args:
+        exc (BaseException): The individual exception to log.
+    """
+    exc_type = type(exc).__name__
+    if isinstance(exc, anyio.ClosedResourceError):
+        _LOGGER.debug(f"[mcp_docs_server:app_lifespan] {exc_type}: {exc}")
+        _LOGGER.debug(
+            "[mcp_docs_server:app_lifespan] This indicates a client disconnected early (expected behavior)"
+        )
+    elif isinstance(exc, asyncio.CancelledError):
+        _LOGGER.error(f"[mcp_docs_server:app_lifespan] {exc_type}: {exc}")
+        _LOGGER.error(
+            "[mcp_docs_server:app_lifespan] This indicates the server task was cancelled during operation"
+        )
+    elif isinstance(exc, TimeoutError):
+        _LOGGER.error(f"[mcp_docs_server:app_lifespan] {exc_type}: {exc}")
+        _LOGGER.error(
+            "[mcp_docs_server:app_lifespan] This indicates an operation timed out during server operation"
+        )
+    elif isinstance(exc, ConnectionError | OSError):
+        _LOGGER.error(f"[mcp_docs_server:app_lifespan] {exc_type}: {exc}")
+        _LOGGER.error(
+            "[mcp_docs_server:app_lifespan] This indicates a connection or system-level error during server operation"
+        )
+    else:
+        _LOGGER.error(
+            f"[mcp_docs_server:app_lifespan] Unexpected exception type {exc_type}: {exc}"
+        )
+
+
+def _log_docs_chat_generic_exception(exc: Exception, elapsed: float) -> None:
+    """Log a generic (non-specialised) exception from docs_chat with enhanced session error detection.
+
+    Args:
+        exc (Exception): The exception to log.
+        elapsed (float): Elapsed seconds since the start of the request.
+    """
+    if "No valid session ID provided" in str(exc):
+        _LOGGER.exception(
+            f"[mcp_docs_server:docs_chat] SESSION ERROR after {elapsed:.2f}s: {exc} - This may indicate that a request was routed to an instance that doesn't have the session state. "
+            f"Consider using a shared session store or constraining to a single instance."
+        )
+    _LOGGER.exception(
+        f"[mcp_docs_server:docs_chat] Unexpected error after {elapsed:.2f}s: {exc}"
+    )
 
 
 @asynccontextmanager
@@ -263,12 +313,10 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
         import uvicorn
 
         try:
-            mcp_version = mcp.__version__
+            mcp_version = mcp.__version__  # type: ignore[attr-defined]
         except AttributeError:
             mcp_version = "unknown"
-        _LOGGER.info(
-            f"[mcp_docs_server:app_lifespan] MCP version: {mcp_version}"
-        )
+        _LOGGER.info(f"[mcp_docs_server:app_lifespan] MCP version: {mcp_version}")
         _LOGGER.info(
             f"[mcp_docs_server:app_lifespan] Uvicorn version: {uvicorn.__version__}"
         )
@@ -297,35 +345,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
 
         # Log details for each exception in the group
         for exc in eg.exceptions:
-            exc_type = type(exc).__name__
-
-            # Log ClosedResourceError at DEBUG level (client disconnect), others at ERROR level
-            if isinstance(exc, anyio.ClosedResourceError):
-                _LOGGER.debug(f"[mcp_docs_server:app_lifespan] {exc_type}: {exc}")
-            else:
-                _LOGGER.error(f"[mcp_docs_server:app_lifespan] {exc_type}: {exc}")
-
-            # Provide specific context based on exception type
-            if isinstance(exc, anyio.ClosedResourceError):
-                _LOGGER.debug(
-                    "[mcp_docs_server:app_lifespan] This indicates a client disconnected early (expected behavior)"
-                )
-            elif isinstance(exc, asyncio.CancelledError):
-                _LOGGER.error(
-                    "[mcp_docs_server:app_lifespan] This indicates the server task was cancelled during operation"
-                )
-            elif isinstance(exc, TimeoutError):
-                _LOGGER.error(
-                    "[mcp_docs_server:app_lifespan] This indicates an operation timed out during server operation"
-                )
-            elif isinstance(exc, ConnectionError | OSError):
-                _LOGGER.error(
-                    "[mcp_docs_server:app_lifespan] This indicates a connection or system-level error during server operation"
-                )
-            else:
-                _LOGGER.error(
-                    f"[mcp_docs_server:app_lifespan] Unexpected exception type: {exc_type}"
-                )
+            _log_lifespan_exception(exc)
 
         _LOGGER.error(
             f"[mcp_docs_server:app_lifespan] Full traceback: {traceback.format_exc()}"
@@ -658,9 +678,11 @@ async def docs_chat(
         - 'response' (str): **Present only when success=True**. The documentation assistant's natural
                            language answer. Content is suitable for direct display to users or further
                            processing by AI agents. May include code examples, explanations, and links.
-        - 'error' (str): **Present only when success=False**. Human-readable error message with specific
-                        error context. Includes error types like "OpenAIClientError", "Unsupported programming language",
-                        or validation errors. Messages are actionable for debugging.
+        - 'error' (str): **Present only when success=False**. Human-readable error message prefixed with
+                        the error type, e.g. ``"OpenAIClientError: <details>"``,
+                        ``"TimeoutError: <details>"``, ``"ClosedResourceError: <details>"``,
+                        ``"Unsupported programming language: <lang>"``, or ``"<ExceptionType>: <details>"``
+                        for unexpected errors.
         - 'isError' (bool): **Present only when success=False**. Always True when present. Explicit error
                            flag for frameworks that need boolean error indicators beyond the 'success' field.
 
@@ -830,7 +852,7 @@ async def docs_chat(
                     f"Worker environment: Programming language: {programming_language}"
                 )
             else:
-                error_msg = f"Unsupported programming language: {programming_language}. Supported languages are: {', '.join(supported_languages)}."
+                error_msg = f"Unsupported programming language: {programming_language}. Supported languages are: {', '.join(sorted(supported_languages))}."
                 _LOGGER.warning(f"[mcp_docs_server:docs_chat] {error_msg}")
                 return {"success": False, "error": error_msg, "isError": True}
 
@@ -888,7 +910,11 @@ async def docs_chat(
         _LOGGER.warning(
             f"[mcp_docs_server:docs_chat] Client transport closed after {_elapsed:.2f}s (client disconnected early): {exc}"
         )
-        return {"success": False, "error": f"ClosedResourceError: {exc}", "isError": True}
+        return {
+            "success": False,
+            "error": f"ClosedResourceError: {exc}",
+            "isError": True,
+        }
     except TimeoutError as exc:
         _elapsed = time.monotonic() - _t_request_start
         _LOGGER.error(
@@ -903,15 +929,7 @@ async def docs_chat(
         return {"success": False, "error": f"OpenAIClientError: {exc}", "isError": True}
     except Exception as exc:
         _elapsed = time.monotonic() - _t_request_start
-        # Enhanced error logging for session-related errors
-        if "No valid session ID provided" in str(exc):
-            _LOGGER.exception(
-                f"[mcp_docs_server:docs_chat] SESSION ERROR after {_elapsed:.2f}s: {exc} - This may indicate that a request was routed to an instance that doesn't have the session state. "
-                f"Consider using a shared session store or constraining to a single instance."
-            )
-        _LOGGER.exception(
-            f"[mcp_docs_server:docs_chat] Unexpected error after {_elapsed:.2f}s: {exc}"
-        )
+        _log_docs_chat_generic_exception(exc, _elapsed)
         return {
             "success": False,
             "error": f"{type(exc).__name__}: {exc}",

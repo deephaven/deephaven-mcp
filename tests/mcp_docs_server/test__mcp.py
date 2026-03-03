@@ -377,7 +377,7 @@ async def test_app_lifespan_exception_in_context(monkeypatch):
 
         # Verify exception was logged with new exception group format
         mock_logger.error.assert_any_call(
-            "[mcp_docs_server:app_lifespan] ValueError: Test exception in context"
+            "[mcp_docs_server:app_lifespan] Unexpected exception type ValueError: Test exception in context"
         )
 
 
