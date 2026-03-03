@@ -32,7 +32,7 @@ MCP Tools (AI Agent Interface):
 AI Agent Integration:
     This module is specifically designed for AI agent consumption with:
     - Structured response format: All tools return dict with 'success' boolean
-    - Comprehensive error handling: only ``asyncio.CancelledError`` propagates (on cancellation); all other errors returned as structured dicts
+    - Comprehensive error handling: No exceptions propagated to MCP layer
     - Detailed parameter validation with descriptive error messages
     - Context-aware responses based on Deephaven version and programming language
     - Multi-turn conversation support via history parameter
@@ -673,7 +673,7 @@ async def docs_chat(
             - Documentation links will prioritize the specified language
 
             **Error Handling:**
-            - Unsupported languages return: {"success": False, "error": "Unsupported programming language: <lang>. Supported languages are: python, groovy", "isError": True}
+            - Unsupported languages return: {"success": False, "error": "Unsupported programming language: <lang>. Supported languages are: groovy, python", "isError": True}
 
     Returns:
         dict[str, object]: Structured result object optimized for AI agent parsing and error handling.
