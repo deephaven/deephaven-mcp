@@ -149,11 +149,11 @@ def _log_asyncio_and_thread_state(
         loop = asyncio.get_running_loop()
         tasks = asyncio.all_tasks(loop)
         _LOGGER.info(
-            f"[mcp_docs_server:app_lifespan] {context} active asyncio tasks: {len(tasks)}"
+            f"[mcp_docs_server:_log_asyncio_and_thread_state] {context} active asyncio tasks: {len(tasks)}"
         )
         if context != "shutdown":  # Only log loop status during startup
             _LOGGER.info(
-                f"[mcp_docs_server:app_lifespan] Event loop running: {loop.is_running()}"
+                f"[mcp_docs_server:_log_asyncio_and_thread_state] Event loop running: {loop.is_running()}"
             )
 
         # Log pending/running tasks
@@ -162,7 +162,7 @@ def _log_asyncio_and_thread_state(
             task_type = "running" if warn_on_running_tasks else "pending"
             log_func = _LOGGER.warning if warn_on_running_tasks else _LOGGER.info
             log_func(
-                f"[mcp_docs_server:app_lifespan] {task_type.title()} tasks during {context}: {len(incomplete_tasks)}"
+                f"[mcp_docs_server:_log_asyncio_and_thread_state] {task_type.title()} tasks during {context}: {len(incomplete_tasks)}"
             )
 
             # Log first few tasks for debugging
@@ -172,21 +172,21 @@ def _log_asyncio_and_thread_state(
                 if not warn_on_running_tasks:  # Include coroutine info during startup
                     task_info += f" - {task.get_coro()}"
                 log_func(
-                    f"[mcp_docs_server:app_lifespan] {task_type.title()} task {i+1}: {task_info}"
+                    f"[mcp_docs_server:_log_asyncio_and_thread_state] {task_type.title()} task {i+1}: {task_info}"
                 )
 
     except RuntimeError:
         _LOGGER.info(
-            f"[mcp_docs_server:app_lifespan] No asyncio event loop running during {context}"
+            f"[mcp_docs_server:_log_asyncio_and_thread_state] No asyncio event loop running during {context}"
         )
 
     # Log threading state
     _LOGGER.info(
-        f"[mcp_docs_server:app_lifespan] {context} active threads: {threading.active_count()}"
+        f"[mcp_docs_server:_log_asyncio_and_thread_state] {context} active threads: {threading.active_count()}"
     )
     if context != "shutdown":  # Only log main thread info during startup
-        _LOGGER.info(
-            f"[mcp_docs_server:app_lifespan] Main thread: {threading.current_thread().name}"
+        _LOGGER.debug(
+            f"[mcp_docs_server:_log_asyncio_and_thread_state] Main thread: {threading.current_thread().name}"
         )
 
 
@@ -254,8 +254,12 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
         import mcp
         import uvicorn
 
+        try:
+            mcp_version = mcp.__version__
+        except AttributeError:
+            mcp_version = "unknown"
         _LOGGER.info(
-            f"[mcp_docs_server:app_lifespan] MCP version: {getattr(mcp, '__version__', 'unknown')}"
+            f"[mcp_docs_server:app_lifespan] MCP version: {mcp_version}"
         )
         _LOGGER.info(
             f"[mcp_docs_server:app_lifespan] Uvicorn version: {uvicorn.__version__}"
@@ -773,7 +777,7 @@ async def docs_chat(
         ...     elif 'Unsupported programming language' in error_message:
         ...         # Parameter validation error
     """
-    _LOGGER.debug(
+    _LOGGER.info(
         f"[mcp_docs_server:docs_chat] Processing documentation query | prompt_len={len(prompt)} | has_history={history is not None} | programming_language={programming_language}"
     )
 
@@ -808,7 +812,7 @@ async def docs_chat(
                 )
             else:
                 error_msg = f"Unsupported programming language: {programming_language}. Supported languages are: {', '.join(supported_languages)}."
-                _LOGGER.error(f"[mcp_docs_server:docs_chat] {error_msg}")
+                _LOGGER.warning(f"[mcp_docs_server:docs_chat] {error_msg}")
                 return {"success": False, "error": error_msg, "isError": True}
 
         # Use OpenAI client as async context manager for automatic resource cleanup

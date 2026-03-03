@@ -349,9 +349,9 @@ def test_log_asyncio_runtime_error_handling(monkeypatch):
             # Call the helper function that should handle the RuntimeError
             mcp_mod._log_asyncio_and_thread_state("test")
 
-            # Verify info message was logged for no event loop (line 182)
+            # Verify info message was logged for no event loop
             mock_logger.info.assert_any_call(
-                "[mcp_docs_server:app_lifespan] No asyncio event loop running during test"
+                "[mcp_docs_server:_log_asyncio_and_thread_state] No asyncio event loop running during test"
             )
 
 
