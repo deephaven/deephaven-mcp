@@ -632,14 +632,24 @@ async def test_docs_chat_cancelled_error(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_docs_chat_closed_resource_error(monkeypatch):
-    """Test docs_chat handles ClosedResourceError (client disconnected early) with WARNING log."""
+    """Test docs_chat handles ClosedResourceError wrapped in OpenAIClientError with WARNING log.
+
+    OpenAIClient.chat() wraps all non-BaseException errors (including ClosedResourceError)
+    into OpenAIClientError. docs_chat detects this via __cause__ and logs at WARNING.
+    """
     import anyio
+
+    from deephaven_mcp.openai import OpenAIClientError
 
     monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
     sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
     import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
 
-    dummy_client = DummyOpenAIClient(exc=anyio.ClosedResourceError())
+    # Simulate how OpenAIClient actually wraps ClosedResourceError
+    cause = anyio.ClosedResourceError()
+    wrapped = OpenAIClientError(f"Unexpected error: {cause}")
+    wrapped.__cause__ = cause
+    dummy_client = DummyOpenAIClient(exc=wrapped)
 
     with (
         patch("deephaven_mcp.mcp_docs_server._mcp._LOGGER") as mock_logger,
@@ -650,25 +660,34 @@ async def test_docs_chat_closed_resource_error(monkeypatch):
         result = await mcp_mod.docs_chat(context={}, prompt="test", history=None)
 
         assert result["success"] is False
-        assert "ClosedResourceError" in result["error"]
+        assert result["error"].startswith("OpenAIClientError:")
         assert result["isError"] is True
 
-        # Verify logged at WARNING (not error/exception) with elapsed time
+        # Verify logged at WARNING (closed-resource cause detected via __cause__)
         calls = mock_logger.warning.call_args_list
         closed_calls = [c for c in calls if "transport closed" in c.args[0].lower()]
         assert len(closed_calls) == 1
         assert "after" in closed_calls[0].args[0]
-        assert "disconnected early" in closed_calls[0].args[0]
 
 
 @pytest.mark.asyncio
 async def test_docs_chat_timeout_error(monkeypatch):
-    """Test docs_chat handles TimeoutError with elapsed time logging."""
+    """Test docs_chat handles TimeoutError wrapped in OpenAIClientError with ERROR log.
+
+    OpenAIClient.chat() wraps all non-BaseException errors (including TimeoutError)
+    into OpenAIClientError. docs_chat detects this via __cause__ and logs at ERROR.
+    """
+    from deephaven_mcp.openai import OpenAIClientError
+
     monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
     sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
     import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
 
-    dummy_client = DummyOpenAIClient(exc=TimeoutError("Request timed out"))
+    # Simulate how OpenAIClient actually wraps TimeoutError
+    cause = TimeoutError("Request timed out")
+    wrapped = OpenAIClientError(f"Unexpected error: {cause}")
+    wrapped.__cause__ = cause
+    dummy_client = DummyOpenAIClient(exc=wrapped)
 
     with (
         patch("deephaven_mcp.mcp_docs_server._mcp._LOGGER") as mock_logger,
@@ -679,15 +698,14 @@ async def test_docs_chat_timeout_error(monkeypatch):
         result = await mcp_mod.docs_chat(context={}, prompt="test", history=None)
 
         assert result["success"] is False
-        assert "TimeoutError" in result["error"]
+        assert result["error"].startswith("OpenAIClientError:")
         assert result["isError"] is True
 
-        # Verify error was logged at ERROR level (not exception level) with elapsed time
+        # Verify logged at ERROR level (timeout cause detected via __cause__)
         calls = mock_logger.error.call_args_list
         timeout_calls = [c for c in calls if "timed out" in c.args[0]]
         assert len(timeout_calls) == 1
         assert "after" in timeout_calls[0].args[0]
-        assert "s" in timeout_calls[0].args[0]
 
 
 @pytest.mark.asyncio

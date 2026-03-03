@@ -694,10 +694,9 @@ async def docs_chat(
                            language answer. Content is suitable for direct display to users or further
                            processing by AI agents. May include code examples, explanations, and links.
         - 'error' (str): **Present only when success=False**. Human-readable error message prefixed with
-                        the error type, e.g. ``"OpenAIClientError: <details>"``,
-                        ``"TimeoutError: <details>"``, ``"ClosedResourceError: <details>"``,
-                        ``"Unsupported programming language: <lang>"``, or ``"<ExceptionType>: <details>"``
-                        for unexpected errors.
+                        the error type, e.g. ``"OpenAIClientError: <details>"`` (all API/network/timeout
+                        failures), ``"Unsupported programming language: <lang>"``, or
+                        ``"<ExceptionType>: <details>"`` for unexpected errors.
         - 'isError' (bool): **Present only when success=False**. Always True when present. Explicit error
                            flag for frameworks that need boolean error indicators beyond the 'success' field.
 
@@ -719,7 +718,7 @@ async def docs_chat(
         This tool implements comprehensive error handling designed for reliable AI agent integration:
 
         **Critical Safety Guarantees:**
-        - **Always includes 'success' field** - reliable for programmatic error detection
+        - **Always includes 'success' field when a dict is returned** - reliable for programmatic error detection
         - **Consistent error format** - predictable structure for error handling logic
         - **Exception note**: ``asyncio.CancelledError`` is re-raised (not returned) when the
           request is cancelled by the caller or an upstream timeout; all other errors are
@@ -727,9 +726,11 @@ async def docs_chat(
 
         **Common Error Categories:**
         1. **API Communication Errors:**
-           - "OpenAIClientError: <details>" - Issues with Inkeep/OpenAI API communication
-           - "TimeoutError: <details>" - Server-side timeout (Inkeep API exceeded 300s read timeout or 30s connect/write timeout)
-           - "ClosedResourceError: <details>" - Client disconnected before the response was delivered
+           - "OpenAIClientError: <details>" - All Inkeep/OpenAI API failures, including timeouts
+             and closed-resource errors (``OpenAIClient`` wraps all underlying exceptions into
+             ``OpenAIClientError``; timeout and closed-resource causes are identified in server
+             logs via ``__cause__`` inspection but the returned error string is always prefixed
+             ``OpenAIClientError:``)
 
         2. **Parameter Validation Errors:**
            - "Unsupported programming language: <lang>" - Invalid programming_language value
@@ -812,13 +813,13 @@ async def docs_chat(
         >>> print(result)
         {'success': False, 'error': 'Unsupported programming language: javascript. Supported languages are: python, groovy', 'isError': True}
 
-        Error response - API timeout:
+        Error response - API timeout (surfaced as OpenAIClientError):
         >>> result = await docs_chat(
         ...     context={},
         ...     prompt="Complex query about advanced features"
         ... )
         >>> print(result)
-        {'success': False, 'error': 'TimeoutError: timed out waiting for server response', 'isError': True}
+        {'success': False, 'error': 'OpenAIClientError: Unexpected error: timed out waiting for server response', 'isError': True}
 
         AI Agent error handling pattern:
         >>> result = await docs_chat(context={}, prompt="How do I use aggregations?")
@@ -920,27 +921,25 @@ async def docs_chat(
             f"[mcp_docs_server:docs_chat] Request cancelled after {_elapsed:.2f}s (client disconnected or upstream timeout)"
         )
         raise
-    except anyio.ClosedResourceError as exc:
-        _elapsed = time.monotonic() - _t_request_start
-        _LOGGER.warning(
-            f"[mcp_docs_server:docs_chat] Client transport closed after {_elapsed:.2f}s (client disconnected early): {exc}"
-        )
-        return {
-            "success": False,
-            "error": f"ClosedResourceError: {exc}",
-            "isError": True,
-        }
-    except TimeoutError as exc:
-        _elapsed = time.monotonic() - _t_request_start
-        _LOGGER.error(
-            f"[mcp_docs_server:docs_chat] Request timed out after {_elapsed:.2f}s: {exc}"
-        )
-        return {"success": False, "error": f"TimeoutError: {exc}", "isError": True}
     except OpenAIClientError as exc:
         _elapsed = time.monotonic() - _t_request_start
-        _LOGGER.exception(
-            f"[mcp_docs_server:docs_chat] OpenAI client error after {_elapsed:.2f}s: {exc}"
-        )
+        # OpenAIClient.chat() wraps all underlying exceptions (including TimeoutError and
+        # ClosedResourceError) into OpenAIClientError via its bare except Exception handler.
+        # Inspect __cause__ to surface more specific log context while keeping the error
+        # response type uniform.
+        cause = exc.__cause__
+        if isinstance(cause, TimeoutError):
+            _LOGGER.error(
+                f"[mcp_docs_server:docs_chat] Request timed out after {_elapsed:.2f}s: {exc}"
+            )
+        elif isinstance(cause, anyio.ClosedResourceError):
+            _LOGGER.warning(
+                f"[mcp_docs_server:docs_chat] Client transport closed after {_elapsed:.2f}s: {exc}"
+            )
+        else:
+            _LOGGER.exception(
+                f"[mcp_docs_server:docs_chat] OpenAI client error after {_elapsed:.2f}s: {exc}"
+            )
         return {"success": False, "error": f"OpenAIClientError: {exc}", "isError": True}
     except Exception as exc:
         _elapsed = time.monotonic() - _t_request_start
