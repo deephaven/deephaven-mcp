@@ -143,8 +143,8 @@ def _log_asyncio_and_thread_state(
 
     Note:
         When ``context`` is not ``"shutdown"`` (e.g. ``"startup"`` or
-        ``"exception_group_time"``): the event loop running-state and the main thread
-        name are logged at DEBUG.
+        ``"exception_group_time"``): the event loop running-state is logged at INFO and
+        the main thread name is logged at DEBUG.
         When ``context`` is ``"shutdown"``: those two items are suppressed, and instead
         any non-daemon, non-main threads still alive are logged as warnings (potential
         resource leaks).
