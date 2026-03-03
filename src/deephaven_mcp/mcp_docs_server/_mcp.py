@@ -74,6 +74,7 @@ import logging
 import os
 import sys
 import threading
+import time
 import traceback
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -777,6 +778,7 @@ async def docs_chat(
         ...     elif 'Unsupported programming language' in error_message:
         ...         # Parameter validation error
     """
+    _t_request_start = time.monotonic()
     _LOGGER.info(
         f"[mcp_docs_server:docs_chat] Processing documentation query | prompt_len={len(prompt)} | has_history={history is not None} | programming_language={programming_language}"
     )
@@ -818,6 +820,7 @@ async def docs_chat(
         # Use OpenAI client as async context manager for automatic resource cleanup
         # This prevents connection pool exhaustion and "Truncated response body" errors
         _LOGGER.info("[mcp_docs_server:docs_chat] Creating OpenAI client for request")
+        _t_client_start = time.monotonic()
 
         async with OpenAIClient(
             api_key=_INKEEP_API_KEY,
@@ -828,11 +831,14 @@ async def docs_chat(
             write_timeout=30.0,  # 30 seconds to send request
             max_retries=1,  # Reduce retries to fail faster on real errors
         ) as inkeep_client:
+            _client_creation_elapsed = time.monotonic() - _t_client_start
             _LOGGER.info(
-                "[mcp_docs_server:docs_chat] OpenAI client created successfully"
+                f"[mcp_docs_server:docs_chat] OpenAI client created successfully | client_creation_elapsed={_client_creation_elapsed:.2f}s"
             )
 
             # Call Inkeep API with performance-optimized parameters
+            _LOGGER.info("[mcp_docs_server:docs_chat] Calling Inkeep API")
+            _t_api_start = time.monotonic()
             response = await inkeep_client.chat(
                 prompt=prompt,
                 history=history,
@@ -844,25 +850,42 @@ async def docs_chat(
                 top_p=0.9,  # Nucleus sampling for balanced speed vs quality
                 presence_penalty=0.1,  # Slight penalty to encourage conciseness
             )
+            _api_elapsed = time.monotonic() - _t_api_start
+            _total_elapsed = time.monotonic() - _t_request_start
             _LOGGER.info(
-                f"[mcp_docs_server:docs_chat] Documentation query completed successfully | response_len={len(response)}"
+                f"[mcp_docs_server:docs_chat] Documentation query completed successfully"
+                f" | response_len={len(response)}"
+                f" | api_elapsed={_api_elapsed:.2f}s"
+                f" | total_elapsed={_total_elapsed:.2f}s"
             )
             return {"success": True, "response": response}
 
+    except TimeoutError as exc:
+        _elapsed = time.monotonic() - _t_request_start
+        _LOGGER.error(
+            f"[mcp_docs_server:docs_chat] Request timed out after {_elapsed:.2f}s: {exc}"
+        )
+        return {"success": False, "error": f"TimeoutError: {exc}", "isError": True}
     except OpenAIClientError as exc:
         # This could be logged at a lower level since it is potentially not a problem with the MCP server itself,
         # but rather an issue with the OpenAI client or API.
         # However, we log it at the exception level to ensure visibility in case of issues.
-        _LOGGER.exception(f"[mcp_docs_server:docs_chat] OpenAI client error: {exc}")
+        _elapsed = time.monotonic() - _t_request_start
+        _LOGGER.exception(
+            f"[mcp_docs_server:docs_chat] OpenAI client error after {_elapsed:.2f}s: {exc}"
+        )
         return {"success": False, "error": f"OpenAIClientError: {exc}", "isError": True}
     except Exception as exc:
+        _elapsed = time.monotonic() - _t_request_start
         # Enhanced error logging for session-related errors
         if "No valid session ID provided" in str(exc):
             _LOGGER.exception(
-                f"[mcp_docs_server:docs_chat] SESSION ERROR: {exc} - This may indicate that a request was routed to an instance that doesn't have the session state. "
+                f"[mcp_docs_server:docs_chat] SESSION ERROR after {_elapsed:.2f}s: {exc} - This may indicate that a request was routed to an instance that doesn't have the session state. "
                 f"Consider using a shared session store or constraining to a single instance."
             )
-        _LOGGER.exception(f"[mcp_docs_server:docs_chat] Unexpected error: {exc}")
+        _LOGGER.exception(
+            f"[mcp_docs_server:docs_chat] Unexpected error after {_elapsed:.2f}s: {exc}"
+        )
         return {
             "success": False,
             "error": f"{type(exc).__name__}: {exc}",
