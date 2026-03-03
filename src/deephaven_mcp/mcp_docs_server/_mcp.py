@@ -224,11 +224,6 @@ def _log_lifespan_exception(exc: BaseException) -> None:
         _LOGGER.debug(
             "[mcp_docs_server:app_lifespan] This indicates a client disconnected early (expected behavior)"
         )
-    elif isinstance(exc, asyncio.CancelledError):
-        _LOGGER.error(f"[mcp_docs_server:app_lifespan] {exc_type}: {exc}")
-        _LOGGER.error(
-            "[mcp_docs_server:app_lifespan] This indicates the server task was cancelled during operation"
-        )
     elif isinstance(exc, TimeoutError):
         _LOGGER.error(f"[mcp_docs_server:app_lifespan] {exc_type}: {exc}")
         _LOGGER.error(
@@ -295,9 +290,11 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
                           and prevent resource leaks during sustained operations.
 
     Raises:
-        ExceptionGroup: Re-raises the exception group if any exception occurs during
-                        the lifespan context, after logging detailed diagnostic information
-                        for each exception in the group.
+        BaseExceptionGroup: Re-raises the exception group if any exception occurs during
+                            the lifespan context. Cancellations (``asyncio.CancelledError``
+                            partitions from anyio's ``BaseExceptionGroup``) are logged at
+                            WARNING and re-raised immediately. Other exceptions are logged
+                            at ERROR with full diagnostics before re-raising.
 
     Note:
         This function is automatically called by FastMCP during server startup and shutdown.
@@ -354,6 +351,14 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
         )
         yield {}
         _LOGGER.info("[mcp_docs_server:app_lifespan] Context manager exiting normally")
+    except* asyncio.CancelledError as eg:
+        # anyio raises BaseExceptionGroup (not plain ExceptionGroup), which can contain
+        # CancelledError. except* Exception does NOT catch CancelledError (BaseException),
+        # so we must handle it explicitly to log and re-raise.
+        _LOGGER.warning(
+            f"[mcp_docs_server:app_lifespan] Server task(s) cancelled during runtime yield: {eg}"
+        )
+        raise
     except* Exception as eg:
         # Handle all exception groups that can occur during yield {}
         _LOGGER.error(

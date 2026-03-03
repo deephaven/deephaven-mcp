@@ -439,32 +439,30 @@ async def test_app_lifespan_anyio_closed_resource_error(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_app_lifespan_cancelled_error_handling(monkeypatch):
-    """Test app_lifespan handling of CancelledError (line 376)."""
+    """Test app_lifespan handling of CancelledError via except* asyncio.CancelledError.
+
+    anyio wraps exceptions from task groups in BaseExceptionGroup, which can contain
+    CancelledError. The except* asyncio.CancelledError handler catches this, logs at
+    WARNING, and re-raises. A bare CancelledError raised inside the lifespan context
+    is wrapped by the except* machinery into a BaseExceptionGroup on re-raise.
+    """
     monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
     sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
-    import asyncio
-
     import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
 
-    # Create a custom CancelledError subclass that can be used in ExceptionGroup
-    class TestCancelledError(asyncio.CancelledError, Exception):
-        """Custom CancelledError that inherits from Exception for ExceptionGroup compatibility."""
-
-        pass
-
     with patch("deephaven_mcp.mcp_docs_server._mcp._LOGGER") as mock_logger:
-        with pytest.raises(ExceptionGroup) as exc_info:
+        with pytest.raises(BaseExceptionGroup) as exc_info:
             async with mcp_mod.app_lifespan(None) as context:
-                raise TestCancelledError("Task cancelled")
+                raise asyncio.CancelledError("Task cancelled")
 
-        # Verify the ExceptionGroup contains our exception
-        assert len(exc_info.value.exceptions) == 1
-        assert isinstance(exc_info.value.exceptions[0], asyncio.CancelledError)
-
-        # Check that the specific CancelledError message was logged (line 376)
-        mock_logger.error.assert_any_call(
-            "[mcp_docs_server:app_lifespan] This indicates the server task was cancelled during operation"
+        # Verify the BaseExceptionGroup contains a CancelledError
+        assert any(
+            isinstance(e, asyncio.CancelledError) for e in exc_info.value.exceptions
         )
+
+        # Verify logged at WARNING (not error) by the except* asyncio.CancelledError handler
+        calls = [str(c) for c in mock_logger.warning.call_args_list]
+        assert any("cancelled" in c.lower() for c in calls)
 
 
 @pytest.mark.asyncio
