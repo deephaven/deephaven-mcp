@@ -349,10 +349,46 @@ def test_log_asyncio_runtime_error_handling(monkeypatch):
             # Call the helper function that should handle the RuntimeError
             mcp_mod._log_asyncio_and_thread_state("test")
 
-            # Verify info message was logged for no event loop (line 182)
+            # Verify info message was logged for no event loop
             mock_logger.info.assert_any_call(
-                "[mcp_docs_server:app_lifespan] No asyncio event loop running during test"
+                "[mcp_docs_server:_log_asyncio_and_thread_state] No asyncio event loop running during test"
             )
+
+
+def test_log_asyncio_shutdown_non_daemon_thread_warning(monkeypatch):
+    """Test _log_asyncio_and_thread_state warns about non-daemon threads at shutdown."""
+    import threading
+
+    monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
+    sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
+    import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
+
+    # Create a real non-daemon thread that stays alive during the call
+    barrier = threading.Barrier(2)
+    done = threading.Event()
+
+    def _worker():
+        barrier.wait()
+        done.wait()
+
+    t = threading.Thread(target=_worker, name="LeakedThread", daemon=False)
+    t.start()
+    try:
+        barrier.wait(timeout=5)  # ensure thread is running before we log
+        assert not barrier.broken, "Barrier timed out; worker thread did not start"
+        with patch("deephaven_mcp.mcp_docs_server._mcp._LOGGER") as mock_logger:
+            mcp_mod._log_asyncio_and_thread_state("shutdown")
+        warning_calls = [str(c) for c in mock_logger.warning.call_args_list]
+        assert any(
+            "LeakedThread" in c and "potential resource leak" in c
+            for c in warning_calls
+        )
+    finally:
+        done.set()
+        t.join(timeout=5)
+        assert (
+            not t.is_alive()
+        ), "Worker thread did not terminate; may leak into subsequent tests"
 
 
 @pytest.mark.asyncio
@@ -377,7 +413,7 @@ async def test_app_lifespan_exception_in_context(monkeypatch):
 
         # Verify exception was logged with new exception group format
         mock_logger.error.assert_any_call(
-            "[mcp_docs_server:app_lifespan] ValueError: Test exception in context"
+            "[mcp_docs_server:app_lifespan] Unexpected exception type ValueError: Test exception in context"
         )
 
 
@@ -407,32 +443,30 @@ async def test_app_lifespan_anyio_closed_resource_error(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_app_lifespan_cancelled_error_handling(monkeypatch):
-    """Test app_lifespan handling of CancelledError (line 376)."""
+    """Test app_lifespan handling of CancelledError via except* asyncio.CancelledError.
+
+    anyio wraps exceptions from task groups in BaseExceptionGroup, which can contain
+    CancelledError. The except* asyncio.CancelledError handler catches this, logs at
+    WARNING, and re-raises. A bare CancelledError raised inside the lifespan context
+    is wrapped by the except* machinery into a BaseExceptionGroup on re-raise.
+    """
     monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
     sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
-    import asyncio
-
     import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
 
-    # Create a custom CancelledError subclass that can be used in ExceptionGroup
-    class TestCancelledError(asyncio.CancelledError, Exception):
-        """Custom CancelledError that inherits from Exception for ExceptionGroup compatibility."""
-
-        pass
-
     with patch("deephaven_mcp.mcp_docs_server._mcp._LOGGER") as mock_logger:
-        with pytest.raises(ExceptionGroup) as exc_info:
+        with pytest.raises(BaseExceptionGroup) as exc_info:
             async with mcp_mod.app_lifespan(None) as context:
-                raise TestCancelledError("Task cancelled")
+                raise asyncio.CancelledError("Task cancelled")
 
-        # Verify the ExceptionGroup contains our exception
-        assert len(exc_info.value.exceptions) == 1
-        assert isinstance(exc_info.value.exceptions[0], asyncio.CancelledError)
-
-        # Check that the specific CancelledError message was logged (line 376)
-        mock_logger.error.assert_any_call(
-            "[mcp_docs_server:app_lifespan] This indicates the server task was cancelled during operation"
+        # Verify the BaseExceptionGroup contains a CancelledError
+        assert any(
+            isinstance(e, asyncio.CancelledError) for e in exc_info.value.exceptions
         )
+
+        # Verify logged at WARNING (not error) by the except* asyncio.CancelledError handler
+        calls = [str(c) for c in mock_logger.warning.call_args_list]
+        assert any("cancelled" in c.lower() for c in calls)
 
 
 @pytest.mark.asyncio
@@ -573,6 +607,110 @@ async def test_dependency_version_logging_exception(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_docs_chat_cancelled_error(monkeypatch):
+    """Test docs_chat handles CancelledError (client disconnect) with WARNING log and re-raise."""
+    monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
+    sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
+    import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
+
+    dummy_client = DummyOpenAIClient(exc=asyncio.CancelledError())
+
+    with (
+        patch("deephaven_mcp.mcp_docs_server._mcp._LOGGER") as mock_logger,
+        patch(
+            "deephaven_mcp.mcp_docs_server._mcp.OpenAIClient", return_value=dummy_client
+        ),
+    ):
+        with pytest.raises(asyncio.CancelledError):
+            await mcp_mod.docs_chat(context={}, prompt="test", history=None)
+
+        # Verify logged at WARNING (not error/exception) with elapsed time
+        calls = mock_logger.warning.call_args_list
+        cancel_calls = [c for c in calls if "cancelled" in c.args[0].lower()]
+        assert len(cancel_calls) == 1
+        assert "after" in cancel_calls[0].args[0]
+        assert "client disconnected" in cancel_calls[0].args[0]
+
+
+@pytest.mark.asyncio
+async def test_docs_chat_closed_resource_error(monkeypatch):
+    """Test docs_chat handles ClosedResourceError wrapped in OpenAIClientError with WARNING log.
+
+    OpenAIClient.chat() wraps all non-BaseException errors (including ClosedResourceError)
+    into OpenAIClientError. docs_chat detects this via __cause__ and logs at WARNING.
+    """
+    import anyio
+
+    from deephaven_mcp.openai import OpenAIClientError
+
+    monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
+    sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
+    import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
+
+    # Simulate how OpenAIClient actually wraps ClosedResourceError
+    cause = anyio.ClosedResourceError()
+    wrapped = OpenAIClientError(f"Unexpected error: {cause}")
+    wrapped.__cause__ = cause
+    dummy_client = DummyOpenAIClient(exc=wrapped)
+
+    with (
+        patch("deephaven_mcp.mcp_docs_server._mcp._LOGGER") as mock_logger,
+        patch(
+            "deephaven_mcp.mcp_docs_server._mcp.OpenAIClient", return_value=dummy_client
+        ),
+    ):
+        result = await mcp_mod.docs_chat(context={}, prompt="test", history=None)
+
+        assert result["success"] is False
+        assert result["error"].startswith("OpenAIClientError:")
+        assert result["isError"] is True
+
+        # Verify logged at WARNING (closed-resource cause detected via __cause__)
+        calls = mock_logger.warning.call_args_list
+        closed_calls = [c for c in calls if "transport closed" in c.args[0].lower()]
+        assert len(closed_calls) == 1
+        assert "after" in closed_calls[0].args[0]
+
+
+@pytest.mark.asyncio
+async def test_docs_chat_timeout_error(monkeypatch):
+    """Test docs_chat handles TimeoutError wrapped in OpenAIClientError with ERROR log.
+
+    OpenAIClient.chat() wraps all non-BaseException errors (including TimeoutError)
+    into OpenAIClientError. docs_chat detects this via __cause__ and logs at ERROR.
+    """
+    from deephaven_mcp.openai import OpenAIClientError
+
+    monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
+    sys.modules.pop("deephaven_mcp.mcp_docs_server._mcp", None)
+    import deephaven_mcp.mcp_docs_server._mcp as mcp_mod
+
+    # Simulate how OpenAIClient actually wraps TimeoutError
+    cause = TimeoutError("Request timed out")
+    wrapped = OpenAIClientError(f"Unexpected error: {cause}")
+    wrapped.__cause__ = cause
+    dummy_client = DummyOpenAIClient(exc=wrapped)
+
+    with (
+        patch("deephaven_mcp.mcp_docs_server._mcp._LOGGER") as mock_logger,
+        patch(
+            "deephaven_mcp.mcp_docs_server._mcp.OpenAIClient", return_value=dummy_client
+        ),
+    ):
+        result = await mcp_mod.docs_chat(context={}, prompt="test", history=None)
+
+        assert result["success"] is False
+        assert result["error"].startswith("OpenAIClientError:")
+        assert result["isError"] is True
+
+        # Verify logged at ERROR level (timeout cause detected via __cause__)
+        calls = mock_logger.error.call_args_list
+        timeout_calls = [c for c in calls if "timed out" in c.args[0]]
+        assert len(timeout_calls) == 1
+        assert "after" in timeout_calls[0].args[0]
+
+
+@pytest.mark.asyncio
 async def test_docs_chat_session_id_exception(monkeypatch):
     """Test docs_chat handles session ID exceptions with special logging (line 858)."""
     monkeypatch.setenv("INKEEP_API_KEY", "dummy-key")
@@ -593,18 +731,12 @@ async def test_docs_chat_session_id_exception(monkeypatch):
         assert not result["success"]
         assert "No valid session ID provided" in result["error"]
 
-        # Check that the special log message was recorded (line 858)
-        # and also that the generic one was called right after.
-        expected_session_msg = (
-            f"[mcp_docs_server:docs_chat] SESSION ERROR: {session_error} - This may indicate that a request was routed to an instance that doesn't have the session state. "
-            f"Consider using a shared session store or constraining to a single instance."
-        )
-        expected_generic_msg = (
-            f"[mcp_docs_server:docs_chat] Unexpected error: {session_error}"
-        )
-
-        # Use call_args_list to check the sequence of calls
+        # Check that the special log message was recorded and also that the generic one was called right after.
+        # Messages now include elapsed time so we match on content rather than exact string.
         calls = mock_logger.exception.call_args_list
         assert len(calls) == 2
-        assert calls[0].args[0] == expected_session_msg
-        assert calls[1].args[0] == expected_generic_msg
+        assert "SESSION ERROR" in calls[0].args[0]
+        assert "No valid session ID provided" in calls[0].args[0]
+        assert "shared session store" in calls[0].args[0]
+        assert "Unexpected error" in calls[1].args[0]
+        assert "No valid session ID provided" in calls[1].args[0]

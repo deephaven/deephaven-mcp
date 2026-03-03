@@ -44,7 +44,7 @@ Usage Patterns:
 
     **Direct Tool Invocation:**
     >>> from deephaven_mcp.mcp_docs_server._mcp import docs_chat
-    >>> context = {}  # Context not currently used but required by MCP protocol
+    >>> # context is injected by the MCP framework; pass a mock when testing directly
     >>>
     >>> # Basic query
     >>> result = await docs_chat(context=context, prompt="How do I install Deephaven?")
@@ -74,6 +74,7 @@ import logging
 import os
 import sys
 import threading
+import time
 import traceback
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -93,13 +94,13 @@ _LOGGER = logging.getLogger(__name__)
 try:
     _INKEEP_API_KEY: str = os.environ["INKEEP_API_KEY"]
     """str: The API key for authenticating with the Inkeep-powered LLM API.
-    
+
     This environment variable must be set for the docs server to function. The API key
     is used to authenticate requests to the Inkeep documentation assistant service.
-    
+
     Environment Variable:
         INKEEP_API_KEY: Required. The API key provided by Inkeep for documentation queries.
-    
+
     Raises:
         RuntimeError: If the INKEEP_API_KEY environment variable is not set.
     """
@@ -128,8 +129,9 @@ def _log_asyncio_and_thread_state(
 ) -> None:
     """Log current asyncio and threading state for debugging.
 
-    Logs active asyncio tasks, event loop status, pending/running tasks, and
-    active thread count to help diagnose concurrency issues and resource leaks.
+    Logs active asyncio tasks, event loop status, pending/running tasks,
+    active thread count, all thread names, and (for non-shutdown contexts) main thread name to
+    help diagnose concurrency issues and resource leaks.
     This is particularly useful for identifying stuck tasks or threading problems
     during server lifecycle events.
 
@@ -140,20 +142,25 @@ def _log_asyncio_and_thread_state(
                                      should have completed. Defaults to False.
 
     Note:
-        Event loop status and main thread info are only logged during startup.
-        During shutdown, running tasks are logged as warnings to highlight potential
-        cleanup issues. All exceptions are caught to prevent diagnostic failures.
+        When ``context`` is not ``"shutdown"`` (e.g. ``"startup"`` or
+        ``"exception_group_time"``): the event loop running-state is logged at INFO and
+        the main thread name is logged at DEBUG.
+        When ``context`` is ``"shutdown"``: those two items are suppressed, and instead
+        any non-daemon, non-main threads still alive are logged as warnings (potential
+        resource leaks).
+        A ``RuntimeError`` from ``asyncio.get_running_loop()`` (no running event loop)
+        is caught and logged at INFO; all other exceptions propagate.
     """
     # Log asyncio state
     try:
         loop = asyncio.get_running_loop()
         tasks = asyncio.all_tasks(loop)
         _LOGGER.info(
-            f"[mcp_docs_server:app_lifespan] {context} active asyncio tasks: {len(tasks)}"
+            f"[mcp_docs_server:_log_asyncio_and_thread_state] {context} active asyncio tasks: {len(tasks)}"
         )
-        if context != "shutdown":  # Only log loop status during startup
+        if context != "shutdown":  # Only log loop status for non-shutdown contexts
             _LOGGER.info(
-                f"[mcp_docs_server:app_lifespan] Event loop running: {loop.is_running()}"
+                f"[mcp_docs_server:_log_asyncio_and_thread_state] Event loop running: {loop.is_running()}"
             )
 
         # Log pending/running tasks
@@ -162,32 +169,92 @@ def _log_asyncio_and_thread_state(
             task_type = "running" if warn_on_running_tasks else "pending"
             log_func = _LOGGER.warning if warn_on_running_tasks else _LOGGER.info
             log_func(
-                f"[mcp_docs_server:app_lifespan] {task_type.title()} tasks during {context}: {len(incomplete_tasks)}"
+                f"[mcp_docs_server:_log_asyncio_and_thread_state] {task_type.title()} tasks during {context}: {len(incomplete_tasks)}"
             )
 
             # Log first few tasks for debugging
             max_tasks = 3 if warn_on_running_tasks else 5
             for i, task in enumerate(incomplete_tasks[:max_tasks]):
-                task_info = f"{task.get_name()}"
+                task_info = task.get_name()
                 if not warn_on_running_tasks:  # Include coroutine info during startup
                     task_info += f" - {task.get_coro()}"
                 log_func(
-                    f"[mcp_docs_server:app_lifespan] {task_type.title()} task {i+1}: {task_info}"
+                    f"[mcp_docs_server:_log_asyncio_and_thread_state] {task_type.title()} task {i+1}: {task_info}"
                 )
 
     except RuntimeError:
         _LOGGER.info(
-            f"[mcp_docs_server:app_lifespan] No asyncio event loop running during {context}"
+            f"[mcp_docs_server:_log_asyncio_and_thread_state] No asyncio event loop running during {context}"
         )
 
     # Log threading state
+    all_threads = threading.enumerate()
     _LOGGER.info(
-        f"[mcp_docs_server:app_lifespan] {context} active threads: {threading.active_count()}"
+        f"[mcp_docs_server:_log_asyncio_and_thread_state] {context} active threads: {len(all_threads)}"
     )
-    if context != "shutdown":  # Only log main thread info during startup
-        _LOGGER.info(
-            f"[mcp_docs_server:app_lifespan] Main thread: {threading.current_thread().name}"
+    _LOGGER.debug(
+        f"[mcp_docs_server:_log_asyncio_and_thread_state] Active threads: {[t.name for t in all_threads]}"
+    )
+    if context != "shutdown":  # Only log main thread info for non-shutdown contexts
+        _LOGGER.debug(
+            f"[mcp_docs_server:_log_asyncio_and_thread_state] Main thread: {threading.main_thread().name}"
         )
+    else:
+        # At shutdown, non-daemon threads (other than main) indicate potential resource leaks
+        leaked = [
+            t.name
+            for t in all_threads
+            if t is not threading.main_thread() and not t.daemon
+        ]
+        if leaked:
+            _LOGGER.warning(
+                f"[mcp_docs_server:_log_asyncio_and_thread_state] Non-daemon threads still running at shutdown (potential resource leak): {leaked}"
+            )
+
+
+def _log_lifespan_exception(exc: BaseException) -> None:
+    """Log a single exception from the app_lifespan exception group with appropriate level and context.
+
+    Args:
+        exc (BaseException): The individual exception to log.
+    """
+    exc_type = type(exc).__name__
+    if isinstance(exc, anyio.ClosedResourceError):
+        _LOGGER.debug(f"[mcp_docs_server:app_lifespan] {exc_type}: {exc}")
+        _LOGGER.debug(
+            "[mcp_docs_server:app_lifespan] This indicates a client disconnected early (expected behavior)"
+        )
+    elif isinstance(exc, TimeoutError):
+        _LOGGER.error(f"[mcp_docs_server:app_lifespan] {exc_type}: {exc}")
+        _LOGGER.error(
+            "[mcp_docs_server:app_lifespan] This indicates an operation timed out during server operation"
+        )
+    elif isinstance(exc, ConnectionError | OSError):
+        _LOGGER.error(f"[mcp_docs_server:app_lifespan] {exc_type}: {exc}")
+        _LOGGER.error(
+            "[mcp_docs_server:app_lifespan] This indicates a connection or system-level error during server operation"
+        )
+    else:
+        _LOGGER.error(
+            f"[mcp_docs_server:app_lifespan] Unexpected exception type {exc_type}: {exc}"
+        )
+
+
+def _log_docs_chat_generic_exception(exc: Exception, elapsed: float) -> None:
+    """Log a generic (non-specialised) exception from docs_chat with enhanced session error detection.
+
+    Args:
+        exc (Exception): The exception to log.
+        elapsed (float): Elapsed seconds since the start of the request.
+    """
+    if "No valid session ID provided" in str(exc):
+        _LOGGER.exception(
+            f"[mcp_docs_server:docs_chat] SESSION ERROR after {elapsed:.2f}s: {exc} - This may indicate that a request was routed to an instance that doesn't have the session state. "
+            f"Consider using a shared session store or constraining to a single instance."
+        )
+    _LOGGER.exception(
+        f"[mcp_docs_server:docs_chat] Unexpected error after {elapsed:.2f}s: {exc}"
+    )
 
 
 @asynccontextmanager
@@ -213,7 +280,9 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
         - Enhanced exception logging with traceback information
 
     Args:
-        server (FastMCP): The FastMCP server instance being managed.
+        server (FastMCP): The FastMCP server instance being managed. This argument
+                          is required by the FastMCP lifespan protocol but is not
+                          used directly by this function.
 
     Yields:
         dict[str, object]: An empty context dictionary. OpenAI clients are created
@@ -221,8 +290,11 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
                           and prevent resource leaks during sustained operations.
 
     Raises:
-        Exception: Re-raises any exceptions that occur during the lifespan context
-                  after logging detailed diagnostic information.
+        BaseExceptionGroup: Re-raises the exception group if any exception occurs during
+                            the lifespan context. Cancellations (``asyncio.CancelledError``
+                            partitions from anyio's ``BaseExceptionGroup``) are logged at
+                            WARNING and re-raised immediately. Other exceptions are logged
+                            at ERROR with full diagnostics before re-raising.
 
     Note:
         This function is automatically called by FastMCP during server startup and shutdown.
@@ -254,9 +326,11 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
         import mcp
         import uvicorn
 
-        _LOGGER.info(
-            f"[mcp_docs_server:app_lifespan] MCP version: {getattr(mcp, '__version__', 'unknown')}"
-        )
+        try:
+            mcp_version = mcp.__version__  # type: ignore[attr-defined]
+        except AttributeError:
+            mcp_version = "unknown"
+        _LOGGER.info(f"[mcp_docs_server:app_lifespan] MCP version: {mcp_version}")
         _LOGGER.info(
             f"[mcp_docs_server:app_lifespan] Uvicorn version: {uvicorn.__version__}"
         )
@@ -277,6 +351,14 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
         )
         yield {}
         _LOGGER.info("[mcp_docs_server:app_lifespan] Context manager exiting normally")
+    except* asyncio.CancelledError as eg:
+        # anyio raises BaseExceptionGroup (not plain ExceptionGroup), which can contain
+        # CancelledError. except* Exception does NOT catch CancelledError (BaseException),
+        # so we must handle it explicitly to log and re-raise.
+        _LOGGER.warning(
+            f"[mcp_docs_server:app_lifespan] Server task(s) cancelled during runtime yield: {eg}"
+        )
+        raise
     except* Exception as eg:
         # Handle all exception groups that can occur during yield {}
         _LOGGER.error(
@@ -285,35 +367,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
 
         # Log details for each exception in the group
         for exc in eg.exceptions:
-            exc_type = type(exc).__name__
-
-            # Log ClosedResourceError at DEBUG level (client disconnect), others at ERROR level
-            if isinstance(exc, anyio.ClosedResourceError):
-                _LOGGER.debug(f"[mcp_docs_server:app_lifespan] {exc_type}: {exc}")
-            else:
-                _LOGGER.error(f"[mcp_docs_server:app_lifespan] {exc_type}: {exc}")
-
-            # Provide specific context based on exception type
-            if isinstance(exc, anyio.ClosedResourceError):
-                _LOGGER.debug(
-                    "[mcp_docs_server:app_lifespan] This indicates a client disconnected early (expected behavior)"
-                )
-            elif isinstance(exc, asyncio.CancelledError):
-                _LOGGER.error(
-                    "[mcp_docs_server:app_lifespan] This indicates the server task was cancelled during operation"
-                )
-            elif isinstance(exc, TimeoutError):
-                _LOGGER.error(
-                    "[mcp_docs_server:app_lifespan] This indicates an operation timed out during server operation"
-                )
-            elif isinstance(exc, ConnectionError | OSError):
-                _LOGGER.error(
-                    "[mcp_docs_server:app_lifespan] This indicates a connection or system-level error during server operation"
-                )
-            else:
-                _LOGGER.error(
-                    f"[mcp_docs_server:app_lifespan] Unexpected exception type: {exc_type}"
-                )
+            _log_lifespan_exception(exc)
 
         _LOGGER.error(
             f"[mcp_docs_server:app_lifespan] Full traceback: {traceback.format_exc()}"
@@ -383,7 +437,6 @@ Session Management:
 
 Architecture Features:
     - Per-request OpenAI client creation prevents connection pool exhaustion
-    - Signal handlers for diagnostic logging during unexpected shutdowns
     - Process and asyncio state monitoring for resource leak detection
     - Comprehensive startup/shutdown logging for debugging
     - Structured error responses optimized for AI agent consumption
@@ -412,7 +465,8 @@ async def health_check(request: Request) -> JSONResponse:
         - Intended for use as a liveness or readiness probe in deployment environments (e.g., Kubernetes, Cloud Run).
 
     Args:
-        request (Request): The HTTP request object (not used but required by FastMCP).
+        request (Request): The incoming HTTP request. Not used but required by the
+                           Starlette route handler signature.
 
     Returns:
         JSONResponse: HTTP 200 response with JSON body {"status": "ok"}.
@@ -522,10 +576,19 @@ async def docs_chat(
 
     This tool provides conversational access to the Deephaven documentation assistant, powered by Inkeep LLM APIs. It creates a fresh OpenAI client per request to ensure connection stability and prevent timeout errors during high-volume usage. Responses are optimized for AI agent consumption with structured success/error indicators.
 
+    Terminology Note:
+        - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
+        - 'Deephaven Community' and 'Deephaven Core' are interchangeable names for the same product
+        - 'Deephaven Enterprise', 'Deephaven Core+', and 'Deephaven CorePlus' are interchangeable names for the same product
+        - In Deephaven, "schema" and "meta table" refer to the same concept - the table's column definitions including names, types, and properties.
+        - In Deephaven, "catalog" and "database" are interchangeable terms - the catalog is the database of available tables.
+        - 'DHC' is shorthand for Deephaven Community (also called 'Core')
+        - 'DHE' is shorthand for Deephaven Enterprise (also called 'Core+')
+
     AI Agent Optimization:
         This tool is specifically designed for AI agent consumption with the following features:
         - **Structured Response Format**: Always returns dict with 'success' boolean for reliable parsing
-        - **Comprehensive Error Handling**: Detailed error messages with specific error types (never raises exceptions)
+        - **Comprehensive Error Handling**: Detailed error messages with specific error types (raises ``asyncio.CancelledError`` on cancellation; all other errors returned as structured dicts)
         - **Context-Aware Responses**: Tailors answers based on Deephaven version and programming language
         - **Multi-Turn Conversation Support**: Maintains context through history parameter for follow-up questions
         - **Orchestration Framework Ready**: Compatible with LLM orchestration tools and agent frameworks
@@ -533,8 +596,8 @@ async def docs_chat(
 
     Parameters:
         context (Context):
-            The MCP context for this tool call. Currently unused but required by MCP protocol.
-            AI agents should pass an empty dict: {}
+            The MCP context for this tool call. Injected automatically by the MCP framework;
+            AI agents do not construct or pass this value directly.
         prompt (str):
             The user's query or question for the documentation assistant. Should be a clear,
             specific natural language string describing what the user wants to know about Deephaven.
@@ -610,12 +673,13 @@ async def docs_chat(
             - Documentation links will prioritize the specified language
 
             **Error Handling:**
-            - Unsupported languages return: {"success": False, "error": "Unsupported programming language: <lang>. Supported languages are: python, groovy", "isError": True}
+            - Unsupported languages return: {"success": False, "error": "Unsupported programming language: <lang>. Supported languages are: groovy, python", "isError": True}
 
     Returns:
         dict[str, object]: Structured result object optimized for AI agent parsing and error handling.
-                          Always contains 'success' (bool) field. On success, contains 'response' (str).
-                          On error, contains 'error' (str) and 'isError' (bool) fields.
+                          Always contains 'success' (bool) field when a dict is returned. On success,
+                          contains 'response' (str). On error, contains 'error' (str) and 'isError' (bool)
+                          fields. Note: ``asyncio.CancelledError`` is re-raised rather than returned.
 
         **Success Response Structure:**
         {
@@ -631,14 +695,15 @@ async def docs_chat(
         }
 
         **Field Descriptions:**
-        - 'success' (bool): **Always present**. True if query completed successfully, False on any error.
-                           AI agents should check this field first before accessing other fields.
+        - 'success' (bool): **Always present when a dict is returned**. True if query completed successfully,
+                           False on any error. AI agents should check this field first before accessing other fields.
         - 'response' (str): **Present only when success=True**. The documentation assistant's natural
                            language answer. Content is suitable for direct display to users or further
                            processing by AI agents. May include code examples, explanations, and links.
-        - 'error' (str): **Present only when success=False**. Human-readable error message with specific
-                        error context. Includes error types like "OpenAIClientError", "Unsupported programming language",
-                        or validation errors. Messages are actionable for debugging.
+        - 'error' (str): **Present only when success=False**. Human-readable error message prefixed with
+                        the error type, e.g. ``"OpenAIClientError: <details>"`` (all API/network/timeout
+                        failures), ``"Unsupported programming language: <lang>"``, or
+                        ``"<ExceptionType>: <details>"`` for unexpected errors.
         - 'isError' (bool): **Present only when success=False**. Always True when present. Explicit error
                            flag for frameworks that need boolean error indicators beyond the 'success' field.
 
@@ -660,24 +725,25 @@ async def docs_chat(
         This tool implements comprehensive error handling designed for reliable AI agent integration:
 
         **Critical Safety Guarantees:**
-        - **Never raises exceptions** - all errors return structured dict responses
-        - **Always includes 'success' field** - reliable for programmatic error detection
+        - **Always includes 'success' field when a dict is returned** - reliable for programmatic error detection
         - **Consistent error format** - predictable structure for error handling logic
+        - **Exception note**: ``asyncio.CancelledError`` is re-raised (not returned) when the
+          request is cancelled by the caller or an upstream timeout; all other errors are
+          returned as structured dict responses.
 
         **Common Error Categories:**
         1. **API Communication Errors:**
-           - "OpenAIClientError: <details>" - Issues with Inkeep/OpenAI API communication
-           - "Request timeout" - API response exceeded 300-second timeout
-           - "Connection failed" - Network connectivity issues
+           - "OpenAIClientError: <details>" - All Inkeep/OpenAI API failures, including timeouts
+             and closed-resource errors (``OpenAIClient`` wraps all underlying exceptions into
+             ``OpenAIClientError``; timeout and closed-resource causes are identified in server
+             logs via ``__cause__`` inspection but the returned error string is always prefixed
+             ``OpenAIClientError:``)
 
         2. **Parameter Validation Errors:**
            - "Unsupported programming language: <lang>" - Invalid programming_language value
-           - "Invalid history format" - Malformed history parameter structure
-           - "Empty prompt" - Missing or empty prompt parameter
 
-        3. **System Configuration Errors:**
-           - "Missing INKEEP_API_KEY" - Required environment variable not set
-           - "Client initialization failed" - OpenAI client setup issues
+        3. **Unexpected Errors:**
+           - "<ExceptionType>: <details>" - Unexpected server-side error; full stack trace is logged
 
         **AI Agent Error Handling Best Practices:**
         ```python
@@ -690,17 +756,16 @@ async def docs_chat(
                 # Retry with supported language or omit parameter
                 pass
             elif "OpenAIClientError" in error_msg:
-                # Log API issue, potentially retry after delay
-                pass
-            elif "timeout" in error_msg.lower():
-                # Retry with simpler query or handle timeout
+                # All API failures (including timeouts and closed-resource) surface here
                 pass
         ```
 
     Performance Characteristics:
         - Creates fresh OpenAI client per request (prevents connection pool exhaustion)
         - Typical response time: 5-30 seconds depending on query complexity
-        - Timeout: 300 seconds (5 minutes) for complex documentation queries
+        - Read timeout: 300 seconds (5 minutes) for complex documentation queries
+        - Connect timeout: 30 seconds to establish connection to Inkeep API
+        - Write timeout: 30 seconds to send the request to Inkeep API
         - Optimized parameters for faster, more deterministic responses
 
     Usage Notes for AI Agents:
@@ -750,15 +815,15 @@ async def docs_chat(
         ...     programming_language="javascript"
         ... )
         >>> print(result)
-        {'success': False, 'error': 'Unsupported programming language: javascript. Supported languages are: python, groovy', 'isError': True}
+        {'success': False, 'error': 'Unsupported programming language: javascript. Supported languages are: groovy, python.', 'isError': True}
 
-        Error response - API timeout:
+        Error response - API timeout (surfaced as OpenAIClientError):
         >>> result = await docs_chat(
         ...     context={},
         ...     prompt="Complex query about advanced features"
         ... )
         >>> print(result)
-        {'success': False, 'error': 'OpenAIClientError: Request timeout after 300 seconds', 'isError': True}
+        {'success': False, 'error': 'OpenAIClientError: Unexpected error: timed out waiting for server response', 'isError': True}
 
         AI Agent error handling pattern:
         >>> result = await docs_chat(context={}, prompt="How do I use aggregations?")
@@ -773,12 +838,12 @@ async def docs_chat(
         ...     elif 'Unsupported programming language' in error_message:
         ...         # Parameter validation error
     """
-    _LOGGER.debug(
-        f"[mcp_docs_server:docs_chat] Processing documentation query | prompt_len={len(prompt)} | has_history={history is not None} | programming_language={programming_language}"
-    )
+    _t_request_start = time.monotonic()
 
     try:
-
+        _LOGGER.info(
+            f"[mcp_docs_server:docs_chat] Processing documentation query | prompt_len={len(prompt)} | has_history={history is not None} | programming_language={programming_language}"
+        )
         # Build system prompts for context-aware responses
         system_prompts = [
             _prompt_basic,
@@ -807,13 +872,14 @@ async def docs_chat(
                     f"Worker environment: Programming language: {programming_language}"
                 )
             else:
-                error_msg = f"Unsupported programming language: {programming_language}. Supported languages are: {', '.join(supported_languages)}."
-                _LOGGER.error(f"[mcp_docs_server:docs_chat] {error_msg}")
+                error_msg = f"Unsupported programming language: {programming_language}. Supported languages are: {', '.join(sorted(supported_languages))}."
+                _LOGGER.warning(f"[mcp_docs_server:docs_chat] {error_msg}")
                 return {"success": False, "error": error_msg, "isError": True}
 
         # Use OpenAI client as async context manager for automatic resource cleanup
         # This prevents connection pool exhaustion and "Truncated response body" errors
         _LOGGER.info("[mcp_docs_server:docs_chat] Creating OpenAI client for request")
+        _t_client_start = time.monotonic()
 
         async with OpenAIClient(
             api_key=_INKEEP_API_KEY,
@@ -824,11 +890,14 @@ async def docs_chat(
             write_timeout=30.0,  # 30 seconds to send request
             max_retries=1,  # Reduce retries to fail faster on real errors
         ) as inkeep_client:
+            _client_creation_elapsed = time.monotonic() - _t_client_start
             _LOGGER.info(
-                "[mcp_docs_server:docs_chat] OpenAI client created successfully"
+                f"[mcp_docs_server:docs_chat] OpenAI client created successfully | client_creation_elapsed={_client_creation_elapsed:.2f}s"
             )
 
             # Call Inkeep API with performance-optimized parameters
+            _LOGGER.info("[mcp_docs_server:docs_chat] Calling Inkeep API")
+            _t_api_start = time.monotonic()
             response = await inkeep_client.chat(
                 prompt=prompt,
                 history=history,
@@ -840,25 +909,45 @@ async def docs_chat(
                 top_p=0.9,  # Nucleus sampling for balanced speed vs quality
                 presence_penalty=0.1,  # Slight penalty to encourage conciseness
             )
+            _api_elapsed = time.monotonic() - _t_api_start
+            _total_elapsed = time.monotonic() - _t_request_start
             _LOGGER.info(
-                f"[mcp_docs_server:docs_chat] Documentation query completed successfully | response_len={len(response)}"
+                f"[mcp_docs_server:docs_chat] Documentation query completed successfully"
+                f" | response_len={len(response)}"
+                f" | api_elapsed={_api_elapsed:.2f}s"
+                f" | total_elapsed={_total_elapsed:.2f}s"
             )
             return {"success": True, "response": response}
 
+    except asyncio.CancelledError:
+        _elapsed = time.monotonic() - _t_request_start
+        _LOGGER.warning(
+            f"[mcp_docs_server:docs_chat] Request cancelled after {_elapsed:.2f}s (client disconnected or upstream timeout)"
+        )
+        raise
     except OpenAIClientError as exc:
-        # This could be logged at a lower level since it is potentially not a problem with the MCP server itself,
-        # but rather an issue with the OpenAI client or API.
-        # However, we log it at the exception level to ensure visibility in case of issues.
-        _LOGGER.exception(f"[mcp_docs_server:docs_chat] OpenAI client error: {exc}")
+        _elapsed = time.monotonic() - _t_request_start
+        # OpenAIClient.chat() wraps all underlying exceptions (including TimeoutError and
+        # ClosedResourceError) into OpenAIClientError via its bare except Exception handler.
+        # Inspect __cause__ to surface more specific log context while keeping the error
+        # response type uniform.
+        cause = exc.__cause__
+        if isinstance(cause, TimeoutError):
+            _LOGGER.error(
+                f"[mcp_docs_server:docs_chat] Request timed out after {_elapsed:.2f}s: {exc}"
+            )
+        elif isinstance(cause, anyio.ClosedResourceError):
+            _LOGGER.warning(
+                f"[mcp_docs_server:docs_chat] Client transport closed after {_elapsed:.2f}s: {exc}"
+            )
+        else:
+            _LOGGER.exception(
+                f"[mcp_docs_server:docs_chat] OpenAI client error after {_elapsed:.2f}s: {exc}"
+            )
         return {"success": False, "error": f"OpenAIClientError: {exc}", "isError": True}
     except Exception as exc:
-        # Enhanced error logging for session-related errors
-        if "No valid session ID provided" in str(exc):
-            _LOGGER.exception(
-                f"[mcp_docs_server:docs_chat] SESSION ERROR: {exc} - This may indicate that a request was routed to an instance that doesn't have the session state. "
-                f"Consider using a shared session store or constraining to a single instance."
-            )
-        _LOGGER.exception(f"[mcp_docs_server:docs_chat] Unexpected error: {exc}")
+        _elapsed = time.monotonic() - _t_request_start
+        _log_docs_chat_generic_exception(exc, _elapsed)
         return {
             "success": False,
             "error": f"{type(exc).__name__}: {exc}",
