@@ -13,6 +13,7 @@ The actual MCP tools are defined in the _tools submodules:
 - _tools.script: Script execution and package management
 - _tools.catalog: Enterprise catalog operations
 - _tools.pq: Enterprise persistent query management
+- _tools.widget: Widget view as interactive MCP Apps
 - _tools.shared: Internal utilities
 
 All tools are automatically registered with the MCP server via decorators.
@@ -36,6 +37,7 @@ from deephaven_mcp.mcp_systems_server._tools import (  # noqa: F401
     session_enterprise as _session_enterprise,
 )
 from deephaven_mcp.mcp_systems_server._tools import table as _table  # noqa: F401
+from deephaven_mcp.mcp_systems_server._tools import widget as _widget  # noqa: F401
 from deephaven_mcp.mcp_systems_server._tools.mcp_server import mcp_server
 
 __all__ = [
