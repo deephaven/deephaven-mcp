@@ -18,7 +18,7 @@ from urllib.parse import quote, urlparse
 
 from mcp.server.fastmcp import Context
 
-from deephaven_mcp.config import ConfigManager, get_config_section
+from deephaven_mcp.config import ConfigManager, get_all_config_names, get_config_section
 from deephaven_mcp.resource_manager import (
     CombinedSessionRegistry,
     CommunitySessionManager,
@@ -337,6 +337,95 @@ _WIDGET_VIEW_HTML = """\
 </html>"""
 
 
+def _compute_frame_domains_from_config(config: dict[str, Any]) -> list[str]:
+    """Compute CSP ``frameDomains`` from the Deephaven MCP configuration.
+
+    Extracts the scheme + host + port origin for every configured community
+    session and enterprise system so that the widget-view resource advertises
+    only the domains that the server can actually reach.
+
+    If dynamic session creation (``community.session_creation``) is enabled,
+    ``http://localhost:*`` and ``http://127.0.0.1:*`` are included as
+    catch-alls since dynamic sessions use ephemeral ports on localhost.
+
+    Returns:
+        A deduplicated, sorted list of origin strings
+        (e.g. ``["http://localhost:10000", "https://dh.example.com"]``).
+    """
+    origins: set[str] = set()
+
+    # --- Community static sessions ---
+    session_names = get_all_config_names(config, ["community", "sessions"])
+    for name in session_names:
+        try:
+            sess = get_config_section(config, ["community", "sessions", name])
+        except KeyError:
+            continue
+
+        server_url = sess.get("server")
+        if server_url:
+            parsed = urlparse(str(server_url))
+            origins.add(f"{parsed.scheme}://{parsed.netloc}")
+        else:
+            host = sess.get("host", "localhost")
+            port = sess.get("port", 10000)
+            use_tls = sess.get("use_tls", False)
+            scheme = "https" if use_tls else "http"
+            origins.add(f"{scheme}://{host}:{port}")
+
+    # --- Community dynamic session creation ---
+    try:
+        get_config_section(config, ["community", "session_creation"])
+        # Dynamic sessions run on localhost with ephemeral ports
+        origins.add("http://localhost:*")
+        origins.add("http://127.0.0.1:*")
+    except KeyError:
+        pass
+
+    # --- Enterprise systems ---
+    system_names = get_all_config_names(config, ["enterprise", "systems"])
+    for name in system_names:
+        try:
+            sys_cfg = get_config_section(config, ["enterprise", "systems", name])
+        except KeyError:
+            continue
+
+        conn_url = sys_cfg.get("connection_json_url", "")
+        if conn_url:
+            parsed = urlparse(conn_url)
+            origins.add(f"{parsed.scheme}://{parsed.netloc}")
+
+    return sorted(origins)
+
+
+async def update_widget_view_frame_domains(config_manager: ConfigManager) -> None:
+    """Update the widget-view resource CSP ``frameDomains`` from the live config.
+
+    Called during server lifespan startup (and on config reload) to replace
+    the initial empty ``frameDomains`` list with origins derived from the
+    configured community sessions and enterprise systems.
+
+    Args:
+        config_manager: The active :class:`ConfigManager` instance.
+    """
+    config = await config_manager.get_config()
+    domains = _compute_frame_domains_from_config(config)
+
+    resource = mcp_server._resource_manager._resources.get(VIEW_URI)
+    if resource is None:
+        _LOGGER.warning(
+            "[widget] Cannot update frameDomains: resource %r not registered.",
+            VIEW_URI,
+        )
+        return
+
+    resource.meta["ui"]["csp"]["frameDomains"] = domains
+    _LOGGER.info(
+        "[widget] Updated frameDomains to %s",
+        domains,
+    )
+
+
 @mcp_server.resource(
     VIEW_URI,
     mime_type="text/html;profile=mcp-app",
@@ -344,12 +433,7 @@ _WIDGET_VIEW_HTML = """\
         "ui": {
             "csp": {
                 "resourceDomains": ["https://unpkg.com"],
-                "frameDomains": [
-                    "http://*",
-                    "https://*",
-                    "http://localhost:*",
-                    "http://127.0.0.1:*",
-                ],
+                "frameDomains": [],
             },
             "prefersBorder": False,
         }

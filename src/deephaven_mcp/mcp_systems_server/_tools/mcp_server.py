@@ -89,6 +89,13 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
         session_registry = CombinedSessionRegistry()
         await session_registry.initialize(config_manager)
 
+        # Update widget-view resource CSP with configured session origins
+        from deephaven_mcp.mcp_systems_server._tools.widget import (
+            update_widget_view_frame_domains,
+        )
+
+        await update_widget_view_frame_domains(config_manager)
+
         # lock for refresh to prevent concurrent refresh operations.
         refresh_lock = asyncio.Lock()
 
@@ -200,6 +207,14 @@ async def mcp_reload(context: Context) -> dict:
             await config_manager.clear_config_cache()
             await session_registry.close()
             await session_registry.initialize(config_manager)
+
+            # Refresh widget-view CSP frameDomains with reloaded config
+            from deephaven_mcp.mcp_systems_server._tools.widget import (
+                update_widget_view_frame_domains,
+            )
+
+            await update_widget_view_frame_domains(config_manager)
+
         _LOGGER.info(
             "[mcp_systems_server:mcp_reload] Success: Session configuration and session cache have been reloaded."
         )
