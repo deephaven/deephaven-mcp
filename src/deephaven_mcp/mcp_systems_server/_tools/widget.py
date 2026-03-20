@@ -344,7 +344,12 @@ _WIDGET_VIEW_HTML = """\
         "ui": {
             "csp": {
                 "resourceDomains": ["https://unpkg.com"],
-                "frameDomains": ["http://*", "https://*"],
+                "frameDomains": [
+                    "http://*",
+                    "https://*",
+                    "http://localhost:*",
+                    "http://127.0.0.1:*",
+                ],
             },
             "prefersBorder": False,
         }
