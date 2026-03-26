@@ -27,6 +27,7 @@ from deephaven_mcp.resource_manager import (
 )
 
 from .mcp_server import mcp_server
+from .shared import _get_session_from_context
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -655,6 +656,94 @@ async def session_widget_view(
     except Exception as e:
         _LOGGER.error(
             f"[mcp_systems_server:session_widget_view] Failed: {e!r}",
+            exc_info=True,
+        )
+        return {"success": False, "error": str(e), "isError": True}
+
+
+@mcp_server.tool()
+async def session_widgets_list(context: Context, session_id: str) -> dict:
+    """
+    MCP Tool: Retrieve the names and types of all exportable objects in a Deephaven session.
+
+    Returns a list of widgets (tables, figures, plots, custom objects, etc.) with their
+    names and types.  This is the widget-level equivalent of ``session_tables_list`` but
+    includes *all* exportable objects, not only tables.
+
+    Terminology Note:
+    - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
+    - 'Deephaven Community' and 'Deephaven Core' are interchangeable names for the same product
+    - 'Deephaven Enterprise', 'Deephaven Core+', and 'Deephaven CorePlus' are interchangeable names for the same product
+    - 'DHC' is shorthand for Deephaven Community (also called 'Core')
+    - 'DHE' is shorthand for Deephaven Enterprise (also called 'Core+')
+
+    AI Agent Usage:
+    - Use this for discovering all exportable objects in a session (tables, figures, widgets, etc.)
+    - Complements session_tables_list which only returns table names
+    - Use before session_widget_view to find available widget names to display
+    - Each widget entry includes its ``name`` and ``type`` (e.g. ``"Table"``, ``"Figure"``, etc.)
+    - Always check 'success' field before accessing 'widgets'
+
+    Args:
+        context (Context): The MCP context object, required by MCP protocol but not actively used.
+        session_id (str): ID of the Deephaven session to query. Must match an existing active session.
+
+    Returns:
+        dict: Structured result object with the following keys:
+            - 'success' (bool): Always present. True if widgets were retrieved successfully.
+            - 'session_id' (str, optional): The session ID if successful.
+            - 'widgets' (list[dict], optional): List of dicts with 'name' and 'type' keys if successful.
+            - 'count' (int, optional): Number of widgets found if successful.
+            - 'error' (str, optional): Human-readable error message if retrieval failed.
+            - 'isError' (bool, optional): Present and True only when success=False.
+
+    Example Successful Response:
+        {
+            'success': True,
+            'session_id': 'community:localhost:10000',
+            'widgets': [
+                {'name': 'trades', 'type': 'Table'},
+                {'name': 'my_plot', 'type': 'Figure'},
+                {'name': 'dashboard', 'type': 'PartitionedTable'}
+            ],
+            'count': 3
+        }
+
+    Example Error Response:
+        {
+            'success': False,
+            'error': 'Session not found: community:localhost:10000',
+            'isError': True
+        }
+    """
+    _LOGGER.info(
+        f"[mcp_systems_server:session_widgets_list] Invoked: session_id={session_id!r}"
+    )
+
+    try:
+        session = await _get_session_from_context(
+            "session_widgets_list", context, session_id
+        )
+
+        _LOGGER.debug(
+            f"[mcp_systems_server:session_widgets_list] Retrieving widgets from session '{session_id}'"
+        )
+        widgets = await session.widgets()
+
+        _LOGGER.info(
+            f"[mcp_systems_server:session_widgets_list] Success: Retrieved {len(widgets)} widget(s) from session '{session_id}'"
+        )
+
+        return {
+            "success": True,
+            "session_id": session_id,
+            "widgets": widgets,
+            "count": len(widgets),
+        }
+
+    except Exception as e:
+        _LOGGER.error(
+            f"[mcp_systems_server:session_widgets_list] Failed for session: '{session_id}', error: {e!r}",
             exc_info=True,
         )
         return {"success": False, "error": str(e), "isError": True}

@@ -14,6 +14,7 @@ from deephaven_mcp.mcp_systems_server._tools.widget import (
     _build_enterprise_widget_url,
     _get_community_psk_token,
     session_widget_view,
+    session_widgets_list,
     widget_view_resource,
 )
 from deephaven_mcp.resource_manager import (
@@ -476,3 +477,144 @@ class TestSessionWidgetViewErrors:
 
         assert result["success"] is False
         assert "unsupported" in result["error"].lower()
+
+
+# ---------------------------------------------------------------------------
+# Tool: session_widgets_list
+# ---------------------------------------------------------------------------
+
+
+class TestSessionWidgetsList:
+    """Tests for session_widgets_list."""
+
+    @pytest.mark.asyncio
+    async def test_success_multiple_widgets(self):
+        """Test session_widgets_list returns multiple widgets with types."""
+
+        class DummySession:
+            async def widgets(self):
+                return [
+                    {"name": "trades", "type": "Table"},
+                    {"name": "my_plot", "type": "Figure"},
+                    {"name": "dashboard", "type": "PartitionedTable"},
+                ]
+
+        mock_session_manager = MagicMock()
+        mock_session_manager.get = AsyncMock(return_value=DummySession())
+
+        session_registry = MagicMock()
+        session_registry.get = AsyncMock(return_value=mock_session_manager)
+
+        context = MockContext({"session_registry": session_registry})
+        result = await session_widgets_list(context, session_id="test-session")
+
+        session_registry.get.assert_awaited_once_with("test-session")
+        mock_session_manager.get.assert_awaited_once()
+
+        assert result["success"] is True
+        assert result["session_id"] == "test-session"
+        assert result["count"] == 3
+        assert result["widgets"] == [
+            {"name": "trades", "type": "Table"},
+            {"name": "my_plot", "type": "Figure"},
+            {"name": "dashboard", "type": "PartitionedTable"},
+        ]
+
+    @pytest.mark.asyncio
+    async def test_success_empty_session(self):
+        """Test session_widgets_list with no widgets."""
+
+        class DummySession:
+            async def widgets(self):
+                return []
+
+        mock_session_manager = MagicMock()
+        mock_session_manager.get = AsyncMock(return_value=DummySession())
+
+        session_registry = MagicMock()
+        session_registry.get = AsyncMock(return_value=mock_session_manager)
+
+        context = MockContext({"session_registry": session_registry})
+        result = await session_widgets_list(context, session_id="empty-session")
+
+        assert result["success"] is True
+        assert result["session_id"] == "empty-session"
+        assert result["widgets"] == []
+        assert result["count"] == 0
+
+    @pytest.mark.asyncio
+    async def test_invalid_session_id(self):
+        """Test session_widgets_list with invalid session_id."""
+        session_registry = MagicMock()
+        session_registry.get = AsyncMock(
+            side_effect=Exception("Session not found: invalid-session")
+        )
+
+        context = MockContext({"session_registry": session_registry})
+        result = await session_widgets_list(context, session_id="invalid-session")
+
+        assert result["success"] is False
+        assert result["isError"] is True
+        assert "Session not found" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_session_connection_failure(self):
+        """Test session_widgets_list when session connection fails."""
+        mock_session_manager = MagicMock()
+        mock_session_manager.get = AsyncMock(side_effect=Exception("Connection failed"))
+
+        session_registry = MagicMock()
+        session_registry.get = AsyncMock(return_value=mock_session_manager)
+
+        context = MockContext({"session_registry": session_registry})
+        result = await session_widgets_list(context, session_id="test-session")
+
+        assert result["success"] is False
+        assert result["isError"] is True
+        assert "Connection failed" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_widgets_method_failure(self):
+        """Test session_widgets_list when session.widgets() raises."""
+
+        class DummySession:
+            async def widgets(self):
+                raise Exception("Failed to retrieve widget list")
+
+        mock_session_manager = MagicMock()
+        mock_session_manager.get = AsyncMock(return_value=DummySession())
+
+        session_registry = MagicMock()
+        session_registry.get = AsyncMock(return_value=mock_session_manager)
+
+        context = MockContext({"session_registry": session_registry})
+        result = await session_widgets_list(context, session_id="test-session")
+
+        assert result["success"] is False
+        assert result["isError"] is True
+        assert "Failed to retrieve widget list" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_tables_only_session(self):
+        """Test session_widgets_list with only tables (no other widget types)."""
+
+        class DummySession:
+            async def widgets(self):
+                return [
+                    {"name": "table1", "type": "Table"},
+                    {"name": "table2", "type": "Table"},
+                ]
+
+        mock_session_manager = MagicMock()
+        mock_session_manager.get = AsyncMock(return_value=DummySession())
+
+        session_registry = MagicMock()
+        session_registry.get = AsyncMock(return_value=mock_session_manager)
+
+        context = MockContext({"session_registry": session_registry})
+        result = await session_widgets_list(context, session_id="community:local:test")
+
+        assert result["success"] is True
+        assert result["session_id"] == "community:local:test"
+        assert result["count"] == 2
+        assert all(w["type"] == "Table" for w in result["widgets"])
