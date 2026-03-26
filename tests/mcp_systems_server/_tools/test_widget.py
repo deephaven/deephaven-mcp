@@ -51,7 +51,25 @@ class TestBuildCommunityBaseUrl:
         mgr._config = {}
         assert _build_community_base_url(mgr) == "http://localhost:10000"
 
-    def test_dynamic_uses_connection_url(self):
+    def test_ui_url_base_override(self):
+        mgr = MagicMock(spec=CommunitySessionManager)
+        mgr._config = {
+            "server": "http://localhost:10000",
+            "ui_url_base": "http://localhost:4000",
+        }
+        assert _build_community_base_url(mgr) == "http://localhost:4000"
+
+    def test_ui_url_base_takes_precedence_over_server(self):
+        mgr = MagicMock(spec=CommunitySessionManager)
+        mgr._config = {
+            "server": "http://localhost:10000",
+            "host": "other",
+            "port": 9999,
+            "ui_url_base": "http://localhost:4000",
+        }
+        assert _build_community_base_url(mgr) == "http://localhost:4000"
+
+    def test_dynamic_ignores_ui_url_base(self):
         mgr = MagicMock(spec=DynamicCommunitySessionManager)
         mgr.connection_url = "http://dynamic-host:12345"
         assert _build_community_base_url(mgr) == "http://dynamic-host:12345"
@@ -156,6 +174,55 @@ class TestBuildCommunityWidgetUrl:
         mgr._config = {"server": "http://localhost:10000"}
         url = _build_community_widget_url(mgr, "my table&special", "none")
         assert "name=my%20table%26special" in url
+
+    def test_ui_url_base_override_from_config(self):
+        mgr = MagicMock(spec=CommunitySessionManager)
+        mgr._config = {
+            "server": "http://localhost:10000",
+            "auth_type": "Anonymous",
+            "ui_url_base": "http://localhost:4000",
+        }
+        url = _build_community_widget_url(mgr, "my_table", "none")
+        assert url == "http://localhost:4000/iframe/widget/?name=my_table"
+
+    def test_ui_url_base_override_with_psk(self):
+        mgr = MagicMock(spec=CommunitySessionManager)
+        mgr._config = {
+            "server": "http://localhost:10000",
+            "auth_type": "PSK",
+            "auth_token": "abc123",
+            "ui_url_base": "http://localhost:4000",
+        }
+        url = _build_community_widget_url(mgr, "my_table", "all")
+        assert url.startswith("http://localhost:4000/iframe/widget/")
+        assert "&psk=abc123" in url
+
+    def test_no_ui_url_base_uses_server(self):
+        mgr = MagicMock(spec=CommunitySessionManager)
+        mgr._config = {"server": "http://localhost:10000", "auth_type": "Anonymous"}
+        url = _build_community_widget_url(mgr, "my_table", "none")
+        assert url == "http://localhost:10000/iframe/widget/?name=my_table"
+
+    def test_custom_widget_path(self):
+        mgr = MagicMock(spec=CommunitySessionManager)
+        mgr._config = {
+            "server": "http://localhost:10000",
+            "auth_type": "Anonymous",
+            "widget_path": "/custom/path/",
+        }
+        url = _build_community_widget_url(mgr, "my_table", "none")
+        assert url == "http://localhost:10000/custom/path/?name=my_table"
+
+    def test_custom_widget_path_with_ui_url_base(self):
+        mgr = MagicMock(spec=CommunitySessionManager)
+        mgr._config = {
+            "server": "http://localhost:10000",
+            "auth_type": "Anonymous",
+            "ui_url_base": "http://localhost:4000",
+            "widget_path": "/custom/path/",
+        }
+        url = _build_community_widget_url(mgr, "my_table", "none")
+        assert url == "http://localhost:4000/custom/path/?name=my_table"
 
 
 # ---------------------------------------------------------------------------
@@ -355,6 +422,30 @@ class TestSessionWidgetViewCommunity:
         assert result["success"] is True
         assert result["widget_url"] == (
             "http://dynamic:11111/iframe/widget/?name=chart"
+        )
+
+    @pytest.mark.asyncio
+    async def test_community_with_ui_url_base_override(self):
+        mgr = MagicMock(spec=CommunitySessionManager)
+        mgr._config = {
+            "server": "http://localhost:10000",
+            "auth_type": "Anonymous",
+            "ui_url_base": "http://localhost:4000",
+        }
+
+        mock_registry = MagicMock()
+        mock_registry.get = AsyncMock(return_value=mgr)
+        context = _make_context(config_dict={}, session_registry=mock_registry)
+
+        result = await session_widget_view(
+            context,
+            session_id="community:config:local",
+            widget_name="my_table",
+        )
+
+        assert result["success"] is True
+        assert result["widget_url"] == (
+            "http://localhost:4000/iframe/widget/?name=my_table"
         )
 
 

@@ -38,9 +38,10 @@ def _build_community_base_url(mgr: CommunitySessionManager) -> str:
     """Build the base HTTP(S) URL for a community session.
 
     For dynamic sessions, uses the pre-built ``connection_url``.
-    For static (config-based) sessions, constructs the URL from the
-    ``server`` field if present, otherwise from ``host``, ``port``, and
-    ``use_tls`` config fields.
+    For static (config-based) sessions, if ``ui_url_base`` is present in the
+    config it is returned directly — this lets developers point at a local
+    Web UI dev server.  Otherwise the URL is constructed from the ``server``
+    field or from ``host``, ``port``, and ``use_tls``.
 
     Args:
         mgr: A community session manager.
@@ -51,7 +52,12 @@ def _build_community_base_url(mgr: CommunitySessionManager) -> str:
     if isinstance(mgr, DynamicCommunitySessionManager):
         return mgr.connection_url
 
-    # Static session – prefer pre-built "server" URL, fall back to host/port
+    # Static session – honour explicit ui_url_base override first
+    ui_url_base = mgr._config.get("ui_url_base")
+    if ui_url_base:
+        return str(ui_url_base)
+
+    # Prefer pre-built "server" URL, fall back to host/port
     server = mgr._config.get("server")
     if server:
         return str(server)
@@ -112,10 +118,17 @@ def _build_community_widget_url(
 ) -> str:
     """Build a full Deephaven Community iframe widget URL.
 
-    URL format: ``http[s]://host:port/iframe/widget/?name=<widget_name>[&psk=<token>]``
+    URL format: ``http[s]://host:port/<widget_path>?name=<widget_name>[&psk=<token>]``
+
+    The path defaults to ``/iframe/widget/`` but can be overridden via the
+    ``widget_path`` config key on static sessions.
     """
     base = _build_community_base_url(mgr)
-    url = f"{base}/iframe/widget/?name={quote(widget_name, safe='')}"
+    if isinstance(mgr, DynamicCommunitySessionManager):
+        widget_path = "/iframe/widget/"
+    else:
+        widget_path = mgr._config.get("widget_path", "/iframe/widget/")
+    url = f"{base}{widget_path}?name={quote(widget_name, safe='')}"
     token = _get_community_psk_token(mgr, credential_retrieval_mode)
     if token:
         url += f"&psk={quote(token, safe='')}"
