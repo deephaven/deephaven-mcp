@@ -441,7 +441,12 @@ def test_signal_handler_defensive_stderr_failure():
 
 
 def test_signal_handler_unknown_signal_number():
-    """Test that signal handler handles unknown signal numbers gracefully."""
+    """Test that signal handler handles unknown signal numbers gracefully.
+
+    In CPython, ``signal.signal(signum, SIG_DFL)`` raises ``ValueError`` for an
+    out-of-range signum before ``os.kill`` is ever reached.  The handler must
+    catch that exception and fall back to ``sys.exit(1)``.
+    """
     import deephaven_mcp._logging as logging_mod
 
     # Mock logging to capture calls; mock signal/os to prevent termination
@@ -449,25 +454,31 @@ def test_signal_handler_unknown_signal_number():
         patch("logging.warning") as mock_warning,
         patch("deephaven_mcp._logging.signal") as mock_sig_mod,
         patch("deephaven_mcp._logging.os") as mock_os,
+        patch("sys.exit") as mock_exit,
     ):
         import signal
 
         mock_sig_mod.Signals = signal.Signals
         mock_sig_mod.SIG_DFL = signal.SIG_DFL
         frame = None
-        # Use a nonsensical signal number
         fake_signum = 9999
 
-        # Should not raise - os.kill will raise for invalid signum, falling back to sys.exit
-        with patch("sys.exit") as mock_exit:
-            mock_os.kill.side_effect = Exception("invalid signal")
-            logging_mod._signal_handler(fake_signum, frame)
-            mock_exit.assert_called_once_with(1)
+        # signal.signal() raises for an invalid signum — this is the real failure
+        # path in CPython before os.kill is ever reached.
+        mock_sig_mod.signal.side_effect = ValueError("signal number out of range")
 
-        # Verify it logged with UNKNOWN
-        assert mock_warning.call_count == 3
-        messages = [args[0] for args, _ in mock_warning.call_args_list]
-        assert any("9999" in msg and "UNKNOWN" in msg for msg in messages)
+        logging_mod._signal_handler(fake_signum, frame)
+
+        # sys.exit(1) must be called as the last-resort fallback
+        mock_exit.assert_called_once_with(1)
+        # os.kill must NOT be called — signal.signal() raised before reaching it
+        mock_os.kill.assert_not_called()
+
+    # Verify it logged with UNKNOWN (mock_warning is still accessible here as
+    # the outer `with` block is closed but the object persists)
+    assert mock_warning.call_count == 3
+    messages = [args[0] for args, _ in mock_warning.call_args_list]
+    assert any("9999" in msg and "UNKNOWN" in msg for msg in messages)
 
 
 def test_signal_handler_reraises_to_terminate():
