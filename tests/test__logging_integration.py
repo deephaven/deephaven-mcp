@@ -42,8 +42,8 @@ _SIGNAL_HANDLER_SCRIPT = textwrap.dedent("""
         time.sleep(0.1)
 """)
 
-_STARTUP_TIMEOUT = 5.0   # seconds to wait for subprocess "ready"
-_EXIT_TIMEOUT = 5.0      # seconds to wait for subprocess to exit after signal
+_STARTUP_TIMEOUT = 5.0  # seconds to wait for subprocess "ready"
+_EXIT_TIMEOUT = 5.0  # seconds to wait for subprocess to exit after signal
 
 
 def _start_subprocess() -> "subprocess.Popen[bytes]":
@@ -82,7 +82,9 @@ def _start_subprocess() -> "subprocess.Popen[bytes]":
     if not ready_event.wait(timeout=_STARTUP_TIMEOUT):
         proc.kill()
         proc.wait()
-        raise TimeoutError(f"Subprocess did not print 'ready' within {_STARTUP_TIMEOUT}s")
+        raise TimeoutError(
+            f"Subprocess did not print 'ready' within {_STARTUP_TIMEOUT}s"
+        )
 
     if proc.poll() is not None:
         raise RuntimeError(
@@ -140,9 +142,9 @@ def test_signal_handler_terminates_process(sig: signal.Signals) -> None:
         if sys.platform == "win32":
             # Windows does not use negative returncodes for signal-killed processes.
             # Assert only that the process exited non-zero.
-            assert proc.returncode != 0, (
-                f"Expected non-zero returncode after {sig.name}, got {proc.returncode}"
-            )
+            assert (
+                proc.returncode != 0
+            ), f"Expected non-zero returncode after {sig.name}, got {proc.returncode}"
         else:
             # On POSIX, subprocess.returncode == -N when the process was killed
             # by signal N with the default OS action.  Our re-raise pattern

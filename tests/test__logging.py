@@ -223,9 +223,10 @@ def test_signal_handler_coverage(caplog):
             frame = object()
 
             # Now call the handler directly - mock signal.signal and os.kill to prevent termination
-            with patch("deephaven_mcp._logging.signal") as mock_sig_mod, patch(
-                "deephaven_mcp._logging.os"
-            ) as mock_os:
+            with (
+                patch("deephaven_mcp._logging.signal") as mock_sig_mod,
+                patch("deephaven_mcp._logging.os") as mock_os,
+            ):
                 mock_sig_mod.Signals = signal.Signals
                 mock_sig_mod.SIG_DFL = signal.SIG_DFL
                 _signal_handler(signal.SIGTERM, frame)
@@ -237,11 +238,18 @@ def test_signal_handler_coverage(caplog):
                     "Received signal" in msg and "SIGTERM" in msg for msg in messages
                 )
                 assert any(f"Signal frame: {frame}" in msg for msg in messages)
-                assert any("Initiating shutdown" in msg and "SIGTERM" in msg for msg in messages)
+                assert any(
+                    "Initiating shutdown" in msg and "SIGTERM" in msg
+                    for msg in messages
+                )
 
                 # Verify the handler restored default and re-raised
-                mock_sig_mod.signal.assert_called_once_with(signal.SIGTERM, signal.SIG_DFL)
-                mock_os.kill.assert_called_once_with(mock_os.getpid.return_value, signal.SIGTERM)
+                mock_sig_mod.signal.assert_called_once_with(
+                    signal.SIGTERM, signal.SIG_DFL
+                )
+                mock_os.kill.assert_called_once_with(
+                    mock_os.getpid.return_value, signal.SIGTERM
+                )
 
 
 def test_signal_handler_logging_registration_failure(monkeypatch):
@@ -399,7 +407,9 @@ def test_signal_handler_defensive_logging_failure():
 
             # Verify termination was still attempted despite logging failure
             mock_sig_mod.signal.assert_called_once_with(signal.SIGTERM, signal.SIG_DFL)
-            mock_os.kill.assert_called_once_with(mock_os.getpid.return_value, signal.SIGTERM)
+            mock_os.kill.assert_called_once_with(
+                mock_os.getpid.return_value, signal.SIGTERM
+            )
 
 
 def test_signal_handler_defensive_stderr_failure():
@@ -425,7 +435,9 @@ def test_signal_handler_defensive_stderr_failure():
 
             # Termination should still be attempted
             mock_sig_mod.signal.assert_called_once_with(signal.SIGTERM, signal.SIG_DFL)
-            mock_os.kill.assert_called_once_with(mock_os.getpid.return_value, signal.SIGTERM)
+            mock_os.kill.assert_called_once_with(
+                mock_os.getpid.return_value, signal.SIGTERM
+            )
 
 
 def test_signal_handler_unknown_signal_number():
@@ -482,7 +494,9 @@ def test_signal_handler_reraises_to_terminate():
         # Must restore the default handler before re-raising
         mock_sig_mod.signal.assert_called_once_with(signal.SIGTERM, signal.SIG_DFL)
         # Must re-raise the signal so the process actually terminates
-        mock_os.kill.assert_called_once_with(mock_os.getpid.return_value, signal.SIGTERM)
+        mock_os.kill.assert_called_once_with(
+            mock_os.getpid.return_value, signal.SIGTERM
+        )
 
 
 def test_signal_handler_reraises_fallback_on_kill_failure():

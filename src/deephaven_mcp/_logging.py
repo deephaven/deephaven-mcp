@@ -80,7 +80,9 @@ def _signal_handler(signum: int, frame: types.FrameType | None) -> None:
     try:
         logging.warning(f"[signal_handler] Received signal {signum} ({signal_name})")
         logging.warning(f"[signal_handler] Signal frame: {frame}")
-        logging.warning(f"[signal_handler] Initiating shutdown due to signal {signum} ({signal_name})")
+        logging.warning(
+            f"[signal_handler] Initiating shutdown due to signal {signum} ({signal_name})"
+        )
         # Flush all handlers to ensure logs are written before termination
         for handler in logging.root.handlers:
             handler.flush()
