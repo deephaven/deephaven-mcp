@@ -57,10 +57,10 @@ def _signal_handler(signum: int, frame: types.FrameType | None) -> None:
 
     The re-raise pattern (restore default + os.kill) is used rather than
     sys.exit() so that:
-    - The process exits with the conventional ``128 + signum`` status that
-      shells and process supervisors expect.
-    - Chaining to the previous OS default is preserved (e.g., SIGQUIT
-      produces a core dump as expected).
+    - The process is terminated *by the signal* with the OS default action
+      (e.g., SIGQUIT produces a core dump as expected).  On POSIX,
+      ``waitpid`` and Python's ``subprocess.returncode`` report ``-signum``;
+      shells commonly display this as ``128 + signum``.
     - The handler does not silently swallow the signal, which was the
       root cause of orphaned high-CPU processes reported in production.
 
@@ -131,9 +131,9 @@ def _register_signal(signal_name: str, is_critical: bool) -> tuple[bool, str | N
         signal.signal(sig, _signal_handler)
         return (True, None)
     except (OSError, RuntimeError, ValueError) as e:
-        # OSError: Signal not supported on this platform
-        # RuntimeError: Signal already registered by another handler
-        # ValueError: Invalid signal
+        # OSError:    Signal not supported on this platform
+        # RuntimeError: Signal already registered by another handler (main-thread check)
+        # ValueError:  Invalid signal number or called from a non-main thread
         return (False, f"{signal_name} ({e})")
 
 
@@ -258,7 +258,7 @@ def log_process_state(log_tag: str, context: str) -> None:
             fd_label = "open handles"
         logging.info(f"[{log_tag}] {prefix}{fd_label}: {fd_count}")
 
-        # Only log PID during startup
+        # Log PID for all contexts except shutdown
         if context != "shutdown":
             logging.info(f"[{log_tag}] Process PID: {process.pid}")
     except Exception as e:
@@ -292,7 +292,8 @@ def setup_signal_handler_logging() -> None:
       - SIGKILL: Immediate termination (cannot be caught)
       - SIGSTOP: Stop process (cannot be caught)
 
-    The handlers log the signal number, name, and frame information before the process terminates.
+    The handlers log the signal number, name, and frame information and then terminate the
+    process by restoring the OS default handler and re-raising the signal (see ``_signal_handler``).
     This is particularly useful for debugging unexpected shutdowns in containerized environments,
     Cloud Run instances, or any environment where signals may be sent by orchestration systems.
 

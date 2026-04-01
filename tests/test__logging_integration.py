@@ -6,12 +6,12 @@ actually terminates with the expected exit status.  They do NOT require Docker
 or any external services.
 
 Platform notes:
-- SIGTERM and SIGINT are tested on all platforms.
-- SIGHUP is Unix-only and is skipped on Windows where the signal does not exist.
-- On POSIX, ``subprocess.returncode`` is ``-N`` when a process is killed by
-  signal N with the default OS action.  On Windows, the returncode is positive
-  (the process exit code set by the OS termination), so the assertion is
-  platform-specific.
+- These tests are POSIX-only (Linux/macOS).  On Windows, ``os.kill(pid, SIGTERM)``
+  terminates the target process directly at the OS level without invoking Python's
+  signal handler machinery, so the test assertion would pass even if the MCP handler
+  never ran.  Windows signal delivery via ``CTRL_BREAK_EVENT`` / ``SIGBREAK`` requires
+  a separate process group and is out of scope here.
+- SIGHUP is Unix-only; on non-Windows POSIX systems it is always available.
 
 Run with: uv run pytest -m integration tests/test__logging_integration.py
 """
@@ -76,8 +76,7 @@ def _start_subprocess() -> "subprocess.Popen[bytes]":
         first_line.append(line)
         ready_event.set()
 
-    reader_thread = threading.Thread(target=_reader, daemon=True)
-    reader_thread.start()
+    threading.Thread(target=_reader, daemon=True).start()
 
     if not ready_event.wait(timeout=_STARTUP_TIMEOUT):
         proc.kill()
@@ -110,6 +109,13 @@ if hasattr(signal, "SIGHUP"):
 
 
 @pytest.mark.integration
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "os.kill on Windows terminates the process at the OS level without invoking "
+        "Python signal handlers, so this test cannot verify that the MCP handler ran."
+    ),
+)
 @pytest.mark.parametrize("sig", _SIGNALS_TO_TEST)
 def test_signal_handler_terminates_process(sig: signal.Signals) -> None:
     """Signal handler must terminate the process promptly after logging.
@@ -119,9 +125,10 @@ def test_signal_handler_terminates_process(sig: signal.Signals) -> None:
 
     1. The process exits within ``_EXIT_TIMEOUT`` seconds (i.e., the handler
        actually terminates the process rather than only logging).
-    2. The exit status reflects the signal delivery: ``-signum`` on POSIX
-       (process killed by the OS default action via the SIG_DFL re-raise
-       pattern), or a non-zero positive code on Windows.
+    2. ``subprocess.returncode == -signum``, confirming the process was killed
+       by the signal's OS default action (the SIG_DFL re-raise pattern), not
+       by a ``sys.exit()`` call.  On POSIX, ``waitpid`` reports ``-signum``;
+       shells commonly display this as ``128 + signum``.
 
     This is a regression test for the bug where ``_signal_handler`` only logged
     but never re-raised the signal, causing orphaned high-CPU processes when the
@@ -139,21 +146,13 @@ def test_signal_handler_terminates_process(sig: signal.Signals) -> None:
                 f"Signal handler is not terminating the process."
             )
 
-        if sys.platform == "win32":
-            # Windows does not use negative returncodes for signal-killed processes.
-            # Assert only that the process exited non-zero.
-            assert (
-                proc.returncode != 0
-            ), f"Expected non-zero returncode after {sig.name}, got {proc.returncode}"
-        else:
-            # On POSIX, subprocess.returncode == -N when the process was killed
-            # by signal N with the default OS action.  Our re-raise pattern
-            # restores SIG_DFL and calls os.kill(), so the OS delivers the
-            # signal natively.
-            assert proc.returncode == -sig, (
-                f"Expected returncode {-sig} (killed by {sig.name} default action), "
-                f"got {proc.returncode}"
-            )
+        # subprocess.returncode == -N when the process was killed by signal N
+        # with the default OS action.  Our re-raise pattern restores SIG_DFL
+        # and calls os.kill(), so the OS delivers the signal natively.
+        assert proc.returncode == -sig, (
+            f"Expected returncode {-sig} (killed by {sig.name} default action), "
+            f"got {proc.returncode}"
+        )
     finally:
         if proc.poll() is None:
             proc.kill()
