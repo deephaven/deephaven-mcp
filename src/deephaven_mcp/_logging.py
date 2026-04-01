@@ -47,16 +47,26 @@ _SIGNAL_HANDLERS_INSTALLED = False
 
 
 def _signal_handler(signum: int, frame: types.FrameType | None) -> None:
-    """Signal handler to log received signals that might cause server shutdown.
+    """Signal handler that logs received signals and then terminates the process.
 
     This handler is registered for all catchable termination signals to provide
     diagnostic information when the server process is being terminated. It logs
-    the signal number, name, and frame information to help with debugging shutdown-
-    related issues, particularly in containerized environments where signals may
-    be sent by orchestration systems.
+    the signal number, name, and frame information, then restores the default
+    OS handler for the signal and re-raises it so the process terminates
+    normally (with the correct exit status / core dump behavior).
 
-    The handler is defensive and catches its own exceptions to prevent the signal
-    handler from crashing during logging.
+    The re-raise pattern (restore default + os.kill) is used rather than
+    sys.exit() so that:
+    - The process exits with the conventional ``128 + signum`` status that
+      shells and process supervisors expect.
+    - Chaining to the previous OS default is preserved (e.g., SIGQUIT
+      produces a core dump as expected).
+    - The handler does not silently swallow the signal, which was the
+      root cause of orphaned high-CPU processes reported in production.
+
+    The handler is defensive and catches its own exceptions to prevent the
+    signal handler from crashing during logging.  Termination is always
+    attempted even when logging fails.
 
     Args:
         signum (int): The signal number that was received.
@@ -70,8 +80,8 @@ def _signal_handler(signum: int, frame: types.FrameType | None) -> None:
     try:
         logging.warning(f"[signal_handler] Received signal {signum} ({signal_name})")
         logging.warning(f"[signal_handler] Signal frame: {frame}")
-        logging.warning("[signal_handler] Process will likely terminate soon")
-        # Flush all handlers to ensure logs are written before potential termination
+        logging.warning(f"[signal_handler] Initiating shutdown due to signal {signum} ({signal_name})")
+        # Flush all handlers to ensure logs are written before termination
         for handler in logging.root.handlers:
             handler.flush()
     except Exception as e:
@@ -84,6 +94,18 @@ def _signal_handler(signum: int, frame: types.FrameType | None) -> None:
             sys.stderr.flush()
         except Exception:  # noqa: S110
             pass  # Nothing more we can do - last resort fallback
+
+    # Restore the default OS handler and re-raise the signal so the process
+    # terminates with the expected exit status.  This must happen outside the
+    # logging try/except so that termination is guaranteed even when logging
+    # has failed.
+    try:
+        signal.signal(signum, signal.SIG_DFL)
+        os.kill(os.getpid(), signum)
+    except Exception:  # noqa: S110
+        # Last-resort: if we cannot re-raise the signal (e.g., invalid signum
+        # in a test environment), fall back to a direct exit.
+        sys.exit(1)
 
 
 def _register_signal(signal_name: str, is_critical: bool) -> tuple[bool, str | None]:

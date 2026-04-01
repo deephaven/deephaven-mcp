@@ -222,17 +222,26 @@ def test_signal_handler_coverage(caplog):
             # Create a frame mock object
             frame = object()
 
-            # Now call the handler directly
-            _signal_handler(signal.SIGTERM, frame)
+            # Now call the handler directly - mock signal.signal and os.kill to prevent termination
+            with patch("deephaven_mcp._logging.signal") as mock_sig_mod, patch(
+                "deephaven_mcp._logging.os"
+            ) as mock_os:
+                mock_sig_mod.Signals = signal.Signals
+                mock_sig_mod.SIG_DFL = signal.SIG_DFL
+                _signal_handler(signal.SIGTERM, frame)
 
-            # Verify correct logging - handler uses warning level
-            assert mock_warning.call_count == 3, "Should log 3 warning messages"
-            messages = [args[0] for args, _ in mock_warning.call_args_list]
-            assert any(
-                "Received signal" in msg and "SIGTERM" in msg for msg in messages
-            )
-            assert any(f"Signal frame: {frame}" in msg for msg in messages)
-            assert any("Process will likely terminate soon" in msg for msg in messages)
+                # Verify correct logging - handler uses warning level
+                assert mock_warning.call_count == 3, "Should log 3 warning messages"
+                messages = [args[0] for args, _ in mock_warning.call_args_list]
+                assert any(
+                    "Received signal" in msg and "SIGTERM" in msg for msg in messages
+                )
+                assert any(f"Signal frame: {frame}" in msg for msg in messages)
+                assert any("Initiating shutdown" in msg and "SIGTERM" in msg for msg in messages)
+
+                # Verify the handler restored default and re-raised
+                mock_sig_mod.signal.assert_called_once_with(signal.SIGTERM, signal.SIG_DFL)
+                mock_os.kill.assert_called_once_with(mock_os.getpid.return_value, signal.SIGTERM)
 
 
 def test_signal_handler_logging_registration_failure(monkeypatch):
@@ -368,7 +377,11 @@ def test_signal_handler_defensive_logging_failure():
         with (
             patch.object(sys.stderr, "write") as mock_stderr_write,
             patch.object(sys.stderr, "flush") as mock_stderr_flush,
+            patch("deephaven_mcp._logging.signal") as mock_sig_mod,
+            patch("deephaven_mcp._logging.os") as mock_os,
         ):
+            mock_sig_mod.Signals = signal.Signals
+            mock_sig_mod.SIG_DFL = signal.SIG_DFL
             frame = None
 
             # Should not raise even though logging fails
@@ -384,6 +397,10 @@ def test_signal_handler_defensive_logging_failure():
             assert "Logging broken" in stderr_output
             mock_stderr_flush.assert_called()
 
+            # Verify termination was still attempted despite logging failure
+            mock_sig_mod.signal.assert_called_once_with(signal.SIGTERM, signal.SIG_DFL)
+            mock_os.kill.assert_called_once_with(mock_os.getpid.return_value, signal.SIGTERM)
+
 
 def test_signal_handler_defensive_stderr_failure():
     """Test that signal handler handles complete failure gracefully (even stderr fails)."""
@@ -393,31 +410,100 @@ def test_signal_handler_defensive_stderr_failure():
 
     # Mock everything to fail
     with patch("logging.warning", side_effect=Exception("Logging broken")):
-        with patch.object(sys.stderr, "write", side_effect=Exception("stderr broken")):
+        with (
+            patch.object(sys.stderr, "write", side_effect=Exception("stderr broken")),
+            patch("deephaven_mcp._logging.signal") as mock_sig_mod,
+            patch("deephaven_mcp._logging.os") as mock_os,
+        ):
+            mock_sig_mod.Signals = signal.Signals
+            mock_sig_mod.SIG_DFL = signal.SIG_DFL
             frame = None
 
             # Should not raise even though everything fails - last resort catch
             # This should complete without raising
             logging_mod._signal_handler(signal.SIGTERM, frame)
 
+            # Termination should still be attempted
+            mock_sig_mod.signal.assert_called_once_with(signal.SIGTERM, signal.SIG_DFL)
+            mock_os.kill.assert_called_once_with(mock_os.getpid.return_value, signal.SIGTERM)
+
 
 def test_signal_handler_unknown_signal_number():
     """Test that signal handler handles unknown signal numbers gracefully."""
     import deephaven_mcp._logging as logging_mod
 
-    # Mock logging to capture calls
-    with patch("logging.warning") as mock_warning:
+    # Mock logging to capture calls; mock signal/os to prevent termination
+    with (
+        patch("logging.warning") as mock_warning,
+        patch("deephaven_mcp._logging.signal") as mock_sig_mod,
+        patch("deephaven_mcp._logging.os") as mock_os,
+    ):
+        import signal
+
+        mock_sig_mod.Signals = signal.Signals
+        mock_sig_mod.SIG_DFL = signal.SIG_DFL
         frame = None
         # Use a nonsensical signal number
         fake_signum = 9999
 
-        # Should not raise
-        logging_mod._signal_handler(fake_signum, frame)
+        # Should not raise - os.kill will raise for invalid signum, falling back to sys.exit
+        with patch("sys.exit") as mock_exit:
+            mock_os.kill.side_effect = Exception("invalid signal")
+            logging_mod._signal_handler(fake_signum, frame)
+            mock_exit.assert_called_once_with(1)
 
         # Verify it logged with UNKNOWN
         assert mock_warning.call_count == 3
         messages = [args[0] for args, _ in mock_warning.call_args_list]
         assert any("9999" in msg and "UNKNOWN" in msg for msg in messages)
+
+
+def test_signal_handler_reraises_to_terminate():
+    """Test that _signal_handler restores the default handler and re-raises the signal.
+
+    This is a regression test for the bug where the handler only logged but never
+    terminated the process, causing orphaned high-CPU processes when the parent
+    MCP client exited (e.g., Claude Code sending SIGTERM).
+    """
+    import signal
+
+    import deephaven_mcp._logging as logging_mod
+
+    with (
+        patch("logging.warning"),
+        patch("deephaven_mcp._logging.signal") as mock_sig_mod,
+        patch("deephaven_mcp._logging.os") as mock_os,
+    ):
+        mock_sig_mod.Signals = signal.Signals
+        mock_sig_mod.SIG_DFL = signal.SIG_DFL
+
+        logging_mod._signal_handler(signal.SIGTERM, None)
+
+        # Must restore the default handler before re-raising
+        mock_sig_mod.signal.assert_called_once_with(signal.SIGTERM, signal.SIG_DFL)
+        # Must re-raise the signal so the process actually terminates
+        mock_os.kill.assert_called_once_with(mock_os.getpid.return_value, signal.SIGTERM)
+
+
+def test_signal_handler_reraises_fallback_on_kill_failure():
+    """Test that _signal_handler falls back to sys.exit(1) if os.kill raises."""
+    import signal
+
+    import deephaven_mcp._logging as logging_mod
+
+    with (
+        patch("logging.warning"),
+        patch("deephaven_mcp._logging.signal") as mock_sig_mod,
+        patch("deephaven_mcp._logging.os") as mock_os,
+        patch("sys.exit") as mock_exit,
+    ):
+        mock_sig_mod.Signals = signal.Signals
+        mock_sig_mod.SIG_DFL = signal.SIG_DFL
+        mock_os.kill.side_effect = OSError("permission denied")
+
+        logging_mod._signal_handler(signal.SIGTERM, None)
+
+        mock_exit.assert_called_once_with(1)
 
 
 def test_signal_handler_platform_specific_signals():
