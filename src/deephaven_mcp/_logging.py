@@ -27,9 +27,9 @@ def setup_logging() -> None:
     """
     Set up logging configuration for the application.
 
-    This function configures the root logger using the PYTHONLOGLEVEL environment variable to set the log level.
-    It should be called before any other imports in your main entrypoint to ensure that all loggers are set up correctly
-    and that no other modules configure logging before this setup takes effect.
+    Configures the root logger using the ``PYTHONLOGLEVEL`` environment variable to set
+    the log level.  Should be called before any other imports in the main entrypoint to
+    ensure all loggers are set up correctly and no other module configures logging first.
     """
     logging.basicConfig(
         level=os.getenv("PYTHONLOGLEVEL", "INFO"),
@@ -47,16 +47,26 @@ _SIGNAL_HANDLERS_INSTALLED = False
 
 
 def _signal_handler(signum: int, frame: types.FrameType | None) -> None:
-    """Signal handler to log received signals that might cause server shutdown.
+    """Signal handler that logs received signals and then terminates the process.
 
     This handler is registered for all catchable termination signals to provide
     diagnostic information when the server process is being terminated. It logs
-    the signal number, name, and frame information to help with debugging shutdown-
-    related issues, particularly in containerized environments where signals may
-    be sent by orchestration systems.
+    the signal number, name, and frame information, then restores the default
+    OS handler for the signal and re-raises it so the process terminates
+    normally (with the correct exit status / core dump behavior).
 
-    The handler is defensive and catches its own exceptions to prevent the signal
-    handler from crashing during logging.
+    The re-raise pattern (restore default + os.kill) is used rather than
+    sys.exit() so that:
+    - The process is terminated *by the signal* with the OS default action
+      (e.g., SIGQUIT produces a core dump as expected).  On POSIX,
+      ``waitpid`` and Python's ``subprocess.returncode`` report ``-signum``;
+      shells commonly display this as ``128 + signum``.
+    - The handler does not silently swallow the signal, which was the
+      root cause of orphaned high-CPU processes reported in production.
+
+    The handler is defensive and catches its own exceptions to prevent the
+    signal handler from crashing during logging.  Termination is always
+    attempted even when logging fails.
 
     Args:
         signum (int): The signal number that was received.
@@ -70,8 +80,10 @@ def _signal_handler(signum: int, frame: types.FrameType | None) -> None:
     try:
         logging.warning(f"[signal_handler] Received signal {signum} ({signal_name})")
         logging.warning(f"[signal_handler] Signal frame: {frame}")
-        logging.warning("[signal_handler] Process will likely terminate soon")
-        # Flush all handlers to ensure logs are written before potential termination
+        logging.warning(
+            f"[signal_handler] Initiating shutdown due to signal {signum} ({signal_name})"
+        )
+        # Flush all handlers to ensure logs are written before termination
         for handler in logging.root.handlers:
             handler.flush()
     except Exception as e:
@@ -85,6 +97,18 @@ def _signal_handler(signum: int, frame: types.FrameType | None) -> None:
         except Exception:  # noqa: S110
             pass  # Nothing more we can do - last resort fallback
 
+    # Restore the default OS handler and re-raise the signal so the process
+    # terminates with the expected exit status.  This must happen outside the
+    # logging try/except so that termination is guaranteed even when logging
+    # has failed.
+    try:
+        signal.signal(signum, signal.SIG_DFL)
+        os.kill(os.getpid(), signum)
+    except Exception:  # noqa: S110
+        # Last-resort: if we cannot re-raise the signal (e.g., invalid signum
+        # in a test environment), fall back to a direct exit.
+        sys.exit(1)
+
 
 def _register_signal(signal_name: str, is_critical: bool) -> tuple[bool, str | None]:
     """Register a signal handler for the given signal name.
@@ -95,7 +119,11 @@ def _register_signal(signal_name: str, is_critical: bool) -> tuple[bool, str | N
             available on this platform.
 
     Returns:
-        tuple[bool, str | None]: (success, error_message). If successful, error_message is None.
+        tuple[bool, str | None]: A ``(success, error_message)`` pair.  On success,
+        ``error_message`` is ``None``.  On failure, ``error_message`` is a human-readable
+        string describing the failure (e.g., ``"SIGTERM (not available on this platform)"``).
+        If the signal is unavailable and ``is_critical`` is ``False``, both ``success`` and
+        ``error_message`` are ``False``/``None`` (failure is silently ignored).
     """
     try:
         try:
@@ -107,9 +135,9 @@ def _register_signal(signal_name: str, is_critical: bool) -> tuple[bool, str | N
         signal.signal(sig, _signal_handler)
         return (True, None)
     except (OSError, RuntimeError, ValueError) as e:
-        # OSError: Signal not supported on this platform
-        # RuntimeError: Signal already registered by another handler
-        # ValueError: Invalid signal
+        # OSError:    Signal not supported on this platform
+        # RuntimeError: Signal already registered by another handler (main-thread check)
+        # ValueError:  Invalid signal number or called from a non-main thread
         return (False, f"{signal_name} ({e})")
 
 
@@ -234,7 +262,7 @@ def log_process_state(log_tag: str, context: str) -> None:
             fd_label = "open handles"
         logging.info(f"[{log_tag}] {prefix}{fd_label}: {fd_count}")
 
-        # Only log PID during startup
+        # Log PID for all contexts except shutdown
         if context != "shutdown":
             logging.info(f"[{log_tag}] Process PID: {process.pid}")
     except Exception as e:
@@ -253,10 +281,6 @@ def setup_signal_handler_logging() -> None:
       - SIGHUP: Hangup signal (terminal disconnect)
       - SIGQUIT: Quit signal (e.g., from Ctrl+\\ in terminal)
       - SIGABRT: Abort signal (from abort() calls or assertion failures)
-      - SIGUSR1: User-defined signal 1
-      - SIGUSR2: User-defined signal 2
-      - SIGALRM: Alarm clock signal
-      - SIGPIPE: Broken pipe signal
 
     **Windows signals:**
       - SIGTERM: Termination signal (limited use on Windows)
@@ -264,11 +288,18 @@ def setup_signal_handler_logging() -> None:
       - SIGBREAK: Break signal (Ctrl+Break on Windows)
       - SIGABRT: Abort signal
 
+    **NOT registered (not termination signals):**
+      - SIGUSR1, SIGUSR2: User-defined signals — reserved for application/library use.
+      - SIGALRM: Alarm clock — used by libraries (e.g., ``threading``, ``multiprocessing``).
+      - SIGPIPE: Broken pipe — Python intentionally ignores this to surface ``BrokenPipeError``;
+        registering it with a terminating handler would cause unexpected exits on any broken pipe.
+
     **NOT catchable (handled by OS directly):**
       - SIGKILL: Immediate termination (cannot be caught)
       - SIGSTOP: Stop process (cannot be caught)
 
-    The handlers log the signal number, name, and frame information before the process terminates.
+    The handlers log the signal number, name, and frame information and then terminate the
+    process by restoring the OS default handler and re-raising the signal (see ``_signal_handler``).
     This is particularly useful for debugging unexpected shutdowns in containerized environments,
     Cloud Run instances, or any environment where signals may be sent by orchestration systems.
 
@@ -303,14 +334,10 @@ def setup_signal_handler_logging() -> None:
         ("SIGTERM", True),  # Standard termination
         ("SIGINT", True),  # Keyboard interrupt
         ("SIGABRT", True),  # Abort signal
-        # Unix/Linux/macOS signals
+        # Unix/Linux/macOS termination signals
         ("SIGHUP", False),  # Hangup
         ("SIGQUIT", False),  # Quit
-        ("SIGUSR1", False),  # User-defined 1
-        ("SIGUSR2", False),  # User-defined 2
-        ("SIGALRM", False),  # Alarm clock
-        ("SIGPIPE", False),  # Broken pipe
-        # Windows-specific
+        # Windows-specific termination signal
         ("SIGBREAK", False),  # Ctrl+Break on Windows
     ]
 
