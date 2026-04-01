@@ -44,6 +44,7 @@ _SIGNAL_HANDLER_SCRIPT = textwrap.dedent("""
 
 _STARTUP_TIMEOUT = 5.0  # seconds to wait for subprocess "ready"
 _EXIT_TIMEOUT = 5.0  # seconds to wait for subprocess to exit after signal
+_KILL_WAIT_TIMEOUT = 5.0  # seconds to wait for subprocess to exit after SIGKILL
 
 
 def _start_subprocess() -> "subprocess.Popen[bytes]":
@@ -57,7 +58,8 @@ def _start_subprocess() -> "subprocess.Popen[bytes]":
         subprocess.Popen[bytes]: The running subprocess, with stdout/stderr pipes open.
 
     Raises:
-        RuntimeError: If the subprocess exits before printing ``ready``.
+        RuntimeError: If the subprocess exits before printing ``ready``, or if it
+            prints an unexpected line instead of ``ready``.
         TimeoutError: If ``ready`` is not received within ``_STARTUP_TIMEOUT`` seconds.
     """
     proc = subprocess.Popen(
@@ -80,7 +82,10 @@ def _start_subprocess() -> "subprocess.Popen[bytes]":
 
     if not ready_event.wait(timeout=_STARTUP_TIMEOUT):
         proc.kill()
-        proc.wait()
+        try:
+            proc.communicate(timeout=_KILL_WAIT_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            pass  # Process is stuck even after SIGKILL; abandon it
         raise TimeoutError(
             f"Subprocess did not print 'ready' within {_STARTUP_TIMEOUT}s"
         )
@@ -93,7 +98,10 @@ def _start_subprocess() -> "subprocess.Popen[bytes]":
 
     if first_line[0].strip() != b"ready":
         proc.kill()
-        proc.wait()
+        try:
+            proc.communicate(timeout=_KILL_WAIT_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            pass  # Process is stuck even after SIGKILL; abandon it
         raise RuntimeError(
             f"Subprocess printed unexpected startup line: {first_line[0]!r}"
         )
@@ -156,4 +164,7 @@ def test_signal_handler_terminates_process(sig: signal.Signals) -> None:
     finally:
         if proc.poll() is None:
             proc.kill()
-            proc.wait()
+            try:
+                proc.communicate(timeout=_KILL_WAIT_TIMEOUT)
+            except subprocess.TimeoutExpired:
+                pass  # Process is stuck even after SIGKILL; abandon it
