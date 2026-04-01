@@ -154,6 +154,11 @@ def test_signal_handler_terminates_process(sig: signal.Signals) -> None:
                 f"Signal handler is not terminating the process."
             )
 
+        # Drain and close the pipes to avoid file descriptor leaks across
+        # parametrized runs.  The process has already exited so communicate()
+        # returns immediately.
+        proc.communicate()
+
         # subprocess.returncode == -N when the process was killed by signal N
         # with the default OS action.  Our re-raise pattern restores SIG_DFL
         # and calls os.kill(), so the OS delivers the signal natively.

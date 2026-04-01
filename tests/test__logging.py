@@ -561,14 +561,19 @@ def test_signal_handler_platform_specific_signals():
         assert "SIGINT" in registration_msg
         assert "SIGABRT" in registration_msg
 
-        # Platform-specific signals may or may not be present
+        # Platform-specific termination signals may or may not be present
         # On Unix-like systems (Linux/macOS), these should be present
         if hasattr(signal, "SIGHUP"):
             assert "SIGHUP" in registration_msg
         if hasattr(signal, "SIGQUIT"):
             assert "SIGQUIT" in registration_msg
-        if hasattr(signal, "SIGUSR1"):
-            assert "SIGUSR1" in registration_msg
+
+        # Non-termination signals must NOT be registered (they were intentionally
+        # excluded to avoid unexpected process exits — see setup_signal_handler_logging).
+        assert "SIGUSR1" not in registration_msg
+        assert "SIGUSR2" not in registration_msg
+        assert "SIGALRM" not in registration_msg
+        assert "SIGPIPE" not in registration_msg
 
 
 def test_signal_handler_multiple_signals_registered():

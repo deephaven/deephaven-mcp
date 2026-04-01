@@ -27,9 +27,9 @@ def setup_logging() -> None:
     """
     Set up logging configuration for the application.
 
-    This function configures the root logger using the PYTHONLOGLEVEL environment variable to set the log level.
-    It should be called before any other imports in your main entrypoint to ensure that all loggers are set up correctly
-    and that no other modules configure logging before this setup takes effect.
+    Configures the root logger using the ``PYTHONLOGLEVEL`` environment variable to set
+    the log level.  Should be called before any other imports in the main entrypoint to
+    ensure all loggers are set up correctly and no other module configures logging first.
     """
     logging.basicConfig(
         level=os.getenv("PYTHONLOGLEVEL", "INFO"),
@@ -119,7 +119,11 @@ def _register_signal(signal_name: str, is_critical: bool) -> tuple[bool, str | N
             available on this platform.
 
     Returns:
-        tuple[bool, str | None]: (success, error_message). If successful, error_message is None.
+        tuple[bool, str | None]: A ``(success, error_message)`` pair.  On success,
+        ``error_message`` is ``None``.  On failure, ``error_message`` is a human-readable
+        string describing the failure (e.g., ``"SIGTERM (not available on this platform)"``).
+        If the signal is unavailable and ``is_critical`` is ``False``, both ``success`` and
+        ``error_message`` are ``False``/``None`` (failure is silently ignored).
     """
     try:
         try:
@@ -277,16 +281,18 @@ def setup_signal_handler_logging() -> None:
       - SIGHUP: Hangup signal (terminal disconnect)
       - SIGQUIT: Quit signal (e.g., from Ctrl+\\ in terminal)
       - SIGABRT: Abort signal (from abort() calls or assertion failures)
-      - SIGUSR1: User-defined signal 1
-      - SIGUSR2: User-defined signal 2
-      - SIGALRM: Alarm clock signal
-      - SIGPIPE: Broken pipe signal
 
     **Windows signals:**
       - SIGTERM: Termination signal (limited use on Windows)
       - SIGINT: Keyboard interrupt (Ctrl+C)
       - SIGBREAK: Break signal (Ctrl+Break on Windows)
       - SIGABRT: Abort signal
+
+    **NOT registered (not termination signals):**
+      - SIGUSR1, SIGUSR2: User-defined signals — reserved for application/library use.
+      - SIGALRM: Alarm clock — used by libraries (e.g., ``threading``, ``multiprocessing``).
+      - SIGPIPE: Broken pipe — Python intentionally ignores this to surface ``BrokenPipeError``;
+        registering it with a terminating handler would cause unexpected exits on any broken pipe.
 
     **NOT catchable (handled by OS directly):**
       - SIGKILL: Immediate termination (cannot be caught)
@@ -328,14 +334,10 @@ def setup_signal_handler_logging() -> None:
         ("SIGTERM", True),  # Standard termination
         ("SIGINT", True),  # Keyboard interrupt
         ("SIGABRT", True),  # Abort signal
-        # Unix/Linux/macOS signals
+        # Unix/Linux/macOS termination signals
         ("SIGHUP", False),  # Hangup
         ("SIGQUIT", False),  # Quit
-        ("SIGUSR1", False),  # User-defined 1
-        ("SIGUSR2", False),  # User-defined 2
-        ("SIGALRM", False),  # Alarm clock
-        ("SIGPIPE", False),  # Broken pipe
-        # Windows-specific
+        # Windows-specific termination signal
         ("SIGBREAK", False),  # Ctrl+Break on Windows
     ]
 
