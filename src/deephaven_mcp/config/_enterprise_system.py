@@ -171,7 +171,7 @@ def validate_enterprise_systems_config(enterprise_systems_map: Any | None) -> No
 
         'private_key' auth_type:
             - private_key_path (str): Path to the Deephaven private keypair file (proprietary format,
-              typically named priv-<keyname>.base64.txt; provided by your IT/security team)
+              typically named `priv-<keyname>.base64.txt`; provided by your IT/security team)
 
     Optional Fields (per system):
         - connection_timeout (int | float): Timeout in seconds for initial connection (default: 10.0)
