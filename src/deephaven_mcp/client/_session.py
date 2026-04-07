@@ -975,6 +975,42 @@ class BaseSession(ClientObjectWrapper[T], Generic[T]):
             _LOGGER.error(f"[CoreSession:tables] Failed to list tables: {e}")
             raise QueryError(f"Failed to list tables: {e}") from e
 
+    async def widgets(self) -> list[dict[str, str | None]]:
+        """
+        Asynchronously retrieve the names and types of all exportable objects in the session.
+
+        Returns a list of dicts, each containing `name` and `type` keys, representing
+        every exportable object (tables, widgets, figures, etc.) currently bound in the
+        Deephaven global namespace.
+
+        Returns:
+            list[dict[str, str | None]]: List of dicts with ``name`` and ``type`` keys.
+
+        Raises:
+            DeephavenConnectionError: If a network or connection error occurs.
+            QueryError: If the operation fails due to a server-side error.
+        """
+        _LOGGER.debug("[CoreSession:widgets] Called")
+        try:
+
+            def _get_widgets() -> list[dict[str, str | None]]:
+                return [
+                    {"name": name, "type": obj.type}
+                    for name, obj in self.wrapped.exportable_objects.items()
+                ]
+
+            return await asyncio.to_thread(_get_widgets)
+        except ConnectionError as e:
+            _LOGGER.error(
+                f"[CoreSession:widgets] Connection error listing widgets: {e}"
+            )
+            raise DeephavenConnectionError(
+                f"Connection error listing widgets: {e}"
+            ) from e
+        except Exception as e:
+            _LOGGER.error(f"[CoreSession:widgets] Failed to list widgets: {e}")
+            raise QueryError(f"Failed to list widgets: {e}") from e
+
     async def is_alive(self) -> bool:
         """
         Asynchronously check if the session is still alive.

@@ -75,6 +75,8 @@ _ALLOWED_COMMUNITY_SESSION_FIELDS: dict[str, type | tuple[type, ...]] = {
     "tls_root_certs": (str, types.NoneType),
     "client_cert_chain": (str, types.NoneType),
     "client_private_key": (str, types.NoneType),
+    "ui_url_base": str,
+    "widget_path": str,
 }
 """
 Dictionary of allowed community session configuration fields and their expected types.
