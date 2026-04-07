@@ -432,7 +432,7 @@ class CorePlusSessionFactory(
 
         - For 'private_key' authentication:
             * 'private_key_path': The path to the Deephaven private keypair file (proprietary format,
-              typically named priv-<keyname>.base64.txt; provided by your IT/security team)
+              typically named `priv-<keyname>.base64.txt`; provided by your IT/security team)
 
         - For 'saml' authentication:
             * No additional fields required, but SAML must be configured on server
