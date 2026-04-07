@@ -697,9 +697,10 @@ The `session_creation` key enables dynamic creation of Deephaven Community Core 
       "saml_enterprise": {
         "connection_json_url": "https://enterprise.example.com:8000/iris/connection.json",
         // Private key authentication (commonly used with SAML/SSO setups)
-        // Your IT/security team typically provides the private key file
+        // Your IT/security team provides the private keypair file (Deephaven proprietary format)
+        // Typically named: priv-<keyname>.base64.txt
         "auth_type": "private_key",
-        "private_key_path": "/absolute/path/to/your/private_key.pem"  // Must be absolute!
+        "private_key_path": "/absolute/path/to/priv-mykeyname.base64.txt"  // Must be absolute!
       }
     }
   }
@@ -719,7 +720,7 @@ The `enterprise` key contains a `"systems"` dictionary mapping custom system nam
 | `username` | string | `auth_type` = `"password"` | Username for authentication |
 | `password` | string | `auth_type` = `"password"` | Password (use `password_env_var` instead for security) |
 | `password_env_var` | string | `auth_type` = `"password"` | Environment variable containing the password (recommended) |
-| `private_key_path` | string | `auth_type` = `"private_key"` | Absolute path to private key file |
+| `private_key_path` | string | `auth_type` = `"private_key"` | Absolute path to the Deephaven private keypair file (proprietary format, typically named `priv-<keyname>.base64.txt`; provided by your IT/security team) |
 | `connection_timeout` | integer \| float | Optional | Timeout in seconds for establishing connection to Enterprise system (default: 10.0) |
 | `session_creation` | object | Optional | Configuration for creating enterprise sessions. If omitted, session creation tools are unavailable |
 | `session_creation.max_concurrent_sessions` | integer | Optional | Maximum concurrent sessions (default: 5). Set to 0 to disable session creation |
@@ -888,7 +889,7 @@ Here's a complete example showing both Community and Enterprise configurations:
       "data_science_env": {
         "connection_json_url": "https://data-science.enterprise.example.com/iris/connection.json",
         "auth_type": "private_key",
-        "private_key_path": "/path/to/your/private_key.pem"  // From your IT team
+        "private_key_path": "/path/to/priv-mykeyname.base64.txt"  // Proprietary keypair file from your IT team
       }
     }
   }

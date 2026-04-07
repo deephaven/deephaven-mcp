@@ -431,7 +431,8 @@ class CorePlusSessionFactory(
             * Optional 'effective_user': User to operate as after authentication
 
         - For 'private_key' authentication:
-            * 'private_key_path': The path to the private key file
+            * 'private_key_path': The path to the Deephaven private keypair file (proprietary format,
+              typically named `priv-<keyname>.base64.txt`; provided by your IT/security team)
 
         - For 'saml' authentication:
             * No additional fields required, but SAML must be configured on server
@@ -492,7 +493,7 @@ class CorePlusSessionFactory(
                 config = {
                     "connection_json_url": "https://example.deephaven.io/iris/connection.json",
                     "auth_type": "private_key",
-                    "private_key_path": "/path/to/private_key.pem"
+                    "private_key_path": "/path/to/priv-mykeyname.base64.txt"
                 }
 
                 # Create and authenticate in one step
@@ -1471,8 +1472,8 @@ class CorePlusSessionFactory(
                 # Create the session factory
                 factory = await CorePlusSessionFactory.from_url("https://myserver.example.com/iris/connection.json")
 
-                # Authenticate using a private key file
-                await factory.private_key("/path/to/private_key.pem")
+                # Authenticate using a private keypair file
+                await factory.private_key("/path/to/priv-mykeyname.base64.txt")
 
                 # Use the authenticated session factory
                 session = await factory.connect_to_new_worker()
@@ -1482,11 +1483,13 @@ class CorePlusSessionFactory(
             ```python
             import io
 
-            # Read key from somewhere else (e.g., environment variable, secrets manager)
-            key_data = "-----BEGIN RSA PRIVATE KEY-----\n..."
+            # Read keypair data from somewhere else (e.g., secrets manager)
+            # The content is in Deephaven's proprietary base64 keypair format,
+            # the same format found in priv-<keyname>.base64.txt files.
+            key_data = "<base64-encoded-keypair-content>"
             key_io = io.StringIO(key_data)
 
-            # Authenticate using the in-memory key
+            # Authenticate using the in-memory keypair data
             await factory.private_key(key_io)
             ```
 

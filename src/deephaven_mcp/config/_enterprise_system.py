@@ -170,7 +170,8 @@ def validate_enterprise_systems_config(enterprise_systems_map: Any | None) -> No
             - password (str) XOR password_env_var (str): Mutually exclusive credential options
 
         'private_key' auth_type:
-            - private_key_path (str): Path to private key file
+            - private_key_path (str): Path to the Deephaven private keypair file (proprietary format,
+              typically named `priv-<keyname>.base64.txt`; provided by your IT/security team)
 
     Optional Fields (per system):
         - connection_timeout (int | float): Timeout in seconds for initial connection (default: 10.0)
@@ -211,7 +212,7 @@ def validate_enterprise_systems_config(enterprise_systems_map: Any | None) -> No
             "development": {
                 "connection_json_url": "https://dev.deephaven.io/iris/connection.json",
                 "auth_type": "private_key",
-                "private_key_path": "/opt/deephaven/keys/dev.pem"
+                "private_key_path": "/opt/deephaven/keys/priv-dev.base64.txt"
             }
         }
 
