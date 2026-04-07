@@ -1472,7 +1472,7 @@ class CorePlusSessionFactory(
                 # Create the session factory
                 factory = await CorePlusSessionFactory.from_url("https://myserver.example.com/iris/connection.json")
 
-                # Authenticate using a private key file
+                # Authenticate using a private keypair file
                 await factory.private_key("/path/to/priv-mykeyname.base64.txt")
 
                 # Use the authenticated session factory
