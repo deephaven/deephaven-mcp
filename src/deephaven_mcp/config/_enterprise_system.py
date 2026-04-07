@@ -211,7 +211,7 @@ def validate_enterprise_systems_config(enterprise_systems_map: Any | None) -> No
             "development": {
                 "connection_json_url": "https://dev.deephaven.io/iris/connection.json",
                 "auth_type": "private_key",
-                "private_key_path": "/opt/deephaven/keys/dev.pem"
+                "private_key_path": "/opt/deephaven/keys/priv-dev.base64.txt"
             }
         }
 

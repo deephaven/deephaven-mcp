@@ -492,7 +492,7 @@ class CorePlusSessionFactory(
                 config = {
                     "connection_json_url": "https://example.deephaven.io/iris/connection.json",
                     "auth_type": "private_key",
-                    "private_key_path": "/path/to/private_key.pem"
+                    "private_key_path": "/path/to/priv-mykeyname.base64.txt"
                 }
 
                 # Create and authenticate in one step
@@ -1472,7 +1472,7 @@ class CorePlusSessionFactory(
                 factory = await CorePlusSessionFactory.from_url("https://myserver.example.com/iris/connection.json")
 
                 # Authenticate using a private key file
-                await factory.private_key("/path/to/private_key.pem")
+                await factory.private_key("/path/to/priv-mykeyname.base64.txt")
 
                 # Use the authenticated session factory
                 session = await factory.connect_to_new_worker()
