@@ -809,7 +809,7 @@ If the `"enterprise"` key is present, it must be a dictionary. Each individual e
 - `connection_json_url` (string, **required**): The URL pointing to the `connection.json` file of the Deephaven Enterprise server. This file provides necessary connection details for the client. For standard HTTPS port 443, no port is needed (e.g., `"https://enterprise.example.com/iris/connection.json"`). For non-standard ports, include the port number explicitly (e.g., `"https://enterprise.example.com:8123/iris/connection.json"`)
 - `auth_type` (string, **required**): Specifies the authentication method to use. Must be one of the following values:
   - `"password"`: Authenticate using a username and password.
-  - `"private_key"`: Authenticate using a private key (e.g., for service accounts or specific SAML/OAuth setups requiring a private key).
+  - `"private_key"`: Authenticate using a Deephaven private keypair file (proprietary format, commonly used with SAML/SSO setups).
     Only configuration keys relevant to the selected `auth_type` (and the general `connection_json_url`) should be included. Extraneous keys will be ignored by the application but will generate a warning message in the logs, indicating which keys are unexpected for the chosen authentication method.
 
 - Conditional Authentication Fields (required based on `auth_type`):
@@ -818,7 +818,7 @@ If the `"enterprise"` key is present, it must be a dictionary. Each individual e
     - And either `password` (string): The password itself.
     - **OR** `password_env_var` (string): The name of an environment variable that holds the password. Using an environment variable is recommended. If the `password` field is used directly, its value will be redacted in application logs.
   - If `auth_type` is `"private_key"`:
-    - `private_key_path` (string, **required**): The absolute file system path to the private key file (e.g., a `.pem` file).
+    - `private_key_path` (string, **required**): The absolute file system path to the Deephaven private keypair file (proprietary format, typically named `priv-<keyname>.base64.txt`; provided by your IT/security team — this is **not** a standard PEM file).
 
 - Optional Connection Settings:
   - `connection_timeout` (integer | float, **optional, default: 10.0**): Timeout in seconds for establishing connection to the Enterprise system.
@@ -876,7 +876,7 @@ If the `"enterprise"` key is present, it must be a dictionary. Each individual e
       "analytics_private_key_auth": {
         "connection_json_url": "https://analytics.dept.com/iris/connection.json",
         "auth_type": "private_key",
-        "private_key_path": "/secure/keys/analytics_service_account.pem",
+        "private_key_path": "/secure/keys/priv-analytics.base64.txt",  // Proprietary keypair file from your IT team
         "session_creation": {
           "max_concurrent_sessions": 5,  // Higher limit for production
           "defaults": {

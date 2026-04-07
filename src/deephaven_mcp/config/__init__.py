@@ -114,7 +114,7 @@ It may contain the following top-level keys:
                         - `password_env_var` (str, optional): Environment variable for the password.
                           (Note: `password` and `password_env_var` are mutually exclusive.)
                     * "private_key":
-                        - `private_key_path` (str, required): The path to the private key file.
+                        - `private_key_path` (str, required): The path to the Deephaven private keypair file (proprietary format, typically named `priv-<keyname>.base64.txt`; provided by your IT/security team - this is not a standard PEM file).
                 - `session_creation` (dict, optional): Configuration for creating enterprise sessions.
                     * `max_concurrent_sessions` (int, optional): Maximum concurrent sessions (default: 5). Set to 0 to disable session creation.
                     * `defaults` (dict, optional): Default parameters for session creation:
@@ -1020,7 +1020,7 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
                               - 'password_env_var' (str, optional): Environment variable for the password.
                                 (Note: `password` and `password_env_var` are mutually exclusive.)
                           * "private_key":
-                              - 'private_key_path' (str, required): The path to the private key file.
+                              - 'private_key_path' (str, required): The path to the Deephaven private keypair file (proprietary format, typically named `priv-<keyname>.base64.txt`; provided by your IT/security team - this is not a standard PEM file).
 
     Validation Rules:
       - Only known keys are allowed at each level of nesting.
