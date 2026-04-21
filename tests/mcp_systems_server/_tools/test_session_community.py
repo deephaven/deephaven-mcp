@@ -48,7 +48,7 @@ async def test_session_community_create_success():
         }
     }
 
-    full_config = {"community": community_config}
+    full_config = community_config
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
     mock_session_registry.add_session = AsyncMock()
@@ -118,7 +118,7 @@ async def test_session_community_create_not_configured():
     mock_session_registry = MagicMock()
 
     # No session_creation config
-    full_config = {"community": {}}
+    full_config = {}
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
 
     context = MockContext(
@@ -153,7 +153,7 @@ async def test_session_community_create_sessions_disabled():
         }
     }
 
-    full_config = {"community": community_config}
+    full_config = community_config
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
     mock_session_registry.add_session = AsyncMock()
@@ -225,7 +225,7 @@ async def test_session_community_create_max_sessions_reached():
         }
     }
 
-    full_config = {"community": community_config}
+    full_config = community_config
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
     mock_session_registry.count_added_sessions = AsyncMock(return_value=2)
 
@@ -261,7 +261,7 @@ async def test_session_community_create_launch_failure():
         }
     }
 
-    full_config = {"community": community_config}
+    full_config = community_config
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
     mock_session_registry.get = AsyncMock(
@@ -465,11 +465,9 @@ async def test_session_community_create_case_insensitive_params():
     # Mock config with session creation enabled
     mock_config_manager.get_config = AsyncMock(
         return_value={
-            "community": {
-                "session_creation": {
-                    "defaults": {},
-                    "max_concurrent_sessions": 5,
-                }
+            "session_creation": {
+                "defaults": {},
+                "max_concurrent_sessions": 5,
             }
         }
     )
@@ -525,11 +523,9 @@ async def test_session_community_create_validates_programming_language_with_pyth
 
     mock_config_manager.get_config = AsyncMock(
         return_value={
-            "community": {
-                "session_creation": {
-                    "defaults": {},
-                    "max_concurrent_sessions": 5,
-                }
+            "session_creation": {
+                "defaults": {},
+                "max_concurrent_sessions": 5,
             }
         }
     )
@@ -570,11 +566,9 @@ async def test_session_community_create_validates_docker_image_with_python():
 
     mock_config_manager.get_config = AsyncMock(
         return_value={
-            "community": {
-                "session_creation": {
-                    "defaults": {},
-                    "max_concurrent_sessions": 5,
-                }
+            "session_creation": {
+                "defaults": {},
+                "max_concurrent_sessions": 5,
             }
         }
     )
@@ -615,11 +609,9 @@ async def test_session_community_create_validates_docker_memory_limit_with_pytho
 
     mock_config_manager.get_config = AsyncMock(
         return_value={
-            "community": {
-                "session_creation": {
-                    "defaults": {},
-                    "max_concurrent_sessions": 5,
-                }
+            "session_creation": {
+                "defaults": {},
+                "max_concurrent_sessions": 5,
             }
         }
     )
@@ -660,11 +652,9 @@ async def test_session_community_create_validates_docker_cpu_limit_with_python()
 
     mock_config_manager.get_config = AsyncMock(
         return_value={
-            "community": {
-                "session_creation": {
-                    "defaults": {},
-                    "max_concurrent_sessions": 5,
-                }
+            "session_creation": {
+                "defaults": {},
+                "max_concurrent_sessions": 5,
             }
         }
     )
@@ -705,11 +695,9 @@ async def test_session_community_create_validates_docker_volumes_with_python():
 
     mock_config_manager.get_config = AsyncMock(
         return_value={
-            "community": {
-                "session_creation": {
-                    "defaults": {},
-                    "max_concurrent_sessions": 5,
-                }
+            "session_creation": {
+                "defaults": {},
+                "max_concurrent_sessions": 5,
             }
         }
     )
@@ -750,11 +738,9 @@ async def test_session_community_create_validates_python_venv_path_with_docker()
 
     mock_config_manager.get_config = AsyncMock(
         return_value={
-            "community": {
-                "session_creation": {
-                    "defaults": {},
-                    "max_concurrent_sessions": 5,
-                }
+            "session_creation": {
+                "defaults": {},
+                "max_concurrent_sessions": 5,
             }
         }
     )
@@ -795,11 +781,9 @@ async def test_session_community_create_validates_mutually_exclusive_params():
 
     mock_config_manager.get_config = AsyncMock(
         return_value={
-            "community": {
-                "session_creation": {
-                    "defaults": {},
-                    "max_concurrent_sessions": 5,
-                }
+            "session_creation": {
+                "defaults": {},
+                "max_concurrent_sessions": 5,
             }
         }
     )
@@ -1088,7 +1072,7 @@ async def test_session_community_create_explicit_docker_image():
         }
     }
 
-    full_config = {"community": community_config}
+    full_config = community_config
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
     mock_session_registry.add_session = AsyncMock()
@@ -1160,7 +1144,7 @@ async def test_session_community_create_groovy_programming_language():
         }
     }
 
-    full_config = {"community": community_config}
+    full_config = community_config
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
     mock_session_registry.add_session = AsyncMock()
@@ -1232,7 +1216,7 @@ async def test_session_community_create_unsupported_programming_language():
         }
     }
 
-    full_config = {"community": community_config}
+    full_config = community_config
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
     mock_session_registry.get = AsyncMock(
@@ -1275,7 +1259,7 @@ async def test_session_community_create_groovy_from_config_defaults():
         }
     }
 
-    full_config = {"community": community_config}
+    full_config = community_config
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
     mock_session_registry.add_session = AsyncMock()
@@ -1348,7 +1332,7 @@ async def test_session_community_create_invalid_config_programming_language():
         }
     }
 
-    full_config = {"community": community_config}
+    full_config = community_config
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
     mock_session_registry.get = AsyncMock(
@@ -1392,7 +1376,7 @@ async def test_session_community_create_missing_auth_token_env_var():
         }
     }
 
-    full_config = {"community": community_config}
+    full_config = community_config
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
     mock_session_registry.get = AsyncMock(
@@ -1427,11 +1411,9 @@ async def test_session_community_credentials_disabled_by_default():
 
     # Config without security section (defaults to mode='none')
     config = {
-        "community": {
-            "session_creation": {
-                "max_concurrent_sessions": 5,
-                "defaults": {},
-            }
+        "session_creation": {
+            "max_concurrent_sessions": 5,
+            "defaults": {},
         }
     }
 
@@ -1464,7 +1446,7 @@ async def test_session_community_credentials_explicit_none():
     mock_session_registry = MagicMock()
 
     # Config with explicit mode='none'
-    config = {"security": {"community": {"credential_retrieval_mode": "none"}}}
+    config = {"security": {"credential_retrieval_mode": "none"}}
 
     mock_config_manager.get_config = AsyncMock(return_value=config)
 
@@ -1492,7 +1474,7 @@ async def test_session_community_credentials_dynamic_success():
     mock_session_registry = MagicMock()
 
     # Config with mode='dynamic_only'
-    config = {"security": {"community": {"credential_retrieval_mode": "dynamic_only"}}}
+    config = {"security": {"credential_retrieval_mode": "dynamic_only"}}
 
     mock_config_manager.get_config = AsyncMock(return_value=config)
 
@@ -1545,7 +1527,7 @@ async def test_session_community_credentials_anonymous_auth():
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock()
 
-    config = {"security": {"community": {"credential_retrieval_mode": "all"}}}
+    config = {"security": {"credential_retrieval_mode": "all"}}
 
     mock_config_manager.get_config = AsyncMock(return_value=config)
 
@@ -1616,7 +1598,7 @@ async def test_session_community_credentials_session_not_found():
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock()
 
-    config = {"security": {"community": {"credential_retrieval_mode": "all"}}}
+    config = {"security": {"credential_retrieval_mode": "all"}}
 
     mock_config_manager.get_config = AsyncMock(return_value=config)
 
@@ -1647,7 +1629,7 @@ async def test_session_community_credentials_not_dynamic_session():
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock()
 
-    config = {"security": {"community": {"credential_retrieval_mode": "all"}}}
+    config = {"security": {"credential_retrieval_mode": "all"}}
 
     mock_config_manager.get_config = AsyncMock(return_value=config)
 
@@ -1680,7 +1662,7 @@ async def test_session_community_credentials_static_session():
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock()
 
-    config = {"security": {"community": {"credential_retrieval_mode": "static_only"}}}
+    config = {"security": {"credential_retrieval_mode": "static_only"}}
 
     mock_config_manager.get_config = AsyncMock(return_value=config)
 
@@ -1726,7 +1708,7 @@ async def test_session_community_credentials_static_session_anonymous():
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock()
 
-    config = {"security": {"community": {"credential_retrieval_mode": "all"}}}
+    config = {"security": {"credential_retrieval_mode": "all"}}
 
     mock_config_manager.get_config = AsyncMock(return_value=config)
 
@@ -1769,7 +1751,7 @@ async def test_session_community_credentials_invalid_session_id():
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock()
 
-    config = {"security": {"community": {"credential_retrieval_mode": "all"}}}
+    config = {"security": {"credential_retrieval_mode": "all"}}
 
     mock_config_manager.get_config = AsyncMock(return_value=config)
 
@@ -1825,7 +1807,7 @@ async def test_session_community_credentials_dynamic_only_denies_static():
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock()
 
-    config = {"security": {"community": {"credential_retrieval_mode": "dynamic_only"}}}
+    config = {"security": {"credential_retrieval_mode": "dynamic_only"}}
 
     mock_config_manager.get_config = AsyncMock(return_value=config)
 
@@ -1863,7 +1845,7 @@ async def test_session_community_credentials_static_only_denies_dynamic():
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock()
 
-    config = {"security": {"community": {"credential_retrieval_mode": "static_only"}}}
+    config = {"security": {"credential_retrieval_mode": "static_only"}}
 
     mock_config_manager.get_config = AsyncMock(return_value=config)
 
@@ -1912,7 +1894,7 @@ async def test_session_community_credentials_all_allows_both():
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock()
 
-    config = {"security": {"community": {"credential_retrieval_mode": "all"}}}
+    config = {"security": {"credential_retrieval_mode": "all"}}
 
     mock_config_manager.get_config = AsyncMock(return_value=config)
 
@@ -2116,7 +2098,7 @@ async def test_session_community_create_groovy_session_type_in_config():
         }
     }
 
-    full_config = {"community": community_config}
+    full_config = community_config
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
     mock_session_registry.add_session = AsyncMock()
@@ -2213,7 +2195,7 @@ async def test_session_community_create_python_session_type_in_config():
         }
     }
 
-    full_config = {"community": community_config}
+    full_config = community_config
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
     mock_session_registry.add_session = AsyncMock()
@@ -2297,7 +2279,7 @@ async def test_session_community_create_default_session_type_in_config():
         }
     }
 
-    full_config = {"community": community_config}
+    full_config = community_config
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
     mock_session_registry.add_session = AsyncMock()

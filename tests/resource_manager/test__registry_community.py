@@ -25,11 +25,9 @@ def mock_community_config_manager():
     mock = AsyncMock(spec=config.ConfigManager)
     mock.get_config = AsyncMock(
         return_value={
-            "community": {
-                "sessions": {
-                    "worker1": {"host": "localhost", "port": 10001},
-                    "worker2": {"host": "localhost", "port": 10002},
-                }
+            "sessions": {
+                "worker1": {"host": "localhost", "port": 10001},
+                "worker2": {"host": "localhost", "port": 10002},
             }
         }
     )
@@ -82,7 +80,7 @@ async def test_community_registry_initialize(
 async def test_community_registry_initialize_empty_sessions():
     """initialize() handles a config with no sessions gracefully."""
     empty_config_manager = AsyncMock(spec=config.ConfigManager)
-    empty_config_manager.get_config = AsyncMock(return_value={"community": {"sessions": {}}})
+    empty_config_manager.get_config = AsyncMock(return_value={"sessions": {}})
 
     registry = CommunitySessionRegistry()
     await registry.initialize(empty_config_manager)

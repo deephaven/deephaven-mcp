@@ -24,7 +24,7 @@ _LOGGER = logging.getLogger(__name__)
 class CommunitySessionRegistry(MutableSessionRegistry):
     """Registry for community sessions — both static (from config) and dynamically created.
 
-    Loads static sessions from the ``community.sessions`` section of the MCP config
+    Loads static sessions from the ``sessions`` section of the MCP config
     at initialization.  Inherits ``add_session``, ``remove_session``, and
     ``count_added_sessions`` from ``MutableSessionRegistry`` for sessions created
     after initialization.
@@ -32,16 +32,16 @@ class CommunitySessionRegistry(MutableSessionRegistry):
 
     @override
     async def _load_items(self, config_manager: config.ConfigManager) -> None:
-        """Load static session configurations from the ``community.sessions`` config section.
+        """Load static session configurations from the ``sessions`` config section.
 
-        Reads ``config_data["community"]["sessions"]`` and creates a
+        Reads ``config_data["sessions"]`` and creates a
         :class:`StaticCommunitySessionManager` for each entry.
 
         Args:
             config_manager (config.ConfigManager): Source of configuration data.
         """
         config_data = await config_manager.get_config()
-        community_sessions_config = config_data.get("community", {}).get("sessions", {})
+        community_sessions_config = config_data.get("sessions", {})
 
         _LOGGER.info(
             f"[{self.__class__.__name__}] Found {len(community_sessions_config)} community session configurations to load."

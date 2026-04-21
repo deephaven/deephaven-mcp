@@ -57,14 +57,12 @@ This repository provides three Model Context Protocol (MCP) servers:
 ```bash
 cat > /tmp/deephaven_community.json << 'EOF'
 {
-  "community": {
-    "sessions": {
-      "local_test": {
-        "host": "localhost",
-        "port": 10000,
-        "session_type": "python",
-        "auth_type": "Anonymous"
-      }
+  "sessions": {
+    "local_test": {
+      "host": "localhost",
+      "port": 10000,
+      "session_type": "python",
+      "auth_type": "Anonymous"
     }
   }
 }

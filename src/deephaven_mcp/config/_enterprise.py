@@ -17,12 +17,15 @@ Key Features:
 Module Constants:
     - DEFAULT_CONNECTION_TIMEOUT_SECONDS: Default connection timeout (10.0 seconds)
 
-Main Functions:
-    - validate_enterprise_config(): Validates a flat enterprise system configuration
-    - redact_enterprise_system_config(): Redacts sensitive fields for logging
+Main Exports:
+    - EnterpriseServerConfigManager: Concrete ConfigManager subclass for the DHE MCP
+      server; loads and caches a flat enterprise config file.
+    - validate_enterprise_config(): Validates a flat enterprise system configuration.
+    - redact_enterprise_system_config(): Redacts sensitive fields for logging.
 """
 
 __all__ = [
+    "EnterpriseServerConfigManager",
     "validate_enterprise_config",
     "redact_enterprise_system_config",
     "DEFAULT_CONNECTION_TIMEOUT_SECONDS",
@@ -32,6 +35,13 @@ import logging
 from typing import Any
 
 from deephaven_mcp._exceptions import EnterpriseSystemConfigurationError
+
+from ._base import (
+    ConfigManager,
+    _get_config_path,
+    _load_and_validate_config,
+    _log_config_summary,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -328,7 +338,8 @@ def _validate_and_get_auth_type(
     """Validate the auth_type field and return allowed fields for that authentication type.
 
     Checks that the auth_type is supported and returns a combined dictionary of all
-    allowed fields (base fields + auth-specific fields) with their expected types.
+    allowed fields — base fields, optional fields, and the auth-specific fields for
+    the given auth_type — with their expected types.
 
     Args:
         system_name (str): The name of the enterprise system being validated.
@@ -584,3 +595,86 @@ def _validate_optional_session_default(
     if field_name not in defaults:
         return  # Field is optional
     _validate_field_type(system_name, field_name, defaults[field_name], expected_type, is_optional=True)
+
+
+async def _load_and_validate_enterprise_config(config_path: str) -> dict[str, Any]:
+    """Load, parse, and validate the flat enterprise configuration from a JSON/JSON5 file."""
+    return await _load_and_validate_config(
+        config_path, validate_enterprise_config, "_load_and_validate_enterprise_config"
+    )
+
+
+class EnterpriseServerConfigManager(ConfigManager):
+    """ConfigManager for the DHE MCP server (``dh-mcp-enterprise-server``).
+
+    Reads a *flat* enterprise config file where the system fields sit at the top level
+    (no system-name nesting).  Validates the config as a single enterprise system and
+    returns it directly.
+
+    Config file format (flat)::
+
+        {
+            "system_name": "prod",
+            "connection_json_url": "https://dhe.example.com/iris/connection.json",
+            "auth_type": "password",
+            "username": "user",
+            "password_env_var": "DHE_PASSWORD",
+            "session_creation": {
+                "max_concurrent_sessions": 5,
+                "defaults": {"heap_size_gb": 4, "programming_language": "Python"}
+            }
+        }
+
+    ``get_config()`` returns the flat config above directly — no wrapping.
+    ``EnterpriseSessionRegistry`` uses the ``system_name`` field as the source name
+    in all enterprise session identifiers (e.g. ``"enterprise:prod:my-pq"``).
+    """
+
+    async def get_config(self) -> dict[str, Any]:
+        """Load and validate the flat enterprise config file.
+
+        Returns:
+            dict[str, Any]: The flat enterprise system config dict (fields at top level).
+
+        Raises:
+            RuntimeError: If no config path is provided and ``DH_MCP_CONFIG_FILE`` is unset.
+            ConfigurationError: If the file cannot be read or fails enterprise validation.
+        """
+        _LOGGER.debug(
+            "[EnterpriseServerConfigManager:get_config] Loading enterprise server configuration..."
+        )
+        async with self._lock:
+            if self._cache is not None:
+                _LOGGER.debug(
+                    "[EnterpriseServerConfigManager:get_config] Using cached configuration."
+                )
+                return self._cache
+
+            resolved_path = self._config_path if self._config_path is not None else _get_config_path()
+            flat_config = await _load_and_validate_enterprise_config(resolved_path)
+            self._cache = flat_config
+            _log_config_summary(
+                flat_config,
+                label="EnterpriseServerConfigManager:get_config",
+                redactor=redact_enterprise_system_config,
+            )
+            _LOGGER.info(
+                "[EnterpriseServerConfigManager:get_config] Enterprise configuration loaded successfully."
+            )
+            return flat_config
+
+    async def _set_config_cache(self, config: dict[str, Any]) -> None:
+        """PRIVATE: Set the in-memory configuration cache for testing (coroutine-safe).
+
+        Validates ``config`` against the enterprise system schema before caching.
+        Implements the abstract :meth:`ConfigManager._set_config_cache` method using
+        enterprise validation rather than community validation.
+
+        Args:
+            config (dict[str, Any]): The flat enterprise configuration dictionary to cache.
+
+        Raises:
+            EnterpriseSystemConfigurationError: If the provided configuration is invalid.
+        """
+        async with self._lock:
+            self._cache = validate_enterprise_config(config)

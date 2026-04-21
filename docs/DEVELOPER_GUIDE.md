@@ -354,13 +354,11 @@ Before proceeding with the Quick Start Guide, verify your setup:
 
    ```json5
    {
-     "community": {
-       "sessions": {
-         // Connect to a local Deephaven Community instance
-         "local_session": {
-           "host": "localhost",  // Deephaven server address
-           "port": 10000         // Default Deephaven port
-         }
+     "sessions": {
+       // Connect to a local Deephaven Community instance
+       "local_session": {
+         "host": "localhost",  // Deephaven server address
+         "port": 10000         // Default Deephaven port
        }
      }
    }
@@ -373,24 +371,20 @@ Before proceeding with the Quick Start Guide, verify your setup:
    > - **Docker (default):** Requires Docker installed and running. No additional Python packages needed.
    >
    >   ```json
-   >   "community": {
-   >     "session_creation": {
-   >       "max_concurrent_sessions": 5,
-   >       "defaults": {"launch_method": "docker"}
-   >     }
+   >   "session_creation": {
+   >     "max_concurrent_sessions": 5,
+   >     "defaults": {"launch_method": "docker"}
    >   }
    >   ```
    >
    > - **Python:** Faster startup, no Docker needed. Install `deephaven-server` in your Python environment.
    >
    >   ```json
-   >   "community": {
-   >     "session_creation": {
-   >       "max_concurrent_sessions": 5,
-   >       "defaults": {
-   >         "launch_method": "python",
-   >         "python_venv_path": null  // Optional: null uses MCP venv, or specify "/path/to/custom/venv"
-   >       }
+   >   "session_creation": {
+   >     "max_concurrent_sessions": 5,
+   >     "defaults": {
+   >       "launch_method": "python",
+   >       "python_venv_path": null  // Optional: null uses MCP venv, or specify "/path/to/custom/venv"
    >     }
    >   }
    >   ```
@@ -538,32 +532,30 @@ All fields within a session's configuration object are optional. If a field is o
 
 ```json
 {
-  "community": {
-    "sessions": {
-      "my_local_deephaven": {
-        "host": "localhost",
-        "port": 10000,
-        "session_type": "python"
-      },
-      "psk_authenticated_session": {
-        "host": "localhost",
-        "port": 10001,
-        "auth_type": "io.deephaven.authentication.psk.PskAuthenticationHandler",
-        "auth_token": "your-shared-secret-key",
-        "session_type": "python"
-      },
-      "basic_auth_worker": {
-        "host": "secure.deephaven.example.com",
-        "port": 10002,
-        "auth_type": "Basic",
-        "auth_token_env_var": "MY_BASIC_AUTH_ENV_VAR",
-        "never_timeout": true,
-        "session_type": "groovy",
-        "use_tls": true,
-        "tls_root_certs": "/path/to/trusted_cas.pem",
-        "client_cert_chain": "/path/to/client_cert_and_chain.pem",
-        "client_private_key": "/path/to/client_private_key.pem"
-      }
+  "sessions": {
+    "my_local_deephaven": {
+      "host": "localhost",
+      "port": 10000,
+      "session_type": "python"
+    },
+    "psk_authenticated_session": {
+      "host": "localhost",
+      "port": 10001,
+      "auth_type": "io.deephaven.authentication.psk.PskAuthenticationHandler",
+      "auth_token": "your-shared-secret-key",
+      "session_type": "python"
+    },
+    "basic_auth_worker": {
+      "host": "secure.deephaven.example.com",
+      "port": 10002,
+      "auth_type": "Basic",
+      "auth_token_env_var": "MY_BASIC_AUTH_ENV_VAR",
+      "never_timeout": true,
+      "session_type": "groovy",
+      "use_tls": true,
+      "tls_root_certs": "/path/to/trusted_cas.pem",
+      "client_cert_chain": "/path/to/client_cert_and_chain.pem",
+      "client_private_key": "/path/to/client_private_key.pem"
     }
   }
 }
@@ -573,40 +565,38 @@ All fields within a session's configuration object are optional. If a field is o
 
 ```json5
 {
-  /* Community Core session configurations */
-  "community": {
-    "sessions": {
-      // Local development environment - no authentication
-      "my_local_deephaven": {
-        "host": "localhost",
-        "port": 10000,
-        "session_type": "python"
-      },
-      // Staging environment with PSK authentication
-      "psk_authenticated_session": {
-        "host": "localhost",
-        "port": 10001,
-        "auth_type": "io.deephaven.authentication.psk.PskAuthenticationHandler",
-        "auth_token": "your-shared-secret-key",  // Consider using auth_token_env_var instead
-        "session_type": "python"
-      },
-      /* Production environment with full TLS and mTLS
-       * Uses Basic auth with credentials from environment variable
-       * Never times out for long-running operations
-       */
-      "basic_auth_worker": {
-        "host": "secure.deephaven.example.com",
-        "port": 10002,
-        "auth_type": "Basic",
-        "auth_token_env_var": "MY_BASIC_AUTH_ENV_VAR",  // More secure than hardcoding
-        "never_timeout": true,
-        "session_type": "groovy",
-        "use_tls": true,
-        "tls_root_certs": "/path/to/trusted_cas.pem",
-        "client_cert_chain": "/path/to/client_cert_and_chain.pem",
-        "client_private_key": "/path/to/client_private_key.pem",
-      },  // Trailing comma supported in JSON5
-    }
+  // Community Core session configurations
+  "sessions": {
+    // Local development environment - no authentication
+    "my_local_deephaven": {
+      "host": "localhost",
+      "port": 10000,
+      "session_type": "python"
+    },
+    // Staging environment with PSK authentication
+    "psk_authenticated_session": {
+      "host": "localhost",
+      "port": 10001,
+      "auth_type": "io.deephaven.authentication.psk.PskAuthenticationHandler",
+      "auth_token": "your-shared-secret-key",  // Consider using auth_token_env_var instead
+      "session_type": "python"
+    },
+    /* Production environment with full TLS and mTLS
+     * Uses Basic auth with credentials from environment variable
+     * Never times out for long-running operations
+     */
+    "basic_auth_worker": {
+      "host": "secure.deephaven.example.com",
+      "port": 10002,
+      "auth_type": "Basic",
+      "auth_token_env_var": "MY_BASIC_AUTH_ENV_VAR",  // More secure than hardcoding
+      "never_timeout": true,
+      "session_type": "groovy",
+      "use_tls": true,
+      "tls_root_certs": "/path/to/trusted_cas.pem",
+      "client_cert_chain": "/path/to/client_cert_and_chain.pem",
+      "client_private_key": "/path/to/client_private_key.pem",
+    },  // Trailing comma supported in JSON5
   }
 }
 ```
@@ -619,11 +609,11 @@ The top-level `security` section in `deephaven_mcp.json` contains security-relat
 
 The `session_community_credentials` MCP tool allows programmatic retrieval of authentication credentials for community sessions. This is **disabled by default** for security.
 
-**Configuration:** `security.community.credential_retrieval_mode`
+**Configuration:** `security.credential_retrieval_mode`
 
 Controls which community session credentials can be retrieved via the MCP tool. This setting applies to:
 
-- **Static sessions**: Pre-configured in `community.sessions`
+- **Static sessions**: Pre-configured in `sessions`
 - **Dynamic sessions**: Created on-demand via `session_community_create`
 
 **Valid modes:**
@@ -638,7 +628,7 @@ Controls which community session credentials can be retrieved via the MCP tool. 
   - **Recommended**: Users typically need dynamic tokens but already have static credentials
   
 - **`"static_only"`**: Only pre-configured tokens (static sessions)
-  - Allows retrieval for sessions from `community.sessions`
+  - Allows retrieval for sessions from `sessions`
   - Denies retrieval for dynamically created sessions
   - **Rare use case**: Static credentials are already in your config file
   
@@ -658,14 +648,10 @@ Controls which community session credentials can be retrieved via the MCP tool. 
 ```json5
 {
   "security": {
-    "community": {
-      "credential_retrieval_mode": "dynamic_only"
-    }
+    "credential_retrieval_mode": "dynamic_only"
   },
-  "community": {
-    "sessions": { /* static sessions */ },
-    "session_creation": { /* dynamic session config */ }
-  }
+  "sessions": { /* static sessions */ },
+  "session_creation": { /* dynamic session config */ }
 }
 ```
 
@@ -770,7 +756,7 @@ If `credential_retrieval_mode` is `"none"` (default), credentials are still acce
    Auth Token: abc123xyz789...
    Browser URL: http://localhost:45123/?psk=abc123xyz789
 
-   To retrieve credentials via MCP tool, set security.community.credential_retrieval_mode
+   To retrieve credentials via MCP tool, set security.credential_retrieval_mode
    in your deephaven_mcp.json configuration.
 ======================================================================
 ```
@@ -782,21 +768,17 @@ This is similar to how Jupyter displays tokens when starting a notebook server.
 ```json
 {
   "security": {
-    "community": {
-      "credential_retrieval_mode": "dynamic_only"
-    }
+    "credential_retrieval_mode": "dynamic_only"
   },
-  "community": {
-    "session_creation": {
-      "max_concurrent_sessions": 5,
-      "defaults": {
-        "launch_method": "docker",
-        "auth_type": "PSK",
-        "heap_size_gb": 4,
-        "extra_jvm_args": ["-XX:+UseG1GC"],
-        "docker_image": "ghcr.io/deephaven/server:latest",
-        "docker_memory_limit_gb": 8.0
-      }
+  "session_creation": {
+    "max_concurrent_sessions": 5,
+    "defaults": {
+      "launch_method": "docker",
+      "auth_type": "PSK",
+      "heap_size_gb": 4,
+      "extra_jvm_args": ["-XX:+UseG1GC"],
+      "docker_image": "ghcr.io/deephaven/server:latest",
+      "docker_memory_limit_gb": 8.0
     }
   }
 }
@@ -1709,12 +1691,12 @@ On error:
 ```json
 {
   "success": false,
-  "error": "Credential retrieval is disabled. Set security.community.credential_retrieval_mode in config.",
+  "error": "Credential retrieval is disabled. Set security.credential_retrieval_mode in config.",
   "isError": true
 }
 ```
 
-**Description**: This tool retrieves connection credentials for community sessions, allowing AI agents or users to obtain the authentication token and connection URLs needed to access a session via browser or API. This functionality is **disabled by default** for security and must be explicitly enabled via the `security.community.credential_retrieval_mode` configuration setting. The retrieval mode can be set to allow credentials for dynamic sessions only (`"dynamic_only"`), static sessions only (`"static_only"`), all sessions (`"all"`), or none (`"none"`, the default).
+**Description**: This tool retrieves connection credentials for community sessions, allowing AI agents or users to obtain the authentication token and connection URLs needed to access a session via browser or API. This functionality is **disabled by default** for security and must be explicitly enabled via the `security.credential_retrieval_mode` configuration setting. The retrieval mode can be set to allow credentials for dynamic sessions only (`"dynamic_only"`), static sessions only (`"static_only"`), all sessions (`"all"`), or none (`"none"`, the default).
 
 **Security Note**: When enabled, this tool provides access to authentication credentials. Use appropriate access controls and consider the security implications for your environment.
 

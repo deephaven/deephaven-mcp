@@ -90,8 +90,7 @@ async def _get_session_creation_config(
         On error, error_dict is set and other values are empty.
     """
     config_data = await config_manager.get_config()
-    community_config = config_data.get("community", {})
-    session_creation_config = community_config.get("session_creation")
+    session_creation_config = config_data.get("session_creation")
 
     if not session_creation_config:
         error_msg = "Community session creation not configured in deephaven_mcp.json"
@@ -1404,9 +1403,7 @@ async def session_community_credentials(
 
         # Check credential retrieval mode from security config
         config = await config_manager.get_config()
-        security_config = config.get("security", {})
-        security_community_config = security_config.get("community", {})
-        credential_retrieval_mode = security_community_config.get(
+        credential_retrieval_mode = config.get("security", {}).get(
             "credential_retrieval_mode", "none"
         )
 
@@ -1435,9 +1432,7 @@ async def session_community_credentials(
                     "Configuration example:\n"
                     "{\n"
                     '  "security": {\n'
-                    '    "community": {\n'
-                    '      "credential_retrieval_mode": "dynamic_only"\n'
-                    "    }\n"
+                    '    "credential_retrieval_mode": "dynamic_only"\n'
                     "  }\n"
                     "}\n\n"
                     "Documentation: https://github.com/deephaven/deephaven-mcp/"
@@ -1481,7 +1476,7 @@ async def session_community_credentials(
                 "error": (
                     f"Credential retrieval for static sessions is disabled. Current mode: 'dynamic_only'. "
                     f"Session '{session_id}' is a static (config-based) session. "
-                    f"To retrieve static session credentials, set security.community.credential_retrieval_mode to 'all' or 'static_only' in deephaven_mcp.json."
+                    f"To retrieve static session credentials, set security.credential_retrieval_mode to 'all' or 'static_only' in deephaven_mcp.json."
                 ),
                 "isError": True,
             }
@@ -1494,7 +1489,7 @@ async def session_community_credentials(
                 "error": (
                     f"Credential retrieval for dynamic sessions is disabled. Current mode: 'static_only'. "
                     f"Session '{session_id}' is a dynamic (on-demand) session. "
-                    f"To retrieve dynamic session credentials, set security.community.credential_retrieval_mode to 'all' or 'dynamic_only' in deephaven_mcp.json."
+                    f"To retrieve dynamic session credentials, set security.credential_retrieval_mode to 'all' or 'dynamic_only' in deephaven_mcp.json."
                 ),
                 "isError": True,
             }

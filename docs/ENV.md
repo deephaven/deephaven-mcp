@@ -107,12 +107,10 @@ session.
 
 ```json5
 {
-  "community": {
-    "sessions": {
-      "my_session": {
-        "auth_type": "PSK",
-        "auth_token_env_var": "MY_DH_TOKEN"  // set MY_DH_TOKEN=your-psk-token
-      }
+  "sessions": {
+    "my_session": {
+      "auth_type": "PSK",
+      "auth_token_env_var": "MY_DH_TOKEN"  // set MY_DH_TOKEN=your-psk-token
     }
   }
 }

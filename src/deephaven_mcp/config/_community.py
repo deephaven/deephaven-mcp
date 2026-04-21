@@ -2,18 +2,31 @@
 Configuration handling specific to Deephaven Community Sessions.
 
 This module provides validation and redaction functions for community session
-configurations, as well as the top-level community config validation engine:
+configurations, as well as the top-level community config validation engine and the
+:class:`CommunityServerConfigManager` for the DHC MCP server.
 
-1. **Security Settings** (`security.community`):
+Community config file format (flat — all keys at top level)::
+
+    {
+        "security": {"credential_retrieval_mode": "dynamic_only"},
+        "sessions": {
+            "local": {"host": "localhost", "port": 10000, "auth_type": "PSK", "auth_token": "..."}
+        },
+        "session_creation": {"defaults": {"launch_method": "python"}}
+    }
+
+Valid top-level keys: ``sessions``, ``session_creation``, ``security``.
+
+1. **Security Settings** (``security``):
    - Security configuration for community sessions (credential retrieval permissions)
-   - Validated by `validate_security_community_config()`
+   - Validated by `validate_security_config()`
 
-2. **Static Community Sessions** (`community.sessions`):
+2. **Static Community Sessions** (``sessions``):
    - Pre-configured connections to existing Deephaven Community servers
    - Validated by `validate_community_sessions_config()` and `validate_single_community_session_config()`
    - Redacted by `redact_community_session_config()`
 
-3. **Dynamic Session Creation** (`community.session_creation`):
+3. **Dynamic Session Creation** (``session_creation``):
    - Configuration for on-demand creation of Deephaven Community sessions via Docker or Python
    - Validated by `validate_community_session_creation_config()`
    - Redacted by `redact_community_session_creation_config()`
@@ -35,7 +48,8 @@ All validation errors raise `CommunitySessionConfigurationError` with descriptiv
 """
 
 __all__ = [
-    "validate_security_community_config",
+    "CommunityServerConfigManager",
+    "validate_security_config",
     "validate_community_sessions_config",
     "validate_single_community_session_config",
     "redact_community_session_config",
@@ -53,6 +67,13 @@ from typing import Any
 from deephaven_mcp._exceptions import (
     CommunitySessionConfigurationError,
     ConfigurationError,
+)
+
+from ._base import (
+    ConfigManager,
+    _get_config_path,
+    _load_and_validate_config,
+    _log_config_summary,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -156,13 +177,16 @@ def redact_community_session_config(
 # Valid values for credential_retrieval_mode
 _VALID_CREDENTIAL_RETRIEVAL_MODES = {"none", "dynamic_only", "static_only", "all"}
 """
-Valid values for security.community.credential_retrieval_mode configuration field.
-Controls which community session credentials can be retrieved via MCP tools.
+Valid values for the ``security.credential_retrieval_mode`` configuration field
+(top-level ``security`` section; the schema is flat — there is no ``community``
+wrapper). Controls which community session credentials can be retrieved via MCP
+tools. If the field is absent the effective default used by consumers is
+``"none"``.
 """
 
 
-def validate_security_community_config(security_community_config: Any | None) -> None:
-    """Validate the 'security.community' configuration section.
+def validate_security_config(security_config: Any | None) -> None:
+    """Validate the 'security' configuration section.
 
     Validates security settings for community sessions from the top-level 'security' section.
     Currently validates the 'credential_retrieval_mode' field which controls which community
@@ -175,51 +199,51 @@ def validate_security_community_config(security_community_config: Any | None) ->
     - "all": Both dynamic and static session credentials can be retrieved
 
     Args:
-        security_community_config (dict[str, Any] | None): The security.community configuration dictionary.
-            Can be None if the 'security.community' key is absent.
+        security_config (dict[str, Any] | None): The security configuration dictionary.
+            Can be None if the 'security' key is absent.
 
     Raises:
         CommunitySessionConfigurationError: If the config is not a dict, or if
             credential_retrieval_mode is present but not a valid string enum value.
     """
-    if security_community_config is None:
+    if security_config is None:
         return
 
-    if not isinstance(security_community_config, dict):
+    if not isinstance(security_config, dict):
         _LOGGER.error(
-            f"[config:validate_security_community_config] 'security.community' must be a dictionary, got {type(security_community_config).__name__}"
+            f"[config:validate_security_config] 'security' must be a dictionary, got {type(security_config).__name__}"
         )
         raise CommunitySessionConfigurationError(
-            "'security.community' must be a dictionary in configuration"
+            "'security' must be a dictionary in configuration"
         )
 
     # Validate credential_retrieval_mode if present
-    if "credential_retrieval_mode" in security_community_config:
-        value = security_community_config["credential_retrieval_mode"]
+    if "credential_retrieval_mode" in security_config:
+        value = security_config["credential_retrieval_mode"]
         if not isinstance(value, str):
             _LOGGER.error(
-                f"[config:validate_security_community_config] 'security.community.credential_retrieval_mode' must be a string, got {type(value).__name__}"
+                f"[config:validate_security_config] 'security.credential_retrieval_mode' must be a string, got {type(value).__name__}"
             )
             raise CommunitySessionConfigurationError(
-                f"'security.community.credential_retrieval_mode' must be a string, got {type(value).__name__}"
+                f"'security.credential_retrieval_mode' must be a string, got {type(value).__name__}"
             )
         if value not in _VALID_CREDENTIAL_RETRIEVAL_MODES:
             valid_modes = '"' + '", "'.join(sorted(_VALID_CREDENTIAL_RETRIEVAL_MODES)) + '"'
             _LOGGER.error(
-                f"[config:validate_security_community_config] 'security.community.credential_retrieval_mode' must be one of: {valid_modes}, got '{value}'"
+                f"[config:validate_security_config] 'security.credential_retrieval_mode' must be one of: {valid_modes}, got '{value}'"
             )
             raise CommunitySessionConfigurationError(
-                f'\'security.community.credential_retrieval_mode\' must be one of: "{valid_modes}", got "{value}"'
+                f'\'security.credential_retrieval_mode\' must be one of: "{valid_modes}", got "{value}"'
             )
 
 
 def validate_community_sessions_config(
     community_sessions_map: Any | None,
 ) -> None:
-    """Validate the overall 'community.sessions' configuration section, if present.
+    """Validate the overall 'sessions' configuration section, if present.
 
     This validates the dictionary of static community sessions defined in the configuration.
-    If `community_sessions_map` is None (i.e., the 'community.sessions' key was absent
+    If `community_sessions_map` is None (i.e., the 'sessions' key was absent
     from the main configuration), this function does nothing.
 
     If `community_sessions_map` is provided, this checks that it's a dictionary
@@ -229,7 +253,7 @@ def validate_community_sessions_config(
     Args:
         community_sessions_map (dict[str, Any] | None): The dictionary of static community sessions,
             where keys are session names and values are session config dicts.
-            Can be None if the 'community.sessions' key is absent.
+            Can be None if the 'sessions' key is absent.
 
     Raises:
         CommunitySessionConfigurationError: If `community_sessions_map` is provided and is not a dict,
@@ -237,15 +261,15 @@ def validate_community_sessions_config(
             `validate_single_community_session_config`).
     """
     if community_sessions_map is None:
-        # If 'community.sessions' key was absent from config, there's nothing to validate here.
+        # If 'sessions' key was absent from config, there's nothing to validate here.
         return
 
     if not isinstance(community_sessions_map, dict):
         _LOGGER.error(
-            f"[config:validate_community_sessions_config] 'community.sessions' must be a dictionary in Deephaven community session config, got {type(community_sessions_map).__name__}"
+            f"[config:validate_community_sessions_config] 'sessions' must be a dictionary in Deephaven community session config, got {type(community_sessions_map).__name__}"
         )
         raise CommunitySessionConfigurationError(
-            "'community.sessions' must be a dictionary in Deephaven community session config"
+            "'sessions' must be a dictionary in Deephaven community session config"
         )
 
     for session_name, session_config_item in community_sessions_map.items():
@@ -454,7 +478,7 @@ def redact_community_session_creation_config(
 def validate_community_session_creation_config(
     session_creation_config: Any | None,
 ) -> None:
-    """Validate the 'community.session_creation' configuration section.
+    """Validate the 'session_creation' configuration section.
 
     This validates the configuration used for dynamically creating community sessions on demand
     via Docker or Python-based Deephaven. Performs comprehensive validation including:
@@ -470,7 +494,7 @@ def validate_community_session_creation_config(
 
     Args:
         session_creation_config (dict[str, Any] | None): The session_creation configuration dictionary.
-            Can be None if the 'community.session_creation' key is absent (validation is skipped).
+            Can be None if the 'session_creation' key is absent (validation is skipped).
 
     Raises:
         CommunitySessionConfigurationError: If the configuration is invalid, including:
@@ -796,33 +820,27 @@ class _ConfigPathSpec:
     redactor: Callable[[Any], Any] | None = None
 
 
-# Schema defining all valid community configuration paths
+# Schema defining all valid community configuration paths (flat — all at depth 1)
 _SCHEMA_PATHS: dict[tuple[str, ...], _ConfigPathSpec] = {
     ("security",): _ConfigPathSpec(
-        required=False, expected_type=dict, validator=None  # Validated by nested paths
-    ),
-    ("security", "community"): _ConfigPathSpec(
         required=False,
         expected_type=dict,
-        validator=validate_security_community_config,
+        validator=validate_security_config,
     ),
-    ("community",): _ConfigPathSpec(
-        required=False, expected_type=dict, validator=None  # Validated by nested paths
-    ),
-    ("community", "sessions"): _ConfigPathSpec(
+    ("sessions",): _ConfigPathSpec(
         required=False,
         expected_type=dict,
         validator=validate_community_sessions_config,
         redactor=lambda sessions_dict: (
             {
-                name: redact_community_session_config(config)
-                for name, config in sessions_dict.items()
+                name: redact_community_session_config(cfg)
+                for name, cfg in sessions_dict.items()
             }
             if isinstance(sessions_dict, dict)
             else sessions_dict
         ),
     ),
-    ("community", "session_creation"): _ConfigPathSpec(
+    ("session_creation",): _ConfigPathSpec(
         required=False,
         expected_type=dict,
         validator=validate_community_session_creation_config,
@@ -843,7 +861,8 @@ def _get_config_section(
     Args:
         config (dict[str, Any]): The root configuration dictionary to navigate.
         section (Sequence[str]): The path to the config section as a sequence of keys.
-            For example, ['community', 'sessions', 'local-dev'] accesses config['community']['sessions']['local-dev'].
+            For example, ``['sessions', 'local-dev']`` accesses
+            ``config['sessions']['local-dev']``.
 
     Returns:
         Any: The configuration value at the specified path. Can be any type (dict, str, int, list, etc.)
@@ -874,8 +893,8 @@ def _get_all_config_names(
 
     Args:
         config (dict[str, Any]): The root configuration dictionary to search within.
-        section (Sequence[str]): The path to the config section (e.g., ['community', 'sessions']
-            to get all community session names).
+        section (Sequence[str]): The path to the config section (e.g., ``['sessions']``
+            to get all static community session names).
 
     Returns:
         list[str]: A list of configuration names (dictionary keys) from the specified section.
@@ -1046,9 +1065,12 @@ def _should_recurse_into_nested_dict(current_path: tuple[str, ...]) -> bool:
     the current path and have at least one more component). This is used during
     validation to decide whether to recursively validate nested dictionary sections.
 
-    For example, if current_path is ('community',) and _SCHEMA_PATHS contains
-    ('community', 'sessions'), this returns True because there are nested paths.
-    If current_path is ('community', 'sessions') and no deeper paths exist, returns False.
+    For example, if ``current_path`` is ``('security',)`` and ``_SCHEMA_PATHS``
+    contained a hypothetical ``('security', 'sub_option')`` entry, this would return
+    ``True``. With the current schema (all ``_SCHEMA_PATHS`` keys have length 1),
+    there are no children of any path and this function therefore always returns
+    ``False``; the helper is retained to support future nested schema extensions
+    without changes to :func:`_validate_section`.
 
     Args:
         current_path (tuple[str, ...]): The current path tuple to check for children.
@@ -1119,22 +1141,25 @@ def _validate_community_config(config: dict[str, Any]) -> dict[str, Any]:
     """Validate the Deephaven MCP community configuration dictionary.
 
     This function ensures that the configuration dictionary conforms to the expected schema for
-    Deephaven MCP community servers. The configuration may contain the following top-level keys:
+    Deephaven MCP community servers. The configuration may contain the following top-level keys
+    (all optional):
 
       - 'security' (dict, optional):
-            A dictionary containing security-related configuration for all session types.
-            If this key is present, its value must be a dictionary (which can be empty, e.g., {}).
-            If this key is absent, all security settings use their secure defaults.
+            Security settings for community sessions (e.g., credential_retrieval_mode).
+            If present, its value must be a dictionary (can be empty).
 
-      - 'community' (dict, optional):
-            A dictionary mapping community configuration.
-            If this key is present, its value must be a dictionary (which can be empty, e.g., {}).
-            If this key is absent, it implies no community configuration is present.
+      - 'sessions' (dict, optional):
+            A dictionary mapping session names to static community session configs.
+            If present, its value must be a dictionary (can be empty).
+
+      - 'session_creation' (dict, optional):
+            Configuration for dynamically creating community sessions on demand.
+            If present, its value must be a dictionary (can be empty).
 
     Validation Rules:
-      - Only known keys are allowed at each level of nesting.
+      - Only known top-level keys are allowed: 'security', 'sessions', 'session_creation'.
       - All present sections are validated according to their schema.
-      - Unknown or misspelled keys at any level will cause validation to fail.
+      - Unknown keys at the top level will cause validation to fail.
       - All field types must be correct if present.
       - Sensitive fields are redacted from logs.
 
@@ -1146,10 +1171,10 @@ def _validate_community_config(config: dict[str, Any]) -> dict[str, Any]:
 
     Raises:
         ConfigurationError: If validation fails due to unknown keys, wrong types, or invalid nested
-            configurations. Any unknown top-level key (including ``"enterprise"``) raises this error.
+            configurations. Any unknown top-level key (e.g. ``"community"``, ``"enterprise"``) raises this error.
 
     Example:
-        >>> validated_config = _validate_community_config({'community': {'sessions': {'local_session': {}}}})
+        >>> validated_config = _validate_community_config({'sessions': {'local_session': {}}})
         >>> validated_config_empty = _validate_community_config({})  # Also valid
     """
     if not isinstance(config, dict):
@@ -1163,3 +1188,76 @@ def _validate_community_config(config: dict[str, Any]) -> dict[str, Any]:
 
     _LOGGER.info("[config:_validate_community_config] Configuration validation passed.")
     return config
+
+
+async def _load_and_validate_community_config(config_path: str) -> dict[str, Any]:
+    """Load, parse, and validate the community configuration from a JSON/JSON5 file."""
+    return await _load_and_validate_config(
+        config_path, _validate_community_config, "_load_and_validate_community_config"
+    )
+
+
+class CommunityServerConfigManager(ConfigManager):
+    """ConfigManager for the DHC MCP server (``dh-mcp-community-server``).
+
+    Reads a community config file. The format uses ``sessions``, ``session_creation``, and
+    ``security`` as optional top-level keys; validation enforces the community schema defined in
+    :mod:`deephaven_mcp.config._community`.
+
+    Config file format::
+
+        {
+            "security": {"credential_retrieval_mode": "dynamic_only"},
+            "sessions": {
+                "local": {"host": "localhost", "port": 10000, "auth_type": "PSK", "auth_token": "..."}
+            },
+            "session_creation": {"defaults": {"launch_method": "python"}}
+        }
+    """
+
+    async def get_config(self) -> dict[str, Any]:
+        """Load and validate the community config file (coroutine-safe).
+
+        Returns:
+            dict[str, Any]: The validated community configuration dictionary.
+
+        Raises:
+            RuntimeError: If no config path is provided and ``DH_MCP_CONFIG_FILE`` is unset.
+            ConfigurationError: If the file cannot be read or fails community validation.
+        """
+        _LOGGER.debug(
+            "[CommunityServerConfigManager:get_config] Loading Deephaven MCP application configuration..."
+        )
+        async with self._lock:
+            if self._cache is not None:
+                _LOGGER.debug(
+                    "[CommunityServerConfigManager:get_config] Using cached Deephaven MCP application configuration."
+                )
+                return self._cache
+
+            resolved_path = self._config_path if self._config_path is not None else _get_config_path()
+            validated = await _load_and_validate_community_config(resolved_path)
+            self._cache = validated
+            _log_config_summary(
+                validated,
+                label="CommunityServerConfigManager:get_config",
+                redactor=_apply_redaction_to_config,
+            )
+            _LOGGER.info(
+                "[CommunityServerConfigManager:get_config] Community configuration loaded successfully."
+            )
+            return self._cache
+
+    async def _set_config_cache(self, config: dict[str, Any]) -> None:
+        """PRIVATE: Inject a community configuration dictionary into the cache (coroutine-safe).
+
+        Validates ``config`` against the community schema before caching.
+
+        Args:
+            config (dict[str, Any]): The community configuration dictionary to cache.
+
+        Raises:
+            ConfigurationError: If the provided configuration is invalid.
+        """
+        async with self._lock:
+            self._cache = _validate_community_config(config)

@@ -125,23 +125,21 @@ For the Community server, create a file (e.g., `dhc.json`) anywhere on your syst
 ```json5
 {
   // Community Core session configurations
-  "community": {
-    "sessions": {
-      // "local" is a custom name - use any name you want for your sessions
-      "local": {
-        "host": "localhost",           // Server hostname or IP address
-        "port": 10000,                 // Deephaven gRPC port (default: 10000)
-        // Full authentication handler class name (can also use "PSK" shorthand)
-        "auth_type": "io.deephaven.authentication.psk.PskAuthenticationHandler",
-        "auth_token": "YOUR_PASSWORD_HERE"  // Must match your Deephaven server token
-      }
-    },
-    // Optional: Enable MCP tools for creating/deleting sessions on-demand
-    // Useful for temporary workspaces and dynamic testing environments
-    "session_creation": {
-      "defaults": {
-        "launch_method": "python"     // "python" or "docker"
-      }
+  "sessions": {
+    // "local" is a custom name - use any name you want for your sessions
+    "local": {
+      "host": "localhost",           // Server hostname or IP address
+      "port": 10000,                 // Deephaven gRPC port (default: 10000)
+      // Full authentication handler class name (can also use "PSK" shorthand)
+      "auth_type": "io.deephaven.authentication.psk.PskAuthenticationHandler",
+      "auth_token": "YOUR_PASSWORD_HERE"  // Must match your Deephaven server token
+    }
+  },
+  // Optional: Enable MCP tools for creating/deleting sessions on-demand
+  // Useful for temporary workspaces and dynamic testing environments
+  "session_creation": {
+    "defaults": {
+      "launch_method": "python"     // "python" or "docker"
     }
   }
 }
@@ -677,7 +675,7 @@ dh-mcp-enterprise-server --config /path/to/dhe_staging.json --port 8004 >dh-mcp-
 
 ### Configuring DHC (Community) Server
 
-The community server (`dh-mcp-community-server`) uses a JSON or JSON5 config file with a `"community"` top-level key (and optional `"security"` key).
+The community server (`dh-mcp-community-server`) uses a flat JSON or JSON5 config file. Valid top-level keys are `"sessions"`, `"session_creation"`, and `"security"` (all optional).
 
 **Config file location**: Pass via `--config` CLI flag or `DH_MCP_CONFIG_FILE` environment variable.
 
@@ -695,14 +693,12 @@ The community server (`dh-mcp-community-server`) uses a JSON or JSON5 config fil
 
 ```json5
 {
-  "community": {
-    "sessions": {
-      // No authentication required - use only for local development!
-      // When auth_type is omitted, defaults to "Anonymous"
-      "my_local_server": {
-        "host": "localhost",  // Deephaven server address
-        "port": 10000          // Default Deephaven port (gRPC)
-      }
+  "sessions": {
+    // No authentication required - use only for local development!
+    // When auth_type is omitted, defaults to "Anonymous"
+    "my_local_server": {
+      "host": "localhost",  // Deephaven server address
+      "port": 10000          // Default Deephaven port (gRPC)
     }
   }
 }
@@ -712,16 +708,14 @@ The community server (`dh-mcp-community-server`) uses a JSON or JSON5 config fil
 
 ```json5
 {
-  "community": {
-    "sessions": {
-      "psk_server": {
-        "host": "localhost",
-        "port": 10000,
-        // Pre-Shared Key authentication (most common for production)
-        // Can use "PSK" shorthand or full class name shown here
-        "auth_type": "io.deephaven.authentication.psk.PskAuthenticationHandler",
-        "auth_token": "your-shared-secret-key"  // Token configured on server
-      }
+  "sessions": {
+    "psk_server": {
+      "host": "localhost",
+      "port": 10000,
+      // Pre-Shared Key authentication (most common for production)
+      // Can use "PSK" shorthand or full class name shown here
+      "auth_type": "io.deephaven.authentication.psk.PskAuthenticationHandler",
+      "auth_token": "your-shared-secret-key"  // Token configured on server
     }
   }
 }
@@ -731,16 +725,14 @@ The community server (`dh-mcp-community-server`) uses a JSON or JSON5 config fil
 
 ```json5
 {
-  "community": {
-    "sessions": {
-      "prod_session": {
-        "host": "deephaven-prod.example.com",  // Remote server
-        "port": 10000,
-        "auth_type": "Basic",  // HTTP Basic authentication
-        // More secure: read credentials from environment variable
-        // Set in shell: export DH_AUTH_TOKEN="username:password"
-        "auth_token_env_var": "DH_AUTH_TOKEN"  // Must be in "user:pass" format
-      }
+  "sessions": {
+    "prod_session": {
+      "host": "deephaven-prod.example.com",  // Remote server
+      "port": 10000,
+      "auth_type": "Basic",  // HTTP Basic authentication
+      // More secure: read credentials from environment variable
+      // Set in shell: export DH_AUTH_TOKEN="username:password"
+      "auth_token_env_var": "DH_AUTH_TOKEN"  // Must be in "user:pass" format
     }
   }
 }
@@ -750,18 +742,16 @@ The community server (`dh-mcp-community-server`) uses a JSON or JSON5 config fil
 
 ```json5
 {
-  "community": {
-    "sessions": {
-      "secure_tls_session": {
-        "host": "secure.deephaven.example.com",
-        "port": 443,  // Standard HTTPS port (use 10000 for non-TLS)
-        "use_tls": true,  // Enable SSL/TLS encryption
-        // Optional: Custom CA certificate for server verification
-        "tls_root_certs": "/absolute/path/to/ca.pem",  // Must be absolute path!
-        // Optional: Mutual TLS (mTLS) for client authentication
-        "client_cert_chain": "/absolute/path/to/client-cert.pem",
-        "client_private_key": "/absolute/path/to/client-key.pem"
-      }
+  "sessions": {
+    "secure_tls_session": {
+      "host": "secure.deephaven.example.com",
+      "port": 443,  // Standard HTTPS port (use 10000 for non-TLS)
+      "use_tls": true,  // Enable SSL/TLS encryption
+      // Optional: Custom CA certificate for server verification
+      "tls_root_certs": "/absolute/path/to/ca.pem",  // Must be absolute path!
+      // Optional: Mutual TLS (mTLS) for client authentication
+      "client_cert_chain": "/absolute/path/to/client-cert.pem",
+      "client_private_key": "/absolute/path/to/client-key.pem"
     }
   }
 }
@@ -893,7 +883,7 @@ The optional top-level `security` section in the community config controls the `
 
 | Field | Type | Values | Description |
 |-------|------|--------|-------------|
-| `security.community.credential_retrieval_mode` | string | `"none"` (default), `"dynamic_only"`, `"static_only"`, `"all"` | Controls credential retrieval access |
+| `security.credential_retrieval_mode` | string | `"none"` (default), `"dynamic_only"`, `"static_only"`, `"all"` | Controls credential retrieval access |
 
 **Mode Descriptions:**
 
@@ -958,7 +948,7 @@ When a session is created with an auto-generated token, the connection informati
    Auth Token: abc123xyz789...
    Browser URL: http://localhost:45123/?psk=abc123xyz789
 
-   To retrieve credentials via MCP tool, set security.community.credential_retrieval_mode
+   To retrieve credentials via MCP tool, set security.credential_retrieval_mode
    in your deephaven_mcp.json configuration.
 ====================================================================
 ```
@@ -974,16 +964,12 @@ If you want AI agents to retrieve credentials programmatically, you can enable t
    ```json
    {
      "security": {
-       "community": {
-         "credential_retrieval_mode": "dynamic_only"
-       }
+       "credential_retrieval_mode": "dynamic_only"
      },
-     "community": {
-       "session_creation": {
-         "defaults": {
-           "launch_method": "docker",
-           "heap_size_gb": 4
-         }
+     "session_creation": {
+       "defaults": {
+         "launch_method": "docker",
+         "heap_size_gb": 4
        }
      }
    }

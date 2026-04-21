@@ -53,7 +53,7 @@ async def test_session_community_create_with_auth_token_parameter():
         }
     }
 
-    full_config = {"community": community_config}
+    full_config = community_config
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
     mock_session_registry.add_session = AsyncMock()
@@ -124,7 +124,7 @@ async def test_session_community_create_with_auth_token_env_var_set():
         }
     }
 
-    full_config = {"community": community_config}
+    full_config = community_config
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
     mock_session_registry.add_session = AsyncMock()
@@ -192,7 +192,7 @@ async def test_session_community_create_with_auth_token_from_defaults():
         }
     }
 
-    full_config = {"community": community_config}
+    full_config = community_config
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
     mock_session_registry.add_session = AsyncMock()
@@ -257,7 +257,7 @@ async def test_session_community_create_session_already_exists():
         }
     }
 
-    full_config = {"community": community_config}
+    full_config = community_config
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
     # Session already exists — get() returns successfully (no exception)
@@ -291,7 +291,7 @@ async def test_session_community_create_health_check_timeout_with_cleanup():
         }
     }
 
-    full_config = {"community": community_config}
+    full_config = community_config
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
     mock_session_registry.get = AsyncMock(
@@ -363,7 +363,7 @@ async def test_session_community_create_with_python_launch_method():
         }
     }
 
-    full_config = {"community": community_config}
+    full_config = community_config
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
     mock_session_registry.add_session = AsyncMock()

@@ -50,7 +50,7 @@ async def test_session_community_create_with_pip_and_process_id():
         }
     }
 
-    full_config = {"community": community_config}
+    full_config = community_config
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
     mock_session_registry.add_session = AsyncMock()
@@ -119,7 +119,7 @@ async def test_session_community_create_auth_token_env_var_not_found():
         }
     }
 
-    full_config = {"community": community_config}
+    full_config = community_config
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
     mock_session_registry.add_session = AsyncMock()
@@ -158,7 +158,7 @@ async def test_session_community_create_cleanup_fails_on_timeout():
         }
     }
 
-    full_config = {"community": community_config}
+    full_config = community_config
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
     mock_session_registry.get = AsyncMock(

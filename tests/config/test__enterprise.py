@@ -1,11 +1,15 @@
-"""Unit tests for the enterprise_system configuration validation."""
+"""Unit tests for deephaven_mcp.config._enterprise — enterprise config validation and EnterpriseServerConfigManager."""
+
+import os
+from unittest.mock import patch
 
 import pytest
 
+from deephaven_mcp._exceptions import ConfigurationError, EnterpriseSystemConfigurationError
+from deephaven_mcp.config import CONFIG_ENV_VAR, ConfigManager, EnterpriseServerConfigManager
 from deephaven_mcp.config._enterprise import (
     _AUTH_SPECIFIC_FIELDS,
     _BASE_ENTERPRISE_SYSTEM_FIELDS,
-    EnterpriseSystemConfigurationError,
     _validate_field_type,
     _validate_optional_fields,
     _validate_required_fields,
@@ -699,3 +703,191 @@ def test_validate_optional_fields_ignores_missing():
     """Missing optional fields are silently ignored."""
     config = {"connection_json_url": "https://test.com", "auth_type": "password"}
     _validate_optional_fields("sys", config)
+
+
+# ---------------------------------------------------------------------------
+# EnterpriseServerConfigManager Tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def clear_env():
+    old = os.environ.get(CONFIG_ENV_VAR)
+    if CONFIG_ENV_VAR in os.environ:
+        del os.environ[CONFIG_ENV_VAR]
+    yield
+    if old is not None:
+        os.environ[CONFIG_ENV_VAR] = old
+
+
+def _flat_config(**kwargs) -> dict:
+    base = {
+        "system_name": "prod",
+        "connection_json_url": "https://dhe.example.com/iris/connection.json",
+        "auth_type": "password",
+        "username": "user",
+        "password": "pass",
+    }
+    base.update(kwargs)
+    return base
+
+
+@pytest.mark.asyncio
+async def test_get_config_returns_flat_config_directly():
+    manager = EnterpriseServerConfigManager(config_path="/fake/path.json")
+    flat_config = _flat_config()
+
+    with patch(
+        "deephaven_mcp.config._base._load_config_from_file",
+        return_value=flat_config,
+    ):
+        result = await manager.get_config()
+
+    assert result == flat_config
+
+
+@pytest.mark.asyncio
+async def test_get_config_caches_result():
+    manager = EnterpriseServerConfigManager(config_path="/fake/path.json")
+    flat_config = _flat_config()
+
+    with (
+        patch(
+            "deephaven_mcp.config._base._load_config_from_file",
+            return_value=flat_config,
+        ) as mock_load,
+        patch("deephaven_mcp.config._enterprise.validate_enterprise_config"),
+    ):
+        first = await manager.get_config()
+        second = await manager.get_config()
+
+    assert first is second
+    mock_load.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_get_config_calls_validate_enterprise_config():
+    manager = EnterpriseServerConfigManager(config_path="/fake/path.json")
+    flat_config = _flat_config()
+
+    with (
+        patch(
+            "deephaven_mcp.config._base._load_config_from_file",
+            return_value=flat_config,
+        ),
+        patch(
+            "deephaven_mcp.config._enterprise.validate_enterprise_config",
+        ) as mock_validate,
+    ):
+        await manager.get_config()
+
+    mock_validate.assert_called_once_with(flat_config)
+
+
+@pytest.mark.asyncio
+async def test_get_config_raises_when_system_name_missing():
+    flat_config = {
+        "connection_json_url": "https://dhe.example.com/iris/connection.json",
+        "auth_type": "password",
+        "username": "user",
+        "password": "pass",
+    }
+    manager = EnterpriseServerConfigManager(config_path="/fake/path.json")
+
+    with (
+        patch(
+            "deephaven_mcp.config._base._load_config_from_file",
+            return_value=flat_config,
+        ),
+        pytest.raises(ConfigurationError),
+    ):
+        await manager.get_config()
+
+
+@pytest.mark.asyncio
+async def test_get_config_raises_when_system_name_wrong_type():
+    flat_config = _flat_config(system_name=42)
+    manager = EnterpriseServerConfigManager(config_path="/fake/path.json")
+
+    with (
+        patch(
+            "deephaven_mcp.config._base._load_config_from_file",
+            return_value=flat_config,
+        ),
+        pytest.raises(ConfigurationError),
+    ):
+        await manager.get_config()
+
+
+@pytest.mark.asyncio
+async def test_get_config_falls_back_to_env_var_when_no_path(monkeypatch):
+    monkeypatch.setenv("DH_MCP_CONFIG_FILE", "/env/path.json")
+    flat_config = _flat_config()
+    manager = EnterpriseServerConfigManager()  # no config_path
+
+    with (
+        patch(
+            "deephaven_mcp.config._base._load_config_from_file",
+            return_value=flat_config,
+        ) as mock_load,
+        patch("deephaven_mcp.config._enterprise.validate_enterprise_config"),
+    ):
+        await manager.get_config()
+
+    call_path = mock_load.call_args[0][0]
+    assert call_path == "/env/path.json"
+
+
+@pytest.mark.asyncio
+async def test_get_config_does_not_log_password_in_plaintext():
+    flat_config = _flat_config(password="supersecret")
+    manager = EnterpriseServerConfigManager(config_path="/fake/path.json")
+
+    logged_calls = []
+
+    def capture_log_summary(config, label=None, redactor=None):
+        logged_calls.append({"config": config, "label": label, "redactor": redactor})
+
+    with (
+        patch(
+            "deephaven_mcp.config._base._load_config_from_file",
+            return_value=flat_config,
+        ),
+        patch(
+            "deephaven_mcp.config._enterprise._log_config_summary",
+            side_effect=capture_log_summary,
+        ),
+    ):
+        await manager.get_config()
+
+    assert len(logged_calls) == 1
+    call = logged_calls[0]
+    assert call["redactor"] is not None, "redactor must be passed to _log_config_summary"
+    redacted = call["redactor"](call["config"])
+    assert redacted.get("password") == "[REDACTED]", (
+        "redactor must mask password before logging"
+    )
+
+
+@pytest.mark.asyncio
+async def test_set_config_cache_accepts_valid_enterprise_config():
+    valid_config = _flat_config()
+    manager = EnterpriseServerConfigManager()
+    await manager._set_config_cache(valid_config)
+
+    result = await manager.get_config()
+    assert result == valid_config
+
+
+@pytest.mark.asyncio
+async def test_set_config_cache_rejects_invalid_enterprise_config():
+    manager = EnterpriseServerConfigManager()
+    with pytest.raises(EnterpriseSystemConfigurationError):
+        await manager._set_config_cache({})
+
+
+@pytest.mark.asyncio
+async def test_set_config_cache_rejects_community_format():
+    manager = EnterpriseServerConfigManager()
+    with pytest.raises(EnterpriseSystemConfigurationError):
+        await manager._set_config_cache({"sessions": {}})
