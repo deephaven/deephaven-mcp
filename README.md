@@ -173,12 +173,12 @@ To stop the server: `pkill -f dh-mcp-community-server`
 {
   "mcpServers": {
     "deephaven-community": {
-      "type": "streamable-http",
-      "url": "http://127.0.0.1:8003/mcp"
+      "command": "/full/path/to/your/.venv/bin/mcp-proxy",
+      "args": ["--transport=streamablehttp", "http://127.0.0.1:8003/mcp"]
     },
     "deephaven-docs": {
-      "type": "streamable-http",
-      "url": "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"
+      "command": "/full/path/to/your/.venv/bin/mcp-proxy",
+      "args": ["--transport=streamablehttp", "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"]
     }
   }
 }
@@ -296,12 +296,12 @@ To stop the server: `pkill -f dh-mcp-enterprise-server`
 {
   "mcpServers": {
     "deephaven-enterprise": {
-      "type": "streamable-http",
-      "url": "http://127.0.0.1:8002/mcp"
+      "command": "/full/path/to/your/.venv/bin/mcp-proxy",
+      "args": ["--transport=streamablehttp", "http://127.0.0.1:8002/mcp"]
     },
     "deephaven-docs": {
-      "type": "streamable-http",
-      "url": "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"
+      "command": "/full/path/to/your/.venv/bin/mcp-proxy",
+      "args": ["--transport=streamablehttp", "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"]
     }
   }
 }
@@ -1068,18 +1068,18 @@ tail -f dh-mcp-enterprise-prod.log
 
 #### Claude Desktop
 
-Claude Desktop supports native streamable-http transport. Open **Claude Desktop** → **Settings** → **Developer** → **Edit Config**:
+Claude Desktop only supports stdio transport. Use `mcp-proxy` (included in your venv) as a bridge to the HTTP servers. Open **Claude Desktop** → **Settings** → **Developer** → **Edit Config**:
 
 ```json
 {
   "mcpServers": {
     "deephaven-community": {
-      "type": "streamable-http",
-      "url": "http://127.0.0.1:8003/mcp"
+      "command": "/full/path/to/your/.venv/bin/mcp-proxy",
+      "args": ["--transport=streamablehttp", "http://127.0.0.1:8003/mcp"]
     },
     "deephaven-docs": {
-      "type": "streamable-http",
-      "url": "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"
+      "command": "/full/path/to/your/.venv/bin/mcp-proxy",
+      "args": ["--transport=streamablehttp", "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"]
     }
   }
 }

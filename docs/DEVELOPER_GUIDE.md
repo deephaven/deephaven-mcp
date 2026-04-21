@@ -2648,17 +2648,19 @@ Claude Desktop is very useful for debugging and interactively exploring MCP serv
 2. **Navigate to `Settings > Developer > Edit Config`.**
 3. **Edit the `claude_desktop_config.json` file.**
 4. **Add your MCP server under the `mcpServers` section.**
-   - All three servers (Community, Enterprise, Docs) are HTTP-only. Start them first, then configure Claude Desktop with a URL connection.
+   - All three servers (Community, Enterprise, Docs) are HTTP-only. Start them first, then configure Claude Desktop using `mcp-proxy` (included in your venv) as a stdio bridge (Claude Desktop does not support HTTP transport natively).
    - Example configuration:
 
      ```json
      {
        "mcpServers": {
          "mcp-community": {
-           "url": "http://127.0.0.1:8003/mcp"
+           "command": "/full/path/to/your/.venv/bin/mcp-proxy",
+           "args": ["--transport=streamablehttp", "http://127.0.0.1:8003/mcp"]
          },
          "mcp-docs": {
-           "url": "http://127.0.0.1:8001/mcp"
+           "command": "/full/path/to/your/.venv/bin/mcp-proxy",
+           "args": ["--transport=streamablehttp", "http://127.0.0.1:8001/mcp"]
          }
        }
      }
@@ -2705,15 +2707,20 @@ For troubleshooting Claude Desktop MCP integration, log files are located at:
    DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json uv run dh-mcp-community-server
    ```
 
-2. Run `mcp-proxy` to connect to your running MCP server:
+2. Configure Claude Desktop to launch `mcp-proxy` as a stdio bridge:
 
-   ```sh
-   mcp-proxy --transport=streamablehttp http://127.0.0.1:8003/mcp
+   ```json
+   {
+     "mcpServers": {
+       "deephaven-community": {
+         "command": "/full/path/to/your/.venv/bin/mcp-proxy",
+         "args": ["--transport=streamablehttp", "http://127.0.0.1:8003/mcp"]
+       }
+     }
+   }
    ```
 
    (Replace the URL if your server uses a different host or port)
-
-3. Configure your client (e.g., Claude Desktop) to use the stdio interface provided by `mcp-proxy`
 
 #### mcp-proxy with Docs Server
 
@@ -2723,13 +2730,18 @@ For troubleshooting Claude Desktop MCP integration, log files are located at:
    INKEEP_API_KEY=your-api-key uv run dh-mcp-docs-server
    ```
 
-2. Run `mcp-proxy`:
+2. Configure Claude Desktop to launch `mcp-proxy` as a stdio bridge:
 
-   ```sh
-   mcp-proxy --transport=streamablehttp http://localhost:8001/mcp
+   ```json
+   {
+     "mcpServers": {
+       "deephaven-docs": {
+         "command": "/full/path/to/your/.venv/bin/mcp-proxy",
+         "args": ["--transport=streamablehttp", "http://127.0.0.1:8001/mcp"]
+       }
+     }
+   }
    ```
-
-3. Configure your client (e.g., Claude Desktop) to use the stdio interface provided by `mcp-proxy`
 
 ### Programmatic API
 
