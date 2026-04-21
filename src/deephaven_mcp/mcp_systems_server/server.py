@@ -125,6 +125,8 @@ def enterprise() -> None:
     server = FastMCP(
         "deephaven-mcp-enterprise",
         lifespan=make_enterprise_lifespan(config_path),
+        host=host,
+        port=port,
     )
     _register_shared_tools(server)
     session_enterprise.register_tools(server)
@@ -135,7 +137,7 @@ def enterprise() -> None:
         f"{host}:{port} (streamable-http)"
     )
     try:
-        server.run(transport="streamable-http", host=host, port=port)
+        server.run(transport="streamable-http")
     finally:
         _LOGGER.info(f"[enterprise] DHE MCP server '{server.name}' stopped.")
 
@@ -154,6 +156,8 @@ def community() -> None:
     server = FastMCP(
         "deephaven-mcp-community",
         lifespan=make_community_lifespan(config_path),
+        host=host,
+        port=port,
     )
     _register_shared_tools(server)
     session_community.register_tools(server)
@@ -162,6 +166,6 @@ def community() -> None:
         f"{host}:{port} (streamable-http)"
     )
     try:
-        server.run(transport="streamable-http", host=host, port=port)
+        server.run(transport="streamable-http")
     finally:
         _LOGGER.info(f"[community] DHC MCP server '{server.name}' stopped.")
