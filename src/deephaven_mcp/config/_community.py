@@ -2,7 +2,7 @@
 Configuration handling specific to Deephaven Community Sessions.
 
 This module provides validation and redaction functions for community session
-configurations:
+configurations, as well as the top-level community config validation engine:
 
 1. **Security Settings** (`security.community`):
    - Security configuration for community sessions (credential retrieval permissions)
@@ -14,9 +14,14 @@ configurations:
    - Redacted by `redact_community_session_config()`
 
 3. **Dynamic Session Creation** (`community.session_creation`):
-   - Configuration for on-demand creation of Deephaven Community sessions via Docker or python
+   - Configuration for on-demand creation of Deephaven Community sessions via Docker or Python
    - Validated by `validate_community_session_creation_config()`
    - Redacted by `redact_community_session_creation_config()`
+
+4. **Top-level Community Config Validation** (internal):
+   - `_validate_community_config()` validates the full community config structure against the schema
+   - `_apply_redaction_to_config()` redacts all sensitive fields for safe logging
+   - `_get_config_section()` and `_get_all_config_names()` navigate the config tree
 
 Key Features:
 - Type validation for all configuration fields
@@ -41,9 +46,14 @@ __all__ = [
 import copy
 import logging
 import types
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from typing import Any
 
-from deephaven_mcp._exceptions import CommunitySessionConfigurationError
+from deephaven_mcp._exceptions import (
+    CommunitySessionConfigurationError,
+    ConfigurationError,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -99,13 +109,12 @@ Type: list[str]
 def redact_community_session_config(
     session_config: dict[str, Any], redact_binary_values: bool = True
 ) -> dict[str, Any]:
-    """
-    Redacts sensitive fields from a community session configuration dictionary.
+    """Redact sensitive fields from a community session configuration dictionary.
 
     Creates a shallow copy of the input dictionary and redacts all sensitive fields:
-    - 'auth_token': Always redacted if present
+    - 'auth_token': Redacted if present and truthy (non-empty)
     - 'tls_root_certs', 'client_cert_chain', 'client_private_key': Redacted only if value
-      is binary (bytes/bytearray) and redact_binary_values is True
+      is truthy, binary (bytes/bytearray), and redact_binary_values is True
 
     Uses shallow copy for performance since nested structures are not expected in session configs.
     The original dictionary is not modified. Sensitive fields are replaced with the string "[REDACTED]".
@@ -153,8 +162,7 @@ Controls which community session credentials can be retrieved via MCP tools.
 
 
 def validate_security_community_config(security_community_config: Any | None) -> None:
-    """
-    Validate the 'security.community' configuration section.
+    """Validate the 'security.community' configuration section.
 
     Validates security settings for community sessions from the top-level 'security' section.
     Currently validates the 'credential_retrieval_mode' field which controls which community
@@ -168,7 +176,7 @@ def validate_security_community_config(security_community_config: Any | None) ->
 
     Args:
         security_community_config (dict[str, Any] | None): The security.community configuration dictionary.
-            Can be None if the 'security.community' keys are absent.
+            Can be None if the 'security.community' key is absent.
 
     Raises:
         CommunitySessionConfigurationError: If the config is not a dict, or if
@@ -178,6 +186,9 @@ def validate_security_community_config(security_community_config: Any | None) ->
         return
 
     if not isinstance(security_community_config, dict):
+        _LOGGER.error(
+            f"[config:validate_security_community_config] 'security.community' must be a dictionary, got {type(security_community_config).__name__}"
+        )
         raise CommunitySessionConfigurationError(
             "'security.community' must be a dictionary in configuration"
         )
@@ -186,11 +197,17 @@ def validate_security_community_config(security_community_config: Any | None) ->
     if "credential_retrieval_mode" in security_community_config:
         value = security_community_config["credential_retrieval_mode"]
         if not isinstance(value, str):
+            _LOGGER.error(
+                f"[config:validate_security_community_config] 'security.community.credential_retrieval_mode' must be a string, got {type(value).__name__}"
+            )
             raise CommunitySessionConfigurationError(
                 f"'security.community.credential_retrieval_mode' must be a string, got {type(value).__name__}"
             )
         if value not in _VALID_CREDENTIAL_RETRIEVAL_MODES:
-            valid_modes = '", "'.join(sorted(_VALID_CREDENTIAL_RETRIEVAL_MODES))
+            valid_modes = '"' + '", "'.join(sorted(_VALID_CREDENTIAL_RETRIEVAL_MODES)) + '"'
+            _LOGGER.error(
+                f"[config:validate_security_community_config] 'security.community.credential_retrieval_mode' must be one of: {valid_modes}, got '{value}'"
+            )
             raise CommunitySessionConfigurationError(
                 f'\'security.community.credential_retrieval_mode\' must be one of: "{valid_modes}", got "{value}"'
             )
@@ -199,8 +216,7 @@ def validate_security_community_config(security_community_config: Any | None) ->
 def validate_community_sessions_config(
     community_sessions_map: Any | None,
 ) -> None:
-    """
-    Validate the overall 'community.sessions' configuration section, if present.
+    """Validate the overall 'community.sessions' configuration section, if present.
 
     This validates the dictionary of static community sessions defined in the configuration.
     If `community_sessions_map` is None (i.e., the 'community.sessions' key was absent
@@ -221,15 +237,15 @@ def validate_community_sessions_config(
             `validate_single_community_session_config`).
     """
     if community_sessions_map is None:
-        # If 'community_sessions' key was absent from config, there's nothing to validate here.
+        # If 'community.sessions' key was absent from config, there's nothing to validate here.
         return
 
     if not isinstance(community_sessions_map, dict):
         _LOGGER.error(
-            f"[config:validate_community_sessions_config] 'community_sessions' must be a dictionary in Deephaven community session config, got {type(community_sessions_map).__name__}"
+            f"[config:validate_community_sessions_config] 'community.sessions' must be a dictionary in Deephaven community session config, got {type(community_sessions_map).__name__}"
         )
         raise CommunitySessionConfigurationError(
-            "'community_sessions' must be a dictionary in Deephaven community session config"
+            "'community.sessions' must be a dictionary in Deephaven community session config"
         )
 
     for session_name, session_config_item in community_sessions_map.items():
@@ -251,6 +267,9 @@ def _validate_field_types(session_name: str, config_item: dict[str, Any]) -> Non
     """
     for field_name, field_value in config_item.items():
         if field_name not in _ALLOWED_COMMUNITY_SESSION_FIELDS:
+            _LOGGER.error(
+                f"[config:validate_single_community_session_config] Unknown field '{field_name}' in community session config for '{session_name}'"
+            )
             raise CommunitySessionConfigurationError(
                 f"Unknown field '{field_name}' in community session config for {session_name}"
             )
@@ -259,11 +278,17 @@ def _validate_field_types(session_name: str, config_item: dict[str, Any]) -> Non
         if isinstance(allowed_types, tuple):
             if not isinstance(field_value, allowed_types):
                 expected_type_names = ", ".join(t.__name__ for t in allowed_types)
+                _LOGGER.error(
+                    f"[config:validate_single_community_session_config] Field '{field_name}' in community session config for '{session_name}' must be one of types ({expected_type_names}), got {type(field_value).__name__}"
+                )
                 raise CommunitySessionConfigurationError(
                     f"Field '{field_name}' in community session config for {session_name} "
                     f"must be one of types ({expected_type_names}), got {type(field_value).__name__}"
                 )
         elif not isinstance(field_value, allowed_types):
+            _LOGGER.error(
+                f"[config:validate_single_community_session_config] Field '{field_name}' in community session config for '{session_name}' must be of type {allowed_types.__name__}, got {type(field_value).__name__}"
+            )
             raise CommunitySessionConfigurationError(
                 f"Field '{field_name}' in community session config for {session_name} "
                 f"must be of type {allowed_types.__name__}, got {type(field_value).__name__}"
@@ -287,6 +312,9 @@ def _validate_auth_configuration(
     """
     # Check for mutual exclusivity of auth_token and auth_token_env_var
     if "auth_token" in config_item and "auth_token_env_var" in config_item:
+        _LOGGER.error(
+            f"[config:validate_single_community_session_config] Community session config for '{session_name}' has both 'auth_token' and 'auth_token_env_var' set; only one is allowed."
+        )
         raise CommunitySessionConfigurationError(
             f"In community session config for '{session_name}', both 'auth_token' and 'auth_token_env_var' are set. "
             "Please use only one."
@@ -323,6 +351,9 @@ def validate_single_community_session_config(
             fields if any were defined in `_REQUIRED_FIELDS`).
     """
     if not isinstance(config_item, dict):
+        _LOGGER.error(
+            f"[config:validate_single_community_session_config] Community session config for '{session_name}' must be a dictionary, got {type(config_item).__name__}"
+        )
         raise CommunitySessionConfigurationError(
             f"Community session config for {session_name} must be a dictionary, got {type(config_item)}"
         )
@@ -343,7 +374,7 @@ _ALLOWED_LAUNCH_METHODS: set[str] = {"docker", "python"}
 Set of allowed launch methods for dynamic community session creation.
 
 - 'docker': Launch Deephaven in a Docker container
-- 'python': Launch Deephaven using python subprocess with optional custom venv
+- 'python': Launch Deephaven using a Python subprocess with optional custom venv
 """
 
 _ALLOWED_SESSION_CREATION_FIELDS: dict[str, type | tuple[type, ...]] = {
@@ -385,8 +416,7 @@ All fields are optional - if not specified, system defaults are used.
 def redact_community_session_creation_config(
     session_creation_config: dict[str, Any],
 ) -> dict[str, Any]:
-    """
-    Redacts sensitive fields from a session_creation configuration dictionary.
+    """Redact sensitive fields from a session_creation configuration dictionary.
 
     Creates a deep copy of the input dictionary and redacts sensitive fields in the defaults section:
     - 'auth_token': Always redacted if present in defaults
@@ -424,11 +454,10 @@ def redact_community_session_creation_config(
 def validate_community_session_creation_config(
     session_creation_config: Any | None,
 ) -> None:
-    """
-    Validate the 'community.session_creation' configuration section.
+    """Validate the 'community.session_creation' configuration section.
 
     This validates the configuration used for dynamically creating community sessions on demand
-    via Docker or python-based Deephaven. Performs comprehensive validation including:
+    via Docker or Python-based Deephaven. Performs comprehensive validation including:
     - Type checking for all fields
     - Validation that max_concurrent_sessions is non-negative
     - Validation of the 'defaults' section (if present) including:
@@ -467,6 +496,9 @@ def validate_community_session_creation_config(
     # Validate top-level fields
     for field_name, field_value in session_creation_config.items():
         if field_name not in _ALLOWED_SESSION_CREATION_FIELDS:
+            _LOGGER.error(
+                f"[config:validate_community_session_creation_config] Unknown field '{field_name}' in session_creation config"
+            )
             raise CommunitySessionConfigurationError(
                 f"Unknown field '{field_name}' in session_creation config"
             )
@@ -480,6 +512,9 @@ def validate_community_session_creation_config(
                 if isinstance(allowed_types, type)
                 else " | ".join(t.__name__ for t in allowed_types)
             )
+            _LOGGER.error(
+                f"[config:validate_community_session_creation_config] Field '{field_name}' in session_creation config must be of type {type_name}, got {type(field_value).__name__}"
+            )
             raise CommunitySessionConfigurationError(
                 f"Field '{field_name}' in session_creation config "
                 f"must be of type {type_name}, got {type(field_value).__name__}"
@@ -489,6 +524,9 @@ def validate_community_session_creation_config(
     if "max_concurrent_sessions" in session_creation_config:
         max_sessions = session_creation_config["max_concurrent_sessions"]
         if max_sessions < 0:
+            _LOGGER.error(
+                f"[config:validate_community_session_creation_config] 'max_concurrent_sessions' must be non-negative, got {max_sessions}"
+            )
             raise CommunitySessionConfigurationError(
                 f"'max_concurrent_sessions' must be non-negative, got {max_sessions}"
             )
@@ -513,6 +551,9 @@ def _validate_defaults_field_types(defaults: dict[str, Any]) -> None:
     """
     for field_name, field_value in defaults.items():
         if field_name not in _ALLOWED_SESSION_CREATION_DEFAULTS:
+            _LOGGER.error(
+                f"[config:_validate_defaults_field_types] Unknown field '{field_name}' in session_creation.defaults config"
+            )
             raise CommunitySessionConfigurationError(
                 f"Unknown field '{field_name}' in session_creation.defaults config"
             )
@@ -521,11 +562,17 @@ def _validate_defaults_field_types(defaults: dict[str, Any]) -> None:
         if isinstance(allowed_types, tuple):
             if not isinstance(field_value, allowed_types):
                 expected_type_names = ", ".join(t.__name__ for t in allowed_types)
+                _LOGGER.error(
+                    f"[config:_validate_defaults_field_types] Field '{field_name}' in session_creation.defaults must be one of types ({expected_type_names}), got {type(field_value).__name__}"
+                )
                 raise CommunitySessionConfigurationError(
                     f"Field '{field_name}' in session_creation.defaults "
                     f"must be one of types ({expected_type_names}), got {type(field_value).__name__}"
                 )
         elif not isinstance(field_value, allowed_types):
+            _LOGGER.error(
+                f"[config:_validate_defaults_field_types] Field '{field_name}' in session_creation.defaults must be of type {allowed_types.__name__}, got {type(field_value).__name__}"
+            )
             raise CommunitySessionConfigurationError(
                 f"Field '{field_name}' in session_creation.defaults "
                 f"must be of type {allowed_types.__name__}, got {type(field_value).__name__}"
@@ -549,6 +596,9 @@ def _validate_defaults_enum_fields(defaults: dict[str, Any]) -> None:
     if "launch_method" in defaults:
         launch_method = defaults["launch_method"]
         if launch_method not in _ALLOWED_LAUNCH_METHODS:
+            _LOGGER.error(
+                f"[config:_validate_defaults_enum_fields] session_creation.defaults 'launch_method' must be one of {_ALLOWED_LAUNCH_METHODS}, got '{launch_method}'"
+            )
             raise CommunitySessionConfigurationError(
                 f"'launch_method' must be one of {_ALLOWED_LAUNCH_METHODS}, got '{launch_method}'"
             )
@@ -562,6 +612,9 @@ def _validate_defaults_enum_fields(defaults: dict[str, Any]) -> None:
             )
 
     if "auth_token" in defaults and "auth_token_env_var" in defaults:
+        _LOGGER.error(
+            "[config:_validate_defaults_enum_fields] session_creation.defaults has both 'auth_token' and 'auth_token_env_var' set; only one is allowed."
+        )
         raise CommunitySessionConfigurationError(
             "In session_creation.defaults, both 'auth_token' and 'auth_token_env_var' are set. "
             "Please use only one."
@@ -579,6 +632,9 @@ def _validate_positive_number(field_name: str, value: float | int) -> None:
         CommunitySessionConfigurationError: If value is not positive (must be > 0).
     """
     if value <= 0:
+        _LOGGER.error(
+            f"[config:_validate_positive_number] '{field_name}' must be positive, got {value}"
+        )
         raise CommunitySessionConfigurationError(
             f"'{field_name}' must be positive, got {value}"
         )
@@ -596,6 +652,9 @@ def _validate_string_list(field_name: str, items: list) -> None:
     """
     for i, item in enumerate(items):
         if not isinstance(item, str):
+            _LOGGER.error(
+                f"[config:_validate_string_list] '{field_name}[{i}]' must be a string, got {type(item).__name__}"
+            )
             raise CommunitySessionConfigurationError(
                 f"'{field_name}[{i}]' must be a string, got {type(item).__name__}"
             )
@@ -641,6 +700,9 @@ def _validate_defaults_numeric_ranges(defaults: dict[str, Any]) -> None:
     if "startup_retries" in defaults:
         retries = defaults["startup_retries"]
         if retries < 0:
+            _LOGGER.error(
+                f"[config:_validate_defaults_numeric_ranges] 'startup_retries' must be non-negative, got {retries}"
+            )
             raise CommunitySessionConfigurationError(
                 f"'startup_retries' must be non-negative, got {retries}"
             )
@@ -669,10 +731,16 @@ def _validate_defaults_collection_contents(defaults: dict[str, Any]) -> None:
         env_vars = defaults["environment_vars"]
         for key, value in env_vars.items():
             if not isinstance(key, str):
+                _LOGGER.error(
+                    f"[config:_validate_defaults_collection_contents] 'environment_vars' key must be a string, got {type(key).__name__}"
+                )
                 raise CommunitySessionConfigurationError(
                     f"'environment_vars' key must be a string, got {type(key).__name__}"
                 )
             if not isinstance(value, str):
+                _LOGGER.error(
+                    f"[config:_validate_defaults_collection_contents] 'environment_vars[{key}]' value must be a string, got {type(value).__name__}"
+                )
                 raise CommunitySessionConfigurationError(
                     f"'environment_vars[{key}]' value must be a string, got {type(value).__name__}"
                 )
@@ -694,3 +762,404 @@ def _validate_session_creation_defaults(defaults: dict[str, Any]) -> None:
     _validate_defaults_enum_fields(defaults)
     _validate_defaults_numeric_ranges(defaults)
     _validate_defaults_collection_contents(defaults)
+
+
+# ---------------------------------------------------------------------------
+# Community config validation engine (internal)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _ConfigPathSpec:
+    """Specification for a valid configuration path in the community config schema.
+
+    Defines the validation and redaction rules for a specific configuration path.
+    Used by the validation engine to ensure configuration correctness and security.
+
+    Attributes:
+        required (bool): Whether this configuration path must be present. If True and the
+            path is missing, validation will fail with ConfigurationError.
+        expected_type (type): The expected Python type for values at this path (e.g., dict, str, int).
+            Type mismatches will cause validation to fail.
+        validator (Callable[[Any], None] | None): Optional validation function for custom validation logic.
+            Receives the value at this path and should raise CommunitySessionConfigurationError if
+            validation fails (automatically wrapped as ConfigurationError).
+            If None, only type validation is performed.
+        redactor (Callable[[Any], Any] | None): Optional function to redact sensitive data for safe logging.
+            Receives the config value and returns a redacted version (typically replacing sensitive
+            strings with "[REDACTED]"). If None, no redaction is applied to this path.
+    """
+
+    required: bool
+    expected_type: type
+    validator: Callable[[Any], None] | None = None
+    redactor: Callable[[Any], Any] | None = None
+
+
+# Schema defining all valid community configuration paths
+_SCHEMA_PATHS: dict[tuple[str, ...], _ConfigPathSpec] = {
+    ("security",): _ConfigPathSpec(
+        required=False, expected_type=dict, validator=None  # Validated by nested paths
+    ),
+    ("security", "community"): _ConfigPathSpec(
+        required=False,
+        expected_type=dict,
+        validator=validate_security_community_config,
+    ),
+    ("community",): _ConfigPathSpec(
+        required=False, expected_type=dict, validator=None  # Validated by nested paths
+    ),
+    ("community", "sessions"): _ConfigPathSpec(
+        required=False,
+        expected_type=dict,
+        validator=validate_community_sessions_config,
+        redactor=lambda sessions_dict: (
+            {
+                name: redact_community_session_config(config)
+                for name, config in sessions_dict.items()
+            }
+            if isinstance(sessions_dict, dict)
+            else sessions_dict
+        ),
+    ),
+    ("community", "session_creation"): _ConfigPathSpec(
+        required=False,
+        expected_type=dict,
+        validator=validate_community_session_creation_config,
+        redactor=redact_community_session_creation_config,
+    ),
+}
+
+
+def _get_config_section(
+    config: dict[str, Any],
+    section: Sequence[str],
+) -> Any:
+    """Navigate to and retrieve a nested configuration section by path.
+
+    This helper function traverses the configuration dictionary using the provided path sequence,
+    returning the value at the final key. Useful for accessing deeply nested configuration values.
+
+    Args:
+        config (dict[str, Any]): The root configuration dictionary to navigate.
+        section (Sequence[str]): The path to the config section as a sequence of keys.
+            For example, ['community', 'sessions', 'local-dev'] accesses config['community']['sessions']['local-dev'].
+
+    Returns:
+        Any: The configuration value at the specified path. Can be any type (dict, str, int, list, etc.)
+            depending on what's stored at that location.
+
+    Raises:
+        KeyError: If any key in the section path does not exist or if any intermediate value is not a dictionary.
+            The error message includes the full path for debugging.
+    """
+    _LOGGER.debug(f"[config:_get_config_section] Getting config section for path: {section}")
+    curr = config
+    for key in section:
+        if not isinstance(curr, dict) or key not in curr:
+            raise KeyError(f"Section path {section} does not exist in configuration")
+        curr = curr[key]
+    return curr
+
+
+def _get_all_config_names(
+    config: dict[str, Any],
+    section: Sequence[str],
+) -> list[str]:
+    """Retrieve all configuration names (keys) from a specific section path.
+
+    This helper function is useful for discovering what sessions, systems, or other named entities
+    are configured. Returns an empty list if the section doesn't exist or isn't a dictionary,
+    making it safe to call without pre-checking.
+
+    Args:
+        config (dict[str, Any]): The root configuration dictionary to search within.
+        section (Sequence[str]): The path to the config section (e.g., ['community', 'sessions']
+            to get all community session names).
+
+    Returns:
+        list[str]: A list of configuration names (dictionary keys) from the specified section.
+            Returns an empty list in two cases:
+            1. The section path doesn't exist (KeyError from _get_config_section)
+            2. The section exists but is not a dictionary (e.g., it's a string or int)
+    """
+    _LOGGER.debug(
+        f"[config:_get_all_config_names] Getting list of all names from config section path: {section}"
+    )
+    try:
+        section_obj = _get_config_section(config, section)
+    except KeyError:
+        _LOGGER.warning(
+            f"[config:_get_all_config_names] Section path {section} does not exist, returning empty list of names."
+        )
+        return []
+
+    if not isinstance(section_obj, dict):
+        _LOGGER.warning(
+            f"[config:_get_all_config_names] Section at path {section} is not a dictionary, returning empty list of names."
+        )
+        return []
+
+    names = list(section_obj.keys())
+    _LOGGER.debug(
+        f"[config:_get_all_config_names] Found {len(names)} names in section {section}: {names}"
+    )
+    return names
+
+
+def _apply_redaction_to_config(config: dict[str, Any]) -> dict[str, Any]:
+    """Apply redaction to sensitive configuration fields for safe logging.
+
+    Creates a deep copy of the configuration and applies all redaction functions defined in
+    _SCHEMA_PATHS. This ensures that sensitive data (auth tokens, passwords, private keys, etc.)
+    is replaced with "[REDACTED]" before logging. The original configuration is never modified.
+
+    Redaction is applied to each path that has a redactor function defined in _SCHEMA_PATHS.
+    If a configuration section doesn't exist, its redaction is silently skipped (no error).
+
+    Args:
+        config (dict[str, Any]): The configuration dictionary to redact. This is NOT modified.
+
+    Returns:
+        dict[str, Any]: A new deep copy of the configuration with sensitive fields redacted.
+            The structure remains identical, only sensitive values are replaced.
+    """
+    config_copy = copy.deepcopy(config)
+
+    # Apply redaction functions for each configured path
+    for path_tuple, spec in _SCHEMA_PATHS.items():
+        if spec.redactor is not None:
+            try:
+                section = _get_config_section(config_copy, list(path_tuple))
+                redacted_section = spec.redactor(section)
+
+                # Navigate to the parent and set the redacted section
+                current = config_copy
+                for key in path_tuple[:-1]:
+                    current = current[key]
+                current[path_tuple[-1]] = redacted_section
+
+            except KeyError:
+                # Section doesn't exist, skip redaction
+                continue
+
+    return config_copy
+
+
+def _validate_unknown_keys(
+    data: dict[str, Any], path: tuple[str, ...], valid_keys: set[str]
+) -> None:
+    """Check for unknown keys at the current path level and raise ConfigurationError if found.
+
+    This validation helper ensures that only known configuration keys are present at the
+    specified path level. Any keys found in the data that are not in the valid_keys set
+    will cause validation to fail with a detailed error message.
+
+    Args:
+        data (dict[str, Any]): The configuration dictionary section to validate.
+        path (tuple[str, ...]): The current path tuple for error reporting context.
+        valid_keys (set[str]): Set of allowed key names at this path level.
+
+    Raises:
+        ConfigurationError: If any unknown keys are found in the data.
+    """
+    unknown_keys = set(data.keys()) - valid_keys
+    if unknown_keys:
+        _LOGGER.error(
+            f"[config:_validate_community_config] Unknown keys at config path {path}: {unknown_keys}"
+        )
+        raise ConfigurationError(f"Unknown keys at config path {path}: {unknown_keys}")
+
+
+def _validate_required_keys(
+    data: dict[str, Any], path: tuple[str, ...], required_keys: set[str]
+) -> None:
+    """Check for missing required keys at the current path level and raise ConfigurationError if any are missing.
+
+    This validation helper ensures that all required configuration keys are present at the
+    specified path level. Any required keys that are missing from the data will cause
+    validation to fail with a detailed error message listing all missing keys.
+
+    Args:
+        data (dict[str, Any]): The configuration dictionary section to validate.
+        path (tuple[str, ...]): The current path tuple for error reporting context.
+        required_keys (set[str]): Set of key names that must be present at this path level.
+
+    Raises:
+        ConfigurationError: If any required keys are missing from the data.
+    """
+    missing_keys = required_keys - set(data.keys())
+    if missing_keys:
+        _LOGGER.error(
+            f"[config:_validate_community_config] Missing required keys at config path {path}: {missing_keys}"
+        )
+        raise ConfigurationError(
+            f"Missing required keys at config path {path}: {missing_keys}"
+        )
+
+
+def _validate_key_type_and_value(
+    key: str, value: Any, spec: _ConfigPathSpec, path: tuple[str, ...]
+) -> None:
+    """Validate type and value for a single configuration key.
+
+    Performs two types of validation:
+    1. Type validation - ensures the value matches the expected type in the spec
+    2. Specialized validation - if a validator is provided in the spec, runs it
+       and wraps CommunitySessionConfigurationError as ConfigurationError
+
+    Args:
+        key (str): The configuration key being validated.
+        value (Any): The value to validate.
+        spec (_ConfigPathSpec): The configuration path specification containing type and validator.
+        path (tuple[str, ...]): The parent path tuple (will be combined with key to form current_path).
+
+    Raises:
+        ConfigurationError: If validation fails for type or specialized validation.
+    """
+    current_path = path + (key,)
+
+    # Type validation
+    if not isinstance(value, spec.expected_type):
+        _LOGGER.error(
+            f"[config:_validate_community_config] Config path {current_path} must be of type {spec.expected_type.__name__}, got {type(value).__name__}"
+        )
+        raise ConfigurationError(
+            f"Config path {current_path} must be of type {spec.expected_type.__name__}, got {type(value).__name__}"
+        )
+
+    # Specialized validation
+    if spec.validator:
+        try:
+            spec.validator(value)
+        except CommunitySessionConfigurationError as e:
+            raise ConfigurationError(
+                f"Invalid configuration for {'.'.join(current_path)}: {e}"
+            ) from e
+
+
+def _should_recurse_into_nested_dict(current_path: tuple[str, ...]) -> bool:
+    """Check if there are nested schema paths for the current path.
+
+    Determines if we should continue recursing into a dictionary by checking if any
+    schema paths exist that are children of the current path (i.e., they start with
+    the current path and have at least one more component). This is used during
+    validation to decide whether to recursively validate nested dictionary sections.
+
+    For example, if current_path is ('community',) and _SCHEMA_PATHS contains
+    ('community', 'sessions'), this returns True because there are nested paths.
+    If current_path is ('community', 'sessions') and no deeper paths exist, returns False.
+
+    Args:
+        current_path (tuple[str, ...]): The current path tuple to check for children.
+
+    Returns:
+        bool: True if there are nested paths that extend beyond the current path,
+              False if this is a leaf node in the schema tree.
+    """
+    return any(
+        nested_path[: len(current_path)] == current_path
+        and len(nested_path) > len(current_path)
+        for nested_path in _SCHEMA_PATHS.keys()
+    )
+
+
+def _validate_section(data: dict[str, Any], path: tuple[str, ...]) -> None:
+    """Validate a configuration section in a single pass.
+
+    Performs comprehensive validation of a configuration section including:
+    1. Checking for unknown keys not in the schema
+    2. Checking for missing required keys
+    3. Validating each key's type and value
+    4. Recursively validating nested dictionary sections
+
+    This is the core validation engine that processes each level of the configuration
+    hierarchy according to the schema defined in _SCHEMA_PATHS. Recursion continues
+    only if nested schema paths exist for the current path.
+
+    Args:
+        data (dict[str, Any]): The dictionary containing configuration data to validate.
+        path (tuple[str, ...]): The current path tuple representing the location in the config.
+
+    Raises:
+        ConfigurationError: If validation fails for any reason (unknown keys, missing required keys,
+                           type mismatches, or specialized validation failures).
+    """
+    # Get specs for the current path level
+    current_specs = {
+        nested_path[len(path)]: spec
+        for nested_path, spec in _SCHEMA_PATHS.items()
+        if len(nested_path) == len(path) + 1 and nested_path[: len(path)] == path
+    }
+
+    # Check for unknown keys
+    valid_keys = set(current_specs.keys())
+    _validate_unknown_keys(data, path, valid_keys)
+
+    # Check for missing required keys
+    required_keys = {key for key, spec in current_specs.items() if spec.required}
+    _validate_required_keys(data, path, required_keys)
+
+    # Validate each present key
+    for key, value in data.items():
+        if key in current_specs:
+            spec = current_specs[key]
+            current_path = path + (key,)
+
+            _validate_key_type_and_value(key, value, spec, path)
+
+            # Recurse into nested dictionaries
+            if isinstance(value, dict) and _should_recurse_into_nested_dict(
+                current_path
+            ):
+                _validate_section(value, current_path)
+
+
+def _validate_community_config(config: dict[str, Any]) -> dict[str, Any]:
+    """Validate the Deephaven MCP community configuration dictionary.
+
+    This function ensures that the configuration dictionary conforms to the expected schema for
+    Deephaven MCP community servers. The configuration may contain the following top-level keys:
+
+      - 'security' (dict, optional):
+            A dictionary containing security-related configuration for all session types.
+            If this key is present, its value must be a dictionary (which can be empty, e.g., {}).
+            If this key is absent, all security settings use their secure defaults.
+
+      - 'community' (dict, optional):
+            A dictionary mapping community configuration.
+            If this key is present, its value must be a dictionary (which can be empty, e.g., {}).
+            If this key is absent, it implies no community configuration is present.
+
+    Validation Rules:
+      - Only known keys are allowed at each level of nesting.
+      - All present sections are validated according to their schema.
+      - Unknown or misspelled keys at any level will cause validation to fail.
+      - All field types must be correct if present.
+      - Sensitive fields are redacted from logs.
+
+    Args:
+        config (dict[str, Any]): The configuration dictionary to validate.
+
+    Returns:
+        dict[str, Any]: The same input dictionary, returned unchanged after successful validation.
+
+    Raises:
+        ConfigurationError: If validation fails due to unknown keys, wrong types, or invalid nested
+            configurations. Any unknown top-level key (including ``"enterprise"``) raises this error.
+
+    Example:
+        >>> validated_config = _validate_community_config({'community': {'sessions': {'local_session': {}}}})
+        >>> validated_config_empty = _validate_community_config({})  # Also valid
+    """
+    if not isinstance(config, dict):
+        _LOGGER.error(
+            f"[config:_validate_community_config] Configuration must be a dictionary, got {type(config).__name__}"
+        )
+        raise ConfigurationError("Configuration must be a dictionary")
+
+    # Validate the entire configuration
+    _validate_section(config, ())
+
+    _LOGGER.info("[config:_validate_community_config] Configuration validation passed.")
+    return config

@@ -1,5 +1,4 @@
-"""
-Script Execution MCP Tools - Run Python Scripts and Manage Packages.
+"""Script Execution MCP Tools - Run Python Scripts and Manage Packages.
 
 Provides MCP tools for executing code and managing packages in sessions:
 - session_script_run: Execute Python scripts in a session
@@ -11,12 +10,9 @@ These tools work with both Community and Enterprise sessions.
 import logging
 
 import aiofiles
-from mcp.server.fastmcp import Context
+from mcp.server.fastmcp import Context, FastMCP
 
 from deephaven_mcp import queries
-from deephaven_mcp.mcp_systems_server._tools.mcp_server import (
-    mcp_server,
-)
 from deephaven_mcp.mcp_systems_server._tools.shared import (
     _get_session_from_context,
 )
@@ -24,7 +20,6 @@ from deephaven_mcp.mcp_systems_server._tools.shared import (
 _LOGGER = logging.getLogger(__name__)
 
 
-@mcp_server.tool()
 async def session_script_run(
     context: Context,
     session_id: str,
@@ -58,8 +53,8 @@ async def session_script_run(
     Args:
         context (Context): The MCP context object.
         session_id (str): ID of the Deephaven session on which to execute the script. This argument is required.
-        script (str, optional): The script to execute. Defaults to None.
-        script_path (str, optional): Path to a script file to execute. Defaults to None.
+        script (str | None, optional): The script to execute. Defaults to None.
+        script_path (str | None, optional): Path to a script file to execute. Defaults to None.
 
     Returns:
         dict: Structured result object with the following keys:
@@ -155,10 +150,8 @@ async def session_script_run(
     return result
 
 
-@mcp_server.tool()
 async def session_pip_list(context: Context, session_id: str) -> dict:
-    """
-    MCP Tool: Retrieve installed pip packages as a TABULAR LIST from a Deephaven session.
+    """MCP Tool: Retrieve installed pip packages as a TABULAR LIST from a Deephaven session.
 
     **Returns**: Package information formatted as TABULAR DATA with columns for package name and version.
     This tabular data should be displayed as a table to users for easy scanning of available libraries.
@@ -206,7 +199,7 @@ async def session_pip_list(context: Context, session_id: str) -> dict:
         {'success': True, 'result': [{"package": "numpy", "version": "1.25.0"}, ...]}
 
     Example Error Response:
-        {'success': False, 'error': 'Failed to get pip packages: ...', 'isError': True}
+        {'success': False, 'error': "Failed to list pip packages for session '<session_id>': <ExceptionType>: <message>", 'isError': True}
     """
     _LOGGER.info(
         f"[mcp_systems_server:session_pip_list] Invoked for session_id: {session_id!r}"
@@ -264,3 +257,15 @@ async def session_pip_list(context: Context, session_id: str) -> dict:
         )
         result["isError"] = True
     return result
+
+
+def register_tools(server: FastMCP) -> None:
+    """Register all script execution tools with the given FastMCP server.
+
+    These tools are shared between the DHE and DHC servers.
+
+    Args:
+        server (FastMCP): The server to register tools with.
+    """
+    server.tool()(session_script_run)
+    server.tool()(session_pip_list)

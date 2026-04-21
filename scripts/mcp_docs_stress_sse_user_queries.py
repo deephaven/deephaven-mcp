@@ -3,7 +3,7 @@
 Async stress test client for the Deephaven MCP Docs server (agentic, MCP-compatible) using user queries.
 
 Features:
-- Connects to the docs server via SSE (Server-Sent Events) only.
+- Connects to the docs server via streamable-http.
 - Lists available tools from the server (should include 'docs_chat').
 - Iterates over a set of predefined prompts and sends each to the docs_chat tool.
 - Supports concurrent execution with configurable number of threads (async tasks).
@@ -17,7 +17,7 @@ Requirements:
 - Python 3.11 or newer (for ExceptionGroup/except* support)
 
 Usage:
-    uv run scripts/mcp_docs_stress_sse_user_queries.py --url http://localhost:8000/sse --threads 4 --runs 10
+    uv run scripts/mcp_docs_stress_sse_user_queries.py --url http://localhost:8001/mcp --threads 4 --runs 10
     uv run scripts/mcp_docs_stress_sse_user_queries.py --url dev --history '[{"role": "user", "content": "Hi"}]' --threads 2 --runs 5
 
 See --help for all options.
@@ -32,7 +32,7 @@ import traceback
 from collections import defaultdict
 
 import httpx
-from mcp.client.sse import sse_client
+from mcp.client.streamable_http import streamable_http_client
 
 prompts = [
     "What is Deephaven?",
@@ -48,22 +48,22 @@ def parse_args():
 
     Returns:
         argparse.Namespace: Parsed arguments with fields:
-            - url: SSE server URL or shortcut (prod, dev, local)
+            - url: streamable-http server URL or shortcut (prod, dev, local)
             - history: Optional chat history as JSON string
             - threads: Number of concurrent threads (async tasks) to use
             - runs: Number of times each thread runs the set of user queries
     """
     parser = argparse.ArgumentParser(
-        description="Async MCP Docs test client (SSE only)"
+        description="Async MCP Docs stress test client (streamable-http)"
     )
     parser.add_argument(
         "--url",
         default="prod",
         help=(
-            "SSE server URL or shortcut: "
-            "'local' for http://localhost:8000/sse, "
-            "'prod' for http://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/sse, "
-            "'dev' for http://deephaven-mcp-docs-dev.dhc-demo.deephaven.io/sse. "
+            "streamable-http server URL or shortcut: "
+            "'local' for http://localhost:8001/mcp, "
+            "'prod' for https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp, "
+            "'dev' for https://deephaven-mcp-docs-dev.dhc-demo.deephaven.io/mcp. "
             "You may also provide a full URL."
         ),
     )
@@ -89,20 +89,20 @@ def parse_args():
 
 def resolve_url(url_option):
     """
-    Resolve URL shortcut to full SSE endpoint URL.
+    Resolve URL shortcut to full streamable-http endpoint URL.
 
     Args:
         url_option: URL string or shortcut ('local', 'prod', 'dev')
 
     Returns:
-        str: Full SSE endpoint URL
+        str: Full streamable-http endpoint URL
     """
     if url_option == "local":
-        return "http://localhost:8000/sse"
+        return "http://localhost:8001/mcp"
     elif url_option == "prod":
-        return "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/sse"
+        return "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"
     elif url_option == "dev":
-        return "https://deephaven-mcp-docs-dev.dhc-demo.deephaven.io/sse"
+        return "https://deephaven-mcp-docs-dev.dhc-demo.deephaven.io/mcp"
     return url_option
 
 
@@ -182,7 +182,7 @@ async def main():
     """
     Main entry point for the concurrent stress test.
 
-    Connects to the MCP Docs server via SSE, verifies docs_chat tool availability,
+    Connects to the MCP Docs server via streamable-http, verifies docs_chat tool availability,
     launches concurrent worker tasks, and prints timing statistics.
     Handles various exception types using Python 3.11+ ExceptionGroup syntax.
     """
@@ -200,7 +200,7 @@ async def main():
                 print(f"Failed to parse --history: {e}", file=sys.stderr)
                 sys.exit(2)
 
-        async with sse_client(url) as (read, write):
+        async with streamable_http_client(url) as (read, write):
             async with read, write:
                 await write.send_initialize()
                 result = await read.recv_initialize()

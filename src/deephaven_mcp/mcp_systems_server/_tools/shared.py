@@ -1,5 +1,4 @@
-"""
-Shared Utilities - Internal Helper Functions.
+"""Shared Utilities - Internal Helper Functions.
 
 Provides internal helper functions used across multiple MCP tool modules:
 - Response size checking and validation
@@ -15,11 +14,10 @@ import pyarrow
 from mcp.server.fastmcp import Context
 
 from deephaven_mcp.client import BaseSession, CorePlusSession
-from deephaven_mcp.config import ConfigManager, get_config_section
 from deephaven_mcp.resource_manager import (
-    CombinedSessionRegistry,
     InitializationPhase,
 )
+from deephaven_mcp.resource_manager._registry import BaseRegistry
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -32,7 +30,7 @@ def _format_initialization_status(
 
     Pure formatting function — does not query any registry.  Callers are
     responsible for obtaining *phase* and *init_errors* from the same
-    atomic snapshot (e.g. via ``CombinedSessionRegistry.get_all()`` on the shared
+    atomic snapshot (e.g. via ``BaseRegistry.get_all()`` on the shared
     registry instance).
 
     Returns ``None`` when there is nothing to report (completed without
@@ -43,8 +41,8 @@ def _format_initialization_status(
             response["initialization"] = init_info
 
     Args:
-        phase: The current initialization phase.
-        init_errors: Dict mapping factory names to error descriptions.
+        phase (InitializationPhase): The current initialization phase.
+        init_errors (dict[str, str]): Dict mapping factory names to error descriptions.
 
     Returns:
         A dict with ``status`` (str, always) and ``errors``
@@ -80,8 +78,7 @@ def _format_initialization_status(
 async def _get_session_from_context(
     function_name: str, context: Context, session_id: str
 ) -> BaseSession:
-    """
-    Get an active session from the MCP context.
+    """Get an active session from the MCP context.
 
     This helper eliminates duplication of the common pattern for accessing
     sessions from the MCP context. It handles the standard flow of:
@@ -98,13 +95,13 @@ async def _get_session_from_context(
         BaseSession: The active session connection
 
     Raises:
-        KeyError: If session_id not found in registry
+        RegistryItemNotFoundError: If session_id not found in registry
         Exception: If session cannot be established or context is invalid
     """
     _LOGGER.debug(
         f"[mcp_systems_server:{function_name}] Accessing session registry from context"
     )
-    session_registry: CombinedSessionRegistry = (
+    session_registry: BaseRegistry = (
         context.request_context.lifespan_context["session_registry"]
     )
 
@@ -128,8 +125,7 @@ async def _get_session_from_context(
 async def _get_enterprise_session(
     function_name: str, context: Context, session_id: str
 ) -> tuple[CorePlusSession | None, dict[str, object] | None]:
-    """
-    Get and validate an enterprise (Core+) session from context.
+    """Get and validate an enterprise (Core+) session from context.
 
     This helper combines session retrieval and validation into a single clean operation,
     consolidating the common pattern of getting a session and verifying it's an enterprise
@@ -141,9 +137,9 @@ async def _get_enterprise_session(
         session_id (str): ID of the session to retrieve (e.g., "enterprise:prod:analytics").
 
     Returns:
-        tuple: A 2-tuple (session, error) where:
+        tuple[CorePlusSession | None, dict[str, object] | None]: A 2-tuple (session, error) where:
             - session (CorePlusSession | None): The validated enterprise session on success, None on failure.
-            - error (dict | None): None on success, structured error dict on failure with keys:
+            - error (dict[str, object] | None): None on success, structured error dict on failure with keys:
                 - 'success': False
                 - 'error': str (human-readable error message)
                 - 'isError': True
@@ -156,7 +152,7 @@ async def _get_enterprise_session(
     Example:
         >>> session, error = await _get_enterprise_session("catalog_tables_schema", context, "enterprise:prod:analytics")
         >>> if error:
-        >>>     return error
+        ...     return error
         >>> session = cast(CorePlusSession, session)  # Type narrowing for mypy
     """
     try:
@@ -185,8 +181,7 @@ WARNING_SIZE = 5_000_000  # 5MB warning threshold
 
 
 def _check_response_size(table_name: str, estimated_size: int) -> dict | None:
-    """
-    Check if estimated response size is within acceptable limits.
+    """Check if estimated response size is within acceptable limits.
 
     Evaluates the estimated response size against predefined limits to prevent memory
     issues and excessive network traffic. Logs warnings for large responses and
@@ -226,8 +221,7 @@ def _format_meta_table_result(
     table_name: str,
     namespace: str | None = None,
 ) -> dict:
-    """
-    Format a PyArrow meta table into a standardized result dictionary.
+    """Format a PyArrow meta table into a standardized result dictionary.
 
     This helper eliminates code duplication between session_tables_schema and
     catalog_tables_schema by providing a single place to format metadata results.
@@ -308,46 +302,3 @@ def _format_meta_table_result(
     return result
 
 
-async def _get_system_config(
-    function_name: str, config_manager: ConfigManager, system_name: str
-) -> tuple[dict, dict | None]:
-    """Get enterprise system configuration and validate it exists.
-
-    Retrieves the configuration for the specified enterprise system from the config manager.
-    This is a common validation step used by enterprise session management functions.
-
-    Args:
-        function_name (str): Name of the calling function for logging purposes.
-        config_manager (ConfigManager): ConfigManager instance to retrieve configuration.
-        system_name (str): Name of the enterprise system to look up.
-
-    Returns:
-        tuple[dict, dict | None]: A tuple containing (system_config, error_dict):
-            - system_config (dict): The enterprise system configuration if found, or empty dict {} if not found.
-            - error_dict (dict | None): Error response with 'error' and 'isError' keys if system not found, or None on success.
-
-            Success: ({"url": "...", "username": "...", ...}, None)
-            Error: ({}, {"error": "Enterprise system 'X' not found...", "isError": True})
-
-    Example:
-        >>> config_mgr = ConfigManager()
-        >>> system_config, error = await _get_system_config("session_enterprise_create", config_mgr, "prod")
-        >>> if error:
-        ...     return error  # System not found
-        >>> # Use system_config for session creation
-    """
-    config = await config_manager.get_config()
-
-    try:
-        enterprise_systems_config = get_config_section(
-            config, ["enterprise", "systems"]
-        )
-    except KeyError:
-        enterprise_systems_config = {}
-
-    if not enterprise_systems_config or system_name not in enterprise_systems_config:
-        error_msg = f"Enterprise system '{system_name}' not found in configuration"
-        _LOGGER.error(f"[mcp_systems_server:{function_name}] {error_msg}")
-        return {}, {"error": error_msg, "isError": True}
-
-    return enterprise_systems_config[system_name], None

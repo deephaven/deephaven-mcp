@@ -1,6 +1,8 @@
-def test_module_all_exports():
+"""Tests for deephaven_mcp.mcp_systems_server package."""
+
+
+def test_module_is_importable():
+    """Verify the mcp_systems_server package can be imported without errors."""
     import deephaven_mcp.mcp_systems_server as mod
 
-    # __all__ should include only mcp_server
-    assert hasattr(mod, "mcp_server")
-    assert "mcp_server" in mod.__all__
+    assert mod is not None

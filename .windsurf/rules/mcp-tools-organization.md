@@ -24,28 +24,38 @@ trigger: always_on
    - Typical module size: 300-700 lines is healthy
 
 5. **Registering New Tool Modules**:
-   - **CRITICAL**: When creating a new tool module, you MUST add an import in `_mcp.py`
-   - Without this import, the `@mcp_server.tool()` decorators will never execute
-   - Use underscore alias and `# noqa: F401` to keep import private and prevent auto-removal
-   - Example: `from deephaven_mcp.mcp_systems_server._tools import newmodule as _newmodule  # noqa: F401`
+   - **CRITICAL**: Every tool module must define a `register_tools(server: FastMCP) -> None` function
+   - This function calls `server.tool()(tool_fn)` for each tool in the module
+   - After creating a new module, explicitly add it to `server.py`:
+     - If the tool is shared between community and enterprise servers, add it to the `_SHARED_TOOLS` tuple
+     - If the tool is enterprise-only, call `module.register_tools(server)` in the `enterprise()` function
+     - If the tool is community-only, call `module.register_tools(server)` in the `community()` function
 
-## Required Imports for MCP Tools
+## Required Pattern for MCP Tool Modules
 
-All files with `@mcp_server.tool()` decorated functions must import:
+All tool modules must follow this pattern — **no `@decorator` on tool functions**:
 
 ```python
-from deephaven_mcp.mcp_systems_server._tools.mcp_server import mcp_server
+from mcp.server.fastmcp import Context, FastMCP
+
+async def my_tool(context: Context, ...) -> dict:
+    """Tool docstring (consumed by AI agents)."""
+    ...
+
+def register_tools(server: FastMCP) -> None:
+    """Register all tools in this module with the given FastMCP server."""
+    server.tool()(my_tool)
 ```
 
 Common shared utilities (import only what you need):
 
 ```python
 from deephaven_mcp.mcp_systems_server._tools.shared import (
-    _get_session_from_context,      # Get session from MCP context
-    _get_enterprise_session,         # Get + validate Enterprise session
-    _check_response_size,            # Validate response size limits
-    _format_meta_table_result,       # Format metadata tables
-    _get_system_config,              # Get Enterprise system config
+    _get_session_from_context,        # Get session from MCP context
+    _get_enterprise_session,          # Get + validate Enterprise session
+    _check_response_size,             # Validate response size limits
+    _format_meta_table_result,        # Format metadata tables
+    _format_initialization_status,    # Format registry initialization phase/errors
 )
 ```
 
@@ -55,7 +65,7 @@ from deephaven_mcp.mcp_systems_server._tools.shared import (
 - **Pattern**: `{domain}_{action}` (e.g., `session_table_data`, `pq_create`, `catalog_tables_list`)
 - **No underscore prefix**: These are the public MCP tools exposed to AI agents
 - **Descriptive and specific**: Name should clearly indicate what the tool does
-- **Registered automatically**: `@mcp_server.tool()` decorator registers them with the server
+- **Registered explicitly**: via `server.tool()(fn)` inside `register_tools()`
 
 ### Helper Functions (Internal Use Only)
 - **Always private**: Use underscore prefix (e.g., `_validate_launch_method`, `_build_response`)

@@ -1262,3 +1262,17 @@ async def test_catalog_table_sample_response_too_large():
     assert "max 50MB" in result["error"]
     assert "reduce max_rows" in result["error"]
     assert result["isError"] is True
+
+
+def test_register_tools_registers_catalog_tools():
+    """register_tools() registers all catalog tools."""
+    from mcp.server.fastmcp import FastMCP
+    from deephaven_mcp.mcp_systems_server._tools.catalog import register_tools
+
+    server = FastMCP("test-catalog-server")
+    register_tools(server)
+    tools = server._tool_manager._tools
+    assert "catalog_tables_list" in tools
+    assert "catalog_namespaces_list" in tools
+    assert "catalog_tables_schema" in tools
+    assert "catalog_table_sample" in tools

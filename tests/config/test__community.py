@@ -6,7 +6,7 @@ from unittest.mock import patch
 import pytest
 
 from deephaven_mcp._exceptions import CommunitySessionConfigurationError
-from deephaven_mcp.config._community_session import (
+from deephaven_mcp.config._community import (
     redact_community_session_config,
     redact_community_session_creation_config,
     validate_community_session_creation_config,
@@ -92,7 +92,6 @@ def test_redact_community_session_config_edge_cases():
     assert result["tls_root_certs"] is None
     assert result["foo"] == b"bar"
 
-    """Test that all sensitive fields are redacted according to unified logic."""
     original_config = {
         "host": "localhost",
         "port": 10000,
@@ -222,7 +221,7 @@ def test_validate_single_cs_wrong_type_in_tuple_tls_root_certs():
 def test_validate_single_cs_missing_required_field():
     """Test validation raises ValueError if a required field (e.g., 'host') is missing."""
     # Patch _REQUIRED_FIELDS in the actual module where it's defined and used.
-    with patch("deephaven_mcp.config._community_session._REQUIRED_FIELDS", ["host"]):
+    with patch("deephaven_mcp.config._community._REQUIRED_FIELDS", ["host"]):
         bad_config = {"port": 10000}  # Missing 'host'
         with pytest.raises(
             CommunitySessionConfigurationError,
@@ -260,16 +259,15 @@ def test_validate_single_cs_valid_with_auth_token_env_var():
 
 def test_validate_community_sessions_valid():
     """Test that a valid community_sessions map passes validation."""
-    # Temporarily ensure _REQUIRED_FIELDS is empty for this test
-    with patch("deephaven_mcp.config._community_session._REQUIRED_FIELDS", []):
-        valid_sessions_map = {
-            "session1": {"host": "localhost"},
-            "session2": {"host": "remote", "port": 9999},
-        }
-        try:
-            validate_community_sessions_config(valid_sessions_map)
-        except ValueError as e:
-            pytest.fail(f"Valid community_sessions_map raised ValueError: {e}")
+    # _REQUIRED_FIELDS is currently empty, so any dict value is accepted per-session
+    valid_sessions_map = {
+        "session1": {"host": "localhost"},
+        "session2": {"host": "remote", "port": 9999},
+    }
+    try:
+        validate_community_sessions_config(valid_sessions_map)
+    except ValueError as e:
+        pytest.fail(f"Valid community_sessions_map raised ValueError: {e}")
 
 
 def test_validate_community_sessions_not_dict():
@@ -283,14 +281,14 @@ def test_validate_community_sessions_not_dict():
     # Case: community_sessions_map is not a dict (e.g., string) - should fail
     with pytest.raises(
         CommunitySessionConfigurationError,
-        match="'community_sessions' must be a dictionary in Deephaven community session config",
+        match="'community.sessions' must be a dictionary in Deephaven community session config",
     ):
         validate_community_sessions_config("not_a_dict")
 
     # Case: community_sessions_map is not a dict (e.g., list) - should fail
     with pytest.raises(
         CommunitySessionConfigurationError,
-        match="'community_sessions' must be a dictionary in Deephaven community session config",
+        match="'community.sessions' must be a dictionary in Deephaven community session config",
     ):
         validate_community_sessions_config([{"session1": {}}])
 
@@ -301,7 +299,7 @@ def test_validate_community_sessions_empty_dict():
 
 
 @patch(
-    "deephaven_mcp.config._community_session.validate_single_community_session_config"
+    "deephaven_mcp.config._community.validate_single_community_session_config"
 )
 def test_validate_community_sessions_invalid_item(mock_validate_single):
     """Test validation fails if an individual session item is invalid."""

@@ -424,31 +424,24 @@ async def test_session_community_create_with_python_launch_method():
 
 @pytest.mark.asyncio
 async def test_session_community_delete_non_community_session():
-    """Test lines 4005-4009: trying to delete non-community session."""
-    mock_config_manager = MagicMock()
+    """Test: trying to delete an enterprise session_id via community delete."""
     mock_session_registry = MagicMock()
-
-    mock_manager = MagicMock()
-    mock_manager.full_name = "enterprise:system:test-session"
-    mock_manager._name = "test-session"
-    mock_manager.source = "dynamic"
-    mock_manager.system_type = SystemType.ENTERPRISE  # Not COMMUNITY
-
-    mock_session_registry.get = AsyncMock(return_value=mock_manager)
 
     context = MockContext(
         {
-            "config_manager": mock_config_manager,
+            "config_manager": MagicMock(),
             "session_registry": mock_session_registry,
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
 
-    result = await session_community_delete(context, session_name="test-session")
+    # Pass an enterprise session_id — type mismatch is caught before registry lookup
+    result = await session_community_delete(context, session_id="enterprise:system:test-session")
 
     assert result["success"] is False
     assert "not a community session" in result["error"]
     assert result["isError"] is True
+    mock_session_registry.get.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -479,7 +472,7 @@ async def test_session_community_delete_close_fails_but_continues():
         }
     )
 
-    result = await session_community_delete(context, session_name="test-session")
+    result = await session_community_delete(context, session_id="community:dynamic:test-session")
 
     # Should still succeed despite close failure
     assert result["success"] is True
@@ -517,7 +510,7 @@ async def test_session_community_delete_removal_fails():
         }
     )
 
-    result = await session_community_delete(context, session_name="test-session")
+    result = await session_community_delete(context, session_id="community:dynamic:test-session")
 
     assert result["success"] is False
     assert "Failed to remove session" in result["error"]
@@ -541,7 +534,7 @@ async def test_session_community_delete_unexpected_exception():
         }
     )
 
-    result = await session_community_delete(context, session_name="test-session")
+    result = await session_community_delete(context, session_id="community:dynamic:test-session")
 
     assert result["success"] is False
     assert "Unexpected error" in result["error"]
@@ -719,9 +712,7 @@ async def test_session_details_logs_version_info():
 
     from deephaven_mcp.mcp_systems_server._tools.session import session_details
     from deephaven_mcp.resource_manager._manager import ResourceLivenessStatus
-    from deephaven_mcp.resource_manager._registry_combined import (
-        CombinedSessionRegistry,
-    )
+    from deephaven_mcp.resource_manager._registry import BaseRegistry
 
     # Create mocks
     context = MagicMock()
@@ -729,7 +720,7 @@ async def test_session_details_logs_version_info():
     session = AsyncMock()
 
     # Setup session registry and session manager
-    session_registry = MagicMock(spec=CombinedSessionRegistry)
+    session_registry = MagicMock(spec=BaseRegistry)
     mgr = AsyncMock()
 
     # Configure session manager with required properties
@@ -1382,3 +1373,15 @@ async def test_sessions_list_shows_errors_even_with_sessions():
     assert "initialization" in result
     assert "errors" in result["initialization"]
     assert "factory1" in result["initialization"]["errors"]
+
+
+def test_register_tools_registers_session_tools():
+    """register_tools() registers sessions_list and session_details."""
+    from mcp.server.fastmcp import FastMCP
+    from deephaven_mcp.mcp_systems_server._tools.session import register_tools
+
+    server = FastMCP("test-session-server")
+    register_tools(server)
+    tools = server._tool_manager._tools
+    assert "sessions_list" in tools
+    assert "session_details" in tools

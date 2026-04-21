@@ -1,8 +1,8 @@
-"""Validation logic for the 'enterprise_systems' section of the Deephaven MCP configuration.
+"""Validation logic for enterprise system configurations in the Deephaven MCP enterprise server.
 
-This module provides comprehensive validation for enterprise system configurations,
-including authentication type validation, field type checking, and security-focused
-credential redaction for safe logging.
+This module provides comprehensive validation for flat enterprise system configurations
+(the format used by the DHE MCP server), including authentication type validation,
+field type checking, and security-focused credential redaction for safe logging.
 
 Supported Authentication Types:
     - 'password': Username/password authentication with optional environment variable support
@@ -14,18 +14,17 @@ Key Features:
     - Comprehensive field validation (required, optional, and auth-specific)
     - Support for session creation configuration
 
+Module Constants:
+    - DEFAULT_CONNECTION_TIMEOUT_SECONDS: Default connection timeout (10.0 seconds)
+
 Main Functions:
-    - validate_enterprise_systems_config(): Validates entire enterprise systems configuration
-    - validate_single_enterprise_system(): Validates individual system configuration
+    - validate_enterprise_config(): Validates a flat enterprise system configuration
     - redact_enterprise_system_config(): Redacts sensitive fields for logging
-    - redact_enterprise_systems_map(): Redacts entire enterprise systems map
 """
 
 __all__ = [
-    "validate_enterprise_systems_config",
-    "validate_single_enterprise_system",
+    "validate_enterprise_config",
     "redact_enterprise_system_config",
-    "redact_enterprise_systems_map",
     "DEFAULT_CONNECTION_TIMEOUT_SECONDS",
 ]
 
@@ -49,16 +48,17 @@ _BASE_ENTERPRISE_SYSTEM_FIELDS: dict[str, type | tuple[type, ...]] = {
     "connection_json_url": str,
     "auth_type": str,
 }
-"""Defines the base fields and their expected types for any enterprise system configuration."""
+"""Required fields and their expected types for a flat enterprise system configuration."""
 
 _OPTIONAL_ENTERPRISE_SYSTEM_FIELDS: dict[str, type | tuple[type, ...]] = {
+    "system_name": str,  # Validated explicitly in validate_enterprise_config; kept here to suppress spurious "unknown field" warning
     "session_creation": dict,  # Optional session creation configuration (max_concurrent_sessions, defaults)
     "connection_timeout": (
         int,
         float,
     ),  # Optional timeout in seconds for initial connection
 }
-"""Defines optional fields that can be included in enterprise system configurations."""
+"""Optional fields that can be included in enterprise system configurations."""
 
 _AUTH_SPECIFIC_FIELDS: dict[str, dict[str, type | tuple[type, ...]]] = {
     "password": {
@@ -107,177 +107,14 @@ def redact_enterprise_system_config(system_config: dict[str, Any]) -> dict[str, 
     return config_copy
 
 
-def redact_enterprise_systems_map(
-    enterprise_systems_map: dict[str, Any],
-) -> dict[str, Any]:
-    """Redact sensitive fields from an enterprise systems map dictionary.
+def validate_enterprise_config(config: Any) -> dict[str, Any]:
+    """Validate a flat enterprise server configuration.
 
-    Creates a new dictionary where each enterprise system configuration has sensitive
-    fields (like passwords) redacted for safe logging. This is particularly useful
-    when logging configuration validation errors or debug information.
+    Validates the DHE server config format where all fields (including system_name)
+    sit at the top level.
 
-    Args:
-        enterprise_systems_map (dict[str, Any]): Dictionary mapping system names to their configurations.
-            Expected format: {"system_name": {"connection_json_url": "...", "password": "...", ...}}
-            If a system configuration is not a dictionary (malformed), it's included as-is
-            to preserve error information for debugging.
-
-    Returns:
-        dict[str, Any]: A new dictionary with the same structure but sensitive fields replaced with
-        "[REDACTED]" placeholders. Non-dict values are preserved unchanged to help
-        with debugging malformed configurations.
-
-    Example:
-        >>> systems = {
-        ...     "prod": {"username": "admin", "password": "secret"},
-        ...     "dev": {"username": "dev", "password": "dev123"}
-        ... }
-        >>> redacted = redact_enterprise_systems_map(systems)
-        >>> print(redacted)
-        {"prod": {"username": "admin", "password": "[REDACTED]"},
-         "dev": {"username": "dev", "password": "[REDACTED]"}}
-    """
-    redacted_map = {}
-    for system_name, system_config in enterprise_systems_map.items():
-        if isinstance(system_config, dict):
-            redacted_map[system_name] = redact_enterprise_system_config(system_config)
-        else:
-            redacted_map[system_name] = system_config  # log as-is for malformed
-    return redacted_map
-
-
-def validate_enterprise_systems_config(enterprise_systems_map: Any | None) -> None:
-    """Validate the 'enterprise_systems' section of the MCP configuration.
-
-    Performs comprehensive validation of enterprise system configurations including
-    structural validation, required field checking, authentication type validation,
-    and session creation settings validation. This function is the main entry point
-    for validating the entire 'enterprise_systems' configuration section.
-
-    Validation Process:
-        1. Structure validation (must be dict or None)
-        2. System name validation (must be strings)
-        3. Per-system validation via validate_single_enterprise_system()
-        4. Logging with credential redaction for security
-
-    Required Fields (per system):
-        - connection_json_url (str): URL to Deephaven Core+ connection JSON
-        - auth_type (str): Authentication method ('password' or 'private_key')
-
-    Authentication-Specific Requirements:
-        'password' auth_type:
-            - username (str): Required username
-            - password (str) XOR password_env_var (str): Mutually exclusive credential options
-
-        'private_key' auth_type:
-            - private_key_path (str): Path to the Deephaven private keypair file (proprietary format,
-              typically named `priv-<keyname>.base64.txt`; provided by your IT/security team)
-
-    Optional Fields (per system):
-        - connection_timeout (int | float): Timeout in seconds for initial connection (default: 10.0)
-        - session_creation (dict): Session creation defaults and limits
-            - max_concurrent_sessions (int): Session limit (0 = disabled, >0 = limit)
-            - defaults (dict): Default session parameters (heap_size_gb, server, etc.)
-
-    Args:
-        enterprise_systems_map (Any | None): The 'enterprise_systems' configuration value.
-            - None: No enterprise systems configured (valid)
-            - dict: Mapping of system_name -> system_config dictionaries
-            - Other types: Invalid and will raise EnterpriseSystemConfigurationError
-
-    Raises:
-        EnterpriseSystemConfigurationError: Raised for any validation failure including:
-            - Non-dict enterprise_systems_map (when not None)
-            - Non-string system names
-            - Individual system validation failures (missing fields, wrong types, etc.)
-            - Invalid authentication configurations
-            - Invalid session creation settings
-
-    Example:
-        Valid enterprise systems configuration:
-        {
-            "production": {
-                "connection_json_url": "https://prod.deephaven.io/iris/connection.json",
-                "auth_type": "password",
-                "username": "prod_admin",
-                "password_env_var": "DH_PROD_PASSWORD",
-                "session_creation": {
-                    "max_concurrent_sessions": 10,
-                    "defaults": {
-                        "heap_size_gb": 16.0,
-                        "server": "prod-server-01"
-                    }
-                }
-            },
-            "development": {
-                "connection_json_url": "https://dev.deephaven.io/iris/connection.json",
-                "auth_type": "private_key",
-                "private_key_path": "/opt/deephaven/keys/priv-dev.base64.txt"
-            }
-        }
-
-    Note:
-        Empty dictionary {} is valid (no enterprise systems configured).
-        Credentials are automatically redacted in debug logging for security.
-    """
-    # For logging purposes, create a redacted version of the map
-    # We do this only if the map is a dictionary, otherwise log as is or let validation catch it
-    if isinstance(enterprise_systems_map, dict):
-        logged_map_str = str(redact_enterprise_systems_map(enterprise_systems_map))
-    else:
-        logged_map_str = str(enterprise_systems_map)  # Default to string representation
-
-    _LOGGER.debug(
-        f"[config:validate_enterprise_systems_config] Validating enterprise_systems configuration: {logged_map_str}"
-    )
-
-    if enterprise_systems_map is None:
-        _LOGGER.debug(
-            "[config:validate_enterprise_systems_config] 'enterprise_systems' key is not present, which is valid."
-        )
-        return
-
-    if not isinstance(enterprise_systems_map, dict):
-        msg = f"'enterprise_systems' must be a dictionary, but got type {type(enterprise_systems_map).__name__}."
-        _LOGGER.error(f"[config:validate_enterprise_systems_config] {msg}")
-        raise EnterpriseSystemConfigurationError(msg)
-
-    if not enterprise_systems_map:
-        _LOGGER.debug(
-            "[config:validate_enterprise_systems_config] 'enterprise_systems' is an empty dictionary, which is valid (no enterprise systems configured)."
-        )
-        return
-
-    # Iterate over and validate each configured enterprise system
-    for system_name, system_config in enterprise_systems_map.items():
-        if not isinstance(system_name, str):
-            msg = f"Enterprise system name must be a string, but got {type(system_name).__name__}: {system_name!r}."
-            _LOGGER.error(f"[config:validate_enterprise_systems_config] {msg}")
-            raise EnterpriseSystemConfigurationError(msg)
-        validate_single_enterprise_system(system_name, system_config)
-
-    _LOGGER.info(
-        f"[config:validate_enterprise_systems_config] Validation passed. Found {len(enterprise_systems_map)} enterprise system(s)."
-    )
-
-
-def validate_single_enterprise_system(system_name: str, config: Any) -> None:
-    """Validate a single enterprise system's configuration comprehensively.
-
-    Performs multi-stage validation of an individual enterprise system configuration,
-    ensuring all required fields are present with correct types and that authentication
-    settings are logically consistent. This function orchestrates validation through
-    multiple specialized helper functions.
-
-    Validation Stages:
-        1. Base field validation (structure, required fields, optional fields)
-        2. Authentication type validation and field collection
-        3. Authentication-specific field validation
-        4. Authentication logic consistency validation
-        5. Connection timeout validation (if present)
-        6. Session creation configuration validation (if present)
-
-    Required Base Fields:
+    Required Fields:
+        - system_name (str): Identifier for this enterprise system
         - connection_json_url (str): URL to Core+ connection.json endpoint
         - auth_type (str): Must be 'password' or 'private_key'
 
@@ -289,61 +126,75 @@ def validate_single_enterprise_system(system_name: str, config: Any) -> None:
         For 'private_key' auth_type:
             - private_key_path (str): Filesystem path to private key file
 
-    Optional Configuration:
-        - connection_timeout (int | float > 0): Timeout in seconds for initial connection (default: 10.0)
+    Optional Fields:
+        - connection_timeout (int | float > 0, bool excluded): Timeout in seconds (default: 10.0)
         - session_creation (dict): Session management settings
             - max_concurrent_sessions (int ≥ 0): 0=disabled, >0=limit
-            - defaults (dict): Default session parameters
+            - defaults (dict): Default session parameters, all optional:
+                - heap_size_gb (int | float): JVM heap size in gigabytes
+                - auto_delete_timeout (int): Auto-delete timeout in seconds
+                - server (str): Target server name
+                - engine (str): Execution engine name
+                - extra_jvm_args (list): Additional JVM arguments
+                - extra_environment_vars (list): Additional environment variables
+                - admin_groups (list): Groups with admin access
+                - viewer_groups (list): Groups with view-only access
+                - timeout_seconds (int | float): Session timeout in seconds
+                - session_arguments (dict): Additional session arguments
+                - programming_language (str): Default programming language
 
     Args:
-        system_name (str): The name/identifier of the enterprise system being validated.
-            Used in error messages and logging to identify which system failed validation.
-        config (Any): The configuration object for the system. Expected to be a dictionary,
+        config (Any): The configuration object. Expected to be a dictionary,
             but accepts Any to provide clear error messages for incorrect types.
 
+    Returns:
+        dict[str, Any]: The same input dictionary, returned unchanged after successful validation.
+
     Raises:
-        EnterpriseSystemConfigurationError: Raised for any validation failure including:
-            - config is not a dictionary
-            - Missing required base fields (connection_json_url, auth_type)
-            - Invalid auth_type value (not 'password' or 'private_key')
-            - Missing authentication-specific fields (username, password info, key path)
-            - Invalid authentication field combinations (both password and password_env_var)
-            - Invalid connection_timeout (non-positive or wrong type)
-            - Invalid session_creation configuration
-            - Field type mismatches (wrong data types)
+        EnterpriseSystemConfigurationError: For any validation failure.
 
     Example:
-        Valid password-based configuration:
-        {
-            "connection_json_url": "https://my-system.com/iris/connection.json",
-            "auth_type": "password",
-            "username": "service_account",
-            "password_env_var": "DH_SERVICE_PASSWORD",
-            "session_creation": {
-                "max_concurrent_sessions": 5,
-                "defaults": {
-                    "heap_size_gb": 8.0,
-                    "programming_language": "Python"
-                }
-            }
-        }
+        >>> config = {
+        ...     "system_name": "prod",
+        ...     "connection_json_url": "https://my-system.com/iris/connection.json",
+        ...     "auth_type": "password",
+        ...     "username": "service_account",
+        ...     "password_env_var": "DH_SERVICE_PASSWORD",
+        ... }
+        >>> result = validate_enterprise_config(config)
+        >>> result is config  # Returns the same dict unchanged
+        True
     """
     _LOGGER.debug(
-        f"[config:validate_single_enterprise_system] Validating enterprise system '{system_name}'"
+        "[config:validate_enterprise_config] Validating enterprise server config"
     )
-
-    _validate_enterprise_system_base_fields(system_name, config)
+    if not isinstance(config, dict):
+        msg = f"Enterprise system configuration must be a dictionary, but got {type(config).__name__}."
+        _LOGGER.error(f"[config:validate_enterprise_config] {msg}")
+        raise EnterpriseSystemConfigurationError(msg)
+    system_name = config.get("system_name")
+    if system_name is None:
+        msg = "Required field 'system_name' is missing from enterprise system configuration."
+        _LOGGER.error(f"[config:validate_enterprise_config] {msg}")
+        raise EnterpriseSystemConfigurationError(msg)
+    if not isinstance(system_name, str):
+        msg = (
+            f"Field 'system_name' in enterprise system configuration must be of type str, "
+            f"but got {type(system_name).__name__}."
+        )
+        _LOGGER.error(f"[config:validate_enterprise_config] {msg}")
+        raise EnterpriseSystemConfigurationError(msg)
+    _validate_required_fields(system_name, config)
+    _validate_optional_fields(system_name, config)
     auth_type, all_allowed_fields = _validate_and_get_auth_type(system_name, config)
-    _validate_enterprise_system_auth_specific_fields(
-        system_name, config, auth_type, all_allowed_fields
-    )
+    _validate_enterprise_system_auth_specific_fields(system_name, config, auth_type, all_allowed_fields)
     _validate_enterprise_system_auth_type_logic(system_name, config, auth_type)
     _validate_enterprise_system_connection_timeout(system_name, config)
     _validate_enterprise_system_session_creation(system_name, config)
-
     _LOGGER.debug(
-        f"[config:validate_single_enterprise_system] Enterprise system '{system_name}' validation passed"
+        f"[config:validate_enterprise_config] Enterprise system '{system_name}' validation passed"
     )
+    return config
 
 
 def _validate_field_type(
@@ -420,14 +271,18 @@ def _validate_field_type(
 
 
 def _validate_required_fields(system_name: str, config: dict[str, Any]) -> None:
-    """Validate all required base fields.
+    """Validate presence and type of all required base fields.
+
+    Checks that every field in `_BASE_ENTERPRISE_SYSTEM_FIELDS` is present in
+    the config and has the correct type. Raises on the first missing or
+    incorrectly typed field encountered.
 
     Args:
-        system_name (str): Name of the enterprise system being validated
-        config (dict[str, Any]): Configuration dictionary
+        system_name (str): Name of the enterprise system being validated.
+        config (dict[str, Any]): The enterprise system configuration dictionary.
 
     Raises:
-        EnterpriseSystemConfigurationError: If required field is missing or has wrong type
+        EnterpriseSystemConfigurationError: If a required field is absent or has the wrong type.
     """
     for field_name, expected_type in _BASE_ENTERPRISE_SYSTEM_FIELDS.items():
         if field_name not in config:
@@ -445,14 +300,18 @@ def _validate_required_fields(system_name: str, config: dict[str, Any]) -> None:
 
 
 def _validate_optional_fields(system_name: str, config: dict[str, Any]) -> None:
-    """Validate all optional fields if present.
+    """Validate type of all optional fields that are present in the config.
+
+    Checks every field in `_OPTIONAL_ENTERPRISE_SYSTEM_FIELDS` against its
+    expected type if the field appears in the config. Absent optional fields
+    are silently skipped.
 
     Args:
-        system_name (str): Name of the enterprise system being validated
-        config (dict[str, Any]): Configuration dictionary
+        system_name (str): Name of the enterprise system being validated.
+        config (dict[str, Any]): The enterprise system configuration dictionary.
 
     Raises:
-        EnterpriseSystemConfigurationError: If optional field has wrong type
+        EnterpriseSystemConfigurationError: If a present optional field has the wrong type.
     """
     for field_name, expected_type in _OPTIONAL_ENTERPRISE_SYSTEM_FIELDS.items():
         if field_name not in config:
@@ -461,30 +320,6 @@ def _validate_optional_fields(system_name: str, config: dict[str, Any]) -> None:
         _validate_field_type(
             system_name, field_name, config[field_name], expected_type, is_optional=True
         )
-
-
-def _validate_enterprise_system_base_fields(system_name: str, config: Any) -> None:
-    """Validate base fields and optional fields in an enterprise system configuration.
-
-    Validates that the configuration is a dictionary and contains all required base fields
-    (connection_json_url, auth_type) with correct types. Also validates optional fields
-    like session_creation if present.
-
-    Args:
-        system_name (str): The name of the enterprise system being validated.
-        config (Any): The configuration object for the system (expected to be a dict).
-
-    Raises:
-        EnterpriseSystemConfigurationError: If the config is not a dictionary,
-            if any required base field is missing, or if any field has the wrong type.
-    """
-    if not isinstance(config, dict):
-        msg = f"Enterprise system '{system_name}' configuration must be a dictionary, but got {type(config).__name__}."
-        _LOGGER.error(f"[config:_validate_enterprise_system_base_fields] {msg}")
-        raise EnterpriseSystemConfigurationError(msg)
-
-    _validate_required_fields(system_name, config)
-    _validate_optional_fields(system_name, config)
 
 
 def _validate_and_get_auth_type(
@@ -501,12 +336,12 @@ def _validate_and_get_auth_type(
 
     Returns:
         tuple[str, dict[str, type | tuple[type, ...]]]: A tuple containing:
-        - The validated auth_type string
-        - Dictionary mapping all allowed field names to their expected types
-          (combines base fields and auth-specific fields)
+            - The validated auth_type string
+            - Dictionary mapping all allowed field names to their expected types
+              (combines base fields, optional fields, and auth-specific fields)
 
     Raises:
-        EnterpriseSystemConfigurationError: If auth_type is missing, invalid,
+        EnterpriseSystemConfigurationError: If auth_type is missing (None), unsupported,
             or not in the list of supported authentication types.
     """
     auth_type = config.get("auth_type")
@@ -533,17 +368,19 @@ def _validate_enterprise_system_auth_specific_fields(
 ) -> None:
     """Validate authentication-specific fields in an enterprise system configuration.
 
-    Validates all non-base fields (e.g., 'username', 'password', 'private_key_path') to ensure
-    they are allowed for the given auth_type and have correct types. Base fields like
-    'connection_json_url' and 'auth_type' are skipped as they're validated separately.
+    Validates all non-base, non-optional fields (e.g., 'username', 'password', 'private_key_path')
+    to ensure they are allowed for the given auth_type and have correct types. Base fields
+    ('connection_json_url', 'auth_type') and optional fields ('system_name', 'session_creation',
+    'connection_timeout') are skipped as they are validated separately.
     Unknown fields generate warnings but don't cause validation failure.
 
     Args:
         system_name (str): The name of the enterprise system being validated.
         config (dict[str, Any]): The configuration dictionary for the system.
         auth_type (str): The authentication type for the system ('password' or 'private_key').
-        all_allowed_fields_for_this_auth_type (dict[str, type | tuple[type, ...]]): Dictionary mapping field names to their
-            expected types for this auth_type (includes both base and auth-specific fields).
+        all_allowed_fields_for_this_auth_type (dict[str, type | tuple[type, ...]]): Dictionary
+            mapping field names to their expected types for this auth_type (includes base,
+            optional, and auth-specific fields).
 
     Raises:
         EnterpriseSystemConfigurationError: If any field has an incorrect type.
@@ -556,33 +393,12 @@ def _validate_enterprise_system_auth_specific_fields(
 
         if field_name not in all_allowed_fields_for_this_auth_type:
             _LOGGER.warning(
-                "[config:_validate_enterprise_system_auth_specific_fields] Unknown field '%s' in enterprise system '%s' configuration. It will be ignored.",
-                field_name,
-                system_name,
+                f"[config:_validate_enterprise_system_auth_specific_fields] Unknown field '{field_name}' in enterprise system '{system_name}' configuration. It will be ignored."
             )
             continue
 
         expected_type = all_allowed_fields_for_this_auth_type[field_name]
-        if isinstance(expected_type, tuple):
-            if not isinstance(field_value, expected_type):
-                expected_type_names = ", ".join(t.__name__ for t in expected_type)
-                msg = (
-                    f"Field '{field_name}' for enterprise system '{system_name}' (auth_type: {auth_type}) "
-                    f"must be one of types ({expected_type_names}), but got {type(field_value).__name__}."
-                )
-                _LOGGER.error(
-                    f"[config:_validate_enterprise_system_auth_specific_fields] {msg}"
-                )
-                raise EnterpriseSystemConfigurationError(msg)
-        elif not isinstance(field_value, expected_type):
-            msg = (
-                f"Field '{field_name}' for enterprise system '{system_name}' (auth_type: {auth_type}) "
-                f"must be of type {expected_type.__name__}, but got {type(field_value).__name__}."
-            )
-            _LOGGER.error(
-                f"[config:_validate_enterprise_system_auth_specific_fields] {msg}"
-            )
-            raise EnterpriseSystemConfigurationError(msg)
+        _validate_field_type(system_name, field_name, field_value, expected_type)
 
 
 def _validate_enterprise_system_auth_type_logic(
@@ -668,7 +484,8 @@ def _validate_enterprise_system_session_creation(
 
     Validates the structure and content of the session_creation section if present.
     The entire section is optional, and if present, all fields within it are also optional.
-    max_concurrent_sessions must be non-negative integer if specified.
+    max_concurrent_sessions must be a non-negative integer if specified. Note: bool values
+    are technically accepted (since bool is a subclass of int), but are not intended for use.
     All default values within the defaults subsection are optional.
 
     Args:
@@ -766,21 +583,4 @@ def _validate_optional_session_default(
     """
     if field_name not in defaults:
         return  # Field is optional
-
-    field_value = defaults[field_name]
-    if isinstance(expected_type, tuple):
-        if not isinstance(field_value, expected_type):
-            expected_type_names = ", ".join(t.__name__ for t in expected_type)
-            msg = (
-                f"Field '{field_name}' in session_creation defaults for enterprise system '{system_name}' "
-                f"must be one of types ({expected_type_names}), but got {type(field_value).__name__}."
-            )
-            _LOGGER.error(f"[config:_validate_optional_session_default] {msg}")
-            raise EnterpriseSystemConfigurationError(msg)
-    elif not isinstance(field_value, expected_type):
-        msg = (
-            f"Field '{field_name}' in session_creation defaults for enterprise system '{system_name}' "
-            f"must be of type {expected_type.__name__}, but got {type(field_value).__name__}."
-        )
-        _LOGGER.error(f"[config:_validate_optional_session_default] {msg}")
-        raise EnterpriseSystemConfigurationError(msg)
+    _validate_field_type(system_name, field_name, defaults[field_name], expected_type, is_optional=True)

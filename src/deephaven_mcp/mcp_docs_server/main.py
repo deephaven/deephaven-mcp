@@ -1,8 +1,7 @@
-"""
-CLI entrypoint for the Deephaven MCP Docs server.
+"""CLI entrypoint for the Deephaven MCP Docs server.
 
-This module sets up logging, global exception handling, and Uvicorn exception patching before starting the Docs MCP server.
-It provides a command-line interface to launch the server with a specified transport (stdio, sse, or streamable-http).
+This module sets up logging, signal handler logging, global exception handling, and Uvicorn exception patching before starting the Docs MCP server.
+It provides a command-line interface to launch the server using streamable-http transport (HTTP-only, like the community and enterprise servers).
 
 See the project README for configuration details, available tools, and usage examples.
 """
@@ -26,62 +25,27 @@ monkeypatch_uvicorn_exception_handling()
 # Register signal handlers for improved debugging of termination signals
 setup_signal_handler_logging()
 
-import argparse  # noqa: E402
 import logging  # noqa: E402
-from typing import Literal  # noqa: E402
 
 from ._mcp import mcp_docs_host, mcp_docs_port, mcp_server  # noqa: E402
 
 _LOGGER = logging.getLogger(__name__)
 
 
-def run_server(
-    transport: Literal["stdio", "sse", "streamable-http"],
-) -> None:
-    """
-    Start the MCP server with the specified transport.
-
-    Args:
-        transport: The transport type ('stdio', 'sse', or 'streamable-http').
-            Must be one of the supported transport methods.
-
-    Returns:
-        None
-    """
+def run_server() -> None:
+    """Start the MCP docs server using streamable-http transport."""
+    _LOGGER.info(
+        f"[run_server] Starting MCP docs server '{mcp_server.name}' with transport=streamable-http (host={mcp_docs_host}, port={mcp_docs_port})"
+    )
     try:
-        # Start the server
-        _LOGGER.warning(
-            f"Starting MCP server '{mcp_server.name}' with transport={transport} (host={mcp_docs_host}, port={mcp_docs_port})"
-        )
-        mcp_server.run(transport=transport)
+        mcp_server.run(transport="streamable-http")
     finally:
-        _LOGGER.info(f"MCP server '{mcp_server.name}' stopped.")
+        _LOGGER.info(f"[run_server] MCP docs server '{mcp_server.name}' stopped.")
 
 
 def main() -> None:
-    """
-    Command-line entry point for the Deephaven MCP Docs server.
-
-    Parses CLI arguments using argparse and starts the MCP server with the specified transport.
-
-    Args:
-        -t, --transport: Transport type for the MCP server ('stdio', 'sse', or 'streamable-http').
-            Default: 'streamable-http'.
-
-    Returns:
-        None
-    """
-    parser = argparse.ArgumentParser(description="Start the Deephaven MCP Docs server.")
-    parser.add_argument(
-        "-t",
-        "--transport",
-        choices=["stdio", "sse", "streamable-http"],
-        default="streamable-http",
-        help="Transport type for the MCP server (stdio, sse, or streamable-http). Default: streamable-http",
-    )
-    args = parser.parse_args()
-    _LOGGER.info(f"CLI args: {vars(args)}")
-    run_server(args.transport)
+    """Command-line entry point for the Deephaven MCP Docs server."""
+    run_server()
 
 
 if __name__ == "__main__":  # pragma: no cover

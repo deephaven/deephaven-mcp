@@ -335,7 +335,7 @@ async def test_session_community_delete_success():
 
     result = await session_community_delete(
         context,
-        session_name="test-session",
+        session_id="community:dynamic:test-session",
     )
 
     # Verify success
@@ -381,7 +381,7 @@ async def test_session_community_delete_python_session():
 
     result = await session_community_delete(
         context,
-        session_name="python-session",
+        session_id="community:dynamic:python-session",
     )
 
     # Verify success
@@ -418,7 +418,7 @@ async def test_session_community_delete_not_found():
 
     result = await session_community_delete(
         context,
-        session_name="nonexistent",
+        session_id="community:dynamic:nonexistent",
     )
 
     # Verify error
@@ -429,17 +429,9 @@ async def test_session_community_delete_not_found():
 
 @pytest.mark.asyncio
 async def test_session_community_delete_not_dynamic():
-    """Test community session deletion when session is not dynamic."""
+    """Test community session deletion when session_id source is not 'dynamic'."""
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock()
-
-    # Create a mock static session manager (not dynamic)
-    mock_manager = MagicMock()
-    mock_manager.full_name = "community:static:test-session"
-    mock_manager.source = "static"  # Not dynamic!
-    mock_manager.system_type = SystemType.COMMUNITY
-
-    mock_session_registry.get = AsyncMock(return_value=mock_manager)
 
     context = MockContext(
         {
@@ -449,21 +441,23 @@ async def test_session_community_delete_not_dynamic():
         }
     )
 
+    # Passing a static session_id — source is "config", not "dynamic"
     result = await session_community_delete(
         context,
-        session_name="test-session",
+        session_id="community:config:test-session",
     )
 
-    # Verify error
+    # Verify error — registry.get should never be called
     assert result["success"] is False
     assert "Only dynamically created sessions" in result["error"]
     assert result["isError"] is True
+    mock_session_registry.get.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_session_community_create_case_insensitive_params():
     """Test that launch_method, programming_language, and auth_type are case-insensitive."""
-    from deephaven_mcp.mcp_systems_server import _mcp as mcp_mod
+    pass  # no longer needed
 
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock()
@@ -524,7 +518,7 @@ async def test_session_community_create_case_insensitive_params():
 @pytest.mark.asyncio
 async def test_session_community_create_validates_programming_language_with_python():
     """Test that programming_language parameter raises error with python launch method."""
-    from deephaven_mcp.mcp_systems_server import _mcp as mcp_mod
+    pass  # no longer needed
 
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock()
@@ -569,7 +563,7 @@ async def test_session_community_create_validates_programming_language_with_pyth
 @pytest.mark.asyncio
 async def test_session_community_create_validates_docker_image_with_python():
     """Test that docker_image parameter raises error with python launch method."""
-    from deephaven_mcp.mcp_systems_server import _mcp as mcp_mod
+    pass  # no longer needed
 
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock()
@@ -614,7 +608,7 @@ async def test_session_community_create_validates_docker_image_with_python():
 @pytest.mark.asyncio
 async def test_session_community_create_validates_docker_memory_limit_with_python():
     """Test that docker_memory_limit_gb parameter raises error with python launch method."""
-    from deephaven_mcp.mcp_systems_server import _mcp as mcp_mod
+    pass  # no longer needed
 
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock()
@@ -659,7 +653,7 @@ async def test_session_community_create_validates_docker_memory_limit_with_pytho
 @pytest.mark.asyncio
 async def test_session_community_create_validates_docker_cpu_limit_with_python():
     """Test that docker_cpu_limit parameter raises error with python launch method."""
-    from deephaven_mcp.mcp_systems_server import _mcp as mcp_mod
+    pass  # no longer needed
 
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock()
@@ -704,7 +698,7 @@ async def test_session_community_create_validates_docker_cpu_limit_with_python()
 @pytest.mark.asyncio
 async def test_session_community_create_validates_docker_volumes_with_python():
     """Test that docker_volumes parameter raises error with python launch method."""
-    from deephaven_mcp.mcp_systems_server import _mcp as mcp_mod
+    pass  # no longer needed
 
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock()
@@ -749,7 +743,7 @@ async def test_session_community_create_validates_docker_volumes_with_python():
 @pytest.mark.asyncio
 async def test_session_community_create_validates_python_venv_path_with_docker():
     """Test that python_venv_path parameter raises error with docker launch method."""
-    from deephaven_mcp.mcp_systems_server import _mcp as mcp_mod
+    pass  # no longer needed
 
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock()
@@ -794,7 +788,7 @@ async def test_session_community_create_validates_python_venv_path_with_docker()
 @pytest.mark.asyncio
 async def test_session_community_create_validates_mutually_exclusive_params():
     """Test that programming_language and docker_image cannot both be specified."""
-    from deephaven_mcp.mcp_systems_server import _mcp as mcp_mod
+    pass  # no longer needed
 
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock()
@@ -839,20 +833,9 @@ async def test_session_community_create_validates_mutually_exclusive_params():
 
 @pytest.mark.asyncio
 async def test_session_community_delete_validates_source():
-    """Test that session_community_delete only allows deletion of dynamic sessions."""
-    from deephaven_mcp.mcp_systems_server import _mcp as mcp_mod
-    from deephaven_mcp.resource_manager import SystemType
-
+    """session_community_delete returns error for non-dynamic source in session_id."""
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock()
-
-    # Create a mock session manager with source="community" (static session from config)
-    mock_static_manager = MagicMock()
-    mock_static_manager.full_name = "community:community:local"
-    mock_static_manager.system_type = SystemType.COMMUNITY
-    mock_static_manager.source = "community"  # NOT "dynamic"
-
-    mock_session_registry.get = AsyncMock(return_value=mock_static_manager)
 
     context = MockContext(
         {
@@ -862,25 +845,23 @@ async def test_session_community_delete_validates_source():
         }
     )
 
-    # Attempt to delete static session
+    # Passing session_id with source="community" (not "dynamic")
     result = await session_community_delete(
         context,
-        session_name="local",
+        session_id="community:community:local",
     )
 
-    # Verify error - cannot delete static sessions
+    # Verify error - cannot delete non-dynamic sessions; registry.get not called
     assert result["success"] is False
     assert "not a dynamically created session" in result["error"]
     assert "source: 'community'" in result["error"]
     assert result["isError"] is True
+    mock_session_registry.get.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_session_community_delete_allows_dynamic_sessions():
-    """Test that session_community_delete allows deletion of dynamic sessions."""
-    from deephaven_mcp.mcp_systems_server import _mcp as mcp_mod
-    from deephaven_mcp.resource_manager import SystemType
-
+    """session_community_delete succeeds for a valid dynamic session_id."""
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock()
 
@@ -892,9 +873,6 @@ async def test_session_community_delete_allows_dynamic_sessions():
     mock_dynamic_manager.close = AsyncMock()
 
     mock_session_registry.get = AsyncMock(return_value=mock_dynamic_manager)
-    mock_session_registry.get_all = AsyncMock(
-        return_value=["community:dynamic:test-session"]
-    )
     mock_session_registry.remove_session = AsyncMock(return_value=mock_dynamic_manager)
 
     context = MockContext(
@@ -905,10 +883,10 @@ async def test_session_community_delete_allows_dynamic_sessions():
         }
     )
 
-    # Delete dynamic session
+    # Delete dynamic session using full session_id
     result = await session_community_delete(
         context,
-        session_name="test-session",
+        session_id="community:dynamic:test-session",
     )
 
     # Verify success
@@ -920,6 +898,181 @@ async def test_session_community_delete_allows_dynamic_sessions():
     mock_session_registry.remove_session.assert_called_once_with(
         "community:dynamic:test-session"
     )
+
+
+@pytest.mark.asyncio
+async def test_session_community_delete_close_failure_continues():
+    """session_community_delete logs warning and continues when close() raises."""
+    mock_session_registry = MagicMock()
+
+    mock_manager = MagicMock(spec=DynamicCommunitySessionManager)
+    mock_manager.full_name = "community:dynamic:close-fail"
+    mock_manager.source = "dynamic"
+    mock_manager.system_type = SystemType.COMMUNITY
+    mock_manager.launched_session = MagicMock(spec=DockerLaunchedSession)
+    mock_manager.close = AsyncMock(side_effect=RuntimeError("close error"))
+
+    mock_session_registry.get = AsyncMock(return_value=mock_manager)
+    mock_session_registry.remove_session = AsyncMock(return_value=mock_manager)
+
+    context = MockContext(
+        {
+            "config_manager": MagicMock(),
+            "session_registry": mock_session_registry,
+            "instance_tracker": create_mock_instance_tracker(),
+        }
+    )
+
+    result = await session_community_delete(context, session_id="community:dynamic:close-fail")
+
+    # Should succeed despite close failure
+    assert result["success"] is True
+    assert result["session_id"] == "community:dynamic:close-fail"
+    mock_session_registry.remove_session.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_session_community_delete_removal_missing_in_registry():
+    """session_community_delete logs warning when remove_session returns None."""
+    mock_session_registry = MagicMock()
+
+    mock_manager = MagicMock(spec=DynamicCommunitySessionManager)
+    mock_manager.full_name = "community:dynamic:ghost"
+    mock_manager.source = "dynamic"
+    mock_manager.system_type = SystemType.COMMUNITY
+    mock_manager.launched_session = MagicMock(spec=DockerLaunchedSession)
+    mock_manager.close = AsyncMock()
+
+    mock_session_registry.get = AsyncMock(return_value=mock_manager)
+    mock_session_registry.remove_session = AsyncMock(return_value=None)
+
+    context = MockContext(
+        {
+            "config_manager": MagicMock(),
+            "session_registry": mock_session_registry,
+            "instance_tracker": create_mock_instance_tracker(),
+        }
+    )
+
+    result = await session_community_delete(context, session_id="community:dynamic:ghost")
+
+    assert result["success"] is True
+
+
+@pytest.mark.asyncio
+async def test_session_community_delete_registry_remove_raises():
+    """session_community_delete returns error when remove_session raises."""
+    mock_session_registry = MagicMock()
+
+    mock_manager = MagicMock(spec=DynamicCommunitySessionManager)
+    mock_manager.full_name = "community:dynamic:boom"
+    mock_manager.source = "dynamic"
+    mock_manager.system_type = SystemType.COMMUNITY
+    mock_manager.launched_session = MagicMock(spec=DockerLaunchedSession)
+    mock_manager.close = AsyncMock()
+
+    mock_session_registry.get = AsyncMock(return_value=mock_manager)
+    mock_session_registry.remove_session = AsyncMock(
+        side_effect=Exception("Simulated registry error")
+    )
+
+    context = MockContext(
+        {
+            "config_manager": MagicMock(),
+            "session_registry": mock_session_registry,
+            "instance_tracker": create_mock_instance_tracker(),
+        }
+    )
+
+    result = await session_community_delete(context, session_id="community:dynamic:boom")
+
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "Failed to remove session" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_session_community_delete_outer_exception():
+    """session_community_delete outer except handler fires when unexpected error occurs."""
+    mock_session_registry = MagicMock()
+    mock_manager = MagicMock(spec=DynamicCommunitySessionManager)
+    mock_manager.full_name = "community:dynamic:unexpected"
+    mock_manager.source = "dynamic"
+    mock_manager.system_type = SystemType.COMMUNITY
+    mock_manager.launched_session = MagicMock(spec=DockerLaunchedSession)
+    mock_manager.close = AsyncMock()
+    mock_session_registry.get = AsyncMock(return_value=mock_manager)
+    mock_session_registry.remove_session = AsyncMock(return_value=mock_manager)
+
+    context = MockContext(
+        {
+            "config_manager": MagicMock(),
+            "session_registry": mock_session_registry,
+            "instance_tracker": create_mock_instance_tracker(),
+        }
+    )
+
+    call_count = {"n": 0}
+
+    def info_side_effect(*args, **kwargs):
+        call_count["n"] += 1
+        if call_count["n"] == 2:
+            raise Exception("unexpected log error")
+        return None
+
+    with patch(
+        "deephaven_mcp.mcp_systems_server._tools.session_community._LOGGER.info",
+        side_effect=info_side_effect,
+    ):
+        result = await session_community_delete(
+            context, session_id="community:dynamic:unexpected"
+        )
+
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "unexpected log error" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_session_community_delete_invalid_session_id_format():
+    """session_community_delete returns error for malformed session_id."""
+    mock_session_registry = MagicMock()
+
+    context = MockContext(
+        {
+            "config_manager": MagicMock(),
+            "session_registry": mock_session_registry,
+            "instance_tracker": create_mock_instance_tracker(),
+        }
+    )
+
+    result = await session_community_delete(context, session_id="not-a-valid-id")
+
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "Invalid session_id format" in result["error"]
+    mock_session_registry.get.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_session_community_delete_wrong_system_type():
+    """session_community_delete returns error when session_id is not community type."""
+    mock_session_registry = MagicMock()
+
+    context = MockContext(
+        {
+            "config_manager": MagicMock(),
+            "session_registry": mock_session_registry,
+            "instance_tracker": create_mock_instance_tracker(),
+        }
+    )
+
+    result = await session_community_delete(context, session_id="enterprise:prod:s1")
+
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "is not a community session" in result["error"]
+    mock_session_registry.get.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -2213,3 +2366,16 @@ async def test_session_community_create_default_session_type_in_config():
         assert "session_type" in captured_config
         # Should default to Python
         assert captured_config["session_type"] == "python"
+
+
+def test_register_tools_registers_community_tools():
+    """register_tools() registers all DHC-specific session tools."""
+    from mcp.server.fastmcp import FastMCP
+    from deephaven_mcp.mcp_systems_server._tools.session_community import register_tools
+
+    server = FastMCP("test-community-server")
+    register_tools(server)
+    tools = server._tool_manager._tools
+    assert "session_community_create" in tools
+    assert "session_community_delete" in tools
+    assert "session_community_credentials" in tools

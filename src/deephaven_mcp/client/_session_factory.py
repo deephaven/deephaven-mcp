@@ -60,6 +60,7 @@ Note:
 import asyncio
 import io
 import logging
+import os
 import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, cast
@@ -80,7 +81,7 @@ from deephaven_mcp._exceptions import (
 )
 from deephaven_mcp.config import (
     EnterpriseSystemConfigurationError,
-    validate_single_enterprise_system,
+    validate_enterprise_config,
 )
 
 from ._auth_client import CorePlusAuthClient
@@ -151,52 +152,28 @@ class CorePlusSessionFactory(
     ):
         """Initialize the CorePlusSessionFactory wrapper with an existing SessionManager.
 
-        This constructor creates a new CorePlusSessionFactory that wraps an existing SessionManager
-        object, providing an asynchronous interface to its methods while preserving all functionality.
-        This class serves as the primary entry point for interacting with Deephaven Enterprise servers,
-        handling authentication, worker management, and session establishment.
+        Automatically initializes both `controller_client` and `auth_client` by accessing
+        the corresponding properties from the wrapped session manager.
 
-        The constructor automatically initializes both the controller_client and auth_client properties
-        by accessing the corresponding properties from the wrapped session manager.
-
-        The CorePlusSessionFactory is designed to provide a convenient async/await interface around
-        the synchronous Enterprise SessionManager, running operations in separate threads to avoid
-        blocking the event loop. This makes it ideal for integration into async applications, web
-        servers, or any environment where non-blocking operations are important.
+        In most cases, prefer the class factory methods over direct instantiation:
+        - Use `from_url()` when you have a connection URL to the Deephaven server.
+        - Use `from_config()` when you have a configuration dictionary.
 
         Args:
-            session_manager (deephaven_enterprise.client.session_manager.SessionManager): The SessionManager instance to wrap. Must be an instance
-                           of deephaven_enterprise.client.session_manager.SessionManager.
-                           This should be a properly initialized session manager with valid
-                           connection information, though it does not need to be authenticated
-                           yet (authentication can be performed through this wrapper's methods).
+            session_manager (deephaven_enterprise.client.session_manager.SessionManager):
+                The SessionManager instance to wrap. Does not need to be authenticated
+                yet; authentication can be performed through this wrapper's methods.
 
         Raises:
-            TypeError: If the provided session_manager is not an instance of the expected
-                       SessionManager class from deephaven_enterprise.client.session_manager.
-            ValueError: If the session_manager is not properly initialized or is missing
-                       required configuration.
             SessionError: If there was an error initializing the controller_client property.
             AuthenticationError: If there was an error initializing the auth_client property.
 
-        Note:
-            In most cases, you should use the class factory methods instead of this constructor:
-            - Use from_url() when you have a connection URL to the Deephaven server
-            - Use from_config() when you have a configuration dictionary
-
-            These factory methods handle initialization details, dependency management, and
-            error handling for you in a more convenient way than direct instantiation.
-
         Example:
             ```python
-            # Direct instantiation (not typically recommended)
             from deephaven_enterprise.client import session_manager
             from deephaven_mcp.client import CorePlusSessionFactory
 
-            # Create the underlying session manager
-            sm = session_manager.SessionManager.from_url("https://example.com/iris/connection.json")
-
-            # Wrap it in the async factory
+            sm = session_manager.SessionManager("https://example.com/iris/connection.json")
             factory = CorePlusSessionFactory(sm)
             ```
 
@@ -343,7 +320,7 @@ class CorePlusSessionFactory(
 
     @staticmethod
     def _resolve_password(
-        worker_cfg: dict[str, Any],
+        config: dict[str, Any],
         log_prefix: str = "[CorePlusSessionFactory:from_config]",
     ) -> str:
         """Resolve password from config dictionary or environment variable.
@@ -360,21 +337,19 @@ class CorePlusSessionFactory(
         AuthenticationError is raised if no password can be resolved.
 
         Args:
-            worker_cfg: Configuration dictionary containing 'password' and/or
+            config (dict[str, Any]): Configuration dictionary containing 'password' and/or
                 'password_env_var' keys.
-            log_prefix: Prefix for log messages (default: "[CorePlusSessionFactory:from_config]").
+            log_prefix (str): Prefix for log messages (default: "[CorePlusSessionFactory:from_config]").
 
         Returns:
-            The resolved password string.
+            str: The resolved password string.
 
         Raises:
             AuthenticationError: If the specified environment variable is not set,
                 or if no password is provided at all.
         """
-        import os
-
-        password = worker_cfg.get("password")
-        password_env_var = worker_cfg.get("password_env_var")
+        password = config.get("password")
+        password_env_var = config.get("password_env_var")
 
         if password is None and password_env_var is not None:
             password = os.environ.get(password_env_var)
@@ -397,11 +372,10 @@ class CorePlusSessionFactory(
     @classmethod
     async def from_config(
         cls,
-        worker_cfg: dict[str, Any],
+        config: dict[str, Any],
         timeout_seconds: float = SESSION_CONNECT_TIMEOUT_SECONDS,
     ) -> "CorePlusSessionFactory":
-        """
-        Create and authenticate a CorePlusSessionFactory from a configuration dictionary.
+        """Create and authenticate a CorePlusSessionFactory from a configuration dictionary.
 
         This factory method provides a complete solution for creating and initializing a
         CorePlusSessionFactory from a configuration dictionary. It handles the entire process:
@@ -416,9 +390,10 @@ class CorePlusSessionFactory(
         in a structured format rather than hardcoded in the application.
 
         Configuration Format:
-        The configuration dictionary must follow the standard enterprise system format with these
+        The configuration dictionary must follow the flat enterprise system format with these
         required fields:
 
+        - 'system_name': Identifier for the enterprise system
         - 'connection_json_url': URL to the Deephaven server's connection.json file
         - 'auth_type': Authentication method to use ('password', 'private_key', or 'saml')
 
@@ -435,10 +410,14 @@ class CorePlusSessionFactory(
               typically named `priv-<keyname>.base64.txt`; provided by your IT/security team)
 
         - For 'saml' authentication:
-            * No additional fields required, but SAML must be configured on server
+            * No additional fields required, but SAML must be configured on the server.
+            * Note: `from_config()` cannot perform SAML authentication automatically because
+              SAML requires interactive browser-based login. When `auth_type` is 'saml',
+              this method returns an unauthenticated factory and logs a warning. Call
+              `saml()` manually on the returned instance to complete authentication.
 
         Args:
-            worker_cfg (dict[str, Any]): Configuration dictionary for the enterprise system connection.
+            config (dict[str, Any]): Configuration dictionary for the enterprise system connection.
                 Must contain the required fields as described above.
             timeout_seconds (float): Maximum time in seconds to wait for connection.
                 Defaults to SESSION_CONNECT_TIMEOUT_SECONDS.
@@ -457,8 +436,6 @@ class CorePlusSessionFactory(
                 incorrect format, or server-side authentication issues.
             EnterpriseSystemConfigurationError: If the configuration dictionary is invalid,
                 missing required fields, or contains incompatible settings.
-            EnvironmentError: If a password environment variable is specified but not found
-                in the environment.
 
         Example - Password authentication with environment variable:
             ```python
@@ -472,6 +449,7 @@ class CorePlusSessionFactory(
             async def create_from_config():
                 # Define configuration with environment variable for password
                 config = {
+                    "system_name": "prod",
                     "connection_json_url": "https://example.deephaven.io/iris/connection.json",
                     "auth_type": "password",
                     "username": "admin",
@@ -491,6 +469,7 @@ class CorePlusSessionFactory(
             async def create_with_key():
                 # Define configuration with private key path
                 config = {
+                    "system_name": "prod",
                     "connection_json_url": "https://example.deephaven.io/iris/connection.json",
                     "auth_type": "private_key",
                     "private_key_path": "/path/to/priv-mykeyname.base64.txt"
@@ -512,15 +491,15 @@ class CorePlusSessionFactory(
 
         # Validate config
         try:
-            validate_single_enterprise_system("from_config", worker_cfg)
+            validate_enterprise_config(config)
         except EnterpriseSystemConfigurationError as e:
             _LOGGER.error(
                 f"[CorePlusSessionFactory:from_config] Invalid enterprise system config: {e}"
             )
             raise
 
-        url = worker_cfg["connection_json_url"]
-        auth_type = worker_cfg["auth_type"]
+        url = config["connection_json_url"]
+        auth_type = config["auth_type"]
         _LOGGER.debug(
             f"[CorePlusSessionFactory:from_config] Creating SessionManager from config: url={url}, auth_type={auth_type}"
         )
@@ -560,12 +539,12 @@ class CorePlusSessionFactory(
 
         # Perform authentication if credentials are provided
         if auth_type == "password":
-            username = worker_cfg.get("username")
-            password = cls._resolve_password(worker_cfg)
-            effective_user = worker_cfg.get("effective_user")
+            username = config.get("username")
+            password = cls._resolve_password(config)
+            effective_user = config.get("effective_user")
             await instance.password(cast(str, username), password, effective_user)
         elif auth_type == "private_key":
-            private_key_path = worker_cfg.get("private_key_path")
+            private_key_path = config.get("private_key_path")
             if private_key_path is None:
                 _LOGGER.error(
                     "[CorePlusSessionFactory:from_config] No private_key_path provided for private_key authentication."
@@ -712,8 +691,7 @@ class CorePlusSessionFactory(
         long-running cleanup operations don't impact the responsiveness of your async application.
 
         Returns:
-            None: This method doesn't return a value. Upon successful completion, the factory
-                 is considered closed and should no longer be used.
+            None
 
         Raises:
             SessionError: If terminating the connections fails for any reason, such as network
@@ -740,13 +718,9 @@ class CorePlusSessionFactory(
         Note:
             - This method does NOT automatically close any sessions created by this factory
             - Each CorePlusSession must be closed separately before closing the factory
-            - After calling close(), the factory should be considered unusable
+            - After calling close(), the factory should be considered unusable and cannot be reused
             - For proper resource cleanup, always use this method in a try/finally block or
               with async context managers to ensure it's called even if exceptions occur
-
-        Note:
-            After closing the session manager, it cannot be reused. A new instance
-            must be created if further connections are needed.
         """
         try:
             _LOGGER.debug(
@@ -778,10 +752,11 @@ class CorePlusSessionFactory(
             See https://deephaven.atlassian.net/browse/DH-19984 for tracking.
 
         Args:
-            session (pydeephaven.Session): The raw session object from the enterprise system
+            session (pydeephaven.Session): The raw session object from the enterprise system.
 
         Returns:
-            str: The programming language (e.g., "python", "groovy")
+            str: The programming language string (e.g., "python", "groovy"). Defaults to
+                "python" if the session's type attribute is None or empty.
         """
         # TODO: the private attribute _session_type is a temporary workaround: See https://deephaven.atlassian.net/browse/DH-19984
         session_type = session._session_type
@@ -845,10 +820,10 @@ class CorePlusSessionFactory(
             viewer_groups (list[str] | None): List of user groups that have read-only access to this worker.
                 Viewers can connect to the worker and view its data but cannot modify it.
                 If None (default), only the creator has viewing privileges.
-            configuration_transformer (Callable[..., Any] | None): Optional function that takes and returns a configuration dictionary.
-                This allows for advanced customization of the worker configuration beyond what the
-                standard parameters provide. The function signature should be:
-                `(config: dict) -> dict`. Use with caution as it may override other settings.
+            configuration_transformer (Callable[..., Any] | None): Optional callable applied to the
+                internal worker configuration dictionary before submission. Accepts and returns
+                the configuration dict, allowing advanced customization beyond what the standard
+                parameters provide. Use with caution as it can override other settings.
             session_arguments (dict[str, Any] | None): Additional keyword arguments to pass to the pydeephaven.Session constructor.
                 These parameters control session behavior rather than worker configuration.
                 Common options include `disable_open_table_listener` or `chunk_size`.
@@ -865,9 +840,9 @@ class CorePlusSessionFactory(
             SessionCreationError: If an error occurs during worker creation or connection establishment,
                 such as invalid configuration parameters or initialization failures.
             DeephavenConnectionError: If there is a network or communication problem with the Deephaven
-                server during worker creation or connection.
+                server during worker creation or connection, or if worker creation exceeds
+                the specified timeout_seconds.
             AuthenticationError: If the current authentication is invalid or has insufficient permissions.
-            TimeoutError: If worker creation exceeds the specified timeout_seconds.
 
         Example - Basic usage:
             ```python
@@ -1038,7 +1013,7 @@ class CorePlusSessionFactory(
             QueryError: If the persistent query cannot be found (doesn't exist, was terminated), is not
                 in a valid state to accept connections, or cannot be accessed due to permission issues.
             DeephavenConnectionError: If a network-related issue occurs while connecting to the worker,
-                such as connectivity problems or server unavailability.
+                such as connectivity problems, server unavailability, or connection timeout.
             SessionCreationError: If there's an error establishing the session connection for any other
                 reason, such as version incompatibility or resource constraints.
             AuthenticationError: If the current authentication is invalid or has insufficient permissions

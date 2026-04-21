@@ -1,5 +1,4 @@
-"""
-Persistent Query (PQ) MCP Tools - Enterprise Core+ PQ Management.
+"""Persistent Query (PQ) MCP Tools - Enterprise Core+ PQ Management.
 
 Provides MCP tools for managing Deephaven Enterprise (Core+) persistent queries:
 - pq_name_to_id: Convert PQ names to IDs
@@ -20,7 +19,7 @@ import logging
 import os
 from typing import TYPE_CHECKING, cast
 
-from mcp.server.fastmcp import Context
+from mcp.server.fastmcp import Context, FastMCP
 
 from deephaven_mcp._exceptions import (
     MissingEnterprisePackageError,
@@ -31,10 +30,9 @@ from deephaven_mcp.client._protobuf import (
     CorePlusQuerySerial,
     CorePlusQueryState,
 )
-from deephaven_mcp.config import ConfigManager
 from deephaven_mcp.resource_manager import (
     BaseItemManager,
-    CombinedSessionRegistry,
+    EnterpriseSessionRegistry,
     SystemType,
 )
 
@@ -64,12 +62,6 @@ except ImportError:
     RestartUsersEnum = None
 
 
-from deephaven_mcp.mcp_systems_server._tools.mcp_server import (
-    mcp_server,
-)
-from deephaven_mcp.mcp_systems_server._tools.shared import (
-    _get_system_config,
-)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -79,23 +71,28 @@ _LOGGER = logging.getLogger(__name__)
 # =============================================================================
 
 
-def _parse_pq_id(pq_id: str) -> tuple[str, CorePlusQuerySerial]:
-    """Parse a pq_id into system_name and serial.
+def _parse_pq_id(pq_id: str, system_name: str) -> CorePlusQuerySerial:
+    """Parse a pq_id and return the serial number.
+
+    Validates that the pq_id belongs to the expected enterprise system, guarding
+    against cross-server mistakes (e.g. an AI agent sending an ID from a different
+    DHE instance).
 
     Args:
         pq_id (str): PQ identifier in format 'enterprise:{system_name}:{serial}'
+        system_name (str): Expected enterprise system name (from the registry).
 
     Returns:
-        tuple[str, CorePlusQuerySerial]: Tuple of (system_name, serial)
+        CorePlusQuerySerial: The serial number extracted from pq_id
 
     Raises:
-        ValueError: If pq_id format is invalid or serial is not an integer
+        ValueError: If pq_id format is invalid, system name doesn't match, or serial is not an integer
     """
     parts = pq_id.split(":")
-    if len(parts) != 3 or parts[0] != "enterprise":
+    if len(parts) != 3 or parts[0] != "enterprise" or parts[1] != system_name:
         raise ValueError(
             f"Invalid pq_id format: '{pq_id}'. "
-            "Expected format: 'enterprise:{{system_name}}:{{serial}}'"
+            f"Expected format: 'enterprise:{system_name}:{{serial}}'"
         )
     try:
         serial_int = int(parts[2])
@@ -104,15 +101,15 @@ def _parse_pq_id(pq_id: str) -> tuple[str, CorePlusQuerySerial]:
             f"Invalid pq_id format: '{pq_id}'. "
             f"Serial must be an integer, got: '{parts[2]}'"
         ) from None
-    return parts[1], CorePlusQuerySerial(serial_int)
+    return CorePlusQuerySerial(serial_int)
 
 
-def _make_pq_id(system_name: str, serial: CorePlusQuerySerial) -> str:
-    """Construct a pq_id from system_name and serial.
+def _make_pq_id(serial: CorePlusQuerySerial, system_name: str) -> str:
+    """Construct a pq_id from serial number.
 
     Args:
-        system_name (str): Name of the enterprise system
         serial (CorePlusQuerySerial): PQ serial number
+        system_name (str): Enterprise system name.
 
     Returns:
         str: PQ identifier in format 'enterprise:{system_name}:{serial}'
@@ -676,15 +673,15 @@ async def _setup_batch_pq_operation(
     max_concurrent: int,
 ) -> tuple[
     list[tuple[str, CorePlusQuerySerial]] | None,
-    str | None,
     CorePlusControllerClient | None,
     int | None,
     int | None,
+    str,
     dict[str, object] | None,
 ]:
     """Set up common infrastructure for batch PQ operations.
 
-    Validates pq_ids and parameters, gets system config, and returns controller client.
+    Validates pq_ids and parameters and returns controller client.
     Consolidates validation and setup boilerplate across pq_delete, pq_start, pq_stop, pq_restart.
 
     Args:
@@ -695,16 +692,22 @@ async def _setup_batch_pq_operation(
         max_concurrent (int): Maximum concurrent operations (must be >= 1)
 
     Returns:
-        tuple: (parsed_pqs, system_name, controller, validated_timeout, validated_max_concurrent, error_response)
-               On success: (parsed_list, "system_name", controller_client, timeout_int, max_concurrent_int, None)
-               On failure: (None, None, None, None, None, {"success": False, "error": "...", "isError": True})
+        tuple: (parsed_pqs, controller, validated_timeout, validated_max_concurrent, system_name, error_response)
+               On success: (parsed_list, controller_client, timeout_int, max_concurrent_int, system_name, None)
+               On failure: (None, None, None, None, system_name, {"success": False, "error": "...", "isError": True})
 
     Usage:
-        parsed_pqs, system_name, controller, timeout, max_conc, error = await _setup_batch_pq_operation(...)
+        parsed_pqs, controller, timeout, max_conc, system_name, error = await _setup_batch_pq_operation(...)
         if error:
             return error
         # Type narrowing: all returned values except error are non-None here
     """
+    # Get session registry and system name first (needed for pq_id validation)
+    session_registry: EnterpriseSessionRegistry = (
+        context.request_context.lifespan_context["session_registry"]
+    )
+    system_name = session_registry.system_name
+
     # Validate parameters
     try:
         validated_timeout = _validate_timeout(timeout_seconds, function_name)
@@ -717,50 +720,32 @@ async def _setup_batch_pq_operation(
             None,
             None,
             None,
-            None,
+            system_name,
             {"success": False, "error": str(e), "isError": True},
         )
 
     # Validate and parse pq_ids
-    parsed_pqs, system_name, parse_error = _validate_and_parse_pq_ids(pq_id)
+    parsed_pqs, parse_error = _validate_and_parse_pq_ids(pq_id, system_name)
     if parse_error:
         return (
             None,
             None,
             None,
             None,
-            None,
+            system_name,
             {"success": False, "error": parse_error, "isError": True},
         )
 
-    # Type narrowing: when parse_error is None, parsed_pqs and system_name are guaranteed non-None
+    # Type narrowing: when parse_error is None, parsed_pqs is guaranteed non-None
     parsed_pqs = cast(list[tuple[str, CorePlusQuerySerial]], parsed_pqs)
-    system_name = cast(str, system_name)
 
-    # Get config and session registry
-    config_manager: ConfigManager = context.request_context.lifespan_context[
-        "config_manager"
-    ]
-    session_registry: CombinedSessionRegistry = (
-        context.request_context.lifespan_context["session_registry"]
-    )
-
-    # Verify enterprise system exists
-    _, error_response = await _get_system_config(
-        function_name, config_manager, system_name
-    )
-    if error_response:
-        return (None, None, None, None, None, error_response)
-
-    # Get enterprise registry and factory
-    enterprise_registry = await session_registry.enterprise_registry()
-    factory_manager = await enterprise_registry.get(system_name)
+    factory_manager = session_registry.factory_manager
     _LOGGER.debug(
-        f"[mcp_systems_server:{function_name}] Connecting to enterprise factory for system '{system_name}'"
+        f"[mcp_systems_server:{function_name}] Connecting to enterprise factory"
     )
     factory = await factory_manager.get()
     _LOGGER.debug(
-        f"[mcp_systems_server:{function_name}] Connected to enterprise factory for system '{system_name}'"
+        f"[mcp_systems_server:{function_name}] Connected to enterprise factory"
     )
 
     # Get controller client
@@ -768,55 +753,47 @@ async def _setup_batch_pq_operation(
 
     return (
         parsed_pqs,
-        system_name,
         controller,
         validated_timeout,
         validated_max_concurrent,
+        system_name,
         None,
     )
 
 
 def _validate_and_parse_pq_ids(
     pq_id: str | list[str],
-) -> tuple[list[tuple[str, CorePlusQuerySerial]] | None, str | None, str | None]:
+    system_name: str,
+) -> tuple[list[tuple[str, CorePlusQuerySerial]] | None, str | None]:
     """Validate and parse pq_id(s) for batch operations.
 
     Args:
         pq_id (str | list[str]): Single pq_id string or list of pq_id strings in
-            format 'enterprise:{system_name}:{serial}'. All IDs must belong to the
-            same enterprise system.
+            format 'enterprise:{system_name}:{serial}'.
+        system_name (str): Expected enterprise system name (from the registry).
 
     Returns:
-        tuple[list[tuple[str, CorePlusQuerySerial]] | None, str | None, str | None]:
-            (parsed_pqs, system_name, error_message)
-            - On success: ([(pq_id, serial), ...], system_name, None)
-            - On failure: (None, None, error_string)
+        tuple[list[tuple[str, CorePlusQuerySerial]] | None, str | None]:
+            (parsed_pqs, error_message)
+            - On success: ([(pq_id, serial), ...], None)
+            - On failure: (None, error_string)
     """
     # Normalize to list
     pq_ids = [pq_id] if isinstance(pq_id, str) else pq_id
 
     if not pq_ids:
-        return (None, None, "At least one pq_id must be provided")
+        return (None, "At least one pq_id must be provided")
 
-    # Parse all pq_ids and validate they're from the same system
+    # Parse all pq_ids
     parsed_pqs = []
-    system_name = None
     for pid in pq_ids:
         try:
-            sys_name, serial = _parse_pq_id(pid)
-            if system_name is None:
-                system_name = sys_name
-            elif system_name != sys_name:
-                return (
-                    None,
-                    None,
-                    f"All pq_ids must be from the same system. Got '{system_name}' and '{sys_name}'",
-                )
+            serial = _parse_pq_id(pid, system_name)
             parsed_pqs.append((pid, serial))
         except ValueError as e:
-            return (None, None, f"Invalid pq_id '{pid}': {e}")
+            return (None, f"Invalid pq_id '{pid}': {e}")
 
-    return (parsed_pqs, system_name, None)
+    return (parsed_pqs, None)
 
 
 def _convert_restart_users_to_enum(restart_users_str: str) -> int:
@@ -850,8 +827,8 @@ def _convert_restart_users_to_enum(restart_users_str: str) -> int:
 def _add_session_id_if_running(
     result_dict: dict[str, object],
     state_name: str,
-    system_name: str,
     pq_name: str,
+    system_name: str,
 ) -> None:
     """Add session_id to result dict if PQ is in RUNNING or INITIALIZING state.
 
@@ -861,8 +838,8 @@ def _add_session_id_if_running(
     Args:
         result_dict (dict[str, object]): Result dictionary to modify in-place
         state_name (str): Current PQ state (e.g., "RUNNING", "STOPPED", "INITIALIZING")
-        system_name (str): Enterprise system name
         pq_name (str): PQ name (NOT serial number)
+        system_name (str): Enterprise system name (from the registry).
     """
     if state_name in ["RUNNING", "INITIALIZING"]:
         session_id = BaseItemManager.make_full_name(
@@ -871,10 +848,8 @@ def _add_session_id_if_running(
         result_dict["session_id"] = session_id
 
 
-@mcp_server.tool()
 async def pq_name_to_id(
     context: Context,
-    system_name: str,
     pq_name: str,
 ) -> dict:
     """MCP Tool: Convert PQ name to pq_id format.
@@ -903,7 +878,6 @@ async def pq_name_to_id(
 
     Args:
         context (Context): MCP context object
-        system_name (str): Name of the enterprise system
         pq_name (str): Human-readable name of the persistent query
 
     Returns:
@@ -923,37 +897,24 @@ async def pq_name_to_id(
             "isError": True
         }
     """
-    _LOGGER.info(
-        f"[mcp_systems_server:pq_name_to_id] Invoked: system_name={system_name!r}, pq_name={pq_name!r}"
-    )
-
     result: dict[str, object] = {"success": False}
 
     try:
-        # Get config and session registry
-        config_manager: ConfigManager = context.request_context.lifespan_context[
-            "config_manager"
-        ]
-        session_registry: CombinedSessionRegistry = (
+        # Get session registry, system name, and factory
+        session_registry: EnterpriseSessionRegistry = (
             context.request_context.lifespan_context["session_registry"]
         )
-
-        # Verify enterprise system exists
-        _, error_response = await _get_system_config(
-            "pq_name_to_id", config_manager, system_name
+        system_name = session_registry.system_name
+        _LOGGER.info(
+            f"[mcp_systems_server:pq_name_to_id] Invoked: system_name={system_name!r}, pq_name={pq_name!r}"
         )
-        if error_response:
-            return error_response
-
-        # Get enterprise registry and factory
-        enterprise_registry = await session_registry.enterprise_registry()
-        factory_manager = await enterprise_registry.get(system_name)
+        factory_manager = session_registry.factory_manager
         _LOGGER.debug(
-            f"[mcp_systems_server:pq_name_to_id] Connecting to enterprise factory for system '{system_name}'"
+            f"[mcp_systems_server:pq_name_to_id] Connecting to enterprise factory"
         )
         factory = await factory_manager.get()
         _LOGGER.debug(
-            f"[mcp_systems_server:pq_name_to_id] Connected to enterprise factory for system '{system_name}'"
+            f"[mcp_systems_server:pq_name_to_id] Connected to enterprise factory"
         )
 
         # Get controller client
@@ -973,7 +934,7 @@ async def pq_name_to_id(
             return result
 
         # Success - construct pq_id
-        pq_id = _make_pq_id(system_name, serial)
+        pq_id = _make_pq_id(serial, system_name)
         result = {
             "success": True,
             "pq_id": pq_id,
@@ -999,10 +960,8 @@ async def pq_name_to_id(
     return result
 
 
-@mcp_server.tool()
 async def pq_list(
     context: Context,
-    system_name: str,
 ) -> dict:
     """MCP Tool: List all persistent queries (PQs) on an enterprise system.
 
@@ -1034,7 +993,6 @@ async def pq_list(
 
     Args:
         context (Context): MCP context object
-        system_name (str): Name of the enterprise system to list PQs for
 
     Returns:
         dict: Success response:
@@ -1070,36 +1028,22 @@ async def pq_list(
             "isError": True
         }
     """
-    _LOGGER.info(f"[mcp_systems_server:pq_list] Invoked: system_name={system_name!r}")
-
     result: dict[str, object] = {"success": False}
 
     try:
-        # Get config and session registry
-        config_manager: ConfigManager = context.request_context.lifespan_context[
-            "config_manager"
-        ]
-        session_registry: CombinedSessionRegistry = (
+        # Get session registry, system name, and factory
+        session_registry: EnterpriseSessionRegistry = (
             context.request_context.lifespan_context["session_registry"]
         )
-
-        # Verify enterprise system exists
-        _, error_response = await _get_system_config(
-            "pq_list", config_manager, system_name
-        )
-        if error_response:
-            result.update(error_response)
-            return result
-
-        # Get enterprise registry and factory
-        enterprise_registry = await session_registry.enterprise_registry()
-        factory_manager = await enterprise_registry.get(system_name)
+        system_name = session_registry.system_name
+        _LOGGER.info(f"[mcp_systems_server:pq_list] Invoked: system_name={system_name!r}")
+        factory_manager = session_registry.factory_manager
         _LOGGER.debug(
-            f"[mcp_systems_server:pq_list] Connecting to enterprise factory for system '{system_name}'"
+            f"[mcp_systems_server:pq_list] Connecting to enterprise factory"
         )
         factory = await factory_manager.get()
         _LOGGER.debug(
-            f"[mcp_systems_server:pq_list] Connected to enterprise factory for system '{system_name}'"
+            f"[mcp_systems_server:pq_list] Connected to enterprise factory"
         )
 
         # Get controller client
@@ -1123,7 +1067,7 @@ async def pq_list(
             config_pb = pq_info.config.pb
             state_pb = pq_info.state.pb if pq_info.state else None
             pq_name = config_pb.name
-            pq_id = _make_pq_id(system_name, serial)
+            pq_id = _make_pq_id(serial, system_name)
             status = pq_info.state.status.name if pq_info.state else "UNKNOWN"
 
             pq_data = {
@@ -1145,7 +1089,7 @@ async def pq_list(
             }
 
             # Add session_id if PQ is running (session_id uses name, not serial)
-            _add_session_id_if_running(pq_data, status, system_name, pq_name)
+            _add_session_id_if_running(pq_data, status, pq_name, system_name)
 
             pqs.append(pq_data)
 
@@ -1174,7 +1118,6 @@ async def pq_list(
     return result
 
 
-@mcp_server.tool()
 async def pq_details(
     context: Context,
     pq_id: str,
@@ -1205,7 +1148,7 @@ async def pq_details(
     - Worker port available at state_details.connection_details.protocols[*].port
     - connection_details is null when PQ is not running
     - Use session_id with other session tools to interact with a running PQ
-    - null script_path means inline script_body is used (or vice versa)
+    - null script_path in config means inline script_code is used (or vice versa)
     - Empty arrays ([]) indicate optional features are disabled (scheduling, admin_groups, etc.)
     - jvm_profile null means default JVM settings are used
     - replicas array contains state of all active replicas (load-balanced instances)
@@ -1373,39 +1316,27 @@ async def pq_details(
     result: dict[str, object] = {"success": False}
 
     try:
+        # Get session registry and system name first (needed for pq_id validation)
+        session_registry: EnterpriseSessionRegistry = (
+            context.request_context.lifespan_context["session_registry"]
+        )
+        system_name = session_registry.system_name
+
         # Early validation: parse pq_id to fail fast on invalid format
         try:
-            system_name, serial = _parse_pq_id(pq_id)
+            serial = _parse_pq_id(pq_id, system_name)
         except ValueError as e:
             result["error"] = str(e)
             result["isError"] = True
             return result
 
-        # Get config and session registry
-        config_manager: ConfigManager = context.request_context.lifespan_context[
-            "config_manager"
-        ]
-        session_registry: CombinedSessionRegistry = (
-            context.request_context.lifespan_context["session_registry"]
-        )
-
-        # Verify enterprise system exists
-        _, error_response = await _get_system_config(
-            "pq_details", config_manager, system_name
-        )
-        if error_response:
-            result.update(error_response)
-            return result
-
-        # Get enterprise registry and factory
-        enterprise_registry = await session_registry.enterprise_registry()
-        factory_manager = await enterprise_registry.get(system_name)
+        factory_manager = session_registry.factory_manager
         _LOGGER.debug(
-            f"[mcp_systems_server:pq_details] Connecting to enterprise factory for system '{system_name}'"
+            f"[mcp_systems_server:pq_details] Connecting to enterprise factory"
         )
         factory = await factory_manager.get()
         _LOGGER.debug(
-            f"[mcp_systems_server:pq_details] Connected to enterprise factory for system '{system_name}'"
+            f"[mcp_systems_server:pq_details] Connected to enterprise factory"
         )
 
         # Get controller client
@@ -1414,15 +1345,15 @@ async def pq_details(
         # Get all PQs from controller (ensures subscription is ready)
         # Then extract the specific PQ by serial
         _LOGGER.debug(
-            f"[mcp_systems_server:pq_details] Fetching PQ map from controller for system '{system_name}'"
+            f"[mcp_systems_server:pq_details] Fetching PQ map from controller"
         )
         pq_map = await controller.map()
         _LOGGER.debug(
-            f"[mcp_systems_server:pq_details] Received {len(pq_map)} PQ(s) from controller for system '{system_name}'"
+            f"[mcp_systems_server:pq_details] Received {len(pq_map)} PQ(s) from controller"
         )
 
         if serial not in pq_map:
-            error_msg = f"PQ with serial {serial} not found on system '{system_name}'"
+            error_msg = f"PQ with serial {serial} not found"
             _LOGGER.error(f"[mcp_systems_server:pq_details] {error_msg}")
             result["error"] = error_msg
             result["isError"] = True
@@ -1449,7 +1380,7 @@ async def pq_details(
         }
 
         # Add session_id if running (session_id uses name, not serial)
-        _add_session_id_if_running(pq_data, state_name, system_name, pq_name)
+        _add_session_id_if_running(pq_data, state_name, pq_name, system_name)
 
         _LOGGER.info(
             f"[mcp_systems_server:pq_details] Retrieved details for PQ '{pq_name}' (serial: {serial})"
@@ -1470,10 +1401,8 @@ async def pq_details(
     return result
 
 
-@mcp_server.tool()
 async def pq_create(
     context: Context,
-    system_name: str,
     pq_name: str,
     heap_size_gb: float | int,
     script_body: str | None = None,
@@ -1566,7 +1495,6 @@ async def pq_create(
 
     Args:
         context (Context): MCP context object
-        system_name (str): Name of the enterprise system
         pq_name (str): Human-readable name for the PQ
         heap_size_gb (float | int): JVM heap size in GB (e.g., 8.0 or 16)
         script_body (str | None): Inline script code to execute (mutually exclusive with script_path)
@@ -1606,11 +1534,6 @@ async def pq_create(
             "isError": True
         }
     """
-    _LOGGER.info(
-        f"[mcp_systems_server:pq_create] Invoked: system_name={system_name!r}, "
-        f"pq_name={pq_name!r}, heap_size_gb={heap_size_gb}"
-    )
-
     result: dict[str, object] = {"success": False}
 
     try:
@@ -1623,31 +1546,22 @@ async def pq_create(
             result["isError"] = True
             return result
 
-        # Get config and session registry
-        config_manager: ConfigManager = context.request_context.lifespan_context[
-            "config_manager"
-        ]
-        session_registry: CombinedSessionRegistry = (
+        # Get session registry, system name, and factory
+        session_registry: EnterpriseSessionRegistry = (
             context.request_context.lifespan_context["session_registry"]
         )
-
-        # Verify enterprise system exists
-        _, error_response = await _get_system_config(
-            "pq_create", config_manager, system_name
+        system_name = session_registry.system_name
+        _LOGGER.info(
+            f"[mcp_systems_server:pq_create] Invoked: system_name={system_name!r}, "
+            f"pq_name={pq_name!r}, heap_size_gb={heap_size_gb}"
         )
-        if error_response:
-            result.update(error_response)
-            return result
-
-        # Get enterprise registry and factory
-        enterprise_registry = await session_registry.enterprise_registry()
-        factory_manager = await enterprise_registry.get(system_name)
+        factory_manager = session_registry.factory_manager
         _LOGGER.debug(
-            f"[mcp_systems_server:pq_create] Connecting to enterprise factory for system '{system_name}'"
+            f"[mcp_systems_server:pq_create] Connecting to enterprise factory"
         )
         factory = await factory_manager.get()
         _LOGGER.debug(
-            f"[mcp_systems_server:pq_create] Connected to enterprise factory for system '{system_name}'"
+            f"[mcp_systems_server:pq_create] Connected to enterprise factory"
         )
 
         # Get controller client
@@ -1690,7 +1604,7 @@ async def pq_create(
         )
 
         # Construct pq_id (serial-based)
-        pq_id = _make_pq_id(system_name, serial)
+        pq_id = _make_pq_id(serial, system_name)
 
         _LOGGER.info(
             f"[mcp_systems_server:pq_create] Created PQ '{pq_name}' with serial {serial}, pq_id='{pq_id}'"
@@ -1722,7 +1636,6 @@ async def pq_create(
     return result
 
 
-@mcp_server.tool()
 async def pq_delete(
     context: Context,
     pq_id: str | list[str],
@@ -1815,10 +1728,10 @@ async def pq_delete(
         # Common setup and validation for batch operations
         (
             parsed_pqs,
-            _,
             controller,
             validated_timeout,
             validated_max_concurrent,
+            system_name,
             setup_error,
         ) = await _setup_batch_pq_operation(
             context, pq_id, "pq_delete", timeout_seconds, max_concurrent
@@ -1973,8 +1886,8 @@ def _apply_pq_config_simple_fields(
     """Apply simple (scalar) field updates to PersistentQueryConfigMessage protobuf.
 
     Updates only the fields that are not None. This helper consolidates the boilerplate
-    for applying individual field modifications to reduce code duplication across
-    pq_create and pq_modify operations.
+    for applying individual field modifications, called by
+    :func:`_apply_pq_config_modifications` which is used by ``pq_modify``.
 
     Args:
         config_pb (PersistentQueryConfigMessage): Protobuf config object to modify in-place
@@ -2039,7 +1952,8 @@ def _apply_pq_config_list_fields(
 
     Updates only the fields that are not None using a del/extend pattern to fully replace
     existing list contents. This helper consolidates the boilerplate for applying list
-    modifications to reduce code duplication across pq_create and pq_modify operations.
+    modifications, called by :func:`_apply_pq_config_modifications` which is used by
+    ``pq_modify``.
 
     Args:
         config_pb (PersistentQueryConfigMessage): Protobuf config object to modify in-place
@@ -2206,7 +2120,6 @@ def _apply_pq_config_modifications(
     return has_changes
 
 
-@mcp_server.tool()
 async def pq_modify(
     context: Context,
     pq_id: str,
@@ -2333,39 +2246,27 @@ async def pq_modify(
             result["isError"] = True
             return result
 
-        # Parse pq_id to get system name and serial
+        # Get session registry and system name first (needed for pq_id validation)
+        session_registry: EnterpriseSessionRegistry = (
+            context.request_context.lifespan_context["session_registry"]
+        )
+        system_name = session_registry.system_name
+
+        # Parse pq_id to get serial
         try:
-            system_name, serial = _parse_pq_id(pq_id)
+            serial = _parse_pq_id(pq_id, system_name)
         except ValueError as e:
             result["error"] = f"Invalid pq_id '{pq_id}': {type(e).__name__}: {e}"
             result["isError"] = True
             return result
 
-        # Get config and session registry
-        config_manager: ConfigManager = context.request_context.lifespan_context[
-            "config_manager"
-        ]
-        session_registry: CombinedSessionRegistry = (
-            context.request_context.lifespan_context["session_registry"]
-        )
-
-        # Verify enterprise system exists
-        _, error_response = await _get_system_config(
-            "pq_modify", config_manager, system_name
-        )
-        if error_response:
-            result.update(error_response)
-            return result
-
-        # Get enterprise registry and factory
-        enterprise_registry = await session_registry.enterprise_registry()
-        factory_manager = await enterprise_registry.get(system_name)
+        factory_manager = session_registry.factory_manager
         _LOGGER.debug(
-            f"[mcp_systems_server:pq_modify] Connecting to enterprise factory for system '{system_name}'"
+            f"[mcp_systems_server:pq_modify] Connecting to enterprise factory"
         )
         factory = await factory_manager.get()
         _LOGGER.debug(
-            f"[mcp_systems_server:pq_modify] Connected to enterprise factory for system '{system_name}'"
+            f"[mcp_systems_server:pq_modify] Connected to enterprise factory"
         )
 
         # Get controller client
@@ -2374,15 +2275,15 @@ async def pq_modify(
         # Get all PQs from controller (ensures subscription is ready)
         # Then extract the specific PQ by serial
         _LOGGER.debug(
-            f"[mcp_systems_server:pq_modify] Fetching PQ map from controller for system '{system_name}'"
+            f"[mcp_systems_server:pq_modify] Fetching PQ map from controller"
         )
         pq_map = await controller.map()
         _LOGGER.debug(
-            f"[mcp_systems_server:pq_modify] Received {len(pq_map)} PQ(s) from controller for system '{system_name}'"
+            f"[mcp_systems_server:pq_modify] Received {len(pq_map)} PQ(s) from controller"
         )
 
         if serial not in pq_map:
-            error_msg = f"PQ with serial {serial} not found on system '{system_name}'"
+            error_msg = f"PQ with serial {serial} not found"
             _LOGGER.error(f"[mcp_systems_server:pq_modify] {error_msg}")
             result["error"] = error_msg
             result["isError"] = True
@@ -2459,7 +2360,6 @@ async def pq_modify(
     return result
 
 
-@mcp_server.tool()
 async def pq_start(
     context: Context,
     pq_id: str | list[str],
@@ -2562,10 +2462,10 @@ async def pq_start(
         # Common setup and validation for batch operations
         (
             parsed_pqs,
-            system_name,
             controller,
             validated_timeout,
             validated_max_concurrent,
+            system_name,
             setup_error,
         ) = await _setup_batch_pq_operation(
             context, pq_id, "pq_start", timeout_seconds, max_concurrent
@@ -2575,7 +2475,6 @@ async def pq_start(
 
         # Type narrowing: when setup_error is None, all values are guaranteed non-None
         parsed_pqs = cast(list[tuple[str, CorePlusQuerySerial]], parsed_pqs)
-        system_name = cast(str, system_name)
         controller = cast(CorePlusControllerClient, controller)
         validated_timeout = cast(int, validated_timeout)
         validated_max_concurrent = cast(int, validated_max_concurrent)
@@ -2626,9 +2525,7 @@ async def pq_start(
                 item_result["state"] = state_name
 
                 # Add session_id if running (session_id uses name, not serial)
-                _add_session_id_if_running(
-                    item_result, state_name, system_name, pq_name
-                )
+                _add_session_id_if_running(item_result, state_name, pq_name, system_name)
 
                 _LOGGER.debug(
                     f"[mcp_systems_server:pq_start] Successfully started PQ {pid}"
@@ -2724,7 +2621,6 @@ async def pq_start(
     return result
 
 
-@mcp_server.tool()
 async def pq_stop(
     context: Context,
     pq_id: str | list[str],
@@ -2824,10 +2720,10 @@ async def pq_stop(
         # Common setup and validation for batch operations
         (
             parsed_pqs,
-            _,
             controller,
             validated_timeout,
             validated_max_concurrent,
+            system_name,
             setup_error,
         ) = await _setup_batch_pq_operation(
             context, pq_id, "pq_stop", timeout_seconds, max_concurrent
@@ -2978,7 +2874,6 @@ async def pq_stop(
     return result
 
 
-@mcp_server.tool()
 async def pq_restart(
     context: Context,
     pq_id: str | list[str],
@@ -3078,10 +2973,10 @@ async def pq_restart(
         # Common setup and validation for batch operations
         (
             parsed_pqs,
-            system_name,
             controller,
             validated_timeout,
             validated_max_concurrent,
+            system_name,
             setup_error,
         ) = await _setup_batch_pq_operation(
             context, pq_id, "pq_restart", timeout_seconds, max_concurrent
@@ -3091,7 +2986,6 @@ async def pq_restart(
 
         # Type narrowing: when setup_error is None, all values are guaranteed non-None
         parsed_pqs = cast(list[tuple[str, CorePlusQuerySerial]], parsed_pqs)
-        system_name = cast(str, system_name)
         controller = cast(CorePlusControllerClient, controller)
         validated_timeout = cast(int, validated_timeout)
         validated_max_concurrent = cast(int, validated_max_concurrent)
@@ -3142,9 +3036,7 @@ async def pq_restart(
                 item_result["state"] = state_name
 
                 # Add session_id if running (session_id uses name, not serial)
-                _add_session_id_if_running(
-                    item_result, state_name, system_name, pq_name
-                )
+                _add_session_id_if_running(item_result, state_name, pq_name, system_name)
 
                 _LOGGER.debug(
                     f"[mcp_systems_server:pq_restart] Successfully restarted PQ {pid}"
@@ -3238,3 +3130,23 @@ async def pq_restart(
         result["isError"] = True
 
     return result
+
+
+def register_tools(server: FastMCP) -> None:
+    """Register all persistent query (PQ) tools with the given FastMCP server.
+
+    These tools are specific to the DHE server and should NOT be registered
+    on the DHC server.
+
+    Args:
+        server (FastMCP): The server to register tools with.
+    """
+    server.tool()(pq_name_to_id)
+    server.tool()(pq_list)
+    server.tool()(pq_details)
+    server.tool()(pq_create)
+    server.tool()(pq_delete)
+    server.tool()(pq_modify)
+    server.tool()(pq_start)
+    server.tool()(pq_stop)
+    server.tool()(pq_restart)

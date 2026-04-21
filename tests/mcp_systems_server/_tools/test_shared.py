@@ -19,7 +19,6 @@ from deephaven_mcp.mcp_systems_server._tools.shared import (
     _format_initialization_status,
     _get_enterprise_session,
     _get_session_from_context,
-    _get_system_config,
 )
 from deephaven_mcp.resource_manager import (
     DockerLaunchedSession,
@@ -36,11 +35,6 @@ from deephaven_mcp.resource_manager import (
 # ===========================================================================
 
 
-def test_format_initialization_status_simple_no_errors():
-    """SIMPLE phase with no errors returns None."""
-    assert _format_initialization_status(InitializationPhase.SIMPLE, {}) is None
-
-
 def test_format_initialization_status_completed_no_errors():
     """COMPLETED phase with no errors returns None."""
     assert _format_initialization_status(InitializationPhase.COMPLETED, {}) is None
@@ -50,15 +44,6 @@ def test_format_initialization_status_completed_with_errors():
     """COMPLETED phase with errors reports connection issues."""
     errors = {"prod": "timeout"}
     result = _format_initialization_status(InitializationPhase.COMPLETED, errors)
-    assert result is not None
-    assert "connection issues" in result["status"]
-    assert result["errors"] == errors
-
-
-def test_format_initialization_status_simple_with_errors():
-    """SIMPLE phase with errors reports connection issues."""
-    errors = {"sys": "unreachable"}
-    result = _format_initialization_status(InitializationPhase.SIMPLE, errors)
     assert result is not None
     assert "connection issues" in result["status"]
     assert result["errors"] == errors
@@ -224,94 +209,6 @@ def test_check_response_size_over_limit():
         "error": "Response would be ~60.0MB (max 50MB). Please reduce max_rows.",
         "isError": True,
     }
-
-
-@pytest.mark.asyncio
-async def test_get_system_config_success():
-    """Test _get_system_config when system exists in configuration."""
-    mock_config_manager = MagicMock()
-
-    enterprise_config = {
-        "test-system": {
-            "connection_json_url": "https://test.com",
-            "auth_type": "password",
-        }
-    }
-
-    # New config access path uses async get_config() with nested structure
-    full_config = {"enterprise": {"systems": enterprise_config}}
-    mock_config_manager.get_config = AsyncMock(return_value=full_config)
-
-    system_config, error_response = await _get_system_config(
-        "test_function", mock_config_manager, "test-system"
-    )
-
-    assert error_response is None
-    assert system_config == enterprise_config["test-system"]
-
-
-@pytest.mark.asyncio
-async def test_get_system_config_system_not_found():
-    """Test _get_system_config when system doesn't exist in configuration."""
-    mock_config_manager = MagicMock()
-
-    enterprise_config = {"other-system": {}}
-
-    full_config = {"enterprise": {"systems": enterprise_config}}
-    mock_config_manager.get_config = AsyncMock(return_value=full_config)
-
-    system_config, error_response = await _get_system_config(
-        "test_function", mock_config_manager, "nonexistent-system"
-    )
-
-    assert system_config == {}
-    assert error_response is not None
-    assert (
-        error_response["error"]
-        == "Enterprise system 'nonexistent-system' not found in configuration"
-    )
-    assert error_response["isError"] is True
-
-
-@pytest.mark.asyncio
-async def test_get_system_config_handles_keyerror_from_get_config_section():
-    """Covers the KeyError except block when extracting nested enterprise systems config."""
-    mock_config_manager = MagicMock()
-    mock_config_manager.get_config = AsyncMock(return_value={"some": "config"})
-
-    with patch(
-        "deephaven_mcp.config.get_config_section",
-        side_effect=KeyError(),
-    ):
-        system_config, error_response = await _get_system_config(
-            "test_function", mock_config_manager, "missing-system"
-        )
-
-    assert system_config == {}
-    assert error_response is not None
-    assert "missing-system" in error_response["error"]
-    assert error_response["isError"] is True
-
-
-@pytest.mark.asyncio
-async def test_get_system_config_empty_config():
-    """Test _get_system_config when enterprise config is empty."""
-    mock_config_manager = MagicMock()
-
-    full_config = {"enterprise": {"systems": {}}}
-    mock_config_manager.get_config = AsyncMock(return_value=full_config)
-
-    system_config, error_response = await _get_system_config(
-        "test_function", mock_config_manager, "test-system"
-    )
-
-    assert system_config == {}
-    assert error_response is not None
-    assert (
-        error_response["error"]
-        == "Enterprise system 'test-system' not found in configuration"
-    )
-    assert error_response["isError"] is True
 
 
 @pytest.mark.asyncio

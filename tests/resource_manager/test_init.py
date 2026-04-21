@@ -10,8 +10,8 @@ def test_imports_and_all():
         CommunitySessionManager,
         CommunitySessionRegistry,
         CorePlusSessionFactoryManager,
-        CorePlusSessionFactoryRegistry,
         EnterpriseSessionManager,
+        EnterpriseSessionRegistry,
     )
 
     # __all__ should be defined and contain all the public symbols
@@ -19,7 +19,7 @@ def test_imports_and_all():
 
     expected_all = [
         "BaseItemManager",
-        "CombinedSessionRegistry",
+        "EnterpriseSessionRegistry",
         "InitializationPhase",
         "RegistrySnapshot",
         "CommunitySessionManager",
@@ -28,7 +28,6 @@ def test_imports_and_all():
         "EnterpriseSessionManager",
         "CorePlusSessionFactoryManager",
         "CommunitySessionRegistry",
-        "CorePlusSessionFactoryRegistry",
         "ResourceLivenessStatus",
         "SystemType",
         "LaunchedSession",
@@ -46,7 +45,7 @@ def test_imports_and_all():
     assert mod.EnterpriseSessionManager is EnterpriseSessionManager
     assert mod.CorePlusSessionFactoryManager is CorePlusSessionFactoryManager
     assert mod.CommunitySessionRegistry is CommunitySessionRegistry
-    assert mod.CorePlusSessionFactoryRegistry is CorePlusSessionFactoryRegistry
+    assert mod.EnterpriseSessionRegistry is EnterpriseSessionRegistry
 
     # star import should bring in only expected symbols
     imported = {}
