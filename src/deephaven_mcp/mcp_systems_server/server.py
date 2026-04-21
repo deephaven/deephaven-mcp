@@ -18,10 +18,13 @@ Host/port precedence for both servers (first wins):
   3. Per-server defaults (enterprise: 8002, community: 8003)
 """
 
+import asyncio
 import logging
+import sys
 
 from mcp.server.fastmcp import FastMCP
 
+from deephaven_mcp.config import CommunityServerConfigManager, EnterpriseServerConfigManager
 from deephaven_mcp.mcp_systems_server._lifespan import (
     make_community_lifespan,
     make_enterprise_lifespan,
@@ -111,6 +114,17 @@ def _register_shared_tools(server: FastMCP) -> None:
         module.register_tools(server)
 
 
+def _validate_config_or_exit(config_path: str | None, config_manager_class: type, label: str) -> None:
+    """Validate config at server startup; exit(1) if invalid."""
+    _LOGGER.info(f"[{label}] Validating configuration before server startup...")
+    try:
+        asyncio.run(config_manager_class(config_path=config_path).get_config())
+    except Exception as e:
+        _LOGGER.error(f"[{label}] Configuration error — server will not start: {e}")
+        sys.exit(1)
+    _LOGGER.info(f"[{label}] Configuration validated successfully.")
+
+
 def enterprise() -> None:
     """Entry point: start the Deephaven Enterprise (DHE) MCP server."""
     _setup_env()
@@ -122,6 +136,7 @@ def enterprise() -> None:
         f"[enterprise] Starting DHE MCP server: host={host!r}, port={port}, "
         f"config={config_path!r}"
     )
+    _validate_config_or_exit(config_path, EnterpriseServerConfigManager, "enterprise")
     server = FastMCP(
         "deephaven-mcp-enterprise",
         lifespan=make_enterprise_lifespan(config_path),
@@ -153,6 +168,7 @@ def community() -> None:
         f"[community] Starting DHC MCP server: host={host!r}, port={port}, "
         f"config={config_path!r}"
     )
+    _validate_config_or_exit(config_path, CommunityServerConfigManager, "community")
     server = FastMCP(
         "deephaven-mcp-community",
         lifespan=make_community_lifespan(config_path),

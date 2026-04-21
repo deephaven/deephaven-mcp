@@ -2,11 +2,12 @@
 Tests for deephaven_mcp.mcp_systems_server.server.
 """
 
-from unittest.mock import ANY, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 
 import deephaven_mcp.mcp_systems_server.server as server
+from deephaven_mcp._exceptions import ConfigurationError
 
 
 # ---------------------------------------------------------------------------
@@ -136,6 +137,7 @@ def test_enterprise_defaults(monkeypatch):
         patch("deephaven_mcp._logging.setup_global_exception_logging"),
         patch("deephaven_mcp._logging.setup_signal_handler_logging"),
         patch("deephaven_mcp._monkeypatch.monkeypatch_uvicorn_exception_handling"),
+        patch("deephaven_mcp.mcp_systems_server.server._validate_config_or_exit"),
         patch("deephaven_mcp.mcp_systems_server.server.FastMCP", return_value=mock_server) as mock_fastmcp_cls,
         patch("deephaven_mcp.mcp_systems_server.server.make_enterprise_lifespan", return_value=MagicMock()) as mock_lifespan,
         patch("deephaven_mcp.mcp_systems_server.server._register_shared_tools"),
@@ -165,6 +167,7 @@ def test_enterprise_cli_args(monkeypatch):
         patch("deephaven_mcp._logging.setup_global_exception_logging"),
         patch("deephaven_mcp._logging.setup_signal_handler_logging"),
         patch("deephaven_mcp._monkeypatch.monkeypatch_uvicorn_exception_handling"),
+        patch("deephaven_mcp.mcp_systems_server.server._validate_config_or_exit"),
         patch("deephaven_mcp.mcp_systems_server.server.FastMCP", return_value=mock_server) as mock_fastmcp_cls,
         patch("deephaven_mcp.mcp_systems_server.server.make_enterprise_lifespan", return_value=MagicMock()) as mock_lifespan,
         patch("deephaven_mcp.mcp_systems_server.server._register_shared_tools"),
@@ -194,6 +197,7 @@ def test_enterprise_env_var_fallback(monkeypatch):
         patch("deephaven_mcp._logging.setup_global_exception_logging"),
         patch("deephaven_mcp._logging.setup_signal_handler_logging"),
         patch("deephaven_mcp._monkeypatch.monkeypatch_uvicorn_exception_handling"),
+        patch("deephaven_mcp.mcp_systems_server.server._validate_config_or_exit"),
         patch("deephaven_mcp.mcp_systems_server.server.FastMCP", return_value=mock_server) as mock_fastmcp_cls,
         patch("deephaven_mcp.mcp_systems_server.server.make_enterprise_lifespan", return_value=MagicMock()) as mock_lifespan,
         patch("deephaven_mcp.mcp_systems_server.server._register_shared_tools"),
@@ -227,6 +231,7 @@ def test_enterprise_registers_shared_and_exclusive_tools(monkeypatch):
         patch("deephaven_mcp._logging.setup_global_exception_logging"),
         patch("deephaven_mcp._logging.setup_signal_handler_logging"),
         patch("deephaven_mcp._monkeypatch.monkeypatch_uvicorn_exception_handling"),
+        patch("deephaven_mcp.mcp_systems_server.server._validate_config_or_exit"),
         patch("deephaven_mcp.mcp_systems_server.server.FastMCP", return_value=mock_server),
         patch("deephaven_mcp.mcp_systems_server.server.make_enterprise_lifespan", return_value=MagicMock()),
         patch("deephaven_mcp.mcp_systems_server.server._register_shared_tools", mock_register_shared),
@@ -259,6 +264,7 @@ def test_enterprise_logs_stopped_onserver_exit(monkeypatch):
         patch("deephaven_mcp._logging.setup_global_exception_logging"),
         patch("deephaven_mcp._logging.setup_signal_handler_logging"),
         patch("deephaven_mcp._monkeypatch.monkeypatch_uvicorn_exception_handling"),
+        patch("deephaven_mcp.mcp_systems_server.server._validate_config_or_exit"),
         patch("deephaven_mcp.mcp_systems_server.server.FastMCP", return_value=mock_server),
         patch("deephaven_mcp.mcp_systems_server.server.make_enterprise_lifespan", return_value=MagicMock()),
         patch("deephaven_mcp.mcp_systems_server.server._register_shared_tools"),
@@ -295,6 +301,7 @@ def test_community_defaults(monkeypatch):
         patch("deephaven_mcp._logging.setup_global_exception_logging"),
         patch("deephaven_mcp._logging.setup_signal_handler_logging"),
         patch("deephaven_mcp._monkeypatch.monkeypatch_uvicorn_exception_handling"),
+        patch("deephaven_mcp.mcp_systems_server.server._validate_config_or_exit"),
         patch("deephaven_mcp.mcp_systems_server.server.FastMCP", return_value=mock_server) as mock_fastmcp_cls,
         patch("deephaven_mcp.mcp_systems_server.server.make_community_lifespan", return_value=MagicMock()) as mock_lifespan,
         patch("deephaven_mcp.mcp_systems_server.server._register_shared_tools"),
@@ -322,6 +329,7 @@ def test_community_cli_args(monkeypatch):
         patch("deephaven_mcp._logging.setup_global_exception_logging"),
         patch("deephaven_mcp._logging.setup_signal_handler_logging"),
         patch("deephaven_mcp._monkeypatch.monkeypatch_uvicorn_exception_handling"),
+        patch("deephaven_mcp.mcp_systems_server.server._validate_config_or_exit"),
         patch("deephaven_mcp.mcp_systems_server.server.FastMCP", return_value=mock_server) as mock_fastmcp_cls,
         patch("deephaven_mcp.mcp_systems_server.server.make_community_lifespan", return_value=MagicMock()) as mock_lifespan,
         patch("deephaven_mcp.mcp_systems_server.server._register_shared_tools"),
@@ -349,6 +357,7 @@ def test_community_env_var_fallback(monkeypatch):
         patch("deephaven_mcp._logging.setup_global_exception_logging"),
         patch("deephaven_mcp._logging.setup_signal_handler_logging"),
         patch("deephaven_mcp._monkeypatch.monkeypatch_uvicorn_exception_handling"),
+        patch("deephaven_mcp.mcp_systems_server.server._validate_config_or_exit"),
         patch("deephaven_mcp.mcp_systems_server.server.FastMCP", return_value=mock_server) as mock_fastmcp_cls,
         patch("deephaven_mcp.mcp_systems_server.server.make_community_lifespan", return_value=MagicMock()) as mock_lifespan,
         patch("deephaven_mcp.mcp_systems_server.server._register_shared_tools"),
@@ -378,6 +387,7 @@ def test_community_registers_shared_and_exclusive_tools(monkeypatch):
         patch("deephaven_mcp._logging.setup_global_exception_logging"),
         patch("deephaven_mcp._logging.setup_signal_handler_logging"),
         patch("deephaven_mcp._monkeypatch.monkeypatch_uvicorn_exception_handling"),
+        patch("deephaven_mcp.mcp_systems_server.server._validate_config_or_exit"),
         patch("deephaven_mcp.mcp_systems_server.server.FastMCP", return_value=mock_server),
         patch("deephaven_mcp.mcp_systems_server.server.make_community_lifespan", return_value=MagicMock()),
         patch("deephaven_mcp.mcp_systems_server.server._register_shared_tools", mock_register_shared),
@@ -406,6 +416,7 @@ def test_community_logs_stopped_onserver_exit(monkeypatch):
         patch("deephaven_mcp._logging.setup_global_exception_logging"),
         patch("deephaven_mcp._logging.setup_signal_handler_logging"),
         patch("deephaven_mcp._monkeypatch.monkeypatch_uvicorn_exception_handling"),
+        patch("deephaven_mcp.mcp_systems_server.server._validate_config_or_exit"),
         patch("deephaven_mcp.mcp_systems_server.server.FastMCP", return_value=mock_server),
         patch("deephaven_mcp.mcp_systems_server.server.make_community_lifespan", return_value=MagicMock()),
         patch("deephaven_mcp.mcp_systems_server.server._register_shared_tools"),
@@ -418,3 +429,124 @@ def test_community_logs_stopped_onserver_exit(monkeypatch):
     mock_logger.info.assert_any_call(
         "[community] DHC MCP server 'deephaven-mcp-community' stopped."
     )
+
+
+# ---------------------------------------------------------------------------
+# _validate_config_or_exit
+# ---------------------------------------------------------------------------
+
+
+def test_validate_config_or_exit_success():
+    """_validate_config_or_exit does not call sys.exit when get_config succeeds."""
+    mock_class = MagicMock()
+    mock_instance = MagicMock()
+    mock_instance.get_config = AsyncMock(return_value={"system_name": "prod"})
+    mock_class.return_value = mock_instance
+
+    with patch("sys.exit") as mock_exit:
+        server._validate_config_or_exit("/path/to/config.json", mock_class, "test")
+
+    mock_class.assert_called_once_with(config_path="/path/to/config.json")
+    mock_exit.assert_not_called()
+
+
+def test_validate_config_or_exit_config_error():
+    """_validate_config_or_exit calls sys.exit(1) when get_config raises ConfigurationError."""
+    mock_class = MagicMock()
+    mock_instance = MagicMock()
+    mock_instance.get_config = AsyncMock(side_effect=ConfigurationError("missing required field"))
+    mock_class.return_value = mock_instance
+
+    with patch("sys.exit") as mock_exit:
+        server._validate_config_or_exit("/bad/config.json", mock_class, "enterprise")
+
+    mock_exit.assert_called_once_with(1)
+
+
+def test_validate_config_or_exit_runtime_error():
+    """_validate_config_or_exit calls sys.exit(1) when get_config raises RuntimeError (no env var)."""
+    mock_class = MagicMock()
+    mock_instance = MagicMock()
+    mock_instance.get_config = AsyncMock(side_effect=RuntimeError("Environment variable DH_MCP_CONFIG_FILE is not set."))
+    mock_class.return_value = mock_instance
+
+    with patch("sys.exit") as mock_exit:
+        server._validate_config_or_exit(None, mock_class, "community")
+
+    mock_exit.assert_called_once_with(1)
+
+
+def test_validate_config_or_exit_passes_config_path():
+    """_validate_config_or_exit passes config_path=None correctly."""
+    mock_class = MagicMock()
+    mock_instance = MagicMock()
+    mock_instance.get_config = AsyncMock(return_value={})
+    mock_class.return_value = mock_instance
+
+    with patch("sys.exit"):
+        server._validate_config_or_exit(None, mock_class, "test")
+
+    mock_class.assert_called_once_with(config_path=None)
+
+
+# ---------------------------------------------------------------------------
+# enterprise() / community() — validation is called with correct args
+# ---------------------------------------------------------------------------
+
+
+def test_enterprise_validates_config_before_start(monkeypatch):
+    """enterprise() calls _validate_config_or_exit with the right args before server.run."""
+    monkeypatch.delenv("DH_MCP_CONFIG_FILE", raising=False)
+    monkeypatch.delenv("MCP_HOST", raising=False)
+    monkeypatch.delenv("MCP_PORT", raising=False)
+
+    mock_server = MagicMock()
+    mock_server.name = "deephaven-mcp-enterprise"
+    mock_validate = MagicMock()
+
+    with (
+        patch("sys.argv", ["dh-mcp-enterprise-server", "--config", "/my/dhe.json"]),
+        patch("deephaven_mcp._logging.setup_logging"),
+        patch("deephaven_mcp._logging.setup_global_exception_logging"),
+        patch("deephaven_mcp._logging.setup_signal_handler_logging"),
+        patch("deephaven_mcp._monkeypatch.monkeypatch_uvicorn_exception_handling"),
+        patch("deephaven_mcp.mcp_systems_server.server._validate_config_or_exit", mock_validate),
+        patch("deephaven_mcp.mcp_systems_server.server.FastMCP", return_value=mock_server),
+        patch("deephaven_mcp.mcp_systems_server.server.make_enterprise_lifespan", return_value=MagicMock()),
+        patch("deephaven_mcp.mcp_systems_server.server._register_shared_tools"),
+        patch("deephaven_mcp.mcp_systems_server.server.session_enterprise"),
+        patch("deephaven_mcp.mcp_systems_server.server.catalog"),
+        patch("deephaven_mcp.mcp_systems_server.server.pq"),
+    ):
+        server.enterprise()
+
+    from deephaven_mcp.config import EnterpriseServerConfigManager
+    mock_validate.assert_called_once_with("/my/dhe.json", EnterpriseServerConfigManager, "enterprise")
+
+
+def test_community_validates_config_before_start(monkeypatch):
+    """community() calls _validate_config_or_exit with the right args before server.run."""
+    monkeypatch.delenv("DH_MCP_CONFIG_FILE", raising=False)
+    monkeypatch.delenv("MCP_HOST", raising=False)
+    monkeypatch.delenv("MCP_PORT", raising=False)
+
+    mock_server = MagicMock()
+    mock_server.name = "deephaven-mcp-community"
+    mock_validate = MagicMock()
+
+    with (
+        patch("sys.argv", ["dh-mcp-community-server", "--config", "/my/dhc.json"]),
+        patch("deephaven_mcp._logging.setup_logging"),
+        patch("deephaven_mcp._logging.setup_global_exception_logging"),
+        patch("deephaven_mcp._logging.setup_signal_handler_logging"),
+        patch("deephaven_mcp._monkeypatch.monkeypatch_uvicorn_exception_handling"),
+        patch("deephaven_mcp.mcp_systems_server.server._validate_config_or_exit", mock_validate),
+        patch("deephaven_mcp.mcp_systems_server.server.FastMCP", return_value=mock_server),
+        patch("deephaven_mcp.mcp_systems_server.server.make_community_lifespan", return_value=MagicMock()),
+        patch("deephaven_mcp.mcp_systems_server.server._register_shared_tools"),
+        patch("deephaven_mcp.mcp_systems_server.server.session_community"),
+    ):
+        server.community()
+
+    from deephaven_mcp.config import CommunityServerConfigManager
+    mock_validate.assert_called_once_with("/my/dhc.json", CommunityServerConfigManager, "community")
