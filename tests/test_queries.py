@@ -541,6 +541,11 @@ async def test_get_pip_packages_table_success(caplog):
             mock_get_table.assert_awaited_once_with(
                 session_mock, "_pip_packages_table", max_rows=None
             )
+            # Verify the script deduplicates packages by name (distributions() can yield
+            # the same package multiple times from different path finders).
+            script_arg = session_mock.run_script.call_args[0][0]
+            assert "seen" in script_arg, "Script must deduplicate distributions by name"
+            assert "if name not in seen" in script_arg
 
 
 @pytest.mark.asyncio

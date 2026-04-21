@@ -603,14 +603,14 @@ async def get_pip_packages_table(session: BaseSession) -> pyarrow.Table:
         import importlib.metadata as importlib_metadata
 
         def _make_pip_packages_table():
-            names = []
-            versions = []
+            seen = {}
             for dist in importlib_metadata.distributions():
-                names.append(dist.metadata['Name'])
-                versions.append(dist.version)
+                name = dist.metadata['Name']
+                if name not in seen:
+                    seen[name] = dist.version
             return new_table([
-                string_col('Package', names),
-                string_col('Version', versions),
+                string_col('Package', list(seen.keys())),
+                string_col('Version', list(seen.values())),
             ])
 
         _pip_packages_table = _make_pip_packages_table()
