@@ -623,10 +623,18 @@ async def catalog_tables_schema(
                 - 'row_count' (int, optional): Number of columns in the schema if successful
                 - 'error' (str, optional): Error message if this table's schema retrieval failed
                 - 'isError' (bool, optional): Present and True if this table had an error
-            - 'count' (int, optional): Number of schemas returned if successful
+            - 'count' (int, optional): Number of schemas returned if successful (includes error entries)
             - 'is_complete' (bool, optional): True if all matching tables were processed, False if truncated by max_tables
             - 'error' (str, optional): Error message if the entire operation failed.
             - 'isError' (bool, optional): Present and True if this is an error response.
+
+    Not-Found Behavior:
+        When table_names is explicitly provided, any name absent from the catalog generates a
+        per-item error entry in 'schemas' (success=False, isError=True). This mirrors
+        session_tables_schema behavior — callers can iterate 'schemas' and check 'success' on
+        each entry without needing to detect missing tables via silent empty results.
+        If table_names is not provided ("give me all matching tables"), an empty result is correct
+        and no per-item errors are generated.
 
     Error Scenarios:
         - Non-enterprise session: Returns error if session is not an enterprise (Core+) session
@@ -635,6 +643,7 @@ async def catalog_tables_schema(
         - Session connection issues: Returns error if unable to communicate with Deephaven server
         - Catalog access error: Returns error if unable to retrieve catalog table
         - Individual table errors: Reported in per-table results, don't stop overall operation
+        - Table not in catalog: When table_names specified, missing tables reported as per-item errors
 
     Performance Considerations:
         - Default max_tables=100 is safe for most use cases
@@ -768,6 +777,9 @@ async def catalog_tables_schema(
         # is_complete_catalog already reflects whether the catalog was truncated
         is_complete = is_complete_catalog
 
+        # Track which explicitly requested table_names were found in the catalog
+        found_names = {entry["TableName"] for entry in catalog_entries} if table_names else None
+
         _LOGGER.debug(
             f"[mcp_systems_server:catalog_tables_schema] Processing {len(catalog_entries)} catalog entries "
             f"(is_complete={is_complete})"
@@ -820,6 +832,27 @@ async def catalog_tables_schema(
                         "isError": True,
                     }
                 )
+
+        # Append per-item errors for explicitly requested table_names not found in catalog.
+        # Mirrors session_tables_schema behavior: callers should not have to detect "not found"
+        # via silent empty results — they get an error entry for each missing name.
+        if table_names:
+            for missing_name in table_names:
+                if missing_name not in found_names:
+                    _LOGGER.warning(
+                        f"[mcp_systems_server:catalog_tables_schema] Table '{missing_name}' not found in catalog"
+                        + (f" namespace '{namespace}'" if namespace else "")
+                    )
+                    schemas.append(
+                        {
+                            "success": False,
+                            "namespace": namespace,
+                            "table": missing_name,
+                            "error": f"Table '{missing_name}' not found in catalog"
+                            + (f" namespace '{namespace}'" if namespace else ""),
+                            "isError": True,
+                        }
+                    )
 
         _LOGGER.info(
             f"[mcp_systems_server:catalog_tables_schema] Completed: Retrieved {len(schemas)} schema(s), "

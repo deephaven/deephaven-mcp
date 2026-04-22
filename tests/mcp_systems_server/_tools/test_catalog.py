@@ -959,6 +959,93 @@ async def test_catalog_tables_schema_mixed_success_failure():
 
 
 @pytest.mark.asyncio
+async def test_catalog_tables_schema_table_names_not_found():
+    """Test that explicitly requested table_names absent from catalog produce per-item errors."""
+    from deephaven_mcp.client import CorePlusSession
+
+    mock_session = MagicMock(spec=CorePlusSession)
+
+    mock_catalog_table = MagicMock()
+    mock_catalog_table.to_pylist = MagicMock(return_value=[])  # Nothing in catalog
+
+    mock_session_manager = MagicMock()
+    mock_session_manager.get = AsyncMock(return_value=mock_session)
+
+    mock_registry = MagicMock()
+    mock_registry.get = AsyncMock(return_value=mock_session_manager)
+
+    context = MockContext({"session_registry": mock_registry})
+
+    with patch(
+        "deephaven_mcp.mcp_systems_server._tools.catalog.queries.get_catalog_table"
+    ) as mock_get_catalog:
+        mock_get_catalog.return_value = (mock_catalog_table, True)
+
+        result = await catalog_tables_schema(
+            context, "enterprise:prod:analytics", table_names=["nonexistent"]
+        )
+
+    assert result["success"] is True
+    assert result["count"] == 1
+    assert result["schemas"][0]["success"] is False
+    assert result["schemas"][0]["table"] == "nonexistent"
+    assert result["schemas"][0]["isError"] is True
+    assert "not found" in result["schemas"][0]["error"].lower()
+
+
+@pytest.mark.asyncio
+async def test_catalog_tables_schema_table_names_partial_not_found():
+    """Test that only missing table_names produce errors; found tables produce successes."""
+    from deephaven_mcp.client import CorePlusSession
+
+    mock_session = MagicMock(spec=CorePlusSession)
+
+    catalog_data = [{"Namespace": "market_data", "TableName": "good_table"}]
+    mock_catalog_table = MagicMock()
+    mock_catalog_table.to_pylist = MagicMock(return_value=catalog_data)
+
+    mock_get_catalog_meta = create_mock_catalog_schema_function(
+        schema_data_map={}, error_tables=set()
+    )
+
+    mock_session_manager = MagicMock()
+    mock_session_manager.get = AsyncMock(return_value=mock_session)
+
+    mock_registry = MagicMock()
+    mock_registry.get = AsyncMock(return_value=mock_session_manager)
+
+    context = MockContext({"session_registry": mock_registry})
+
+    with (
+        patch(
+            "deephaven_mcp.mcp_systems_server._tools.catalog.queries.get_catalog_table"
+        ) as mock_get_catalog,
+        patch(
+            "deephaven_mcp.mcp_systems_server._tools.catalog.queries.get_catalog_meta_table"
+        ) as mock_get_schema,
+    ):
+        mock_get_catalog.return_value = (mock_catalog_table, True)
+        mock_get_schema.side_effect = mock_get_catalog_meta
+
+        result = await catalog_tables_schema(
+            context,
+            "enterprise:prod:analytics",
+            table_names=["good_table", "missing_table"],
+        )
+
+    assert result["success"] is True
+    assert result["count"] == 2
+
+    success_entry = next(s for s in result["schemas"] if s["table"] == "good_table")
+    error_entry = next(s for s in result["schemas"] if s["table"] == "missing_table")
+
+    assert success_entry["success"] is True
+    assert error_entry["success"] is False
+    assert error_entry["isError"] is True
+    assert "not found" in error_entry["error"].lower()
+
+
+@pytest.mark.asyncio
 async def test_catalog_tables_schema_session_not_found():
     """Test catalog_schemas when session is not found."""
     mock_registry = MagicMock()
