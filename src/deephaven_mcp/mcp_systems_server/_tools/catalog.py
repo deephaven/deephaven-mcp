@@ -217,6 +217,11 @@ async def catalog_tables_list(
     - Combine with catalog_tables_schema to get full metadata for discovered tables
     - Essential first step before querying enterprise data sources
     - Use filters to narrow down large catalogs/databases efficiently
+    - **Catalog listing ≠ data access**: a table appearing in the catalog is not
+      guaranteed to be loadable — it may be protected by access controls, not yet
+      populated, or otherwise inaccessible. Treat results as a *candidate set* and
+      handle fetch failures (e.g. FetchTableOp errors) gracefully — skip or report
+      the unavailable table rather than treating the failure as fatal.
 
     Filter Syntax Reference:
     Filters use Deephaven query language with backticks (`) for string literals.
@@ -975,6 +980,10 @@ async def catalog_table_sample(
         - Community session: Returns error if session is not an enterprise (Core+) session
         - Invalid namespace: Returns error if namespace doesn't exist in the catalog
         - Invalid table_name: Returns error if table doesn't exist in the namespace
+        - Inaccessible catalog entry: table is listed in the catalog but cannot be
+          loaded (access controls, no data, type incompatibility, etc.). Returns a
+          FetchTableOp or similar error. Catalog listings are a candidate set; handle
+          this gracefully.
         - Invalid format: Returns error if format is not one of the supported options
         - Response too large: Returns error if estimated response would exceed 50MB limit
         - Session connection issues: Returns error if unable to communicate with Deephaven server
