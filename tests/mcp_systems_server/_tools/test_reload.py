@@ -3,12 +3,12 @@ Tests for deephaven_mcp.mcp_systems_server._tools.reload.
 """
 
 import asyncio
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from conftest import MockContext
 
-from deephaven_mcp.mcp_systems_server._tools.reload import mcp_reload_community, mcp_reload_enterprise
+from deephaven_mcp.mcp_systems_server._tools.reload import _do_reload, mcp_reload_community, mcp_reload_enterprise
 
 
 @pytest.mark.asyncio
@@ -116,6 +116,35 @@ def test_register_enterprise_tools_registers_mcp_reload():
     server = FastMCP("test-reload-enterprise-server")
     register_enterprise_tools(server)
     assert "mcp_reload" in server._tool_manager._tools
+
+
+@pytest.mark.asyncio
+async def test_mcp_reload_community_calls_manager_close():
+    """mcp_reload with a real registry calls close() on every manager — including dynamic sessions."""
+    from deephaven_mcp.resource_manager._registry import MutableSessionRegistry
+
+    class _TestRegistry(MutableSessionRegistry):
+        async def _load_items(self, config_manager):
+            pass
+
+    session_registry = _TestRegistry()
+    session_registry._initialized = True
+
+    mock_manager = MagicMock()
+    mock_manager.close = AsyncMock()
+    session_registry._items["test_key"] = mock_manager
+
+    config_manager = AsyncMock()
+    context = MockContext({
+        "config_manager": config_manager,
+        "session_registry": session_registry,
+        "refresh_lock": asyncio.Lock(),
+    })
+
+    result = await _do_reload(context)
+
+    assert result == {"success": True}
+    mock_manager.close.assert_awaited_once()
 
 
 @pytest.mark.asyncio
