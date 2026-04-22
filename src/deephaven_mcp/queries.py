@@ -109,6 +109,10 @@ async def _apply_row_limit(
     This helper consolidates the common pattern of limiting table rows using head() or tail(),
     checking if the full table was retrieved, and logging appropriate warnings.
 
+    Uses a probe approach (requesting max_rows+1 rows then checking that probe table's .size)
+    to reliably detect completeness without relying on the original table's .size, which can
+    return unreliable values for live/ticking tables before they are fully populated.
+
     Args:
         table (Table): The Deephaven table to limit (must have .size, .head(), .tail() methods).
         max_rows (int | None): Maximum number of rows to retrieve.
@@ -126,28 +130,38 @@ async def _apply_row_limit(
         This is a private helper function for internal use only.
         The returned table is NOT converted to Arrow format - caller must do that.
     """
-    is_complete = False
-
     if max_rows is not None:
-        # Get original table size before applying limits
-        original_size = await asyncio.to_thread(lambda: table.size)
-
+        # Probe with max_rows+1: the bounded probe table's .size is reliable even for live tables,
+        # unlike the original table's .size which may be a partial count before full population.
+        probe_n = max_rows + 1
         if head:
-            limited_table = await asyncio.to_thread(lambda: table.head(max_rows))
-            _LOGGER.debug(
-                f"[queries:_apply_row_limit] Limited to first {max_rows} rows of {context_name}"
-            )
+            probe_table = await asyncio.to_thread(lambda: table.head(probe_n))
         else:
-            limited_table = await asyncio.to_thread(lambda: table.tail(max_rows))
+            probe_table = await asyncio.to_thread(lambda: table.tail(probe_n))
+
+        probe_size = await asyncio.to_thread(lambda: probe_table.size)
+
+        if probe_size > max_rows:
+            # More rows exist — apply the actual limit
+            if head:
+                limited_table = await asyncio.to_thread(lambda: table.head(max_rows))
+                _LOGGER.debug(
+                    f"[queries:_apply_row_limit] Limited to first {max_rows} rows of {context_name}"
+                )
+            else:
+                limited_table = await asyncio.to_thread(lambda: table.tail(max_rows))
+                _LOGGER.debug(
+                    f"[queries:_apply_row_limit] Limited to last {max_rows} rows of {context_name}"
+                )
+            is_complete = False
+        else:
+            # probe_size <= max_rows: all rows fit within the limit
+            limited_table = probe_table
+            is_complete = True
             _LOGGER.debug(
-                f"[queries:_apply_row_limit] Limited to last {max_rows} rows of {context_name}"
+                f"[queries:_apply_row_limit] {context_name.capitalize()} complete: {probe_size} rows"
             )
 
-        # Determine if we got the complete table
-        is_complete = original_size is not None and original_size <= max_rows
-        _LOGGER.debug(
-            f"[queries:_apply_row_limit] {context_name.capitalize()} has {original_size} total rows"
-        )
         return limited_table, is_complete
     else:
         # Full table requested - log warning for safety
