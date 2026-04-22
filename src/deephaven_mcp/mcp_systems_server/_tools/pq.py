@@ -29,6 +29,7 @@ from deephaven_mcp.client._protobuf import (
     CorePlusQueryConfig,
     CorePlusQuerySerial,
     CorePlusQueryState,
+    CorePlusQueryStatus,
 )
 from deephaven_mcp.resource_manager import (
     BaseItemManager,
@@ -826,22 +827,19 @@ def _convert_restart_users_to_enum(restart_users_str: str) -> int:
 
 def _add_session_id_if_running(
     result_dict: dict[str, object],
-    state_name: str,
+    status: CorePlusQueryStatus | None,
     pq_name: str,
     system_name: str,
 ) -> None:
-    """Add session_id to result dict if PQ is in RUNNING or INITIALIZING state.
-
-    This helper consolidates the duplicate session_id generation logic used across
-    pq_list, pq_details, pq_start, and pq_restart.
+    """Add ``session_id`` to ``result_dict`` if the PQ is RUNNING or INITIALIZING.
 
     Args:
-        result_dict (dict[str, object]): Result dictionary to modify in-place
-        state_name (str): Current PQ state (e.g., "RUNNING", "STOPPED", "INITIALIZING")
-        pq_name (str): PQ name (NOT serial number)
-        system_name (str): Enterprise system name (from the registry).
+        result_dict (dict[str, object]): Result dict to mutate in place.
+        status (CorePlusQueryStatus | None): Current PQ status. ``None`` is a no-op.
+        pq_name (str): PQ name.
+        system_name (str): Enterprise system name.
     """
-    if state_name in ["RUNNING", "INITIALIZING"]:
+    if status is not None and (status.is_running or status.is_initializing):
         session_id = BaseItemManager.make_full_name(
             SystemType.ENTERPRISE, system_name, pq_name
         )
@@ -1068,7 +1066,8 @@ async def pq_list(
             state_pb = pq_info.state.pb if pq_info.state else None
             pq_name = config_pb.name
             pq_id = _make_pq_id(serial, system_name)
-            status = pq_info.state.status.name if pq_info.state else "UNKNOWN"
+            status_obj = pq_info.state.status if pq_info.state else None
+            status = status_obj.name if status_obj is not None else "UNKNOWN"
 
             pq_data = {
                 "pq_id": pq_id,
@@ -1089,7 +1088,7 @@ async def pq_list(
             }
 
             # Add session_id if PQ is running (session_id uses name, not serial)
-            _add_session_id_if_running(pq_data, status, pq_name, system_name)
+            _add_session_id_if_running(pq_data, status_obj, pq_name, system_name)
 
             pqs.append(pq_data)
 
@@ -1365,7 +1364,8 @@ async def pq_details(
         # NOTE: pq_info is PersistentQueryInfoMessage
         # Protobuf docs: https://docs.deephaven.io/protodoc/latest/#io.deephaven.proto.persistent_query.PersistentQueryInfoMessage
         pq_name = pq_info.config.pb.name
-        state_name = pq_info.state.status.name if pq_info.state else "UNKNOWN"
+        status_obj = pq_info.state.status if pq_info.state else None
+        state_name = status_obj.name if status_obj is not None else "UNKNOWN"
 
         pq_data = {
             "success": True,
@@ -1380,7 +1380,7 @@ async def pq_details(
         }
 
         # Add session_id if running (session_id uses name, not serial)
-        _add_session_id_if_running(pq_data, state_name, pq_name, system_name)
+        _add_session_id_if_running(pq_data, status_obj, pq_name, system_name)
 
         _LOGGER.info(
             f"[mcp_systems_server:pq_details] Retrieved details for PQ '{pq_name}' (serial: {serial})"
@@ -1426,8 +1426,33 @@ async def pq_create(
 ) -> dict:
     """MCP Tool: Create a new persistent query on an enterprise system.
 
-    Creates a PQ configuration and adds it to the controller. The PQ will
-    be created but not automatically started - use pq_start to start it.
+    Creates a PQ configuration and adds it to the controller.
+
+    Scheduler semantics (three-way, based on ``schedule``):
+        - ``schedule=None`` (default): install the default scheduler and make no further
+          changes. For a *permanent* PQ (``auto_delete_timeout=None``) the default is a
+          continuous scheduler with ``SchedulingDisabled=false`` and
+          ``RestartWhenRunning=Yes``, which causes the controller to begin acquiring a
+          worker immediately after creation (``ACQUIRING_WORKER`` → ``RUNNING``
+          with no explicit ``pq_start`` call). For a *temporary* PQ the default is
+          whatever the controller's temporary scheduling installs.
+        - ``schedule=[]``: the caller is explicitly requesting no scheduling. The
+          scheduling list is cleared; the server decides whether to accept or reject a
+          PQ with no scheduling entries.
+        - ``schedule=[...]`` (non-empty list): the caller-supplied list **replaces** the
+          scheduling block wholesale. No default keys are merged in — the caller is
+          responsible for including ``SchedulerType`` and any other required entries.
+
+    Creating a quiescent PQ (created but not auto-starting):
+        Two supported recipes, each with different semantics:
+        - ``enabled=False``: the PQ is marked disabled. The controller will not acquire
+          a worker. Subsequent ``pq_start`` typically requires enabling the PQ first.
+        - ``schedule=[...]`` with ``SchedulingDisabled=true``: the PQ has a valid,
+          disabled scheduler. Manual ``pq_start`` / ``pq_stop`` / ``pq_restart`` work
+          normally; only the automatic scheduler trigger is suppressed. The Core+ client
+          library publishes a canonical "disabled daily" scheduler that can be used
+          here; see its ``generate_disabled_scheduler`` helper for the full list of
+          entries.
 
     Terminology Note:
     - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
@@ -1442,7 +1467,11 @@ async def pq_create(
     - 'DHE' is shorthand for Deephaven Enterprise (also called 'Core+')
 
     AI Agent Usage:
-    - PQ is created in UNINITIALIZED state - must call pq_start to run it
+    - Permanent PQs (``auto_delete_timeout=None``, the default) auto-start after creation
+      via the default continuous scheduler. See "Scheduler semantics" above. Do not call
+      ``pq_start`` on a freshly-created permanent PQ unless you have overridden the
+      default — it will already be acquiring a worker. Use ``pq_details`` to observe the
+      state transition.
     - Returns pq_id and serial number for use with other PQ management tools
     - programming_language is case-insensitive: "Python"/"python" or "Groovy"/"groovy"
     - auto_delete_timeout=None (default) creates a permanent PQ; set to seconds for auto-deletion
@@ -1465,10 +1494,12 @@ async def pq_create(
     - Other types exist (Merge, Import, etc.) but are specialized
 
     Scheduling Format (list of "Key=Value" strings):
-    - SchedulerType: Use full qualified Java class name (required if scheduling)
+    - SchedulerType: Use fully qualified Java class name (required whenever the list
+      is non-empty)
     - Time format: HH:MM:SS (24-hour) for all time fields
     - TimeZone: Standard timezone identifiers (e.g., "America/New_York", "UTC")
-    - Empty list [] or None: No automatic scheduling (manual start/stop only)
+    - See "Scheduler semantics" above for how ``None`` / ``[]`` / non-empty list are
+      interpreted on create.
 
     Daily Scheduler:
       ["SchedulerType=com.illumon.iris.controller.IrisQuerySchedulerDaily",
@@ -1517,7 +1548,15 @@ async def pq_create(
         restart_users (str | None): Who can restart - "RU_ADMIN", "RU_ADMIN_AND_VIEWERS", "RU_VIEWERS_WHEN_DOWN"
 
     Returns:
-        dict: Success response:
+        dict: Success response. The ``"state"`` field is a fixed placeholder
+        (``"UNINITIALIZED"``) emitted at the moment the controller accepts the
+        ``add_query`` call; it does **not** reflect the live state of the PQ at
+        response time. In particular, for a permanent PQ created with the default
+        continuous scheduler the controller typically begins acquiring a worker
+        immediately, so by the time the caller reads this field the real state may
+        already be ``ACQUIRING_WORKER``, ``INITIALIZING``, or ``RUNNING``. Call
+        ``pq_details`` with the returned ``pq_id`` to observe the actual live state.
+
         {
             "success": True,
             "pq_id": "enterprise:prod:12345",
@@ -1957,7 +1996,10 @@ def _apply_pq_config_list_fields(
 
     Args:
         config_pb (PersistentQueryConfigMessage): Protobuf config object to modify in-place
-        schedule (list[str] | None): Cron schedule entries → protobuf field: config_pb.scheduling
+        schedule (list[str] | None): PQ scheduling entries as ``Key=Value`` strings
+            targeting an Iris scheduler class (e.g., ``SchedulerType=com.illumon.iris.controller.IrisQuerySchedulerDaily``,
+            ``StartTime=08:00:00``). These are not cron expressions. Maps to protobuf
+            field ``config_pb.scheduling``.
         extra_jvm_args (list[str] | None): Additional JVM arguments → protobuf field: config_pb.extraJvmArguments
         extra_class_path (list[str] | None): Additional classpath entries → protobuf field: config_pb.classPathAdditions
         extra_environment_vars (list[str] | None): Additional env vars (KEY=VALUE format) → protobuf field: config_pb.extraEnvironmentVariables
@@ -1968,11 +2010,9 @@ def _apply_pq_config_list_fields(
         bool: True if any changes were made, False if all parameters were None
 
     Note:
-        Uses del [:] + extend() pattern for protobuf repeated fields to fully replace contents:
-        - del config_pb.field[:] clears the existing list
-        - config_pb.field.extend(new_list) adds all new elements
-        This ensures complete replacement rather than appending to existing values.
-        See _apply_pq_config_simple_fields for scalar field updates.
+        Each field is handled with ``del config_pb.field[:]`` followed by
+        ``config_pb.field.extend(new_list)`` so the existing contents are fully
+        replaced rather than appended to. An empty list therefore clears the field.
     """
     has_changes = False
     if schedule is not None:
@@ -2069,14 +2109,12 @@ def _apply_pq_config_modifications(
         config_pb.scriptLanguage = normalized_lang
         has_changes = True
 
-    # Handle script_body and script_path (mutually clear the other)
+    # Handle script_body and script_path (protobuf oneof scriptData clears the other automatically)
     if script_body is not None:
         config_pb.scriptCode = script_body
-        config_pb.scriptPath = ""
         has_changes = True
     if script_path is not None:
         config_pb.scriptPath = script_path
-        config_pb.scriptCode = ""
         has_changes = True
 
     # Handle auto_delete_timeout: convert seconds to nanoseconds
@@ -2150,6 +2188,20 @@ async def pq_modify(
     Updates a PQ's configuration by merging provided parameters with the current config.
     Only specified (non-None) parameters are updated - all others remain unchanged.
     Changes can be applied to PQs in any state (RUNNING, STOPPED, etc.).
+
+    Scheduler semantics (three-way, based on ``schedule``):
+        - ``schedule=None`` (default): the existing scheduling on the PQ is preserved
+          unchanged.
+        - ``schedule=[]``: the caller is explicitly clearing the scheduling. The PQ's
+          scheduling list is sent empty to the server; the server decides whether to
+          accept or reject a PQ with no scheduling entries.
+        - ``schedule=[...]`` (non-empty list): the caller-supplied list **replaces** the
+          scheduling block wholesale. No existing entries are merged in — the caller is
+          responsible for re-specifying every key they want to keep (including
+          ``SchedulerType``, ``TimeZone``, flags like ``SchedulingDisabled``, etc.). To
+          tweak a single key, first call ``pq_details`` to read the current
+          ``config.scheduling`` list, modify the entries you want, and pass the full
+          modified list here.
 
     Terminology Note:
     - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
@@ -2503,6 +2555,17 @@ async def pq_start(
             }
 
             try:
+                # Check current state before attempting start
+                current_info = await controller.get(
+                    serial, timeout_seconds=validated_timeout
+                )
+                if current_info.state and current_info.state.status.is_running:
+                    item_result["error"] = "Cannot start a PQ that is already RUNNING"
+                    _LOGGER.warning(
+                        f"[mcp_systems_server:pq_start] PQ {pid} is already RUNNING, skipping start"
+                    )
+                    return item_result
+
                 # Start the PQ and wait
                 _LOGGER.debug(
                     f"[mcp_systems_server:pq_start] Calling start_and_wait for PQ {pid} (timeout={validated_timeout}s)"
@@ -2517,7 +2580,10 @@ async def pq_start(
                     serial, timeout_seconds=validated_timeout
                 )
                 pq_name = pq_info.config.pb.name
-                state_name = pq_info.state.status.name if pq_info.state else "UNKNOWN"
+                status_obj = pq_info.state.status if pq_info.state else None
+                state_name = (
+                    status_obj.name if status_obj is not None else "UNKNOWN"
+                )
 
                 # Success
                 item_result["success"] = True
@@ -2525,7 +2591,9 @@ async def pq_start(
                 item_result["state"] = state_name
 
                 # Add session_id if running (session_id uses name, not serial)
-                _add_session_id_if_running(item_result, state_name, pq_name, system_name)
+                _add_session_id_if_running(
+                    item_result, status_obj, pq_name, system_name
+                )
 
                 _LOGGER.debug(
                     f"[mcp_systems_server:pq_start] Successfully started PQ {pid}"
@@ -2914,8 +2982,9 @@ async def pq_restart(
     - If you only have PQ names, use pq_name_to_id to look up the pq_ids first
     - Best-effort: partial success is possible, check summary and individual results
     - Each result item has same fields: pq_id, serial, success, name, state, session_id (conditional), error
-    - If success=True: name, state have values, error is None
-    - If success=False: name/state are None, error has message
+    - If success=True: name and state have values; session_id is populated when state
+      is RUNNING or INITIALIZING and omitted otherwise; error is None
+    - If success=False: name/state/session_id are None, error has message
     - Works for stopped, failed, or completed PQs
     - Preserves PQ serial numbers and configurations
     - More efficient than deleting and recreating
@@ -3028,7 +3097,10 @@ async def pq_restart(
                     serial, timeout_seconds=validated_timeout
                 )
                 pq_name = pq_info.config.pb.name
-                state_name = pq_info.state.status.name if pq_info.state else "UNKNOWN"
+                status_obj = pq_info.state.status if pq_info.state else None
+                state_name = (
+                    status_obj.name if status_obj is not None else "UNKNOWN"
+                )
 
                 # Success
                 item_result["success"] = True
@@ -3036,7 +3108,9 @@ async def pq_restart(
                 item_result["state"] = state_name
 
                 # Add session_id if running (session_id uses name, not serial)
-                _add_session_id_if_running(item_result, state_name, pq_name, system_name)
+                _add_session_id_if_running(
+                    item_result, status_obj, pq_name, system_name
+                )
 
                 _LOGGER.debug(
                     f"[mcp_systems_server:pq_restart] Successfully restarted PQ {pid}"

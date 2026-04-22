@@ -137,6 +137,50 @@ def test_coreplus_query_info_handles_missing_state(monkeypatch):
     assert info.spares == []
 
 
+def test_coreplus_query_status_name_strips_pqs_prefix(monkeypatch):
+    """``name`` must strip a leading ``PQS_`` prefix from the raw library output."""
+    monkeypatch.setattr(
+        _protobuf,
+        "ControllerClient",
+        type("CC", (), {"status_name": staticmethod(lambda x: "PQS_RUNNING")}),
+    )
+    status = _protobuf.CorePlusQueryStatus(object())
+    assert status.name == "RUNNING"
+    # __str__ and string equality use .name, so they must see the stripped form.
+    assert str(status) == "RUNNING"
+    assert status == "RUNNING"
+
+
+def test_coreplus_query_status_name_passthrough_when_no_prefix(monkeypatch):
+    """If the library ever returns an unprefixed name, pass it through unchanged."""
+    monkeypatch.setattr(
+        _protobuf,
+        "ControllerClient",
+        type("CC", (), {"status_name": staticmethod(lambda x: "RUNNING")}),
+    )
+    status = _protobuf.CorePlusQueryStatus(object())
+    assert status.name == "RUNNING"
+
+
+def test_coreplus_query_status_is_initializing(monkeypatch):
+    """``is_initializing`` must return True only when the stripped name is INITIALIZING."""
+    # INITIALIZING case (raw name carries the PQS_ prefix).
+    monkeypatch.setattr(
+        _protobuf,
+        "ControllerClient",
+        type("CC", (), {"status_name": staticmethod(lambda x: "PQS_INITIALIZING")}),
+    )
+    assert _protobuf.CorePlusQueryStatus(object()).is_initializing is True
+
+    # Non-initializing case.
+    monkeypatch.setattr(
+        _protobuf,
+        "ControllerClient",
+        type("CC", (), {"status_name": staticmethod(lambda x: "PQS_RUNNING")}),
+    )
+    assert _protobuf.CorePlusQueryStatus(object()).is_initializing is False
+
+
 def test_coreplus_query_status_comparisons(monkeypatch):
     # Patch ControllerClient for is_running, etc.
     monkeypatch.setattr(

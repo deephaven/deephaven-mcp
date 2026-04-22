@@ -72,8 +72,14 @@ def create_mock_pq_info(serial, name, state="RUNNING", heap_size=8.0):
     mock_pq_info.config.pb.assignmentPolicyParams = ""
     mock_pq_info.config.pb.additionalMemoryGb = 0.0
     # State - primary instance with ALL 25 protobuf fields
-    # status is accessed via wrapper's status.name property
+    # status is accessed via wrapper's status.name property AND via the
+    # semantic is_running / is_initializing properties used by
+    # _add_session_id_if_running. MagicMock defaults both to truthy mock objects,
+    # so we must set them explicitly based on the state string to avoid
+    # session_id being populated for stopped/failed/completed PQs.
     mock_pq_info.state.status.name = state
+    mock_pq_info.state.status.is_running = state == "RUNNING"
+    mock_pq_info.state.status.is_initializing = state == "INITIALIZING"
     mock_pq_info.state.pb.serial = serial
     mock_pq_info.state.pb.version = 1
     mock_pq_info.state.pb.initializationStartNanos = (
@@ -118,7 +124,18 @@ def create_mock_pq_info(serial, name, state="RUNNING", heap_size=8.0):
 
 import deephaven_mcp.mcp_systems_server._tools.pq as _pq_module
 from deephaven_mcp import config
+
+# Capture real protobuf class at collection time — before any session-scoped fixture
+# patches sys.modules["deephaven_enterprise.proto"] with a mock module.
+try:
+    from deephaven_enterprise.proto.persistent_query_pb2 import (
+        PersistentQueryConfigMessage as _PQConfigMessage,
+    )
+except Exception:
+    _PQConfigMessage = None
 from deephaven_mcp.mcp_systems_server._tools.pq import (
+    _apply_pq_config_list_fields,
+    _apply_pq_config_modifications,
     _format_column_definition,
     _format_connection_details,
     _format_exception_details,
@@ -678,14 +695,23 @@ async def test_pq_start_partial_failure():
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
 
-    mock_pq_info_1 = create_mock_pq_info(12345, "analytics", "RUNNING", 8.0)
-
     async def mock_start_side_effect(serial, timeout):
         if serial == 67890:
             raise Exception("Timeout waiting for PQ to start")
 
     mock_controller.start_and_wait = AsyncMock(side_effect=mock_start_side_effect)
-    mock_controller.get = AsyncMock(return_value=mock_pq_info_1)
+
+    # get() pre-check returns STOPPED for both PQs; post-start returns RUNNING for 12345.
+    # 67890 raises in start_and_wait so its post-start get() is never called.
+    call_counts: dict[int, int] = {}
+
+    async def mock_get_side_effect(serial, timeout_seconds=None):
+        call_counts[serial] = call_counts.get(serial, 0) + 1
+        if serial == 12345 and call_counts[serial] > 1:
+            return create_mock_pq_info(12345, "analytics", "RUNNING", 8.0)
+        return create_mock_pq_info(serial, "analytics", "STOPPED", 8.0)
+
+    mock_controller.get = AsyncMock(side_effect=mock_get_side_effect)
 
     context = MockContext(
         {
@@ -2619,6 +2645,132 @@ async def test_pq_modify_script_path():
     assert current_pq_info.config.pb.scriptCode == ""
 
 
+@pytest.mark.skipif(
+    _PQConfigMessage is None, reason="deephaven_enterprise not available"
+)
+def test_apply_pq_config_modifications_script_body_oneof():
+    """Verify script_body/script_path oneof semantics using real protobuf objects.
+
+    scriptCode and scriptPath are in a protobuf 'oneof scriptData' group: setting one
+    must clear the other. This test uses a real PersistentQueryConfigMessage (not MagicMock)
+    to confirm the fix for Bug 2, where explicit '= ""' assignments were re-activating
+    the wrong oneof field and silently nullifying the intended value.
+    """
+    nones = [None] * 16  # remaining args: programming_language through restart_users
+
+    # Case 1: setting script_body should preserve scriptCode, clear scriptPath
+    pb = _PQConfigMessage()
+    pb.scriptPath = "/old/path.py"
+    _apply_pq_config_modifications(pb, None, None, "t = 42", None, *nones)
+    assert pb.scriptCode == "t = 42", "scriptCode should be set to the provided value"
+    assert pb.scriptPath == "", "scriptPath should be cleared by the oneof"
+    assert pb.WhichOneof("scriptData") == "scriptCode"
+
+    # Case 2: setting script_path should preserve scriptPath, clear scriptCode
+    pb2 = _PQConfigMessage()
+    pb2.scriptCode = "t = None"
+    _apply_pq_config_modifications(pb2, None, None, None, "/new/path.py", *nones)
+    assert pb2.scriptPath == "/new/path.py", "scriptPath should be set to the provided value"
+    assert pb2.scriptCode == "", "scriptCode should be cleared by the oneof"
+    assert pb2.WhichOneof("scriptData") == "scriptPath"
+
+
+@pytest.mark.skipif(
+    _PQConfigMessage is None, reason="deephaven_enterprise not available"
+)
+def test_apply_pq_config_list_fields_schedule_none_preserves_existing():
+    """schedule=None must leave the existing scheduling field untouched."""
+    pb = _PQConfigMessage()
+    pb.scheduling.extend(
+        [
+            "SchedulerType=com.illumon.iris.controller.IrisQuerySchedulerContinuous",
+            "TimeZone=America/New_York",
+            "SchedulingDisabled=false",
+        ]
+    )
+    existing = list(pb.scheduling)
+
+    has_changes = _apply_pq_config_list_fields(
+        pb,
+        schedule=None,
+        extra_jvm_args=None,
+        extra_class_path=None,
+        extra_environment_vars=None,
+        admin_groups=None,
+        viewer_groups=None,
+    )
+
+    assert has_changes is False
+    assert list(pb.scheduling) == existing
+
+
+@pytest.mark.skipif(
+    _PQConfigMessage is None, reason="deephaven_enterprise not available"
+)
+def test_apply_pq_config_list_fields_schedule_empty_clears():
+    """schedule=[] must clear the existing scheduling field entirely."""
+    pb = _PQConfigMessage()
+    pb.scheduling.extend(
+        [
+            "SchedulerType=com.illumon.iris.controller.IrisQuerySchedulerContinuous",
+            "SchedulingDisabled=false",
+        ]
+    )
+
+    has_changes = _apply_pq_config_list_fields(
+        pb,
+        schedule=[],
+        extra_jvm_args=None,
+        extra_class_path=None,
+        extra_environment_vars=None,
+        admin_groups=None,
+        viewer_groups=None,
+    )
+
+    assert has_changes is True
+    assert list(pb.scheduling) == []
+
+
+@pytest.mark.skipif(
+    _PQConfigMessage is None, reason="deephaven_enterprise not available"
+)
+def test_apply_pq_config_list_fields_schedule_explicit_replaces_wholesale():
+    """schedule=[...] must replace the existing scheduling block wholesale.
+
+    No existing entries may survive; the caller's list is authoritative.
+    """
+    pb = _PQConfigMessage()
+    pb.scheduling.extend(
+        [
+            "SchedulerType=com.illumon.iris.controller.IrisQuerySchedulerContinuous",
+            "StartTime=00:00:00",
+            "TimeZone=America/New_York",
+            "SchedulingDisabled=false",
+            "RestartWhenRunning=Yes",
+        ]
+    )
+    caller_schedule = [
+        "SchedulerType=com.illumon.iris.controller.IrisQuerySchedulerDaily",
+        "StartTime=09:00:00",
+        "StopTime=17:00:00",
+        "SchedulingDisabled=true",
+    ]
+
+    has_changes = _apply_pq_config_list_fields(
+        pb,
+        schedule=caller_schedule,
+        extra_jvm_args=None,
+        extra_class_path=None,
+        extra_environment_vars=None,
+        admin_groups=None,
+        viewer_groups=None,
+    )
+
+    assert has_changes is True
+    # Exactly the caller's list; no leftover entries from the previous scheduling.
+    assert list(pb.scheduling) == caller_schedule
+
+
 @pytest.mark.asyncio
 async def test_pq_modify_mutually_exclusive_scripts():
     """Test pq_modify with both script_body and script_path (mutually exclusive)."""
@@ -3057,10 +3209,12 @@ async def test_pq_start_success():
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
 
-    # Mock controller methods (no more get_serial_for_name)
+    # Mock controller methods
     mock_controller.start_and_wait = AsyncMock()
-    mock_pq_info = create_mock_pq_info(12345, "analytics", "RUNNING", 8.0)
-    mock_controller.get = AsyncMock(return_value=mock_pq_info)
+    # get() is called twice: pre-start state check (STOPPED), then post-start state (RUNNING)
+    mock_pq_info_stopped = create_mock_pq_info(12345, "analytics", "STOPPED", 8.0)
+    mock_pq_info_running = create_mock_pq_info(12345, "analytics", "RUNNING", 8.0)
+    mock_controller.get = AsyncMock(side_effect=[mock_pq_info_stopped, mock_pq_info_running])
 
     context = MockContext(
         {
@@ -3087,6 +3241,37 @@ async def test_pq_start_success():
     assert result["message"] == "Started 1 PQ(s)"
     # Verify controller.start_and_wait was called with correct timeout
     mock_controller.start_and_wait.assert_called_once_with(12345, 30)
+
+
+@pytest.mark.asyncio
+async def test_pq_start_already_running():
+    """Test that pq_start returns an error when the PQ is already RUNNING."""
+    mock_session_registry = MagicMock()
+    mock_session_registry.system_name = _TEST_SYSTEM_NAME
+    mock_factory_manager = MagicMock()
+    mock_factory = MagicMock()
+    mock_controller = MagicMock()
+
+    mock_session_registry.factory_manager = mock_factory_manager
+    mock_factory_manager.get = AsyncMock(return_value=mock_factory)
+    mock_factory.controller_client = mock_controller
+
+    mock_controller.start_and_wait = AsyncMock()
+    mock_pq_running = create_mock_pq_info(12345, "analytics", "RUNNING", 8.0)
+    mock_controller.get = AsyncMock(return_value=mock_pq_running)
+
+    context = MockContext({"session_registry": mock_session_registry})
+
+    result = await pq_start(context, pq_id="enterprise:system:12345")
+
+    assert result["success"] is True  # overall batch op succeeded (best-effort)
+    assert len(result["results"]) == 1
+    assert result["results"][0]["success"] is False
+    assert "already RUNNING" in result["results"][0]["error"]
+    assert result["summary"]["succeeded"] == 0
+    assert result["summary"]["failed"] == 1
+    # Verify start_and_wait was NOT called
+    mock_controller.start_and_wait.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -3169,9 +3354,17 @@ async def test_pq_start_multiple():
 
     # Mock controller methods
     mock_controller.start_and_wait = AsyncMock()
-    mock_pq_info1 = create_mock_pq_info(12345, "analytics", "RUNNING", 8.0)
-    mock_pq_info2 = create_mock_pq_info(67890, "reporting", "RUNNING", 16.0)
-    mock_controller.get = AsyncMock(side_effect=[mock_pq_info1, mock_pq_info2])
+    # get() called twice per PQ: pre-start check (STOPPED) then post-start state (RUNNING)
+    names = {12345: "analytics", 67890: "reporting"}
+    heaps = {12345: 8.0, 67890: 16.0}
+    call_counts_multi: dict[int, int] = {}
+
+    async def mock_get_multi(serial, timeout_seconds=None):
+        call_counts_multi[serial] = call_counts_multi.get(serial, 0) + 1
+        state = "RUNNING" if call_counts_multi[serial] > 1 else "STOPPED"
+        return create_mock_pq_info(serial, names[serial], state, heaps[serial])
+
+    mock_controller.get = AsyncMock(side_effect=mock_get_multi)
 
     context = MockContext(
         {
@@ -3959,11 +4152,15 @@ async def test_pq_start_parallel_execution():
         active_operations.remove(serial)
 
     mock_controller.start_and_wait = AsyncMock(side_effect=mock_start_and_wait)
-    mock_controller.get = AsyncMock(
-        side_effect=lambda s, timeout_seconds=0: create_mock_pq_info(
-            s, f"pq_{s}", "RUNNING"
-        )
-    )
+    # get() called twice per PQ: pre-start check (STOPPED) then post-start state (RUNNING)
+    parallel_call_counts: dict[int, int] = {}
+
+    async def mock_get_parallel(s, timeout_seconds=0):
+        parallel_call_counts[s] = parallel_call_counts.get(s, 0) + 1
+        state = "RUNNING" if parallel_call_counts[s] > 1 else "STOPPED"
+        return create_mock_pq_info(s, f"pq_{s}", state)
+
+    mock_controller.get = AsyncMock(side_effect=mock_get_parallel)
 
     context = MockContext(
         {
