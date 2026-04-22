@@ -2217,8 +2217,10 @@ async def pq_modify(
     - Only specify parameters you want to change - all params are optional
     - List fields (extra_jvm_args, schedule, etc.) completely REPLACE the existing list
     - restart=True applies changes immediately by restarting the PQ
-    - restart=False saves changes but requires manual pq_start to apply
-    - Some changes (heap size, script content, JVM args) require restart to take effect
+    - restart=False (default): config is saved but the running worker keeps executing the previous
+      script/config. If you modify script_body, heap_size_gb, or other runtime settings on a
+      RUNNING PQ without restart=True, the response will include a "warning" field — always check
+      for it and call pq_restart to apply the changes.
     - Can modify RUNNING PQs but be cautious - restart=True will disrupt active sessions
     - Use pq_details first to see current config before modifying
 
@@ -2263,14 +2265,19 @@ async def pq_modify(
         restart_users (str | None): Who can restart - "RU_ADMIN", "RU_ADMIN_AND_VIEWERS", "RU_VIEWERS_WHEN_DOWN"
 
     Returns:
-        dict: Success response:
+        dict: Success response. The ``"warning"`` field is only present when the PQ is
+        currently RUNNING and runtime-affecting settings (script, heap, JVM args, etc.)
+        were changed with ``restart=False`` — the running worker still has the previous
+        config. Call ``pq_restart`` to apply when you see it.
+
         {
             "success": True,
             "pq_id": "enterprise:prod:12345",
             "serial": 12345,
             "name": "analytics_worker",
-            "restarted": True or False,
-            "message": "PQ modified successfully"
+            "restarted": False,
+            "message": "PQ modified successfully",
+            "warning": "Config saved but the PQ is still running the previous configuration. ..."
         }
 
         dict: Error response:
@@ -2395,6 +2402,29 @@ async def pq_modify(
                 + (" and restarted" if restart else ""),
             }
         )
+
+        if (
+            not restart
+            and pq_info.state.status.is_running
+            and any(
+                v is not None
+                for v in (
+                    script_body,
+                    script_path,
+                    heap_size_gb,
+                    extra_jvm_args,
+                    extra_class_path,
+                    jvm_profile,
+                    python_virtual_environment,
+                    programming_language,
+                )
+            )
+        ):
+            result["warning"] = (
+                "Config saved but the PQ is still running the previous configuration. "
+                "Runtime changes (script, heap, JVM args, etc.) require a restart to take effect. "
+                "Call pq_restart to apply."
+            )
 
     except Exception as e:
         _LOGGER.error(

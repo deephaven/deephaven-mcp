@@ -1046,6 +1046,23 @@ def test_format_exported_object_info_with_table_definition(mock_exported_enum):
     assert result["original_type"] is None
 
 
+@patch("deephaven_mcp.mcp_systems_server._tools.pq.ExportedObjectTypeEnum", None)
+def test_format_exported_object_info_enum_not_available():
+    """Test _format_exported_object_info when ExportedObjectTypeEnum is None (import failed)."""
+    mock_obj = MagicMock()
+    mock_obj.name = "my_table"
+    mock_obj.type = 1
+    mock_obj.tableDefinition = None
+    mock_obj.originalType = ""
+
+    result = _format_exported_object_info(mock_obj)
+
+    assert result["name"] == "my_table"
+    assert result["type"] == 1  # raw integer returned when enum unavailable
+    assert result["table_definition"] is None
+    assert result["original_type"] is None
+
+
 def test_format_connection_details():
     """Test _format_connection_details formats ProcessorConnectionDetailsMessage correctly."""
     mock_protocol = MagicMock()
@@ -2600,6 +2617,9 @@ async def test_pq_modify_success():
     assert result["name"] == "analytics"
     assert result["restarted"] is False
     assert "modified successfully" in result["message"]
+    # heap_size_gb is runtime-affecting and PQ is RUNNING without restart → warning expected
+    assert "warning" in result
+    assert "pq_restart" in result["warning"]
 
     # Verify modify_query was called with the existing config (now modified) and restart=False
     mock_controller.modify_query.assert_called_once()
@@ -2658,6 +2678,134 @@ async def test_pq_modify_with_restart():
     assert call_args[1]["restart"] is True
     # Verify name was actually modified in the existing config
     assert current_pq_info.config.pb.name == "analytics_renamed"
+    # pq_name is not runtime-affecting, so no warning even on a running PQ
+    assert "warning" not in result
+
+
+@pytest.mark.asyncio
+async def test_pq_modify_script_body_running_no_restart_warns():
+    """Test that modifying script_body on a RUNNING PQ without restart produces a warning."""
+    mock_session_registry = MagicMock()
+    mock_session_registry.system_name = _TEST_SYSTEM_NAME
+    mock_factory_manager = MagicMock()
+    mock_factory = MagicMock()
+    mock_controller = MagicMock()
+
+    mock_session_registry.factory_manager = mock_factory_manager
+    mock_factory_manager.get = AsyncMock(return_value=mock_factory)
+    mock_factory.controller_client = mock_controller
+
+    current_pq_info = create_mock_pq_info(12345, "analytics", "RUNNING", 8.0)
+    mock_controller.map = AsyncMock(return_value={12345: current_pq_info})
+    mock_controller.modify_query = AsyncMock()
+
+    context = MockContext({"session_registry": mock_session_registry})
+
+    result = await pq_modify(
+        context,
+        pq_id="enterprise:system:12345",
+        script_body="t = 42",
+        restart=False,
+    )
+
+    assert result["success"] is True
+    assert result["restarted"] is False
+    assert "warning" in result
+    assert "pq_restart" in result["warning"]
+    assert "running the previous configuration" in result["warning"]
+
+
+@pytest.mark.asyncio
+async def test_pq_modify_stopped_pq_no_warning():
+    """Test that modifying script_body on a STOPPED PQ without restart produces no warning."""
+    mock_session_registry = MagicMock()
+    mock_session_registry.system_name = _TEST_SYSTEM_NAME
+    mock_factory_manager = MagicMock()
+    mock_factory = MagicMock()
+    mock_controller = MagicMock()
+
+    mock_session_registry.factory_manager = mock_factory_manager
+    mock_factory_manager.get = AsyncMock(return_value=mock_factory)
+    mock_factory.controller_client = mock_controller
+
+    current_pq_info = create_mock_pq_info(12345, "analytics", "STOPPED", 8.0)
+    mock_controller.map = AsyncMock(return_value={12345: current_pq_info})
+    mock_controller.modify_query = AsyncMock()
+
+    context = MockContext({"session_registry": mock_session_registry})
+
+    result = await pq_modify(
+        context,
+        pq_id="enterprise:system:12345",
+        script_body="t = 42",
+        restart=False,
+    )
+
+    assert result["success"] is True
+    assert result["restarted"] is False
+    assert "warning" not in result
+
+
+@pytest.mark.asyncio
+async def test_pq_modify_metadata_only_no_warning():
+    """Test that modifying only metadata (pq_name) on a RUNNING PQ produces no warning."""
+    mock_session_registry = MagicMock()
+    mock_session_registry.system_name = _TEST_SYSTEM_NAME
+    mock_factory_manager = MagicMock()
+    mock_factory = MagicMock()
+    mock_controller = MagicMock()
+
+    mock_session_registry.factory_manager = mock_factory_manager
+    mock_factory_manager.get = AsyncMock(return_value=mock_factory)
+    mock_factory.controller_client = mock_controller
+
+    current_pq_info = create_mock_pq_info(12345, "analytics", "RUNNING", 8.0)
+    mock_controller.map = AsyncMock(return_value={12345: current_pq_info})
+    mock_controller.modify_query = AsyncMock()
+
+    context = MockContext({"session_registry": mock_session_registry})
+
+    result = await pq_modify(
+        context,
+        pq_id="enterprise:system:12345",
+        pq_name="analytics_renamed",
+        restart=False,
+    )
+
+    assert result["success"] is True
+    assert result["restarted"] is False
+    assert "warning" not in result
+
+
+@pytest.mark.asyncio
+async def test_pq_modify_running_with_restart_no_warning():
+    """Test that modifying script on a RUNNING PQ with restart=True produces no warning."""
+    mock_session_registry = MagicMock()
+    mock_session_registry.system_name = _TEST_SYSTEM_NAME
+    mock_factory_manager = MagicMock()
+    mock_factory = MagicMock()
+    mock_controller = MagicMock()
+
+    mock_session_registry.factory_manager = mock_factory_manager
+    mock_factory_manager.get = AsyncMock(return_value=mock_factory)
+    mock_factory.controller_client = mock_controller
+
+    current_pq_info = create_mock_pq_info(12345, "analytics", "RUNNING", 8.0)
+    mock_controller.map = AsyncMock(return_value={12345: current_pq_info})
+    mock_controller.modify_query = AsyncMock()
+
+    context = MockContext({"session_registry": mock_session_registry})
+
+    result = await pq_modify(
+        context,
+        pq_id="enterprise:system:12345",
+        script_body="t = 42",
+        restart=True,
+    )
+
+    assert result["success"] is True
+    assert result["restarted"] is True
+    assert "warning" not in result
 
 
 @pytest.mark.asyncio
