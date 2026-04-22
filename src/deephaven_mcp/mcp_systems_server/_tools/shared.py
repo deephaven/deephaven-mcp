@@ -8,6 +8,7 @@ Provides internal helper functions used across multiple MCP tool modules:
 This module contains private helper functions not exposed as MCP tools.
 """
 
+import json
 import logging
 
 import pyarrow
@@ -22,7 +23,7 @@ from deephaven_mcp.resource_manager._registry import BaseRegistry
 _LOGGER = logging.getLogger(__name__)
 
 
-def _format_initialization_status(
+def format_initialization_status(
     phase: InitializationPhase,
     init_errors: dict[str, str],
 ) -> dict[str, object] | None:
@@ -36,7 +37,7 @@ def _format_initialization_status(
     Returns ``None`` when there is nothing to report (completed without
     errors), so callers can simply do::
 
-        init_info = _format_initialization_status(phase, errors)
+        init_info = format_initialization_status(phase, errors)
         if init_info:
             response["initialization"] = init_info
 
@@ -75,7 +76,7 @@ def _format_initialization_status(
     return init_info or None
 
 
-async def _get_session_from_context(
+async def get_session_from_context(
     function_name: str, context: Context, session_id: str
 ) -> BaseSession:
     """Get an active session from the MCP context.
@@ -122,7 +123,7 @@ async def _get_session_from_context(
     return session
 
 
-async def _get_enterprise_session(
+async def get_enterprise_session(
     function_name: str, context: Context, session_id: str
 ) -> tuple[CorePlusSession | None, dict[str, object] | None]:
     """Get and validate an enterprise (Core+) session from context.
@@ -150,14 +151,14 @@ async def _get_enterprise_session(
         - Any exception during session retrieval
 
     Example:
-        >>> session, error = await _get_enterprise_session("catalog_tables_schema", context, "enterprise:prod:analytics")
+        >>> session, error = await get_enterprise_session("catalog_tables_schema", context, "enterprise:prod:analytics")
         >>> if error:
         ...     return error
         >>> session = cast(CorePlusSession, session)  # Type narrowing for mypy
     """
     try:
         # Get session from context
-        session = await _get_session_from_context(function_name, context, session_id)
+        session = await get_session_from_context(function_name, context, session_id)
 
         # Validate it's an enterprise session
         if not isinstance(session, CorePlusSession):
@@ -180,7 +181,7 @@ MAX_RESPONSE_SIZE = 50_000_000  # 50MB hard limit
 WARNING_SIZE = 5_000_000  # 5MB warning threshold
 
 
-def _check_response_size(table_name: str, estimated_size: int) -> dict | None:
+def check_response_size(table_name: str, estimated_size: int) -> dict | None:
     """Check if estimated response size is within acceptable limits.
 
     Evaluates the estimated response size against predefined limits to prevent memory
@@ -216,7 +217,7 @@ def _check_response_size(table_name: str, estimated_size: int) -> dict | None:
     return None  # Size is acceptable
 
 
-def _format_meta_table_result(
+def format_meta_table_result(
     arrow_meta_table: pyarrow.Table,
     table_name: str,
     namespace: str | None = None,
@@ -256,7 +257,7 @@ def _format_meta_table_result(
 
     Example:
         >>> # For a table with 2 columns (Date and Price)
-        >>> result = _format_meta_table_result(meta_table, "daily_prices", "market_data")
+        >>> result = format_meta_table_result(meta_table, "daily_prices", "market_data")
         >>> result
         {
             "success": True,
@@ -302,3 +303,45 @@ def _format_meta_table_result(
     return result
 
 
+# =============================================================================
+# Credential redaction utilities
+# =============================================================================
+
+_SENSITIVE_JSON_KEYS: frozenset[str] = frozenset(
+    {"password", "passwd", "token", "secret", "api_key", "apikey", "api_secret"}
+)
+"""JSON object keys whose values are redacted in type_specific_fields_json / type_specific_state_json output."""
+
+
+def _redact_recursive(obj: object) -> object:
+    """Recursively redact values of sensitive keys in a parsed JSON structure.
+
+    Walks dicts, lists, and nested combinations thereof, replacing the value of
+    any key whose lowercase form appears in _SENSITIVE_JSON_KEYS with "[REDACTED]".
+    Scalar values (str, int, float, bool, None) are returned unchanged.
+    """
+    if isinstance(obj, dict):
+        return {
+            k: "[REDACTED]" if k.lower() in _SENSITIVE_JSON_KEYS else _redact_recursive(v)
+            for k, v in obj.items()
+        }
+    if isinstance(obj, list):
+        return [_redact_recursive(item) for item in obj]
+    return obj
+
+
+def redact_json_sensitive_fields(json_str: str | None) -> str | None:
+    """Parse a JSON string and redact values whose keys match known-sensitive names.
+
+    Returns None for empty/None input. Returns the original string unchanged if it
+    cannot be parsed as JSON (with a debug log). Otherwise returns a re-serialized
+    JSON string with sensitive values replaced by "[REDACTED]".
+    """
+    if not json_str:
+        return None
+    try:
+        parsed = json.loads(json_str)
+    except (json.JSONDecodeError, ValueError):
+        _LOGGER.debug("type_specific JSON field is not valid JSON; returning as-is")
+        return json_str
+    return json.dumps(_redact_recursive(parsed))

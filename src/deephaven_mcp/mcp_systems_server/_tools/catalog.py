@@ -19,10 +19,10 @@ from deephaven_mcp._exceptions import UnsupportedOperationError
 from deephaven_mcp.client import CorePlusSession
 from deephaven_mcp.formatters import format_table_data
 from deephaven_mcp.mcp_systems_server._tools.shared import (
-    _check_response_size,
-    _format_meta_table_result,
-    _get_enterprise_session,
-    _get_session_from_context,
+    check_response_size,
+    format_meta_table_result,
+    get_enterprise_session,
+    get_session_from_context,
 )
 from deephaven_mcp.mcp_systems_server._tools.table import (
     ESTIMATED_BYTES_PER_CELL,
@@ -72,7 +72,7 @@ async def _get_catalog_data(
 
     try:
         # Use helper to get session from context
-        session = await _get_session_from_context(tool_name, context, session_id)
+        session = await get_session_from_context(tool_name, context, session_id)
 
         # Get catalog data using queries module (includes enterprise check and filtering)
         _LOGGER.debug(
@@ -92,7 +92,7 @@ async def _get_catalog_data(
 
         # Estimate response size for safety
         estimated_size = arrow_table.nbytes
-        size_check_result = _check_response_size(tool_name, estimated_size)
+        size_check_result = check_response_size(tool_name, estimated_size)
         if size_check_result:
             return size_check_result
 
@@ -719,7 +719,7 @@ async def catalog_tables_schema(
 
     try:
         # Get and validate enterprise session
-        session, error = await _get_enterprise_session(
+        session, error = await get_enterprise_session(
             "catalog_tables_schema", context, session_id
         )
 
@@ -795,7 +795,7 @@ async def catalog_tables_schema(
                 )
 
                 # Use helper to format result (include namespace for catalog tables)
-                result = _format_meta_table_result(
+                result = format_meta_table_result(
                     arrow_meta_table, catalog_table_name, namespace=catalog_namespace
                 )
                 schemas.append(result)
@@ -989,7 +989,7 @@ async def catalog_table_sample(
 
     try:
         # Get and validate enterprise session
-        session, error = await _get_enterprise_session(
+        session, error = await get_enterprise_session(
             "catalog_table_sample", context, session_id
         )
 
@@ -1014,7 +1014,7 @@ async def catalog_table_sample(
         row_count = len(arrow_table)
         col_count = len(arrow_table.schema)
         estimated_size = row_count * col_count * ESTIMATED_BYTES_PER_CELL
-        size_error = _check_response_size(f"{namespace}.{table_name}", estimated_size)
+        size_error = check_response_size(f"{namespace}.{table_name}", estimated_size)
 
         if size_error:
             return size_error

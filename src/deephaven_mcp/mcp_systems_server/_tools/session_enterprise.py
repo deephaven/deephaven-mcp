@@ -26,7 +26,7 @@ from deephaven_mcp.mcp_systems_server._tools.session import (
     DEFAULT_PROGRAMMING_LANGUAGE,
 )
 from deephaven_mcp.mcp_systems_server._tools.shared import (
-    _format_initialization_status,
+    format_initialization_status,
 )
 from deephaven_mcp.resource_manager import (
     BaseItemManager,
@@ -177,7 +177,7 @@ async def enterprise_systems_status(
         response: dict[str, object] = {"success": True, "systems": [system_info]}
 
         # Surface initialization status from the registry snapshot
-        init_info = _format_initialization_status(
+        init_info = format_initialization_status(
             snapshot.initialization_phase, snapshot.initialization_errors
         )
         if init_info:

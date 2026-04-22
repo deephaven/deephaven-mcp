@@ -14,7 +14,7 @@ from mcp.server.fastmcp import Context, FastMCP
 
 from deephaven_mcp import queries
 from deephaven_mcp.mcp_systems_server._tools.shared import (
-    _get_session_from_context,
+    get_session_from_context,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -118,7 +118,7 @@ async def session_script_run(
             )
 
         # Use helper to get session from context
-        session = await _get_session_from_context(
+        session = await get_session_from_context(
             "session_script_run", context, session_id
         )
         _LOGGER.info(
@@ -207,7 +207,7 @@ async def session_pip_list(context: Context, session_id: str) -> dict:
     result: dict = {"success": False}
     try:
         # Use helper to get session from context
-        session = await _get_session_from_context(
+        session = await get_session_from_context(
             "session_pip_list", context, session_id
         )
         _LOGGER.info(

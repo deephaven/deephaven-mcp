@@ -17,7 +17,7 @@ from mcp.server.fastmcp import Context, FastMCP
 from deephaven_mcp import queries
 from deephaven_mcp.client import BaseSession
 from deephaven_mcp.mcp_systems_server._tools.shared import (
-    _format_initialization_status,
+    format_initialization_status,
 )
 from deephaven_mcp.resource_manager import (
     BaseItemManager,
@@ -163,7 +163,7 @@ async def sessions_list(context: Context) -> dict:
         response: dict[str, object] = {"success": True, "sessions": results}
 
         # Surface initialization status from the same atomic snapshot
-        init_info = _format_initialization_status(
+        init_info = format_initialization_status(
             snapshot.initialization_phase, snapshot.initialization_errors
         )
         if init_info:

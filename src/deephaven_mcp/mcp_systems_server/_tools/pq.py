@@ -31,6 +31,7 @@ from deephaven_mcp.client._protobuf import (
     CorePlusQueryState,
     CorePlusQueryStatus,
 )
+from deephaven_mcp.mcp_systems_server._tools.shared import redact_json_sensitive_fields
 from deephaven_mcp.resource_manager import (
     BaseItemManager,
     EnterpriseSessionRegistry,
@@ -140,7 +141,6 @@ single batch tool call.
 Environment variable override: DH_MCP_DEFAULT_MAX_CONCURRENT
 """
 
-
 def _validate_timeout(timeout_seconds: int, function_name: str) -> int:
     """Validate timeout is reasonable for MCP operations.
 
@@ -249,9 +249,7 @@ def _format_pq_config(config: CorePlusQueryConfig) -> dict[str, object]:
         "script_path": pb.scriptPath if pb.scriptPath else None,
         "script_language": pb.scriptLanguage,
         "configuration_type": pb.configurationType,
-        "type_specific_fields_json": (
-            pb.typeSpecificFieldsJson if pb.typeSpecificFieldsJson else None
-        ),
+        "type_specific_fields_json": redact_json_sensitive_fields(pb.typeSpecificFieldsJson),
         "scheduling": list(pb.scheduling),
         "timeout_nanos": pb.timeoutNanos if pb.timeoutNanos else None,
         "jvm_profile": pb.jvmProfile if pb.jvmProfile else None,
@@ -577,7 +575,7 @@ def _format_pq_state(state: CorePlusQueryState | None) -> dict[str, object] | No
         "scope_types": scope_types,
         "connection_details": connection_details,
         "exception_details": exception_details,
-        "type_specific_state_json": pb.typeSpecificStateJson or None,
+        "type_specific_state_json": redact_json_sensitive_fields(pb.typeSpecificStateJson),
         "last_authenticated_user": pb.lastAuthenticatedUser or None,
         "last_effective_user": pb.lastEffectiveUser or None,
         "script_loader_state_json": pb.scriptLoaderStateJson or None,

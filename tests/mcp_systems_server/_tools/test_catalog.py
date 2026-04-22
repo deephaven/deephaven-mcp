@@ -21,7 +21,7 @@ def create_mock_arrow_meta_table(
 
     This helper eliminates duplication across schema-related tests by providing
     a consistent way to create mock meta tables that match the behavior expected
-    by _format_meta_table_result().
+    by format_meta_table_result().
 
     Args:
         schema_data: List of dicts representing metadata rows (e.g., column info)

@@ -16,9 +16,9 @@ from mcp.server.fastmcp import Context, FastMCP
 from deephaven_mcp import queries
 from deephaven_mcp.formatters import format_table_data
 from deephaven_mcp.mcp_systems_server._tools.shared import (
-    _check_response_size,
-    _format_meta_table_result,
-    _get_session_from_context,
+    check_response_size,
+    format_meta_table_result,
+    get_session_from_context,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -214,7 +214,7 @@ async def session_tables_schema(
     schemas = []
     try:
         # Use helper to get session from context
-        session = await _get_session_from_context(
+        session = await get_session_from_context(
             "session_tables_schema", context, session_id
         )
 
@@ -242,7 +242,7 @@ async def session_tables_schema(
                 )
 
                 # Use helper to format result (no namespace for session tables)
-                result = _format_meta_table_result(
+                result = format_meta_table_result(
                     meta_arrow_table, table_name, namespace=None
                 )
                 schemas.append(result)
@@ -345,7 +345,7 @@ async def session_tables_list(context: Context, session_id: str) -> dict:
 
     try:
         # Use helper to get session from context
-        session = await _get_session_from_context(
+        session = await get_session_from_context(
             "session_tables_list", context, session_id
         )
 
@@ -538,7 +538,7 @@ async def session_table_data(
 
     try:
         # Use helper to get session from context
-        session = await _get_session_from_context(
+        session = await get_session_from_context(
             "session_table_data", context, session_id
         )
 
@@ -554,7 +554,7 @@ async def session_table_data(
         row_count = len(arrow_table)
         col_count = len(arrow_table.schema)
         estimated_size = row_count * col_count * ESTIMATED_BYTES_PER_CELL
-        size_error = _check_response_size(table_name, estimated_size)
+        size_error = check_response_size(table_name, estimated_size)
 
         if size_error:
             return size_error

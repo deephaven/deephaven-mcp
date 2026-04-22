@@ -531,6 +531,60 @@ def test_format_pq_config_no_restart_enum():
     assert result["serial"] == 12345
 
 
+@patch("deephaven_mcp.mcp_systems_server._tools.pq.RestartUsersEnum")
+def test_format_pq_config_redacts_type_specific_fields_json(mock_restart_enum):
+    """_format_pq_config must redact sensitive keys in typeSpecificFieldsJson."""
+    import json
+    mock_restart_enum.Name.return_value = "RU_ADMIN"
+    mock_config = MagicMock()
+    mock_pb = MagicMock()
+    mock_pb.serial = 1
+    mock_pb.version = 1
+    mock_pb.name = "q"
+    mock_pb.owner = "o"
+    mock_pb.enabled = True
+    mock_pb.heapSizeGb = 4.0
+    mock_pb.bufferPoolToHeapRatio = 0.0
+    mock_pb.detailedGCLoggingEnabled = False
+    mock_pb.extraJvmArguments = []
+    mock_pb.extraEnvironmentVariables = []
+    mock_pb.classPathAdditions = []
+    mock_pb.serverName = ""
+    mock_pb.adminGroups = []
+    mock_pb.viewerGroups = []
+    mock_pb.restartUsers = 0
+    mock_pb.scriptCode = ""
+    mock_pb.scriptPath = ""
+    mock_pb.scriptLanguage = "Python"
+    mock_pb.configurationType = "JdbcImport"
+    mock_pb.typeSpecificFieldsJson = json.dumps({"password": "AAABBB==", "driver": "com.mysql.Driver"})
+    mock_pb.scheduling = []
+    mock_pb.timeoutNanos = 0
+    mock_pb.jvmProfile = ""
+    mock_pb.lastModifiedByAuthenticated = ""
+    mock_pb.lastModifiedByEffective = ""
+    mock_pb.lastModifiedTimeNanos = 0
+    mock_pb.completedStatus = ""
+    mock_pb.expirationTimeNanos = 0
+    mock_pb.kubernetesControl = ""
+    mock_pb.workerKind = "DeephavenCommunity"
+    mock_pb.createdTimeNanos = 0
+    mock_pb.replicaCount = 0
+    mock_pb.spareCount = 0
+    mock_pb.assignmentPolicy = ""
+    mock_pb.assignmentPolicyParams = ""
+    mock_pb.additionalMemoryGb = 0.0
+    mock_pb.pythonControl = ""
+    mock_pb.genericWorkerControl = ""
+    mock_config.pb = mock_pb
+
+    result = _format_pq_config(mock_config)
+
+    parsed = json.loads(result["type_specific_fields_json"])
+    assert parsed["password"] == "[REDACTED]"
+    assert parsed["driver"] == "com.mysql.Driver"
+
+
 @pytest.mark.asyncio
 async def test_pq_restart_multiple():
     """Test pq_restart with multiple PQs."""
