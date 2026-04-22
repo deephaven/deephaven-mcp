@@ -252,14 +252,14 @@ async def session_tables_schema(
                 )
             except Exception as table_exc:
                 _LOGGER.error(
-                    f"[mcp_systems_server:session_tables_schema] Failed to get schema for table '{table_name}': {table_exc!r}",
+                    f"[mcp_systems_server:session_tables_schema] Failed to get schema for table '{table_name}' in session '{session_id}': {table_exc!r}",
                     exc_info=True,
                 )
                 schemas.append(
                     {
                         "success": False,
                         "table": table_name,
-                        "error": str(table_exc),
+                        "error": f"Failed to get schema for table '{table_name}' in session '{session_id}': {type(table_exc).__name__}: {table_exc}",
                         "isError": True,
                     }
                 )
@@ -370,7 +370,7 @@ async def session_tables_list(context: Context, session_id: str) -> dict:
             f"[mcp_systems_server:session_tables_list] Failed for session: '{session_id}', error: {e!r}",
             exc_info=True,
         )
-        return {"success": False, "error": str(e), "isError": True}
+        return {"success": False, "error": f"Failed to get schemas for session '{session_id}': {type(e).__name__}: {e}", "isError": True}
 
 
 async def session_table_data(
@@ -576,10 +576,10 @@ async def session_table_data(
     except ValueError as e:
         # Format validation error from formatters package
         _LOGGER.error(
-            f"[mcp_systems_server:session_table_data] Invalid format parameter: {e!r}"
+            f"[mcp_systems_server:session_table_data] Invalid format parameter '{format}' for table '{table_name}' in session '{session_id}': {e!r}"
         )
         result["error"] = (
-            f"Invalid format parameter for table '{table_name}': {type(e).__name__}: {e}"
+            f"Invalid format parameter '{format}' for table '{table_name}' in session '{session_id}': {type(e).__name__}: {e}"
         )
         result["isError"] = True
 
