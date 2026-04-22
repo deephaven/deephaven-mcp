@@ -43,9 +43,10 @@ from deephaven_mcp.mcp_systems_server._tools import (
 _LOGGER = logging.getLogger(__name__)
 
 # Tools registered on every server regardless of type.
-# Enterprise-exclusive tools (session_enterprise, catalog, pq) are registered
-# directly in enterprise() so the distinction is explicit.
-_SHARED_TOOLS = (session, table, script, reload)
+# Enterprise-exclusive tools (session_enterprise, catalog, pq) and server-specific
+# variants (reload) are registered directly in enterprise()/community() so the
+# distinction is explicit.
+_SHARED_TOOLS = (session, table, script)
 
 
 def _setup_env() -> None:
@@ -144,6 +145,7 @@ def enterprise() -> None:
         port=port,
     )
     _register_shared_tools(server)
+    reload.register_enterprise_tools(server)
     session_enterprise.register_tools(server)
     catalog.register_tools(server)
     pq.register_tools(server)
@@ -176,6 +178,7 @@ def community() -> None:
         port=port,
     )
     _register_shared_tools(server)
+    reload.register_community_tools(server)
     session_community.register_tools(server)
     _LOGGER.info(
         f"[community] DHC MCP server '{server.name}' starting on "

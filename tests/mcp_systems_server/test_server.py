@@ -100,12 +100,18 @@ def test_register_shared_tools_registers_all_shared_modules():
 
 def test_shared_tools_contains_expected_modules():
     """_SHARED_TOOLS contains exactly the modules shared by both servers."""
-    from deephaven_mcp.mcp_systems_server._tools import reload, script, session, table
+    from deephaven_mcp.mcp_systems_server._tools import script, session, table
 
     assert session in server._SHARED_TOOLS
     assert table in server._SHARED_TOOLS
     assert script in server._SHARED_TOOLS
-    assert reload in server._SHARED_TOOLS
+
+
+def test_shared_tools_excludes_reload():
+    """reload is NOT in _SHARED_TOOLS; each server registers its own variant."""
+    from deephaven_mcp.mcp_systems_server._tools import reload
+
+    assert reload not in server._SHARED_TOOLS
 
 
 def test_shared_tools_excludes_enterprise_exclusive_modules():
@@ -213,7 +219,7 @@ def test_enterprise_env_var_fallback(monkeypatch):
 
 
 def test_enterprise_registers_shared_and_exclusive_tools(monkeypatch):
-    """enterprise() registers shared tools and DHE-exclusive tools."""
+    """enterprise() registers shared tools, the enterprise reload variant, and DHE-exclusive tools."""
     monkeypatch.delenv("DH_MCP_CONFIG_FILE", raising=False)
     monkeypatch.delenv("MCP_HOST", raising=False)
     monkeypatch.delenv("MCP_PORT", raising=False)
@@ -221,6 +227,7 @@ def test_enterprise_registers_shared_and_exclusive_tools(monkeypatch):
     mock_server = MagicMock()
     mock_server.name = "deephaven-mcp-enterprise"
     mock_register_shared = MagicMock()
+    mock_reload = MagicMock()
     mock_session_enterprise = MagicMock()
     mock_catalog = MagicMock()
     mock_pq = MagicMock()
@@ -235,6 +242,7 @@ def test_enterprise_registers_shared_and_exclusive_tools(monkeypatch):
         patch("deephaven_mcp.mcp_systems_server.server.FastMCP", return_value=mock_server),
         patch("deephaven_mcp.mcp_systems_server.server.make_enterprise_lifespan", return_value=MagicMock()),
         patch("deephaven_mcp.mcp_systems_server.server._register_shared_tools", mock_register_shared),
+        patch("deephaven_mcp.mcp_systems_server.server.reload", mock_reload),
         patch("deephaven_mcp.mcp_systems_server.server.session_enterprise", mock_session_enterprise),
         patch("deephaven_mcp.mcp_systems_server.server.catalog", mock_catalog),
         patch("deephaven_mcp.mcp_systems_server.server.pq", mock_pq),
@@ -242,6 +250,7 @@ def test_enterprise_registers_shared_and_exclusive_tools(monkeypatch):
         server.enterprise()
 
     mock_register_shared.assert_called_once_with(mock_server)
+    mock_reload.register_enterprise_tools.assert_called_once_with(mock_server)
     mock_session_enterprise.register_tools.assert_called_once_with(mock_server)
     mock_catalog.register_tools.assert_called_once_with(mock_server)
     mock_pq.register_tools.assert_called_once_with(mock_server)
@@ -371,7 +380,7 @@ def test_community_env_var_fallback(monkeypatch):
 
 
 def test_community_registers_shared_and_exclusive_tools(monkeypatch):
-    """community() registers shared tools and DHC-exclusive tools; does NOT register enterprise tools."""
+    """community() registers shared tools, the community reload variant, and DHC-exclusive tools."""
     monkeypatch.delenv("DH_MCP_CONFIG_FILE", raising=False)
     monkeypatch.delenv("MCP_HOST", raising=False)
     monkeypatch.delenv("MCP_PORT", raising=False)
@@ -379,6 +388,7 @@ def test_community_registers_shared_and_exclusive_tools(monkeypatch):
     mock_server = MagicMock()
     mock_server.name = "deephaven-mcp-community"
     mock_register_shared = MagicMock()
+    mock_reload = MagicMock()
     mock_session_community = MagicMock()
 
     with (
@@ -391,11 +401,13 @@ def test_community_registers_shared_and_exclusive_tools(monkeypatch):
         patch("deephaven_mcp.mcp_systems_server.server.FastMCP", return_value=mock_server),
         patch("deephaven_mcp.mcp_systems_server.server.make_community_lifespan", return_value=MagicMock()),
         patch("deephaven_mcp.mcp_systems_server.server._register_shared_tools", mock_register_shared),
+        patch("deephaven_mcp.mcp_systems_server.server.reload", mock_reload),
         patch("deephaven_mcp.mcp_systems_server.server.session_community", mock_session_community),
     ):
         server.community()
 
     mock_register_shared.assert_called_once_with(mock_server)
+    mock_reload.register_community_tools.assert_called_once_with(mock_server)
     mock_session_community.register_tools.assert_called_once_with(mock_server)
 
 
