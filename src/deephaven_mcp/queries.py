@@ -7,6 +7,9 @@ This module provides coroutine-compatible utility functions for querying Deephav
     - `get_table(session, table_name)`: Retrieve a Deephaven table as a pyarrow.Table snapshot.
     - `get_session_meta_table(session, table_name)`: Retrieve a session table's schema/meta table as a pyarrow.Table snapshot.
     - `get_catalog_meta_table(session, namespace, table_name)`: Retrieve a catalog table's schema/meta table as a pyarrow.Table snapshot.
+    - `get_catalog_table_partition_columns(session, namespace, table_name)`: Return partition column definitions (name/type) for a catalog table.
+    - `get_catalog_table_partition_values(session, namespace, table_name, column)`: Return distinct values for a partition column, sorted descending.
+    - `find_catalog_table_recent_partition(session, namespace, table_name)`: Find DQL filter strings for the most recent partition slice with data.
     - `get_catalog_table(session)`: Retrieve the catalog table from an enterprise session with optional filtering and namespace extraction.
     - `get_pip_packages_table(session)`: Get a table of installed pip packages as a pyarrow.Table.
     - `get_programming_language_version_table(session)`: Get a table with Python version information as a pyarrow.Table.
@@ -27,7 +30,7 @@ import textwrap
 import pyarrow
 from pydeephaven.table import Table
 
-from deephaven_mcp._exceptions import UnsupportedOperationError
+from deephaven_mcp._exceptions import InternalError, UnsupportedOperationError
 from deephaven_mcp.client import BaseSession, CorePlusSession
 
 _LOGGER = logging.getLogger(__name__)
@@ -367,6 +370,208 @@ async def _load_catalog_table(
             ) from live_exc
 
 
+_MAX_PARTITION_PROBES = 50
+"""Maximum number of partition values to probe when searching for a partition with data.
+
+Caps the number of round-trips to DHE during partition auto-detection. A table with
+many empty historical partitions (e.g. purged dates) may require probing several
+values before finding one with rows; raising this limit increases the search depth
+at the cost of more queries.
+"""
+
+
+async def _extract_partition_column_defs(table: Table) -> list[dict]:
+    """
+    Parse table.meta_table for IsPartitioning=True columns. Type-agnostic.
+    Propagates exceptions — callers decide how to handle failures.
+
+    Returns a list of {"name": str, "type": str} dicts for each partition column.
+    """
+    meta_arrow = await asyncio.to_thread(
+        lambda: table.meta_table.view(["Name", "IsPartitioning", "DataType"]).to_arrow()
+    )
+    d = meta_arrow.to_pydict()
+    return [
+        {"name": n, "type": t}
+        for n, is_p, t in zip(
+            d.get("Name", []), d.get("IsPartitioning", []), d.get("DataType", [])
+        )
+        if is_p
+    ]
+
+
+def _format_partition_filter(col: str, val: object) -> str:
+    """
+    Format a Deephaven DQL where-clause fragment for a partition column value.
+    Partition values are expected to be strings. Raises InternalError for other types.
+    """
+    if isinstance(val, str):
+        return f"{col} == `{val}`"
+    raise InternalError(
+        f"Unsupported partition value type for column '{col}': "
+        f"{type(val).__name__!r} (value={val!r}). Only string partition values are currently supported."
+    )
+
+
+async def _get_distinct_column_values(table: Table, col: str, *, descending: bool) -> list:
+    """
+    Return distinct values for a column sorted ascending or descending.
+    Propagates exceptions — callers decide how to handle failures.
+    """
+    arrow = await asyncio.to_thread(
+        lambda: (
+            table.select_distinct(col).sort_descending(col)
+            if descending
+            else table.select_distinct(col).sort(col)
+        ).to_arrow()
+    )
+    return arrow[col].to_pylist()
+
+
+async def _find_recent_partition_filters(
+    table: Table, namespace: str, table_name: str
+) -> list[str] | None:
+    """
+    Find where-clause filters for the most recent partition slice that has data.
+
+    Only single-column partitioning is supported. Raises InternalError if the table
+    has more than one IsPartitioning column. Enumerates distinct values of that column
+    sorted descending (most-recent-first for ordered types), probes each 
+    until finding one with rows. Returns a filter list or None if the
+    table has no partition columns or all probes find no data.
+
+    Propagates errors from meta_table / select_distinct. Per-probe failures (e.g.
+    access control on a specific partition) are logged at WARNING and skipped.
+    """
+    col_defs = await _extract_partition_column_defs(table)
+    if not col_defs:
+        return None
+
+    if len(col_defs) > 1:
+        raise InternalError(
+            f"Table '{namespace}.{table_name}' has {len(col_defs)} partition columns "
+            f"({[c['name'] for c in col_defs]}); only single-column partitioning is supported."
+        )
+
+    primary_col = col_defs[0]["name"]
+    values = await _get_distinct_column_values(table, primary_col, descending=True)
+    if not values:
+        _LOGGER.debug(
+            f"[queries:_find_recent_partition_filters] "
+            f"No distinct values for '{namespace}.{table_name}' col '{primary_col}'"
+        )
+        return None
+
+    for val in values[:_MAX_PARTITION_PROBES]:
+        if val is None:
+            continue
+        filter_str = _format_partition_filter(primary_col, val)
+        try:
+            probe_size = await asyncio.to_thread(
+                lambda f=filter_str: table.where([f]).size
+            )
+            if probe_size > 0:
+                _LOGGER.debug(
+                    f"[queries:_find_recent_partition_filters] "
+                    f"Found partition with data for '{namespace}.{table_name}' "
+                    f"(1 filter)"
+                )
+                return [filter_str]
+        except Exception as e:
+            _LOGGER.warning(
+                f"[queries:_find_recent_partition_filters] "
+                f"Probe failed for '{namespace}.{table_name}' filter '{filter_str}': {e}"
+            )
+    return None
+
+
+async def get_catalog_table_partition_columns(
+    session: CorePlusSession, namespace: str, table_name: str
+) -> list[dict]:
+    """
+    Return partition column definitions for a catalog table.
+
+    Each dict has "name" (str) and "type" (str, Java class name) for columns
+    with IsPartitioning=True in the table's meta table.
+
+    Args:
+        session (CorePlusSession): An active Deephaven Enterprise (Core+) session.
+        namespace (str): The catalog namespace containing the table.
+        table_name (str): The name of the table within the namespace.
+
+    Returns:
+        list[dict]: List of {"name": str, "type": str} for each partition column.
+                    Empty list if the table has no partition columns.
+
+    Raises:
+        Exception: If the table cannot be loaded or the meta table cannot be accessed.
+    """
+    _LOGGER.debug(
+        f"[queries:get_catalog_table_partition_columns] Getting partition columns for '{namespace}.{table_name}'"
+    )
+    table = await _load_catalog_table(session, namespace, table_name)
+    return await _extract_partition_column_defs(table)
+
+
+async def get_catalog_table_partition_values(
+    session: CorePlusSession, namespace: str, table_name: str, column: str
+) -> list:
+    """
+    Return distinct values for a partition column, sorted descending (most-recent first
+    for ordered types such as dates or version numbers).
+
+    Args:
+        session (CorePlusSession): An active Deephaven Enterprise (Core+) session.
+        namespace (str): The catalog namespace containing the table.
+        table_name (str): The name of the table within the namespace.
+        column (str): The partition column name to enumerate values for.
+
+    Returns:
+        list: Distinct values for the column, sorted descending. Empty list if no values.
+
+    Raises:
+        Exception: If the table cannot be loaded or the column cannot be accessed.
+    """
+    _LOGGER.debug(
+        f"[queries:get_catalog_table_partition_values] Getting distinct values for "
+        f"'{namespace}.{table_name}' col '{column}'"
+    )
+    table = await _load_catalog_table(session, namespace, table_name)
+    return await _get_distinct_column_values(table, column, descending=True)
+
+
+async def find_catalog_table_recent_partition(
+    session: CorePlusSession, namespace: str, table_name: str
+) -> list[str] | None:
+    """
+    Find where-clause filters for the most recent partition slice with data.
+
+    Inspects the table's IsPartitioning columns, enumerates distinct values sorted
+    descending (most-recent first), and probes each until finding one that returns
+    rows. Returns a list of Deephaven DQL filter strings (e.g. ["Date == `2024-01-15`"])
+    or None if the table has no partition columns or no data is found.
+
+    Args:
+        session (CorePlusSession): An active Deephaven Enterprise (Core+) session.
+        namespace (str): The catalog namespace containing the table.
+        table_name (str): The name of the table within the namespace.
+
+    Returns:
+        list[str] | None: DQL filter strings for the most recent partition with data,
+                         or None if no partition columns or no data found.
+
+    Raises:
+        InternalError: If the table has more than one IsPartitioning column (only single-column
+                       partitioning is supported).
+        Exception: If the table cannot be loaded or partition metadata cannot be accessed.
+    """
+    _LOGGER.debug(
+        f"[queries:find_catalog_table_recent_partition] Finding recent partition for '{namespace}.{table_name}'"
+    )
+    table = await _load_catalog_table(session, namespace, table_name)
+    return await _find_recent_partition_filters(table, namespace, table_name)
+
+
 async def get_catalog_table_data(
     session: CorePlusSession,
     namespace: str,
@@ -374,12 +579,14 @@ async def get_catalog_table_data(
     *,
     max_rows: int | None,
     head: bool = True,
+    filters: list[str] | None = None,
 ) -> tuple[pyarrow.Table, bool]:
     """
     Asynchronously retrieve data from a specific catalog table as a pyarrow.Table from a Deephaven Enterprise session.
 
     This function loads a catalog table (trying historical_table first, then live_table as fallback)
-    and retrieves its data with optional row limiting. Use this for tables in the Enterprise catalog system.
+    and retrieves its data with optional row limiting and partition filtering. Use this for tables
+    in the Enterprise catalog system.
 
     Args:
         session (CorePlusSession): An active Deephaven Enterprise (Core+) session.
@@ -390,6 +597,11 @@ async def get_catalog_table_data(
         head (bool): If True and max_rows is not None, retrieve rows from the beginning using head().
                     If False and max_rows is not None, retrieve rows from the end using tail().
                     Ignored when max_rows=None. Default is True.
+        filters (list[str] | None): Controls partition filtering behavior:
+                                    - None (default): auto-detect partition columns and apply the most
+                                      recent partition filter with data (see find_catalog_table_recent_partition).
+                                    - [] (empty list): no filter applied; skip auto-detection.
+                                    - ["expr", ...]: apply these explicit Deephaven DQL filters; skip auto-detection.
 
     Returns:
         tuple[pyarrow.Table, bool]: A tuple containing:
@@ -409,11 +621,33 @@ async def get_catalog_table_data(
     """
     _LOGGER.debug(
         f"[queries:get_catalog_table_data] Retrieving catalog table data for '{namespace}.{table_name}' "
-        f"(max_rows={max_rows}, head={head})"
+        f"(max_rows={max_rows}, head={head}, filters={filters!r})"
     )
 
     # Load catalog table using helper
     table = await _load_catalog_table(session, namespace, table_name)
+
+    # Determine effective filters: auto-detect when filters=None, skip when filters=[]
+    effective_filters = filters
+    if filters is None:
+        try:
+            effective_filters = await _find_recent_partition_filters(table, namespace, table_name)
+            if effective_filters:
+                _LOGGER.info(
+                    f"[queries:get_catalog_table_data] Auto-detected {len(effective_filters)} "
+                    f"partition filter(s) for '{namespace}.{table_name}'"
+                )
+        except Exception as e:
+            _LOGGER.warning(
+                f"[queries:get_catalog_table_data] Partition auto-detection failed for "
+                f"'{namespace}.{table_name}', proceeding without filter: {e}"
+            )
+            effective_filters = None
+
+    # Apply filters if any
+    table = await _apply_filters(
+        table, effective_filters, context_name=f"catalog table '{namespace}.{table_name}'"
+    )
 
     # Apply row limiting using helper function
     limited_table, is_complete = await _apply_row_limit(

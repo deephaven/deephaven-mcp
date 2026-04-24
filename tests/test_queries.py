@@ -10,11 +10,18 @@ from deephaven_mcp.queries import (
     _apply_filters,
     _apply_row_limit,
     _extract_meta_table,
+    _extract_partition_column_defs,
+    _find_recent_partition_filters,
+    _format_partition_filter,
+    _get_distinct_column_values,
     _load_catalog_table,
     _validate_python_session,
+    find_catalog_table_recent_partition,
     get_catalog_meta_table,
     get_catalog_table,
     get_catalog_table_data,
+    get_catalog_table_partition_columns,
+    get_catalog_table_partition_values,
     get_dh_versions,
     get_pip_packages_table,
     get_programming_language_version,
@@ -1612,3 +1619,236 @@ async def test_get_catalog_table_data_load_failure():
         await get_catalog_table_data(
             session_mock, "market_data", "missing_table", max_rows=100
         )
+
+
+# ===== _find_recent_partition_filters branch coverage =====
+
+
+@pytest.mark.asyncio
+async def test_find_recent_partition_filters_empty_distinct_values():
+    """_find_recent_partition_filters returns None when no distinct values exist."""
+    mock_table = MagicMock()
+
+    with (
+        patch("deephaven_mcp.queries._extract_partition_column_defs") as mock_extract,
+        patch("deephaven_mcp.queries._get_distinct_column_values") as mock_distinct,
+    ):
+        mock_extract.return_value = [{"name": "Date", "type": "java.time.LocalDate"}]
+        mock_distinct.return_value = []
+
+        result = await _find_recent_partition_filters(mock_table, "DbInternal", "ProcessEventLog")
+
+    assert result is None
+    mock_table.where.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_find_recent_partition_filters_none_value_skipped():
+    """_find_recent_partition_filters skips None values in distinct list."""
+    mock_table = MagicMock()
+    mock_table.where.return_value.size = 1
+
+    with (
+        patch("deephaven_mcp.queries._extract_partition_column_defs") as mock_extract,
+        patch("deephaven_mcp.queries._get_distinct_column_values") as mock_distinct,
+    ):
+        mock_extract.return_value = [{"name": "Date", "type": "java.time.LocalDate"}]
+        # First value is None (skipped), second has data
+        mock_distinct.return_value = [None, "2024-01-14"]
+
+        async def fake_to_thread(fn, *args, **kwargs):
+            return fn(*args, **kwargs)
+
+        with patch("deephaven_mcp.queries.asyncio.to_thread", new=fake_to_thread):
+            result = await _find_recent_partition_filters(mock_table, "DbInternal", "ProcessEventLog")
+
+    # None was skipped; "2024-01-14" should be returned
+    assert result == ["Date == `2024-01-14`"]
+    mock_table.where.assert_called_once_with(["Date == `2024-01-14`"])
+
+
+@pytest.mark.asyncio
+async def test_find_recent_partition_filters_probe_exception_warns_and_continues():
+    """_find_recent_partition_filters logs WARNING on probe exception and tries next value."""
+    mock_table = MagicMock()
+
+    call_count = {"n": 0}
+
+    def where_side_effect(f):
+        idx = call_count["n"]
+        call_count["n"] += 1
+        m = MagicMock()
+        if idx == 0:
+            raise RuntimeError("access denied for partition 2024-01-15")
+        m.size = 3
+        return m
+
+    mock_table.where.side_effect = where_side_effect
+
+    with (
+        patch("deephaven_mcp.queries._extract_partition_column_defs") as mock_extract,
+        patch("deephaven_mcp.queries._get_distinct_column_values") as mock_distinct,
+    ):
+        mock_extract.return_value = [{"name": "Date", "type": "java.time.LocalDate"}]
+        mock_distinct.return_value = ["2024-01-15", "2024-01-14"]
+
+        async def fake_to_thread(fn, *args, **kwargs):
+            return fn(*args, **kwargs)
+
+        with patch("deephaven_mcp.queries.asyncio.to_thread", new=fake_to_thread):
+            result = await _find_recent_partition_filters(mock_table, "DbInternal", "ProcessEventLog")
+
+    # First probe raised, second probe succeeded
+    assert result == ["Date == `2024-01-14`"]
+
+
+# ===== Public partition utility function tests =====
+
+
+@pytest.mark.asyncio
+async def test_get_catalog_table_partition_columns_success():
+    """get_catalog_table_partition_columns loads table and extracts partition column defs."""
+    from deephaven_mcp.client import CorePlusSession
+
+    session_mock = MagicMock(spec=CorePlusSession)
+    mock_table = MagicMock()
+    expected = [{"name": "Date", "type": "java.time.LocalDate"}]
+
+    with (
+        patch("deephaven_mcp.queries._load_catalog_table") as mock_load,
+        patch("deephaven_mcp.queries._extract_partition_column_defs") as mock_extract,
+    ):
+        mock_load.return_value = mock_table
+        mock_extract.return_value = expected
+
+        result = await get_catalog_table_partition_columns(session_mock, "DbInternal", "ProcessEventLog")
+
+    assert result == expected
+    mock_load.assert_called_once_with(session_mock, "DbInternal", "ProcessEventLog")
+    mock_extract.assert_called_once_with(mock_table)
+
+
+@pytest.mark.asyncio
+async def test_get_catalog_table_partition_values_success():
+    """get_catalog_table_partition_values loads table and returns distinct values."""
+    from deephaven_mcp.client import CorePlusSession
+
+    session_mock = MagicMock(spec=CorePlusSession)
+    mock_table = MagicMock()
+    expected = ["2024-01-15", "2024-01-14"]
+
+    with (
+        patch("deephaven_mcp.queries._load_catalog_table") as mock_load,
+        patch("deephaven_mcp.queries._get_distinct_column_values") as mock_distinct,
+    ):
+        mock_load.return_value = mock_table
+        mock_distinct.return_value = expected
+
+        result = await get_catalog_table_partition_values(
+            session_mock, "DbInternal", "ProcessEventLog", "Date"
+        )
+
+    assert result == expected
+    mock_load.assert_called_once_with(session_mock, "DbInternal", "ProcessEventLog")
+    mock_distinct.assert_called_once_with(mock_table, "Date", descending=True)
+
+
+@pytest.mark.asyncio
+async def test_find_catalog_table_recent_partition_success():
+    """find_catalog_table_recent_partition loads table and delegates to _find_recent_partition_filters."""
+    from deephaven_mcp.client import CorePlusSession
+
+    session_mock = MagicMock(spec=CorePlusSession)
+    mock_table = MagicMock()
+    expected = ["Date == `2024-01-15`"]
+
+    with (
+        patch("deephaven_mcp.queries._load_catalog_table") as mock_load,
+        patch("deephaven_mcp.queries._find_recent_partition_filters") as mock_find,
+    ):
+        mock_load.return_value = mock_table
+        mock_find.return_value = expected
+
+        result = await find_catalog_table_recent_partition(session_mock, "DbInternal", "ProcessEventLog")
+
+    assert result == expected
+    mock_load.assert_called_once_with(session_mock, "DbInternal", "ProcessEventLog")
+    mock_find.assert_called_once_with(mock_table, "DbInternal", "ProcessEventLog")
+
+
+# ===== get_catalog_table_data auto-detection branch coverage =====
+
+
+@pytest.mark.asyncio
+async def test_get_catalog_table_data_auto_detect_logs_when_filters_found():
+    """get_catalog_table_data logs INFO when auto-detection returns filters."""
+    from deephaven_mcp.client import CorePlusSession
+
+    session_mock = MagicMock(spec=CorePlusSession)
+    mock_table = MagicMock()
+    mock_arrow_table = MagicMock(spec=pyarrow.Table)
+
+    # After _apply_filters calls table.where(filters), we get filtered_table.
+    # _apply_row_limit then calls filtered_table.head(probe_n).
+    filtered_table = mock_table.where.return_value
+    probe_table = filtered_table.head.return_value
+    probe_table.size = 3  # 3 <= 10 → is_complete=True
+    probe_table.to_arrow.return_value = mock_arrow_table
+
+    session_mock.historical_table = AsyncMock(return_value=mock_table)
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    auto_filters = ["Date == `2024-01-15`"]
+
+    with (
+        patch("deephaven_mcp.queries._find_recent_partition_filters") as mock_find,
+        patch("deephaven_mcp.queries.asyncio.to_thread", new=fake_to_thread),
+    ):
+        mock_find.return_value = auto_filters
+
+        result, is_complete = await get_catalog_table_data(
+            session_mock, "DbInternal", "ProcessEventLog", max_rows=10, filters=None
+        )
+
+    assert is_complete is True
+    mock_find.assert_called_once()
+    # Verify auto-detected filters were applied via table.where(auto_filters)
+    mock_table.where.assert_called_once_with(auto_filters)
+
+
+@pytest.mark.asyncio
+async def test_get_catalog_table_data_auto_detect_exception_warns_and_proceeds():
+    """get_catalog_table_data logs WARNING and proceeds without filter when auto-detection raises."""
+    from deephaven_mcp.client import CorePlusSession
+
+    session_mock = MagicMock(spec=CorePlusSession)
+    mock_table = MagicMock()
+    mock_arrow_table = MagicMock(spec=pyarrow.Table)
+
+    # No filter applied after exception; _apply_row_limit runs directly on mock_table.
+    probe_table = mock_table.head.return_value
+    probe_table.size = 3  # 3 <= 10 → is_complete=True
+    probe_table.to_arrow.return_value = mock_arrow_table
+
+    session_mock.historical_table = AsyncMock(return_value=mock_table)
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch("deephaven_mcp.queries._find_recent_partition_filters") as mock_find,
+        patch("deephaven_mcp.queries.asyncio.to_thread", new=fake_to_thread),
+    ):
+        mock_find.side_effect = RuntimeError("meta table unavailable")
+
+        # Should NOT raise — auto-detect failure is recoverable
+        result, is_complete = await get_catalog_table_data(
+            session_mock, "DbInternal", "ProcessEventLog", max_rows=10, filters=None
+        )
+
+    assert is_complete is True
+    mock_find.assert_called_once()
+    # No where() filter applied (auto-detect failed, graceful degradation)
+    mock_table.where.assert_not_called()

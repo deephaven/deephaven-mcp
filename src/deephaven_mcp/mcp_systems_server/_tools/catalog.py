@@ -887,6 +887,7 @@ async def catalog_table_sample(
     max_rows: int | None = 100,
     head: bool = True,
     format: str = "optimize-rendering",
+    filters: list[str] | None = None,
 ) -> dict:
     """MCP Tool: Retrieve sample TABULAR DATA from a catalog table in a Deephaven Enterprise (Core+) session.
 
@@ -937,6 +938,10 @@ async def catalog_table_sample(
     - Use 'optimize-rendering' (default) for best table display in AI interfaces
     - Use 'optimize-accuracy' for highest comprehension (markdown-kv format, more tokens)
     - Check 'format' field in response to know actual format used
+    - **Partitioned tables** (e.g. DbInternal, System tables) may return 0 rows without a
+      partition filter. By default (filters=None), the tool auto-detects the table's partition
+      columns and applies a filter for the most recent partition with data. Pass filters=[] to
+      disable auto-detection, or pass an explicit filter list to override.
 
     Args:
         context (Context): The MCP context object.
@@ -960,6 +965,15 @@ async def catalog_table_sample(
                                - "csv": String with comma-separated values, includes header row
                                - "yaml": String with YAML-formatted records list
                                - "xml": String with XML records structure
+        filters (list[str] | None, optional): Partition filter behavior. Defaults to None (auto-detect).
+                              - None (default): automatically detect the table's partition columns and apply
+                                a filter for the most recent partition that has data. This prevents silently
+                                empty results on partitioned tables such as DbInternal or System tables.
+                              - [] (empty list): no filter applied; skips auto-detection entirely.
+                              - ["expr", ...]: apply these explicit Deephaven DQL where-clause filters
+                                (e.g. ["Date == `2024-01-15`"]) and skip auto-detection.
+                              Partition columns and valid values can be discovered via catalog_tables_schema
+                              (look for IsPartitioning=True columns).
 
     Returns:
         dict: Structured result object with the following keys:
@@ -1026,7 +1040,8 @@ async def catalog_table_sample(
     """
     _LOGGER.info(
         f"[mcp_systems_server:catalog_table_sample] Invoked: session_id={session_id!r}, "
-        f"namespace={namespace!r}, table_name={table_name!r}, max_rows={max_rows}, head={head}, format={format!r}"
+        f"namespace={namespace!r}, table_name={table_name!r}, max_rows={max_rows}, head={head}, "
+        f"format={format!r}, filters={filters!r}"
     )
 
     try:
@@ -1049,7 +1064,7 @@ async def catalog_table_sample(
             f"[mcp_systems_server:catalog_table_sample] Retrieving catalog table data for '{namespace}.{table_name}'"
         )
         arrow_table, is_complete = await queries.get_catalog_table_data(
-            session, namespace, table_name, max_rows=max_rows, head=head
+            session, namespace, table_name, max_rows=max_rows, head=head, filters=filters
         )
 
         # Check response size before formatting
