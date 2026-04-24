@@ -437,8 +437,9 @@ async def _find_recent_partition_filters(
     Find where-clause filters for the most recent partition slice that has data.
 
     Only single-column partitioning is supported. Raises InternalError if the table
-    has more than one IsPartitioning column. Enumerates distinct values of that column
-    sorted descending (most-recent-first for ordered types), probes each
+    has more than one IsPartitioning column. Partition columns must be of string type;
+    non-string partition values raise InternalError. Enumerates distinct values of that
+    column sorted descending (most-recent-first for string-sorted columns), probes each
     until finding one with rows. Returns a filter list or None if the
     table has no partition columns or all probes find no data.
 
@@ -520,7 +521,7 @@ async def get_catalog_table_partition_values(
 ) -> list:
     """
     Return distinct values for a partition column, sorted descending (most-recent first
-    for ordered types such as dates or version numbers).
+    for string-sorted columns). Partition columns are expected to be of string type.
 
     Args:
         session (CorePlusSession): An active Deephaven Enterprise (Core+) session.
@@ -564,7 +565,8 @@ async def find_catalog_table_recent_partition(
 
     Raises:
         InternalError: If the table has more than one IsPartitioning column (only single-column
-                       partitioning is supported).
+                       partitioning is supported), or if a partition column contains non-string
+                       values (partition columns must be of string type).
         Exception: If the table cannot be loaded or partition metadata cannot be accessed.
     """
     _LOGGER.debug(
