@@ -132,7 +132,7 @@ async def mcp_reload_enterprise(context: Context) -> dict:
     - Check 'success' field to verify reload completed
     - Operation is atomic and thread-safe
     - After reload, background re-discovery runs asynchronously; the full session list may not
-      be immediately available — use sessions_status to check discovery progress
+      be immediately available — call sessions_list and check the 'initialization' field to monitor discovery progress
     - NOTE: This does NOT destroy enterprise PQs. All controller-owned PQs will reappear
       after re-discovery. To get a clean slate, delete individual sessions with
       session_enterprise_delete before reloading.
