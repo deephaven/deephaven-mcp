@@ -386,6 +386,7 @@ at the cost of more queries.
 async def _extract_partition_column_defs(table: Table) -> list[dict]:
     """
     Parse table.meta_table for IsPartitioning=True columns. Type-agnostic.
+
     Propagates exceptions — callers decide how to handle failures.
 
     Returns a list of {"name": str, "type": str} dicts for each partition column.
@@ -406,6 +407,7 @@ async def _extract_partition_column_defs(table: Table) -> list[dict]:
 def _format_partition_filter(col: str, val: object) -> str:
     """
     Format a Deephaven DQL where-clause fragment for a partition column value.
+
     Partition values are expected to be strings. Raises InternalError for other types.
     """
     if isinstance(val, str):
@@ -421,6 +423,7 @@ async def _get_distinct_column_values(
 ) -> list[Any]:
     """
     Return distinct values for a column sorted ascending or descending.
+
     Propagates exceptions — callers decide how to handle failures.
     """
     arrow = await asyncio.to_thread(
@@ -524,8 +527,9 @@ async def get_catalog_table_partition_values(
     session: CorePlusSession, namespace: str, table_name: str, column: str
 ) -> list:
     """
-    Return distinct values for a partition column, sorted descending (most-recent first
-    for string-sorted columns). Partition columns are expected to be of string type.
+    Return distinct partition column values, sorted descending (most-recent first).
+
+    Partition columns are expected to be of string type.
 
     Args:
         session (CorePlusSession): An active Deephaven Enterprise (Core+) session.

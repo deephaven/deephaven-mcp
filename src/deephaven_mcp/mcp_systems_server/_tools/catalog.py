@@ -891,7 +891,7 @@ async def catalog_table_sample(
     format: str = "optimize-rendering",
     filters: list[str] | None = None,
 ) -> dict:
-    """MCP Tool: Retrieve sample TABULAR DATA from a catalog table in a Deephaven Enterprise (Core+) session.
+    r"""MCP Tool: Retrieve sample TABULAR DATA from a catalog table in a Deephaven Enterprise (Core+) session.
 
     **Returns**: Sample table data formatted as TABULAR DATA for display. This tabular data should be
     displayed as a table to users for previewing catalog table contents.

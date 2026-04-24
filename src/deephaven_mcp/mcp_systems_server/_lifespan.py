@@ -45,7 +45,7 @@ def _make_lifespan(
     label: str,
     config_path: str | None,
 ) -> Callable[[FastMCP], AbstractAsyncContextManager[dict[str, Any]]]:
-    """Generic lifespan factory shared by community and enterprise servers.
+    """Create a lifespan context manager shared by community and enterprise servers.
 
     Args:
         config_manager_class (type): The config manager class to instantiate.
