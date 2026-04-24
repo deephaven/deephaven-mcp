@@ -26,6 +26,7 @@ This module provides coroutine-compatible utility functions for querying Deephav
 import asyncio
 import logging
 import textwrap
+from typing import Any, cast
 
 import pyarrow
 from pydeephaven.table import Table
@@ -143,6 +144,8 @@ async def _apply_row_limit(
             probe_table = await asyncio.to_thread(lambda: table.tail(probe_n))
 
         probe_size = await asyncio.to_thread(lambda: probe_table.size)
+        if probe_size is None:
+            raise InternalError(f"[queries:_apply_row_limit] Table .size returned None for {context_name}")
 
         if probe_size > max_rows:
             # More rows exist — apply the actual limit
@@ -415,7 +418,7 @@ def _format_partition_filter(col: str, val: object) -> str:
 
 async def _get_distinct_column_values(
     table: Table, col: str, *, descending: bool
-) -> list:
+) -> list[Any]:
     """
     Return distinct values for a column sorted ascending or descending.
     Propagates exceptions — callers decide how to handle failures.
@@ -427,7 +430,7 @@ async def _get_distinct_column_values(
             else table.select_distinct(col).sort(col)
         ).to_arrow()
     )
-    return arrow[col].to_pylist()
+    return cast(list[Any], arrow[col].to_pylist())
 
 
 async def _find_recent_partition_filters(
@@ -470,21 +473,22 @@ async def _find_recent_partition_filters(
             continue
         filter_str = _format_partition_filter(primary_col, val)
         try:
-            probe_size = await asyncio.to_thread(
-                lambda f=filter_str: table.where([f]).size
-            )
-            if probe_size > 0:
-                _LOGGER.debug(
-                    f"[queries:_find_recent_partition_filters] "
-                    f"Found partition with data for '{namespace}.{table_name}' "
-                    f"(1 filter)"
-                )
-                return [filter_str]
+            probe_size = await asyncio.to_thread(lambda: table.where([filter_str]).size)
         except Exception as e:
             _LOGGER.warning(
                 f"[queries:_find_recent_partition_filters] "
                 f"Probe failed for '{namespace}.{table_name}' filter '{filter_str}': {e}"
             )
+            continue
+        if probe_size is None:
+            raise InternalError(f"[queries:_find_recent_partition_filters] Table .size returned None for '{namespace}.{table_name}'")
+        if probe_size > 0:
+            _LOGGER.debug(
+                f"[queries:_find_recent_partition_filters] "
+                f"Found partition with data for '{namespace}.{table_name}' "
+                f"(1 filter)"
+            )
+            return [filter_str]
     return None
 
 

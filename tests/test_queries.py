@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pyarrow
 import pytest
 
-from deephaven_mcp._exceptions import UnsupportedOperationError
+from deephaven_mcp._exceptions import InternalError, UnsupportedOperationError
 from deephaven_mcp.queries import (
     _apply_filters,
     _apply_row_limit,
@@ -253,6 +253,22 @@ async def test_apply_row_limit_unreliable_table_size_regression():
         # Probe fix uses probe_table.size: 6 > 5 → is_complete=False (correct)
         assert result_table is limited_table_mock
         assert is_complete is False
+
+
+@pytest.mark.asyncio
+async def test_apply_row_limit_size_none_raises_internal_error():
+    """_apply_row_limit raises InternalError if probe_table.size returns None."""
+    table_mock = MagicMock()
+    probe_table_mock = MagicMock()
+    probe_table_mock.size = None
+    table_mock.head = MagicMock(return_value=probe_table_mock)
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with patch("deephaven_mcp.queries.asyncio.to_thread", new=fake_to_thread):
+        with pytest.raises(InternalError):
+            await _apply_row_limit(table_mock, max_rows=1000, head=True, context_name="test table")
 
 
 # ===== get_table tests =====
@@ -1714,6 +1730,27 @@ async def test_find_recent_partition_filters_probe_exception_warns_and_continues
 
     # First probe raised, second probe succeeded
     assert result == ["Date == `2024-01-14`"]
+
+
+@pytest.mark.asyncio
+async def test_find_recent_partition_filters_size_none_raises_internal_error():
+    """_find_recent_partition_filters raises InternalError if table.where().size returns None."""
+    mock_table = MagicMock()
+    mock_table.where.return_value.size = None
+
+    with (
+        patch("deephaven_mcp.queries._extract_partition_column_defs") as mock_extract,
+        patch("deephaven_mcp.queries._get_distinct_column_values") as mock_distinct,
+    ):
+        mock_extract.return_value = [{"name": "Date", "type": "java.time.LocalDate"}]
+        mock_distinct.return_value = ["2024-01-15"]
+
+        async def fake_to_thread(fn, *args, **kwargs):
+            return fn(*args, **kwargs)
+
+        with patch("deephaven_mcp.queries.asyncio.to_thread", new=fake_to_thread):
+            with pytest.raises(InternalError):
+                await _find_recent_partition_filters(mock_table, "DbInternal", "ProcessEventLog")
 
 
 # ===== Public partition utility function tests =====

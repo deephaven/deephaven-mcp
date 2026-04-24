@@ -377,7 +377,7 @@ def validate_single_community_session_config(
             fields if any were defined in `_REQUIRED_FIELDS`).
     """
     if not isinstance(config_item, dict):
-        _LOGGER.error(
+        _LOGGER.error(  # type: ignore[unreachable]
             f"[config:validate_single_community_session_config] Community session config for '{session_name}' must be a dictionary, got {type(config_item).__name__}"
         )
         raise CommunitySessionConfigurationError(
@@ -1182,7 +1182,7 @@ def _validate_community_config(config: dict[str, Any]) -> dict[str, Any]:
         >>> validated_config_empty = _validate_community_config({})  # Also valid
     """
     if not isinstance(config, dict):
-        _LOGGER.error(
+        _LOGGER.error(  # type: ignore[unreachable]
             f"[config:_validate_community_config] Configuration must be a dictionary, got {type(config).__name__}"
         )
         raise ConfigurationError("Configuration must be a dictionary")

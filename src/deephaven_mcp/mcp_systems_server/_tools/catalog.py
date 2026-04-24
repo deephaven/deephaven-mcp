@@ -10,7 +10,7 @@ These tools require Deephaven Enterprise (Core+) and are not available in Commun
 """
 
 import logging
-from typing import cast
+from typing import Any, cast
 
 from mcp.server.fastmcp import Context, FastMCP
 
@@ -783,8 +783,8 @@ async def catalog_tables_schema(
         is_complete = is_complete_catalog
 
         # Track which explicitly requested table_names were found in the catalog
-        found_names = (
-            {entry["TableName"] for entry in catalog_entries} if table_names else None
+        found_names: set[str] = (
+            {str(entry["TableName"]) for entry in catalog_entries} if table_names else set()
         )
 
         _LOGGER.debug(
