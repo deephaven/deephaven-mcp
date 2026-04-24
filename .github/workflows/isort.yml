@@ -2,9 +2,9 @@ name: isort (Import Sorting)
 
 on:
   push:
-    branches: [main]
+    branches: [main, mcp2]
   pull_request:
-    branches: [main]
+    branches: [main, mcp2]
 
 jobs:
   isort-check:

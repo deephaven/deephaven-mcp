@@ -72,9 +72,11 @@ on:
   push:
     branches:
       - main
+      - mcp2
   pull_request:
     branches:
       - main
+      - mcp2
   workflow_dispatch:
 
 env:
