@@ -372,7 +372,7 @@ async def session_tables_list(context: Context, session_id: str) -> dict:
         )
         return {
             "success": False,
-            "error": f"Failed to get schemas for session '{session_id}': {type(e).__name__}: {e}",
+            "error": f"Failed to list tables for session '{session_id}': {type(e).__name__}: {e}",
             "isError": True,
         }
 
