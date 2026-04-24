@@ -2,9 +2,9 @@ name: Integration Tests
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "mcp2" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "main", "mcp2" ]
   workflow_dispatch:  # Allow manual trigger
 
 jobs:
