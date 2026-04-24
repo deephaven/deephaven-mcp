@@ -16,9 +16,9 @@ from mcp.server.fastmcp import Context
 
 from deephaven_mcp.client import BaseSession, CorePlusSession
 from deephaven_mcp.resource_manager import (
+    BaseRegistry,
     InitializationPhase,
 )
-from deephaven_mcp.resource_manager._registry import BaseRegistry
 
 _LOGGER = logging.getLogger(__name__)
 

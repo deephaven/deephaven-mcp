@@ -21,9 +21,9 @@ from deephaven_mcp.mcp_systems_server._tools.shared import (
 )
 from deephaven_mcp.resource_manager import (
     BaseItemManager,
+    BaseRegistry,
     DynamicCommunitySessionManager,
 )
-from deephaven_mcp.resource_manager._registry import BaseRegistry
 
 T = TypeVar("T")
 

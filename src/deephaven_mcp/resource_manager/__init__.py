@@ -41,6 +41,9 @@ Exports - Session Managers:
       for item caching, liveness checking, and async-safe resource management.
 
 Exports - Registries:
+    - BaseRegistry: Abstract generic base class for all session registries. Provides coroutine-safe
+      management of named async-closable items with lifecycle tracking (initialize/get/get_all/close).
+
     - CommunitySessionRegistry: Registry for all configured CommunitySessionManager instances.
       Provides centralized access to all community sessions loaded from configuration.
 
@@ -171,6 +174,7 @@ from ._manager import (
     SystemType,
 )
 from ._registry import (
+    BaseRegistry,
     InitializationPhase,
     RegistrySnapshot,
 )
@@ -187,6 +191,7 @@ __all__ = [
     "DynamicCommunitySessionManager",
     "EnterpriseSessionManager",
     "CorePlusSessionFactoryManager",
+    "BaseRegistry",
     "CommunitySessionRegistry",
     "EnterpriseSessionRegistry",
     "InitializationPhase",

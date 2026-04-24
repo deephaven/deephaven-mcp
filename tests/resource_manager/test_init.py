@@ -19,6 +19,7 @@ def test_imports_and_all():
 
     expected_all = [
         "BaseItemManager",
+        "BaseRegistry",
         "EnterpriseSessionRegistry",
         "InitializationPhase",
         "RegistrySnapshot",

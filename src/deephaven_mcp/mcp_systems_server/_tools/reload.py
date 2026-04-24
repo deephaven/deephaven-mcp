@@ -14,7 +14,7 @@ import logging
 from mcp.server.fastmcp import Context, FastMCP
 
 from deephaven_mcp.config import ConfigManager
-from deephaven_mcp.resource_manager._registry import BaseRegistry
+from deephaven_mcp.resource_manager import BaseRegistry
 
 _LOGGER = logging.getLogger(__name__)
 
