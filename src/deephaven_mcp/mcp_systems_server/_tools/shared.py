@@ -346,6 +346,8 @@ def redact_json_sensitive_fields(json_str: str | None) -> str | None:
     try:
         parsed = json.loads(json_str)
     except (json.JSONDecodeError, ValueError):
-        _LOGGER.warning("type_specific JSON field is not valid JSON; content suppressed")
+        _LOGGER.warning(
+            "type_specific JSON field is not valid JSON; content suppressed"
+        )
         return "[UNPARSEABLE]"
     return json.dumps(_redact_recursive(parsed))
