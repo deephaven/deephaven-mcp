@@ -767,7 +767,31 @@ class CorePlusControllerClient(
             )
             raise QueryError(f"Failed to create query: {e}") from e
 
-    def _apply_pq_config_parameters(
+    def _apply_schedule_config(self, config: Any, schedule: list[str] | None) -> None:
+        """Apply scheduling entries to a protobuf config with three-way semantics.
+
+        The ``schedule`` parameter controls how the existing ``config.scheduling``
+        field is updated:
+
+        - ``None``: leave ``config.scheduling`` untouched (caller did not supply a value).
+        - ``[]``: clear ``config.scheduling`` (caller explicitly wants no schedule).
+        - ``[...]``: replace ``config.scheduling`` wholesale with the supplied entries.
+
+        Args:
+            config (Any): The protobuf config object whose ``scheduling`` field will be updated.
+            schedule (list[str] | None): Scheduling entries to apply, or ``None`` to skip.
+                An empty list clears all existing entries; a non-empty list replaces them.
+
+        Note:
+            Protobuf ``RepeatedScalarContainer`` has no ``clear()`` method; slice deletion
+            (``del config.scheduling[:]``) is used instead.
+        """
+        if schedule is not None:
+            del config.scheduling[:]
+            if schedule:
+                config.scheduling.extend(schedule)
+
+    def _apply_pq_config_parameters(  # noqa: C901
         self,
         config: Any,
         programming_language: str | None,
@@ -818,12 +842,7 @@ class CorePlusControllerClient(
             config.restartUsers = restart_users
         if extra_class_path:
             config.extraClassPath.extend(extra_class_path)
-        # Three-way semantics for schedule: None=skip, []=clear, [...]=replace.
-        # Protobuf RepeatedScalarContainer has no clear(); use slice deletion.
-        if schedule is not None:
-            del config.scheduling[:]
-            if schedule:
-                config.scheduling.extend(schedule)
+        self._apply_schedule_config(config, schedule)
         if init_timeout_nanos is not None:
             config.initTimeoutNanos = init_timeout_nanos
         if jvm_profile is not None:

@@ -519,8 +519,8 @@ async def test_session_community_delete_removal_fails():
     )
 
     assert result["success"] is False
-    assert "Failed to remove session" in result["error"]
     assert result["isError"] is True
+    assert "Removal failed" in result["error"]
 
 
 @pytest.mark.asyncio

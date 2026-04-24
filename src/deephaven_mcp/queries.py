@@ -398,7 +398,8 @@ async def _extract_partition_column_defs(table: Table) -> list[dict]:
     return [
         {"name": n, "type": t}
         for n, is_p, t in zip(
-            d.get("Name", []), d.get("IsPartitioning", []), d.get("DataType", [])
+            d.get("Name", []), d.get("IsPartitioning", []), d.get("DataType", []),
+            strict=True,
         )
         if is_p
     ]
@@ -476,7 +477,7 @@ async def _find_recent_partition_filters(
             continue
         filter_str = _format_partition_filter(primary_col, val)
         try:
-            probe_size = await asyncio.to_thread(lambda: table.where([filter_str]).size)
+            probe_size = await asyncio.to_thread(lambda fs=filter_str: table.where([fs]).size)
         except Exception as e:
             _LOGGER.warning(
                 f"[queries:_find_recent_partition_filters] "

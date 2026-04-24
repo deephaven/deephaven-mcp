@@ -978,7 +978,7 @@ async def test_session_community_delete_registry_remove_raises():
 
     assert result["success"] is False
     assert result["isError"] is True
-    assert "Failed to remove session" in result["error"]
+    assert "Simulated registry error" in result["error"]
 
 
 @pytest.mark.asyncio

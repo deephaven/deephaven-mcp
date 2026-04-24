@@ -83,6 +83,7 @@ def create_mock_catalog_schema_function(schema_data_map, error_tables=None):
 
 from deephaven_mcp import config
 from deephaven_mcp.mcp_systems_server._tools.catalog import (
+    _build_catalog_filters,
     catalog_namespaces_list,
     catalog_table_sample,
     catalog_tables_list,
@@ -1175,6 +1176,46 @@ async def test_catalog_tables_schema_empty_catalog():
     assert result["count"] == 0
     assert result["is_complete"] is True
     assert len(result["schemas"]) == 0
+
+
+def test_build_catalog_filters_all_none():
+    """All-None inputs produce an empty list."""
+    result = _build_catalog_filters(namespace=None, table_names=None, filters=None)
+    assert result == []
+
+
+def test_build_catalog_filters_filters_only():
+    """Caller-supplied filters are copied verbatim; original list is not mutated."""
+    original = ["Col1 = `a`", "Col2 = `b`"]
+    result = _build_catalog_filters(namespace=None, table_names=None, filters=original)
+    assert result == ["Col1 = `a`", "Col2 = `b`"]
+    assert result is not original  # must be a fresh copy
+
+
+def test_build_catalog_filters_namespace_only():
+    """A namespace produces exactly one filter with correct backtick syntax."""
+    result = _build_catalog_filters(namespace="market_data", table_names=None, filters=None)
+    assert result == ["Namespace = `market_data`"]
+
+
+def test_build_catalog_filters_table_names_only():
+    """table_names produces a single 'TableName in ...' filter with backtick-quoted names."""
+    result = _build_catalog_filters(namespace=None, table_names=["prices", "trades"], filters=None)
+    assert result == ["TableName in `prices`, `trades`"]
+
+
+def test_build_catalog_filters_all_combined():
+    """All three inputs combine in order: caller filters, then namespace, then table_names."""
+    result = _build_catalog_filters(
+        namespace="market_data",
+        table_names=["prices"],
+        filters=["IsActive = true"],
+    )
+    assert result == [
+        "IsActive = true",
+        "Namespace = `market_data`",
+        "TableName in `prices`",
+    ]
 
 
 @pytest.mark.asyncio

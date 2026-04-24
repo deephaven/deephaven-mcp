@@ -1055,6 +1055,67 @@ async def session_community_create(
     return result
 
 
+async def _delete_session_resources(
+    session_id: str,
+    session_name: str,
+    session_manager: Any,
+    session_registry: CommunitySessionRegistry,
+    instance_tracker: InstanceTracker,
+) -> None:
+    """Untrack, close, and remove a community session from the registry.
+
+    Performs the three cleanup steps required to fully delete a session:
+
+    1. **Untrack** the Python process from the instance tracker, if the session
+       is a :class:`DynamicCommunitySessionManager` backed by a
+       :class:`PythonLaunchedSession`.
+    2. **Close** the session (stops the Docker container or Python process).
+       Close failure is non-fatal: it is logged as a warning and cleanup
+       continues so that the registry entry is always removed.
+    3. **Remove** the session from the registry.  If ``remove_session`` raises,
+       the exception propagates to the caller.
+
+    Args:
+        session_id (str): Full session identifier, e.g. ``"community:dynamic:my-session"``.
+        session_name (str): Simple session name (the last component of ``session_id``),
+            used for Python process untracking.
+        session_manager (Any): The session manager retrieved from the registry.
+        session_registry (CommunitySessionRegistry): Registry to remove the session from.
+        instance_tracker (InstanceTracker): Tracker used to unregister Python processes.
+
+    Raises:
+        Exception: Propagates any exception raised by ``session_registry.remove_session``.
+            Close failure is swallowed and logged; removal failure is fatal.
+    """
+    if isinstance(session_manager, DynamicCommunitySessionManager):
+        if isinstance(session_manager.launched_session, PythonLaunchedSession):
+            await instance_tracker.untrack_python_process(session_name)
+
+    try:
+        _LOGGER.debug(
+            f"[mcp_systems_server:session_community_delete] Closing session '{session_id}'"
+        )
+        await session_manager.close()
+        _LOGGER.debug(
+            f"[mcp_systems_server:session_community_delete] Successfully closed session '{session_id}'"
+        )
+    except Exception as e:
+        _LOGGER.warning(
+            f"[mcp_systems_server:session_community_delete] Failed to close session '{session_id}': {e}"
+        )
+        # Continue with removal even if close failed
+
+    removed_manager = await session_registry.remove_session(session_id)
+    if removed_manager is None:
+        _LOGGER.warning(
+            f"[mcp_systems_server:session_community_delete] Session '{session_id}' was not found in registry during removal"
+        )
+    else:
+        _LOGGER.debug(
+            f"[mcp_systems_server:session_community_delete] Removed session '{session_id}' from registry"
+        )
+
+
 async def session_community_delete(
     context: Context,
     session_id: str,
@@ -1204,50 +1265,12 @@ async def session_community_delete(
             f"[mcp_systems_server:session_community_delete] Found dynamic community session manager for '{session_id}'"
         )
 
-        # Untrack python process if applicable (before closing)
         instance_tracker: InstanceTracker = context.request_context.lifespan_context[
             "instance_tracker"
         ]
-        if isinstance(session_manager, DynamicCommunitySessionManager):
-            if isinstance(session_manager.launched_session, PythonLaunchedSession):
-                await instance_tracker.untrack_python_process(session_name)
-
-        # Close the session (this will also stop the Docker container/python process)
-        try:
-            _LOGGER.debug(
-                f"[mcp_systems_server:session_community_delete] Closing session '{session_id}'"
-            )
-            await session_manager.close()
-            _LOGGER.debug(
-                f"[mcp_systems_server:session_community_delete] Successfully closed session '{session_id}'"
-            )
-        except Exception as e:
-            _LOGGER.warning(
-                f"[mcp_systems_server:session_community_delete] Failed to close session '{session_id}': {e}"
-            )
-            # Continue with removal even if close failed
-
-        # Remove from session registry
-        try:
-            removed_manager = await session_registry.remove_session(session_id)
-            if removed_manager is None:
-                error_msg = (
-                    f"Session '{session_id}' was not found in registry during removal"
-                )
-                _LOGGER.warning(
-                    f"[mcp_systems_server:session_community_delete] {error_msg}"
-                )
-            else:
-                _LOGGER.debug(
-                    f"[mcp_systems_server:session_community_delete] Removed session '{session_id}' from registry"
-                )
-
-        except Exception as e:
-            error_msg = f"Failed to remove session '{session_id}' from registry: {e}"
-            _LOGGER.error(f"[mcp_systems_server:session_community_delete] {error_msg}")
-            result["error"] = error_msg
-            result["isError"] = True
-            return result
+        await _delete_session_resources(
+            session_id, session_name, session_manager, session_registry, instance_tracker
+        )
 
         _LOGGER.info(
             f"[mcp_systems_server:session_community_delete] Successfully deleted session "

@@ -10,7 +10,7 @@ These tools require Deephaven Enterprise (Core+) and are not available in Commun
 """
 
 import logging
-from typing import Any, cast
+from typing import cast
 
 from mcp.server.fastmcp import Context, FastMCP
 
@@ -522,6 +522,39 @@ async def catalog_namespaces_list(
     )
 
 
+def _build_catalog_filters(
+    namespace: str | None,
+    table_names: list[str] | None,
+    filters: list[str] | None,
+) -> list[str]:
+    """Build the combined Deephaven query-language filter list for a catalog query.
+
+    Merges the caller-supplied ``filters`` with any implicit constraints derived
+    from ``namespace`` and ``table_names``.  All conditions are combined with AND
+    logic by the catalog query engine.
+
+    Args:
+        namespace (str | None): If provided, appends ``"Namespace = `<namespace>`"``
+            to restrict results to a single namespace.
+        table_names (list[str] | None): If provided, appends
+            ``"TableName in `<n1>`, `<n2>`, ..."`` to restrict results to the
+            named tables.
+        filters (list[str] | None): Caller-supplied Deephaven query-language filter
+            strings.  Copied as-is into the result; ``None`` is treated as empty.
+
+    Returns:
+        list[str]: Combined filter list ready to pass to ``queries.get_catalog_table``.
+            Empty list means no filtering (return all rows).
+    """
+    combined: list[str] = list(filters) if filters else []
+    if namespace:
+        combined.append(f"Namespace = `{namespace}`")
+    if table_names:
+        table_names_quoted = ", ".join(f"`{name}`" for name in table_names)
+        combined.append(f"TableName in {table_names_quoted}")
+    return combined
+
+
 async def catalog_tables_schema(
     context: Context,
     session_id: str,
@@ -746,15 +779,7 @@ async def catalog_tables_schema(
             f"[mcp_systems_server:catalog_tables_schema] Session established for enterprise session: '{session_id}'"
         )
 
-        # Build combined filters list
-        combined_filters = []
-        if filters:
-            combined_filters.extend(filters)
-        if namespace:
-            combined_filters.append(f"Namespace = `{namespace}`")
-        if table_names:
-            table_names_quoted = ", ".join(f"`{name}`" for name in table_names)
-            combined_filters.append(f"TableName in {table_names_quoted}")
+        combined_filters = _build_catalog_filters(namespace, table_names, filters)
 
         _LOGGER.debug(
             f"[mcp_systems_server:catalog_tables_schema] Combined filters: {combined_filters!r}"
