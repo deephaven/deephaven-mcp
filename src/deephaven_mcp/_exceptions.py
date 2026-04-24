@@ -541,7 +541,7 @@ class CommunitySessionConfigurationError(ConfigurationError):
 
     This exception is raised during validation of community session configuration
     data from the `deephaven_mcp.json` configuration file. It indicates that
-    session parameters are missing, invalid, or conflicting in the ``community.sessions``
+    session parameters are missing, invalid, or conflicting in the ``sessions``
     section of the configuration.
 
     Community sessions are statically configured Deephaven Community (Core) instances
