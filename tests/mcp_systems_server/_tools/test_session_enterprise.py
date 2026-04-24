@@ -1220,14 +1220,11 @@ async def test_session_enterprise_create_session_conflict():
         {"config_manager": mock_config_manager, "session_registry": mock_registry}
     )
 
-    result = await session_enterprise_create(
-        context, "existing-worker"
-    )
+    result = await session_enterprise_create(context, "existing-worker")
 
     assert result["success"] is False
     assert (
-        "Session 'enterprise:system:existing-worker' already exists"
-        in result["error"]
+        "Session 'enterprise:system:existing-worker' already exists" in result["error"]
     )
     assert result["isError"] is True
 
@@ -1272,9 +1269,7 @@ async def test_session_enterprise_create_factory_creation_failure():
         {"config_manager": mock_config_manager, "session_registry": mock_registry}
     )
 
-    result = await session_enterprise_create(
-        context, "failing-worker"
-    )
+    result = await session_enterprise_create(context, "failing-worker")
 
     assert result["success"] is False
     assert "Resource exhausted" in result["error"]
@@ -1413,10 +1408,7 @@ async def test_session_enterprise_delete_session_not_found():
     )
 
     assert result["success"] is False
-    assert (
-        "Session 'enterprise:system:nonexistent-worker' not found"
-        in result["error"]
-    )
+    assert "Session 'enterprise:system:nonexistent-worker' not found" in result["error"]
     assert result["isError"] is True
 
 
@@ -1510,7 +1502,9 @@ async def test_session_enterprise_delete_invalid_session_id_format():
     mock_registry = MagicMock()
     mock_registry.system_name = _TEST_SYSTEM_NAME
 
-    context = MockContext({"config_manager": MagicMock(), "session_registry": mock_registry})
+    context = MockContext(
+        {"config_manager": MagicMock(), "session_registry": mock_registry}
+    )
 
     result = await session_enterprise_delete(context, session_id="not-a-valid-id")
 
@@ -1525,7 +1519,9 @@ async def test_session_enterprise_delete_wrong_system_type():
     mock_registry = MagicMock()
     mock_registry.system_name = _TEST_SYSTEM_NAME
 
-    context = MockContext({"config_manager": MagicMock(), "session_registry": mock_registry})
+    context = MockContext(
+        {"config_manager": MagicMock(), "session_registry": mock_registry}
+    )
 
     result = await session_enterprise_delete(context, session_id="community:system:s1")
 
@@ -1540,7 +1536,9 @@ async def test_session_enterprise_delete_wrong_server():
     mock_registry = MagicMock()
     mock_registry.system_name = "prod"  # This server manages "prod"
 
-    context = MockContext({"config_manager": MagicMock(), "session_registry": mock_registry})
+    context = MockContext(
+        {"config_manager": MagicMock(), "session_registry": mock_registry}
+    )
 
     # session_id says "dev", but this server manages "prod"
     result = await session_enterprise_delete(context, session_id="enterprise:dev:s1")
@@ -1791,9 +1789,7 @@ async def test_session_enterprise_create_max_sessions_reached():
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
 
     # Flat config format with low max limit
-    flat_config = {
-        "session_creation": {"max_concurrent_sessions": 2, "defaults": {}}
-    }
+    flat_config = {"session_creation": {"max_concurrent_sessions": 2, "defaults": {}}}
 
     mock_config_manager.get_config = AsyncMock(return_value=flat_config)
 
@@ -1818,9 +1814,7 @@ async def test_session_enterprise_create_max_sessions_reached():
 
     mock_session_registry.get = AsyncMock(side_effect=mock_get)
 
-    result = await session_enterprise_create(
-        context, session_name="test-session"
-    )
+    result = await session_enterprise_create(context, session_name="test-session")
 
     # Verify failure due to max sessions reached
     assert result["success"] is False
@@ -1853,9 +1847,7 @@ async def test_session_enterprise_create_disabled():
     # get_config() returns flat config directly
     mock_config_manager.get_config = AsyncMock(return_value=flat_config)
 
-    result = await session_enterprise_create(
-        context, session_name="test-session"
-    )
+    result = await session_enterprise_create(context, session_name="test-session")
 
     # Verify failure due to disabled session creation
     assert result["success"] is False
@@ -1892,9 +1884,7 @@ async def test_session_enterprise_create_system_not_found_v2():
         }
     )
 
-    result = await session_enterprise_create(
-        context, session_name="test-session"
-    )
+    result = await session_enterprise_create(context, session_name="test-session")
 
     # Verify failure due to factory connection failure
     assert result["success"] is False
@@ -1911,9 +1901,7 @@ async def test_session_enterprise_delete_success_v2():
     mock_session_manager = MagicMock(spec=EnterpriseSessionManager)
 
     # Mock config
-    enterprise_config = {
-        "system": {"session_creation": {"max_concurrent_sessions": 5}}
-    }
+    enterprise_config = {"system": {"session_creation": {"max_concurrent_sessions": 5}}}
 
     def mock_get_config_section(manager, section):
         if section == "enterprise_sessions":
@@ -1962,9 +1950,7 @@ async def test_session_enterprise_delete_not_found():
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
 
     # Mock config
-    enterprise_config = {
-        "system": {"session_creation": {"max_concurrent_sessions": 5}}
-    }
+    enterprise_config = {"system": {"session_creation": {"max_concurrent_sessions": 5}}}
     full_config = {"enterprise": {"systems": enterprise_config}}
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
 
@@ -1988,8 +1974,7 @@ async def test_session_enterprise_delete_not_found():
     assert result["success"] is False
     assert result["isError"] is True
     assert (
-        "Session 'enterprise:system:nonexistent-session' not found"
-        in result["error"]
+        "Session 'enterprise:system:nonexistent-session' not found" in result["error"]
     )
 
 
@@ -2063,10 +2048,7 @@ async def test_check_session_limit_at_limit():
 
     assert result is not None
     assert result["success"] is False
-    assert (
-        result["error"]
-        == "Max concurrent sessions (5) reached for system 'system'"
-    )
+    assert result["error"] == "Max concurrent sessions (5) reached for system 'system'"
     assert result["isError"] is True
     mock_session_registry.count_added_sessions.assert_awaited_once()
 
@@ -2230,7 +2212,10 @@ def test_resolve_session_parameters_zero_values():
 def test_register_tools_registers_enterprise_tools():
     """register_tools() registers all DHE-specific session tools."""
     from mcp.server.fastmcp import FastMCP
-    from deephaven_mcp.mcp_systems_server._tools.session_enterprise import register_tools
+
+    from deephaven_mcp.mcp_systems_server._tools.session_enterprise import (
+        register_tools,
+    )
 
     server = FastMCP("test-enterprise-server")
     register_tools(server)

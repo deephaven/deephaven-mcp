@@ -102,9 +102,9 @@ async def get_session_from_context(
     _LOGGER.debug(
         f"[mcp_systems_server:{function_name}] Accessing session registry from context"
     )
-    session_registry: BaseRegistry = (
-        context.request_context.lifespan_context["session_registry"]
-    )
+    session_registry: BaseRegistry = context.request_context.lifespan_context[
+        "session_registry"
+    ]
 
     _LOGGER.debug(
         f"[mcp_systems_server:{function_name}] Retrieving session manager for '{session_id}'"
@@ -322,7 +322,11 @@ def _redact_recursive(obj: object) -> object:
     """
     if isinstance(obj, dict):
         return {
-            k: "[REDACTED]" if k.lower() in _SENSITIVE_JSON_KEYS else _redact_recursive(v)
+            k: (
+                "[REDACTED]"
+                if k.lower() in _SENSITIVE_JSON_KEYS
+                else _redact_recursive(v)
+            )
             for k, v in obj.items()
         }
     if isinstance(obj, list):

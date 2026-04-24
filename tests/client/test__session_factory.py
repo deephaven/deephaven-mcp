@@ -643,7 +643,11 @@ async def test_from_config_private_key_success(monkeypatch):
 async def test_from_config_invalid_config(monkeypatch):
     # Test enterprise functionality when available
     monkeypatch.setattr("deephaven_mcp.client._base.is_enterprise_available", True)
-    worker_cfg = {"system_name": "test-system", "connection_json_url": "url", "auth_type": "password"}
+    worker_cfg = {
+        "system_name": "test-system",
+        "connection_json_url": "url",
+        "auth_type": "password",
+    }
     with (
         patch("deephaven_mcp.client._session_factory.is_enterprise_available", True),
         patch(
@@ -664,7 +668,9 @@ async def test_from_config_invalid_config(monkeypatch):
         patch("deephaven_mcp.client._session_factory.is_enterprise_available", True),
         patch(
             "deephaven_mcp.client._session_factory.validate_enterprise_config",
-            side_effect=EnterpriseSystemConfigurationError("Required field 'x' missing in enterprise system 'test-system'"),
+            side_effect=EnterpriseSystemConfigurationError(
+                "Required field 'x' missing in enterprise system 'test-system'"
+            ),
         ),
     ):
         import deephaven_mcp.client._session_factory as sm_mod
@@ -677,7 +683,11 @@ async def test_from_config_invalid_config(monkeypatch):
 async def test_from_config_not_enterprise(monkeypatch):
     # Test when enterprise functionality is not available
     monkeypatch.setattr("deephaven_mcp.client._base.is_enterprise_available", False)
-    worker_cfg = {"system_name": "test-system", "connection_json_url": "url", "auth_type": "password"}
+    worker_cfg = {
+        "system_name": "test-system",
+        "connection_json_url": "url",
+        "auth_type": "password",
+    }
     with patch("deephaven_mcp.client._session_factory.is_enterprise_available", False):
         import deephaven_mcp.client._session_factory as sm_mod
 

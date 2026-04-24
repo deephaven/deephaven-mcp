@@ -413,7 +413,9 @@ def _format_partition_filter(col: str, val: object) -> str:
     )
 
 
-async def _get_distinct_column_values(table: Table, col: str, *, descending: bool) -> list:
+async def _get_distinct_column_values(
+    table: Table, col: str, *, descending: bool
+) -> list:
     """
     Return distinct values for a column sorted ascending or descending.
     Propagates exceptions — callers decide how to handle failures.
@@ -436,7 +438,7 @@ async def _find_recent_partition_filters(
 
     Only single-column partitioning is supported. Raises InternalError if the table
     has more than one IsPartitioning column. Enumerates distinct values of that column
-    sorted descending (most-recent-first for ordered types), probes each 
+    sorted descending (most-recent-first for ordered types), probes each
     until finding one with rows. Returns a filter list or None if the
     table has no partition columns or all probes find no data.
 
@@ -631,7 +633,9 @@ async def get_catalog_table_data(
     effective_filters = filters
     if filters is None:
         try:
-            effective_filters = await _find_recent_partition_filters(table, namespace, table_name)
+            effective_filters = await _find_recent_partition_filters(
+                table, namespace, table_name
+            )
             if effective_filters:
                 _LOGGER.info(
                     f"[queries:get_catalog_table_data] Auto-detected {len(effective_filters)} "
@@ -646,7 +650,9 @@ async def get_catalog_table_data(
 
     # Apply filters if any
     table = await _apply_filters(
-        table, effective_filters, context_name=f"catalog table '{namespace}.{table_name}'"
+        table,
+        effective_filters,
+        context_name=f"catalog table '{namespace}.{table_name}'",
     )
 
     # Apply row limiting using helper function

@@ -12,7 +12,6 @@ from deephaven_mcp.mcp_systems_server._lifespan import (
     make_enterprise_lifespan,
 )
 
-
 # ---------------------------------------------------------------------------
 # make_enterprise_lifespan
 # ---------------------------------------------------------------------------
@@ -230,7 +229,9 @@ async def test_make_enterprise_lifespan_cleanup_continues_after_tracker_unregist
     config_manager.get_config = AsyncMock(return_value={})
     session_registry.initialize = AsyncMock()
     session_registry.close = AsyncMock()
-    instance_tracker.unregister = AsyncMock(side_effect=RuntimeError("unregister failed"))
+    instance_tracker.unregister = AsyncMock(
+        side_effect=RuntimeError("unregister failed")
+    )
 
     with (
         patch(
@@ -380,7 +381,9 @@ async def test_make_community_lifespan_cleanup_on_initialize_error():
     instance_tracker.instance_id = "test-community-id"
 
     config_manager.get_config = AsyncMock(return_value={})
-    session_registry.initialize = AsyncMock(side_effect=RuntimeError("community init failed"))
+    session_registry.initialize = AsyncMock(
+        side_effect=RuntimeError("community init failed")
+    )
     session_registry.close = AsyncMock()
     instance_tracker.unregister = AsyncMock()
 

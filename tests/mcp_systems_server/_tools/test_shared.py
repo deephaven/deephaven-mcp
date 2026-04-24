@@ -11,13 +11,13 @@ from conftest import MockContext
 from deephaven_mcp._exceptions import RegistryItemNotFoundError
 from deephaven_mcp.client import BaseSession, CorePlusSession
 from deephaven_mcp.mcp_systems_server._tools.shared import (
+    _redact_recursive,
     check_response_size,
     format_initialization_status,
     format_meta_table_result,
     get_enterprise_session,
     get_session_from_context,
     redact_json_sensitive_fields,
-    _redact_recursive,
 )
 from deephaven_mcp.resource_manager import InitializationPhase
 
@@ -209,7 +209,9 @@ async def test_get_enterprise_session_success():
 
     context = MockContext({"session_registry": mock_registry})
 
-    session, error = await get_enterprise_session("test_function", context, "test-session-id")
+    session, error = await get_enterprise_session(
+        "test_function", context, "test-session-id"
+    )
 
     assert session is mock_session
     assert error is None
@@ -226,7 +228,9 @@ async def test_get_enterprise_session_not_enterprise():
 
     context = MockContext({"session_registry": mock_registry})
 
-    session, error = await get_enterprise_session("test_function", context, "test-session-id")
+    session, error = await get_enterprise_session(
+        "test_function", context, "test-session-id"
+    )
 
     assert session is None
     assert error is not None
@@ -244,7 +248,9 @@ async def test_get_enterprise_session_exception():
 
     context = MockContext({"session_registry": mock_registry})
 
-    session, error = await get_enterprise_session("test_function", context, "test-session-id")
+    session, error = await get_enterprise_session(
+        "test_function", context, "test-session-id"
+    )
 
     assert session is None
     assert error is not None
@@ -288,7 +294,9 @@ def test_format_meta_table_result_without_namespace():
 def test_format_meta_table_result_with_namespace():
     """With namespace the result includes the 'namespace' key."""
     arrow_table = _make_arrow_table()
-    result = format_meta_table_result(arrow_table, "daily_prices", namespace="market_data")
+    result = format_meta_table_result(
+        arrow_table, "daily_prices", namespace="market_data"
+    )
 
     assert result["success"] is True
     assert result["namespace"] == "market_data"
@@ -353,7 +361,10 @@ def test_redact_recursive_list_of_scalars():
 def test_redact_recursive_list_of_dicts():
     data = [{"token": "abc", "id": 1}, {"token": "xyz", "id": 2}]
     result = _redact_recursive(data)
-    assert result == [{"token": "[REDACTED]", "id": 1}, {"token": "[REDACTED]", "id": 2}]
+    assert result == [
+        {"token": "[REDACTED]", "id": 1},
+        {"token": "[REDACTED]", "id": 2},
+    ]
 
 
 # ===========================================================================
@@ -371,14 +382,18 @@ def test_redact_json_sensitive_fields_empty_string():
 
 def test_redact_json_sensitive_fields_no_sensitive_keys():
     import json
+
     data = {"host": "localhost", "port": 5432, "database": "testdb"}
     result = redact_json_sensitive_fields(json.dumps(data))
     assert json.loads(result) == data
 
 
-@pytest.mark.parametrize("key", ["password", "passwd", "token", "secret", "api_key", "apikey", "api_secret"])
+@pytest.mark.parametrize(
+    "key", ["password", "passwd", "token", "secret", "api_key", "apikey", "api_secret"]
+)
 def test_redact_json_sensitive_fields_each_key(key):
     import json
+
     data = {key: "supersensitive", "other": "keep"}
     result = redact_json_sensitive_fields(json.dumps(data))
     parsed = json.loads(result)
@@ -388,6 +403,7 @@ def test_redact_json_sensitive_fields_each_key(key):
 
 def test_redact_json_sensitive_fields_nested():
     import json
+
     data = {"jdbcConfig": {"password": "secret123", "host": "db.example.com"}}
     result = redact_json_sensitive_fields(json.dumps(data))
     parsed = json.loads(result)
@@ -397,6 +413,7 @@ def test_redact_json_sensitive_fields_nested():
 
 def test_redact_json_sensitive_fields_array_of_dicts():
     import json
+
     data = [{"token": "abc123", "id": 1}, {"token": "xyz789", "id": 2}]
     result = redact_json_sensitive_fields(json.dumps(data))
     parsed = json.loads(result)
@@ -414,6 +431,7 @@ def test_redact_json_sensitive_fields_invalid_json():
 
 def test_redact_json_sensitive_fields_mixed_keys():
     import json
+
     data = {"username": "admin", "password": "hunter2", "database": "prod"}
     result = redact_json_sensitive_fields(json.dumps(data))
     parsed = json.loads(result)

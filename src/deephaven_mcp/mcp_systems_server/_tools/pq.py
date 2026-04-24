@@ -145,6 +145,7 @@ single batch tool call.
 Environment variable override: DH_MCP_DEFAULT_MAX_CONCURRENT
 """
 
+
 def _validate_timeout(timeout_seconds: int, function_name: str) -> int:
     """Validate timeout is reasonable for MCP operations.
 
@@ -255,7 +256,9 @@ def _format_pq_config(config: CorePlusQueryConfig) -> dict[str, object]:
         "script_path": pb.scriptPath if pb.scriptPath else None,
         "script_language": pb.scriptLanguage,
         "configuration_type": pb.configurationType,
-        "type_specific_fields_json": redact_json_sensitive_fields(pb.typeSpecificFieldsJson),
+        "type_specific_fields_json": redact_json_sensitive_fields(
+            pb.typeSpecificFieldsJson
+        ),
         "scheduling": list(pb.scheduling),
         "timeout_nanos": pb.timeoutNanos if pb.timeoutNanos else None,
         "jvm_profile": pb.jvmProfile if pb.jvmProfile else None,
@@ -274,7 +277,11 @@ def _format_pq_config(config: CorePlusQueryConfig) -> dict[str, object]:
         ),
         "kubernetes_control": pb.kubernetesControl if pb.kubernetesControl else None,
         "worker_kind": pb.workerKind,
-        "created_time_nanos": pb.createdTimeNanos if (pb.createdTimeNanos and pb.createdTimeNanos != _NULL_LONG) else None,
+        "created_time_nanos": (
+            pb.createdTimeNanos
+            if (pb.createdTimeNanos and pb.createdTimeNanos != _NULL_LONG)
+            else None
+        ),
         "replica_count": pb.replicaCount,
         "spare_count": pb.spareCount,
         "assignment_policy": pb.assignmentPolicy if pb.assignmentPolicy else None,
@@ -581,7 +588,9 @@ def _format_pq_state(state: CorePlusQueryState | None) -> dict[str, object] | No
         "scope_types": scope_types,
         "connection_details": connection_details,
         "exception_details": exception_details,
-        "type_specific_state_json": redact_json_sensitive_fields(pb.typeSpecificStateJson),
+        "type_specific_state_json": redact_json_sensitive_fields(
+            pb.typeSpecificStateJson
+        ),
         "last_authenticated_user": pb.lastAuthenticatedUser or None,
         "last_effective_user": pb.lastEffectiveUser or None,
         "script_loader_state_json": pb.scriptLoaderStateJson or None,
@@ -923,11 +932,11 @@ async def pq_name_to_id(
         )
         factory_manager = session_registry.factory_manager
         _LOGGER.debug(
-            f"[mcp_systems_server:pq_name_to_id] Connecting to enterprise factory"
+            "[mcp_systems_server:pq_name_to_id] Connecting to enterprise factory"
         )
         factory = await factory_manager.get()
         _LOGGER.debug(
-            f"[mcp_systems_server:pq_name_to_id] Connected to enterprise factory"
+            "[mcp_systems_server:pq_name_to_id] Connected to enterprise factory"
         )
 
         # Get controller client
@@ -1058,15 +1067,13 @@ async def pq_list(
             context.request_context.lifespan_context["session_registry"]
         )
         system_name = session_registry.system_name
-        _LOGGER.info(f"[mcp_systems_server:pq_list] Invoked: system_name={system_name!r}")
+        _LOGGER.info(
+            f"[mcp_systems_server:pq_list] Invoked: system_name={system_name!r}"
+        )
         factory_manager = session_registry.factory_manager
-        _LOGGER.debug(
-            f"[mcp_systems_server:pq_list] Connecting to enterprise factory"
-        )
+        _LOGGER.debug("[mcp_systems_server:pq_list] Connecting to enterprise factory")
         factory = await factory_manager.get()
-        _LOGGER.debug(
-            f"[mcp_systems_server:pq_list] Connected to enterprise factory"
-        )
+        _LOGGER.debug("[mcp_systems_server:pq_list] Connected to enterprise factory")
 
         # Get controller client
         controller = factory.controller_client
@@ -1356,21 +1363,17 @@ async def pq_details(
 
         factory_manager = session_registry.factory_manager
         _LOGGER.debug(
-            f"[mcp_systems_server:pq_details] Connecting to enterprise factory"
+            "[mcp_systems_server:pq_details] Connecting to enterprise factory"
         )
         factory = await factory_manager.get()
-        _LOGGER.debug(
-            f"[mcp_systems_server:pq_details] Connected to enterprise factory"
-        )
+        _LOGGER.debug("[mcp_systems_server:pq_details] Connected to enterprise factory")
 
         # Get controller client
         controller = factory.controller_client
 
         # Get all PQs from controller (ensures subscription is ready)
         # Then extract the specific PQ by serial
-        _LOGGER.debug(
-            f"[mcp_systems_server:pq_details] Fetching PQ map from controller"
-        )
+        _LOGGER.debug("[mcp_systems_server:pq_details] Fetching PQ map from controller")
         pq_map = await controller.map()
         _LOGGER.debug(
             f"[mcp_systems_server:pq_details] Received {len(pq_map)} PQ(s) from controller"
@@ -1621,13 +1624,9 @@ async def pq_create(
             f"pq_name={pq_name!r}, heap_size_gb={heap_size_gb}"
         )
         factory_manager = session_registry.factory_manager
-        _LOGGER.debug(
-            f"[mcp_systems_server:pq_create] Connecting to enterprise factory"
-        )
+        _LOGGER.debug("[mcp_systems_server:pq_create] Connecting to enterprise factory")
         factory = await factory_manager.get()
-        _LOGGER.debug(
-            f"[mcp_systems_server:pq_create] Connected to enterprise factory"
-        )
+        _LOGGER.debug("[mcp_systems_server:pq_create] Connected to enterprise factory")
 
         # Get controller client
         controller = factory.controller_client
@@ -2347,22 +2346,16 @@ async def pq_modify(
             return result
 
         factory_manager = session_registry.factory_manager
-        _LOGGER.debug(
-            f"[mcp_systems_server:pq_modify] Connecting to enterprise factory"
-        )
+        _LOGGER.debug("[mcp_systems_server:pq_modify] Connecting to enterprise factory")
         factory = await factory_manager.get()
-        _LOGGER.debug(
-            f"[mcp_systems_server:pq_modify] Connected to enterprise factory"
-        )
+        _LOGGER.debug("[mcp_systems_server:pq_modify] Connected to enterprise factory")
 
         # Get controller client
         controller = factory.controller_client
 
         # Get all PQs from controller (ensures subscription is ready)
         # Then extract the specific PQ by serial
-        _LOGGER.debug(
-            f"[mcp_systems_server:pq_modify] Fetching PQ map from controller"
-        )
+        _LOGGER.debug("[mcp_systems_server:pq_modify] Fetching PQ map from controller")
         pq_map = await controller.map()
         _LOGGER.debug(
             f"[mcp_systems_server:pq_modify] Received {len(pq_map)} PQ(s) from controller"
@@ -2648,9 +2641,7 @@ async def pq_start(
                 )
                 pq_name = pq_info.config.pb.name
                 status_obj = pq_info.state.status if pq_info.state else None
-                state_name = (
-                    status_obj.name if status_obj is not None else "UNKNOWN"
-                )
+                state_name = status_obj.name if status_obj is not None else "UNKNOWN"
 
                 # Success
                 item_result["success"] = True
@@ -3175,9 +3166,7 @@ async def pq_restart(
                 )
                 pq_name = pq_info.config.pb.name
                 status_obj = pq_info.state.status if pq_info.state else None
-                state_name = (
-                    status_obj.name if status_obj is not None else "UNKNOWN"
-                )
+                state_name = status_obj.name if status_obj is not None else "UNKNOWN"
 
                 # Success
                 item_result["success"] = True

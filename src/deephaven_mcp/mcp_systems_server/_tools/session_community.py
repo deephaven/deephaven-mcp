@@ -1147,7 +1147,9 @@ async def session_community_delete(
     )
 
     result: dict[str, object] = {"success": False}
-    session_name = session_id  # fallback for outer except; overwritten after parse_full_name
+    session_name = (
+        session_id  # fallback for outer except; overwritten after parse_full_name
+    )
 
     try:
         # Get session registry
@@ -1157,7 +1159,9 @@ async def session_community_delete(
 
         # Parse and validate the session_id
         try:
-            system_type_str, source, session_name = BaseItemManager.parse_full_name(session_id)
+            system_type_str, source, session_name = BaseItemManager.parse_full_name(
+                session_id
+            )
         except InvalidSessionNameError as e:
             error_msg = f"Invalid session_id format: {e}"
             _LOGGER.error(f"[mcp_systems_server:session_community_delete] {error_msg}")

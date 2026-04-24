@@ -337,7 +337,9 @@ async def test_get_table_head_incomplete_table():
     arrow_mock = MagicMock(spec=pyarrow.Table)
     arrow_mock.__len__ = lambda: 1000  # Arrow table has 1000 rows (limited)
     limited_table_mock.to_arrow = lambda: arrow_mock
-    original_table_mock.head = MagicMock(side_effect=[probe_table_mock, limited_table_mock])
+    original_table_mock.head = MagicMock(
+        side_effect=[probe_table_mock, limited_table_mock]
+    )
 
     session_mock = MagicMock()
     session_mock.open_table = AsyncMock(return_value=original_table_mock)
@@ -390,7 +392,9 @@ async def test_get_table_tail_incomplete_table():
     arrow_mock = MagicMock(spec=pyarrow.Table)
     arrow_mock.__len__ = lambda: 800  # Arrow table has 800 rows (limited)
     limited_table_mock.to_arrow = lambda: arrow_mock
-    original_table_mock.tail = MagicMock(side_effect=[probe_table_mock, limited_table_mock])
+    original_table_mock.tail = MagicMock(
+        side_effect=[probe_table_mock, limited_table_mock]
+    )
 
     session_mock = MagicMock()
     session_mock.open_table = AsyncMock(return_value=original_table_mock)
@@ -974,7 +978,9 @@ async def test_get_catalog_table_success_no_filters():
     limited_table_mock = MagicMock()
     arrow_mock = MagicMock(spec=pyarrow.Table)
     limited_table_mock.to_arrow = lambda: arrow_mock
-    catalog_table_mock.head = MagicMock(side_effect=[probe_table_mock, limited_table_mock])
+    catalog_table_mock.head = MagicMock(
+        side_effect=[probe_table_mock, limited_table_mock]
+    )
 
     # Create mock session
     session_mock = MagicMock(spec=CorePlusSession)
@@ -1243,7 +1249,9 @@ async def test_get_catalog_namespaces_incomplete():
     # Create mock sorted namespace table with more rows than max_rows
     sorted_namespace_table_mock = MagicMock()
     sorted_namespace_table_mock.size = 2000
-    sorted_namespace_table_mock.head = MagicMock(side_effect=[probe_table_mock, limited_table_mock])
+    sorted_namespace_table_mock.head = MagicMock(
+        side_effect=[probe_table_mock, limited_table_mock]
+    )
 
     # Create mock namespace table (after select_distinct)
     namespace_table_mock = MagicMock()
@@ -1636,7 +1644,9 @@ async def test_find_recent_partition_filters_empty_distinct_values():
         mock_extract.return_value = [{"name": "Date", "type": "java.time.LocalDate"}]
         mock_distinct.return_value = []
 
-        result = await _find_recent_partition_filters(mock_table, "DbInternal", "ProcessEventLog")
+        result = await _find_recent_partition_filters(
+            mock_table, "DbInternal", "ProcessEventLog"
+        )
 
     assert result is None
     mock_table.where.assert_not_called()
@@ -1660,7 +1670,9 @@ async def test_find_recent_partition_filters_none_value_skipped():
             return fn(*args, **kwargs)
 
         with patch("deephaven_mcp.queries.asyncio.to_thread", new=fake_to_thread):
-            result = await _find_recent_partition_filters(mock_table, "DbInternal", "ProcessEventLog")
+            result = await _find_recent_partition_filters(
+                mock_table, "DbInternal", "ProcessEventLog"
+            )
 
     # None was skipped; "2024-01-14" should be returned
     assert result == ["Date == `2024-01-14`"]
@@ -1696,7 +1708,9 @@ async def test_find_recent_partition_filters_probe_exception_warns_and_continues
             return fn(*args, **kwargs)
 
         with patch("deephaven_mcp.queries.asyncio.to_thread", new=fake_to_thread):
-            result = await _find_recent_partition_filters(mock_table, "DbInternal", "ProcessEventLog")
+            result = await _find_recent_partition_filters(
+                mock_table, "DbInternal", "ProcessEventLog"
+            )
 
     # First probe raised, second probe succeeded
     assert result == ["Date == `2024-01-14`"]
@@ -1721,7 +1735,9 @@ async def test_get_catalog_table_partition_columns_success():
         mock_load.return_value = mock_table
         mock_extract.return_value = expected
 
-        result = await get_catalog_table_partition_columns(session_mock, "DbInternal", "ProcessEventLog")
+        result = await get_catalog_table_partition_columns(
+            session_mock, "DbInternal", "ProcessEventLog"
+        )
 
     assert result == expected
     mock_load.assert_called_once_with(session_mock, "DbInternal", "ProcessEventLog")
@@ -1769,7 +1785,9 @@ async def test_find_catalog_table_recent_partition_success():
         mock_load.return_value = mock_table
         mock_find.return_value = expected
 
-        result = await find_catalog_table_recent_partition(session_mock, "DbInternal", "ProcessEventLog")
+        result = await find_catalog_table_recent_partition(
+            session_mock, "DbInternal", "ProcessEventLog"
+        )
 
     assert result == expected
     mock_load.assert_called_once_with(session_mock, "DbInternal", "ProcessEventLog")

@@ -1371,7 +1371,9 @@ async def test_catalog_table_sample_with_explicit_filters():
     mock_arrow_table.__len__ = MagicMock(return_value=5)
     mock_arrow_table.schema = MagicMock()
     mock_arrow_table.schema.__len__ = MagicMock(return_value=2)
-    mock_arrow_table.to_pydict = MagicMock(return_value={"Date": ["2024-01-15"], "Val": [1]})
+    mock_arrow_table.to_pydict = MagicMock(
+        return_value={"Date": ["2024-01-15"], "Val": [1]}
+    )
 
     with patch(
         "deephaven_mcp.mcp_systems_server._tools.catalog.queries.get_catalog_table_data"
@@ -1451,7 +1453,9 @@ async def test_extract_partition_column_defs_returns_partition_cols():
         {"name": "Date", "type": "java.time.LocalDate"},
         {"name": "Region", "type": "java.lang.String"},
     ]
-    mock_table.meta_table.view.assert_called_once_with(["Name", "IsPartitioning", "DataType"])
+    mock_table.meta_table.view.assert_called_once_with(
+        ["Name", "IsPartitioning", "DataType"]
+    )
 
 
 @pytest.mark.asyncio
@@ -1512,15 +1516,21 @@ async def test_get_distinct_column_values_descending_returns_sorted():
     mock_table = MagicMock()
     mock_arrow = MagicMock()
     mock_arrow.__getitem__ = MagicMock(
-        side_effect=lambda col: MagicMock(to_pylist=MagicMock(return_value=["2024-01-15", "2024-01-14", "2024-01-13"]))
+        side_effect=lambda col: MagicMock(
+            to_pylist=MagicMock(return_value=["2024-01-15", "2024-01-14", "2024-01-13"])
+        )
     )
-    mock_table.select_distinct.return_value.sort_descending.return_value.to_arrow.return_value = mock_arrow
+    mock_table.select_distinct.return_value.sort_descending.return_value.to_arrow.return_value = (
+        mock_arrow
+    )
 
     result = await _get_distinct_column_values(mock_table, "Date", descending=True)
 
     assert result == ["2024-01-15", "2024-01-14", "2024-01-13"]
     mock_table.select_distinct.assert_called_once_with("Date")
-    mock_table.select_distinct.return_value.sort_descending.assert_called_once_with("Date")
+    mock_table.select_distinct.return_value.sort_descending.assert_called_once_with(
+        "Date"
+    )
 
 
 @pytest.mark.asyncio
@@ -1554,7 +1564,9 @@ async def test_find_recent_partition_filters_first_partition_has_data():
         # First probe returns size=1 (has data)
         mock_table.where.return_value.size = 1
 
-        result = await _find_recent_partition_filters(mock_table, "DbInternal", "ProcessEventLog")
+        result = await _find_recent_partition_filters(
+            mock_table, "DbInternal", "ProcessEventLog"
+        )
 
     assert result == ["Date == `2024-01-15`"]
     mock_table.where.assert_called_once_with(["Date == `2024-01-15`"])
@@ -1593,7 +1605,9 @@ async def test_find_recent_partition_filters_second_partition_has_data():
 
         mock_table.where.side_effect = where_side_effect
 
-        result = await _find_recent_partition_filters(mock_table, "DbInternal", "ProcessEventLog")
+        result = await _find_recent_partition_filters(
+            mock_table, "DbInternal", "ProcessEventLog"
+        )
 
     assert result == ["Date == `2024-01-14`"]
 
@@ -1615,7 +1629,9 @@ async def test_find_recent_partition_filters_all_probes_empty():
         mock_extract.return_value = [{"name": "Date", "type": "java.time.LocalDate"}]
         mock_distinct.return_value = ["2024-01-15", "2024-01-14", "2024-01-13"]
 
-        result = await _find_recent_partition_filters(mock_table, "DbInternal", "ProcessEventLog")
+        result = await _find_recent_partition_filters(
+            mock_table, "DbInternal", "ProcessEventLog"
+        )
 
     assert result is None
 
@@ -1661,6 +1677,7 @@ async def test_find_recent_partition_filters_multiple_partition_cols_raises():
 def test_register_tools_registers_catalog_tools():
     """register_tools() registers all catalog tools."""
     from mcp.server.fastmcp import FastMCP
+
     from deephaven_mcp.mcp_systems_server._tools.catalog import register_tools
 
     server = FastMCP("test-catalog-server")

@@ -436,7 +436,9 @@ async def test_session_community_delete_non_community_session():
     )
 
     # Pass an enterprise session_id — type mismatch is caught before registry lookup
-    result = await session_community_delete(context, session_id="enterprise:system:test-session")
+    result = await session_community_delete(
+        context, session_id="enterprise:system:test-session"
+    )
 
     assert result["success"] is False
     assert "not a community session" in result["error"]
@@ -472,7 +474,9 @@ async def test_session_community_delete_close_fails_but_continues():
         }
     )
 
-    result = await session_community_delete(context, session_id="community:dynamic:test-session")
+    result = await session_community_delete(
+        context, session_id="community:dynamic:test-session"
+    )
 
     # Should still succeed despite close failure
     assert result["success"] is True
@@ -510,7 +514,9 @@ async def test_session_community_delete_removal_fails():
         }
     )
 
-    result = await session_community_delete(context, session_id="community:dynamic:test-session")
+    result = await session_community_delete(
+        context, session_id="community:dynamic:test-session"
+    )
 
     assert result["success"] is False
     assert "Failed to remove session" in result["error"]
@@ -534,7 +540,9 @@ async def test_session_community_delete_unexpected_exception():
         }
     )
 
-    result = await session_community_delete(context, session_id="community:dynamic:test-session")
+    result = await session_community_delete(
+        context, session_id="community:dynamic:test-session"
+    )
 
     assert result["success"] is False
     assert "Unexpected error" in result["error"]
@@ -1378,6 +1386,7 @@ async def test_sessions_list_shows_errors_even_with_sessions():
 def test_register_tools_registers_session_tools():
     """register_tools() registers sessions_list and session_details."""
     from mcp.server.fastmcp import FastMCP
+
     from deephaven_mcp.mcp_systems_server._tools.session import register_tools
 
     server = FastMCP("test-session-server")

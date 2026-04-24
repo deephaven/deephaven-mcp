@@ -228,7 +228,9 @@ def validate_security_config(security_config: Any | None) -> None:
                 f"'security.credential_retrieval_mode' must be a string, got {type(value).__name__}"
             )
         if value not in _VALID_CREDENTIAL_RETRIEVAL_MODES:
-            valid_modes = '"' + '", "'.join(sorted(_VALID_CREDENTIAL_RETRIEVAL_MODES)) + '"'
+            valid_modes = (
+                '"' + '", "'.join(sorted(_VALID_CREDENTIAL_RETRIEVAL_MODES)) + '"'
+            )
             _LOGGER.error(
                 f"[config:validate_security_config] 'security.credential_retrieval_mode' must be one of: {valid_modes}, got '{value}'"
             )
@@ -872,7 +874,9 @@ def _get_config_section(
         KeyError: If any key in the section path does not exist or if any intermediate value is not a dictionary.
             The error message includes the full path for debugging.
     """
-    _LOGGER.debug(f"[config:_get_config_section] Getting config section for path: {section}")
+    _LOGGER.debug(
+        f"[config:_get_config_section] Getting config section for path: {section}"
+    )
     curr = config
     for key in section:
         if not isinstance(curr, dict) or key not in curr:
@@ -1235,7 +1239,11 @@ class CommunityServerConfigManager(ConfigManager):
                 )
                 return self._cache
 
-            resolved_path = self._config_path if self._config_path is not None else _get_config_path()
+            resolved_path = (
+                self._config_path
+                if self._config_path is not None
+                else _get_config_path()
+            )
             validated = await _load_and_validate_community_config(resolved_path)
             self._cache = validated
             _log_config_summary(

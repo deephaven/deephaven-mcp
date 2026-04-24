@@ -783,7 +783,9 @@ async def catalog_tables_schema(
         is_complete = is_complete_catalog
 
         # Track which explicitly requested table_names were found in the catalog
-        found_names = {entry["TableName"] for entry in catalog_entries} if table_names else None
+        found_names = (
+            {entry["TableName"] for entry in catalog_entries} if table_names else None
+        )
 
         _LOGGER.debug(
             f"[mcp_systems_server:catalog_tables_schema] Processing {len(catalog_entries)} catalog entries "
@@ -1064,7 +1066,12 @@ async def catalog_table_sample(
             f"[mcp_systems_server:catalog_table_sample] Retrieving catalog table data for '{namespace}.{table_name}'"
         )
         arrow_table, is_complete = await queries.get_catalog_table_data(
-            session, namespace, table_name, max_rows=max_rows, head=head, filters=filters
+            session,
+            namespace,
+            table_name,
+            max_rows=max_rows,
+            head=head,
+            filters=filters,
         )
 
         # Check response size before formatting

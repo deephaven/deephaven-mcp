@@ -171,7 +171,6 @@ from deephaven_mcp.resource_manager import (
     SystemType,
 )
 
-
 _TEST_SYSTEM_NAME = "system"
 
 
@@ -252,9 +251,7 @@ async def test_pq_name_to_id_connection_failed():
         }
     )
 
-    result = await pq_name_to_id(
-        context, pq_name="analytics"
-    )
+    result = await pq_name_to_id(context, pq_name="analytics")
 
     assert "error" in result
     assert result["isError"] is True
@@ -536,6 +533,7 @@ def test_format_pq_config_no_restart_enum():
 def test_format_pq_config_redacts_type_specific_fields_json(mock_restart_enum):
     """_format_pq_config must redact sensitive keys in typeSpecificFieldsJson."""
     import json
+
     mock_restart_enum.Name.return_value = "RU_ADMIN"
     mock_config = MagicMock()
     mock_pb = MagicMock()
@@ -558,7 +556,9 @@ def test_format_pq_config_redacts_type_specific_fields_json(mock_restart_enum):
     mock_pb.scriptPath = ""
     mock_pb.scriptLanguage = "Python"
     mock_pb.configurationType = "JdbcImport"
-    mock_pb.typeSpecificFieldsJson = json.dumps({"password": "AAABBB==", "driver": "com.mysql.Driver"})
+    mock_pb.typeSpecificFieldsJson = json.dumps(
+        {"password": "AAABBB==", "driver": "com.mysql.Driver"}
+    )
     mock_pb.scheduling = []
     mock_pb.timeoutNanos = 0
     mock_pb.jvmProfile = ""
@@ -1803,9 +1803,7 @@ async def test_pq_list_success():
     assert pq1["is_scheduled"] is False
     assert pq1["num_failures"] == 0
     assert "session_id" in pq1  # Running PQ should have session_id
-    assert (
-        pq1["session_id"] == "enterprise:system:analytics"
-    )  # session_id uses name
+    assert pq1["session_id"] == "enterprise:system:analytics"  # session_id uses name
 
     # Verify trimmed response does NOT include full config/state_details/replicas/spares
     assert "config" not in pq1
@@ -2281,9 +2279,7 @@ async def test_pq_create_connection_failed():
         }
     )
 
-    result = await pq_create(
-        context, pq_name="new-pq", heap_size_gb=8.0
-    )
+    result = await pq_create(context, pq_name="new-pq", heap_size_gb=8.0)
 
     assert "error" in result
     assert result["isError"] is True
@@ -2305,9 +2301,7 @@ async def test_pq_create_exception():
         }
     )
 
-    result = await pq_create(
-        context, pq_name="new-pq", heap_size_gb=8.0
-    )
+    result = await pq_create(context, pq_name="new-pq", heap_size_gb=8.0)
 
     assert result["success"] is False
     assert "error" in result
@@ -2612,9 +2606,7 @@ async def test_pq_delete_negative_timeout():
     """Test pq_delete with negative timeout triggers validation error."""
     mock_session_registry = MagicMock()
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
-    context = MockContext(
-        {"session_registry": mock_session_registry}
-    )
+    context = MockContext({"session_registry": mock_session_registry})
 
     result = await pq_delete(context, "enterprise:system:12345", timeout_seconds=-1)
 
@@ -2629,9 +2621,7 @@ async def test_pq_delete_zero_max_concurrent():
     """Test pq_delete with max_concurrent=0 triggers validation error."""
     mock_session_registry = MagicMock()
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
-    context = MockContext(
-        {"session_registry": mock_session_registry}
-    )
+    context = MockContext({"session_registry": mock_session_registry})
 
     result = await pq_delete(context, "enterprise:system:12345", max_concurrent=0)
 
@@ -2938,7 +2928,9 @@ def test_apply_pq_config_modifications_script_body_oneof():
     pb2 = _PQConfigMessage()
     pb2.scriptCode = "t = None"
     _apply_pq_config_modifications(pb2, None, None, None, "/new/path.py", *nones)
-    assert pb2.scriptPath == "/new/path.py", "scriptPath should be set to the provided value"
+    assert (
+        pb2.scriptPath == "/new/path.py"
+    ), "scriptPath should be set to the provided value"
     assert pb2.scriptCode == "", "scriptCode should be cleared by the oneof"
     assert pb2.WhichOneof("scriptData") == "scriptPath"
 
@@ -3482,7 +3474,9 @@ async def test_pq_start_success():
     # get() is called twice: pre-start state check (STOPPED), then post-start state (RUNNING)
     mock_pq_info_stopped = create_mock_pq_info(12345, "analytics", "STOPPED", 8.0)
     mock_pq_info_running = create_mock_pq_info(12345, "analytics", "RUNNING", 8.0)
-    mock_controller.get = AsyncMock(side_effect=[mock_pq_info_stopped, mock_pq_info_running])
+    mock_controller.get = AsyncMock(
+        side_effect=[mock_pq_info_stopped, mock_pq_info_running]
+    )
 
     context = MockContext(
         {
@@ -3778,9 +3772,7 @@ async def test_pq_stop_success_custom_timeout():
         }
     )
 
-    result = await pq_stop(
-        context, pq_id="enterprise:system:12345", timeout_seconds=60
-    )
+    result = await pq_stop(context, pq_id="enterprise:system:12345", timeout_seconds=60)
 
     # Verify success - new results structure
     assert result["success"] is True
@@ -4849,6 +4841,7 @@ class TestPqConstantsEnvVarOverrides:
 def test_register_tools_registers_all_pq_tools():
     """register_tools() registers all 9 PQ tools with the given FastMCP server."""
     from mcp.server.fastmcp import FastMCP
+
     from deephaven_mcp.mcp_systems_server._tools.pq import register_tools
 
     server = FastMCP("test-pq-server")
@@ -4879,8 +4872,18 @@ def test_pq_state_category_active():
 
 
 def test_pq_state_category_transitional():
-    for state in ("UNINITIALIZED", "CONNECTING", "AUTHENTICATING", "ACQUIRING_WORKER", "INITIALIZING", "STOPPING", "DISCONNECTED"):
-        assert _pq_state_category(state) == "TRANSITIONAL", f"{state} should be TRANSITIONAL"
+    for state in (
+        "UNINITIALIZED",
+        "CONNECTING",
+        "AUTHENTICATING",
+        "ACQUIRING_WORKER",
+        "INITIALIZING",
+        "STOPPING",
+        "DISCONNECTED",
+    ):
+        assert (
+            _pq_state_category(state) == "TRANSITIONAL"
+        ), f"{state} should be TRANSITIONAL"
 
 
 def test_pq_state_category_terminal():

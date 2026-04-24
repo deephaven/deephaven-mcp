@@ -5,8 +5,15 @@ from unittest.mock import patch
 
 import pytest
 
-from deephaven_mcp._exceptions import ConfigurationError, EnterpriseSystemConfigurationError
-from deephaven_mcp.config import CONFIG_ENV_VAR, ConfigManager, EnterpriseServerConfigManager
+from deephaven_mcp._exceptions import (
+    ConfigurationError,
+    EnterpriseSystemConfigurationError,
+)
+from deephaven_mcp.config import (
+    CONFIG_ENV_VAR,
+    ConfigManager,
+    EnterpriseServerConfigManager,
+)
 from deephaven_mcp.config._enterprise import (
     _AUTH_SPECIFIC_FIELDS,
     _BASE_ENTERPRISE_SYSTEM_FIELDS,
@@ -17,10 +24,10 @@ from deephaven_mcp.config._enterprise import (
     validate_enterprise_config,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helper
 # ---------------------------------------------------------------------------
+
 
 def _valid_config(**kwargs) -> dict:
     """Return a minimal valid flat enterprise config, with optional overrides."""
@@ -47,23 +54,29 @@ def test_valid_password_config():
 
 def test_valid_private_key_config():
     """A complete valid private_key-auth config should pass without error."""
-    validate_enterprise_config({
-        "system_name": "prod",
-        "connection_json_url": "https://test.example.com/iris/connection.json",
-        "auth_type": "private_key",
-        "private_key_path": "/path/to/priv-key.base64.txt",
-    })
+    validate_enterprise_config(
+        {
+            "system_name": "prod",
+            "connection_json_url": "https://test.example.com/iris/connection.json",
+            "auth_type": "private_key",
+            "private_key_path": "/path/to/priv-key.base64.txt",
+        }
+    )
 
 
 def test_config_not_dict():
     """Raises when config is not a dictionary."""
-    with pytest.raises(EnterpriseSystemConfigurationError, match="must be a dictionary"):
+    with pytest.raises(
+        EnterpriseSystemConfigurationError, match="must be a dictionary"
+    ):
         validate_enterprise_config("not_a_dict")
 
 
 def test_config_not_dict_list():
     """Raises when config is a list."""
-    with pytest.raises(EnterpriseSystemConfigurationError, match="must be a dictionary"):
+    with pytest.raises(
+        EnterpriseSystemConfigurationError, match="must be a dictionary"
+    ):
         validate_enterprise_config([1, 2, 3])
 
 
@@ -145,12 +158,14 @@ def test_password_auth_missing_username():
         EnterpriseSystemConfigurationError,
         match="must define 'username'",
     ):
-        validate_enterprise_config({
-            "system_name": "sys",
-            "connection_json_url": "https://test.example.com/iris/connection.json",
-            "auth_type": "password",
-            "password": "p",
-        })
+        validate_enterprise_config(
+            {
+                "system_name": "sys",
+                "connection_json_url": "https://test.example.com/iris/connection.json",
+                "auth_type": "password",
+                "password": "p",
+            }
+        )
 
 
 def test_password_auth_invalid_username_type():
@@ -168,12 +183,14 @@ def test_password_auth_missing_password_keys():
         EnterpriseSystemConfigurationError,
         match="must define 'password' or 'password_env_var'",
     ):
-        validate_enterprise_config({
-            "system_name": "sys",
-            "connection_json_url": "https://test.example.com/iris/connection.json",
-            "auth_type": "password",
-            "username": "u",
-        })
+        validate_enterprise_config(
+            {
+                "system_name": "sys",
+                "connection_json_url": "https://test.example.com/iris/connection.json",
+                "auth_type": "password",
+                "username": "u",
+            }
+        )
 
 
 def test_password_auth_invalid_password_type():
@@ -208,13 +225,15 @@ def test_password_auth_both_passwords_present():
 
 def test_password_env_var_valid():
     """password_env_var alone (without password) is valid."""
-    validate_enterprise_config({
-        "system_name": "sys",
-        "connection_json_url": "https://test.example.com/iris/connection.json",
-        "auth_type": "password",
-        "username": "u",
-        "password_env_var": "MY_PASSWORD",
-    })
+    validate_enterprise_config(
+        {
+            "system_name": "sys",
+            "connection_json_url": "https://test.example.com/iris/connection.json",
+            "auth_type": "password",
+            "username": "u",
+            "password_env_var": "MY_PASSWORD",
+        }
+    )
 
 
 # --- private_key auth ---
@@ -226,11 +245,13 @@ def test_private_key_auth_missing_key():
         EnterpriseSystemConfigurationError,
         match="must define 'private_key_path'",
     ):
-        validate_enterprise_config({
-            "system_name": "sys",
-            "connection_json_url": "https://test.example.com/iris/connection.json",
-            "auth_type": "private_key",
-        })
+        validate_enterprise_config(
+            {
+                "system_name": "sys",
+                "connection_json_url": "https://test.example.com/iris/connection.json",
+                "auth_type": "private_key",
+            }
+        )
 
 
 def test_private_key_auth_invalid_key_type():
@@ -239,12 +260,14 @@ def test_private_key_auth_invalid_key_type():
         EnterpriseSystemConfigurationError,
         match="'private_key_path'.*must be of type str",
     ):
-        validate_enterprise_config({
-            "system_name": "sys",
-            "connection_json_url": "https://test.example.com/iris/connection.json",
-            "auth_type": "private_key",
-            "private_key_path": 123,
-        })
+        validate_enterprise_config(
+            {
+                "system_name": "sys",
+                "connection_json_url": "https://test.example.com/iris/connection.json",
+                "auth_type": "private_key",
+                "private_key_path": 123,
+            }
+        )
 
 
 # --- unknown fields ---
@@ -253,21 +276,28 @@ def test_private_key_auth_invalid_key_type():
 def test_unknown_key_logs_warning_not_error(caplog):
     """Unknown fields log a warning but do not raise."""
     validate_enterprise_config(_valid_config(totally_unknown_field="xyz"))
-    assert any("totally_unknown_field" in r.message for r in caplog.records if r.levelname == "WARNING")
+    assert any(
+        "totally_unknown_field" in r.message
+        for r in caplog.records
+        if r.levelname == "WARNING"
+    )
 
 
 def test_unknown_key_warning_for_private_key_with_password(caplog):
     """For private_key auth, 'password' is an unknown field and generates a warning."""
-    validate_enterprise_config({
-        "system_name": "sys",
-        "connection_json_url": "https://test.example.com/iris/connection.json",
-        "auth_type": "private_key",
-        "private_key_path": "/path/key.pem",
-        "password": "secret",
-    })
+    validate_enterprise_config(
+        {
+            "system_name": "sys",
+            "connection_json_url": "https://test.example.com/iris/connection.json",
+            "auth_type": "private_key",
+            "private_key_path": "/path/key.pem",
+            "password": "secret",
+        }
+    )
     assert any(
         "Unknown field 'password'" in r.message
-        for r in caplog.records if r.levelname == "WARNING"
+        for r in caplog.records
+        if r.levelname == "WARNING"
     )
 
 
@@ -379,7 +409,9 @@ def test_session_creation_invalid_defaults_not_dict():
         match=r"'defaults' in session_creation.*must be a dictionary",
     ):
         validate_enterprise_config(
-            _valid_config(session_creation={"max_concurrent_sessions": 5, "defaults": "bad"})
+            _valid_config(
+                session_creation={"max_concurrent_sessions": 5, "defaults": "bad"}
+            )
         )
 
 
@@ -463,7 +495,9 @@ def test_session_creation_invalid_extra_environment_vars_wrong_type():
         match=r"'extra_environment_vars'.*must be of type list",
     ):
         validate_enterprise_config(
-            _valid_config(session_creation={"defaults": {"extra_environment_vars": "bad"}})
+            _valid_config(
+                session_creation={"defaults": {"extra_environment_vars": "bad"}}
+            )
         )
 
 
@@ -480,30 +514,34 @@ def test_session_creation_invalid_programming_language_wrong_type():
 
 def test_session_creation_valid_all_defaults():
     """session_creation with all valid default parameters passes."""
-    validate_enterprise_config(_valid_config(
-        session_creation={
-            "max_concurrent_sessions": 3,
-            "defaults": {
-                "heap_size_gb": 8,
-                "auto_delete_timeout": 600,
-                "server": "gpu-server-1",
-                "engine": "DeephavenCommunity",
-                "extra_jvm_args": ["-XX:+UseG1GC"],
-                "extra_environment_vars": ["PYTHONPATH=/custom/libs"],
-                "admin_groups": ["deephaven-admins"],
-                "viewer_groups": ["analysts"],
-                "timeout_seconds": 120.0,
-                "session_arguments": {"custom_setting": "example_value"},
-                "programming_language": "Groovy",
-            },
-        }
-    ))
+    validate_enterprise_config(
+        _valid_config(
+            session_creation={
+                "max_concurrent_sessions": 3,
+                "defaults": {
+                    "heap_size_gb": 8,
+                    "auto_delete_timeout": 600,
+                    "server": "gpu-server-1",
+                    "engine": "DeephavenCommunity",
+                    "extra_jvm_args": ["-XX:+UseG1GC"],
+                    "extra_environment_vars": ["PYTHONPATH=/custom/libs"],
+                    "admin_groups": ["deephaven-admins"],
+                    "viewer_groups": ["analysts"],
+                    "timeout_seconds": 120.0,
+                    "session_arguments": {"custom_setting": "example_value"},
+                    "programming_language": "Groovy",
+                },
+            }
+        )
+    )
 
 
 def test_session_creation_valid_session_arguments():
     """session_arguments dict with various values passes."""
     validate_enterprise_config(
-        _valid_config(session_creation={"defaults": {"session_arguments": {"a": 1, "b": "x"}}})
+        _valid_config(
+            session_creation={"defaults": {"session_arguments": {"a": 1, "b": "x"}}}
+        )
     )
 
 
@@ -512,7 +550,9 @@ def test_session_creation_valid_session_arguments():
 
 def test_validate_enterprise_config_tuple_type_in_base_field(monkeypatch):
     """Tuple type validation in _validate_required_fields raises correct message."""
-    monkeypatch.setitem(_BASE_ENTERPRISE_SYSTEM_FIELDS, "test_tuple_field", (str, type(None)))
+    monkeypatch.setitem(
+        _BASE_ENTERPRISE_SYSTEM_FIELDS, "test_tuple_field", (str, type(None))
+    )
     with pytest.raises(
         EnterpriseSystemConfigurationError,
         match=r"'test_tuple_field'.*must be one of types \(str, NoneType\), but got int",
@@ -524,30 +564,40 @@ def test_validate_enterprise_config_tuple_type_validation_error_optional(monkeyp
     """Tuple type validation in _validate_optional_fields raises correct message."""
     from deephaven_mcp.config import _enterprise
 
-    monkeypatch.setitem(_enterprise._OPTIONAL_ENTERPRISE_SYSTEM_FIELDS, "test_tuple_field", (str, int))
-    with pytest.raises(EnterpriseSystemConfigurationError, match="must be one of types"):
+    monkeypatch.setitem(
+        _enterprise._OPTIONAL_ENTERPRISE_SYSTEM_FIELDS, "test_tuple_field", (str, int)
+    )
+    with pytest.raises(
+        EnterpriseSystemConfigurationError, match="must be one of types"
+    ):
         validate_enterprise_config(_valid_config(test_tuple_field=[]))
 
 
 def test_validate_enterprise_config_tuple_type_auth_specific(monkeypatch):
     """Tuple type validation in auth-specific fields raises correct message."""
-    monkeypatch.setitem(_AUTH_SPECIFIC_FIELDS["private_key"], "test_tuple_field", (str, int, type(None)))
+    monkeypatch.setitem(
+        _AUTH_SPECIFIC_FIELDS["private_key"], "test_tuple_field", (str, int, type(None))
+    )
     with pytest.raises(
         EnterpriseSystemConfigurationError,
         match=r"'test_tuple_field'.*must be one of types \(str, int, NoneType\), but got float",
     ):
-        validate_enterprise_config({
-            "system_name": "sys",
-            "connection_json_url": "https://test.example.com/iris/connection.json",
-            "auth_type": "private_key",
-            "private_key_path": "/path/key",
-            "test_tuple_field": 3.14,
-        })
+        validate_enterprise_config(
+            {
+                "system_name": "sys",
+                "connection_json_url": "https://test.example.com/iris/connection.json",
+                "auth_type": "private_key",
+                "private_key_path": "/path/key",
+                "test_tuple_field": 3.14,
+            }
+        )
 
 
 def test_session_creation_not_dict_via_session_creation_validator():
     """_validate_enterprise_system_session_creation raises for non-dict session_creation."""
-    from deephaven_mcp.config._enterprise import _validate_enterprise_system_session_creation
+    from deephaven_mcp.config._enterprise import (
+        _validate_enterprise_system_session_creation,
+    )
 
     with pytest.raises(
         EnterpriseSystemConfigurationError,
@@ -862,11 +912,13 @@ async def test_get_config_does_not_log_password_in_plaintext():
 
     assert len(logged_calls) == 1
     call = logged_calls[0]
-    assert call["redactor"] is not None, "redactor must be passed to _log_config_summary"
+    assert (
+        call["redactor"] is not None
+    ), "redactor must be passed to _log_config_summary"
     redacted = call["redactor"](call["config"])
-    assert redacted.get("password") == "[REDACTED]", (
-        "redactor must mask password before logging"
-    )
+    assert (
+        redacted.get("password") == "[REDACTED]"
+    ), "redactor must mask password before logging"
 
 
 @pytest.mark.asyncio

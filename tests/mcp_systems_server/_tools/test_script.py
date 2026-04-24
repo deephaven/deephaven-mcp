@@ -241,11 +241,15 @@ async def test_session_community_delete_removal_returns_none():
         }
     )
 
-    result = await session_community_delete(context, session_id="community:dynamic:test-session")
+    result = await session_community_delete(
+        context, session_id="community:dynamic:test-session"
+    )
 
     # Should still succeed even though removal returned None
     assert result["success"] is True
-    mock_session_registry.remove_session.assert_awaited_once_with("community:dynamic:test-session")
+    mock_session_registry.remove_session.assert_awaited_once_with(
+        "community:dynamic:test-session"
+    )
 
 
 def test_run_script_reads_script_from_file():
@@ -738,6 +742,7 @@ async def test_session_pip_list_session_not_found():
 def test_register_tools_registers_script_tools():
     """register_tools() registers session_script_run and session_pip_list."""
     from mcp.server.fastmcp import FastMCP
+
     from deephaven_mcp.mcp_systems_server._tools.script import register_tools
 
     server = FastMCP("test-script-server")

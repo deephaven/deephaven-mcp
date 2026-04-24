@@ -8,7 +8,11 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from conftest import MockContext
 
-from deephaven_mcp.mcp_systems_server._tools.reload import _do_reload, mcp_reload_community, mcp_reload_enterprise
+from deephaven_mcp.mcp_systems_server._tools.reload import (
+    _do_reload,
+    mcp_reload_community,
+    mcp_reload_enterprise,
+)
 
 
 @pytest.mark.asyncio
@@ -135,11 +139,13 @@ async def test_mcp_reload_community_calls_manager_close():
     session_registry._items["test_key"] = mock_manager
 
     config_manager = AsyncMock()
-    context = MockContext({
-        "config_manager": config_manager,
-        "session_registry": session_registry,
-        "refresh_lock": asyncio.Lock(),
-    })
+    context = MockContext(
+        {
+            "config_manager": config_manager,
+            "session_registry": session_registry,
+            "refresh_lock": asyncio.Lock(),
+        }
+    )
 
     result = await _do_reload(context)
 

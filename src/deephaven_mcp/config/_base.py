@@ -229,13 +229,7 @@ def _log_config_summary(
 
     try:
         formatted_config = json5.dumps(redacted_config, indent=2, sort_keys=True)
-        _LOGGER.info(
-            f"[{label}] Loaded configuration:\n{formatted_config}"
-        )
+        _LOGGER.info(f"[{label}] Loaded configuration:\n{formatted_config}")
     except (TypeError, ValueError) as e:
-        _LOGGER.warning(
-            f"[{label}] Failed to format config as JSON: {e}"
-        )
-        _LOGGER.info(
-            f"[{label}] Loaded configuration: {redacted_config}"
-        )
+        _LOGGER.warning(f"[{label}] Failed to format config as JSON: {e}")
+        _LOGGER.info(f"[{label}] Loaded configuration: {redacted_config}")

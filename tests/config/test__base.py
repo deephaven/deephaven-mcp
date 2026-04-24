@@ -17,10 +17,10 @@ from deephaven_mcp.config._base import (
     _log_config_summary,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture(autouse=True)
 def clear_env():
@@ -45,6 +45,7 @@ def _make_aiofiles_mock(content: str):
 # CONFIG_ENV_VAR
 # ---------------------------------------------------------------------------
 
+
 def test_config_env_var_value():
     assert CONFIG_ENV_VAR == "DH_MCP_CONFIG_FILE"
 
@@ -52,6 +53,7 @@ def test_config_env_var_value():
 # ---------------------------------------------------------------------------
 # ConfigManager abstract base
 # ---------------------------------------------------------------------------
+
 
 def test_config_manager_is_abstract():
     """ConfigManager cannot be instantiated directly."""
@@ -61,6 +63,7 @@ def test_config_manager_is_abstract():
 
 def test_config_manager_subclass_must_implement_get_config():
     """Subclass missing get_config raises TypeError."""
+
     class Partial(ConfigManager):
         async def _set_config_cache(self, config):
             pass
@@ -71,6 +74,7 @@ def test_config_manager_subclass_must_implement_get_config():
 
 def test_config_manager_subclass_must_implement_set_config_cache():
     """Subclass missing _set_config_cache raises TypeError."""
+
     class Partial(ConfigManager):
         async def get_config(self):
             return {}
@@ -82,9 +86,11 @@ def test_config_manager_subclass_must_implement_set_config_cache():
 @pytest.mark.asyncio
 async def test_config_manager_clear_cache():
     """clear_config_cache sets _cache to None."""
+
     class Concrete(ConfigManager):
         async def get_config(self):
             return {}
+
         async def _set_config_cache(self, config):
             self._cache = config
 
@@ -97,9 +103,11 @@ async def test_config_manager_clear_cache():
 @pytest.mark.asyncio
 async def test_config_manager_init_with_explicit_path():
     """ConfigManager stores an explicit config_path."""
+
     class Concrete(ConfigManager):
         async def get_config(self):
             return {}
+
         async def _set_config_cache(self, config):
             pass
 
@@ -110,6 +118,7 @@ async def test_config_manager_init_with_explicit_path():
 # ---------------------------------------------------------------------------
 # _get_config_path
 # ---------------------------------------------------------------------------
+
 
 def test_get_config_path_returns_env_var(monkeypatch):
     monkeypatch.setenv(CONFIG_ENV_VAR, "/etc/config.json")
@@ -125,6 +134,7 @@ def test_get_config_path_raises_when_unset(monkeypatch):
 # ---------------------------------------------------------------------------
 # _load_config_from_file
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_load_config_from_file_success(tmp_path):
@@ -173,6 +183,7 @@ async def test_load_config_from_file_generic_exception():
 # _load_and_validate_config
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_load_and_validate_config_success(tmp_path):
     cfg_file = tmp_path / "config.json"
@@ -197,14 +208,13 @@ async def test_load_and_validate_config_validator_error_wrapped(tmp_path):
 @pytest.mark.asyncio
 async def test_load_and_validate_config_load_error_wrapped():
     with pytest.raises(ConfigurationError, match="Error loading configuration file"):
-        await _load_and_validate_config(
-            "/nonexistent.json", lambda d: d, "test"
-        )
+        await _load_and_validate_config("/nonexistent.json", lambda d: d, "test")
 
 
 # ---------------------------------------------------------------------------
 # _log_config_summary
 # ---------------------------------------------------------------------------
+
 
 def test_log_config_summary_with_redactor(caplog):
     redactor = lambda c: {k: "[R]" if k == "password" else v for k, v in c.items()}
@@ -221,7 +231,10 @@ def test_log_config_summary_without_redactor_logs_config(caplog):
 
 
 def test_log_config_summary_json_serialization_failure(caplog):
-    with patch("deephaven_mcp.config._base.json5.dumps", side_effect=TypeError("not serializable")):
+    with patch(
+        "deephaven_mcp.config._base.json5.dumps",
+        side_effect=TypeError("not serializable"),
+    ):
         with caplog.at_level("WARNING", logger="deephaven_mcp.config._base"):
             _log_config_summary({"x": object()})
     assert "Failed to format config as JSON" in caplog.text

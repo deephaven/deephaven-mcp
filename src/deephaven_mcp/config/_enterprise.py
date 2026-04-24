@@ -197,7 +197,9 @@ def validate_enterprise_config(config: Any) -> dict[str, Any]:
     _validate_required_fields(system_name, config)
     _validate_optional_fields(system_name, config)
     auth_type, all_allowed_fields = _validate_and_get_auth_type(system_name, config)
-    _validate_enterprise_system_auth_specific_fields(system_name, config, auth_type, all_allowed_fields)
+    _validate_enterprise_system_auth_specific_fields(
+        system_name, config, auth_type, all_allowed_fields
+    )
     _validate_enterprise_system_auth_type_logic(system_name, config, auth_type)
     _validate_enterprise_system_connection_timeout(system_name, config)
     _validate_enterprise_system_session_creation(system_name, config)
@@ -594,7 +596,9 @@ def _validate_optional_session_default(
     """
     if field_name not in defaults:
         return  # Field is optional
-    _validate_field_type(system_name, field_name, defaults[field_name], expected_type, is_optional=True)
+    _validate_field_type(
+        system_name, field_name, defaults[field_name], expected_type, is_optional=True
+    )
 
 
 async def _load_and_validate_enterprise_config(config_path: str) -> dict[str, Any]:
@@ -650,7 +654,11 @@ class EnterpriseServerConfigManager(ConfigManager):
                 )
                 return self._cache
 
-            resolved_path = self._config_path if self._config_path is not None else _get_config_path()
+            resolved_path = (
+                self._config_path
+                if self._config_path is not None
+                else _get_config_path()
+            )
             flat_config = await _load_and_validate_enterprise_config(resolved_path)
             self._cache = flat_config
             _log_config_summary(

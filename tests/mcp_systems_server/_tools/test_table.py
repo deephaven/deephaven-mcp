@@ -788,6 +788,7 @@ async def test_session_table_data_table_not_found():
 def test_register_tools_registers_table_tools():
     """register_tools() registers all table tools."""
     from mcp.server.fastmcp import FastMCP
+
     from deephaven_mcp.mcp_systems_server._tools.table import register_tools
 
     server = FastMCP("test-table-server")

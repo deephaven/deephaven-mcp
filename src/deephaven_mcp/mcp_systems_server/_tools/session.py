@@ -116,9 +116,9 @@ async def sessions_list(context: Context) -> dict:
         _LOGGER.debug(
             "[mcp_systems_server:sessions_list] Accessing session registry from context"
         )
-        session_registry: BaseRegistry = (
-            context.request_context.lifespan_context["session_registry"]
-        )
+        session_registry: BaseRegistry = context.request_context.lifespan_context[
+            "session_registry"
+        ]
         _LOGGER.debug(
             "[mcp_systems_server:sessions_list] Retrieving all sessions from registry"
         )
@@ -389,9 +389,9 @@ async def session_details(
         _LOGGER.debug(
             "[mcp_systems_server:session_details] Accessing session registry from context"
         )
-        session_registry: BaseRegistry = (
-            context.request_context.lifespan_context["session_registry"]
-        )
+        session_registry: BaseRegistry = context.request_context.lifespan_context[
+            "session_registry"
+        ]
 
         # Get the specific session manager directly
         _LOGGER.debug(

@@ -241,7 +241,9 @@ def test_pq_states_is_state_to_category_map():
     assert isinstance(_protobuf.PQ_STATES, dict)
     for state, category in _protobuf.PQ_STATES.items():
         assert isinstance(state, str)
-        assert category in valid_categories, f"{state!r} maps to unknown category {category!r}"
+        assert (
+            category in valid_categories
+        ), f"{state!r} maps to unknown category {category!r}"
 
 
 def test_pq_states_known_mappings():

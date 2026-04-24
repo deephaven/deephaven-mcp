@@ -104,7 +104,10 @@ async def main():
     http_client = httpx.AsyncClient(headers=headers) if headers else None
 
     try:
-        async with streamable_http_client(args.url, http_client=http_client) as (read, write):
+        async with streamable_http_client(args.url, http_client=http_client) as (
+            read,
+            write,
+        ):
             async with read, write:
                 await write.send_initialize()
                 result = await read.recv_initialize()

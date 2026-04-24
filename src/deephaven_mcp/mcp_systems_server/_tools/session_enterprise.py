@@ -33,7 +33,9 @@ from deephaven_mcp.resource_manager import (
     EnterpriseSessionManager,
     SystemType,
 )
-from deephaven_mcp.resource_manager._registry_enterprise import EnterpriseSessionRegistry
+from deephaven_mcp.resource_manager._registry_enterprise import (
+    EnterpriseSessionRegistry,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -461,9 +463,7 @@ async def session_enterprise_create(
         )
 
         # Check session limits (both enabled and count)
-        error_response = await _check_session_limit(
-            session_registry, max_sessions
-        )
+        error_response = await _check_session_limit(session_registry, max_sessions)
         if error_response:
             result.update(error_response)
             return result
@@ -741,8 +741,12 @@ async def session_enterprise_delete(
         - Use with caution in production environments
     """
     result: dict[str, object] = {"success": False}
-    session_name = session_id  # fallback for outer except; overwritten after parse_full_name
-    system_name: str = ""      # fallback for outer except; overwritten after registry lookup
+    session_name = (
+        session_id  # fallback for outer except; overwritten after parse_full_name
+    )
+    system_name: str = (
+        ""  # fallback for outer except; overwritten after registry lookup
+    )
 
     try:
         # Get session registry
@@ -757,7 +761,9 @@ async def session_enterprise_delete(
 
         # Parse and validate the session_id
         try:
-            system_type_str, source, session_name = BaseItemManager.parse_full_name(session_id)
+            system_type_str, source, session_name = BaseItemManager.parse_full_name(
+                session_id
+            )
         except InvalidSessionNameError as e:
             error_msg = f"Invalid session_id format: {e}"
             _LOGGER.error(f"[mcp_systems_server:session_enterprise_delete] {error_msg}")

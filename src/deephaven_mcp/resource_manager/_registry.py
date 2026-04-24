@@ -423,5 +423,3 @@ class MutableSessionRegistry(BaseRegistry[BaseItemManager]):
                 ):
                     count += 1
             return count
-
-

@@ -907,7 +907,9 @@ async def test_session_community_delete_close_failure_continues():
         }
     )
 
-    result = await session_community_delete(context, session_id="community:dynamic:close-fail")
+    result = await session_community_delete(
+        context, session_id="community:dynamic:close-fail"
+    )
 
     # Should succeed despite close failure
     assert result["success"] is True
@@ -938,7 +940,9 @@ async def test_session_community_delete_removal_missing_in_registry():
         }
     )
 
-    result = await session_community_delete(context, session_id="community:dynamic:ghost")
+    result = await session_community_delete(
+        context, session_id="community:dynamic:ghost"
+    )
 
     assert result["success"] is True
 
@@ -968,7 +972,9 @@ async def test_session_community_delete_registry_remove_raises():
         }
     )
 
-    result = await session_community_delete(context, session_id="community:dynamic:boom")
+    result = await session_community_delete(
+        context, session_id="community:dynamic:boom"
+    )
 
     assert result["success"] is False
     assert result["isError"] is True
@@ -2353,6 +2359,7 @@ async def test_session_community_create_default_session_type_in_config():
 def test_register_tools_registers_community_tools():
     """register_tools() registers all DHC-specific session tools."""
     from mcp.server.fastmcp import FastMCP
+
     from deephaven_mcp.mcp_systems_server._tools.session_community import register_tools
 
     server = FastMCP("test-community-server")

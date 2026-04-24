@@ -15,7 +15,11 @@ from deephaven_mcp._exceptions import (
     CommunitySessionConfigurationError,
     ConfigurationError,
 )
-from deephaven_mcp.config import CONFIG_ENV_VAR, ConfigManager, CommunityServerConfigManager
+from deephaven_mcp.config import (
+    CONFIG_ENV_VAR,
+    CommunityServerConfigManager,
+    ConfigManager,
+)
 from deephaven_mcp.config._community import (
     _get_all_config_names,
     _get_config_section,
@@ -27,7 +31,6 @@ from deephaven_mcp.config._community import (
     validate_security_config,
     validate_single_community_session_config,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -839,9 +842,7 @@ def test_get_config_section_invalid_section():
 
 
 def test_get_all_config_names_returns_keys():
-    cfg = {
-        "sessions": {"a": {"host": "localhost"}, "b": {"host": "localhost"}}
-    }
+    cfg = {"sessions": {"a": {"host": "localhost"}, "b": {"host": "localhost"}}}
     names = _get_all_config_names(cfg, ["sessions"])
     assert set(names) == {"a", "b"}
 
@@ -896,7 +897,9 @@ async def test_get_config_other_os_error_on_read(monkeypatch, caplog):
     mock_async_context_manager = mock.AsyncMock()
     mock_async_context_manager.__aenter__.return_value.read = mock_file_read
 
-    with patch("aiofiles.open", mock.MagicMock(return_value=mock_async_context_manager)):
+    with patch(
+        "aiofiles.open", mock.MagicMock(return_value=mock_async_context_manager)
+    ):
         cm = CommunityServerConfigManager()
         with pytest.raises(
             ConfigurationError,
@@ -911,7 +914,9 @@ async def test_get_config_other_os_error_on_read(monkeypatch, caplog):
 
 
 @pytest.mark.asyncio
-async def test_validate_community_config_missing_required_key_bytes_mode(caplog, monkeypatch):
+async def test_validate_community_config_missing_required_key_bytes_mode(
+    caplog, monkeypatch
+):
     with patch.object(
         _community_module,
         "_SCHEMA_PATHS",
@@ -936,7 +941,9 @@ async def test_validate_community_config_missing_required_key_bytes_mode(caplog,
             mock_file_read_content
         )
 
-        with patch("aiofiles.open", mock.MagicMock(return_value=mock_async_context_manager_req)):
+        with patch(
+            "aiofiles.open", mock.MagicMock(return_value=mock_async_context_manager_req)
+        ):
             with pytest.raises(
                 ConfigurationError,
                 match=re.escape(
@@ -969,7 +976,8 @@ async def test_get_config_uses_cache_and_logs(monkeypatch, caplog):
         config1 = await cm.get_config()
         assert valid_config_data == config1
         assert (
-            "Returning cached Deephaven MCP application configuration." not in caplog.text
+            "Returning cached Deephaven MCP application configuration."
+            not in caplog.text
         )
         aiofiles_open_mock.assert_called_once_with(config_file_path)
 
@@ -993,7 +1001,9 @@ async def test_get_config_unknown_top_level_key(monkeypatch, caplog):
     mock_async_context_manager = mock.AsyncMock()
     mock_async_context_manager.__aenter__.return_value.read = mock_file_read_content
 
-    with patch("aiofiles.open", mock.MagicMock(return_value=mock_async_context_manager)):
+    with patch(
+        "aiofiles.open", mock.MagicMock(return_value=mock_async_context_manager)
+    ):
         cm = CommunityServerConfigManager()
         with pytest.raises(
             ConfigurationError,
@@ -1007,7 +1017,9 @@ async def test_get_config_unknown_top_level_key(monkeypatch, caplog):
 
 
 @pytest.mark.asyncio
-async def test_get_config_invalid_community_session_schema_from_file(monkeypatch, caplog):
+async def test_get_config_invalid_community_session_schema_from_file(
+    monkeypatch, caplog
+):
     config_file_path = "/fake/path/invalid_community_schema.json"
     monkeypatch.setenv(CONFIG_ENV_VAR, config_file_path)
     invalid_config_data = {
@@ -1025,7 +1037,9 @@ async def test_get_config_invalid_community_session_schema_from_file(monkeypatch
     mock_async_context_manager = mock.AsyncMock()
     mock_async_context_manager.__aenter__.return_value.read = mock_file_read_content
 
-    with patch("aiofiles.open", mock.MagicMock(return_value=mock_async_context_manager)):
+    with patch(
+        "aiofiles.open", mock.MagicMock(return_value=mock_async_context_manager)
+    ):
         cm = CommunityServerConfigManager()
         expected_error_pattern = re.escape(
             "Error loading configuration file: Invalid configuration for sessions: Field 'host' in community session config for bad_session must be of type str, got int"
@@ -1057,7 +1071,9 @@ async def test_get_config_missing_env(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_validate_community_config_missing_required_key_runtime(monkeypatch, caplog):
+async def test_validate_community_config_missing_required_key_runtime(
+    monkeypatch, caplog
+):
     config_file_path = "/fake/path/missing_required_key.json"
     monkeypatch.setenv("DH_MCP_CONFIG_FILE", config_file_path)
     config_data = {}  # Missing 'must_have_this'
@@ -1219,7 +1235,9 @@ async def test_config_validation_error_in_load_and_validate(monkeypatch):
         cm = CommunityServerConfigManager()
         await cm.clear_config_cache()
 
-        with pytest.raises(ConfigurationError, match="Error loading configuration file"):
+        with pytest.raises(
+            ConfigurationError, match="Error loading configuration file"
+        ):
             await cm.get_config()
 
 
@@ -1524,6 +1542,4 @@ def test_validate_section_recurses_into_nested_dict():
                 "Config path ('parent', 'child') must be of type str, got int"
             ),
         ):
-            _community_module._validate_community_config(
-                {"parent": {"child": 123}}
-            )
+            _community_module._validate_community_config({"parent": {"child": 123}})

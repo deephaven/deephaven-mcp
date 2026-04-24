@@ -634,9 +634,7 @@ async def test_make_pq_config_temporary_schedule_none_no_default_installed(
     mock_config.scheduling = mock_scheduling
     dummy_controller_client.make_temporary_config.return_value = mock_config
 
-    with patch.object(
-        controller_client_mod, "CorePlusQueryConfig", autospec=True
-    ):
+    with patch.object(controller_client_mod, "CorePlusQueryConfig", autospec=True):
         await coreplus_controller_client.make_pq_config(
             name="test-pq",
             heap_size_gb=8.0,
@@ -664,9 +662,7 @@ async def test_make_pq_config_permanent_schedule_empty_clears_without_default(
     mock_config.scheduling = mock_scheduling
     dummy_controller_client.make_temporary_config.return_value = mock_config
 
-    with patch.object(
-        controller_client_mod, "CorePlusQueryConfig", autospec=True
-    ):
+    with patch.object(controller_client_mod, "CorePlusQueryConfig", autospec=True):
         await coreplus_controller_client.make_pq_config(
             name="test-pq",
             heap_size_gb=8.0,
@@ -692,9 +688,7 @@ async def test_make_pq_config_temporary_schedule_empty_clears(
     mock_config.scheduling = mock_scheduling
     dummy_controller_client.make_temporary_config.return_value = mock_config
 
-    with patch.object(
-        controller_client_mod, "CorePlusQueryConfig", autospec=True
-    ):
+    with patch.object(controller_client_mod, "CorePlusQueryConfig", autospec=True):
         await coreplus_controller_client.make_pq_config(
             name="test-pq",
             heap_size_gb=8.0,
@@ -727,9 +721,7 @@ async def test_make_pq_config_permanent_schedule_explicit_replaces_default(
         "SchedulingDisabled=true",
     ]
 
-    with patch.object(
-        controller_client_mod, "CorePlusQueryConfig", autospec=True
-    ):
+    with patch.object(controller_client_mod, "CorePlusQueryConfig", autospec=True):
         await coreplus_controller_client.make_pq_config(
             name="test-pq",
             heap_size_gb=8.0,
@@ -756,9 +748,7 @@ async def test_make_pq_config_temporary_schedule_explicit_replaces_temp(
 
     caller_schedule = ["SchedulerType=Daily", "StartTime=08:00:00"]
 
-    with patch.object(
-        controller_client_mod, "CorePlusQueryConfig", autospec=True
-    ):
+    with patch.object(controller_client_mod, "CorePlusQueryConfig", autospec=True):
         await coreplus_controller_client.make_pq_config(
             name="test-pq",
             heap_size_gb=8.0,

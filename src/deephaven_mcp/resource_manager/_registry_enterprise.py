@@ -56,7 +56,12 @@ from deephaven_mcp._exceptions import (
 from deephaven_mcp.client import CorePlusControllerClient, CorePlusSession
 from deephaven_mcp.config import ConfigManager
 
-from ._manager import BaseItemManager, CorePlusSessionFactoryManager, EnterpriseSessionManager, SystemType
+from ._manager import (
+    BaseItemManager,
+    CorePlusSessionFactoryManager,
+    EnterpriseSessionManager,
+    SystemType,
+)
 from ._registry import InitializationPhase, MutableSessionRegistry, RegistrySnapshot
 
 _LOGGER = logging.getLogger(__name__)
@@ -564,9 +569,7 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
         elif isinstance(result, _FactoryQueryError):
             return self._apply_factory_error(result)
         else:
-            raise InternalError(
-                f"Unexpected result type {type(result).__name__!r}"
-            )
+            raise InternalError(f"Unexpected result type {type(result).__name__!r}")
 
     def _remove_sessions_by_keys(self, keys: set[str]) -> list[BaseItemManager]:
         """Remove a specific set of session keys from ``_items``.
@@ -623,7 +626,9 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
 
         for full_key in keys_to_add:
             _, _, session_name = BaseItemManager.parse_full_name(full_key)
-            mgr = self._make_enterprise_session_manager(factory_manager, session_name, self._system_name)
+            mgr = self._make_enterprise_session_manager(
+                factory_manager, session_name, self._system_name
+            )
             self._items[mgr.full_name] = mgr
 
         managers_to_close = self._remove_sessions_by_keys(keys_to_remove)

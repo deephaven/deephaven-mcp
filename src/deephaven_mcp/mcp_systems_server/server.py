@@ -24,7 +24,10 @@ import sys
 
 from mcp.server.fastmcp import FastMCP
 
-from deephaven_mcp.config import CommunityServerConfigManager, EnterpriseServerConfigManager
+from deephaven_mcp.config import (
+    CommunityServerConfigManager,
+    EnterpriseServerConfigManager,
+)
 from deephaven_mcp.mcp_systems_server._lifespan import (
     make_community_lifespan,
     make_enterprise_lifespan,
@@ -64,9 +67,7 @@ def _setup_env() -> None:
     monkeypatch_uvicorn_exception_handling()
 
 
-def _parse_args(
-    description: str, default_port: int
-) -> tuple[str | None, str, int]:
+def _parse_args(description: str, default_port: int) -> tuple[str | None, str, int]:
     """Parse ``--config`` / ``--host`` / ``--port`` from argv and env vars.
 
     Precedence for each value (first wins):
@@ -115,7 +116,9 @@ def _register_shared_tools(server: FastMCP) -> None:
         module.register_tools(server)
 
 
-def _validate_config_or_exit(config_path: str | None, config_manager_class: type, label: str) -> None:
+def _validate_config_or_exit(
+    config_path: str | None, config_manager_class: type, label: str
+) -> None:
     """Validate config at server startup; exit(1) if invalid."""
     _LOGGER.info(f"[{label}] Validating configuration before server startup...")
     try:

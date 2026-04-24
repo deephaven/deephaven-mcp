@@ -34,14 +34,17 @@ from deephaven_mcp.resource_manager import (
     InitializationPhase,
     RegistrySnapshot,
 )
-from deephaven_mcp.resource_manager._manager import BaseItemManager, CorePlusSessionFactoryManager, EnterpriseSessionManager
+from deephaven_mcp.resource_manager._manager import (
+    BaseItemManager,
+    CorePlusSessionFactoryManager,
+    EnterpriseSessionManager,
+)
 from deephaven_mcp.resource_manager._registry_enterprise import (
     _FactoryQueryError,
     _FactoryQueryResult,
     _FactorySnapshot,
     _fetch_factory_pqs,
 )
-
 
 _TEST_SYSTEM_NAME = "system"
 
@@ -98,10 +101,12 @@ async def test_fetch_factory_pqs_no_cached_client_success():
     snapshot = _make_factory_snapshot(client=None)
 
     mock_client = AsyncMock()
-    mock_client.map = AsyncMock(return_value={
-        "q1": _make_pq_info("pq1"),
-        "q2": _make_pq_info("pq2"),
-    })
+    mock_client.map = AsyncMock(
+        return_value={
+            "q1": _make_pq_info("pq1"),
+            "q2": _make_pq_info("pq2"),
+        }
+    )
     mock_factory_instance = MagicMock()
     mock_factory_instance.controller_client = mock_client
     snapshot.factory_manager.get = AsyncMock(return_value=mock_factory_instance)
@@ -118,9 +123,11 @@ async def test_fetch_factory_pqs_cached_client_ping_ok():
     """Cached client with good ping → reuses client, new_client is NOT set (stays None in result's new_client)."""
     mock_client = AsyncMock()
     mock_client.ping = AsyncMock(return_value=True)
-    mock_client.map = AsyncMock(return_value={
-        "q1": _make_pq_info("mypq"),
-    })
+    mock_client.map = AsyncMock(
+        return_value={
+            "q1": _make_pq_info("mypq"),
+        }
+    )
 
     snapshot = _make_factory_snapshot(client=mock_client)
 
@@ -141,9 +148,11 @@ async def test_fetch_factory_pqs_cached_client_ping_returns_false():
     mock_old_client.ping = AsyncMock(return_value=False)
 
     mock_new_client = AsyncMock()
-    mock_new_client.map = AsyncMock(return_value={
-        "q1": _make_pq_info("fresh-pq"),
-    })
+    mock_new_client.map = AsyncMock(
+        return_value={
+            "q1": _make_pq_info("fresh-pq"),
+        }
+    )
     mock_factory_instance = MagicMock()
     mock_factory_instance.controller_client = mock_new_client
 
@@ -165,9 +174,11 @@ async def test_fetch_factory_pqs_cached_client_ping_raises():
     mock_old_client.ping = AsyncMock(side_effect=ConnectionError("timeout"))
 
     mock_new_client = AsyncMock()
-    mock_new_client.map = AsyncMock(return_value={
-        "q1": _make_pq_info("recovered-pq"),
-    })
+    mock_new_client.map = AsyncMock(
+        return_value={
+            "q1": _make_pq_info("recovered-pq"),
+        }
+    )
     mock_factory_instance = MagicMock()
     mock_factory_instance.controller_client = mock_new_client
 
@@ -202,7 +213,9 @@ async def test_fetch_factory_pqs_cached_client_ping_fails_recreate_fails():
     mock_old_client.ping = AsyncMock(side_effect=ConnectionError("dead"))
 
     snapshot = _make_factory_snapshot(client=mock_old_client)
-    snapshot.factory_manager.get = AsyncMock(side_effect=RuntimeError("factory unreachable"))
+    snapshot.factory_manager.get = AsyncMock(
+        side_effect=RuntimeError("factory unreachable")
+    )
 
     result = await _fetch_factory_pqs(snapshot)
 
@@ -262,7 +275,9 @@ def test_make_enterprise_session_manager_returns_enterprise_session_manager():
     """Creates an EnterpriseSessionManager with source=system_name, name=session_name."""
     mock_factory = MagicMock(spec=CorePlusSessionFactoryManager)
 
-    manager = EnterpriseSessionRegistry._make_enterprise_session_manager(mock_factory, "my-pq", _TEST_SYSTEM_NAME)
+    manager = EnterpriseSessionRegistry._make_enterprise_session_manager(
+        mock_factory, "my-pq", _TEST_SYSTEM_NAME
+    )
 
     assert isinstance(manager, EnterpriseSessionManager)
     assert manager.source == _TEST_SYSTEM_NAME
@@ -274,18 +289,24 @@ async def test_make_enterprise_session_manager_creation_function_calls_connect()
     """The creation_function calls factory.get() then connect_to_persistent_query(name)."""
     mock_session = MagicMock()
     mock_factory_instance = AsyncMock()
-    mock_factory_instance.connect_to_persistent_query = AsyncMock(return_value=mock_session)
+    mock_factory_instance.connect_to_persistent_query = AsyncMock(
+        return_value=mock_session
+    )
 
     mock_factory = MagicMock(spec=CorePlusSessionFactoryManager)
     mock_factory.get = AsyncMock(return_value=mock_factory_instance)
 
-    manager = EnterpriseSessionRegistry._make_enterprise_session_manager(mock_factory, "pq-test", _TEST_SYSTEM_NAME)
+    manager = EnterpriseSessionRegistry._make_enterprise_session_manager(
+        mock_factory, "pq-test", _TEST_SYSTEM_NAME
+    )
 
     # The creation_function is stored in manager._creation_function
     result = await manager._creation_function(_TEST_SYSTEM_NAME, "pq-test")
 
     mock_factory.get.assert_awaited_once()
-    mock_factory_instance.connect_to_persistent_query.assert_awaited_once_with("pq-test")
+    mock_factory_instance.connect_to_persistent_query.assert_awaited_once_with(
+        "pq-test"
+    )
     assert result is mock_session
 
 
@@ -416,7 +437,9 @@ async def test_initialize_is_idempotent():
     """Second call to initialize() does not create a second discovery task."""
     registry = EnterpriseSessionRegistry()
     config_manager = AsyncMock()
-    config_manager.get_config = AsyncMock(return_value={"host": "myhost", "system_name": _TEST_SYSTEM_NAME})
+    config_manager.get_config = AsyncMock(
+        return_value={"host": "myhost", "system_name": _TEST_SYSTEM_NAME}
+    )
 
     mock_factory = MagicMock(spec=CorePlusSessionFactoryManager)
     with patch(
@@ -482,7 +505,9 @@ async def test_close_no_discovery_task():
 async def test_close_factory_close_raises_is_caught():
     """close() catches exceptions from factory.close() and continues."""
     registry = _make_initialized_registry()
-    registry._factory_manager.close = AsyncMock(side_effect=RuntimeError("factory close error"))
+    registry._factory_manager.close = AsyncMock(
+        side_effect=RuntimeError("factory close error")
+    )
     registry._discovery_task = None
 
     # Should not raise
@@ -717,7 +742,9 @@ async def test_sync_enterprise_sessions_normal():
     mock_stale_mgr = _make_mock_manager("enterprise:system:stale")
 
     with (
-        patch.object(registry, "_snapshot_factory_state", AsyncMock(return_value=mock_snapshot)),
+        patch.object(
+            registry, "_snapshot_factory_state", AsyncMock(return_value=mock_snapshot)
+        ),
         patch(
             "deephaven_mcp.resource_manager._registry_enterprise._fetch_factory_pqs",
             AsyncMock(return_value=mock_result),
@@ -758,7 +785,9 @@ async def test_sync_enterprise_sessions_stale_close_raises_is_caught():
     mock_stale_mgr.close = AsyncMock(side_effect=RuntimeError("close error"))
 
     with (
-        patch.object(registry, "_snapshot_factory_state", AsyncMock(return_value=mock_snapshot)),
+        patch.object(
+            registry, "_snapshot_factory_state", AsyncMock(return_value=mock_snapshot)
+        ),
         patch(
             "deephaven_mcp.resource_manager._registry_enterprise._fetch_factory_pqs",
             AsyncMock(return_value=mock_result),
@@ -810,7 +839,9 @@ def test_apply_result_success_calls_apply_factory_success():
     result = _FactoryQueryResult(new_client=MagicMock(), query_names={"pq1"})
     factory_manager = registry._factory_manager
 
-    with patch.object(registry, "_apply_factory_success", return_value=[]) as mock_success:
+    with patch.object(
+        registry, "_apply_factory_success", return_value=[]
+    ) as mock_success:
         managers = registry._apply_result(result, factory_manager)
 
     mock_success.assert_called_once_with(result, factory_manager)
@@ -846,12 +877,18 @@ def test_apply_result_unexpected_type_raises():
 def test_items_keys_used_directly_for_reconciliation():
     """_apply_factory_success uses set(_items.keys()) — all items are reconciled."""
     registry = _make_initialized_registry()
-    registry._items[f"enterprise:{_TEST_SYSTEM_NAME}:pq1"] = _make_mock_manager(f"enterprise:{_TEST_SYSTEM_NAME}:pq1")
-    registry._items[f"enterprise:{_TEST_SYSTEM_NAME}:pq2"] = _make_mock_manager(f"enterprise:{_TEST_SYSTEM_NAME}:pq2")
+    registry._items[f"enterprise:{_TEST_SYSTEM_NAME}:pq1"] = _make_mock_manager(
+        f"enterprise:{_TEST_SYSTEM_NAME}:pq1"
+    )
+    registry._items[f"enterprise:{_TEST_SYSTEM_NAME}:pq2"] = _make_mock_manager(
+        f"enterprise:{_TEST_SYSTEM_NAME}:pq2"
+    )
 
     # Controller reports only pq1 — pq2 is stale and should be removed.
     result = _FactoryQueryResult(new_client=MagicMock(), query_names={"pq1"})
-    managers_to_close = registry._apply_factory_success(result, registry._factory_manager)
+    managers_to_close = registry._apply_factory_success(
+        result, registry._factory_manager
+    )
 
     assert f"enterprise:{_TEST_SYSTEM_NAME}:pq1" in registry._items
     assert f"enterprise:{_TEST_SYSTEM_NAME}:pq2" not in registry._items
@@ -920,7 +957,9 @@ def test_apply_factory_success_adds_new_pqs():
     with patch.object(
         EnterpriseSessionRegistry,
         "_make_enterprise_session_manager",
-        side_effect=lambda factory, name, system_name: _make_mock_manager(f"enterprise:{system_name}:{name}"),
+        side_effect=lambda factory, name, system_name: _make_mock_manager(
+            f"enterprise:{system_name}:{name}"
+        ),
     ):
         managers_to_close = registry._apply_factory_success(result, mock_factory)
 
@@ -1045,7 +1084,11 @@ async def test_discover_enterprise_sessions_cancelled():
     registry = _make_initialized_registry()
     registry._phase = InitializationPhase.PARTIAL
 
-    with patch.object(registry, "_sync_enterprise_sessions", AsyncMock(side_effect=asyncio.CancelledError())):
+    with patch.object(
+        registry,
+        "_sync_enterprise_sessions",
+        AsyncMock(side_effect=asyncio.CancelledError()),
+    ):
         with pytest.raises(asyncio.CancelledError):
             await registry._discover_enterprise_sessions()
 
@@ -1058,7 +1101,11 @@ async def test_discover_enterprise_sessions_generic_exception():
     registry = _make_initialized_registry()
     registry._phase = InitializationPhase.PARTIAL
 
-    with patch.object(registry, "_sync_enterprise_sessions", AsyncMock(side_effect=RuntimeError("oops"))):
+    with patch.object(
+        registry,
+        "_sync_enterprise_sessions",
+        AsyncMock(side_effect=RuntimeError("oops")),
+    ):
         await registry._discover_enterprise_sessions()
 
     assert registry._phase == InitializationPhase.COMPLETED
@@ -1077,7 +1124,9 @@ async def test_discover_enterprise_sessions_sets_loading_phase_first():
     async def track_sync():
         phases_seen.append(registry._phase)
 
-    with patch.object(registry, "_sync_enterprise_sessions", AsyncMock(side_effect=track_sync)):
+    with patch.object(
+        registry, "_sync_enterprise_sessions", AsyncMock(side_effect=track_sync)
+    ):
         await registry._discover_enterprise_sessions()
 
     assert InitializationPhase.LOADING in phases_seen
@@ -1094,7 +1143,9 @@ async def test_discover_enterprise_sessions_logs_warning_when_errors_present():
         async with registry._lock:
             registry._error = "some factory error"
 
-    with patch.object(registry, "_sync_enterprise_sessions", AsyncMock(side_effect=sync_adds_error)):
+    with patch.object(
+        registry, "_sync_enterprise_sessions", AsyncMock(side_effect=sync_adds_error)
+    ):
         await registry._discover_enterprise_sessions()
 
     # Phase should still be COMPLETED

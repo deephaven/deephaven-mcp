@@ -13,8 +13,8 @@ from deephaven_mcp._exceptions import (
     SessionCreationError,
 )
 from deephaven_mcp.resource_manager import (
-    CommunitySessionRegistry,
     CommunitySessionManager,
+    CommunitySessionRegistry,
 )
 from deephaven_mcp.resource_manager._registry import MutableSessionRegistry
 
@@ -68,7 +68,8 @@ async def test_community_registry_initialize(
     assert "community:config:worker1" in community_session_registry._items
     assert "community:config:worker2" in community_session_registry._items
     assert isinstance(
-        community_session_registry._items["community:config:worker1"], CommunitySessionManager
+        community_session_registry._items["community:config:worker1"],
+        CommunitySessionManager,
     )
 
     # Idempotency: second call should not re-load

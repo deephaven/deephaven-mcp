@@ -370,7 +370,11 @@ async def session_tables_list(context: Context, session_id: str) -> dict:
             f"[mcp_systems_server:session_tables_list] Failed for session: '{session_id}', error: {e!r}",
             exc_info=True,
         )
-        return {"success": False, "error": f"Failed to get schemas for session '{session_id}': {type(e).__name__}: {e}", "isError": True}
+        return {
+            "success": False,
+            "error": f"Failed to get schemas for session '{session_id}': {type(e).__name__}: {e}",
+            "isError": True,
+        }
 
 
 async def session_table_data(
