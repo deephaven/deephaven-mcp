@@ -337,15 +337,15 @@ def _redact_recursive(obj: object) -> object:
 def redact_json_sensitive_fields(json_str: str | None) -> str | None:
     """Parse a JSON string and redact values whose keys match known-sensitive names.
 
-    Returns None for empty/None input. Returns the original string unchanged if it
-    cannot be parsed as JSON (with a debug log). Otherwise returns a re-serialized
-    JSON string with sensitive values replaced by "[REDACTED]".
+    Returns None for empty/None input. Returns "[UNPARSEABLE]" if the string cannot
+    be parsed as JSON (with a warning log). Otherwise returns a re-serialized JSON
+    string with sensitive values replaced by "[REDACTED]".
     """
     if not json_str:
         return None
     try:
         parsed = json.loads(json_str)
     except (json.JSONDecodeError, ValueError):
-        _LOGGER.debug("type_specific JSON field is not valid JSON; returning as-is")
-        return json_str
+        _LOGGER.warning("type_specific JSON field is not valid JSON; content suppressed")
+        return "[UNPARSEABLE]"
     return json.dumps(_redact_recursive(parsed))

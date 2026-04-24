@@ -424,9 +424,13 @@ def test_redact_json_sensitive_fields_array_of_dicts():
 
 
 def test_redact_json_sensitive_fields_invalid_json():
-    raw = "not valid json {{"
-    result = redact_json_sensitive_fields(raw)
-    assert result == raw
+    result = redact_json_sensitive_fields("not valid json {{")
+    assert result == "[UNPARSEABLE]"
+
+
+def test_redact_json_sensitive_fields_invalid_json_with_sensitive_content():
+    result = redact_json_sensitive_fields("not-json password=hunter2 token=abc123")
+    assert result == "[UNPARSEABLE]"
 
 
 def test_redact_json_sensitive_fields_mixed_keys():
