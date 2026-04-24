@@ -69,6 +69,33 @@ else:
     ControllerClient = None  # pragma: no cover
 
 
+PQ_STATES: dict[str, str] = {
+    "RUNNING": "ACTIVE",
+    "EXECUTING": "ACTIVE",
+    "UNINITIALIZED": "TRANSITIONAL",
+    "CONNECTING": "TRANSITIONAL",
+    "AUTHENTICATING": "TRANSITIONAL",
+    "ACQUIRING_WORKER": "TRANSITIONAL",
+    "INITIALIZING": "TRANSITIONAL",
+    "STOPPING": "TRANSITIONAL",
+    "DISCONNECTED": "TRANSITIONAL",
+    "STOPPED": "TERMINAL",
+    "FAILED": "TERMINAL",
+    "KILLED": "TERMINAL",
+    "COMPLETED": "TERMINAL",
+    "ERROR": "TERMINAL",
+    "UNSPECIFIED": "INVALID",
+}
+"""Maps each PQ state string to its lifecycle category.
+
+Categories:
+- ACTIVE: PQ is processing data; session_id is present (RUNNING, EXECUTING)
+- TRANSITIONAL: PQ is between stable states; do not branch on a specific value
+- TERMINAL: state will not change without user action; STOPPED and FAILED can be restarted
+- INVALID: UNSPECIFIED is a protobuf zero-value sentinel; should not appear at runtime
+"""
+
+
 # Type definitions
 CorePlusQuerySerial = NewType("CorePlusQuerySerial", int)
 """Type representing the serial number of a persistent query.

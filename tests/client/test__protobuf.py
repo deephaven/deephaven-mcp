@@ -228,3 +228,31 @@ def test_coreplus_query_status_comparisons(monkeypatch):
     assert status == 1
     assert status == pb_enum
     assert str(status) == "RUNNING"
+
+
+# ---------------------------------------------------------------------------
+# PQ_STATES
+# ---------------------------------------------------------------------------
+
+
+def test_pq_states_is_state_to_category_map():
+    """PQ_STATES maps every state string to one of the four valid category strings."""
+    valid_categories = {"ACTIVE", "TRANSITIONAL", "TERMINAL", "INVALID"}
+    assert isinstance(_protobuf.PQ_STATES, dict)
+    for state, category in _protobuf.PQ_STATES.items():
+        assert isinstance(state, str)
+        assert category in valid_categories, f"{state!r} maps to unknown category {category!r}"
+
+
+def test_pq_states_known_mappings():
+    pq_states = _protobuf.PQ_STATES
+    assert pq_states["RUNNING"] == "ACTIVE"
+    assert pq_states["EXECUTING"] == "ACTIVE"
+    assert pq_states["CONNECTING"] == "TRANSITIONAL"
+    assert pq_states["INITIALIZING"] == "TRANSITIONAL"
+    assert pq_states["UNINITIALIZED"] == "TRANSITIONAL"
+    assert pq_states["STOPPED"] == "TERMINAL"
+    assert pq_states["FAILED"] == "TERMINAL"
+    assert pq_states["COMPLETED"] == "TERMINAL"
+    assert pq_states["KILLED"] == "TERMINAL"
+    assert pq_states["UNSPECIFIED"] == "INVALID"

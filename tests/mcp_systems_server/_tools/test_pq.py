@@ -148,6 +148,7 @@ from deephaven_mcp.mcp_systems_server._tools.pq import (
     _format_table_definition,
     _format_worker_protocol,
     _parse_pq_id,
+    _pq_state_category,
     _validate_and_parse_pq_ids,
     _validate_max_concurrent,
     _validate_timeout,
@@ -620,10 +621,12 @@ async def test_pq_restart_multiple():
     assert result["results"][0]["success"] is True
     assert result["results"][0]["name"] == "analytics"
     assert result["results"][0]["state"] == "RUNNING"
+    assert result["results"][0]["state_category"] == "ACTIVE"
     assert result["results"][0]["error"] is None
     assert result["results"][1]["success"] is True
     assert result["results"][1]["name"] == "reporting"
     assert result["results"][1]["state"] == "RUNNING"
+    assert result["results"][1]["state_category"] == "ACTIVE"
     assert result["results"][1]["error"] is None
     assert result["summary"]["total"] == 2
     assert result["summary"]["succeeded"] == 2
@@ -669,9 +672,11 @@ async def test_pq_restart_partial_failure():
     assert result["results"][0]["success"] is True
     assert result["results"][0]["name"] == "analytics"
     assert result["results"][0]["state"] == "RUNNING"
+    assert result["results"][0]["state_category"] == "ACTIVE"
     assert result["results"][0]["error"] is None
     assert result["results"][1]["success"] is False
     assert result["results"][1]["name"] is None
+    assert result["results"][1]["state_category"] is None
     assert "cannot be restarted" in result["results"][1]["error"]
     assert result["summary"]["total"] == 2
     assert result["summary"]["succeeded"] == 1
@@ -783,10 +788,12 @@ async def test_pq_start_partial_failure():
     assert result["results"][0]["success"] is True
     assert result["results"][0]["name"] == "analytics"
     assert result["results"][0]["state"] == "RUNNING"
+    assert result["results"][0]["state_category"] == "ACTIVE"
     assert result["results"][0]["session_id"] == "enterprise:system:analytics"
     assert result["results"][0]["error"] is None
     assert result["results"][1]["success"] is False
     assert result["results"][1]["name"] is None
+    assert result["results"][1]["state_category"] is None
     assert "Timeout" in result["results"][1]["error"]
     assert result["summary"]["total"] == 2
     assert result["summary"]["succeeded"] == 1
@@ -1726,6 +1733,7 @@ async def test_pq_list_success():
     assert pq1["serial"] == 12345
     assert pq1["name"] == "analytics"
     assert pq1["status"] == "RUNNING"
+    assert pq1["status_category"] == "ACTIVE"
     assert pq1["enabled"] is True
     assert pq1["owner"] == "test_user"
     assert pq1["heap_size_gb"] == 8.0
@@ -1753,6 +1761,7 @@ async def test_pq_list_success():
     assert pq2["pq_id"] == "enterprise:system:12346"
     assert pq2["name"] == "reporting"
     assert pq2["status"] == "STOPPED"
+    assert pq2["status_category"] == "TERMINAL"
     assert pq2["enabled"] is True
     assert pq2["owner"] == "test_user"
     assert pq2["heap_size_gb"] == 4.0
@@ -4168,7 +4177,6 @@ def test_validate_max_concurrent_zero():
 
     assert "max_concurrent must be at least 1" in str(exc_info.value)
     assert "got 0" in str(exc_info.value)
-    assert "test_function" in str(exc_info.value)
 
 
 def test_validate_max_concurrent_negative():
@@ -4178,7 +4186,6 @@ def test_validate_max_concurrent_negative():
 
     assert "max_concurrent must be at least 1" in str(exc_info.value)
     assert "got -5" in str(exc_info.value)
-    assert "test_function" in str(exc_info.value)
 
 
 def test_validate_max_concurrent_valid():
@@ -4802,3 +4809,33 @@ def test_register_tools_registers_all_pq_tools():
         "pq_restart",
     }
     assert expected <= set(tools.keys())
+
+
+# ---------------------------------------------------------------------------
+# _pq_state_category
+# ---------------------------------------------------------------------------
+
+
+def test_pq_state_category_active():
+    assert _pq_state_category("RUNNING") == "ACTIVE"
+    assert _pq_state_category("EXECUTING") == "ACTIVE"
+
+
+def test_pq_state_category_transitional():
+    for state in ("UNINITIALIZED", "CONNECTING", "AUTHENTICATING", "ACQUIRING_WORKER", "INITIALIZING", "STOPPING", "DISCONNECTED"):
+        assert _pq_state_category(state) == "TRANSITIONAL", f"{state} should be TRANSITIONAL"
+
+
+def test_pq_state_category_terminal():
+    for state in ("STOPPED", "FAILED", "KILLED", "COMPLETED", "ERROR"):
+        assert _pq_state_category(state) == "TERMINAL", f"{state} should be TERMINAL"
+
+
+def test_pq_state_category_invalid():
+    assert _pq_state_category("UNSPECIFIED") == "INVALID"
+
+
+def test_pq_state_category_unknown_falls_back_to_invalid():
+    assert _pq_state_category("UNKNOWN") == "INVALID"
+    assert _pq_state_category("") == "INVALID"
+    assert _pq_state_category("bogus") == "INVALID"

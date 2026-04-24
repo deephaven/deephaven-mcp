@@ -26,6 +26,7 @@ from deephaven_mcp._exceptions import (
 )
 from deephaven_mcp.client._controller_client import CorePlusControllerClient
 from deephaven_mcp.client._protobuf import (
+    PQ_STATES,
     CorePlusQueryConfig,
     CorePlusQuerySerial,
     CorePlusQueryState,
@@ -62,7 +63,6 @@ try:
 except ImportError:
     ExportedObjectTypeEnum = None
     RestartUsersEnum = None
-
 
 
 _LOGGER = logging.getLogger(__name__)
@@ -208,6 +208,8 @@ def _format_pq_config(config: CorePlusQueryConfig) -> dict[str, object]:
     - Repeated fields → Python lists
     - Enum values → Stringified
     - camelCase protobuf names → snake_case API names
+    - ``script_code`` and ``script_path`` are a protobuf ``oneof`` (``scriptData``); at most
+      one will be non-None at any time
 
     Args:
         config (CorePlusQueryConfig): Wrapper around PersistentQueryConfigMessage protobuf
@@ -695,7 +697,8 @@ async def _setup_batch_pq_operation(
                On success: (parsed_list, controller_client, timeout_int, max_concurrent_int, system_name, None)
                On failure: (None, None, None, None, system_name, {"success": False, "error": "...", "isError": True})
 
-    Usage:
+    Example::
+
         parsed_pqs, controller, timeout, max_conc, system_name, error = await _setup_batch_pq_operation(...)
         if error:
             return error
@@ -823,19 +826,28 @@ def _convert_restart_users_to_enum(restart_users_str: str) -> int:
         ) from None
 
 
+def _pq_state_category(state_name: str) -> str:
+    """Return the PQ_STATES category for a state name; INVALID if unrecognized."""
+    return PQ_STATES.get(state_name, "INVALID")
+
+
 def _add_session_id_if_running(
     result_dict: dict[str, object],
     status: CorePlusQueryStatus | None,
     pq_name: str,
     system_name: str,
 ) -> None:
-    """Add ``session_id`` to ``result_dict`` if the PQ is RUNNING or INITIALIZING.
+    """Add ``session_id`` to ``result_dict`` if the PQ is RUNNING, EXECUTING, or INITIALIZING.
+
+    ``session_id`` is added when ``status.is_running`` (covers RUNNING and EXECUTING) or
+    ``status.is_initializing`` (covers INITIALIZING). In all other states no ``session_id``
+    key is written to ``result_dict``.
 
     Args:
         result_dict (dict[str, object]): Result dict to mutate in place.
         status (CorePlusQueryStatus | None): Current PQ status. ``None`` is a no-op.
-        pq_name (str): PQ name.
-        system_name (str): Enterprise system name.
+        pq_name (str): PQ name used to construct the session_id.
+        system_name (str): Enterprise system name used to construct the session_id.
     """
     if status is not None and (status.is_running or status.is_initializing):
         session_id = BaseItemManager.make_full_name(
@@ -894,6 +906,7 @@ async def pq_name_to_id(
         }
     """
     result: dict[str, object] = {"success": False}
+    system_name = "<unknown>"
 
     try:
         # Get session registry, system name, and factory
@@ -980,9 +993,16 @@ async def pq_list(
     AI Agent Usage:
     - Use this to discover all PQs on a system before performing operations
     - Each PQ includes a pq_id that can be used with pq_details, pq_start, pq_stop, etc.
-    - Common states: RUNNING (active), STOPPED (inactive), INITIALIZING (starting), FAILED (error)
+    - PQ state vocabulary — ACTIVE: RUNNING, EXECUTING;
+      TRANSITIONAL (do not branch on a specific value): UNINITIALIZED, CONNECTING,
+      AUTHENTICATING, ACQUIRING_WORKER, INITIALIZING, STOPPING, DISCONNECTED;
+      TERMINAL (stable until user action): STOPPED, FAILED, KILLED, COMPLETED, ERROR;
+      STOPPED and FAILED can be restarted; INVALID sentinel: UNSPECIFIED
+    - Each PQ entry includes a status_category field (ACTIVE/TRANSITIONAL/TERMINAL/INVALID)
+      so you can branch on category without memorizing which states fall in each group
+    - Never write `if status == "RUNNING"` — use `if status_category == "ACTIVE"` instead
+    - session_id field only present when status is RUNNING, EXECUTING, or INITIALIZING
     - Filter results by status, owner, worker_kind, configuration_type, or script_language
-    - session_id field only present when status is RUNNING or INITIALIZING
     - Use pq_details(pq_id) to get full configuration and state for a specific PQ
     - Empty pqs list is valid - indicates no PQs configured on the system
     - num_failures is the cumulative lifetime failure count for the PQ (not reset on restart)
@@ -1001,6 +1021,7 @@ async def pq_list(
                     "serial": 12345,
                     "name": "analytics_worker",
                     "status": "RUNNING",
+                    "status_category": "ACTIVE",  # ACTIVE | TRANSITIONAL | TERMINAL | INVALID
                     "enabled": True,
                     "owner": "admin_user",
                     "heap_size_gb": 8.0,
@@ -1012,7 +1033,7 @@ async def pq_list(
                     "viewer_groups": ["analysts"],
                     "is_scheduled": True,
                     "num_failures": 0,
-                    "session_id": "enterprise:prod_cluster:analytics_worker"  # Only when RUNNING/INITIALIZING
+                    "session_id": "enterprise:prod_cluster:analytics_worker"  # Only when RUNNING, EXECUTING, or INITIALIZING
                 }
             ]
         }
@@ -1025,6 +1046,7 @@ async def pq_list(
         }
     """
     result: dict[str, object] = {"success": False}
+    system_name = "<unknown>"
 
     try:
         # Get session registry, system name, and factory
@@ -1072,6 +1094,7 @@ async def pq_list(
                 "serial": serial,
                 "name": pq_name,
                 "status": status,
+                "status_category": _pq_state_category(status),
                 "enabled": config_pb.enabled,
                 "owner": config_pb.owner,
                 "heap_size_gb": config_pb.heapSizeGb,
@@ -1140,7 +1163,7 @@ async def pq_details(
     AI Agent Usage:
     - Use pq_id from pq_list to identify the PQ
     - If you only have a PQ name, use pq_name_to_id to look up the pq_id first
-    - session_id only present when state is RUNNING or INITIALIZING
+    - session_id only present when state is RUNNING, EXECUTING, or INITIALIZING
     - Worker host available at state_details.connection_details.processor_host
     - Worker port available at state_details.connection_details.protocols[*].port
     - connection_details is null when PQ is not running
@@ -1572,6 +1595,7 @@ async def pq_create(
         }
     """
     result: dict[str, object] = {"success": False}
+    system_name = "<unknown>"
 
     try:
         # Early validation: script_body and script_path are mutually exclusive
@@ -2292,6 +2316,7 @@ async def pq_modify(
     )
 
     result: dict[str, object] = {"success": False}
+    system_name = "<unknown>"
 
     try:
         # Early validation: script_body and script_path are mutually exclusive
@@ -2405,6 +2430,7 @@ async def pq_modify(
 
         if (
             not restart
+            and pq_info.state is not None
             and pq_info.state.status.is_running
             and any(
                 v is not None
@@ -2483,12 +2509,18 @@ async def pq_start(
     - Single PQ: pass string "enterprise:system:12345"
     - Multiple PQs: pass list ["enterprise:system:12345", "enterprise:system:67890"]
     - Best-effort: partial success is possible, check summary and individual results
-    - Each result item has same fields: pq_id, serial, success, name, state, session_id, error
-    - If success=True: name, state, session_id (conditional) have values, error is None
-    - If success=False: name/state/session_id are None, error has message
+    - Each result item has same fields: pq_id, serial, success, name, state, state_category, session_id, error
+    - If success=True: name, state, and state_category have values; session_id is populated
+      when state is RUNNING, EXECUTING, or INITIALIZING and omitted otherwise; error is None
+    - If success=False: name/state/state_category/session_id are None, error has message
     - Recommended timeout: 30s for typical PQs, 60s for large heap (>32GB) or complex initialization
     - Cannot start a PQ that is already RUNNING - will be marked as failed
     - Can start a STOPPED or FAILED PQ - this is a normal operation
+    - state_category == "TRANSITIONAL" (e.g. state CONNECTING or INITIALIZING) is a valid
+      success outcome when the timeout is short — success=True means the start was accepted
+      and the PQ was last seen in a non-failed state, NOT that it is fully RUNNING;
+      use pq_details to confirm RUNNING if the caller requires it
+    - Branch on `state_category == "ACTIVE"` rather than `state == "RUNNING"`
 
     Args:
         context (Context): MCP context object
@@ -2508,6 +2540,7 @@ async def pq_start(
                     "success": True,
                     "name": "analytics_worker",
                     "state": "RUNNING",
+                    "state_category": "ACTIVE",  # ACTIVE | TRANSITIONAL | TERMINAL | INVALID
                     "session_id": "enterprise:prod:analytics_worker",
                     "error": None
                 },
@@ -2517,6 +2550,7 @@ async def pq_start(
                     "success": False,
                     "name": None,
                     "state": None,
+                    "state_category": None,
                     "session_id": None,
                     "error": "Timeout waiting for PQ to start"
                 }
@@ -2578,6 +2612,7 @@ async def pq_start(
                 "success": False,
                 "name": None,
                 "state": None,
+                "state_category": None,
                 "session_id": None,
                 "error": None,
             }
@@ -2617,6 +2652,7 @@ async def pq_start(
                 item_result["success"] = True
                 item_result["name"] = pq_name
                 item_result["state"] = state_name
+                item_result["state_category"] = _pq_state_category(state_name)
 
                 # Add session_id if running (session_id uses name, not serial)
                 _add_session_id_if_running(
@@ -2668,6 +2704,7 @@ async def pq_start(
                         "success": False,
                         "name": None,
                         "state": None,
+                        "state_category": None,
                         "session_id": None,
                         "error": f"Unexpected error: {type(r).__name__}: {r}",
                     }
@@ -2976,9 +3013,9 @@ async def pq_restart(
     timeout_seconds: int = DEFAULT_PQ_TIMEOUT,
     max_concurrent: int = DEFAULT_MAX_CONCURRENT,
 ) -> dict:
-    """MCP Tool: Restart one or more stopped or failed persistent queries.
+    """MCP Tool: Restart one or more persistent queries.
 
-    Restarts stopped or failed PQs using their original configurations.
+    Restarts PQs using their original configurations, stopping them first if currently running.
     More efficient than delete + recreate for the same configuration.
 
     **Batch Support**: This operation supports batch execution for efficiency.
@@ -3009,14 +3046,19 @@ async def pq_restart(
     - Use pq_id from pq_list to identify PQs
     - If you only have PQ names, use pq_name_to_id to look up the pq_ids first
     - Best-effort: partial success is possible, check summary and individual results
-    - Each result item has same fields: pq_id, serial, success, name, state, session_id (conditional), error
-    - If success=True: name and state have values; session_id is populated when state
-      is RUNNING or INITIALIZING and omitted otherwise; error is None
-    - If success=False: name/state/session_id are None, error has message
+    - Each result item has same fields: pq_id, serial, success, name, state, state_category, session_id, error
+    - If success=True: name, state, and state_category have values; session_id is populated
+      when state is RUNNING, EXECUTING, or INITIALIZING and omitted otherwise; error is None
+    - If success=False: name/state/state_category/session_id are None, error has message
     - Works for stopped, failed, or completed PQs
     - Preserves PQ serial numbers and configurations
     - More efficient than deleting and recreating
     - Increase timeout_seconds for PQs that take longer to restart
+    - state_category == "TRANSITIONAL" (e.g. state CONNECTING or INITIALIZING) is a valid
+      success outcome when the timeout is short — success=True means the restart was accepted
+      and the PQ was last seen in a non-failed state, NOT that it is fully RUNNING;
+      use pq_details to confirm RUNNING if the caller requires it
+    - Branch on `state_category == "ACTIVE"` rather than `state == "RUNNING"`
 
     Args:
         context (Context): MCP context object
@@ -3035,8 +3077,9 @@ async def pq_restart(
                     "serial": 12345,
                     "success": True,
                     "name": "analytics_worker",
-                    "state": "RUNNING",
-                    "session_id": "enterprise:prod:analytics_worker",
+                    "state": "CONNECTING",          # may be RUNNING if fully started within timeout
+                    "state_category": "TRANSITIONAL",  # ACTIVE | TRANSITIONAL | TERMINAL | INVALID
+                    "session_id": None,             # present only when RUNNING, EXECUTING, or INITIALIZING
                     "error": None
                 },
                 {
@@ -3045,6 +3088,7 @@ async def pq_restart(
                     "success": False,
                     "name": None,
                     "state": None,
+                    "state_category": None,
                     "session_id": None,
                     "error": "Timeout waiting for PQ to restart"
                 }
@@ -3106,6 +3150,7 @@ async def pq_restart(
                 "success": False,
                 "name": None,
                 "state": None,
+                "state_category": None,
                 "session_id": None,
                 "error": None,
             }
@@ -3134,6 +3179,7 @@ async def pq_restart(
                 item_result["success"] = True
                 item_result["name"] = pq_name
                 item_result["state"] = state_name
+                item_result["state_category"] = _pq_state_category(state_name)
 
                 # Add session_id if running (session_id uses name, not serial)
                 _add_session_id_if_running(
@@ -3185,6 +3231,7 @@ async def pq_restart(
                         "success": False,
                         "name": None,
                         "state": None,
+                        "state_category": None,
                         "session_id": None,
                         "error": f"Unexpected error: {type(r).__name__}: {r}",
                     }
