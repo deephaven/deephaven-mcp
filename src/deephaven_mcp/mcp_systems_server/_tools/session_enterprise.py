@@ -667,7 +667,7 @@ async def session_enterprise_delete(
         returns a clear error rather than a confusing "not found".
 
         Use the ``session_id`` returned by ``session_enterprise_create`` or
-        ``session_list`` verbatim — do not construct or modify it manually.
+        ``sessions_list`` verbatim — do not construct or modify it manually.
 
     Terminology Note:
     - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
@@ -680,7 +680,7 @@ async def session_enterprise_delete(
 
     AI Agent Usage:
     - Use this tool to clean up sessions when no longer needed
-    - Pass the ``session_id`` exactly as returned by ``session_enterprise_create`` or ``session_list``
+    - Pass the ``session_id`` exactly as returned by ``session_enterprise_create`` or ``sessions_list``
     - Check 'success' field to verify deletion completed
     - This operation is irreversible - deleted sessions cannot be recovered
     - Session will no longer be accessible via other MCP tools after deletion

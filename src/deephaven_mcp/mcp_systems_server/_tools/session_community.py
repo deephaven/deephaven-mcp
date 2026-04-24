@@ -1067,7 +1067,7 @@ async def session_community_delete(
 
     Session ID Format:
         Dynamic community session IDs have the format ``"community:dynamic:{session_name}"``.
-        Use the ``session_id`` returned by ``session_community_create`` or ``session_list``
+        Use the ``session_id`` returned by ``session_community_create`` or ``sessions_list``
         verbatim — do not construct or modify it manually.
         Only dynamically created sessions (source ``"dynamic"``) can be deleted; passing
         a static session ID (source ``"config"``) returns a clear error.
@@ -1084,7 +1084,7 @@ async def session_community_delete(
 
     AI Agent Usage:
     - Use this tool to clean up sessions when no longer needed to free resources
-    - Pass the ``session_id`` exactly as returned by ``session_community_create`` or ``session_list``
+    - Pass the ``session_id`` exactly as returned by ``session_community_create`` or ``sessions_list``
     - Always check 'success' field first to verify deletion completed
     - This operation is irreversible - deleted sessions cannot be recovered
     - Only dynamically created sessions (source='dynamic') can be deleted
