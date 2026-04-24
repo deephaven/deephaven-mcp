@@ -586,6 +586,63 @@ def test_format_pq_config_redacts_type_specific_fields_json(mock_restart_enum):
     assert parsed["driver"] == "com.mysql.Driver"
 
 
+@patch("deephaven_mcp.mcp_systems_server._tools.pq.RestartUsersEnum")
+def test_format_pq_config_long_min_value_sentinel(mock_restart_enum):
+    """Test _format_pq_config converts Java Long.MIN_VALUE to None for created_time_nanos.
+
+    ImportJDBCMultiPartition and PQs predating creation tracking use Long.MIN_VALUE
+    (-9223372036854775808) as the "unset" sentinel. It is truthy in Python so the
+    ordinary ``if pb.createdTimeNanos`` guard does not catch it; this test verifies
+    the explicit sentinel check converts it to None.
+    """
+    mock_restart_enum.Name.return_value = "RU_ADMIN"
+    mock_config = MagicMock()
+    mock_pb = MagicMock()
+    mock_pb.serial = 12345
+    mock_pb.version = 1
+    mock_pb.name = "test"
+    mock_pb.owner = "owner"
+    mock_pb.enabled = True
+    mock_pb.heapSizeGb = 8.0
+    mock_pb.bufferPoolToHeapRatio = 0.0
+    mock_pb.detailedGCLoggingEnabled = False
+    mock_pb.extraJvmArguments = []
+    mock_pb.extraEnvironmentVariables = []
+    mock_pb.classPathAdditions = []
+    mock_pb.serverName = ""
+    mock_pb.adminGroups = []
+    mock_pb.viewerGroups = []
+    mock_pb.restartUsers = 1
+    mock_pb.scriptCode = ""
+    mock_pb.scriptPath = ""
+    mock_pb.scriptLanguage = "Python"
+    mock_pb.configurationType = "Script"
+    mock_pb.typeSpecificFieldsJson = ""
+    mock_pb.scheduling = []
+    mock_pb.timeoutNanos = 0
+    mock_pb.jvmProfile = ""
+    mock_pb.lastModifiedByAuthenticated = ""
+    mock_pb.lastModifiedByEffective = ""
+    mock_pb.lastModifiedTimeNanos = 0
+    mock_pb.completedStatus = ""
+    mock_pb.expirationTimeNanos = 0
+    mock_pb.kubernetesControl = ""
+    mock_pb.workerKind = "DeephavenCommunity"
+    mock_pb.createdTimeNanos = -9223372036854775808  # NULL_LONG sentinel
+    mock_pb.replicaCount = 0
+    mock_pb.spareCount = 0
+    mock_pb.assignmentPolicy = ""
+    mock_pb.assignmentPolicyParams = ""
+    mock_pb.additionalMemoryGb = 0.0
+    mock_pb.pythonControl = ""
+    mock_pb.genericWorkerControl = ""
+    mock_config.pb = mock_pb
+
+    result = _format_pq_config(mock_config)
+
+    assert result["created_time_nanos"] is None
+
+
 @pytest.mark.asyncio
 async def test_pq_restart_multiple():
     """Test pq_restart with multiple PQs."""

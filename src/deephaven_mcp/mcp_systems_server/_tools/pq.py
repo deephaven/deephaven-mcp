@@ -67,6 +67,10 @@ except ImportError:
 
 _LOGGER = logging.getLogger(__name__)
 
+# Matches deephaven.constants.NULL_LONG / Java Long.MIN_VALUE. Defined locally because
+# deephaven.constants requires a live JVM which this server never starts.
+_NULL_LONG = -9223372036854775808
+
 
 # =============================================================================
 # Persistent Query (PQ) Management Tools
@@ -270,7 +274,7 @@ def _format_pq_config(config: CorePlusQueryConfig) -> dict[str, object]:
         ),
         "kubernetes_control": pb.kubernetesControl if pb.kubernetesControl else None,
         "worker_kind": pb.workerKind,
-        "created_time_nanos": pb.createdTimeNanos if pb.createdTimeNanos else None,
+        "created_time_nanos": pb.createdTimeNanos if (pb.createdTimeNanos and pb.createdTimeNanos != _NULL_LONG) else None,
         "replica_count": pb.replicaCount,
         "spare_count": pb.spareCount,
         "assignment_policy": pb.assignmentPolicy if pb.assignmentPolicy else None,
