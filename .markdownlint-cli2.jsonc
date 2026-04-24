@@ -3,6 +3,9 @@
     "default": true,
     // MD013: Line length - disabled because URLs and tables can't be wrapped
     "MD013": false,
+    // MD024: Duplicate headings - siblings_only allows same headings in different sections
+    // (e.g. parallel Community/Enterprise quickstart steps like "1. Create Virtual Environment")
+    "MD024": { "siblings_only": true },
     // MD028: No blank lines in blockquotes - disabled, blank lines improve readability for multi-paragraph blockquotes
     "MD028": false,
     // MD033: Inline HTML - allow specific elements needed in docs
