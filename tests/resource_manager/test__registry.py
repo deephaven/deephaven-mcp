@@ -1,41 +1,39 @@
 """
-Tests for the registry classes in the session manager module.
+Tests for the registry base classes in the resource manager module.
 
 This file contains tests for:
 1. BaseRegistry - Abstract base class providing generic registry functionality
-2. CommunitySessionRegistry - Registry for managing CommunitySessionManager instances
-3. CorePlusSessionFactoryRegistry - Registry for managing CorePlusSessionFactoryManager instances
+2. MutableSessionRegistry - Abstract intermediate class owning mutation API
 """
 
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from pydeephaven import Session
 
 from deephaven_mcp import config
 from deephaven_mcp._exceptions import (
-    ConfigurationError,
     InternalError,
-    SessionCreationError,
 )
 from deephaven_mcp.resource_manager import (
-    CommunitySessionManager,
-    CommunitySessionRegistry,
-    CorePlusSessionFactoryRegistry,
+    BaseItemManager,
     InitializationPhase,
     RegistrySnapshot,
+    SystemType,
 )
-from deephaven_mcp.resource_manager._registry import BaseRegistry
+from deephaven_mcp.resource_manager._registry import (
+    BaseRegistry,
+    MutableSessionRegistry,
+)
 
 # --- RegistrySnapshot Tests ---
 
 
 def test_snapshot_simple_sets_phase_and_empty_errors():
-    """Test that simple() sets SIMPLE phase and empty errors dict."""
+    """Test that simple() sets COMPLETED phase and empty errors dict."""
     snapshot = RegistrySnapshot.simple(items={"a": 1, "b": 2})
     assert snapshot.items == {"a": 1, "b": 2}
-    assert snapshot.initialization_phase == InitializationPhase.SIMPLE
+    assert snapshot.initialization_phase == InitializationPhase.COMPLETED
     assert snapshot.initialization_errors == {}
 
 
@@ -43,7 +41,7 @@ def test_snapshot_simple_empty_items():
     """Test simple() with an empty items dict."""
     snapshot = RegistrySnapshot.simple(items={})
     assert snapshot.items == {}
-    assert snapshot.initialization_phase == InitializationPhase.SIMPLE
+    assert snapshot.initialization_phase == InitializationPhase.COMPLETED
     assert snapshot.initialization_errors == {}
 
 
@@ -216,7 +214,7 @@ async def test_get_all_returns_snapshot(registry, mock_base_config_manager):
 
     # Should return a RegistrySnapshot with both configured items
     assert isinstance(snapshot, RegistrySnapshot)
-    assert snapshot.initialization_phase == InitializationPhase.SIMPLE
+    assert snapshot.initialization_phase == InitializationPhase.COMPLETED
     assert snapshot.initialization_errors == {}
     assert len(snapshot.items) == 2
     assert "item1" in snapshot.items
@@ -230,7 +228,7 @@ async def test_get_all_returns_copy(registry, mock_base_config_manager):
     """Test that get_all() returns a copy of items, not the original dict."""
     await registry.initialize(mock_base_config_manager)
     snapshot = await registry.get_all()
-    assert snapshot.initialization_phase == InitializationPhase.SIMPLE
+    assert snapshot.initialization_phase == InitializationPhase.COMPLETED
     assert snapshot.initialization_errors == {}
 
     # Modify the returned dict
@@ -244,7 +242,7 @@ async def test_get_all_returns_copy(registry, mock_base_config_manager):
 
     # Getting all items again should not include our modification
     fresh_snapshot = await registry.get_all()
-    assert fresh_snapshot.initialization_phase == InitializationPhase.SIMPLE
+    assert fresh_snapshot.initialization_phase == InitializationPhase.COMPLETED
     assert fresh_snapshot.initialization_errors == {}
     assert "new_item" not in fresh_snapshot.items
     assert len(fresh_snapshot.items) == 2
@@ -262,7 +260,7 @@ async def test_get_all_empty_registry():
 
     snapshot = await registry.get_all()
     assert isinstance(snapshot, RegistrySnapshot)
-    assert snapshot.initialization_phase == InitializationPhase.SIMPLE
+    assert snapshot.initialization_phase == InitializationPhase.COMPLETED
     assert snapshot.initialization_errors == {}
     assert len(snapshot.items) == 0
 
@@ -285,236 +283,208 @@ async def test_close_calls_close_on_items(registry, mock_base_config_manager):
     assert registry._items == {}
 
 
-# --- Community Session Registry Tests ---
-
-
-@pytest.fixture
-def mock_community_config_manager():
-    """Fixture for a mock ConfigManager."""
-    mock = AsyncMock(spec=config.ConfigManager)
-    mock.get_config = AsyncMock(
-        return_value={
-            "community": {
-                "sessions": {
-                    "worker1": {"host": "localhost", "port": 10001},
-                    "worker2": {"host": "localhost", "port": 10002},
-                }
-            }
-        }
-    )
-    return mock
-
-
-@pytest.fixture
-def community_session_registry():
-    """Fixture for a CommunitySessionRegistry instance."""
-    return CommunitySessionRegistry()
-
-
-def test_community_registry_construction(community_session_registry):
-    """Test that CommunitySessionRegistry can be constructed."""
-    assert isinstance(community_session_registry, CommunitySessionRegistry)
-    assert not community_session_registry._initialized
-
-
 @pytest.mark.asyncio
-async def test_community_registry_initialize(
-    community_session_registry, mock_community_config_manager
+async def test_close_logs_error_when_item_close_raises(
+    registry, mock_base_config_manager
 ):
-    """Test that initialize() populates session managers correctly."""
-    await community_session_registry.initialize(mock_community_config_manager)
-    assert community_session_registry._initialized
-    assert len(community_session_registry._items) == 2
-    assert "worker1" in community_session_registry._items
-    assert "worker2" in community_session_registry._items
-    assert isinstance(
-        community_session_registry._items["worker1"], CommunitySessionManager
-    )
+    """close() logs errors from item.close() but continues closing remaining items."""
+    await registry.initialize(mock_base_config_manager)
 
-    # Test idempotency
-    await community_session_registry.initialize(mock_community_config_manager)
-    assert len(community_session_registry._items) == 2
+    item1 = await registry.get("item1")
+    item2 = await registry.get("item2")
+    item1.close = AsyncMock(side_effect=RuntimeError("network error"))
+    item2.close = AsyncMock()
 
+    # Should not raise — errors are logged and swallowed
+    await registry.close()
 
-@pytest.mark.asyncio
-async def test_community_registry_methods_raise_before_initialize(
-    community_session_registry,
-):
-    """Test that methods raise InternalError if called before initialization."""
-    with pytest.raises(InternalError, match="CommunitySessionRegistry not initialized"):
-        await community_session_registry.get("worker1")
-
-    with pytest.raises(InternalError, match="CommunitySessionRegistry not initialized"):
-        await community_session_registry.close()
+    item1.close.assert_awaited_once()
+    item2.close.assert_awaited_once()
+    assert not registry._initialized
 
 
-@pytest.mark.asyncio
-async def test_community_registry_get_returns_manager(
-    community_session_registry, mock_community_config_manager
-):
-    """Test that get() returns the correct session manager instance."""
-    await community_session_registry.initialize(mock_community_config_manager)
-    manager = await community_session_registry.get("worker1")
-    assert isinstance(manager, CommunitySessionManager)
-    assert manager._name == "worker1"
+# ---------------------------------------------------------------------------
+# MutableSessionRegistry — mutation methods (via concrete test subclass)
+# ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_community_registry_get_unknown_raises_registry_item_not_found(
-    community_session_registry, mock_community_config_manager
-):
-    """Test that get() for an unknown worker raises RegistryItemNotFoundError."""
-    from deephaven_mcp._exceptions import RegistryItemNotFoundError
+class _MutableRegistryImpl(MutableSessionRegistry):
+    """Minimal concrete subclass of MutableSessionRegistry for testing."""
 
-    await community_session_registry.initialize(mock_community_config_manager)
-    with pytest.raises(
-        RegistryItemNotFoundError,
-        match="No item with name 'unknown_worker' found in CommunitySessionRegistry",
-    ):
-        await community_session_registry.get("unknown_worker")
+    async def _load_items(self, config_manager) -> None:  # type: ignore[override]
+        pass  # no-op — tests populate _items directly
 
 
-@pytest.mark.asyncio
-async def test_community_registry_close_calls_close_on_managers(
-    community_session_registry, mock_community_config_manager
-):
-    """Test that close() calls close() on each manager but does not clear the registry."""
-    await community_session_registry.initialize(mock_community_config_manager)
+def _make_initialized_mutable_registry() -> _MutableRegistryImpl:
+    """Return a _MutableRegistryImpl that has been initialized (empty)."""
+    registry = _MutableRegistryImpl()
+    registry._initialized = True
+    return registry
 
-    # Mock the close method of the managers
-    manager1 = community_session_registry._items["worker1"]
-    manager2 = community_session_registry._items["worker2"]
-    manager1.close = AsyncMock()
-    manager2.close = AsyncMock()
 
-    await community_session_registry.close()
+def _make_mock_manager(full_name: str) -> MagicMock:
+    """Return a BaseItemManager mock with the given full_name and correct system_type/source/name."""
+    parts = full_name.split(":")
+    mgr = MagicMock(spec=BaseItemManager)
+    mgr.full_name = full_name
+    mgr.close = AsyncMock()
+    mgr.system_type = MagicMock()
+    mgr.system_type.value = parts[0] if len(parts) >= 1 else "community"
+    mgr.source = parts[1] if len(parts) >= 2 else ""
+    mgr.name = parts[2] if len(parts) >= 3 else ""
+    return mgr
 
-    # Verify close was called on each manager
-    manager1.close.assert_awaited_once()
-    manager2.close.assert_awaited_once()
 
-    # close() resets _initialized and clears _items to allow reinitialization
-    assert not community_session_registry._initialized
-    assert community_session_registry._items == {}
+# --- isinstance checks ---
+
+
+def test_mutable_registry_is_base_registry():
+    """MutableSessionRegistry is a BaseRegistry."""
+    assert isinstance(_MutableRegistryImpl(), BaseRegistry)
+
+
+# --- MutableSessionRegistry.close() clears _added_session_ids ---
 
 
 @pytest.mark.asyncio
-async def test_community_registry_get_session_from_manager(
-    community_session_registry, mock_community_config_manager
-):
-    """Test the full flow of getting a session via the registry and manager."""
-    await community_session_registry.initialize(mock_community_config_manager)
+async def test_mutable_registry_close_clears_added_session_ids():
+    """close() clears _added_session_ids so the registry is clean for reuse."""
+    registry = _make_initialized_mutable_registry()
+    mgr = _make_mock_manager("community:default:s1")
+    registry._items["community:default:s1"] = mgr
+    registry._added_session_ids = {"community:default:s1"}
 
-    mock_session = AsyncMock(spec=Session)
-    mock_session.is_alive = True
+    await registry.close()
 
-    # Patch the manager's get method to return our mock session
-    with patch(
-        "deephaven_mcp.resource_manager._manager.CommunitySessionManager.get",
-        new=AsyncMock(return_value=mock_session),
-    ) as mock_manager_get:
-        manager = await community_session_registry.get("worker1")
-        session = await manager.get()
-
-        assert session is mock_session
-        mock_manager_get.assert_awaited_once()
+    assert registry._added_session_ids == set()
+    assert not registry._initialized
 
 
 @pytest.mark.asyncio
-async def test_community_registry_get_session_creation_error(
-    community_session_registry, mock_community_config_manager
-):
-    """Test that SessionCreationError from the manager propagates."""
-    await community_session_registry.initialize(mock_community_config_manager)
+async def test_mutable_registry_add_session_success():
+    """add_session() stores manager and tracks its id."""
+    registry = _make_initialized_mutable_registry()
+    mgr = _make_mock_manager("community:default:mysession")
 
-    # Patch the manager's get method to raise an error
-    with patch(
-        "deephaven_mcp.resource_manager._manager.CommunitySessionManager.get",
-        side_effect=SessionCreationError("Failed to connect"),
-    ):
-        manager = await community_session_registry.get("worker1")
-        with pytest.raises(SessionCreationError, match="Failed to connect"):
-            await manager.get()
+    await registry.add_session(mgr)
 
-
-# --- CorePlus Session Factory Registry Tests ---
-
-
-@pytest.fixture
-def mock_factory_config_manager():
-    """Fixture for a mock ConfigManager."""
-    manager = AsyncMock(spec=config.ConfigManager)
-    manager.get_config.return_value = {
-        "enterprise": {
-            "systems": {
-                "factory1": {"host": "localhost", "port": 8080},
-                "factory2": {"host": "remotehost", "port": 9090},
-            }
-        }
-    }
-    return manager
+    assert "community:default:mysession" in registry._items
+    assert "community:default:mysession" in registry._added_session_ids
 
 
 @pytest.mark.asyncio
-async def test_factory_registry_creation(mock_factory_config_manager):
-    """Test that the registry creates managers for each config entry."""
-    with patch(
-        "deephaven_mcp.resource_manager._registry.CorePlusSessionFactoryManager"
-    ) as mock_manager:
-        registry = CorePlusSessionFactoryRegistry()
-        await registry.initialize(mock_factory_config_manager)
+async def test_mutable_registry_add_session_duplicate_raises():
+    """add_session() raises ValueError if session already exists."""
+    registry = _make_initialized_mutable_registry()
+    mgr = _make_mock_manager("community:default:dup")
+    registry._items["community:default:dup"] = mgr
 
-        assert mock_manager.call_count == 2
-        mock_manager.assert_any_call("factory1", {"host": "localhost", "port": 8080})
-        mock_manager.assert_any_call("factory2", {"host": "remotehost", "port": 9090})
+    with pytest.raises(ValueError, match="already exists"):
+        await registry.add_session(mgr)
 
 
 @pytest.mark.asyncio
-async def test_factory_registry_get_nonexistent(mock_factory_config_manager):
-    """Test that getting a non-existent manager raises RegistryItemNotFoundError."""
-    from deephaven_mcp._exceptions import RegistryItemNotFoundError
+async def test_mutable_registry_add_session_not_initialized_raises():
+    """add_session() raises InternalError if registry not initialized."""
+    registry = _MutableRegistryImpl()  # not initialized
+    mgr = _make_mock_manager("community:default:s")
 
-    registry = CorePlusSessionFactoryRegistry()
-    await registry.initialize(mock_factory_config_manager)
-
-    with pytest.raises(RegistryItemNotFoundError):
-        await registry.get("nonexistent")
+    with pytest.raises(InternalError):
+        await registry.add_session(mgr)
 
 
 @pytest.mark.asyncio
-async def test_factory_registry_no_systems_key():
-    """Test that the registry handles a missing 'systems' key gracefully."""
-    manager = AsyncMock(spec=config.ConfigManager)
-    manager.get_config.return_value = {"enterprise": {}}
-    registry = CorePlusSessionFactoryRegistry()
-    await registry.initialize(manager)
+async def test_mutable_registry_remove_session_success():
+    """remove_session() removes and returns the manager, discards tracking id."""
+    registry = _make_initialized_mutable_registry()
+    mgr = _make_mock_manager("community:default:tosremove")
+    registry._items["community:default:tosremove"] = mgr
+    registry._added_session_ids.add("community:default:tosremove")
 
-    assert len(registry._items) == 0
+    result = await registry.remove_session("community:default:tosremove")
+
+    assert result is mgr
+    assert "community:default:tosremove" not in registry._items
+    assert "community:default:tosremove" not in registry._added_session_ids
 
 
 @pytest.mark.asyncio
-async def test_factory_registry_enterprise_not_available_raises_config_error():
-    """Test that ConfigurationError is raised when enterprise configs exist but enterprise is not available."""
-    manager = AsyncMock(spec=config.ConfigManager)
-    manager.get_config.return_value = {
-        "enterprise": {
-            "systems": {
-                "factory1": {"host": "localhost", "port": 8080},
-            }
-        }
+async def test_mutable_registry_remove_session_not_found_returns_none():
+    """remove_session() returns None for a non-existent session (idempotent)."""
+    registry = _make_initialized_mutable_registry()
+
+    result = await registry.remove_session("community:default:ghost")
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_mutable_registry_remove_session_not_initialized_raises():
+    """remove_session() raises InternalError if registry not initialized."""
+    registry = _MutableRegistryImpl()
+
+    with pytest.raises(InternalError):
+        await registry.remove_session("community:default:s")
+
+
+@pytest.mark.asyncio
+async def test_mutable_registry_count_added_sessions_zero():
+    """count_added_sessions() returns 0 when no sessions tracked."""
+    registry = _make_initialized_mutable_registry()
+
+    count = await registry.count_added_sessions(SystemType.COMMUNITY, "default")
+    assert count == 0
+
+
+@pytest.mark.asyncio
+async def test_mutable_registry_count_added_sessions_counts_correctly():
+    """count_added_sessions() counts matching sessions that are still in _items."""
+    registry = _make_initialized_mutable_registry()
+
+    mgr1 = _make_mock_manager("community:default:s1")
+    mgr2 = _make_mock_manager("community:default:s2")
+    mgr3 = _make_mock_manager("community:other:s3")
+
+    registry._items["community:default:s1"] = mgr1
+    registry._items["community:default:s2"] = mgr2
+    registry._items["community:other:s3"] = mgr3
+    registry._added_session_ids = {
+        "community:default:s1",
+        "community:default:s2",
+        "community:other:s3",
     }
 
-    # Mock is_enterprise_available as False
-    with patch(
-        "deephaven_mcp.resource_manager._registry.is_enterprise_available", False
-    ):
-        registry = CorePlusSessionFactoryRegistry()
+    assert await registry.count_added_sessions(SystemType.COMMUNITY, "default") == 2
+    assert await registry.count_added_sessions(SystemType.COMMUNITY, "other") == 1
 
-        with pytest.raises(ConfigurationError) as exc_info:
-            await registry.initialize(manager)
 
-        # Verify the error message is helpful
-        assert "Enterprise factory configurations" in str(exc_info.value)
-        assert "deephaven-coreplus-client" in str(exc_info.value)
-        assert "install" in str(exc_info.value).lower()
-        assert "Python package" in str(exc_info.value)
+@pytest.mark.asyncio
+async def test_mutable_registry_count_added_sessions_excludes_removed():
+    """count_added_sessions() does not count sessions removed from _items."""
+    registry = _make_initialized_mutable_registry()
+
+    mgr = _make_mock_manager("community:default:s1")
+    registry._items["community:default:s1"] = mgr
+    registry._added_session_ids = {"community:default:s1", "community:default:s2"}
+    # s2 is tracked but not in _items (removed without cleanup)
+
+    count = await registry.count_added_sessions(SystemType.COMMUNITY, "default")
+    assert count == 1
+
+
+@pytest.mark.asyncio
+async def test_mutable_registry_count_added_sessions_not_initialized_raises():
+    """count_added_sessions() raises InternalError if registry not initialized."""
+    registry = _MutableRegistryImpl()
+
+    with pytest.raises(InternalError):
+        await registry.count_added_sessions(SystemType.COMMUNITY, "default")
+
+
+@pytest.mark.asyncio
+async def test_mutable_registry_count_added_sessions_malformed_id_raises():
+    """count_added_sessions() raises InternalError for malformed IDs in _added_session_ids."""
+    registry = _make_initialized_mutable_registry()
+    registry._added_session_ids = {"badkey"}  # no colons — invalid full_name
+
+    with pytest.raises(InternalError, match="Malformed session ID"):
+        await registry.count_added_sessions(SystemType.COMMUNITY, "default")

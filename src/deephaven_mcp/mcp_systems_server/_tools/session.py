@@ -1,5 +1,4 @@
-"""
-Session Management MCP Tools - List and Query Sessions.
+"""Session Management MCP Tools - List and Query Sessions.
 
 Provides MCP tools for viewing and managing Deephaven sessions:
 - sessions_list: List all active sessions (Community and Enterprise)
@@ -13,17 +12,16 @@ import time
 from collections.abc import Awaitable, Callable
 from typing import TypeVar
 
-from mcp.server.fastmcp import Context
+from mcp.server.fastmcp import Context, FastMCP
 
 from deephaven_mcp import queries
 from deephaven_mcp.client import BaseSession
-from deephaven_mcp.mcp_systems_server._tools.mcp_server import mcp_server
 from deephaven_mcp.mcp_systems_server._tools.shared import (
-    _format_initialization_status,
+    format_initialization_status,
 )
 from deephaven_mcp.resource_manager import (
     BaseItemManager,
-    CombinedSessionRegistry,
+    BaseRegistry,
     DynamicCommunitySessionManager,
 )
 
@@ -34,8 +32,7 @@ _LOGGER = logging.getLogger(__name__)
 
 # Session management constants
 DEFAULT_MAX_CONCURRENT_SESSIONS = 5
-"""
-Default maximum number of concurrent sessions per enterprise system.
+"""Default maximum number of concurrent sessions per enterprise system.
 
 This default is used when session_creation.max_concurrent_sessions is not specified
 in the enterprise system configuration. Can be overridden per system in the config.
@@ -46,10 +43,8 @@ DEFAULT_PROGRAMMING_LANGUAGE = "Python"
 """Default programming language for community and enterprise sessions when not specified in config."""
 
 
-@mcp_server.tool()
 async def sessions_list(context: Context) -> dict:
-    """
-    MCP Tool: List all sessions with basic metadata.
+    """MCP Tool: List all sessions with basic metadata.
 
     Returns basic information about all available sessions (community and enterprise).
     This is a lightweight operation that doesn't connect to sessions or check their status.
@@ -67,7 +62,7 @@ async def sessions_list(context: Context) -> dict:
     - Use this to discover available sessions before calling other session-based tools
     - Use returned 'session_id' values with other tools like run_script, get_table_data
     - Check 'type' field to understand session capabilities (community vs enterprise)
-    - For detailed session information, use get_session_details with a specific session_id
+    - For detailed session information, use session_details with a specific session_id
 
     Args:
         context (Context): The MCP context object.
@@ -121,9 +116,9 @@ async def sessions_list(context: Context) -> dict:
         _LOGGER.debug(
             "[mcp_systems_server:sessions_list] Accessing session registry from context"
         )
-        session_registry: CombinedSessionRegistry = (
-            context.request_context.lifespan_context["session_registry"]
-        )
+        session_registry: BaseRegistry = context.request_context.lifespan_context[
+            "session_registry"
+        ]
         _LOGGER.debug(
             "[mcp_systems_server:sessions_list] Retrieving all sessions from registry"
         )
@@ -168,7 +163,7 @@ async def sessions_list(context: Context) -> dict:
         response: dict[str, object] = {"success": True, "sessions": results}
 
         # Surface initialization status from the same atomic snapshot
-        init_info = _format_initialization_status(
+        init_info = format_initialization_status(
             snapshot.initialization_phase, snapshot.initialization_errors
         )
         if init_info:
@@ -185,8 +180,7 @@ async def sessions_list(context: Context) -> dict:
 async def _get_session_liveness_info(
     mgr: BaseItemManager, session_id: str, attempt_to_connect: bool
 ) -> tuple[bool, str, str | None]:
-    """
-    Get session liveness status and availability.
+    """Get session liveness status and availability.
 
     This function checks the liveness status of a session using the provided manager.
     It can optionally attempt to connect to the session to verify its actual status.
@@ -225,8 +219,7 @@ async def _get_session_property(
     property_name: str,
     getter_func: Callable[[BaseSession], Awaitable[T]],
 ) -> T | None:
-    """
-    Safely get a session property.
+    """Safely get a session property.
 
     Args:
         mgr (BaseItemManager): Session manager
@@ -258,8 +251,7 @@ async def _get_session_property(
 async def _get_session_programming_language(
     mgr: BaseItemManager, session_id: str, available: bool
 ) -> str | None:
-    """
-    Get the programming language of a session.
+    """Get the programming language of a session.
 
     This function retrieves the programming language (e.g., "python", "groovy")
     associated with the session. If the session is not available, it returns None
@@ -294,8 +286,7 @@ async def _get_session_programming_language(
 async def _get_session_versions(
     mgr: BaseItemManager, session_id: str, available: bool
 ) -> tuple[str | None, str | None]:
-    """
-    Get Deephaven version information from a session.
+    """Get Deephaven version information from a session.
 
     Retrieves both community (Core) and enterprise (Core+) version information.
     Returns (None, None) immediately without connecting if the session is unavailable.
@@ -328,12 +319,10 @@ async def _get_session_versions(
         return None, None
 
 
-@mcp_server.tool()
 async def session_details(
     context: Context, session_id: str, attempt_to_connect: bool = False
 ) -> dict:
-    """
-    MCP Tool: Get detailed information about a specific session.
+    """MCP Tool: Get detailed information about a specific session.
 
     Returns comprehensive status and configuration information for a specific session,
     including availability status, programming language, and version information.
@@ -352,7 +341,7 @@ async def session_details(
     - Use attempt_to_connect=True to actively verify session connectivity
     - Check 'available' field to determine if session can be used
     - Use 'liveness_status' for detailed status classification
-    - Use list_sessions first to discover available session_id values
+    - Use sessions_list first to discover available session_id values
     - IMPORTANT: attempt_to_connect=True creates resource overhead (open sessions consume MCP server resources and each session maintains connections)
     - Only use attempt_to_connect=True for sessions you actually intend to use, not for general discovery or monitoring
 
@@ -367,12 +356,12 @@ async def session_details(
             - 'success' (bool): True if retrieval succeeded, False otherwise.
             - 'session' (dict): Session details including:
                 - session_id (fully qualified session name)
-                - type ("community" or "enterprise")
+                - type ("COMMUNITY" or "ENTERPRISE")
                 - source (community source or enterprise factory)
                 - session_name (session name)
                 - available (bool): Whether the session is available
                 - liveness_status (str): Status classification ("ONLINE", "OFFLINE", etc.)
-                - liveness_detail (str): Detailed explanation of the status
+                - liveness_detail (str, optional): Detailed explanation of the status, omitted if unavailable
                 - programming_language (str, optional): The programming language of the session (e.g., "python", "groovy")
                 - programming_language_version (str, optional): Version of the programming language (e.g., "3.9.7")
                 - deephaven_community_version (str, optional): Version of Deephaven Community/Core (e.g., "0.24.0")
@@ -400,9 +389,9 @@ async def session_details(
         _LOGGER.debug(
             "[mcp_systems_server:session_details] Accessing session registry from context"
         )
-        session_registry: CombinedSessionRegistry = (
-            context.request_context.lifespan_context["session_registry"]
-        )
+        session_registry: BaseRegistry = context.request_context.lifespan_context[
+            "session_registry"
+        ]
 
         # Get the specific session manager directly
         _LOGGER.debug(
@@ -525,3 +514,15 @@ async def session_details(
             f"[mcp_systems_server:session_details] Failed: {e!r}", exc_info=True
         )
         return {"success": False, "error": str(e), "isError": True}
+
+
+def register_tools(server: FastMCP) -> None:
+    """Register all session listing/details tools with the given FastMCP server.
+
+    These tools are shared between the DHE and DHC servers.
+
+    Args:
+        server (FastMCP): The server to register tools with.
+    """
+    server.tool()(sessions_list)
+    server.tool()(session_details)

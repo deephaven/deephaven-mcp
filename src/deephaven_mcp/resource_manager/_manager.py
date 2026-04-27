@@ -1,5 +1,4 @@
-"""
-Async resource managers for Deephaven MCP session and factory lifecycle management.
+"""Async resource managers for Deephaven MCP session and factory lifecycle management.
 
 This module provides thread-safe, async resource managers that handle the complete lifecycle
 of Deephaven sessions and factories across both Community and Enterprise deployments. The managers
@@ -99,7 +98,7 @@ from deephaven_mcp.client import (
     CorePlusSessionFactory,
     CoreSession,
 )
-from deephaven_mcp.config._enterprise_system import (
+from deephaven_mcp.config import (
     DEFAULT_CONNECTION_TIMEOUT_SECONDS,
 )
 
@@ -400,11 +399,11 @@ class BaseItemManager(Generic[T], ABC):
             Using this method prevents identifier format inconsistencies.
 
         Args:
-            system_type: The Deephaven deployment type (COMMUNITY or ENTERPRISE).
+            system_type (SystemType): The Deephaven deployment type (COMMUNITY or ENTERPRISE).
                 Determines which client libraries and authentication mechanisms are used.
-            source: The configuration source identifier that groups related resources.
+            source (str): The configuration source identifier that groups related resources.
                 Examples: "config.yaml", "https://api.example.com/config", "env-vars"
-            name: The unique name of the specific resource within its source context.
+            name (str): The unique name of the specific resource within its source context.
                 Must be unique within the same system_type and source combination.
 
         Returns:
@@ -1853,8 +1852,7 @@ class CommunitySessionManager(BaseItemManager[CoreSession]):
 
 
 class StaticCommunitySessionManager(CommunitySessionManager):
-    """
-    Manages a statically configured Deephaven Community session.
+    """Manages a statically configured Deephaven Community session.
 
     This class extends CommunitySessionManager for sessions defined in configuration files.
     These sessions connect to pre-existing Deephaven servers that are managed externally
@@ -1883,8 +1881,7 @@ class StaticCommunitySessionManager(CommunitySessionManager):
 
     @override
     def __init__(self, name: str, config: dict[str, Any]):
-        """
-        Initialize a StaticCommunitySessionManager for a configuration-based session.
+        """Initialize a StaticCommunitySessionManager for a configuration-based session.
 
         Args:
             name (str): Unique identifier for this manager instance within the registry.
@@ -1901,17 +1898,16 @@ class StaticCommunitySessionManager(CommunitySessionManager):
 
 
 class DynamicCommunitySessionManager(CommunitySessionManager):
-    """
-    Manages a dynamically created Deephaven Community session.
+    """Manages a dynamically created Deephaven Community session.
 
     This class extends CommunitySessionManager to add full lifecycle management for
-    sessions that are launched on-demand via Docker containers or python-based servers.
+    sessions that are launched on-demand via Docker containers or Python-based servers.
     Unlike static sessions, this manager controls server startup, monitoring, and shutdown.
 
     Key Characteristics:
         - **Source**: Automatically set to "dynamic" to identify runtime-created sessions
         - **Server Lifecycle**: DOES manage server startup/shutdown (via LaunchedSession)
-        - **Launch Methods**: Supports Docker containers or python-based deephaven-server
+        - **Launch Methods**: Supports Docker containers or Python-based deephaven-server
         - **Full Name Format**: "community:dynamic:{name}"
         - **Created By**: MCP tools like session_community_create
 
@@ -1935,14 +1931,17 @@ class DynamicCommunitySessionManager(CommunitySessionManager):
         ```python
         launched = await launch_session(
             launch_method="docker",
+            session_name="my-session",
             port=10000,
-            programming_language="python",
-            auth_type="PSK",
-            auth_token="secret"
+            auth_token="secret",
+            heap_size_gb=4,
+            extra_jvm_args=[],
+            environment_vars={},
+            docker_image="ghcr.io/deephaven/server:latest",
         )
         manager = DynamicCommunitySessionManager(
             name="my-session",
-            config={"host": "localhost", "port": 10000, "auth_token": "secret"},
+            config={"server": "http://localhost:10000", "auth_token": "secret"},
             launched_session=launched
         )
         ```
@@ -1964,8 +1963,7 @@ class DynamicCommunitySessionManager(CommunitySessionManager):
         config: dict[str, Any],
         launched_session: DockerLaunchedSession | PythonLaunchedSession,
     ):
-        """
-        Initialize a DynamicCommunitySessionManager for a runtime-created session.
+        """Initialize a DynamicCommunitySessionManager for a runtime-created session.
 
         Args:
             name (str): Unique identifier for this manager instance within the registry.
@@ -2050,8 +2048,7 @@ class DynamicCommunitySessionManager(CommunitySessionManager):
 
     @override
     async def close(self) -> None:
-        """
-        Close the session and stop the underlying process/container.
+        """Close the session and stop the underlying process/container.
 
         This method:
         1. Closes the CoreSession connection (if established)
@@ -2091,11 +2088,10 @@ class DynamicCommunitySessionManager(CommunitySessionManager):
             )
 
     def to_dict(self) -> dict[str, Any]:
-        """
-        Convert session information to a dictionary for API responses.
+        """Convert session information to a dictionary for API responses.
 
         Returns:
-            dict: Session information including connection details.
+            dict[str, Any]: Session information including connection details.
 
         Note:
             Does NOT include connection_url_with_auth or auth_token for security.
@@ -2271,7 +2267,7 @@ class EnterpriseSessionManager(BaseItemManager[CorePlusSession]):
             - **system_type**: Set to SystemType.ENTERPRISE for Enterprise deployments
             - **source**: The configuration source identifier provided by caller
             - **name**: The unique identifier for this specific manager instance
-            - **full_name**: Computed as "{source}.{name}" for global uniqueness
+            - **full_name**: Computed as "{system_type}:{source}:{name}" for global uniqueness
 
         Function-Based Creation:
             Unlike CommunitySessionManager's config-dict approach, this manager uses
@@ -2583,14 +2579,6 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
         - **Performance Tuning**: Connection limits, caching strategies, optimization flags
 
     Integration Patterns:
-        **Registry Integration**:
-        ```python
-        registry = CorePlusSessionFactoryRegistry()
-        manager = CorePlusSessionFactoryManager("prod-factory", config)
-        registry.add_manager(manager)
-        factory = await registry.get_factory("prod-factory")
-        ```
-
         **Factory-Based Session Creation**:
         ```python
         factory_manager = CorePlusSessionFactoryManager("enterprise", config)
@@ -2672,7 +2660,6 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
     See Also:
         BaseItemManager[T]: Generic base class providing core lifecycle management
         CorePlusSessionFactory: The Deephaven Enterprise factory type being managed
-        CorePlusSessionFactoryRegistry: Registry for managing multiple factory managers
         EnterpriseSessionManager: Session-level manager that can use factories
         SystemType.ENTERPRISE: The system type constant for Enterprise deployments
     """
@@ -2690,7 +2677,7 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
             - **system_type**: Set to SystemType.ENTERPRISE for Enterprise factory management
             - **source**: Set to "factory" to indicate this manages factory instances
             - **name**: The unique identifier for this specific factory manager instance
-            - **full_name**: Computed as "factory.{name}" for global uniqueness
+            - **full_name**: Computed as "enterprise:factory:{name}" for global uniqueness
             - **config**: The complete configuration dictionary for factory creation
 
         Configuration-Driven Architecture:
@@ -2760,14 +2747,6 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
             }
             ```
 
-            **Registry Integration**:
-            ```python
-            registry = CorePlusSessionFactoryRegistry()
-            for env, config in configurations.items():
-                manager = CorePlusSessionFactoryManager(f"{env}-factory", config)
-                registry.add_manager(manager)
-            ```
-
             **Health Monitoring Setup**:
             ```python
             manager = CorePlusSessionFactoryManager("enterprise", config)
@@ -2810,7 +2789,6 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
 
         See Also:
             CorePlusSessionFactory: The Enterprise factory type that will be created from config
-            CorePlusSessionFactoryRegistry: Registry for managing multiple factory managers
             SystemType.ENTERPRISE: The system type constant used for Enterprise deployments
             BaseItemManager.__init__(): The parent constructor that handles common initialization
         """

@@ -15,46 +15,73 @@ Bootstrap and build the repository:
 
 Run tests:
 
-- `uv run pytest tests/test_init.py -v` -- basic smoke test, takes 0.5 seconds
-- `uv run pytest tests/test__*.py -v` -- core tests, takes 2 seconds. NEVER CANCEL.
+- `uv run pytest tests/config/test_init.py -v` -- config smoke test, takes 0.5 seconds
+- `uv run pytest tests/config/ tests/client/ -v` -- core tests, takes 2 seconds. NEVER CANCEL.
 - `uv run pytest` -- full test suite (may require additional dependencies)
 
 ## MCP Servers
 
-This repository provides two Model Context Protocol (MCP) servers:
+This repository provides three Model Context Protocol (MCP) servers:
 
-**Systems Server** (orchestrates Deephaven Community Core workers):
+**Community Server** (manages one or more DHC / Deephaven Community Core workers):
 
-- `dh-mcp-systems-server --help` -- shows available options
-- `DH_MCP_CONFIG_FILE=/path/to/config.json dh-mcp-systems-server --transport sse` -- starts on port 8000
-- `DH_MCP_CONFIG_FILE=/path/to/config.json dh-mcp-systems-server` -- stdio mode (default)
+- HTTP-only transport (streamable-http). Default port **8003**.
+- `dh-mcp-community-server --help` -- shows available options
+- `DH_MCP_CONFIG_FILE=/path/to/config.json dh-mcp-community-server` -- starts on 127.0.0.1:8003
+- `dh-mcp-community-server --config /path/to/config.json --host 0.0.0.0 --port 8003` -- explicit args
+- Host/port can also be set via `MCP_HOST` / `MCP_PORT` environment variables
+
+**Enterprise Server** (manages a single DHE / Deephaven Enterprise system):
+
+- HTTP-only transport (streamable-http). Default port **8002**.
+- One server instance per DHE system (run multiple instances for multiple systems).
+- `dh-mcp-enterprise-server --help` -- shows available options
+- `DH_MCP_CONFIG_FILE=/path/to/enterprise.json dh-mcp-enterprise-server` -- starts on 127.0.0.1:8002
+- `dh-mcp-enterprise-server --config /path/to/enterprise.json --host 0.0.0.0 --port 8002` -- explicit args
+- Host/port can also be set via `MCP_HOST` / `MCP_PORT` environment variables
 
 **Docs Server** (documentation Q&A):
 
-- `INKEEP_API_KEY=your-key dh-mcp-docs-server --transport sse` -- starts on port 8001
-- `INKEEP_API_KEY=your-key dh-mcp-docs-server` -- streamable-http mode (default)
-- Use `PORT=8001` environment variable to change port
+- HTTP-only transport (streamable-http). Default port **8001**.
+- `INKEEP_API_KEY=your-key dh-mcp-docs-server` -- starts on 127.0.0.1:8001
+- `INKEEP_API_KEY=your-key MCP_DOCS_HOST=0.0.0.0 MCP_DOCS_PORT=8001 dh-mcp-docs-server` -- explicit args
+- Host/port can also be set via `MCP_DOCS_HOST` / `MCP_DOCS_PORT` environment variables (or `PORT` for Cloud Run)
 
 ## Configuration
 
-**Systems Server Configuration:**
+**Community Server Configuration:**
 
-- Requires `DH_MCP_CONFIG_FILE` environment variable pointing to JSON config file
+- Requires `DH_MCP_CONFIG_FILE` environment variable or `--config` CLI argument pointing to a JSON/JSON5 config file
 - Create a basic config file for testing:
 
 ```bash
-cat > /tmp/deephaven_mcp.json << 'EOF'
+cat > /tmp/deephaven_community.json << 'EOF'
 {
-  "community": {
-    "sessions": {
-      "local_test": {
-        "host": "localhost",
-        "port": 10000,
-        "session_type": "python",
-        "auth_type": "anonymous"
-      }
+  "sessions": {
+    "local_test": {
+      "host": "localhost",
+      "port": 10000,
+      "session_type": "python",
+      "auth_type": "Anonymous"
     }
   }
+}
+EOF
+```
+
+**Enterprise Server Configuration:**
+
+- Requires `DH_MCP_CONFIG_FILE` environment variable or `--config` CLI argument pointing to a flat JSON/JSON5 config file
+- All fields are at the top level (no nesting under a system name):
+
+```bash
+cat > /tmp/deephaven_enterprise.json << 'EOF'
+{
+  "system_name": "prod",
+  "connection_json_url": "https://dhe.example.com/iris/connection.json",
+  "auth_type": "password",
+  "username": "user",
+  "password_env_var": "DHE_PASSWORD"
 }
 EOF
 ```
@@ -62,7 +89,8 @@ EOF
 **Docs Server Configuration:**
 
 - `INKEEP_API_KEY` -- required for docs server functionality
-- `OPENAI_API_KEY` -- optional fallback for docs server
+- `MCP_DOCS_HOST` -- host to bind to (default: `127.0.0.1`); set to `0.0.0.0` for external access
+- `MCP_DOCS_PORT` / `PORT` -- port override (default: 8001; `PORT` is checked as a fallback for Cloud Run compatibility)
 - Production streamable-http MCP server: `https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp`
 
 ## Validation and Code Quality
@@ -83,23 +111,20 @@ Individual checks:
 
 Test the servers without a full Deephaven instance:
 
-**Systems Server Test:**
+**Community Server Test:**
 
 ```bash
-python scripts/mcp_community_test_client.py \
-  --transport stdio \
-  --stdio-cmd "uv run dh-mcp-systems-server --transport stdio" \
-  --env DH_MCP_CONFIG_FILE=/tmp/deephaven_mcp.json
+DH_MCP_CONFIG_FILE=/tmp/deephaven_community.json python scripts/mcp_community_test_client.py \
+  --transport streamable-http \
+  --url http://127.0.0.1:8003/mcp
 ```
 
 **Docs Server Test:**
 
 ```bash
-python scripts/mcp_docs_test_client.py \
-  --transport stdio \
-  --prompt "What is Deephaven?" \
-  --env INKEEP_API_KEY=your-inkeep-api-key \
-  --env OPENAI_API_KEY=your-openai-api-key
+INKEEP_API_KEY=your-inkeep-api-key python scripts/mcp_docs_test_client.py \
+  --url http://127.0.0.1:8001/mcp \
+  --prompt "What is Deephaven?"
 ```
 
 ## Validation Scenarios
@@ -111,37 +136,39 @@ After making changes, always validate with these complete scenarios:
    - Set up virtual environment
    - Install dependencies
    - Run basic tests
-   - Start both servers briefly to verify functionality
+   - Start all three servers briefly to verify functionality
 
 2. **Code Quality Validation:**
    - Run `./bin/precommit.sh` and ensure it passes
    - Verify no new linting or formatting issues
 
 3. **MCP Server Validation:**
-   - Test systems server starts with config file
+   - Test community server starts with config file
+   - Test enterprise server starts with config file
    - Test docs server starts with API key
-   - Verify both servers respond to basic commands
+   - Verify all servers respond to basic commands
 
 ## Architecture and Key Files
 
 **Main Components:**
 
-- `src/deephaven_mcp/mcp_systems_server/` -- Systems MCP server for Deephaven orchestration
+- `src/deephaven_mcp/mcp_systems_server/server.py` -- Community and Enterprise MCP server entry points (`community()` and `enterprise()`)
+- `src/deephaven_mcp/mcp_systems_server/_tools/` -- Shared MCP tools (session, table, script, catalog, pq, etc.)
 - `src/deephaven_mcp/mcp_docs_server/` -- Docs MCP server for documentation Q&A  
+- `src/deephaven_mcp/config/` -- Config loading/validation (`_community.py`, `_enterprise.py`, `__init__.py`)
 - `scripts/` -- Test clients and utilities
 - `tests/` -- Comprehensive test suite
 - `pyproject.toml` -- Project configuration and dependencies
 
 **Entry Points:**
 
-- `dh-mcp-systems-server` -- Systems server command
-- `dh-mcp-docs-server` -- Docs server command
+- `dh-mcp-community-server` -- Community server command (HTTP-only, port 8003)
+- `dh-mcp-enterprise-server` -- Enterprise server command (HTTP-only, port 8002; one instance per DHE system)
+- `dh-mcp-docs-server` -- Docs server command (HTTP-only, port 8001)
 
 **Transport Modes:**
 
-- `stdio` -- Standard input/output (default for systems server, good for Claude Desktop)
-- `sse` -- Server-Sent Events over HTTP (good for testing)  
-- `streamable-http` -- HTTP streaming (default for docs server, optimal performance)
+- `streamable-http` -- HTTP streaming (only supported transport for all three servers)
 
 ## Critical Timing Information
 
@@ -163,10 +190,11 @@ After making changes, always validate with these complete scenarios:
 
 ## Common Issues
 
-- **Missing `DH_MCP_CONFIG_FILE`**: Systems server requires this environment variable pointing to a valid JSON config
+- **Missing `DH_MCP_CONFIG_FILE`**: Community and enterprise servers require this (or `--config` arg) pointing to a valid JSON/JSON5 config file
 - **Missing `INKEEP_API_KEY`**: Docs server requires this for documentation functionality  
-- **Wrong command names**: Use `dh-mcp-systems-server` and `dh-mcp-docs-server`, not abbreviated versions
-- **Port conflicts**: Systems server uses port 8000, docs server uses 8001 by default (configurable with `PORT` env var)
+- **Wrong command names**: Use `dh-mcp-community-server`, `dh-mcp-enterprise-server`, and `dh-mcp-docs-server`
+- **Port conflicts**: Community server defaults to 8003, enterprise to 8002, docs to 8001. Override with `--port` or `MCP_PORT` (`MCP_DOCS_PORT` for docs server)
+- **No stdio/sse**: All three servers (`dh-mcp-community-server`, `dh-mcp-enterprise-server`, `dh-mcp-docs-server`) only support `streamable-http`
 - **Java required**: Deephaven test server requires Java 11+ to be installed and in PATH
 
 The project uses modern Python development practices with uv for fast package management, comprehensive testing, and excellent tooling integration for code quality.

@@ -35,9 +35,12 @@ Variables are grouped by server component.
 
 Set this in your AI tool's MCP server `env` block:
 
-```json
-"env": {
-  "DH_MCP_CONFIG_FILE": "/full/path/to/your/deephaven_mcp.json"
+```json5
+// Example: inside your MCP client config (e.g. Claude Desktop)
+{
+  "env": {
+    "DH_MCP_CONFIG_FILE": "/full/path/to/your/deephaven_mcp.json"
+  }
 }
 ```
 
@@ -63,6 +66,34 @@ production.
 
 ---
 
+#### `MCP_HOST`
+
+Host interface the Community or Enterprise server HTTP server binds to.
+
+| | |
+|---|---|
+| Required | No |
+| Default | `127.0.0.1` (localhost only) |
+| Example | `0.0.0.0` (all interfaces, for Docker/remote access) |
+
+Can also be set via the `--host` CLI argument (CLI takes precedence).
+
+---
+
+#### `MCP_PORT`
+
+Port the Community or Enterprise server HTTP server listens on.
+
+| | |
+|---|---|
+| Required | No |
+| Default | `8003` for Community server, `8002` for Enterprise server |
+| Example | `9000` |
+
+Can also be set via the `--port` CLI argument (CLI takes precedence). Precedence order: CLI argument → `MCP_PORT` env var → server default.
+
+---
+
 ### Credential variables (user-defined names)
 
 These are not fixed variable names — you choose the names and reference them
@@ -76,10 +107,10 @@ session.
 
 ```json5
 {
-  "community_sessions": {
+  "sessions": {
     "my_session": {
-      "auth_type": "password",
-      "auth_token_env_var": "MY_DH_TOKEN"  // set MY_DH_TOKEN=user:password
+      "auth_type": "PSK",
+      "auth_token_env_var": "MY_DH_TOKEN"  // set MY_DH_TOKEN=your-psk-token
     }
   }
 }
@@ -91,32 +122,30 @@ Any variable name you choose. Holds the password for an enterprise session
 configured with `"auth_type": "password"`.
 
 ```json5
+// Enterprise config is flat - each enterprise server has its own config file
 {
-  "enterprise_sessions": {
-    "prod": {
-      "connection_json_url": "https://your-server.example.com/iris/connection.json",
-      "auth_type": "password",
-      "username": "your-username",
-      "password_env_var": "PROD_DH_PASSWORD"  // set PROD_DH_PASSWORD=your-password
-    }
-  }
+  "system_name": "prod",
+  "connection_json_url": "https://your-server.example.com/iris/connection.json",
+  "auth_type": "password",
+  "username": "your-username",
+  "password_env_var": "PROD_DH_PASSWORD"  // set PROD_DH_PASSWORD=your-password
 }
 ```
 
-#### Enterprise session: `api_key_env_var`
+#### Enterprise session: `private_key_path` (file path, not an env var)
 
-Any variable name you choose. Holds the API key for an enterprise session
-configured with `"auth_type": "api_key"`.
+The `"auth_type": "private_key"` enterprise auth type uses `private_key_path`,
+a direct filesystem path to the private key file. Unlike `password_env_var`, there
+is no `*_env_var` indirection for this field — the path is specified directly in
+the config file.
 
 ```json5
+// Enterprise config is flat - each enterprise server has its own config file
 {
-  "enterprise_sessions": {
-    "prod": {
-      "connection_json_url": "https://your-server.example.com/iris/connection.json",
-      "auth_type": "api_key",
-      "api_key_env_var": "PROD_DH_API_KEY"  // set PROD_DH_API_KEY=your-api-key
-    }
-  }
+  "system_name": "prod",
+  "connection_json_url": "https://your-server.example.com/iris/connection.json",
+  "auth_type": "private_key",
+  "private_key_path": "/path/to/your/private_key.pem"
 }
 ```
 
@@ -125,8 +154,9 @@ configured with `"auth_type": "api_key"`.
 ### Timeout tuning
 
 These variables override the built-in timeout defaults. They are optional and
-rarely need to be changed. All values are in **seconds** and must be parseable
-as a float (or integer where noted). Invalid values raise an error at startup.
+rarely need to be changed. Most values are in **seconds** and must be parseable
+as a float; entries marked *(int)* must be parseable as an integer. Invalid
+values raise a `ValueError` at startup.
 
 | Variable | Default | Description |
 |---|---|---|
@@ -154,14 +184,14 @@ variables.
 
 ### `INKEEP_API_KEY`
 
-**Required** for the Docs Server. API key for the Inkeep-powered documentation
-LLM backend.
+**Required** for the Docs Server. API key for the [Inkeep](https://inkeep.com)-powered
+documentation LLM backend.
 
 | | |
 |---|---|
 | Required | Yes (Docs Server only) |
 | Default | *(none — server will not start without this)* |
-| Obtained from | Your Inkeep account or Deephaven support |
+| Obtained from | Your [Inkeep](https://inkeep.com) account or Deephaven support |
 
 ---
 

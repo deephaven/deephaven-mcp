@@ -68,6 +68,22 @@ from ._protobuf import (
 
 _LOGGER = logging.getLogger(__name__)
 
+# Default scheduling entries applied by ``CorePlusControllerClient.make_pq_config`` to
+# a *permanent* PQ (``auto_delete_timeout=None``) when the caller passes
+# ``schedule=None``. Produces a continuous scheduler that auto-starts the PQ after
+# the controller accepts it. See ``make_pq_config`` for the full three-way semantics.
+_DEFAULT_PERMANENT_CONTINUOUS_SCHEDULING: tuple[str, ...] = (
+    "SchedulerType=com.illumon.iris.controller.IrisQuerySchedulerContinuous",
+    "StartTime=00:00:00",
+    "TimeZone=America/New_York",
+    "DailyRestart=false",
+    "StopTimeDisabled=true",
+    "RestartErrorCount=0",
+    "RestartErrorDelay=0",
+    "RestartWhenRunning=Yes",
+    "SchedulingDisabled=false",
+)
+
 
 class CorePlusControllerClient(
     ClientObjectWrapper["deephaven_enterprise.client.controller.ControllerClient"]
@@ -307,11 +323,11 @@ class CorePlusControllerClient(
             managed by the controller. The dictionary will be empty if no queries are managed.
 
         Raises:
+            InternalError: If ``subscribe()`` was not called before this method.
             DeephavenConnectionError: If unable to connect to the controller service due to
                                     network issues or if the controller is unavailable.
-            QueryError: If not subscribed or if the subscription state is invalid, which can
-                       happen if subscribe() was not called or if the subscription has been
-                       invalidated.
+            QueryError: If the subscription state is invalid (for example, if the
+                       subscription has been invalidated server-side).
         """
         if not self._subscribed:
             _LOGGER.error(
@@ -751,6 +767,30 @@ class CorePlusControllerClient(
             )
             raise QueryError(f"Failed to create query: {e}") from e
 
+    def _apply_schedule_config(self, config: Any, schedule: list[str] | None) -> None:
+        """Apply scheduling entries to a protobuf config with three-way semantics.
+
+        The ``schedule`` parameter controls how the existing ``config.scheduling``
+        field is updated:
+
+        - ``None``: leave ``config.scheduling`` untouched (caller did not supply a value).
+        - ``[]``: clear ``config.scheduling`` (caller explicitly wants no schedule).
+        - ``[...]``: replace ``config.scheduling`` wholesale with the supplied entries.
+
+        Args:
+            config (Any): The protobuf config object whose ``scheduling`` field will be updated.
+            schedule (list[str] | None): Scheduling entries to apply, or ``None`` to skip.
+                An empty list clears all existing entries; a non-empty list replaces them.
+
+        Note:
+            Protobuf ``RepeatedScalarContainer`` has no ``clear()`` method; slice deletion
+            (``del config.scheduling[:]``) is used instead.
+        """
+        if schedule is not None:
+            del config.scheduling[:]
+            if schedule:
+                config.scheduling.extend(schedule)
+
     def _apply_pq_config_parameters(  # noqa: C901
         self,
         config: Any,
@@ -766,10 +806,11 @@ class CorePlusControllerClient(
         jvm_profile: str | None,
         python_virtual_environment: str | None,
     ) -> None:
-        """Apply additional configuration parameters to protobuf config.
+        """Apply caller-supplied configuration parameters to a protobuf config in place.
 
-        Only sets values that are explicitly provided (not None), preserving
-        defaults set by make_temporary_config for unspecified parameters.
+        Every field except ``schedule`` follows a "None means skip" rule, so the
+        existing default is preserved when the caller does not supply a value.
+        See the ``schedule`` entry below for its three-way semantics.
 
         Args:
             config (Any): The protobuf config object to modify
@@ -780,7 +821,9 @@ class CorePlusControllerClient(
             enabled (bool | None): Whether query is enabled, or None to use default
             restart_users (str | None): Restart permission setting, or None to use controller default
             extra_class_path (list[str] | None): Additional classpath entries, or None if not specified
-            schedule (list[str] | None): Scheduling configuration as "Key=Value" strings, or None if not specified
+            schedule (list[str] | None): Scheduling entries. ``None`` leaves the
+                existing scheduling untouched; ``[]`` clears it; a non-empty list
+                replaces it wholesale.
             init_timeout_nanos (int | None): Initialization timeout in nanoseconds, or None to use default
             jvm_profile (str | None): Named JVM profile, or None if not specified
             python_virtual_environment (str | None): Named Python venv, or None if not specified
@@ -799,8 +842,7 @@ class CorePlusControllerClient(
             config.restartUsers = restart_users
         if extra_class_path:
             config.extraClassPath.extend(extra_class_path)
-        if schedule:
-            config.scheduling.extend(schedule)
+        self._apply_schedule_config(config, schedule)
         if init_timeout_nanos is not None:
             config.initTimeoutNanos = init_timeout_nanos
         if jvm_profile is not None:
@@ -836,6 +878,24 @@ class CorePlusControllerClient(
         Creates an in-memory PQ configuration object that can be customized with script content,
         scheduling, resource settings, and access controls. The configuration is not persisted
         until passed to add_query().
+
+        Scheduler semantics (three-way, based on ``schedule``):
+            - ``schedule=None`` (default): install the default scheduler and make no
+              further changes.
+                - For a *permanent* PQ (``auto_delete_timeout=None``) the default is a
+                  continuous scheduler with ``SchedulingDisabled=false`` and
+                  ``RestartWhenRunning=Yes``; the controller will begin acquiring a worker
+                  immediately after ``add_query()`` (assuming ``enabled`` is ``True``,
+                  which is the controller default).
+                - For a *temporary* PQ (``auto_delete_timeout`` is a positive integer)
+                  the default is whatever ``make_temporary_config`` installs.
+            - ``schedule=[]``: the caller is explicitly requesting no scheduling. The
+              scheduling list is cleared before the config is returned; the server is
+              responsible for accepting or rejecting a PQ with no scheduling entries.
+            - ``schedule=[...]`` (non-empty list): the caller-supplied list **replaces**
+              the scheduling block wholesale. No default keys are merged in; the caller
+              is responsible for including ``SchedulerType`` and any other required
+              entries.
 
         Args:
             name (str): The name of the persistent query. This is used for identification.
@@ -890,11 +950,10 @@ class CorePlusControllerClient(
             )
 
         try:
-            # For permanent queries (auto_delete_timeout=None), we need to:
-            # 1. Call make_temporary_config with a default timeout
-            # 2. Then clear the scheduling to make it permanent
-            # This is because make_temporary_config sets up temporary scheduling
-            # which the server rejects if there's no valid timeout.
+            # Step 1: call make_temporary_config to produce a baseline config.
+            # For permanent queries (auto_delete_timeout=None) we must still pass a
+            # placeholder timeout because the server rejects temporary scheduling
+            # that lacks a valid timeout; we overwrite the scheduling below.
             is_permanent = auto_delete_timeout is None
             effective_timeout = 600 if is_permanent else auto_delete_timeout
 
@@ -911,27 +970,28 @@ class CorePlusControllerClient(
                 viewer_groups,
             )
 
-            # For permanent queries, replace temporary scheduling with continuous scheduling
-            # Note: protobuf RepeatedScalarContainer doesn't have clear(), use slice deletion
-            if is_permanent:
+            # Step 2: install the default scheduler for permanent queries when the
+            # caller did not supply a schedule. Replaces the temporary scheduling
+            # that make_temporary_config installs with a continuous scheduler that
+            # causes the PQ to auto-start once the controller accepts it. This step
+            # lives here (not in _apply_pq_config_parameters) because it needs the
+            # ``is_permanent`` context which is local to this method.
+            # Note: protobuf RepeatedScalarContainer has no clear(); use slice del.
+            if is_permanent and schedule is None:
                 del config.scheduling[:]
-                # Set continuous scheduling for permanent queries
-                # Uses the full class name as required by IrisQueryScheduler
-                config.scheduling.append(
-                    "SchedulerType=com.illumon.iris.controller.IrisQuerySchedulerContinuous"
-                )
-                config.scheduling.append("StartTime=00:00:00")
-                config.scheduling.append("TimeZone=America/New_York")
-                config.scheduling.append("DailyRestart=false")
-                config.scheduling.append("StopTimeDisabled=true")
-                config.scheduling.append("RestartErrorCount=0")
-                config.scheduling.append("RestartErrorDelay=0")
-                config.scheduling.append("RestartWhenRunning=Yes")
-                config.scheduling.append("SchedulingDisabled=false")
+                for entry in _DEFAULT_PERMANENT_CONTINUOUS_SCHEDULING:
+                    config.scheduling.append(entry)
                 _LOGGER.debug(
-                    f"[CorePlusControllerClient:make_pq_config] Set continuous scheduling for permanent query '{name}'"
+                    f"[CorePlusControllerClient:make_pq_config] "
+                    f"Installed default continuous scheduler for permanent query '{name}'"
                 )
 
+            # Step 3: apply all caller-supplied parameters (including any
+            # caller-supplied scheduling override) through the single helper.
+            # Scheduling is applied with three-way semantics inside the helper:
+            #   schedule=None      -> no override (default from step 2 stays)
+            #   schedule=[]        -> explicit "no scheduling"; clear the block
+            #   schedule=[...]     -> replace wholesale with the caller's list
             self._apply_pq_config_parameters(
                 config,
                 programming_language,
@@ -1200,9 +1260,9 @@ class CorePlusControllerClient(
         Args:
             serial (CorePlusQuerySerial): The serial number of the query to start. This must reference a valid query that
                    has been previously created via add_query.
-            timeout_seconds (int): How long to wait for the query to become running, in seconds. Default is
-                           120 seconds (2 minutes). For large or complex queries, a longer timeout
-                           may be necessary.
+            timeout_seconds (float): Maximum time in seconds to wait for the query to
+                reach the RUNNING state. Defaults to PQ_STATE_CHANGE_TIMEOUT_SECONDS.
+                For large or complex queries, a longer timeout may be necessary.
 
         Raises:
             DeephavenConnectionError: If unable to connect to the controller service.
@@ -1314,9 +1374,9 @@ class CorePlusControllerClient(
         Args:
             serial (CorePlusQuerySerial): The serial number of the query to stop. This must reference a valid query that
                    has been previously created via add_query.
-            timeout_seconds (int): How long to wait for the query to stop, in seconds. Default is
-                           120 seconds (2 minutes). For large queries with significant cleanup,
-                           a longer timeout may be necessary.
+            timeout_seconds (float): Maximum time in seconds to wait for the query to
+                reach a terminal state. Defaults to PQ_STATE_CHANGE_TIMEOUT_SECONDS.
+                For large queries with significant cleanup, a longer timeout may be necessary.
 
         Raises:
             DeephavenConnectionError: If unable to connect to the controller service.

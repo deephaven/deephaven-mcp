@@ -1,5 +1,4 @@
-"""
-Shared Utilities - Internal Helper Functions.
+"""Shared Utilities - Internal Helper Functions.
 
 Provides internal helper functions used across multiple MCP tool modules:
 - Response size checking and validation
@@ -9,22 +8,22 @@ Provides internal helper functions used across multiple MCP tool modules:
 This module contains private helper functions not exposed as MCP tools.
 """
 
+import json
 import logging
 
 import pyarrow
 from mcp.server.fastmcp import Context
 
 from deephaven_mcp.client import BaseSession, CorePlusSession
-from deephaven_mcp.config import ConfigManager, get_config_section
 from deephaven_mcp.resource_manager import (
-    CombinedSessionRegistry,
+    BaseRegistry,
     InitializationPhase,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
 
-def _format_initialization_status(
+def format_initialization_status(
     phase: InitializationPhase,
     init_errors: dict[str, str],
 ) -> dict[str, object] | None:
@@ -32,19 +31,19 @@ def _format_initialization_status(
 
     Pure formatting function — does not query any registry.  Callers are
     responsible for obtaining *phase* and *init_errors* from the same
-    atomic snapshot (e.g. via ``CombinedSessionRegistry.get_all()`` on the shared
+    atomic snapshot (e.g. via ``BaseRegistry.get_all()`` on the shared
     registry instance).
 
     Returns ``None`` when there is nothing to report (completed without
     errors), so callers can simply do::
 
-        init_info = _format_initialization_status(phase, errors)
+        init_info = format_initialization_status(phase, errors)
         if init_info:
             response["initialization"] = init_info
 
     Args:
-        phase: The current initialization phase.
-        init_errors: Dict mapping factory names to error descriptions.
+        phase (InitializationPhase): The current initialization phase.
+        init_errors (dict[str, str]): Dict mapping factory names to error descriptions.
 
     Returns:
         A dict with ``status`` (str, always) and ``errors``
@@ -77,11 +76,10 @@ def _format_initialization_status(
     return init_info or None
 
 
-async def _get_session_from_context(
+async def get_session_from_context(
     function_name: str, context: Context, session_id: str
 ) -> BaseSession:
-    """
-    Get an active session from the MCP context.
+    """Get an active session from the MCP context.
 
     This helper eliminates duplication of the common pattern for accessing
     sessions from the MCP context. It handles the standard flow of:
@@ -98,15 +96,15 @@ async def _get_session_from_context(
         BaseSession: The active session connection
 
     Raises:
-        KeyError: If session_id not found in registry
+        RegistryItemNotFoundError: If session_id not found in registry
         Exception: If session cannot be established or context is invalid
     """
     _LOGGER.debug(
         f"[mcp_systems_server:{function_name}] Accessing session registry from context"
     )
-    session_registry: CombinedSessionRegistry = (
-        context.request_context.lifespan_context["session_registry"]
-    )
+    session_registry: BaseRegistry = context.request_context.lifespan_context[
+        "session_registry"
+    ]
 
     _LOGGER.debug(
         f"[mcp_systems_server:{function_name}] Retrieving session manager for '{session_id}'"
@@ -125,11 +123,10 @@ async def _get_session_from_context(
     return session
 
 
-async def _get_enterprise_session(
+async def get_enterprise_session(
     function_name: str, context: Context, session_id: str
 ) -> tuple[CorePlusSession | None, dict[str, object] | None]:
-    """
-    Get and validate an enterprise (Core+) session from context.
+    """Get and validate an enterprise (Core+) session from context.
 
     This helper combines session retrieval and validation into a single clean operation,
     consolidating the common pattern of getting a session and verifying it's an enterprise
@@ -141,9 +138,9 @@ async def _get_enterprise_session(
         session_id (str): ID of the session to retrieve (e.g., "enterprise:prod:analytics").
 
     Returns:
-        tuple: A 2-tuple (session, error) where:
+        tuple[CorePlusSession | None, dict[str, object] | None]: A 2-tuple (session, error) where:
             - session (CorePlusSession | None): The validated enterprise session on success, None on failure.
-            - error (dict | None): None on success, structured error dict on failure with keys:
+            - error (dict[str, object] | None): None on success, structured error dict on failure with keys:
                 - 'success': False
                 - 'error': str (human-readable error message)
                 - 'isError': True
@@ -154,14 +151,14 @@ async def _get_enterprise_session(
         - Any exception during session retrieval
 
     Example:
-        >>> session, error = await _get_enterprise_session("catalog_tables_schema", context, "enterprise:prod:analytics")
+        >>> session, error = await get_enterprise_session("catalog_tables_schema", context, "enterprise:prod:analytics")
         >>> if error:
-        >>>     return error
+        ...     return error
         >>> session = cast(CorePlusSession, session)  # Type narrowing for mypy
     """
     try:
         # Get session from context
-        session = await _get_session_from_context(function_name, context, session_id)
+        session = await get_session_from_context(function_name, context, session_id)
 
         # Validate it's an enterprise session
         if not isinstance(session, CorePlusSession):
@@ -184,9 +181,8 @@ MAX_RESPONSE_SIZE = 50_000_000  # 50MB hard limit
 WARNING_SIZE = 5_000_000  # 5MB warning threshold
 
 
-def _check_response_size(table_name: str, estimated_size: int) -> dict | None:
-    """
-    Check if estimated response size is within acceptable limits.
+def check_response_size(table_name: str, estimated_size: int) -> dict | None:
+    """Check if estimated response size is within acceptable limits.
 
     Evaluates the estimated response size against predefined limits to prevent memory
     issues and excessive network traffic. Logs warnings for large responses and
@@ -221,13 +217,12 @@ def _check_response_size(table_name: str, estimated_size: int) -> dict | None:
     return None  # Size is acceptable
 
 
-def _format_meta_table_result(
+def format_meta_table_result(
     arrow_meta_table: pyarrow.Table,
     table_name: str,
     namespace: str | None = None,
 ) -> dict:
-    """
-    Format a PyArrow meta table into a standardized result dictionary.
+    """Format a PyArrow meta table into a standardized result dictionary.
 
     This helper eliminates code duplication between session_tables_schema and
     catalog_tables_schema by providing a single place to format metadata results.
@@ -262,7 +257,7 @@ def _format_meta_table_result(
 
     Example:
         >>> # For a table with 2 columns (Date and Price)
-        >>> result = _format_meta_table_result(meta_table, "daily_prices", "market_data")
+        >>> result = format_meta_table_result(meta_table, "daily_prices", "market_data")
         >>> result
         {
             "success": True,
@@ -308,46 +303,51 @@ def _format_meta_table_result(
     return result
 
 
-async def _get_system_config(
-    function_name: str, config_manager: ConfigManager, system_name: str
-) -> tuple[dict, dict | None]:
-    """Get enterprise system configuration and validate it exists.
+# =============================================================================
+# Credential redaction utilities
+# =============================================================================
 
-    Retrieves the configuration for the specified enterprise system from the config manager.
-    This is a common validation step used by enterprise session management functions.
+_SENSITIVE_JSON_KEYS: frozenset[str] = frozenset(
+    {"password", "passwd", "token", "secret", "api_key", "apikey", "api_secret"}
+)
+"""JSON object keys whose values are redacted in type_specific_fields_json / type_specific_state_json output."""
 
-    Args:
-        function_name (str): Name of the calling function for logging purposes.
-        config_manager (ConfigManager): ConfigManager instance to retrieve configuration.
-        system_name (str): Name of the enterprise system to look up.
 
-    Returns:
-        tuple[dict, dict | None]: A tuple containing (system_config, error_dict):
-            - system_config (dict): The enterprise system configuration if found, or empty dict {} if not found.
-            - error_dict (dict | None): Error response with 'error' and 'isError' keys if system not found, or None on success.
+def _redact_recursive(obj: object) -> object:
+    """Recursively redact values of sensitive keys in a parsed JSON structure.
 
-            Success: ({"url": "...", "username": "...", ...}, None)
-            Error: ({}, {"error": "Enterprise system 'X' not found...", "isError": True})
-
-    Example:
-        >>> config_mgr = ConfigManager()
-        >>> system_config, error = await _get_system_config("session_enterprise_create", config_mgr, "prod")
-        >>> if error:
-        ...     return error  # System not found
-        >>> # Use system_config for session creation
+    Walks dicts, lists, and nested combinations thereof, replacing the value of
+    any key whose lowercase form appears in _SENSITIVE_JSON_KEYS with "[REDACTED]".
+    Scalar values (str, int, float, bool, None) are returned unchanged.
     """
-    config = await config_manager.get_config()
+    if isinstance(obj, dict):
+        return {
+            k: (
+                "[REDACTED]"
+                if k.lower() in _SENSITIVE_JSON_KEYS
+                else _redact_recursive(v)
+            )
+            for k, v in obj.items()
+        }
+    if isinstance(obj, list):
+        return [_redact_recursive(item) for item in obj]
+    return obj
 
+
+def redact_json_sensitive_fields(json_str: str | None) -> str | None:
+    """Parse a JSON string and redact values whose keys match known-sensitive names.
+
+    Returns None for empty/None input. Returns "[UNPARSEABLE]" if the string cannot
+    be parsed as JSON (with a warning log). Otherwise returns a re-serialized JSON
+    string with sensitive values replaced by "[REDACTED]".
+    """
+    if not json_str:
+        return None
     try:
-        enterprise_systems_config = get_config_section(
-            config, ["enterprise", "systems"]
+        parsed = json.loads(json_str)
+    except (json.JSONDecodeError, ValueError):
+        _LOGGER.warning(
+            "type_specific JSON field is not valid JSON; content suppressed"
         )
-    except KeyError:
-        enterprise_systems_config = {}
-
-    if not enterprise_systems_config or system_name not in enterprise_systems_config:
-        error_msg = f"Enterprise system '{system_name}' not found in configuration"
-        _LOGGER.error(f"[mcp_systems_server:{function_name}] {error_msg}")
-        return {}, {"error": error_msg, "isError": True}
-
-    return enterprise_systems_config[system_name], None
+        return "[UNPARSEABLE]"
+    return json.dumps(_redact_recursive(parsed))

@@ -1,14 +1,12 @@
-"""
-Async, coroutine-safe registries for Deephaven MCP resource management.
+"""Async, coroutine-safe registries for Deephaven resource management.
 
-This module provides a generic, reusable foundation for managing collections of objects (such as session or factory managers)
-in a coroutine-safe, async environment. It defines the abstract `BaseRegistry` and concrete registry implementations for
-community and enterprise session/factory managers.
+This module provides a generic, reusable foundation for managing named collections
+of async-closable objects in a coroutine-safe environment.
 
 Key Classes:
-    BaseRegistry: Abstract, generic, coroutine-safe registry base class. Handles item caching, async initialization, locking, and closure.
-    CommunitySessionRegistry: Registry for managing CommunitySessionManager instances. Discovers and loads community sessions from config.
-    CorePlusSessionFactoryRegistry: Registry for managing CorePlusSessionFactoryManager instances. Discovers and loads enterprise factories from config.
+    BaseRegistry: Abstract, generic, coroutine-safe registry base class.
+    MutableSessionRegistry: Extends BaseRegistry with tracked mutation support
+        (add/remove/count of dynamically created sessions).
 
 Features:
     - Abstract interface for all registry implementations (subclass and implement `_load_items`).
@@ -17,8 +15,9 @@ Features:
     - Lifecycle management: Robust `initialize` and `close` methods for resource control.
 
 Usage:
-    Subclass `BaseRegistry` and implement the `_load_items` method to define how items are loaded from configuration.
-    Use the provided concrete registries for most Deephaven MCP session/factory management scenarios.
+    Subclass `BaseRegistry` and implement `_load_items` to define how items are loaded.
+    Subclass `MutableSessionRegistry` when callers also need to add and remove items
+    dynamically after initialization.
 """
 
 import abc
@@ -39,18 +38,15 @@ else:
 
 from deephaven_mcp import config
 from deephaven_mcp._exceptions import (
-    ConfigurationError,
     InternalError,
-    MissingEnterprisePackageError,
+    InvalidSessionNameError,
     RegistryItemNotFoundError,
 )
-from deephaven_mcp.client import is_enterprise_available
 
 from ._manager import (
     AsyncClosable,
-    CommunitySessionManager,
-    CorePlusSessionFactoryManager,
-    StaticCommunitySessionManager,
+    BaseItemManager,
+    SystemType,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -61,17 +57,13 @@ T = TypeVar("T", bound=AsyncClosable)
 class InitializationPhase(enum.Enum):
     """Lifecycle phase of a registry's initialization.
 
-    Simple registries (e.g. CommunitySessionRegistry, CorePlusSessionFactoryRegistry)
-    always return ``SIMPLE`` — they have no initialization lifecycle.
+    Registries that load synchronously (e.g. CommunitySessionRegistry) return
+    ``COMPLETED`` immediately after ``initialize()`` finishes — they have no
+    background initialization lifecycle.
 
-    Complex registries (e.g. CombinedSessionRegistry) progress through phases:
+    Complex registries (e.g. EnterpriseSessionRegistry) progress through phases:
     NOT_STARTED → PARTIAL → LOADING → COMPLETED (or FAILED).
     """
-
-    SIMPLE = "simple"
-    """Registry has no initialization lifecycle — always fully available.
-    Used by simple registries like CommunitySessionRegistry and
-    CorePlusSessionFactoryRegistry."""
 
     NOT_STARTED = "not_started"
     """Registry has not been initialized yet."""
@@ -86,8 +78,8 @@ class InitializationPhase(enum.Enum):
 
     COMPLETED = "completed"
     """All initialization has finished (successfully or with errors).
-    On-demand updates resume in ``get()`` / ``get_all()``.  Only used by
-    complex registries with an initialization lifecycle."""
+    Used by all registries — both synchronous (always) and complex
+    (after background work completes)."""
 
     FAILED = "failed"
     """Initialization failed critically.  The registry may have partial data."""
@@ -118,20 +110,20 @@ class RegistrySnapshot(Generic[T]):
 
     @classmethod
     def simple(cls, items: dict[str, T]) -> "RegistrySnapshot[T]":
-        """Create a snapshot for a registry without initialization lifecycle.
+        """Create a snapshot for a registry that loads synchronously.
 
-        Intended for simple registries (CommunitySessionRegistry,
-        CorePlusSessionFactoryRegistry) that are always fully available.
+        For registries that are always fully available after ``initialize()``
+        completes (no background work, no per-source errors).
 
         Args:
-            items: Copy of the registry items dictionary.
+            items (dict[str, T]): Copy of the registry items dictionary.
 
         Returns:
-            A snapshot with phase SIMPLE and no initialization errors.
+            A snapshot with phase COMPLETED and no initialization errors.
         """
         return cls(
             items=items,
-            initialization_phase=InitializationPhase.SIMPLE,
+            initialization_phase=InitializationPhase.COMPLETED,
             initialization_errors={},
         )
 
@@ -142,15 +134,15 @@ class RegistrySnapshot(Generic[T]):
         phase: InitializationPhase,
         errors: dict[str, str],
     ) -> "RegistrySnapshot[T]":
-        """Create a snapshot that includes initialization state.
+        """Create a snapshot that includes initialization lifecycle state.
 
-        Intended for CombinedSessionRegistry, which tracks enterprise
-        discovery progress and per-factory errors.
+        For registries that perform background discovery after ``initialize()``
+        returns and track per-source errors during that process.
 
         Args:
-            items: Copy of the registry items dictionary.
-            phase: Current initialization lifecycle phase.
-            errors: Per-factory error descriptions from enterprise discovery.
+            items (dict[str, T]): Copy of the registry items dictionary.
+            phase (InitializationPhase): Current initialization lifecycle phase.
+            errors (dict[str, str]): Per-source error descriptions recorded during initialization.
 
         Returns:
             A snapshot with the given initialization state.
@@ -163,27 +155,18 @@ class RegistrySnapshot(Generic[T]):
 
 
 class BaseRegistry(abc.ABC, Generic[T]):
-    """
-    Generic, async, coroutine-safe abstract base class for a registry of items.
+    """Generic, async, coroutine-safe abstract base class for a named item registry.
 
-    This class provides a skeletal implementation for managing a dictionary of items, including initialization, retrieval, and closure. It is designed to be subclassed to create specific types of registries.
+    Manages a ``dict[str, T]`` of async-closable items.  Subclasses implement
+    ``_load_items`` to populate the dict at initialization time; this class
+    handles locking, idempotent initialization, retrieval, and shutdown.
 
-    See Also:
-        - `CommunitySessionRegistry`: A concrete implementation for managing community sessions.
-        - `CorePlusSessionFactoryRegistry`: A concrete implementation for managing enterprise factories.
+    Subclasses that need to add or remove items after initialization should
+    extend ``MutableSessionRegistry`` instead.
     """
 
     def __init__(self) -> None:
-        """Initialize the BaseRegistry.
-
-        This constructor sets up the internal state for the registry, including
-        the item dictionary, an asyncio lock for safe concurrent access, and
-        an initialization flag.
-
-        It's important to note that the registry is not fully operational after
-        the constructor is called. The `initialize()` method must be called and
-        awaited to load the configured items before the registry can be used.
-        """
+        """Set up internal state.  ``await initialize()`` must be called before use."""
         self._items: dict[str, T] = {}
         self._lock = asyncio.Lock()
         self._initialized = False
@@ -207,24 +190,23 @@ class BaseRegistry(abc.ABC, Generic[T]):
 
     @abc.abstractmethod
     async def _load_items(self, config_manager: config.ConfigManager) -> None:
-        """
-        Abstract method to load items into the registry.
+        """Populate ``_items`` from the given configuration.
 
-        Subclasses must implement this method to populate the `_items` dictionary.
+        Called by ``initialize()`` under ``self._lock``.  Subclasses must
+        implement this to define how items are loaded.
 
         Args:
-            config_manager: The configuration manager to use for loading item configurations.
+            config_manager (config.ConfigManager): Source of configuration data.
         """
         pass  # pragma: no cover
 
     async def initialize(self, config_manager: config.ConfigManager) -> None:
-        """
-        Initialize the registry by loading all configured items.
+        """Initialize the registry by loading items from configuration.
 
-        This method is idempotent and ensures that initialization is only performed once.
+        Idempotent — subsequent calls return immediately if already initialized.
 
         Args:
-            config_manager: The configuration manager to use for loading item configurations.
+            config_manager (config.ConfigManager): Source of configuration data.
         """
         async with self._lock:
             if self._initialized:
@@ -238,18 +220,17 @@ class BaseRegistry(abc.ABC, Generic[T]):
             )
 
     async def get(self, name: str) -> T:
-        """
-        Retrieve an item from the registry by its name.
+        """Retrieve an item by name.
 
         Args:
-            name: The name of the item to retrieve.
+            name (str): Key of the item to retrieve.
 
         Returns:
-            The item corresponding to the given name.
+            The item registered under *name*.
 
         Raises:
             InternalError: If the registry has not been initialized.
-            RegistryItemNotFoundError: If no item with the given name exists in the registry.
+            RegistryItemNotFoundError: If no item with the given name exists.
         """
         async with self._lock:
             self._check_initialized()
@@ -262,19 +243,14 @@ class BaseRegistry(abc.ABC, Generic[T]):
             return self._items[name]
 
     async def get_all(self) -> RegistrySnapshot[T]:
-        """
-        Retrieve all items from the registry as an atomic snapshot.
+        """Retrieve all items as an atomic snapshot.
 
         Returns:
-            RegistrySnapshot[T]: An atomic snapshot containing:
-
-                - **items** — ``dict[str, T]`` copy of all registered items.
-                - **initialization_phase** — the current
-                  :class:`InitializationPhase` lifecycle value.
-                  Always ``SIMPLE`` for simple registries.
-                - **initialization_errors** — ``dict[str, str]`` mapping
-                  source names to error descriptions.  Always empty for
-                  simple registries.
+            RegistrySnapshot[T]: Snapshot with ``items``, ``initialization_phase``
+            (always ``COMPLETED`` for this base implementation), and
+            ``initialization_errors`` (always empty for this base implementation).
+            Subclasses that perform background initialization override this to
+            return richer phase/error information.
 
         Raises:
             InternalError: If the registry has not been initialized.
@@ -285,104 +261,165 @@ class BaseRegistry(abc.ABC, Generic[T]):
             # Return a copy to avoid external modification
             return RegistrySnapshot.simple(items=self._items.copy())
 
-    async def close(self) -> None:
+    async def _close_items(self, items: list[T]) -> None:
+        """Close a list of managed items, logging any errors.
+
+        Called outside ``self._lock`` so that network I/O during close does not
+        block other coroutines.  Subclasses may override this to add extra
+        teardown steps alongside item closing.
+
+        Args:
+            items (list[T]): Items to close.  Each is closed in sequence; errors are
+                logged and do not abort the remaining closures.
         """
-        Close all managed items in the registry and reset state for reinitialization.
+        for item in items:
+            try:
+                await item.close()
+            except Exception as e:
+                _LOGGER.error(
+                    f"[{self.__class__.__name__}] error closing item"
+                    f" '{getattr(item, 'full_name', repr(item))}': {e}"
+                )
 
-        This method iterates through all items and calls their `close` method,
-        then resets `_initialized` and clears `_items` so the registry can be
-        reinitialized via `initialize()` if needed.
+    async def close(self) -> None:
+        """Close all managed items and reset state for reinitialization.
 
-        Note:
-            This method is intended as a terminal shutdown operation. It holds
-            ``self._lock`` for the duration of closing all items, which includes
-            network calls. It is not safe to call concurrently with other operations.
+        Captures items under ``self._lock``, resets state, then closes items
+        **outside** the lock via :meth:`_close_items` so that network I/O
+        during close does not block other coroutines.
+
+        After this call the registry can be reinitialized via ``initialize()``.
+
+        Raises:
+            InternalError: If the registry has not been initialized.
         """
         async with self._lock:
             self._check_initialized()
-
             start_time = time.time()
             _LOGGER.info(f"[{self.__class__.__name__}] closing all items...")
             num_items = len(self._items)
-
-            for item in self._items.values():
-                await item.close()
-
+            items_to_close = list(self._items.values())
             self._items.clear()
             self._initialized = False
 
-            _LOGGER.info(
-                f"[{self.__class__.__name__}] closed all items. Processed {num_items} items in {time.time() - start_time:.2f}s"
-            )
-
-
-class CommunitySessionRegistry(BaseRegistry[CommunitySessionManager]):
-    """
-    A registry for managing `CommunitySessionManager` instances.
-
-    This class discovers and loads community session configurations from the
-    `community.sessions` path in the application's configuration data.
-    """
-
-    @override
-    async def _load_items(self, config_manager: config.ConfigManager) -> None:
-        """
-        Load session configurations and create CommunitySessionManager instances.
-
-        Args:
-            config_manager: The configuration manager to use for loading session configurations.
-        """
-        config_data = await config_manager.get_config()
-        community_sessions_config = config_data.get("community", {}).get("sessions", {})
-
+        await self._close_items(items_to_close)
         _LOGGER.info(
-            f"[{self.__class__.__name__}] Found {len(community_sessions_config)} community session configurations to load."
+            f"[{self.__class__.__name__}] closed all items."
+            f" Processed {num_items} items in {time.time() - start_time:.2f}s"
         )
 
-        for session_name, session_config in community_sessions_config.items():
-            _LOGGER.info(
-                f"[{self.__class__.__name__}] Loading session configuration for '{session_name}'..."
-            )
-            self._items[session_name] = StaticCommunitySessionManager(
-                session_name, session_config
-            )
 
+class MutableSessionRegistry(BaseRegistry[BaseItemManager]):
+    """Abstract registry that supports dynamic mutation after initialization.
 
-class CorePlusSessionFactoryRegistry(BaseRegistry[CorePlusSessionFactoryManager]):
+    Extends ``BaseRegistry`` with ``_added_session_ids`` and three mutation
+    methods (``add_session``, ``remove_session``, ``count_added_sessions``) that
+    track items added after the initial ``_load_items`` call.  ``_load_items``
+    is still abstract — subclasses define how items are loaded from config.
+
+    See Also:
+        - `CommunitySessionRegistry`: Concrete subclass for community sessions.
+        - `EnterpriseSessionRegistry`: Concrete subclass for enterprise sessions.
     """
-    A registry for managing `CorePlusSessionFactoryManager` instances.
 
-    This class discovers and loads enterprise factory configurations from the
-    `enterprise.factories` path in the application's configuration data.
-    """
+    def __init__(self) -> None:
+        """Initialize the registry.  Call ``await initialize()`` before use."""
+        super().__init__()
+        self._added_session_ids: set[str] = set()
 
     @override
-    async def _load_items(self, config_manager: config.ConfigManager) -> None:
+    async def close(self) -> None:
+        """Close all managed items and clear mutation-tracking state.
+
+        Delegates item closure and ``_initialized`` reset to
+        ``BaseRegistry.close()``, then clears ``_added_session_ids`` so the
+        registry is clean for reinitialization.
+
+        Raises:
+            InternalError: If the registry has not been initialized.
         """
-        Load factory configurations and create CorePlusSessionFactoryManager instances.
+        await super().close()
+        # super().close() sets _initialized=False under self._lock, preventing
+        # any concurrent mutation call from entering after this point.
+        self._added_session_ids.clear()
+
+    async def add_session(self, manager: BaseItemManager) -> None:
+        """Add a dynamically created session to the registry and mark it as added.
 
         Args:
-            config_manager: The configuration manager to use for loading factory configurations.
+            manager (BaseItemManager): Session manager to add.  Its ``full_name`` must not already
+                exist in the registry.
+
+        Raises:
+            ValueError: If a session with the same ``full_name`` already exists.
+            InternalError: If the registry has not been initialized.
         """
-        config_data = await config_manager.get_config()
-        factories_config = config_data.get("enterprise", {}).get("systems", {})
+        async with self._lock:
+            self._check_initialized()
+            session_id = manager.full_name
+            if session_id in self._items:
+                raise ValueError(f"Session '{session_id}' already exists in registry")
+            self._items[session_id] = manager
+            self._added_session_ids.add(session_id)
+            _LOGGER.debug(f"[{self.__class__.__name__}] added session '{session_id}'")
 
-        if not is_enterprise_available and factories_config:
-            raise ConfigurationError(
-                "Enterprise factory configurations were found in your config, but the required "
-                "Python package 'deephaven-coreplus-client' is not installed. "
-                "Please install the deephaven-coreplus-client package to use Deephaven Enterprise (DHE) features, "
-                "or remove the enterprise factory configurations from your config file."
-            ) from MissingEnterprisePackageError()
+    async def remove_session(self, session_id: str) -> BaseItemManager | None:
+        """Remove a session manager from the registry.
 
-        _LOGGER.info(
-            f"[{self.__class__.__name__}] Found {len(factories_config)} core+ factory configurations to load."
-        )
+        Idempotent — returns ``None`` if the session does not exist.
 
-        for factory_name, factory_config in factories_config.items():
-            _LOGGER.info(
-                f"[{self.__class__.__name__}] Loading factory configuration for '{factory_name}'..."
-            )
-            self._items[factory_name] = CorePlusSessionFactoryManager(
-                factory_name, factory_config
-            )
+        Args:
+            session_id (str): Fully qualified session identifier.
+
+        Returns:
+            The removed manager, or ``None`` if not found.
+
+        Raises:
+            InternalError: If the registry has not been initialized.
+        """
+        async with self._lock:
+            self._check_initialized()
+            manager = self._items.pop(session_id, None)
+            if manager is not None:
+                self._added_session_ids.discard(session_id)
+                _LOGGER.debug(
+                    f"[{self.__class__.__name__}] removed session '{session_id}'"
+                )
+            return manager
+
+    async def count_added_sessions(
+        self, system_type: SystemType, system_name: str
+    ) -> int:
+        """Count dynamically added sessions for a specific system that still exist.
+
+        Only counts sessions that were added via ``add_session()`` (not config-loaded
+        sessions) and that are still present in the registry.
+
+        Args:
+            system_type (SystemType): Session type to filter by (e.g. ``SystemType.COMMUNITY``).
+            system_name (str): Source/system name to filter by.
+
+        Returns:
+            int: Count of matching dynamically added sessions still in the registry.
+
+        Raises:
+            InternalError: If the registry has not been initialized, or if a malformed
+                session ID is found in the internal tracking set.
+        """
+        async with self._lock:
+            self._check_initialized()
+            count = 0
+            for sid in self._added_session_ids:
+                try:
+                    s_type, s_source, _ = BaseItemManager.parse_full_name(sid)
+                except InvalidSessionNameError as e:
+                    raise InternalError(
+                        f"Malformed session ID {sid!r} found in _added_session_ids: {e}"
+                    ) from e
+                if (
+                    s_type == system_type.value
+                    and s_source == system_name
+                    and sid in self._items
+                ):
+                    count += 1
+            return count

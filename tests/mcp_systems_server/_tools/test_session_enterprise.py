@@ -15,7 +15,7 @@ from deephaven_mcp import config
 from deephaven_mcp._exceptions import RegistryItemNotFoundError
 from deephaven_mcp.mcp_systems_server._tools.session_enterprise import (
     _check_session_id_available,
-    _check_session_limits,
+    _check_session_limit,
     _generate_session_name_if_none,
     _resolve_session_parameters,
     enterprise_systems_status,
@@ -33,49 +33,46 @@ from deephaven_mcp.resource_manager import (
     SystemType,
 )
 
+_TEST_SYSTEM_NAME = "system"
+
 
 @pytest.mark.asyncio
 async def test_session_enterprise_create_auto_name_no_username_and_language_transformer():
     """Covers auto-generated name without username (mcp-worker-...), language transformer execution, and creation_function."""
     mock_registry = MagicMock()
+    mock_registry.system_name = _TEST_SYSTEM_NAME
     mock_config_manager = MagicMock()
 
-    enterprise_config = {
-        "no-user-system": {
-            "connection_json_url": "https://example.com/iris/connection.json",
-            "auth_type": "password",
-            # Intentionally omit 'username' to exercise the no-username branch
-            "password": "pass",
-            "session_creation": {
-                "max_concurrent_sessions": 5,
-                "defaults": {
-                    "heap_size_gb": 2.0,
-                    "auto_delete_timeout": 600,
-                    "server": "server-east-1",
-                    "engine": "DeephavenCommunity",
-                },
+    # Flat config format - no username to exercise the no-username branch
+    flat_config = {
+        "connection_json_url": "https://example.com/iris/connection.json",
+        "auth_type": "password",
+        # Intentionally omit 'username' to exercise the no-username branch
+        "password": "pass",
+        "session_creation": {
+            "max_concurrent_sessions": 5,
+            "defaults": {
+                "heap_size_gb": 2.0,
+                "auto_delete_timeout": 600,
+                "server": "server-east-1",
+                "engine": "DeephavenCommunity",
             },
-        }
+        },
     }
 
-    # Provide nested enterprise systems config via async get_config()
-    full_config = {"enterprise": {"systems": enterprise_config}}
-    mock_config_manager.get_config = AsyncMock(return_value=full_config)
+    # get_config() returns flat config directly
+    mock_config_manager.get_config = AsyncMock(return_value=flat_config)
 
     with patch(
         "deephaven_mcp.mcp_systems_server._tools.session_enterprise.datetime"
     ) as mock_datetime:
         mock_datetime.now().strftime.return_value = "20241126-1500"
 
-        # Enterprise factory chain
-        mock_enterprise_registry = MagicMock()
-        mock_factory_manager = MagicMock()
+        # Use factory_manager directly (plain property on session_registry)
+        mock_factory_manager = AsyncMock()
         mock_factory = MagicMock()
         mock_session = MagicMock()
-        mock_registry.enterprise_registry = AsyncMock(
-            return_value=mock_enterprise_registry
-        )
-        mock_enterprise_registry.get = AsyncMock(return_value=mock_factory_manager)
+        mock_registry.factory_manager = mock_factory_manager
         mock_factory_manager.get = AsyncMock(return_value=mock_factory)
         # Set up the factory mock to capture configuration_transformer calls
         captured_config_transformer = None
@@ -101,7 +98,6 @@ async def test_session_enterprise_create_auto_name_no_username_and_language_tran
         # Use a non-Python programming language to exercise configuration_transformer
         result = await session_enterprise_create(
             context,
-            "no-user-system",
             None,
             programming_language="Groovy",
         )
@@ -121,13 +117,13 @@ async def test_session_enterprise_create_auto_name_no_username_and_language_tran
         assert mock_config.pb.scriptLanguage == "Groovy"
 
         # Verify session was added using add_session method - check the call was made
-        session_id = f"enterprise:no-user-system:mcp-session-20241126-1500"
+        session_id = f"enterprise:system:mcp-session-20241126-1500"
         mock_registry.add_session.assert_called_once()
         call_args = mock_registry.add_session.call_args
         session_manager = call_args[0][0]  # First (and only) argument is the manager
         assert session_manager.full_name == session_id
         returned_session = await session_manager._creation_function(
-            "no-user-system", "mcp-session-20241126-1500"
+            "system", "mcp-session-20241126-1500"
         )
         assert returned_session is mock_session
 
@@ -136,11 +132,12 @@ async def test_session_enterprise_create_auto_name_no_username_and_language_tran
 async def test_session_enterprise_delete_removal_missing_in_registry():
     """Covers branch where pop returns None (lines 1959-1960)."""
     mock_registry = MagicMock()
+    mock_registry.system_name = _TEST_SYSTEM_NAME
     mock_config_manager = MagicMock()
     mock_session_manager = MagicMock(spec=EnterpriseSessionManager)
     mock_session_manager.close = AsyncMock()
 
-    enterprise_config = {"sys": {"session_creation": {"max_concurrent_sessions": 5}}}
+    enterprise_config = {"system": {"session_creation": {"max_concurrent_sessions": 5}}}
 
     mock_registry.get = AsyncMock(return_value=mock_session_manager)
     # Mock remove_session to return None (simulating session not found in registry)
@@ -152,7 +149,7 @@ async def test_session_enterprise_delete_removal_missing_in_registry():
 
     full_config = {"enterprise": {"systems": enterprise_config}}
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
-    result = await session_enterprise_delete(context, "sys", "s1")
+    result = await session_enterprise_delete(context, "enterprise:system:s1")
 
     assert result["success"] is True
 
@@ -161,14 +158,15 @@ async def test_session_enterprise_delete_removal_missing_in_registry():
 async def test_session_enterprise_delete_cleanup_created_sessions_empty():
     """Test session removal - session tracking now handled by registry automatically."""
     mock_registry = MagicMock()
+    mock_registry.system_name = _TEST_SYSTEM_NAME
     mock_config_manager = MagicMock()
     mock_session_manager = MagicMock(spec=EnterpriseSessionManager)
     mock_session_manager.close = AsyncMock()
 
-    enterprise_config = {"sys2": {"session_creation": {"max_concurrent_sessions": 5}}}
+    enterprise_config = {"system": {"session_creation": {"max_concurrent_sessions": 5}}}
 
     # Mock remove_session to return the manager (simulating successful removal)
-    full_id = "enterprise:sys2:solo"
+    full_id = "enterprise:system:solo"
     mock_registry.remove_session = AsyncMock(return_value=mock_session_manager)
     mock_registry.get = AsyncMock(return_value=mock_session_manager)
 
@@ -178,7 +176,7 @@ async def test_session_enterprise_delete_cleanup_created_sessions_empty():
 
     full_config = {"enterprise": {"systems": enterprise_config}}
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
-    result = await session_enterprise_delete(context, "sys2", "solo")
+    result = await session_enterprise_delete(context, "enterprise:system:solo")
 
     assert result["success"] is True
     # Session tracking is now handled internally by the registry
@@ -193,11 +191,12 @@ async def test_session_enterprise_delete_registry_pop_raises_error():
             raise RuntimeError("pop failed")
 
     mock_registry = MagicMock()
+    mock_registry.system_name = _TEST_SYSTEM_NAME
     mock_config_manager = MagicMock()
     mock_session_manager = MagicMock(spec=EnterpriseSessionManager)
     mock_session_manager.close = AsyncMock()
 
-    enterprise_config = {"sys3": {"session_creation": {"max_concurrent_sessions": 5}}}
+    enterprise_config = {"system": {"session_creation": {"max_concurrent_sessions": 5}}}
     mock_registry.get = AsyncMock(return_value=mock_session_manager)
     mock_registry.remove_session = AsyncMock(
         side_effect=Exception("Simulated registry error")
@@ -209,7 +208,7 @@ async def test_session_enterprise_delete_registry_pop_raises_error():
 
     full_config = {"enterprise": {"systems": enterprise_config}}
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
-    result = await session_enterprise_delete(context, "sys3", "s3")
+    result = await session_enterprise_delete(context, "enterprise:system:s3")
 
     assert result["success"] is False
     assert result["isError"] is True
@@ -220,12 +219,13 @@ async def test_session_enterprise_delete_registry_pop_raises_error():
 async def test_session_enterprise_delete_outer_exception_logger_info_raises():
     """Force outer exception handler (lines 1991-1998) by making _LOGGER.info raise."""
     mock_registry = MagicMock()
+    mock_registry.system_name = _TEST_SYSTEM_NAME
     mock_config_manager = MagicMock()
     mock_session_manager = MagicMock(spec=EnterpriseSessionManager)
     mock_session_manager.close = AsyncMock()
 
-    enterprise_config = {"sys4": {"session_creation": {"max_concurrent_sessions": 5}}}
-    full_id = "enterprise:sys4:s4"
+    enterprise_config = {"system": {"session_creation": {"max_concurrent_sessions": 5}}}
+    full_id = "enterprise:system:s4"
     mock_registry.remove_session = AsyncMock(return_value=mock_session_manager)
     mock_registry.get = AsyncMock(return_value=mock_session_manager)
 
@@ -248,7 +248,7 @@ async def test_session_enterprise_delete_outer_exception_logger_info_raises():
         "deephaven_mcp.mcp_systems_server._tools.session_enterprise._LOGGER.info",
         side_effect=info_side_effect,
     ):
-        result = await session_enterprise_delete(context, "sys4", "s4")
+        result = await session_enterprise_delete(context, "enterprise:system:s4")
 
     assert result["success"] is False
     assert result["isError"] is True
@@ -258,50 +258,25 @@ async def test_session_enterprise_delete_outer_exception_logger_info_raises():
 @pytest.mark.asyncio
 async def test_enterprise_systems_status_success():
     """Test successful retrieval of enterprise systems status."""
-    # Mock factory with liveness_status and is_alive methods
-    mock_factory1 = AsyncMock()
-    mock_factory1.liveness_status = AsyncMock(
+    # Mock factory_manager with liveness_status and is_alive methods
+    mock_factory_manager = AsyncMock()
+    mock_factory_manager.liveness_status = AsyncMock(
         return_value=(ResourceLivenessStatus.ONLINE, "System is healthy")
     )
-    mock_factory1.is_alive = AsyncMock(return_value=True)
+    mock_factory_manager.is_alive = AsyncMock(return_value=True)
 
-    mock_factory2 = AsyncMock()
-    mock_factory2.liveness_status = AsyncMock(
-        return_value=(ResourceLivenessStatus.OFFLINE, "System is not responding")
-    )
-    mock_factory2.is_alive = AsyncMock(return_value=False)
-
-    # Mock enterprise registry
-    mock_enterprise_registry = AsyncMock()
-    mock_enterprise_registry.get_all = AsyncMock(
-        return_value=RegistrySnapshot.simple(
-            items={"system1": mock_factory1, "system2": mock_factory2}
-        )
-    )
-
-    # Mock session registry
+    # Mock session registry - factory_manager is a plain property (not async)
     mock_session_registry = MagicMock()
-    mock_session_registry.enterprise_registry = AsyncMock(
-        return_value=mock_enterprise_registry
-    )
+    mock_session_registry.system_name = _TEST_SYSTEM_NAME
+    mock_session_registry.factory_manager = mock_factory_manager
     mock_session_registry.get_all = AsyncMock(
         return_value=RegistrySnapshot.simple(items={})
     )
 
-    # Mock config manager
+    # Mock config manager - returns flat config directly
     mock_config_manager = AsyncMock()
     mock_config_manager.get_config = AsyncMock(
-        return_value={
-            "enterprise": {
-                "systems": {
-                    "system1": {"url": "http://example.com", "api_key": "secret_key"},
-                    "system2": {
-                        "url": "http://example2.com",
-                        "password": "secret_password",
-                    },
-                }
-            }
-        }
+        return_value={"url": "http://example.com", "api_key": "secret_key"}
     )
 
     # Create context
@@ -315,77 +290,54 @@ async def test_enterprise_systems_status_success():
 
     # Mock the redact function to match the actual implementation
     with patch(
-        "deephaven_mcp.config._enterprise_system.redact_enterprise_system_config"
+        "deephaven_mcp.config._enterprise.redact_enterprise_system_config"
     ) as mock_redact:
-        # Configure the mock to replace only password with [REDACTED]
-        def redact_config(config):
-            result = config.copy()
-            if "password" in result:
-                result["password"] = "[REDACTED]"
-            return result
+        mock_redact.side_effect = lambda config: config
 
-        mock_redact.side_effect = redact_config
         # Call the function with default parameters
         result = await enterprise_systems_status(context)
 
-    # Verify the result
+    # Verify the result - new code always returns exactly one system with name="system"
     assert result["success"] is True
-    assert len(result["systems"]) == 2
+    assert len(result["systems"]) == 1
 
-    # Check system1
-    system1 = next(s for s in result["systems"] if s["name"] == "system1")
-    assert system1["liveness_status"] == "ONLINE"
-    assert system1["liveness_detail"] == "System is healthy"
-    assert system1["is_alive"] is True
-    assert system1["config"]["url"] == "http://example.com"
-    assert system1["config"]["api_key"] == "secret_key"
-
-    # Check system2
-    system2 = next(s for s in result["systems"] if s["name"] == "system2")
-    assert system2["liveness_status"] == "OFFLINE"
-    assert system2["liveness_detail"] == "System is not responding"
-    assert system2["is_alive"] is False
-    assert system2["config"]["url"] == "http://example2.com"
-    assert system2["config"]["password"] == "[REDACTED]"
+    # Check system (always named "system", read from session_registry.system_name)
+    system = result["systems"][0]
+    assert system["name"] == "system"
+    assert system["liveness_status"] == "ONLINE"
+    assert system["liveness_detail"] == "System is healthy"
+    assert system["is_alive"] is True
+    assert system["config"]["url"] == "http://example.com"
+    assert system["config"]["api_key"] == "secret_key"
 
     # COMPLETED with no errors should not include initialization info
     assert "initialization" not in result
 
     # Verify liveness_status was called with attempt_to_connect=False
-    mock_factory1.liveness_status.assert_called_once_with(ensure_item=False)
-    mock_factory2.liveness_status.assert_called_once_with(ensure_item=False)
+    mock_factory_manager.liveness_status.assert_called_once_with(ensure_item=False)
 
 
 @pytest.mark.asyncio
 async def test_enterprise_systems_status_with_attempt_to_connect():
     """Test enterprise systems status with attempt_to_connect=True."""
-    # Mock factory with liveness_status and is_alive methods
-    mock_factory = AsyncMock()
-    mock_factory.liveness_status = AsyncMock(
+    # Mock factory_manager with liveness_status and is_alive methods
+    mock_factory_manager = AsyncMock()
+    mock_factory_manager.liveness_status = AsyncMock(
         return_value=(ResourceLivenessStatus.ONLINE, None)
     )
-    mock_factory.is_alive = AsyncMock(return_value=True)
+    mock_factory_manager.is_alive = AsyncMock(return_value=True)
 
-    # Mock enterprise registry
-    mock_enterprise_registry = AsyncMock()
-    mock_enterprise_registry.get_all = AsyncMock(
-        return_value=RegistrySnapshot.simple(items={"system1": mock_factory})
-    )
-
-    # Mock session registry
+    # Mock session registry - factory_manager is a plain property (not async)
     mock_session_registry = MagicMock()
-    mock_session_registry.enterprise_registry = AsyncMock(
-        return_value=mock_enterprise_registry
-    )
+    mock_session_registry.system_name = _TEST_SYSTEM_NAME
+    mock_session_registry.factory_manager = mock_factory_manager
     mock_session_registry.get_all = AsyncMock(
         return_value=RegistrySnapshot.simple(items={})
     )
 
-    # Mock config manager
+    # Mock config manager - returns flat config
     mock_config_manager = AsyncMock()
-    mock_config_manager.get_config = AsyncMock(
-        return_value={"enterprise": {"factories": {"system1": {}}}}
-    )
+    mock_config_manager.get_config = AsyncMock(return_value={})
 
     # Create context
     context = MockContext(
@@ -398,53 +350,51 @@ async def test_enterprise_systems_status_with_attempt_to_connect():
 
     # Mock the redact function
     with patch(
-        "deephaven_mcp.config._enterprise_system.redact_enterprise_system_config",
+        "deephaven_mcp.config._enterprise.redact_enterprise_system_config",
         return_value={},
     ):
         # Call the function with attempt_to_connect=True
         result = await enterprise_systems_status(context, attempt_to_connect=True)
 
-        # Verify the result
+        # Verify the result - always one system with name="system"
         assert result["success"] is True
         assert len(result["systems"]) == 1
 
-        # Check system1
-        system1 = result["systems"][0]
-        assert system1["name"] == "system1"
-        assert system1["liveness_status"] == "ONLINE"
-        assert "liveness_detail" not in system1  # No detail was provided
-        assert system1["is_alive"] is True
+        # Check system (always named "system")
+        system = result["systems"][0]
+        assert system["name"] == "system"
+        assert system["liveness_status"] == "ONLINE"
+        assert "liveness_detail" not in system  # No detail was provided
+        assert system["is_alive"] is True
 
         # COMPLETED with no errors should not include initialization info
         assert "initialization" not in result
 
         # Verify liveness_status was called with attempt_to_connect=True
-        mock_factory.liveness_status.assert_called_once_with(ensure_item=True)
+        mock_factory_manager.liveness_status.assert_called_once_with(ensure_item=True)
 
 
 @pytest.mark.asyncio
 async def test_enterprise_systems_status_no_systems():
-    """Test enterprise systems status with no systems available."""
-    # Mock enterprise registry with no systems
-    mock_enterprise_registry = AsyncMock()
-    mock_enterprise_registry.get_all = AsyncMock(
-        return_value=RegistrySnapshot.simple(items={})
+    """Test enterprise systems status - new code always returns exactly one system."""
+    # Mock factory_manager reporting OFFLINE status
+    mock_factory_manager = AsyncMock()
+    mock_factory_manager.liveness_status = AsyncMock(
+        return_value=(ResourceLivenessStatus.OFFLINE, None)
     )
+    mock_factory_manager.is_alive = AsyncMock(return_value=False)
 
-    # Mock session registry
+    # Mock session registry - factory_manager is a plain property (not async)
     mock_session_registry = MagicMock()
-    mock_session_registry.enterprise_registry = AsyncMock(
-        return_value=mock_enterprise_registry
-    )
+    mock_session_registry.system_name = _TEST_SYSTEM_NAME
+    mock_session_registry.factory_manager = mock_factory_manager
     mock_session_registry.get_all = AsyncMock(
         return_value=RegistrySnapshot.simple(items={})
     )
 
-    # Mock config manager
+    # Mock config manager - returns flat config
     mock_config_manager = AsyncMock()
-    mock_config_manager.get_config = AsyncMock(
-        return_value={"enterprise": {"systems": {}}}
-    )
+    mock_config_manager.get_config = AsyncMock(return_value={})
 
     # Create context
     context = MockContext(
@@ -455,108 +405,90 @@ async def test_enterprise_systems_status_no_systems():
         }
     )
 
-    # Call the function
-    result = await enterprise_systems_status(context)
+    with patch(
+        "deephaven_mcp.config._enterprise.redact_enterprise_system_config",
+        return_value={},
+    ):
+        # Call the function
+        result = await enterprise_systems_status(context)
 
-    # Verify the result
+    # Verify the result - new code always returns exactly 1 system
     assert result["success"] is True
-    assert len(result["systems"]) == 0
+    assert len(result["systems"]) == 1
+    assert result["systems"][0]["name"] == "system"
+    assert result["systems"][0]["liveness_status"] == "OFFLINE"
+    assert result["systems"][0]["is_alive"] is False
     # COMPLETED with no errors should not include initialization info
     assert "initialization" not in result
 
 
 @pytest.mark.asyncio
 async def test_enterprise_systems_status_all_status_types():
-    """Test enterprise systems status with all possible status types."""
-    # Create a mock factory for each status type
-    factories = {}
-    status_details = {
-        "online_system": (ResourceLivenessStatus.ONLINE, "System is healthy"),
-        "offline_system": (ResourceLivenessStatus.OFFLINE, "System is not responding"),
-        "unauthorized_system": (
-            ResourceLivenessStatus.UNAUTHORIZED,
-            "Authentication failed",
-        ),
-        "misconfigured_system": (
-            ResourceLivenessStatus.MISCONFIGURED,
-            "Invalid configuration",
-        ),
-        "unknown_system": (ResourceLivenessStatus.UNKNOWN, "Unknown error occurred"),
-    }
+    """Test enterprise systems status with all possible status types (single system)."""
+    # New code has a single system; test each status type individually
+    status_details = [
+        (ResourceLivenessStatus.ONLINE, "System is healthy"),
+        (ResourceLivenessStatus.OFFLINE, "System is not responding"),
+        (ResourceLivenessStatus.UNAUTHORIZED, "Authentication failed"),
+        (ResourceLivenessStatus.MISCONFIGURED, "Invalid configuration"),
+        (ResourceLivenessStatus.UNKNOWN, "Unknown error occurred"),
+    ]
 
-    for name, (status, detail) in status_details.items():
-        mock_factory = AsyncMock()
-        mock_factory.liveness_status = AsyncMock(return_value=(status, detail))
-        mock_factory.is_alive = AsyncMock(
+    for status, detail in status_details:
+        mock_factory_manager = AsyncMock()
+        mock_factory_manager.liveness_status = AsyncMock(return_value=(status, detail))
+        mock_factory_manager.is_alive = AsyncMock(
             return_value=(status == ResourceLivenessStatus.ONLINE)
         )
-        factories[name] = mock_factory
 
-    # Mock enterprise registry
-    mock_enterprise_registry = AsyncMock()
-    mock_enterprise_registry.get_all = AsyncMock(
-        return_value=RegistrySnapshot.simple(items=factories)
-    )
+        mock_session_registry = MagicMock()
+        mock_session_registry.system_name = _TEST_SYSTEM_NAME
+        mock_session_registry.factory_manager = mock_factory_manager
+        mock_session_registry.get_all = AsyncMock(
+            return_value=RegistrySnapshot.simple(items={})
+        )
 
-    # Mock session registry
-    mock_session_registry = MagicMock()
-    mock_session_registry.enterprise_registry = AsyncMock(
-        return_value=mock_enterprise_registry
-    )
-    mock_session_registry.get_all = AsyncMock(
-        return_value=RegistrySnapshot.simple(items={})
-    )
+        mock_config_manager = AsyncMock()
+        mock_config_manager.get_config = AsyncMock(return_value={})
 
-    # Mock config manager with empty configs
-    mock_config_manager = AsyncMock()
-    mock_config_manager.get_config = AsyncMock(
-        return_value={"enterprise": {"factories": {name: {} for name in factories}}}
-    )
+        context = MockContext(
+            {
+                "session_registry": mock_session_registry,
+                "config_manager": mock_config_manager,
+                "instance_tracker": create_mock_instance_tracker(),
+            }
+        )
 
-    # Create context
-    context = MockContext(
-        {
-            "session_registry": mock_session_registry,
-            "config_manager": mock_config_manager,
-            "instance_tracker": create_mock_instance_tracker(),
-        }
-    )
+        with patch(
+            "deephaven_mcp.config._enterprise.redact_enterprise_system_config",
+            return_value={},
+        ):
+            result = await enterprise_systems_status(context)
 
-    # Mock the redact function
-    with patch(
-        "deephaven_mcp.config._enterprise_system.redact_enterprise_system_config",
-        return_value={},
-    ):
-        # Call the function
-        result = await enterprise_systems_status(context)
-
-        # Verify the result
         assert result["success"] is True
-        assert len(result["systems"]) == 5
-
-        # Check each system has the correct status and detail
-        for name, (status, detail) in status_details.items():
-            system = next(s for s in result["systems"] if s["name"] == name)
-            assert system["liveness_status"] == status.name
-            assert system["liveness_detail"] == detail
-            assert system["is_alive"] == (status == ResourceLivenessStatus.ONLINE)
-
-        # COMPLETED with no errors should not include initialization info
+        assert len(result["systems"]) == 1
+        system = result["systems"][0]
+        assert system["name"] == "system"
+        assert system["liveness_status"] == status.name
+        assert system["liveness_detail"] == detail
+        assert system["is_alive"] == (status == ResourceLivenessStatus.ONLINE)
         assert "initialization" not in result
 
 
 @pytest.mark.asyncio
 async def test_enterprise_systems_status_config_error():
     """Test enterprise systems status when config retrieval fails."""
+    # Mock factory_manager (liveness_status works fine)
+    mock_factory_manager = AsyncMock()
+    mock_factory_manager.liveness_status = AsyncMock(
+        return_value=(ResourceLivenessStatus.ONLINE, None)
+    )
+    mock_factory_manager.is_alive = AsyncMock(return_value=True)
+
     # Mock session registry
     mock_session_registry = MagicMock()
-    mock_enterprise_registry = AsyncMock()
-    mock_enterprise_registry.get_all = AsyncMock(
-        return_value=RegistrySnapshot.simple(items={})
-    )
-    mock_session_registry.enterprise_registry = AsyncMock(
-        return_value=mock_enterprise_registry
-    )
+    mock_session_registry.system_name = _TEST_SYSTEM_NAME
+    mock_session_registry.factory_manager = mock_factory_manager
     mock_session_registry.get_all = AsyncMock(
         return_value=RegistrySnapshot.simple(items={})
     )
@@ -585,25 +517,15 @@ async def test_enterprise_systems_status_config_error():
 
 @pytest.mark.asyncio
 async def test_enterprise_systems_status_registry_error():
-    """Test enterprise systems status when registry retrieval fails."""
-    # Mock enterprise registry that raises an exception
-    mock_enterprise_registry = AsyncMock()
-    mock_enterprise_registry.get_all.side_effect = Exception("Registry error")
-
-    # Mock session registry
+    """Test enterprise systems status when session_registry.get_all() fails."""
+    # Mock session registry where get_all raises an exception
     mock_session_registry = MagicMock()
-    mock_session_registry.enterprise_registry = AsyncMock(
-        return_value=mock_enterprise_registry
-    )
-    mock_session_registry.get_all = AsyncMock(
-        return_value=RegistrySnapshot.simple(items={})
-    )
+    mock_session_registry.system_name = _TEST_SYSTEM_NAME
+    mock_session_registry.get_all = AsyncMock(side_effect=Exception("Registry error"))
 
     # Mock config manager
     mock_config_manager = AsyncMock()
-    mock_config_manager.get_config = AsyncMock(
-        return_value={"enterprise": {"factories": {}}}
-    )
+    mock_config_manager.get_config = AsyncMock(return_value={})
 
     # Create context
     context = MockContext(
@@ -625,74 +547,25 @@ async def test_enterprise_systems_status_registry_error():
 
 @pytest.mark.asyncio
 async def test_enterprise_systems_status_liveness_error():
-    """Test enterprise systems status when liveness_status raises an exception."""
-    # Mock factory with liveness_status that raises an exception
-    mock_factory = AsyncMock()
-    mock_factory.liveness_status.side_effect = Exception("Liveness error")
-    mock_factory.is_alive.return_value = False
-
-    # Mock enterprise registry
-    mock_enterprise_registry = AsyncMock()
-    mock_enterprise_registry.get_all = AsyncMock(
-        return_value=RegistrySnapshot.simple(items={"system1": mock_factory})
+    """Test enterprise systems status when factory_manager.liveness_status raises."""
+    # Mock factory_manager with liveness_status that raises an exception
+    mock_factory_manager = AsyncMock()
+    mock_factory_manager.liveness_status = AsyncMock(
+        side_effect=Exception("Liveness error")
     )
+    mock_factory_manager.is_alive = AsyncMock(return_value=False)
 
     # Mock session registry
     mock_session_registry = MagicMock()
-    mock_session_registry.enterprise_registry = AsyncMock(
-        return_value=mock_enterprise_registry
-    )
+    mock_session_registry.system_name = _TEST_SYSTEM_NAME
+    mock_session_registry.factory_manager = mock_factory_manager
     mock_session_registry.get_all = AsyncMock(
         return_value=RegistrySnapshot.simple(items={})
     )
 
     # Mock config manager
     mock_config_manager = AsyncMock()
-    mock_config_manager.get_config = AsyncMock(
-        return_value={"enterprise": {"factories": {"system1": {}}}}
-    )
-
-    # Create context
-    context = MockContext(
-        {
-            "session_registry": mock_session_registry,
-            "config_manager": mock_config_manager,
-            "instance_tracker": create_mock_instance_tracker(),
-        }
-    )
-
-    # Mock the redact function
-    with patch(
-        "deephaven_mcp.config._enterprise_system.redact_enterprise_system_config",
-        return_value={},
-    ):
-        # Call the function
-        result = await enterprise_systems_status(context)
-
-        # Verify the result
-        assert result["success"] is False
-        assert result["isError"] is True
-        assert "Liveness error" in result["error"]
-
-
-@pytest.mark.asyncio
-async def test_enterprise_systems_status_no_enterprise_registry():
-    """Test enterprise systems status when enterprise_registry is None."""
-    # Mock session registry with None enterprise registry
-    mock_session_registry = MagicMock()
-    mock_session_registry.enterprise_registry = AsyncMock(return_value=AsyncMock())
-    mock_session_registry.enterprise_registry.return_value.get_all = AsyncMock(
-        return_value=RegistrySnapshot.simple(items={})
-    )
-    mock_session_registry.get_all = AsyncMock(
-        return_value=RegistrySnapshot.simple(items={})
-    )
-
-    # Mock config manager
-    mock_config_manager = AsyncMock()
-    mock_config_manager.get_config = AsyncMock(
-        return_value={"enterprise": {"systems": {}}}
-    )
+    mock_config_manager.get_config = AsyncMock(return_value={})
 
     # Create context
     context = MockContext(
@@ -707,36 +580,82 @@ async def test_enterprise_systems_status_no_enterprise_registry():
     result = await enterprise_systems_status(context)
 
     # Verify the result
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "Liveness error" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_enterprise_systems_status_no_enterprise_registry():
+    """Test enterprise systems status - new code always returns one system (OFFLINE when not connected)."""
+    # Mock factory_manager returning OFFLINE
+    mock_factory_manager = AsyncMock()
+    mock_factory_manager.liveness_status = AsyncMock(
+        return_value=(ResourceLivenessStatus.OFFLINE, None)
+    )
+    mock_factory_manager.is_alive = AsyncMock(return_value=False)
+
+    mock_session_registry = MagicMock()
+    mock_session_registry.system_name = _TEST_SYSTEM_NAME
+    mock_session_registry.factory_manager = mock_factory_manager
+    mock_session_registry.get_all = AsyncMock(
+        return_value=RegistrySnapshot.simple(items={})
+    )
+
+    # Mock config manager
+    mock_config_manager = AsyncMock()
+    mock_config_manager.get_config = AsyncMock(return_value={})
+
+    # Create context
+    context = MockContext(
+        {
+            "session_registry": mock_session_registry,
+            "config_manager": mock_config_manager,
+            "instance_tracker": create_mock_instance_tracker(),
+        }
+    )
+
+    with patch(
+        "deephaven_mcp.config._enterprise.redact_enterprise_system_config",
+        return_value={},
+    ):
+        # Call the function
+        result = await enterprise_systems_status(context)
+
+    # Verify the result - new code always returns exactly 1 system
     assert result["success"] is True
-    assert len(result["systems"]) == 0
+    assert len(result["systems"]) == 1
+    assert result["systems"][0]["name"] == "system"
+    assert result["systems"][0]["liveness_status"] == "OFFLINE"
+    assert result["systems"][0]["is_alive"] is False
     # COMPLETED with no errors should not include initialization info
     assert "initialization" not in result
 
 
 @pytest.mark.asyncio
 async def test_enterprise_systems_status_factory_snapshot_unexpected_phase():
-    """Test enterprise_systems_status raises InternalError for unexpected phase."""
+    """Test enterprise_systems_status surfaces initialization status for LOADING phase."""
     from deephaven_mcp.resource_manager import InitializationPhase
 
-    mock_enterprise_registry = AsyncMock()
-    mock_enterprise_registry.get_all = AsyncMock(
+    # Mock factory_manager
+    mock_factory_manager = AsyncMock()
+    mock_factory_manager.liveness_status = AsyncMock(
+        return_value=(ResourceLivenessStatus.OFFLINE, None)
+    )
+    mock_factory_manager.is_alive = AsyncMock(return_value=False)
+
+    mock_session_registry = MagicMock()
+    mock_session_registry.system_name = _TEST_SYSTEM_NAME
+    mock_session_registry.factory_manager = mock_factory_manager
+    # session_registry.get_all() returns a LOADING phase snapshot
+    mock_session_registry.get_all = AsyncMock(
         return_value=RegistrySnapshot.with_initialization(
             items={}, phase=InitializationPhase.LOADING, errors={}
         )
     )
 
-    mock_session_registry = MagicMock()
-    mock_session_registry.enterprise_registry = AsyncMock(
-        return_value=mock_enterprise_registry
-    )
-    mock_session_registry.get_all = AsyncMock(
-        return_value=RegistrySnapshot.simple(items={})
-    )
-
     mock_config_manager = AsyncMock()
-    mock_config_manager.get_config = AsyncMock(
-        return_value={"enterprise": {"systems": {}}}
-    )
+    mock_config_manager.get_config = AsyncMock(return_value={})
 
     context = MockContext(
         {
@@ -746,39 +665,46 @@ async def test_enterprise_systems_status_factory_snapshot_unexpected_phase():
         }
     )
 
-    result = await enterprise_systems_status(context)
+    with patch(
+        "deephaven_mcp.config._enterprise.redact_enterprise_system_config",
+        return_value={},
+    ):
+        result = await enterprise_systems_status(context)
 
-    # InternalError is caught by the tool's except Exception handler
-    assert result["success"] is False
-    assert "expected SIMPLE" in result["error"]
+    # LOADING phase is surfaced in initialization info, not as an error
+    assert result["success"] is True
+    assert len(result["systems"]) == 1
+    assert result["systems"][0]["name"] == "system"
+    assert "initialization" in result
+    assert "actively running" in result["initialization"]["status"]
 
 
 @pytest.mark.asyncio
 async def test_enterprise_systems_status_factory_snapshot_with_errors():
-    """Test enterprise_systems_status raises InternalError for factory snapshot errors."""
+    """Test enterprise_systems_status surfaces init errors from session registry snapshot."""
     from deephaven_mcp.resource_manager import InitializationPhase
 
-    mock_enterprise_registry = AsyncMock()
-    mock_enterprise_registry.get_all = AsyncMock(
+    # Mock factory_manager
+    mock_factory_manager = AsyncMock()
+    mock_factory_manager.liveness_status = AsyncMock(
+        return_value=(ResourceLivenessStatus.ONLINE, None)
+    )
+    mock_factory_manager.is_alive = AsyncMock(return_value=True)
+
+    mock_session_registry = MagicMock()
+    mock_session_registry.system_name = _TEST_SYSTEM_NAME
+    mock_session_registry.factory_manager = mock_factory_manager
+    # session_registry.get_all() returns a COMPLETED snapshot with errors
+    mock_session_registry.get_all = AsyncMock(
         return_value=RegistrySnapshot.with_initialization(
             items={},
-            phase=InitializationPhase.SIMPLE,
+            phase=InitializationPhase.COMPLETED,
             errors={"factory_reg": "something broke"},
         )
     )
 
-    mock_session_registry = MagicMock()
-    mock_session_registry.enterprise_registry = AsyncMock(
-        return_value=mock_enterprise_registry
-    )
-    mock_session_registry.get_all = AsyncMock(
-        return_value=RegistrySnapshot.simple(items={})
-    )
-
     mock_config_manager = AsyncMock()
-    mock_config_manager.get_config = AsyncMock(
-        return_value={"enterprise": {"systems": {}}}
-    )
+    mock_config_manager.get_config = AsyncMock(return_value={})
 
     context = MockContext(
         {
@@ -788,11 +714,19 @@ async def test_enterprise_systems_status_factory_snapshot_with_errors():
         }
     )
 
-    result = await enterprise_systems_status(context)
+    with patch(
+        "deephaven_mcp.config._enterprise.redact_enterprise_system_config",
+        return_value={},
+    ):
+        result = await enterprise_systems_status(context)
 
-    # Simple registry should never have errors - InternalError caught by handler
-    assert result["success"] is False
-    assert "unexpected errors" in result["error"]
+    # Errors from snapshot are surfaced in initialization info
+    assert result["success"] is True
+    assert len(result["systems"]) == 1
+    assert result["systems"][0]["name"] == "system"
+    assert "initialization" in result
+    assert "errors" in result["initialization"]
+    assert "factory_reg" in result["initialization"]["errors"]
 
 
 # =============================================================================
@@ -803,15 +737,15 @@ async def test_enterprise_systems_status_factory_snapshot_with_errors():
 @pytest.mark.asyncio
 async def test_enterprise_systems_status_discovery_in_progress():
     """Test enterprise_systems_status shows status when discovery is in progress."""
-    mock_enterprise_registry = AsyncMock()
-    mock_enterprise_registry.get_all = AsyncMock(
-        return_value=RegistrySnapshot.simple(items={})
+    mock_factory_manager = AsyncMock()
+    mock_factory_manager.liveness_status = AsyncMock(
+        return_value=(ResourceLivenessStatus.OFFLINE, None)
     )
+    mock_factory_manager.is_alive = AsyncMock(return_value=False)
 
     mock_session_registry = MagicMock()
-    mock_session_registry.enterprise_registry = AsyncMock(
-        return_value=mock_enterprise_registry
-    )
+    mock_session_registry.system_name = _TEST_SYSTEM_NAME
+    mock_session_registry.factory_manager = mock_factory_manager
     mock_session_registry.get_all = AsyncMock(
         return_value=RegistrySnapshot.with_initialization(
             items={},
@@ -821,9 +755,7 @@ async def test_enterprise_systems_status_discovery_in_progress():
     )
 
     mock_config_manager = AsyncMock()
-    mock_config_manager.get_config = AsyncMock(
-        return_value={"enterprise": {"systems": {}}}
-    )
+    mock_config_manager.get_config = AsyncMock(return_value={})
 
     context = MockContext(
         {
@@ -833,7 +765,11 @@ async def test_enterprise_systems_status_discovery_in_progress():
         }
     )
 
-    result = await enterprise_systems_status(context)
+    with patch(
+        "deephaven_mcp.config._enterprise.redact_enterprise_system_config",
+        return_value={},
+    ):
+        result = await enterprise_systems_status(context)
 
     assert result["success"] is True
     assert "initialization" in result
@@ -843,15 +779,15 @@ async def test_enterprise_systems_status_discovery_in_progress():
 @pytest.mark.asyncio
 async def test_enterprise_systems_status_discovery_in_progress_with_errors():
     """Test enterprise_systems_status shows both status and errors during discovery."""
-    mock_enterprise_registry = AsyncMock()
-    mock_enterprise_registry.get_all = AsyncMock(
-        return_value=RegistrySnapshot.simple(items={})
+    mock_factory_manager = AsyncMock()
+    mock_factory_manager.liveness_status = AsyncMock(
+        return_value=(ResourceLivenessStatus.OFFLINE, None)
     )
+    mock_factory_manager.is_alive = AsyncMock(return_value=False)
 
     mock_session_registry = MagicMock()
-    mock_session_registry.enterprise_registry = AsyncMock(
-        return_value=mock_enterprise_registry
-    )
+    mock_session_registry.system_name = _TEST_SYSTEM_NAME
+    mock_session_registry.factory_manager = mock_factory_manager
     mock_session_registry.get_all = AsyncMock(
         return_value=RegistrySnapshot.with_initialization(
             items={},
@@ -861,9 +797,7 @@ async def test_enterprise_systems_status_discovery_in_progress_with_errors():
     )
 
     mock_config_manager = AsyncMock()
-    mock_config_manager.get_config = AsyncMock(
-        return_value={"enterprise": {"systems": {}}}
-    )
+    mock_config_manager.get_config = AsyncMock(return_value={})
 
     context = MockContext(
         {
@@ -873,7 +807,11 @@ async def test_enterprise_systems_status_discovery_in_progress_with_errors():
         }
     )
 
-    result = await enterprise_systems_status(context)
+    with patch(
+        "deephaven_mcp.config._enterprise.redact_enterprise_system_config",
+        return_value={},
+    ):
+        result = await enterprise_systems_status(context)
 
     assert result["success"] is True
     assert "initialization" in result
@@ -885,15 +823,15 @@ async def test_enterprise_systems_status_discovery_in_progress_with_errors():
 @pytest.mark.asyncio
 async def test_enterprise_systems_status_completed_with_errors():
     """Test enterprise_systems_status shows init_errors."""
-    mock_enterprise_registry = AsyncMock()
-    mock_enterprise_registry.get_all = AsyncMock(
-        return_value=RegistrySnapshot.simple(items={})
+    mock_factory_manager = AsyncMock()
+    mock_factory_manager.liveness_status = AsyncMock(
+        return_value=(ResourceLivenessStatus.ONLINE, None)
     )
+    mock_factory_manager.is_alive = AsyncMock(return_value=True)
 
     mock_session_registry = MagicMock()
-    mock_session_registry.enterprise_registry = AsyncMock(
-        return_value=mock_enterprise_registry
-    )
+    mock_session_registry.system_name = _TEST_SYSTEM_NAME
+    mock_session_registry.factory_manager = mock_factory_manager
     mock_session_registry.get_all = AsyncMock(
         return_value=RegistrySnapshot.with_initialization(
             items={},
@@ -903,9 +841,7 @@ async def test_enterprise_systems_status_completed_with_errors():
     )
 
     mock_config_manager = AsyncMock()
-    mock_config_manager.get_config = AsyncMock(
-        return_value={"enterprise": {"systems": {}}}
-    )
+    mock_config_manager.get_config = AsyncMock(return_value={})
 
     context = MockContext(
         {
@@ -915,7 +851,11 @@ async def test_enterprise_systems_status_completed_with_errors():
         }
     )
 
-    result = await enterprise_systems_status(context)
+    with patch(
+        "deephaven_mcp.config._enterprise.redact_enterprise_system_config",
+        return_value={},
+    ):
+        result = await enterprise_systems_status(context)
 
     assert result["success"] is True
     assert "initialization" in result
@@ -927,23 +867,21 @@ async def test_enterprise_systems_status_completed_with_errors():
 @pytest.mark.asyncio
 async def test_enterprise_systems_status_completed_no_errors():
     """Test enterprise_systems_status omits init fields when no errors."""
-    mock_enterprise_registry = AsyncMock()
-    mock_enterprise_registry.get_all = AsyncMock(
-        return_value=RegistrySnapshot.simple(items={})
+    mock_factory_manager = AsyncMock()
+    mock_factory_manager.liveness_status = AsyncMock(
+        return_value=(ResourceLivenessStatus.ONLINE, None)
     )
+    mock_factory_manager.is_alive = AsyncMock(return_value=True)
 
     mock_session_registry = MagicMock()
-    mock_session_registry.enterprise_registry = AsyncMock(
-        return_value=mock_enterprise_registry
-    )
+    mock_session_registry.system_name = _TEST_SYSTEM_NAME
+    mock_session_registry.factory_manager = mock_factory_manager
     mock_session_registry.get_all = AsyncMock(
         return_value=RegistrySnapshot.simple(items={})
     )
 
     mock_config_manager = AsyncMock()
-    mock_config_manager.get_config = AsyncMock(
-        return_value={"enterprise": {"systems": {}}}
-    )
+    mock_config_manager.get_config = AsyncMock(return_value={})
 
     context = MockContext(
         {
@@ -953,49 +891,75 @@ async def test_enterprise_systems_status_completed_no_errors():
         }
     )
 
-    result = await enterprise_systems_status(context)
+    with patch(
+        "deephaven_mcp.config._enterprise.redact_enterprise_system_config",
+        return_value={},
+    ):
+        result = await enterprise_systems_status(context)
 
     assert result["success"] is True
     assert "initialization" not in result
 
 
 @pytest.mark.asyncio
-async def test_session_enterprise_create_success_with_defaults():
-    """Test session_enterprise_create with config defaults."""
+async def test_session_enterprise_create_no_session_creation_config():
+    """session_enterprise_create returns error when session_creation section is absent."""
     mock_registry = MagicMock()
+    mock_registry.system_name = _TEST_SYSTEM_NAME
     mock_config_manager = MagicMock()
-
-    # Mock enterprise systems config
-    enterprise_config = {
-        "prod-system": {
+    mock_config_manager.get_config = AsyncMock(
+        return_value={
             "connection_json_url": "https://prod.example.com/iris/connection.json",
             "auth_type": "password",
             "username": "admin",
             "password": "secret",
-            "session_creation": {
-                "max_concurrent_sessions": 5,
-                "defaults": {
-                    "heap_size_gb": 8.0,
-                    "auto_delete_timeout": 3600,
-                    "server": "server-east-1",
-                    "engine": "DeephavenCommunity",
-                },
-            },
         }
+    )
+
+    context = MockContext(
+        {"config_manager": mock_config_manager, "session_registry": mock_registry}
+    )
+
+    result = await session_enterprise_create(context, "test-worker")
+
+    assert result["isError"] is True
+    assert result["success"] is False
+    assert "session_creation" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_session_enterprise_create_success_with_defaults():
+    """Test session_enterprise_create with config defaults."""
+    mock_registry = MagicMock()
+    mock_registry.system_name = _TEST_SYSTEM_NAME
+    mock_config_manager = MagicMock()
+
+    # Flat config format returned directly by get_config()
+    flat_config = {
+        "connection_json_url": "https://prod.example.com/iris/connection.json",
+        "auth_type": "password",
+        "username": "admin",
+        "password": "secret",
+        "session_creation": {
+            "max_concurrent_sessions": 5,
+            "defaults": {
+                "heap_size_gb": 8.0,
+                "auto_delete_timeout": 3600,
+                "server": "server-east-1",
+                "engine": "DeephavenCommunity",
+            },
+        },
     }
 
-    # Provide nested enterprise systems config via async get_config()
-    full_config = {"enterprise": {"systems": enterprise_config}}
-    mock_config_manager.get_config = AsyncMock(return_value=full_config)
+    # get_config() returns flat config directly
+    mock_config_manager.get_config = AsyncMock(return_value=flat_config)
 
-    # Mock session registry and factories
-    mock_enterprise_registry = MagicMock()
-    mock_factory_manager = MagicMock()
+    # Mock session registry and factories - use factory_manager directly
+    mock_factory_manager = AsyncMock()
     mock_factory = MagicMock()
     mock_session = MagicMock()
 
-    mock_registry.enterprise_registry = AsyncMock(return_value=mock_enterprise_registry)
-    mock_enterprise_registry.get = AsyncMock(return_value=mock_factory_manager)
+    mock_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.connect_to_new_worker = AsyncMock(return_value=mock_session)
 
@@ -1011,11 +975,11 @@ async def test_session_enterprise_create_success_with_defaults():
         {"config_manager": mock_config_manager, "session_registry": mock_registry}
     )
 
-    result = await session_enterprise_create(context, "prod-system", "test-worker")
+    result = await session_enterprise_create(context, "test-worker")
 
     assert result["success"] is True
-    assert result["session_id"] == "enterprise:prod-system:test-worker"
-    assert result["system_name"] == "prod-system"
+    assert result["session_id"] == "enterprise:system:test-worker"
+    assert result["system_name"] == "system"
     assert result["session_name"] == "test-worker"
     assert result["configuration"]["heap_size_gb"] == 8.0
     assert result["configuration"]["auto_delete_timeout"] == 3600
@@ -1043,41 +1007,37 @@ async def test_session_enterprise_create_success_with_defaults():
     mock_registry.add_session.assert_called_once()
     call_args = mock_registry.add_session.call_args
     session_manager = call_args[0][0]  # Manager is the only argument
-    assert session_manager.full_name == "enterprise:prod-system:test-worker"
+    assert session_manager.full_name == "enterprise:system:test-worker"
 
 
 @pytest.mark.asyncio
 async def test_session_enterprise_create_success_with_overrides():
     """Test session_enterprise_create with parameter overrides."""
     mock_registry = MagicMock()
+    mock_registry.system_name = _TEST_SYSTEM_NAME
     mock_config_manager = MagicMock()
 
-    # Mock enterprise systems config with defaults
-    enterprise_config = {
-        "prod-system": {
-            "connection_json_url": "https://prod.example.com/iris/connection.json",
-            "auth_type": "password",
-            "username": "admin",
-            "password": "secret",
-            "session_creation": {
-                "max_concurrent_sessions": 5,
-                "defaults": {"heap_size_gb": 4.0, "auto_delete_timeout": 1800},
-            },
-        }
+    # Flat config format returned directly by get_config()
+    flat_config = {
+        "connection_json_url": "https://prod.example.com/iris/connection.json",
+        "auth_type": "password",
+        "username": "admin",
+        "password": "secret",
+        "session_creation": {
+            "max_concurrent_sessions": 5,
+            "defaults": {"heap_size_gb": 4.0, "auto_delete_timeout": 1800},
+        },
     }
 
-    # Provide nested enterprise systems config via async get_config()
-    full_config = {"enterprise": {"systems": enterprise_config}}
-    mock_config_manager.get_config = AsyncMock(return_value=full_config)
+    # get_config() returns flat config directly
+    mock_config_manager.get_config = AsyncMock(return_value=flat_config)
 
-    # Mock session registry and factories
-    mock_enterprise_registry = MagicMock()
-    mock_factory_manager = MagicMock()
+    # Mock session registry and factories - use factory_manager directly
+    mock_factory_manager = AsyncMock()
     mock_factory = MagicMock()
     mock_session = MagicMock()
 
-    mock_registry.enterprise_registry = AsyncMock(return_value=mock_enterprise_registry)
-    mock_enterprise_registry.get = AsyncMock(return_value=mock_factory_manager)
+    mock_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.connect_to_new_worker = AsyncMock(return_value=mock_session)
 
@@ -1094,7 +1054,6 @@ async def test_session_enterprise_create_success_with_overrides():
 
     result = await session_enterprise_create(
         context,
-        "prod-system",
         "custom-worker",
         heap_size_gb=16.0,
         auto_delete_timeout=7200,
@@ -1128,37 +1087,35 @@ async def test_session_enterprise_create_success_with_overrides():
 async def test_session_enterprise_create_auto_generate_name():
     """Test session_enterprise_create auto-generates worker name when None."""
     mock_registry = MagicMock()
+    mock_registry.system_name = _TEST_SYSTEM_NAME
     mock_config_manager = MagicMock()
 
-    enterprise_config = {
-        "test-system": {
-            "connection_json_url": "https://test.example.com/iris/connection.json",
-            "auth_type": "password",
-            "username": "test",
-            "password": "test",
-            "session_creation": {"max_concurrent_sessions": 3},
-        }
+    # Flat config format returned directly by get_config()
+    flat_config = {
+        "connection_json_url": "https://test.example.com/iris/connection.json",
+        "auth_type": "password",
+        "username": "test",
+        "password": "test",
+        "session_creation": {
+            "max_concurrent_sessions": 3,
+            "defaults": {"heap_size_gb": 4},
+        },
     }
 
-    # Provide nested enterprise systems config via async get_config()
-    full_config = {"enterprise": {"systems": enterprise_config}}
-    mock_config_manager.get_config = AsyncMock(return_value=full_config)
+    # get_config() returns flat config directly
+    mock_config_manager.get_config = AsyncMock(return_value=flat_config)
 
     with patch(
         "deephaven_mcp.mcp_systems_server._tools.session_enterprise.datetime"
     ) as mock_datetime:
         mock_datetime.now().strftime.return_value = "20241126-1430"
 
-        # Mock session registry and factories
-        mock_enterprise_registry = MagicMock()
-        mock_factory_manager = MagicMock()
+        # Mock session registry and factories - use factory_manager directly
+        mock_factory_manager = AsyncMock()
         mock_factory = MagicMock()
         mock_session = MagicMock()
 
-        mock_registry.enterprise_registry = AsyncMock(
-            return_value=mock_enterprise_registry
-        )
-        mock_enterprise_registry.get = AsyncMock(return_value=mock_factory_manager)
+        mock_registry.factory_manager = mock_factory_manager
         mock_factory_manager.get = AsyncMock(return_value=mock_factory)
         mock_factory.connect_to_new_worker = AsyncMock(return_value=mock_session)
 
@@ -1173,31 +1130,48 @@ async def test_session_enterprise_create_auto_generate_name():
             {"config_manager": mock_config_manager, "session_registry": mock_registry}
         )
 
-        result = await session_enterprise_create(context, "test-system")
+        result = await session_enterprise_create(context)
 
         assert result["success"] is True
         assert result["session_name"] == "mcp-test-20241126-1430"
-        assert result["session_id"] == "enterprise:test-system:mcp-test-20241126-1430"
+        assert result["session_id"] == "enterprise:system:mcp-test-20241126-1430"
 
 
 @pytest.mark.asyncio
 async def test_session_enterprise_create_system_not_found():
-    """Test session_enterprise_create when enterprise system not found."""
+    """Test session_enterprise_create when factory connection fails."""
     mock_registry = MagicMock()
+    mock_registry.system_name = _TEST_SYSTEM_NAME
     mock_config_manager = MagicMock()
 
-    # Provide empty enterprise systems config via async get_config()
-    full_config = {"enterprise": {"systems": {}}}
-    mock_config_manager.get_config = AsyncMock(return_value=full_config)
+    # Flat config with sessions enabled
+    flat_config = {
+        "session_creation": {
+            "max_concurrent_sessions": 5,
+            "defaults": {"heap_size_gb": 4},
+        }
+    }
+    mock_config_manager.get_config = AsyncMock(return_value=flat_config)
+
+    # factory_manager.get() raises a connection error
+    mock_factory_manager = AsyncMock()
+    mock_factory_manager.get = AsyncMock(
+        side_effect=RuntimeError("connection failed: system not available")
+    )
+    mock_registry.factory_manager = mock_factory_manager
+    mock_registry.get = AsyncMock(
+        side_effect=RegistryItemNotFoundError("Session not found")
+    )
+    mock_registry.count_added_sessions = AsyncMock(return_value=0)
 
     context = MockContext(
         {"config_manager": mock_config_manager, "session_registry": mock_registry}
     )
 
-    result = await session_enterprise_create(context, "nonexistent-system", "worker")
+    result = await session_enterprise_create(context, "worker")
 
     assert result["success"] is False
-    assert "Enterprise system 'nonexistent-system' not found" in result["error"]
+    assert "connection failed" in result["error"]
     assert result["isError"] is True
 
 
@@ -1205,21 +1179,20 @@ async def test_session_enterprise_create_system_not_found():
 async def test_session_enterprise_create_max_workers_exceeded():
     """Test session_enterprise_create when max concurrent workers limit exceeded."""
     mock_registry = MagicMock()
+    mock_registry.system_name = _TEST_SYSTEM_NAME
     mock_config_manager = MagicMock()
 
-    enterprise_config = {
-        "limited-system": {
-            "connection_json_url": "https://limited.example.com/iris/connection.json",
-            "auth_type": "password",
-            "username": "user",
-            "password": "pass",
-            "session_creation": {"max_concurrent_sessions": 2},  # Low limit for testing
-        }
+    # Flat config format returned directly by get_config()
+    flat_config = {
+        "connection_json_url": "https://limited.example.com/iris/connection.json",
+        "auth_type": "password",
+        "username": "user",
+        "password": "pass",
+        "session_creation": {"max_concurrent_sessions": 2},  # Low limit for testing
     }
 
-    # Provide nested enterprise systems config via async get_config()
-    full_config = {"enterprise": {"systems": enterprise_config}}
-    mock_config_manager.get_config = AsyncMock(return_value=full_config)
+    # get_config() returns flat config directly
+    mock_config_manager.get_config = AsyncMock(return_value=flat_config)
 
     # Mock registry to return 2 existing sessions (at limit)
     mock_registry.count_added_sessions = AsyncMock(return_value=2)
@@ -1227,11 +1200,11 @@ async def test_session_enterprise_create_max_workers_exceeded():
     # Mock session registry get to simulate existing sessions for counting
     async def mock_session_get(session_id):
         if session_id in [
-            "enterprise:limited-system:worker1",
-            "enterprise:limited-system:worker2",
+            "enterprise:system:worker1",
+            "enterprise:system:worker2",
         ]:
             return MagicMock(spec=EnterpriseSessionManager)
-        elif session_id == "enterprise:limited-system:worker3":
+        elif session_id == "enterprise:system:worker3":
             raise RegistryItemNotFoundError(
                 "Session not found"
             )  # New session doesn't exist yet
@@ -1244,7 +1217,7 @@ async def test_session_enterprise_create_max_workers_exceeded():
         {"config_manager": mock_config_manager, "session_registry": mock_registry}
     )
 
-    result = await session_enterprise_create(context, "limited-system", "worker3")
+    result = await session_enterprise_create(context, "worker3")
 
     assert result["success"] is False
     assert "Max concurrent sessions (2) reached" in result["error"]
@@ -1257,20 +1230,19 @@ async def test_session_enterprise_create_max_workers_exceeded():
 async def test_session_enterprise_create_session_conflict():
     """Test session_enterprise_create when session ID already exists."""
     mock_registry = MagicMock()
+    mock_registry.system_name = _TEST_SYSTEM_NAME
     mock_config_manager = MagicMock()
 
-    enterprise_config = {
-        "conflict-system": {
-            "connection_json_url": "https://conflict.example.com/iris/connection.json",
-            "auth_type": "password",
-            "username": "user",
-            "password": "pass",
-            "session_creation": {"max_concurrent_sessions": 5},
-        }
+    # Flat config format returned directly by get_config()
+    flat_config = {
+        "connection_json_url": "https://conflict.example.com/iris/connection.json",
+        "auth_type": "password",
+        "username": "user",
+        "password": "pass",
+        "session_creation": {"max_concurrent_sessions": 5},
     }
 
-    full_config = {"enterprise": {"systems": enterprise_config}}
-    mock_config_manager.get_config = AsyncMock(return_value=full_config)
+    mock_config_manager.get_config = AsyncMock(return_value=flat_config)
 
     # Mock session registry to return existing session
     mock_existing_session = MagicMock()
@@ -1282,14 +1254,11 @@ async def test_session_enterprise_create_session_conflict():
         {"config_manager": mock_config_manager, "session_registry": mock_registry}
     )
 
-    result = await session_enterprise_create(
-        context, "conflict-system", "existing-worker"
-    )
+    result = await session_enterprise_create(context, "existing-worker")
 
     assert result["success"] is False
     assert (
-        "Session 'enterprise:conflict-system:existing-worker' already exists"
-        in result["error"]
+        "Session 'enterprise:system:existing-worker' already exists" in result["error"]
     )
     assert result["isError"] is True
 
@@ -1298,21 +1267,23 @@ async def test_session_enterprise_create_session_conflict():
 async def test_session_enterprise_create_factory_creation_failure():
     """Test session_enterprise_create when worker creation fails."""
     mock_registry = MagicMock()
+    mock_registry.system_name = _TEST_SYSTEM_NAME
     mock_config_manager = MagicMock()
 
-    enterprise_config = {
-        "failing-system": {
-            "connection_json_url": "https://failing.example.com/iris/connection.json",
-            "auth_type": "password",
-            "username": "user",
-            "password": "pass",
-            "session_creation": {"max_concurrent_sessions": 5},
-        }
+    # Flat config format returned directly by get_config()
+    flat_config = {
+        "connection_json_url": "https://failing.example.com/iris/connection.json",
+        "auth_type": "password",
+        "username": "user",
+        "password": "pass",
+        "session_creation": {
+            "max_concurrent_sessions": 5,
+            "defaults": {"heap_size_gb": 4},
+        },
     }
 
-    # Provide nested enterprise systems config via async get_config()
-    full_config = {"enterprise": {"systems": enterprise_config}}
-    mock_config_manager.get_config = AsyncMock(return_value=full_config)
+    # get_config() returns flat config directly
+    mock_config_manager.get_config = AsyncMock(return_value=flat_config)
 
     # Mock session registry - no conflict
     mock_registry.get = AsyncMock(
@@ -1321,13 +1292,11 @@ async def test_session_enterprise_create_factory_creation_failure():
     mock_registry.get_all = AsyncMock(return_value={})
     mock_registry.count_added_sessions = AsyncMock(return_value=0)
 
-    # Mock factory that fails during worker creation
-    mock_enterprise_registry = MagicMock()
-    mock_factory_manager = MagicMock()
+    # Mock factory_manager directly - factory fails during worker creation
+    mock_factory_manager = AsyncMock()
     mock_factory = MagicMock()
 
-    mock_registry.enterprise_registry = AsyncMock(return_value=mock_enterprise_registry)
-    mock_enterprise_registry.get = AsyncMock(return_value=mock_factory_manager)
+    mock_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.connect_to_new_worker = AsyncMock(
         side_effect=Exception("Resource exhausted")
@@ -1337,9 +1306,7 @@ async def test_session_enterprise_create_factory_creation_failure():
         {"config_manager": mock_config_manager, "session_registry": mock_registry}
     )
 
-    result = await session_enterprise_create(
-        context, "failing-system", "failing-worker"
-    )
+    result = await session_enterprise_create(context, "failing-worker")
 
     assert result["success"] is False
     assert "Resource exhausted" in result["error"]
@@ -1350,27 +1317,26 @@ async def test_session_enterprise_create_factory_creation_failure():
 async def test_session_enterprise_create_disabled_by_zero_max_workers():
     """Test session_enterprise_create when worker creation is disabled (max_concurrent_sessions = 0)."""
     mock_registry = MagicMock()
+    mock_registry.system_name = _TEST_SYSTEM_NAME
     mock_config_manager = MagicMock()
 
-    enterprise_config = {
-        "disabled-system": {
-            "connection_json_url": "https://disabled.example.com/iris/connection.json",
-            "auth_type": "password",
-            "username": "user",
-            "password": "pass",
-            "session_creation": {"max_concurrent_sessions": 0},  # Disabled
-        }
+    # Flat config format returned directly by get_config()
+    flat_config = {
+        "connection_json_url": "https://disabled.example.com/iris/connection.json",
+        "auth_type": "password",
+        "username": "user",
+        "password": "pass",
+        "session_creation": {"max_concurrent_sessions": 0},  # Disabled
     }
 
-    # Provide nested enterprise systems config via async get_config()
-    full_config = {"enterprise": {"systems": enterprise_config}}
-    mock_config_manager.get_config = AsyncMock(return_value=full_config)
+    # get_config() returns flat config directly
+    mock_config_manager.get_config = AsyncMock(return_value=flat_config)
 
     context = MockContext(
         {"config_manager": mock_config_manager, "session_registry": mock_registry}
     )
 
-    result = await session_enterprise_create(context, "disabled-system", "test-worker")
+    result = await session_enterprise_create(context, "test-worker")
 
     assert result["success"] is False
     assert "Session creation is disabled" in result["error"]
@@ -1381,10 +1347,11 @@ async def test_session_enterprise_create_disabled_by_zero_max_workers():
 async def test_session_enterprise_delete_success():
     """Test session_enterprise_delete successful deletion."""
     mock_registry = MagicMock()
+    mock_registry.system_name = _TEST_SYSTEM_NAME
     mock_config_manager = MagicMock()
 
     enterprise_config = {
-        "test-system": {
+        "system": {
             "connection_json_url": "https://test.example.com/iris/connection.json",
             "auth_type": "password",
             "username": "user",
@@ -1407,39 +1374,41 @@ async def test_session_enterprise_delete_success():
         {"config_manager": mock_config_manager, "session_registry": mock_registry}
     )
 
-    result = await session_enterprise_delete(context, "test-system", "test-worker")
+    result = await session_enterprise_delete(context, "enterprise:system:test-worker")
 
     assert result["success"] is True
-    assert result["session_id"] == "enterprise:test-system:test-worker"
-    assert result["system_name"] == "test-system"
+    assert result["session_id"] == "enterprise:system:test-worker"
+    assert result["system_name"] == "system"
     assert result["session_name"] == "test-worker"
 
     # Verify session was closed and removed
     mock_session_manager.close.assert_called_once()
     # Verify remove_session was called
     mock_registry.remove_session.assert_called_once_with(
-        "enterprise:test-system:test-worker"
+        "enterprise:system:test-worker"
     )
 
 
 @pytest.mark.asyncio
 async def test_session_enterprise_delete_system_not_found():
-    """Test session_enterprise_delete when enterprise system not found."""
+    """Test session_enterprise_delete when session registry raises unexpected error."""
     mock_registry = MagicMock()
+    mock_registry.system_name = _TEST_SYSTEM_NAME
     mock_config_manager = MagicMock()
 
-    full_config = {"enterprise": {"systems": {}}}
-    mock_config_manager.get_config = AsyncMock(return_value=full_config)
-    # No enterprise systems
+    # session_registry.get() raises unexpected RuntimeError (not RegistryItemNotFoundError)
+    mock_registry.get = AsyncMock(
+        side_effect=RuntimeError("connection to registry failed")
+    )
 
     context = MockContext(
         {"config_manager": mock_config_manager, "session_registry": mock_registry}
     )
 
-    result = await session_enterprise_delete(context, "nonexistent-system", "worker")
+    result = await session_enterprise_delete(context, "enterprise:system:worker")
 
     assert result["success"] is False
-    assert "Enterprise system 'nonexistent-system' not found" in result["error"]
+    assert "connection to registry failed" in result["error"]
     assert result["isError"] is True
 
 
@@ -1447,10 +1416,11 @@ async def test_session_enterprise_delete_system_not_found():
 async def test_session_enterprise_delete_session_not_found():
     """Test session_enterprise_delete when session not found."""
     mock_registry = MagicMock()
+    mock_registry.system_name = _TEST_SYSTEM_NAME
     mock_config_manager = MagicMock()
 
     enterprise_config = {
-        "test-system": {
+        "system": {
             "connection_json_url": "https://test.example.com/iris/connection.json",
             "auth_type": "password",
             "username": "user",
@@ -1471,14 +1441,11 @@ async def test_session_enterprise_delete_session_not_found():
     )
 
     result = await session_enterprise_delete(
-        context, "test-system", "nonexistent-worker"
+        context, "enterprise:system:nonexistent-worker"
     )
 
     assert result["success"] is False
-    assert (
-        "Session 'enterprise:test-system:nonexistent-worker' not found"
-        in result["error"]
-    )
+    assert "Session 'enterprise:system:nonexistent-worker' not found" in result["error"]
     assert result["isError"] is True
 
 
@@ -1486,10 +1453,11 @@ async def test_session_enterprise_delete_session_not_found():
 async def test_session_enterprise_delete_not_enterprise_session():
     """Test session_enterprise_delete when session is not an EnterpriseSessionManager."""
     mock_registry = MagicMock()
+    mock_registry.system_name = _TEST_SYSTEM_NAME
     mock_config_manager = MagicMock()
 
     enterprise_config = {
-        "test-system": {
+        "system": {
             "connection_json_url": "https://test.example.com/iris/connection.json",
             "auth_type": "password",
             "username": "user",
@@ -1511,7 +1479,7 @@ async def test_session_enterprise_delete_not_enterprise_session():
     )
 
     result = await session_enterprise_delete(
-        context, "test-system", "wrong-type-worker"
+        context, "enterprise:system:wrong-type-worker"
     )
 
     assert result["success"] is False
@@ -1523,10 +1491,11 @@ async def test_session_enterprise_delete_not_enterprise_session():
 async def test_session_enterprise_delete_close_failure_continues():
     """Test session_enterprise_delete continues removal even if close fails."""
     mock_registry = MagicMock()
+    mock_registry.system_name = _TEST_SYSTEM_NAME
     mock_config_manager = MagicMock()
 
     enterprise_config = {
-        "test-system": {
+        "system": {
             "connection_json_url": "https://test.example.com/iris/connection.json",
             "auth_type": "password",
             "username": "user",
@@ -1550,18 +1519,71 @@ async def test_session_enterprise_delete_close_failure_continues():
     )
 
     result = await session_enterprise_delete(
-        context, "test-system", "failing-close-worker"
+        context, "enterprise:system:failing-close-worker"
     )
 
     # Should succeed despite close failure
     assert result["success"] is True
-    assert result["session_id"] == "enterprise:test-system:failing-close-worker"
+    assert result["session_id"] == "enterprise:system:failing-close-worker"
 
     # Verify session was still removed from registry
     # Verify remove_session was called even after close failure
     mock_registry.remove_session.assert_called_once_with(
-        "enterprise:test-system:failing-close-worker"
+        "enterprise:system:failing-close-worker"
     )
+
+
+@pytest.mark.asyncio
+async def test_session_enterprise_delete_invalid_session_id_format():
+    """session_enterprise_delete returns error for malformed session_id."""
+    mock_registry = MagicMock()
+    mock_registry.system_name = _TEST_SYSTEM_NAME
+
+    context = MockContext(
+        {"config_manager": MagicMock(), "session_registry": mock_registry}
+    )
+
+    result = await session_enterprise_delete(context, session_id="not-a-valid-id")
+
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "Invalid session_id format" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_session_enterprise_delete_wrong_system_type():
+    """session_enterprise_delete returns error when session_id is not enterprise type."""
+    mock_registry = MagicMock()
+    mock_registry.system_name = _TEST_SYSTEM_NAME
+
+    context = MockContext(
+        {"config_manager": MagicMock(), "session_registry": mock_registry}
+    )
+
+    result = await session_enterprise_delete(context, session_id="community:system:s1")
+
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "is not an enterprise session" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_session_enterprise_delete_wrong_server():
+    """session_enterprise_delete returns clear error when session_id belongs to different server."""
+    mock_registry = MagicMock()
+    mock_registry.system_name = "prod"  # This server manages "prod"
+
+    context = MockContext(
+        {"config_manager": MagicMock(), "session_registry": mock_registry}
+    )
+
+    # session_id says "dev", but this server manages "prod"
+    result = await session_enterprise_delete(context, session_id="enterprise:dev:s1")
+
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "belongs to system 'dev'" in result["error"]
+    assert "this server manages 'prod'" in result["error"]
 
 
 def test_resolve_session_parameters():
@@ -1691,16 +1713,13 @@ async def test_session_enterprise_create_success():
     """Test successful enterprise session creation."""
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock()
-    mock_enterprise_factory_registry = MagicMock()
-    mock_factory_manager = MagicMock()
+    mock_session_registry.system_name = _TEST_SYSTEM_NAME
+    mock_factory_manager = AsyncMock()
     mock_factory = MagicMock()
     mock_session = MagicMock()
 
-    # Configure the chain of mocks
-    mock_session_registry.enterprise_registry = AsyncMock(
-        return_value=mock_enterprise_factory_registry
-    )
-    mock_enterprise_factory_registry.get = AsyncMock(return_value=mock_factory_manager)
+    # Configure factory_manager directly on session_registry (plain property)
+    mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.connect_to_new_worker = AsyncMock(return_value=mock_session)
     mock_session_registry.add_session = AsyncMock()
@@ -1710,23 +1729,16 @@ async def test_session_enterprise_create_success():
         side_effect=RegistryItemNotFoundError("Session not found")
     )
 
-    # Mock config
-    enterprise_config = {
-        "test-system": {
-            "session_creation": {
-                "max_concurrent_sessions": 5,
-                "defaults": {"heap_size_gb": 4.0, "programming_language": "Python"},
-            },
-            "username": "testuser",
-        }
+    # Flat config format returned directly by get_config()
+    flat_config = {
+        "session_creation": {
+            "max_concurrent_sessions": 5,
+            "defaults": {"heap_size_gb": 4.0, "programming_language": "Python"},
+        },
+        "username": "testuser",
     }
 
-    def mock_get_config_section(manager, section):
-        if section == "enterprise_sessions":
-            return enterprise_config
-        return {}
-
-    mock_config_manager.get_config = MagicMock()
+    mock_config_manager.get_config = AsyncMock(return_value=flat_config)
 
     context = MockContext(
         {
@@ -1735,14 +1747,8 @@ async def test_session_enterprise_create_success():
         }
     )
 
-    # Clear any existing tracking
-    _created_sessions = {}
-
-    full_config = {"enterprise": {"systems": enterprise_config}}
-    mock_config_manager.get_config = AsyncMock(return_value=full_config)
     result = await session_enterprise_create(
         context,
-        system_name="test-system",
         session_name="test-session",
         heap_size_gb=8.0,
         programming_language="Groovy",
@@ -1750,15 +1756,15 @@ async def test_session_enterprise_create_success():
 
     # Verify success
     assert result["success"] is True
-    assert result["session_id"] == "enterprise:test-system:test-session"
-    assert result["system_name"] == "test-system"
+    assert result["session_id"] == "enterprise:system:test-session"
+    assert result["system_name"] == "system"
     assert result["session_name"] == "test-session"
 
     # Verify session was added to registry
     mock_session_registry.add_session.assert_called_once()
     call_args = mock_session_registry.add_session.call_args
     session_manager = call_args[0][0]  # Manager is the only argument
-    assert session_manager.full_name == "enterprise:test-system:test-session"
+    assert session_manager.full_name == "enterprise:system:test-session"
 
     # Session tracking is now verified through registry methods
     # Verify session was added (tracked automatically by add_session)
@@ -1769,16 +1775,13 @@ async def test_session_enterprise_create_auto_generated_name():
     """Test enterprise session creation with auto-generated session name."""
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock()
-    mock_enterprise_factory_registry = MagicMock()
-    mock_factory_manager = MagicMock()
+    mock_session_registry.system_name = _TEST_SYSTEM_NAME
+    mock_factory_manager = AsyncMock()
     mock_factory = MagicMock()
     mock_session = MagicMock()
 
-    # Configure the chain of mocks
-    mock_session_registry.enterprise_registry = AsyncMock(
-        return_value=mock_enterprise_factory_registry
-    )
-    mock_enterprise_factory_registry.get = AsyncMock(return_value=mock_factory_manager)
+    # Configure factory_manager directly on session_registry (plain property)
+    mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.connect_to_new_worker = AsyncMock(return_value=mock_session)
     mock_session_registry.add_session = AsyncMock()
@@ -1788,20 +1791,13 @@ async def test_session_enterprise_create_auto_generated_name():
         side_effect=RegistryItemNotFoundError("Session not found")
     )
 
-    # Mock config with username
-    enterprise_config = {
-        "test-system": {
-            "session_creation": {"max_concurrent_sessions": 5, "defaults": {}},
-            "username": "alice",
-        }
+    # Flat config format with username for auto-name generation
+    flat_config = {
+        "session_creation": {"max_concurrent_sessions": 5, "defaults": {}},
+        "username": "alice",
     }
 
-    def mock_get_config_section(manager, section):
-        if section == "enterprise_sessions":
-            return enterprise_config
-        return {}
-
-    mock_config_manager.get_config = MagicMock()
+    mock_config_manager.get_config = AsyncMock(return_value=flat_config)
 
     context = MockContext(
         {
@@ -1810,25 +1806,16 @@ async def test_session_enterprise_create_auto_generated_name():
         }
     )
 
-    # Clear any existing tracking
-    _created_sessions = {}
-
-    full_config = {"enterprise": {"systems": enterprise_config}}
-    mock_config_manager.get_config = AsyncMock(return_value=full_config)
     result = await session_enterprise_create(
         context,
-        system_name="test-system",
         session_name=None,  # This should trigger auto-generation
     )
 
     # Verify success
     assert result["success"] is True
-    assert result["session_id"].startswith("enterprise:test-system:mcp-alice-")
-    assert result["system_name"] == "test-system"
+    assert result["session_id"].startswith("enterprise:system:mcp-alice-")
+    assert result["system_name"] == "system"
     assert result["session_name"].startswith("mcp-alice-")
-
-    # Clean up
-    _created_sessions = {}
 
 
 @pytest.mark.asyncio
@@ -1836,20 +1823,12 @@ async def test_session_enterprise_create_max_sessions_reached():
     """Test enterprise session creation when max concurrent sessions reached."""
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock()
+    mock_session_registry.system_name = _TEST_SYSTEM_NAME
 
-    # Mock config with low max limit
-    enterprise_config = {
-        "test-system": {
-            "session_creation": {"max_concurrent_sessions": 2, "defaults": {}}
-        }
-    }
+    # Flat config format with low max limit
+    flat_config = {"session_creation": {"max_concurrent_sessions": 2, "defaults": {}}}
 
-    def mock_get_config_section(manager, section):
-        if section == "enterprise_sessions":
-            return enterprise_config
-        return {}
-
-    mock_config_manager.get_config = MagicMock()
+    mock_config_manager.get_config = AsyncMock(return_value=flat_config)
 
     context = MockContext(
         {
@@ -1864,27 +1843,20 @@ async def test_session_enterprise_create_max_sessions_reached():
     # Mock the session registry to return sessions for count validation
     async def mock_get(session_id):
         if session_id in [
-            "enterprise:test-system:session1",
-            "enterprise:test-system:session2",
+            "enterprise:system:session1",
+            "enterprise:system:session2",
         ]:
             return MagicMock()
         raise RegistryItemNotFoundError(f"Session {session_id} not found")
 
     mock_session_registry.get = AsyncMock(side_effect=mock_get)
 
-    full_config = {"enterprise": {"systems": enterprise_config}}
-    mock_config_manager.get_config = AsyncMock(return_value=full_config)
-    result = await session_enterprise_create(
-        context, system_name="test-system", session_name="test-session"
-    )
+    result = await session_enterprise_create(context, session_name="test-session")
 
     # Verify failure due to max sessions reached
     assert result["success"] is False
     assert result["isError"] is True
     assert "Max concurrent sessions (2) reached" in result["error"]
-
-    # Clean up
-    _created_sessions = {}
 
 
 @pytest.mark.asyncio
@@ -1892,14 +1864,13 @@ async def test_session_enterprise_create_disabled():
     """Test enterprise session creation when session creation is disabled."""
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock()
+    mock_session_registry.system_name = _TEST_SYSTEM_NAME
 
-    # Mock config with session creation disabled
-    enterprise_config = {
-        "test-system": {
-            "session_creation": {
-                "max_concurrent_sessions": 0,  # Disabled
-                "defaults": {},
-            }
+    # Flat config format with session creation disabled
+    flat_config = {
+        "session_creation": {
+            "max_concurrent_sessions": 0,  # Disabled
+            "defaults": {},
         }
     }
 
@@ -1910,13 +1881,10 @@ async def test_session_enterprise_create_disabled():
         }
     )
 
-    # Provide nested enterprise systems config via async get_config()
-    full_config = {"enterprise": {"systems": enterprise_config}}
-    mock_config_manager.get_config = AsyncMock(return_value=full_config)
+    # get_config() returns flat config directly
+    mock_config_manager.get_config = AsyncMock(return_value=flat_config)
 
-    result = await session_enterprise_create(
-        context, system_name="test-system", session_name="test-session"
-    )
+    result = await session_enterprise_create(context, session_name="test-session")
 
     # Verify failure due to disabled session creation
     assert result["success"] is False
@@ -1926,9 +1894,30 @@ async def test_session_enterprise_create_disabled():
 
 @pytest.mark.asyncio
 async def test_session_enterprise_create_system_not_found_v2():
-    """Test enterprise session creation with non-existent system."""
+    """Test enterprise session creation when factory connection fails."""
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock()
+    mock_session_registry.system_name = _TEST_SYSTEM_NAME
+
+    # Flat config with sessions enabled
+    flat_config = {
+        "session_creation": {
+            "max_concurrent_sessions": 5,
+            "defaults": {"heap_size_gb": 4},
+        }
+    }
+    mock_config_manager.get_config = AsyncMock(return_value=flat_config)
+
+    # factory_manager.get() raises a connection error
+    mock_factory_manager = AsyncMock()
+    mock_factory_manager.get = AsyncMock(
+        side_effect=RuntimeError("factory connection failed")
+    )
+    mock_session_registry.factory_manager = mock_factory_manager
+    mock_session_registry.get = AsyncMock(
+        side_effect=RegistryItemNotFoundError("Session not found")
+    )
+    mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
 
     context = MockContext(
         {
@@ -1937,18 +1926,12 @@ async def test_session_enterprise_create_system_not_found_v2():
         }
     )
 
-    # Provide empty systems via async get_config()
-    full_config = {"enterprise": {"systems": {}}}
-    mock_config_manager.get_config = AsyncMock(return_value=full_config)
+    result = await session_enterprise_create(context, session_name="test-session")
 
-    result = await session_enterprise_create(
-        context, system_name="nonexistent-system", session_name="test-session"
-    )
-
-    # Verify failure due to system not found
+    # Verify failure due to factory connection failure
     assert result["success"] is False
     assert result["isError"] is True
-    assert "Enterprise system 'nonexistent-system' not found" in result["error"]
+    assert "factory connection failed" in result["error"]
 
 
 @pytest.mark.asyncio
@@ -1956,12 +1939,11 @@ async def test_session_enterprise_delete_success_v2():
     """Test successful enterprise session deletion."""
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock()
+    mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_session_manager = MagicMock(spec=EnterpriseSessionManager)
 
     # Mock config
-    enterprise_config = {
-        "test-system": {"session_creation": {"max_concurrent_sessions": 5}}
-    }
+    enterprise_config = {"system": {"session_creation": {"max_concurrent_sessions": 5}}}
 
     def mock_get_config_section(manager, section):
         if section == "enterprise_sessions":
@@ -1985,18 +1967,18 @@ async def test_session_enterprise_delete_success_v2():
     full_config = {"enterprise": {"systems": enterprise_config}}
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
     result = await session_enterprise_delete(
-        context, system_name="test-system", session_name="test-session"
+        context, session_id="enterprise:system:test-session"
     )
 
     # Verify success
     assert result["success"] is True
-    assert result["session_id"] == "enterprise:test-system:test-session"
-    assert result["system_name"] == "test-system"
+    assert result["session_id"] == "enterprise:system:test-session"
+    assert result["system_name"] == "system"
     assert result["session_name"] == "test-session"
 
     # Verify session was removed from registry
     mock_session_registry.remove_session.assert_called_once_with(
-        "enterprise:test-system:test-session"
+        "enterprise:system:test-session"
     )
 
     # Session tracking cleanup is now handled automatically by remove_session()
@@ -2007,11 +1989,10 @@ async def test_session_enterprise_delete_not_found():
     """Test enterprise session deletion when session doesn't exist."""
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock()
+    mock_session_registry.system_name = _TEST_SYSTEM_NAME
 
     # Mock config
-    enterprise_config = {
-        "test-system": {"session_creation": {"max_concurrent_sessions": 5}}
-    }
+    enterprise_config = {"system": {"session_creation": {"max_concurrent_sessions": 5}}}
     full_config = {"enterprise": {"systems": enterprise_config}}
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
 
@@ -2028,27 +2009,28 @@ async def test_session_enterprise_delete_not_found():
     )
 
     result = await session_enterprise_delete(
-        context, system_name="test-system", session_name="nonexistent-session"
+        context, session_id="enterprise:system:nonexistent-session"
     )
 
     # Verify failure due to session not found
     assert result["success"] is False
     assert result["isError"] is True
     assert (
-        "Session 'enterprise:test-system:nonexistent-session' not found"
-        in result["error"]
+        "Session 'enterprise:system:nonexistent-session' not found" in result["error"]
     )
 
 
 @pytest.mark.asyncio
 async def test_session_enterprise_delete_system_not_found_v2():
-    """Test enterprise session deletion with non-existent system."""
+    """Test enterprise session deletion when session registry raises unexpected error."""
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock()
+    mock_session_registry.system_name = _TEST_SYSTEM_NAME
 
-    # No systems configured
-    full_config = {"enterprise": {"systems": {}}}
-    mock_config_manager.get_config = AsyncMock(return_value=full_config)
+    # session_registry.get() raises unexpected RuntimeError (not RegistryItemNotFoundError)
+    mock_session_registry.get = AsyncMock(
+        side_effect=RuntimeError("registry backend unavailable")
+    )
 
     context = MockContext(
         {
@@ -2058,55 +2040,57 @@ async def test_session_enterprise_delete_system_not_found_v2():
     )
 
     result = await session_enterprise_delete(
-        context, system_name="nonexistent-system", session_name="test-session"
+        context, session_id="enterprise:system:test-session"
     )
 
-    # Verify failure due to system not found
+    # Verify failure due to registry error
     assert result["success"] is False
     assert result["isError"] is True
-    assert "Enterprise system 'nonexistent-system' not found" in result["error"]
+    assert "registry backend unavailable" in result["error"]
 
 
 @pytest.mark.asyncio
-async def test_check_session_limits_disabled():
-    """Test _check_session_limits when sessions are disabled (max_sessions = 0)."""
+async def test_check_session_limit_disabled():
+    """Test _check_session_limit when sessions are disabled (max_sessions = 0)."""
     mock_session_registry = MagicMock()
+    mock_session_registry.system_name = _TEST_SYSTEM_NAME
 
-    result = await _check_session_limits(mock_session_registry, "test-system", 0)
+    result = await _check_session_limit(mock_session_registry, 0)
 
     assert result is not None
+    assert result["success"] is False
     assert (
         result["error"]
-        == "Session creation is disabled for system 'test-system' (max_concurrent_sessions = 0)"
+        == "Session creation is disabled for system 'system' (max_concurrent_sessions = 0)"
     )
     assert result["isError"] is True
 
 
 @pytest.mark.asyncio
-async def test_check_session_limits_under_limit():
-    """Test _check_session_limits when under the session limit."""
+async def test_check_session_limit_under_limit():
+    """Test _check_session_limit when under the session limit."""
     mock_session_registry = MagicMock()
+    mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_session_registry.count_added_sessions = AsyncMock(return_value=2)
 
-    result = await _check_session_limits(mock_session_registry, "test-system", 5)
+    result = await _check_session_limit(mock_session_registry, 5)
 
     assert result is None  # No error when under limit
     mock_session_registry.count_added_sessions.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_check_session_limits_at_limit():
-    """Test _check_session_limits when at the session limit."""
+async def test_check_session_limit_at_limit():
+    """Test _check_session_limit when at the session limit."""
     mock_session_registry = MagicMock()
+    mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_session_registry.count_added_sessions = AsyncMock(return_value=5)
 
-    result = await _check_session_limits(mock_session_registry, "test-system", 5)
+    result = await _check_session_limit(mock_session_registry, 5)
 
     assert result is not None
-    assert (
-        result["error"]
-        == "Max concurrent sessions (5) reached for system 'test-system'"
-    )
+    assert result["success"] is False
+    assert result["error"] == "Max concurrent sessions (5) reached for system 'system'"
     assert result["isError"] is True
     mock_session_registry.count_added_sessions.assert_awaited_once()
 
@@ -2265,3 +2249,19 @@ def test_resolve_session_parameters_zero_values():
 
     assert result["auto_delete_timeout"] == 0  # Should use explicit 0, not default
     assert result["timeout_seconds"] == 0.0  # Should use explicit 0.0, not default
+
+
+def test_register_tools_registers_enterprise_tools():
+    """register_tools() registers all DHE-specific session tools."""
+    from mcp.server.fastmcp import FastMCP
+
+    from deephaven_mcp.mcp_systems_server._tools.session_enterprise import (
+        register_tools,
+    )
+
+    server = FastMCP("test-enterprise-server")
+    register_tools(server)
+    tools = server._tool_manager._tools
+    assert "enterprise_systems_status" in tools
+    assert "session_enterprise_create" in tools
+    assert "session_enterprise_delete" in tools

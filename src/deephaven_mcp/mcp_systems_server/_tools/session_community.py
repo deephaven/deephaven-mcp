@@ -1,5 +1,4 @@
-"""
-Community Session MCP Tools - Create and Manage Community Sessions.
+"""Community Session MCP Tools - Create and Manage Community Sessions.
 
 Provides MCP tools for managing Deephaven Community sessions:
 - session_community_create: Create new Community sessions (Docker or Python)
@@ -13,24 +12,22 @@ import logging
 import os
 from typing import Any, Literal, cast
 
-from mcp.server.fastmcp import Context
+from mcp.server.fastmcp import Context, FastMCP
 
 from deephaven_mcp._exceptions import (
     CommunitySessionConfigurationError,
+    InvalidSessionNameError,
     RegistryItemNotFoundError,
 )
 from deephaven_mcp.config import ConfigManager
-from deephaven_mcp.mcp_systems_server._tools.mcp_server import (
-    mcp_server,
-)
 from deephaven_mcp.mcp_systems_server._tools.session import (
     DEFAULT_MAX_CONCURRENT_SESSIONS,
     DEFAULT_PROGRAMMING_LANGUAGE,
 )
 from deephaven_mcp.resource_manager import (
     BaseItemManager,
-    CombinedSessionRegistry,
     CommunitySessionManager,
+    CommunitySessionRegistry,
     DockerLaunchedSession,
     DynamicCommunitySessionManager,
     LaunchedSession,
@@ -93,8 +90,7 @@ async def _get_session_creation_config(
         On error, error_dict is set and other values are empty.
     """
     config_data = await config_manager.get_config()
-    community_config = config_data.get("community", {})
-    session_creation_config = community_config.get("session_creation")
+    session_creation_config = config_data.get("session_creation")
 
     if not session_creation_config:
         error_msg = "Community session creation not configured in deephaven_mcp.json"
@@ -110,7 +106,7 @@ async def _get_session_creation_config(
 
 
 async def _check_session_limit(
-    session_registry: CombinedSessionRegistry,
+    session_registry: CommunitySessionRegistry,
     max_concurrent_sessions: int,
 ) -> dict | None:
     """Check if session limit has been reached.
@@ -122,7 +118,7 @@ async def _check_session_limit(
         return None
 
     current_count = await session_registry.count_added_sessions(
-        SystemType.COMMUNITY, ""
+        SystemType.COMMUNITY, "dynamic"
     )
     if current_count >= max_concurrent_sessions:
         error_msg = f"Session limit reached: {current_count}/{max_concurrent_sessions} sessions active"
@@ -520,13 +516,13 @@ async def _register_session_manager(
     resolved_auth_type: str,
     resolved_auth_token: str | None,
     launched_session: DockerLaunchedSession | PythonLaunchedSession,
-    session_registry: CombinedSessionRegistry,
+    session_registry: CommunitySessionRegistry,
     instance_tracker: InstanceTracker,
 ) -> None:
     """Create session manager object and register it in the session registry.
 
     This helper function creates a DynamicCommunitySessionManager with the appropriate
-    configuration and registers it in the combined session registry. It also tracks
+    configuration and registers it in the session registry. It also tracks
     Python-launched processes for orphan cleanup.
 
     Args:
@@ -537,7 +533,7 @@ async def _register_session_manager(
         resolved_auth_type (str): Normalized authentication type (full class name)
         resolved_auth_token (str | None): Authentication token if applicable
         launched_session (DockerLaunchedSession | PythonLaunchedSession): The launched session object
-        session_registry (CombinedSessionRegistry): Registry to add the session to
+        session_registry (CommunitySessionRegistry): Registry to add the session to
         instance_tracker (InstanceTracker): Tracker for orphan process cleanup
     """
     # Create session configuration
@@ -613,7 +609,7 @@ async def _launch_process_and_wait_for_ready(
         instance_tracker (InstanceTracker): Tracker for orphan cleanup.
 
     Returns:
-        tuple[LaunchedSession | None, int | None, dict | None]: Tuple of
+        tuple[DockerLaunchedSession | PythonLaunchedSession | None, int | None, dict | None]: Tuple of
             (launched_session, port, error_dict). On success, error_dict is None.
             On failure, launched_session and port may be None.
     """
@@ -726,7 +722,6 @@ def _log_auto_generated_credentials(
     _LOGGER.warning("=" * 70)
 
 
-@mcp_server.tool()
 async def session_community_create(
     context: Context,
     session_name: str,
@@ -743,8 +738,7 @@ async def session_community_create(
     docker_volumes: list[str] | None = None,
     python_venv_path: str | None = None,
 ) -> dict:
-    """
-    MCP Tool: Create a new dynamically launched Deephaven Community session.
+    """MCP Tool: Create a new dynamically launched Deephaven Community session.
 
     Creates a new Deephaven Community session by launching it via Docker or Python-launched
     Deephaven. The session is registered in the MCP server and will be automatically
@@ -826,7 +820,7 @@ async def session_community_create(
             - 'session_name' (str): Simple name provided by user
             - 'connection_url' (str): Base HTTP URL without authentication
             - 'auth_type' (str): Normalized authentication type as full class name
-                (e.g., "io.deephaven.authentication.psk.PskAuthenticationHandler", "Anonymous", "Basic")
+                (e.g., "io.deephaven.authentication.psk.PskAuthenticationHandler", "Anonymous")
             - 'launch_method' (str): "docker" or "python" (normalized to lowercase)
             - 'port' (int): Port number where session is listening
             - 'container_id' (str, optional): Docker container ID (only for docker launch)
@@ -911,7 +905,7 @@ async def session_community_create(
         config_manager: ConfigManager = context.request_context.lifespan_context[
             "config_manager"
         ]
-        session_registry: CombinedSessionRegistry = (
+        session_registry: CommunitySessionRegistry = (
             context.request_context.lifespan_context["session_registry"]
         )
 
@@ -1061,17 +1055,83 @@ async def session_community_create(
     return result
 
 
-@mcp_server.tool()
+async def _delete_session_resources(
+    session_id: str,
+    session_name: str,
+    session_manager: Any,
+    session_registry: CommunitySessionRegistry,
+    instance_tracker: InstanceTracker,
+) -> None:
+    """Untrack, close, and remove a community session from the registry.
+
+    Performs the three cleanup steps required to fully delete a session:
+
+    1. **Untrack** the Python process from the instance tracker, if the session
+       is a :class:`DynamicCommunitySessionManager` backed by a
+       :class:`PythonLaunchedSession`.
+    2. **Close** the session (stops the Docker container or Python process).
+       Close failure is non-fatal: it is logged as a warning and cleanup
+       continues so that the registry entry is always removed.
+    3. **Remove** the session from the registry.  If ``remove_session`` raises,
+       the exception propagates to the caller.
+
+    Args:
+        session_id (str): Full session identifier, e.g. ``"community:dynamic:my-session"``.
+        session_name (str): Simple session name (the last component of ``session_id``),
+            used for Python process untracking.
+        session_manager (Any): The session manager retrieved from the registry.
+        session_registry (CommunitySessionRegistry): Registry to remove the session from.
+        instance_tracker (InstanceTracker): Tracker used to unregister Python processes.
+
+    Raises:
+        Exception: Propagates any exception raised by ``session_registry.remove_session``.
+            Close failure is swallowed and logged; removal failure is fatal.
+    """
+    if isinstance(session_manager, DynamicCommunitySessionManager):
+        if isinstance(session_manager.launched_session, PythonLaunchedSession):
+            await instance_tracker.untrack_python_process(session_name)
+
+    try:
+        _LOGGER.debug(
+            f"[mcp_systems_server:session_community_delete] Closing session '{session_id}'"
+        )
+        await session_manager.close()
+        _LOGGER.debug(
+            f"[mcp_systems_server:session_community_delete] Successfully closed session '{session_id}'"
+        )
+    except Exception as e:
+        _LOGGER.warning(
+            f"[mcp_systems_server:session_community_delete] Failed to close session '{session_id}': {e}"
+        )
+        # Continue with removal even if close failed
+
+    removed_manager = await session_registry.remove_session(session_id)
+    if removed_manager is None:
+        _LOGGER.warning(
+            f"[mcp_systems_server:session_community_delete] Session '{session_id}' was not found in registry during removal"
+        )
+    else:
+        _LOGGER.debug(
+            f"[mcp_systems_server:session_community_delete] Removed session '{session_id}' from registry"
+        )
+
+
 async def session_community_delete(
     context: Context,
-    session_name: str,
+    session_id: str,
 ) -> dict:
-    """
-    MCP Tool: Delete a dynamically created Deephaven Community session.
+    """MCP Tool: Delete a dynamically created Deephaven Community session.
 
     Deletes a community session that was created via session_community_create.
-    This stops the underlying Docker container or pip process and removes the
+    This stops the underlying Docker container or Python process and removes the
     session from the registry.
+
+    Session ID Format:
+        Dynamic community session IDs have the format ``"community:dynamic:{session_name}"``.
+        Use the ``session_id`` returned by ``session_community_create`` or ``sessions_list``
+        verbatim — do not construct or modify it manually.
+        Only dynamically created sessions (source ``"dynamic"``) can be deleted; passing
+        a static session ID (source ``"config"``) returns a clear error.
 
     Terminology Note:
     - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
@@ -1085,16 +1145,17 @@ async def session_community_delete(
 
     AI Agent Usage:
     - Use this tool to clean up sessions when no longer needed to free resources
+    - Pass the ``session_id`` exactly as returned by ``session_community_create`` or ``sessions_list``
     - Always check 'success' field first to verify deletion completed
     - This operation is irreversible - deleted sessions cannot be recovered
     - Only dynamically created sessions (source='dynamic') can be deleted
     - Static sessions from configuration cannot be deleted (will return error)
     - After successful deletion, session_id will no longer be valid for other MCP tools
-    - Deletion stops the Docker container or kills the pip process
+    - Deletion stops the Docker container or terminates the Python process
 
     Args:
         context (Context): The MCP context object.
-        session_name (str): Name of the session to delete (without "community:dynamic:" prefix).
+        session_id (str): Full session identifier in format ``"community:dynamic:{session_name}"``.
             Must be a dynamically created session from session_community_create.
             Static sessions from configuration files cannot be deleted.
 
@@ -1143,21 +1204,48 @@ async def session_community_delete(
         - Use with caution - ensure you have saved any important data
     """
     _LOGGER.info(
-        f"[mcp_systems_server:session_community_delete] Invoked: session_name={session_name!r}"
+        f"[mcp_systems_server:session_community_delete] Invoked: session_id={session_id!r}"
     )
 
     result: dict[str, object] = {"success": False}
+    session_name = (
+        session_id  # fallback for outer except; overwritten after parse_full_name
+    )
 
     try:
         # Get session registry
-        session_registry: CombinedSessionRegistry = (
+        session_registry: CommunitySessionRegistry = (
             context.request_context.lifespan_context["session_registry"]
         )
 
-        # Create expected session ID for dynamic sessions
-        session_id = BaseItemManager.make_full_name(
-            SystemType.COMMUNITY, "dynamic", session_name
-        )
+        # Parse and validate the session_id
+        try:
+            system_type_str, source, session_name = BaseItemManager.parse_full_name(
+                session_id
+            )
+        except InvalidSessionNameError as e:
+            error_msg = f"Invalid session_id format: {e}"
+            _LOGGER.error(f"[mcp_systems_server:session_community_delete] {error_msg}")
+            result["error"] = error_msg
+            result["isError"] = True
+            return result
+
+        if system_type_str != SystemType.COMMUNITY.value:
+            error_msg = f"Session '{session_id}' is not a community session (type: '{system_type_str}')"
+            _LOGGER.error(f"[mcp_systems_server:session_community_delete] {error_msg}")
+            result["error"] = error_msg
+            result["isError"] = True
+            return result
+
+        if source != "dynamic":
+            error_msg = (
+                f"Session '{session_id}' is not a dynamically created session "
+                f"(source: '{source}'). Only dynamically created sessions can be deleted."
+            )
+            _LOGGER.error(f"[mcp_systems_server:session_community_delete] {error_msg}")
+            result["error"] = error_msg
+            result["isError"] = True
+            return result
 
         _LOGGER.debug(
             f"[mcp_systems_server:session_community_delete] Looking for session '{session_id}'"
@@ -1173,72 +1261,20 @@ async def session_community_delete(
             result["isError"] = True
             return result
 
-        # Verify it's a dynamic community session
-        if session_manager.system_type != SystemType.COMMUNITY:
-            error_msg = f"Session '{session_id}' is not a community session"
-            _LOGGER.error(f"[mcp_systems_server:session_community_delete] {error_msg}")
-            result["error"] = error_msg
-            result["isError"] = True
-            return result
-
-        if session_manager.source != "dynamic":
-            error_msg = (
-                f"Session '{session_id}' is not a dynamically created session "
-                f"(source: '{session_manager.source}'). Only dynamically created sessions can be deleted."
-            )
-            _LOGGER.error(f"[mcp_systems_server:session_community_delete] {error_msg}")
-            result["error"] = error_msg
-            result["isError"] = True
-            return result
-
         _LOGGER.debug(
             f"[mcp_systems_server:session_community_delete] Found dynamic community session manager for '{session_id}'"
         )
 
-        # Untrack python process if applicable (before closing)
         instance_tracker: InstanceTracker = context.request_context.lifespan_context[
             "instance_tracker"
         ]
-        if isinstance(session_manager, DynamicCommunitySessionManager):
-            if isinstance(session_manager.launched_session, PythonLaunchedSession):
-                await instance_tracker.untrack_python_process(session_name)
-
-        # Close the session (this will also stop the Docker container/python process)
-        try:
-            _LOGGER.debug(
-                f"[mcp_systems_server:session_community_delete] Closing session '{session_id}'"
-            )
-            await session_manager.close()
-            _LOGGER.debug(
-                f"[mcp_systems_server:session_community_delete] Successfully closed session '{session_id}'"
-            )
-        except Exception as e:
-            _LOGGER.warning(
-                f"[mcp_systems_server:session_community_delete] Failed to close session '{session_id}': {e}"
-            )
-            # Continue with removal even if close failed
-
-        # Remove from session registry
-        try:
-            removed_manager = await session_registry.remove_session(session_id)
-            if removed_manager is None:
-                error_msg = (
-                    f"Session '{session_id}' was not found in registry during removal"
-                )
-                _LOGGER.warning(
-                    f"[mcp_systems_server:session_community_delete] {error_msg}"
-                )
-            else:
-                _LOGGER.debug(
-                    f"[mcp_systems_server:session_community_delete] Removed session '{session_id}' from registry"
-                )
-
-        except Exception as e:
-            error_msg = f"Failed to remove session '{session_id}' from registry: {e}"
-            _LOGGER.error(f"[mcp_systems_server:session_community_delete] {error_msg}")
-            result["error"] = error_msg
-            result["isError"] = True
-            return result
+        await _delete_session_resources(
+            session_id,
+            session_name,
+            session_manager,
+            session_registry,
+            instance_tracker,
+        )
 
         _LOGGER.info(
             f"[mcp_systems_server:session_community_delete] Successfully deleted session "
@@ -1266,13 +1302,11 @@ async def session_community_delete(
     return result
 
 
-@mcp_server.tool()
 async def session_community_credentials(
     context: Context,
     session_id: str,
 ) -> dict:
-    """
-    SECURITY SENSITIVE: Retrieve connection credentials for browser access.
+    """SECURITY SENSITIVE: Retrieve connection credentials for browser access.
 
     Returns authentication credentials for connecting to a Deephaven Community session
     via web browser. This tool exposes sensitive credentials and should only be called
@@ -1338,7 +1372,10 @@ async def session_community_credentials(
 
         On Success (success=True):
             - success (bool): Always True
-            - auth_type (str): Authentication type - "PSK" (pre-shared key) or "ANONYMOUS"
+            - auth_type (str): Authentication type string (uppercased). For dynamic sessions,
+                derived from the launched session's auth type (e.g., "PSK", "ANONYMOUS").
+                For static sessions, the raw config ``auth_type`` value uppercased
+                (e.g., "IO.DEEPHAVEN.AUTHENTICATION.PSK.PSKAUTHENTICATIONHANDLER", "ANONYMOUS").
             - auth_token (str): Authentication token string. For PSK auth, contains the token value.
                 For ANONYMOUS auth, returns empty string "". Never None.
             - connection_url (str): Base server URL without authentication parameters.
@@ -1397,9 +1434,7 @@ async def session_community_credentials(
 
         # Check credential retrieval mode from security config
         config = await config_manager.get_config()
-        security_config = config.get("security", {})
-        security_community_config = security_config.get("community", {})
-        credential_retrieval_mode = security_community_config.get(
+        credential_retrieval_mode = config.get("security", {}).get(
             "credential_retrieval_mode", "none"
         )
 
@@ -1428,9 +1463,7 @@ async def session_community_credentials(
                     "Configuration example:\n"
                     "{\n"
                     '  "security": {\n'
-                    '    "community": {\n'
-                    '      "credential_retrieval_mode": "dynamic_only"\n'
-                    "    }\n"
+                    '    "credential_retrieval_mode": "dynamic_only"\n'
                     "  }\n"
                     "}\n\n"
                     "Documentation: https://github.com/deephaven/deephaven-mcp/"
@@ -1439,7 +1472,7 @@ async def session_community_credentials(
             }
 
         # Get session registry and session manager
-        session_registry: CombinedSessionRegistry = (
+        session_registry: CommunitySessionRegistry = (
             context.request_context.lifespan_context["session_registry"]
         )
 
@@ -1474,7 +1507,7 @@ async def session_community_credentials(
                 "error": (
                     f"Credential retrieval for static sessions is disabled. Current mode: 'dynamic_only'. "
                     f"Session '{session_id}' is a static (config-based) session. "
-                    f"To retrieve static session credentials, set security.community.credential_retrieval_mode to 'all' or 'static_only' in deephaven_mcp.json."
+                    f"To retrieve static session credentials, set security.credential_retrieval_mode to 'all' or 'static_only' in deephaven_mcp.json."
                 ),
                 "isError": True,
             }
@@ -1487,7 +1520,7 @@ async def session_community_credentials(
                 "error": (
                     f"Credential retrieval for dynamic sessions is disabled. Current mode: 'static_only'. "
                     f"Session '{session_id}' is a dynamic (on-demand) session. "
-                    f"To retrieve dynamic session credentials, set security.community.credential_retrieval_mode to 'all' or 'dynamic_only' in deephaven_mcp.json."
+                    f"To retrieve dynamic session credentials, set security.credential_retrieval_mode to 'all' or 'dynamic_only' in deephaven_mcp.json."
                 ),
                 "isError": True,
             }
@@ -1543,3 +1576,17 @@ async def session_community_credentials(
             exc_info=True,
         )
         return {"success": False, "error": str(e), "isError": True}
+
+
+def register_tools(server: FastMCP) -> None:
+    """Register all community session tools with the given FastMCP server.
+
+    These tools are specific to the DHC server and should NOT be registered
+    on the DHE server.
+
+    Args:
+        server (FastMCP): The server to register tools with.
+    """
+    server.tool()(session_community_create)
+    server.tool()(session_community_delete)
+    server.tool()(session_community_credentials)

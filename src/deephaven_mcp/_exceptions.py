@@ -146,6 +146,9 @@ class MissingEnterprisePackageError(InternalError):
     def __str__(self) -> str:
         """Return a prominently formatted error message.
 
+        Always returns the fixed banner format with installation instructions,
+        regardless of any custom message passed to ``__init__``.
+
         Returns:
             str: A formatted error message with clear visual separation and
                 actionable instructions for resolving the issue.
@@ -229,7 +232,7 @@ class SessionCreationError(SessionError):
     Usage:
         ```python
         try:
-            session = await session_manager.connect_to_new_worker()
+            session = await session_manager.connect_to_new_worker(heap_size_gb=4)
         except SessionCreationError as e:
             logger.error(f"Failed to create session: {e}")
             # Implement fallback or retry logic
@@ -411,9 +414,6 @@ class DeephavenConnectionError(McpError):
             # Implement connection retry or fallback logic
         ```
 
-    Note:
-        Always catch this exception before other more specific exceptions in try/except
-        chains, as connection failures typically prevent other operations from succeeding.
     """
 
     pass
@@ -541,7 +541,7 @@ class CommunitySessionConfigurationError(ConfigurationError):
 
     This exception is raised during validation of community session configuration
     data from the `deephaven_mcp.json` configuration file. It indicates that
-    session parameters are missing, invalid, or conflicting in the `community_sessions`
+    session parameters are missing, invalid, or conflicting in the ``sessions``
     section of the configuration.
 
     Community sessions are statically configured Deephaven Community (Core) instances
@@ -572,31 +572,31 @@ class CommunitySessionConfigurationError(ConfigurationError):
 class EnterpriseSystemConfigurationError(ConfigurationError):
     """Raised when enterprise system configuration is invalid.
 
-    This exception is raised during validation of enterprise system (Deephaven Core+)
-    configuration data from the `deephaven_mcp.json` configuration file. It indicates
-    that connection parameters, authentication settings, or other enterprise-specific
-    configuration is missing, invalid, or conflicting in the `enterprise.systems` section.
+    This exception is raised during validation of a Deephaven Enterprise (Core+) system
+    configuration. Each enterprise system is managed by its own ``dh-mcp-enterprise-server``
+    instance, which reads a flat config file where all fields (including ``system_name``) sit at
+    the top level. This error indicates that connection parameters, authentication settings, or
+    other enterprise-specific configuration is missing, invalid, or conflicting in that file.
 
-    Enterprise systems are Deephaven Core+ (CorePlus) deployments with controller
-    clients that the MCP server connects to. Configuration errors prevent these systems
-    from being initialized and their session factories from being registered.
+    Configuration errors prevent the enterprise system from being initialized and its session
+    factory from being registered.
 
     Common causes include:
-        - Invalid or malformed connection_json_url
+        - Missing required ``system_name`` field
+        - Invalid or malformed ``connection_json_url``
         - Missing or invalid authentication credentials (username, password, private_key)
         - Conflicting authentication methods (e.g., both password and private_key)
         - Invalid TLS/SSL configuration
-        - Missing required enterprise system parameters (auth_type, connection_json_url)
-        - Invalid worker creation parameters (max_concurrent_workers)
+        - Missing required parameters (``auth_type``, ``connection_json_url``)
         - Malformed session creation configuration objects
 
     Usage:
         ```python
         try:
-            enterprise_config = validate_enterprise_system_config(system_name, config_data)
+            validate_enterprise_config(config_data)
         except EnterpriseSystemConfigurationError as e:
-            logger.error(f"Enterprise system configuration error for {system_name}: {e}")
-            # Guide user to fix enterprise system configuration in deephaven_mcp.json
+            logger.error(f"Enterprise system configuration error: {e}")
+            # Guide user to fix the enterprise server config file
         ```
     """
 

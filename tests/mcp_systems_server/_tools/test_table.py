@@ -783,3 +783,17 @@ async def test_session_table_data_table_not_found():
         assert result["success"] is False
         assert "Table 'invalid_table' not found" in result["error"]
         assert result["isError"] is True
+
+
+def test_register_tools_registers_table_tools():
+    """register_tools() registers all table tools."""
+    from mcp.server.fastmcp import FastMCP
+
+    from deephaven_mcp.mcp_systems_server._tools.table import register_tools
+
+    server = FastMCP("test-table-server")
+    register_tools(server)
+    tools = server._tool_manager._tools
+    assert "session_tables_schema" in tools
+    assert "session_tables_list" in tools
+    assert "session_table_data" in tools

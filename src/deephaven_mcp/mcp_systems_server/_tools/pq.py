@@ -1,5 +1,4 @@
-"""
-Persistent Query (PQ) MCP Tools - Enterprise Core+ PQ Management.
+"""Persistent Query (PQ) MCP Tools - Enterprise Core+ PQ Management.
 
 Provides MCP tools for managing Deephaven Enterprise (Core+) persistent queries:
 - pq_name_to_id: Convert PQ names to IDs
@@ -20,21 +19,23 @@ import logging
 import os
 from typing import TYPE_CHECKING, cast
 
-from mcp.server.fastmcp import Context
+from mcp.server.fastmcp import Context, FastMCP
 
 from deephaven_mcp._exceptions import (
     MissingEnterprisePackageError,
 )
 from deephaven_mcp.client._controller_client import CorePlusControllerClient
 from deephaven_mcp.client._protobuf import (
+    PQ_STATES,
     CorePlusQueryConfig,
     CorePlusQuerySerial,
     CorePlusQueryState,
+    CorePlusQueryStatus,
 )
-from deephaven_mcp.config import ConfigManager
+from deephaven_mcp.mcp_systems_server._tools.shared import redact_json_sensitive_fields
 from deephaven_mcp.resource_manager import (
     BaseItemManager,
-    CombinedSessionRegistry,
+    EnterpriseSessionRegistry,
     SystemType,
 )
 
@@ -44,11 +45,13 @@ if TYPE_CHECKING:
         ExportedObjectInfoMessage,
         TableDefinitionMessage,
     )
+    from deephaven_enterprise.proto.common_pb2 import (
+        ExceptionDetailsMessage,
+    )
     from deephaven_enterprise.proto.controller_common_pb2 import (
         NamedStringList,
     )
     from deephaven_enterprise.proto.persistent_query_pb2 import (
-        ExceptionDetailsMessage,
         PersistentQueryConfigMessage,
         ProcessorConnectionDetailsMessage,
         WorkerProtocolMessage,
@@ -64,14 +67,11 @@ except ImportError:
     RestartUsersEnum = None
 
 
-from deephaven_mcp.mcp_systems_server._tools.mcp_server import (
-    mcp_server,
-)
-from deephaven_mcp.mcp_systems_server._tools.shared import (
-    _get_system_config,
-)
-
 _LOGGER = logging.getLogger(__name__)
+
+# Matches deephaven.constants.NULL_LONG / Java Long.MIN_VALUE. Defined locally because
+# deephaven.constants requires a live JVM which this server never starts.
+_NULL_LONG = -9223372036854775808
 
 
 # =============================================================================
@@ -79,23 +79,28 @@ _LOGGER = logging.getLogger(__name__)
 # =============================================================================
 
 
-def _parse_pq_id(pq_id: str) -> tuple[str, CorePlusQuerySerial]:
-    """Parse a pq_id into system_name and serial.
+def _parse_pq_id(pq_id: str, system_name: str) -> CorePlusQuerySerial:
+    """Parse a pq_id and return the serial number.
+
+    Validates that the pq_id belongs to the expected enterprise system, guarding
+    against cross-server mistakes (e.g. an AI agent sending an ID from a different
+    DHE instance).
 
     Args:
         pq_id (str): PQ identifier in format 'enterprise:{system_name}:{serial}'
+        system_name (str): Expected enterprise system name (from the registry).
 
     Returns:
-        tuple[str, CorePlusQuerySerial]: Tuple of (system_name, serial)
+        CorePlusQuerySerial: The serial number extracted from pq_id
 
     Raises:
-        ValueError: If pq_id format is invalid or serial is not an integer
+        ValueError: If pq_id format is invalid, system name doesn't match, or serial is not an integer
     """
     parts = pq_id.split(":")
-    if len(parts) != 3 or parts[0] != "enterprise":
+    if len(parts) != 3 or parts[0] != "enterprise" or parts[1] != system_name:
         raise ValueError(
             f"Invalid pq_id format: '{pq_id}'. "
-            "Expected format: 'enterprise:{{system_name}}:{{serial}}'"
+            f"Expected format: 'enterprise:{system_name}:{{serial}}'"
         )
     try:
         serial_int = int(parts[2])
@@ -104,15 +109,15 @@ def _parse_pq_id(pq_id: str) -> tuple[str, CorePlusQuerySerial]:
             f"Invalid pq_id format: '{pq_id}'. "
             f"Serial must be an integer, got: '{parts[2]}'"
         ) from None
-    return parts[1], CorePlusQuerySerial(serial_int)
+    return CorePlusQuerySerial(serial_int)
 
 
-def _make_pq_id(system_name: str, serial: CorePlusQuerySerial) -> str:
-    """Construct a pq_id from system_name and serial.
+def _make_pq_id(serial: CorePlusQuerySerial, system_name: str) -> str:
+    """Construct a pq_id from serial number.
 
     Args:
-        system_name (str): Name of the enterprise system
         serial (CorePlusQuerySerial): PQ serial number
+        system_name (str): Enterprise system name.
 
     Returns:
         str: PQ identifier in format 'enterprise:{system_name}:{serial}'
@@ -210,6 +215,8 @@ def _format_pq_config(config: CorePlusQueryConfig) -> dict[str, object]:
     - Repeated fields → Python lists
     - Enum values → Stringified
     - camelCase protobuf names → snake_case API names
+    - ``script_code`` and ``script_path`` are a protobuf ``oneof`` (``scriptData``); at most
+      one will be non-None at any time
 
     Args:
         config (CorePlusQueryConfig): Wrapper around PersistentQueryConfigMessage protobuf
@@ -251,8 +258,8 @@ def _format_pq_config(config: CorePlusQueryConfig) -> dict[str, object]:
         "script_path": pb.scriptPath if pb.scriptPath else None,
         "script_language": pb.scriptLanguage,
         "configuration_type": pb.configurationType,
-        "type_specific_fields_json": (
-            pb.typeSpecificFieldsJson if pb.typeSpecificFieldsJson else None
+        "type_specific_fields_json": redact_json_sensitive_fields(
+            pb.typeSpecificFieldsJson
         ),
         "scheduling": list(pb.scheduling),
         "timeout_nanos": pb.timeoutNanos if pb.timeoutNanos else None,
@@ -272,7 +279,11 @@ def _format_pq_config(config: CorePlusQueryConfig) -> dict[str, object]:
         ),
         "kubernetes_control": pb.kubernetesControl if pb.kubernetesControl else None,
         "worker_kind": pb.workerKind,
-        "created_time_nanos": pb.createdTimeNanos if pb.createdTimeNanos else None,
+        "created_time_nanos": (
+            pb.createdTimeNanos
+            if (pb.createdTimeNanos and pb.createdTimeNanos != _NULL_LONG)
+            else None
+        ),
         "replica_count": pb.replicaCount,
         "spare_count": pb.spareCount,
         "assignment_policy": pb.assignmentPolicy if pb.assignmentPolicy else None,
@@ -579,7 +590,9 @@ def _format_pq_state(state: CorePlusQueryState | None) -> dict[str, object] | No
         "scope_types": scope_types,
         "connection_details": connection_details,
         "exception_details": exception_details,
-        "type_specific_state_json": pb.typeSpecificStateJson or None,
+        "type_specific_state_json": redact_json_sensitive_fields(
+            pb.typeSpecificStateJson
+        ),
         "last_authenticated_user": pb.lastAuthenticatedUser or None,
         "last_effective_user": pb.lastEffectiveUser or None,
         "script_loader_state_json": pb.scriptLoaderStateJson or None,
@@ -676,15 +689,15 @@ async def _setup_batch_pq_operation(
     max_concurrent: int,
 ) -> tuple[
     list[tuple[str, CorePlusQuerySerial]] | None,
-    str | None,
     CorePlusControllerClient | None,
     int | None,
     int | None,
+    str,
     dict[str, object] | None,
 ]:
     """Set up common infrastructure for batch PQ operations.
 
-    Validates pq_ids and parameters, gets system config, and returns controller client.
+    Validates pq_ids and parameters and returns controller client.
     Consolidates validation and setup boilerplate across pq_delete, pq_start, pq_stop, pq_restart.
 
     Args:
@@ -695,16 +708,23 @@ async def _setup_batch_pq_operation(
         max_concurrent (int): Maximum concurrent operations (must be >= 1)
 
     Returns:
-        tuple: (parsed_pqs, system_name, controller, validated_timeout, validated_max_concurrent, error_response)
-               On success: (parsed_list, "system_name", controller_client, timeout_int, max_concurrent_int, None)
-               On failure: (None, None, None, None, None, {"success": False, "error": "...", "isError": True})
+        tuple: (parsed_pqs, controller, validated_timeout, validated_max_concurrent, system_name, error_response)
+               On success: (parsed_list, controller_client, timeout_int, max_concurrent_int, system_name, None)
+               On failure: (None, None, None, None, system_name, {"success": False, "error": "...", "isError": True})
 
-    Usage:
-        parsed_pqs, system_name, controller, timeout, max_conc, error = await _setup_batch_pq_operation(...)
+    Example::
+
+        parsed_pqs, controller, timeout, max_conc, system_name, error = await _setup_batch_pq_operation(...)
         if error:
             return error
         # Type narrowing: all returned values except error are non-None here
     """
+    # Get session registry and system name first (needed for pq_id validation)
+    session_registry: EnterpriseSessionRegistry = (
+        context.request_context.lifespan_context["session_registry"]
+    )
+    system_name = session_registry.system_name
+
     # Validate parameters
     try:
         validated_timeout = _validate_timeout(timeout_seconds, function_name)
@@ -717,50 +737,32 @@ async def _setup_batch_pq_operation(
             None,
             None,
             None,
-            None,
+            system_name,
             {"success": False, "error": str(e), "isError": True},
         )
 
     # Validate and parse pq_ids
-    parsed_pqs, system_name, parse_error = _validate_and_parse_pq_ids(pq_id)
+    parsed_pqs, parse_error = _validate_and_parse_pq_ids(pq_id, system_name)
     if parse_error:
         return (
             None,
             None,
             None,
             None,
-            None,
+            system_name,
             {"success": False, "error": parse_error, "isError": True},
         )
 
-    # Type narrowing: when parse_error is None, parsed_pqs and system_name are guaranteed non-None
+    # Type narrowing: when parse_error is None, parsed_pqs is guaranteed non-None
     parsed_pqs = cast(list[tuple[str, CorePlusQuerySerial]], parsed_pqs)
-    system_name = cast(str, system_name)
 
-    # Get config and session registry
-    config_manager: ConfigManager = context.request_context.lifespan_context[
-        "config_manager"
-    ]
-    session_registry: CombinedSessionRegistry = (
-        context.request_context.lifespan_context["session_registry"]
-    )
-
-    # Verify enterprise system exists
-    _, error_response = await _get_system_config(
-        function_name, config_manager, system_name
-    )
-    if error_response:
-        return (None, None, None, None, None, error_response)
-
-    # Get enterprise registry and factory
-    enterprise_registry = await session_registry.enterprise_registry()
-    factory_manager = await enterprise_registry.get(system_name)
+    factory_manager = session_registry.factory_manager
     _LOGGER.debug(
-        f"[mcp_systems_server:{function_name}] Connecting to enterprise factory for system '{system_name}'"
+        f"[mcp_systems_server:{function_name}] Connecting to enterprise factory"
     )
     factory = await factory_manager.get()
     _LOGGER.debug(
-        f"[mcp_systems_server:{function_name}] Connected to enterprise factory for system '{system_name}'"
+        f"[mcp_systems_server:{function_name}] Connected to enterprise factory"
     )
 
     # Get controller client
@@ -768,55 +770,47 @@ async def _setup_batch_pq_operation(
 
     return (
         parsed_pqs,
-        system_name,
         controller,
         validated_timeout,
         validated_max_concurrent,
+        system_name,
         None,
     )
 
 
 def _validate_and_parse_pq_ids(
     pq_id: str | list[str],
-) -> tuple[list[tuple[str, CorePlusQuerySerial]] | None, str | None, str | None]:
+    system_name: str,
+) -> tuple[list[tuple[str, CorePlusQuerySerial]] | None, str | None]:
     """Validate and parse pq_id(s) for batch operations.
 
     Args:
         pq_id (str | list[str]): Single pq_id string or list of pq_id strings in
-            format 'enterprise:{system_name}:{serial}'. All IDs must belong to the
-            same enterprise system.
+            format 'enterprise:{system_name}:{serial}'.
+        system_name (str): Expected enterprise system name (from the registry).
 
     Returns:
-        tuple[list[tuple[str, CorePlusQuerySerial]] | None, str | None, str | None]:
-            (parsed_pqs, system_name, error_message)
-            - On success: ([(pq_id, serial), ...], system_name, None)
-            - On failure: (None, None, error_string)
+        tuple[list[tuple[str, CorePlusQuerySerial]] | None, str | None]:
+            (parsed_pqs, error_message)
+            - On success: ([(pq_id, serial), ...], None)
+            - On failure: (None, error_string)
     """
     # Normalize to list
     pq_ids = [pq_id] if isinstance(pq_id, str) else pq_id
 
     if not pq_ids:
-        return (None, None, "At least one pq_id must be provided")
+        return (None, "At least one pq_id must be provided")
 
-    # Parse all pq_ids and validate they're from the same system
+    # Parse all pq_ids
     parsed_pqs = []
-    system_name = None
     for pid in pq_ids:
         try:
-            sys_name, serial = _parse_pq_id(pid)
-            if system_name is None:
-                system_name = sys_name
-            elif system_name != sys_name:
-                return (
-                    None,
-                    None,
-                    f"All pq_ids must be from the same system. Got '{system_name}' and '{sys_name}'",
-                )
+            serial = _parse_pq_id(pid, system_name)
             parsed_pqs.append((pid, serial))
         except ValueError as e:
-            return (None, None, f"Invalid pq_id '{pid}': {e}")
+            return (None, f"Invalid pq_id '{pid}': {e}")
 
-    return (parsed_pqs, system_name, None)
+    return (parsed_pqs, None)
 
 
 def _convert_restart_users_to_enum(restart_users_str: str) -> int:
@@ -847,34 +841,38 @@ def _convert_restart_users_to_enum(restart_users_str: str) -> int:
         ) from None
 
 
+def _pq_state_category(state_name: str) -> str:
+    """Return the PQ_STATES category for a state name; INVALID if unrecognized."""
+    return PQ_STATES.get(state_name, "INVALID")
+
+
 def _add_session_id_if_running(
     result_dict: dict[str, object],
-    state_name: str,
-    system_name: str,
+    status: CorePlusQueryStatus | None,
     pq_name: str,
+    system_name: str,
 ) -> None:
-    """Add session_id to result dict if PQ is in RUNNING or INITIALIZING state.
+    """Add ``session_id`` to ``result_dict`` if the PQ is RUNNING, EXECUTING, or INITIALIZING.
 
-    This helper consolidates the duplicate session_id generation logic used across
-    pq_list, pq_details, pq_start, and pq_restart.
+    ``session_id`` is added when ``status.is_running`` (covers RUNNING and EXECUTING) or
+    ``status.is_initializing`` (covers INITIALIZING). In all other states no ``session_id``
+    key is written to ``result_dict``.
 
     Args:
-        result_dict (dict[str, object]): Result dictionary to modify in-place
-        state_name (str): Current PQ state (e.g., "RUNNING", "STOPPED", "INITIALIZING")
-        system_name (str): Enterprise system name
-        pq_name (str): PQ name (NOT serial number)
+        result_dict (dict[str, object]): Result dict to mutate in place.
+        status (CorePlusQueryStatus | None): Current PQ status. ``None`` is a no-op.
+        pq_name (str): PQ name used to construct the session_id.
+        system_name (str): Enterprise system name used to construct the session_id.
     """
-    if state_name in ["RUNNING", "INITIALIZING"]:
+    if status is not None and (status.is_running or status.is_initializing):
         session_id = BaseItemManager.make_full_name(
             SystemType.ENTERPRISE, system_name, pq_name
         )
         result_dict["session_id"] = session_id
 
 
-@mcp_server.tool()
 async def pq_name_to_id(
     context: Context,
-    system_name: str,
     pq_name: str,
 ) -> dict:
     """MCP Tool: Convert PQ name to pq_id format.
@@ -903,7 +901,6 @@ async def pq_name_to_id(
 
     Args:
         context (Context): MCP context object
-        system_name (str): Name of the enterprise system
         pq_name (str): Human-readable name of the persistent query
 
     Returns:
@@ -923,37 +920,25 @@ async def pq_name_to_id(
             "isError": True
         }
     """
-    _LOGGER.info(
-        f"[mcp_systems_server:pq_name_to_id] Invoked: system_name={system_name!r}, pq_name={pq_name!r}"
-    )
-
     result: dict[str, object] = {"success": False}
+    system_name = "<unknown>"
 
     try:
-        # Get config and session registry
-        config_manager: ConfigManager = context.request_context.lifespan_context[
-            "config_manager"
-        ]
-        session_registry: CombinedSessionRegistry = (
+        # Get session registry, system name, and factory
+        session_registry: EnterpriseSessionRegistry = (
             context.request_context.lifespan_context["session_registry"]
         )
-
-        # Verify enterprise system exists
-        _, error_response = await _get_system_config(
-            "pq_name_to_id", config_manager, system_name
+        system_name = session_registry.system_name
+        _LOGGER.info(
+            f"[mcp_systems_server:pq_name_to_id] Invoked: system_name={system_name!r}, pq_name={pq_name!r}"
         )
-        if error_response:
-            return error_response
-
-        # Get enterprise registry and factory
-        enterprise_registry = await session_registry.enterprise_registry()
-        factory_manager = await enterprise_registry.get(system_name)
+        factory_manager = session_registry.factory_manager
         _LOGGER.debug(
-            f"[mcp_systems_server:pq_name_to_id] Connecting to enterprise factory for system '{system_name}'"
+            "[mcp_systems_server:pq_name_to_id] Connecting to enterprise factory"
         )
         factory = await factory_manager.get()
         _LOGGER.debug(
-            f"[mcp_systems_server:pq_name_to_id] Connected to enterprise factory for system '{system_name}'"
+            "[mcp_systems_server:pq_name_to_id] Connected to enterprise factory"
         )
 
         # Get controller client
@@ -973,7 +958,7 @@ async def pq_name_to_id(
             return result
 
         # Success - construct pq_id
-        pq_id = _make_pq_id(system_name, serial)
+        pq_id = _make_pq_id(serial, system_name)
         result = {
             "success": True,
             "pq_id": pq_id,
@@ -999,10 +984,8 @@ async def pq_name_to_id(
     return result
 
 
-@mcp_server.tool()
 async def pq_list(
     context: Context,
-    system_name: str,
 ) -> dict:
     """MCP Tool: List all persistent queries (PQs) on an enterprise system.
 
@@ -1025,16 +1008,22 @@ async def pq_list(
     AI Agent Usage:
     - Use this to discover all PQs on a system before performing operations
     - Each PQ includes a pq_id that can be used with pq_details, pq_start, pq_stop, etc.
-    - Common states: RUNNING (active), STOPPED (inactive), INITIALIZING (starting), FAILED (error)
+    - PQ state vocabulary — ACTIVE: RUNNING, EXECUTING;
+      TRANSITIONAL (do not branch on a specific value): UNINITIALIZED, CONNECTING,
+      AUTHENTICATING, ACQUIRING_WORKER, INITIALIZING, STOPPING, DISCONNECTED;
+      TERMINAL (stable until user action): STOPPED, FAILED, KILLED, COMPLETED, ERROR;
+      STOPPED and FAILED can be restarted; INVALID sentinel: UNSPECIFIED
+    - Each PQ entry includes a status_category field (ACTIVE/TRANSITIONAL/TERMINAL/INVALID)
+      so you can branch on category without memorizing which states fall in each group
+    - Never write `if status == "RUNNING"` — use `if status_category == "ACTIVE"` instead
+    - session_id field only present when status is RUNNING, EXECUTING, or INITIALIZING
     - Filter results by status, owner, worker_kind, configuration_type, or script_language
-    - session_id field only present when status is RUNNING or INITIALIZING
     - Use pq_details(pq_id) to get full configuration and state for a specific PQ
     - Empty pqs list is valid - indicates no PQs configured on the system
     - num_failures is the cumulative lifetime failure count for the PQ (not reset on restart)
 
     Args:
         context (Context): MCP context object
-        system_name (str): Name of the enterprise system to list PQs for
 
     Returns:
         dict: Success response:
@@ -1047,6 +1036,7 @@ async def pq_list(
                     "serial": 12345,
                     "name": "analytics_worker",
                     "status": "RUNNING",
+                    "status_category": "ACTIVE",  # ACTIVE | TRANSITIONAL | TERMINAL | INVALID
                     "enabled": True,
                     "owner": "admin_user",
                     "heap_size_gb": 8.0,
@@ -1058,7 +1048,7 @@ async def pq_list(
                     "viewer_groups": ["analysts"],
                     "is_scheduled": True,
                     "num_failures": 0,
-                    "session_id": "enterprise:prod_cluster:analytics_worker"  # Only when RUNNING/INITIALIZING
+                    "session_id": "enterprise:prod_cluster:analytics_worker"  # Only when RUNNING, EXECUTING, or INITIALIZING
                 }
             ]
         }
@@ -1070,37 +1060,22 @@ async def pq_list(
             "isError": True
         }
     """
-    _LOGGER.info(f"[mcp_systems_server:pq_list] Invoked: system_name={system_name!r}")
-
     result: dict[str, object] = {"success": False}
+    system_name = "<unknown>"
 
     try:
-        # Get config and session registry
-        config_manager: ConfigManager = context.request_context.lifespan_context[
-            "config_manager"
-        ]
-        session_registry: CombinedSessionRegistry = (
+        # Get session registry, system name, and factory
+        session_registry: EnterpriseSessionRegistry = (
             context.request_context.lifespan_context["session_registry"]
         )
-
-        # Verify enterprise system exists
-        _, error_response = await _get_system_config(
-            "pq_list", config_manager, system_name
+        system_name = session_registry.system_name
+        _LOGGER.info(
+            f"[mcp_systems_server:pq_list] Invoked: system_name={system_name!r}"
         )
-        if error_response:
-            result.update(error_response)
-            return result
-
-        # Get enterprise registry and factory
-        enterprise_registry = await session_registry.enterprise_registry()
-        factory_manager = await enterprise_registry.get(system_name)
-        _LOGGER.debug(
-            f"[mcp_systems_server:pq_list] Connecting to enterprise factory for system '{system_name}'"
-        )
+        factory_manager = session_registry.factory_manager
+        _LOGGER.debug("[mcp_systems_server:pq_list] Connecting to enterprise factory")
         factory = await factory_manager.get()
-        _LOGGER.debug(
-            f"[mcp_systems_server:pq_list] Connected to enterprise factory for system '{system_name}'"
-        )
+        _LOGGER.debug("[mcp_systems_server:pq_list] Connected to enterprise factory")
 
         # Get controller client
         controller = factory.controller_client
@@ -1123,14 +1098,16 @@ async def pq_list(
             config_pb = pq_info.config.pb
             state_pb = pq_info.state.pb if pq_info.state else None
             pq_name = config_pb.name
-            pq_id = _make_pq_id(system_name, serial)
-            status = pq_info.state.status.name if pq_info.state else "UNKNOWN"
+            pq_id = _make_pq_id(serial, system_name)
+            status_obj = pq_info.state.status if pq_info.state else None
+            status = status_obj.name if status_obj is not None else "UNKNOWN"
 
             pq_data = {
                 "pq_id": pq_id,
                 "serial": serial,
                 "name": pq_name,
                 "status": status,
+                "status_category": _pq_state_category(status),
                 "enabled": config_pb.enabled,
                 "owner": config_pb.owner,
                 "heap_size_gb": config_pb.heapSizeGb,
@@ -1145,7 +1122,7 @@ async def pq_list(
             }
 
             # Add session_id if PQ is running (session_id uses name, not serial)
-            _add_session_id_if_running(pq_data, status, system_name, pq_name)
+            _add_session_id_if_running(pq_data, status_obj, pq_name, system_name)
 
             pqs.append(pq_data)
 
@@ -1174,7 +1151,6 @@ async def pq_list(
     return result
 
 
-@mcp_server.tool()
 async def pq_details(
     context: Context,
     pq_id: str,
@@ -1200,12 +1176,12 @@ async def pq_details(
     AI Agent Usage:
     - Use pq_id from pq_list to identify the PQ
     - If you only have a PQ name, use pq_name_to_id to look up the pq_id first
-    - session_id only present when state is RUNNING or INITIALIZING
+    - session_id only present when state is RUNNING, EXECUTING, or INITIALIZING
     - Worker host available at state_details.connection_details.processor_host
     - Worker port available at state_details.connection_details.protocols[*].port
     - connection_details is null when PQ is not running
     - Use session_id with other session tools to interact with a running PQ
-    - null script_path means inline script_body is used (or vice versa)
+    - null script_path in config means inline script_code is used (or vice versa)
     - Empty arrays ([]) indicate optional features are disabled (scheduling, admin_groups, etc.)
     - jvm_profile null means default JVM settings are used
     - replicas array contains state of all active replicas (load-balanced instances)
@@ -1373,56 +1349,40 @@ async def pq_details(
     result: dict[str, object] = {"success": False}
 
     try:
+        # Get session registry and system name first (needed for pq_id validation)
+        session_registry: EnterpriseSessionRegistry = (
+            context.request_context.lifespan_context["session_registry"]
+        )
+        system_name = session_registry.system_name
+
         # Early validation: parse pq_id to fail fast on invalid format
         try:
-            system_name, serial = _parse_pq_id(pq_id)
+            serial = _parse_pq_id(pq_id, system_name)
         except ValueError as e:
             result["error"] = str(e)
             result["isError"] = True
             return result
 
-        # Get config and session registry
-        config_manager: ConfigManager = context.request_context.lifespan_context[
-            "config_manager"
-        ]
-        session_registry: CombinedSessionRegistry = (
-            context.request_context.lifespan_context["session_registry"]
-        )
-
-        # Verify enterprise system exists
-        _, error_response = await _get_system_config(
-            "pq_details", config_manager, system_name
-        )
-        if error_response:
-            result.update(error_response)
-            return result
-
-        # Get enterprise registry and factory
-        enterprise_registry = await session_registry.enterprise_registry()
-        factory_manager = await enterprise_registry.get(system_name)
+        factory_manager = session_registry.factory_manager
         _LOGGER.debug(
-            f"[mcp_systems_server:pq_details] Connecting to enterprise factory for system '{system_name}'"
+            "[mcp_systems_server:pq_details] Connecting to enterprise factory"
         )
         factory = await factory_manager.get()
-        _LOGGER.debug(
-            f"[mcp_systems_server:pq_details] Connected to enterprise factory for system '{system_name}'"
-        )
+        _LOGGER.debug("[mcp_systems_server:pq_details] Connected to enterprise factory")
 
         # Get controller client
         controller = factory.controller_client
 
         # Get all PQs from controller (ensures subscription is ready)
         # Then extract the specific PQ by serial
-        _LOGGER.debug(
-            f"[mcp_systems_server:pq_details] Fetching PQ map from controller for system '{system_name}'"
-        )
+        _LOGGER.debug("[mcp_systems_server:pq_details] Fetching PQ map from controller")
         pq_map = await controller.map()
         _LOGGER.debug(
-            f"[mcp_systems_server:pq_details] Received {len(pq_map)} PQ(s) from controller for system '{system_name}'"
+            f"[mcp_systems_server:pq_details] Received {len(pq_map)} PQ(s) from controller"
         )
 
         if serial not in pq_map:
-            error_msg = f"PQ with serial {serial} not found on system '{system_name}'"
+            error_msg = f"PQ with serial {serial} not found"
             _LOGGER.error(f"[mcp_systems_server:pq_details] {error_msg}")
             result["error"] = error_msg
             result["isError"] = True
@@ -1434,7 +1394,8 @@ async def pq_details(
         # NOTE: pq_info is PersistentQueryInfoMessage
         # Protobuf docs: https://docs.deephaven.io/protodoc/latest/#io.deephaven.proto.persistent_query.PersistentQueryInfoMessage
         pq_name = pq_info.config.pb.name
-        state_name = pq_info.state.status.name if pq_info.state else "UNKNOWN"
+        status_obj = pq_info.state.status if pq_info.state else None
+        state_name = status_obj.name if status_obj is not None else "UNKNOWN"
 
         pq_data = {
             "success": True,
@@ -1449,7 +1410,7 @@ async def pq_details(
         }
 
         # Add session_id if running (session_id uses name, not serial)
-        _add_session_id_if_running(pq_data, state_name, system_name, pq_name)
+        _add_session_id_if_running(pq_data, status_obj, pq_name, system_name)
 
         _LOGGER.info(
             f"[mcp_systems_server:pq_details] Retrieved details for PQ '{pq_name}' (serial: {serial})"
@@ -1470,10 +1431,8 @@ async def pq_details(
     return result
 
 
-@mcp_server.tool()
 async def pq_create(
     context: Context,
-    system_name: str,
     pq_name: str,
     heap_size_gb: float | int,
     script_body: str | None = None,
@@ -1497,8 +1456,33 @@ async def pq_create(
 ) -> dict:
     """MCP Tool: Create a new persistent query on an enterprise system.
 
-    Creates a PQ configuration and adds it to the controller. The PQ will
-    be created but not automatically started - use pq_start to start it.
+    Creates a PQ configuration and adds it to the controller.
+
+    Scheduler semantics (three-way, based on ``schedule``):
+        - ``schedule=None`` (default): install the default scheduler and make no further
+          changes. For a *permanent* PQ (``auto_delete_timeout=None``) the default is a
+          continuous scheduler with ``SchedulingDisabled=false`` and
+          ``RestartWhenRunning=Yes``, which causes the controller to begin acquiring a
+          worker immediately after creation (``ACQUIRING_WORKER`` → ``RUNNING``
+          with no explicit ``pq_start`` call). For a *temporary* PQ the default is
+          whatever the controller's temporary scheduling installs.
+        - ``schedule=[]``: the caller is explicitly requesting no scheduling. The
+          scheduling list is cleared; the server decides whether to accept or reject a
+          PQ with no scheduling entries.
+        - ``schedule=[...]`` (non-empty list): the caller-supplied list **replaces** the
+          scheduling block wholesale. No default keys are merged in — the caller is
+          responsible for including ``SchedulerType`` and any other required entries.
+
+    Creating a quiescent PQ (created but not auto-starting):
+        Two supported recipes, each with different semantics:
+        - ``enabled=False``: the PQ is marked disabled. The controller will not acquire
+          a worker. Subsequent ``pq_start`` typically requires enabling the PQ first.
+        - ``schedule=[...]`` with ``SchedulingDisabled=true``: the PQ has a valid,
+          disabled scheduler. Manual ``pq_start`` / ``pq_stop`` / ``pq_restart`` work
+          normally; only the automatic scheduler trigger is suppressed. The Core+ client
+          library publishes a canonical "disabled daily" scheduler that can be used
+          here; see its ``generate_disabled_scheduler`` helper for the full list of
+          entries.
 
     Terminology Note:
     - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
@@ -1513,7 +1497,11 @@ async def pq_create(
     - 'DHE' is shorthand for Deephaven Enterprise (also called 'Core+')
 
     AI Agent Usage:
-    - PQ is created in UNINITIALIZED state - must call pq_start to run it
+    - Permanent PQs (``auto_delete_timeout=None``, the default) auto-start after creation
+      via the default continuous scheduler. See "Scheduler semantics" above. Do not call
+      ``pq_start`` on a freshly-created permanent PQ unless you have overridden the
+      default — it will already be acquiring a worker. Use ``pq_details`` to observe the
+      state transition.
     - Returns pq_id and serial number for use with other PQ management tools
     - programming_language is case-insensitive: "Python"/"python" or "Groovy"/"groovy"
     - auto_delete_timeout=None (default) creates a permanent PQ; set to seconds for auto-deletion
@@ -1536,10 +1524,12 @@ async def pq_create(
     - Other types exist (Merge, Import, etc.) but are specialized
 
     Scheduling Format (list of "Key=Value" strings):
-    - SchedulerType: Use full qualified Java class name (required if scheduling)
+    - SchedulerType: Use fully qualified Java class name (required whenever the list
+      is non-empty)
     - Time format: HH:MM:SS (24-hour) for all time fields
     - TimeZone: Standard timezone identifiers (e.g., "America/New_York", "UTC")
-    - Empty list [] or None: No automatic scheduling (manual start/stop only)
+    - See "Scheduler semantics" above for how ``None`` / ``[]`` / non-empty list are
+      interpreted on create.
 
     Daily Scheduler:
       ["SchedulerType=com.illumon.iris.controller.IrisQuerySchedulerDaily",
@@ -1566,7 +1556,6 @@ async def pq_create(
 
     Args:
         context (Context): MCP context object
-        system_name (str): Name of the enterprise system
         pq_name (str): Human-readable name for the PQ
         heap_size_gb (float | int): JVM heap size in GB (e.g., 8.0 or 16)
         script_body (str | None): Inline script code to execute (mutually exclusive with script_path)
@@ -1589,7 +1578,15 @@ async def pq_create(
         restart_users (str | None): Who can restart - "RU_ADMIN", "RU_ADMIN_AND_VIEWERS", "RU_VIEWERS_WHEN_DOWN"
 
     Returns:
-        dict: Success response:
+        dict: Success response. The ``"state"`` field is a fixed placeholder
+        (``"UNINITIALIZED"``) emitted at the moment the controller accepts the
+        ``add_query`` call; it does **not** reflect the live state of the PQ at
+        response time. In particular, for a permanent PQ created with the default
+        continuous scheduler the controller typically begins acquiring a worker
+        immediately, so by the time the caller reads this field the real state may
+        already be ``ACQUIRING_WORKER``, ``INITIALIZING``, or ``RUNNING``. Call
+        ``pq_details`` with the returned ``pq_id`` to observe the actual live state.
+
         {
             "success": True,
             "pq_id": "enterprise:prod:12345",
@@ -1606,12 +1603,8 @@ async def pq_create(
             "isError": True
         }
     """
-    _LOGGER.info(
-        f"[mcp_systems_server:pq_create] Invoked: system_name={system_name!r}, "
-        f"pq_name={pq_name!r}, heap_size_gb={heap_size_gb}"
-    )
-
     result: dict[str, object] = {"success": False}
+    system_name = "<unknown>"
 
     try:
         # Early validation: script_body and script_path are mutually exclusive
@@ -1623,32 +1616,19 @@ async def pq_create(
             result["isError"] = True
             return result
 
-        # Get config and session registry
-        config_manager: ConfigManager = context.request_context.lifespan_context[
-            "config_manager"
-        ]
-        session_registry: CombinedSessionRegistry = (
+        # Get session registry, system name, and factory
+        session_registry: EnterpriseSessionRegistry = (
             context.request_context.lifespan_context["session_registry"]
         )
-
-        # Verify enterprise system exists
-        _, error_response = await _get_system_config(
-            "pq_create", config_manager, system_name
+        system_name = session_registry.system_name
+        _LOGGER.info(
+            f"[mcp_systems_server:pq_create] Invoked: system_name={system_name!r}, "
+            f"pq_name={pq_name!r}, heap_size_gb={heap_size_gb}"
         )
-        if error_response:
-            result.update(error_response)
-            return result
-
-        # Get enterprise registry and factory
-        enterprise_registry = await session_registry.enterprise_registry()
-        factory_manager = await enterprise_registry.get(system_name)
-        _LOGGER.debug(
-            f"[mcp_systems_server:pq_create] Connecting to enterprise factory for system '{system_name}'"
-        )
+        factory_manager = session_registry.factory_manager
+        _LOGGER.debug("[mcp_systems_server:pq_create] Connecting to enterprise factory")
         factory = await factory_manager.get()
-        _LOGGER.debug(
-            f"[mcp_systems_server:pq_create] Connected to enterprise factory for system '{system_name}'"
-        )
+        _LOGGER.debug("[mcp_systems_server:pq_create] Connected to enterprise factory")
 
         # Get controller client
         controller = factory.controller_client
@@ -1690,7 +1670,7 @@ async def pq_create(
         )
 
         # Construct pq_id (serial-based)
-        pq_id = _make_pq_id(system_name, serial)
+        pq_id = _make_pq_id(serial, system_name)
 
         _LOGGER.info(
             f"[mcp_systems_server:pq_create] Created PQ '{pq_name}' with serial {serial}, pq_id='{pq_id}'"
@@ -1722,7 +1702,6 @@ async def pq_create(
     return result
 
 
-@mcp_server.tool()
 async def pq_delete(
     context: Context,
     pq_id: str | list[str],
@@ -1815,10 +1794,10 @@ async def pq_delete(
         # Common setup and validation for batch operations
         (
             parsed_pqs,
-            _,
             controller,
             validated_timeout,
             validated_max_concurrent,
+            system_name,
             setup_error,
         ) = await _setup_batch_pq_operation(
             context, pq_id, "pq_delete", timeout_seconds, max_concurrent
@@ -1973,8 +1952,8 @@ def _apply_pq_config_simple_fields(
     """Apply simple (scalar) field updates to PersistentQueryConfigMessage protobuf.
 
     Updates only the fields that are not None. This helper consolidates the boilerplate
-    for applying individual field modifications to reduce code duplication across
-    pq_create and pq_modify operations.
+    for applying individual field modifications, called by
+    :func:`_apply_pq_config_modifications` which is used by ``pq_modify``.
 
     Args:
         config_pb (PersistentQueryConfigMessage): Protobuf config object to modify in-place
@@ -2039,11 +2018,15 @@ def _apply_pq_config_list_fields(
 
     Updates only the fields that are not None using a del/extend pattern to fully replace
     existing list contents. This helper consolidates the boilerplate for applying list
-    modifications to reduce code duplication across pq_create and pq_modify operations.
+    modifications, called by :func:`_apply_pq_config_modifications` which is used by
+    ``pq_modify``.
 
     Args:
         config_pb (PersistentQueryConfigMessage): Protobuf config object to modify in-place
-        schedule (list[str] | None): Cron schedule entries → protobuf field: config_pb.scheduling
+        schedule (list[str] | None): PQ scheduling entries as ``Key=Value`` strings
+            targeting an Iris scheduler class (e.g., ``SchedulerType=com.illumon.iris.controller.IrisQuerySchedulerDaily``,
+            ``StartTime=08:00:00``). These are not cron expressions. Maps to protobuf
+            field ``config_pb.scheduling``.
         extra_jvm_args (list[str] | None): Additional JVM arguments → protobuf field: config_pb.extraJvmArguments
         extra_class_path (list[str] | None): Additional classpath entries → protobuf field: config_pb.classPathAdditions
         extra_environment_vars (list[str] | None): Additional env vars (KEY=VALUE format) → protobuf field: config_pb.extraEnvironmentVariables
@@ -2054,11 +2037,9 @@ def _apply_pq_config_list_fields(
         bool: True if any changes were made, False if all parameters were None
 
     Note:
-        Uses del [:] + extend() pattern for protobuf repeated fields to fully replace contents:
-        - del config_pb.field[:] clears the existing list
-        - config_pb.field.extend(new_list) adds all new elements
-        This ensures complete replacement rather than appending to existing values.
-        See _apply_pq_config_simple_fields for scalar field updates.
+        Each field is handled with ``del config_pb.field[:]`` followed by
+        ``config_pb.field.extend(new_list)`` so the existing contents are fully
+        replaced rather than appended to. An empty list therefore clears the field.
     """
     has_changes = False
     if schedule is not None:
@@ -2155,14 +2136,12 @@ def _apply_pq_config_modifications(
         config_pb.scriptLanguage = normalized_lang
         has_changes = True
 
-    # Handle script_body and script_path (mutually clear the other)
+    # Handle script_body and script_path (protobuf oneof scriptData clears the other automatically)
     if script_body is not None:
         config_pb.scriptCode = script_body
-        config_pb.scriptPath = ""
         has_changes = True
     if script_path is not None:
         config_pb.scriptPath = script_path
-        config_pb.scriptCode = ""
         has_changes = True
 
     # Handle auto_delete_timeout: convert seconds to nanoseconds
@@ -2206,7 +2185,6 @@ def _apply_pq_config_modifications(
     return has_changes
 
 
-@mcp_server.tool()
 async def pq_modify(
     context: Context,
     pq_id: str,
@@ -2238,6 +2216,20 @@ async def pq_modify(
     Only specified (non-None) parameters are updated - all others remain unchanged.
     Changes can be applied to PQs in any state (RUNNING, STOPPED, etc.).
 
+    Scheduler semantics (three-way, based on ``schedule``):
+        - ``schedule=None`` (default): the existing scheduling on the PQ is preserved
+          unchanged.
+        - ``schedule=[]``: the caller is explicitly clearing the scheduling. The PQ's
+          scheduling list is sent empty to the server; the server decides whether to
+          accept or reject a PQ with no scheduling entries.
+        - ``schedule=[...]`` (non-empty list): the caller-supplied list **replaces** the
+          scheduling block wholesale. No existing entries are merged in — the caller is
+          responsible for re-specifying every key they want to keep (including
+          ``SchedulerType``, ``TimeZone``, flags like ``SchedulingDisabled``, etc.). To
+          tweak a single key, first call ``pq_details`` to read the current
+          ``config.scheduling`` list, modify the entries you want, and pass the full
+          modified list here.
+
     Terminology Note:
     - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
     - 'PQ' is shorthand for Persistent Query
@@ -2254,8 +2246,10 @@ async def pq_modify(
     - Only specify parameters you want to change - all params are optional
     - List fields (extra_jvm_args, schedule, etc.) completely REPLACE the existing list
     - restart=True applies changes immediately by restarting the PQ
-    - restart=False saves changes but requires manual pq_start to apply
-    - Some changes (heap size, script content, JVM args) require restart to take effect
+    - restart=False (default): config is saved but the running worker keeps executing the previous
+      script/config. If you modify script_body, heap_size_gb, or other runtime settings on a
+      RUNNING PQ without restart=True, the response will include a "warning" field — always check
+      for it and call pq_restart to apply the changes.
     - Can modify RUNNING PQs but be cautious - restart=True will disrupt active sessions
     - Use pq_details first to see current config before modifying
 
@@ -2300,14 +2294,19 @@ async def pq_modify(
         restart_users (str | None): Who can restart - "RU_ADMIN", "RU_ADMIN_AND_VIEWERS", "RU_VIEWERS_WHEN_DOWN"
 
     Returns:
-        dict: Success response:
+        dict: Success response. The ``"warning"`` field is only present when the PQ is
+        currently RUNNING and runtime-affecting settings (script, heap, JVM args, etc.)
+        were changed with ``restart=False`` — the running worker still has the previous
+        config. Call ``pq_restart`` to apply when you see it.
+
         {
             "success": True,
             "pq_id": "enterprise:prod:12345",
             "serial": 12345,
             "name": "analytics_worker",
-            "restarted": True or False,
-            "message": "PQ modified successfully"
+            "restarted": False,
+            "message": "PQ modified successfully",
+            "warning": "Config saved but the PQ is still running the previous configuration. ..."
         }
 
         dict: Error response:
@@ -2322,6 +2321,7 @@ async def pq_modify(
     )
 
     result: dict[str, object] = {"success": False}
+    system_name = "<unknown>"
 
     try:
         # Early validation: script_body and script_path are mutually exclusive
@@ -2333,56 +2333,38 @@ async def pq_modify(
             result["isError"] = True
             return result
 
-        # Parse pq_id to get system name and serial
+        # Get session registry and system name first (needed for pq_id validation)
+        session_registry: EnterpriseSessionRegistry = (
+            context.request_context.lifespan_context["session_registry"]
+        )
+        system_name = session_registry.system_name
+
+        # Parse pq_id to get serial
         try:
-            system_name, serial = _parse_pq_id(pq_id)
+            serial = _parse_pq_id(pq_id, system_name)
         except ValueError as e:
             result["error"] = f"Invalid pq_id '{pq_id}': {type(e).__name__}: {e}"
             result["isError"] = True
             return result
 
-        # Get config and session registry
-        config_manager: ConfigManager = context.request_context.lifespan_context[
-            "config_manager"
-        ]
-        session_registry: CombinedSessionRegistry = (
-            context.request_context.lifespan_context["session_registry"]
-        )
-
-        # Verify enterprise system exists
-        _, error_response = await _get_system_config(
-            "pq_modify", config_manager, system_name
-        )
-        if error_response:
-            result.update(error_response)
-            return result
-
-        # Get enterprise registry and factory
-        enterprise_registry = await session_registry.enterprise_registry()
-        factory_manager = await enterprise_registry.get(system_name)
-        _LOGGER.debug(
-            f"[mcp_systems_server:pq_modify] Connecting to enterprise factory for system '{system_name}'"
-        )
+        factory_manager = session_registry.factory_manager
+        _LOGGER.debug("[mcp_systems_server:pq_modify] Connecting to enterprise factory")
         factory = await factory_manager.get()
-        _LOGGER.debug(
-            f"[mcp_systems_server:pq_modify] Connected to enterprise factory for system '{system_name}'"
-        )
+        _LOGGER.debug("[mcp_systems_server:pq_modify] Connected to enterprise factory")
 
         # Get controller client
         controller = factory.controller_client
 
         # Get all PQs from controller (ensures subscription is ready)
         # Then extract the specific PQ by serial
-        _LOGGER.debug(
-            f"[mcp_systems_server:pq_modify] Fetching PQ map from controller for system '{system_name}'"
-        )
+        _LOGGER.debug("[mcp_systems_server:pq_modify] Fetching PQ map from controller")
         pq_map = await controller.map()
         _LOGGER.debug(
-            f"[mcp_systems_server:pq_modify] Received {len(pq_map)} PQ(s) from controller for system '{system_name}'"
+            f"[mcp_systems_server:pq_modify] Received {len(pq_map)} PQ(s) from controller"
         )
 
         if serial not in pq_map:
-            error_msg = f"PQ with serial {serial} not found on system '{system_name}'"
+            error_msg = f"PQ with serial {serial} not found"
             _LOGGER.error(f"[mcp_systems_server:pq_modify] {error_msg}")
             result["error"] = error_msg
             result["isError"] = True
@@ -2445,6 +2427,30 @@ async def pq_modify(
             }
         )
 
+        if (
+            not restart
+            and pq_info.state is not None
+            and pq_info.state.status.is_running
+            and any(
+                v is not None
+                for v in (
+                    script_body,
+                    script_path,
+                    heap_size_gb,
+                    extra_jvm_args,
+                    extra_class_path,
+                    jvm_profile,
+                    python_virtual_environment,
+                    programming_language,
+                )
+            )
+        ):
+            result["warning"] = (
+                "Config saved but the PQ is still running the previous configuration. "
+                "Runtime changes (script, heap, JVM args, etc.) require a restart to take effect. "
+                "Call pq_restart to apply."
+            )
+
     except Exception as e:
         _LOGGER.error(
             f"[mcp_systems_server:pq_modify] Failed to modify PQ: {e!r}",
@@ -2459,7 +2465,6 @@ async def pq_modify(
     return result
 
 
-@mcp_server.tool()
 async def pq_start(
     context: Context,
     pq_id: str | list[str],
@@ -2503,12 +2508,18 @@ async def pq_start(
     - Single PQ: pass string "enterprise:system:12345"
     - Multiple PQs: pass list ["enterprise:system:12345", "enterprise:system:67890"]
     - Best-effort: partial success is possible, check summary and individual results
-    - Each result item has same fields: pq_id, serial, success, name, state, session_id, error
-    - If success=True: name, state, session_id (conditional) have values, error is None
-    - If success=False: name/state/session_id are None, error has message
+    - Each result item has same fields: pq_id, serial, success, name, state, state_category, session_id, error
+    - If success=True: name, state, and state_category have values; session_id is populated
+      when state is RUNNING, EXECUTING, or INITIALIZING and omitted otherwise; error is None
+    - If success=False: name/state/state_category/session_id are None, error has message
     - Recommended timeout: 30s for typical PQs, 60s for large heap (>32GB) or complex initialization
     - Cannot start a PQ that is already RUNNING - will be marked as failed
     - Can start a STOPPED or FAILED PQ - this is a normal operation
+    - state_category == "TRANSITIONAL" (e.g. state CONNECTING or INITIALIZING) is a valid
+      success outcome when the timeout is short — success=True means the start was accepted
+      and the PQ was last seen in a non-failed state, NOT that it is fully RUNNING;
+      use pq_details to confirm RUNNING if the caller requires it
+    - Branch on `state_category == "ACTIVE"` rather than `state == "RUNNING"`
 
     Args:
         context (Context): MCP context object
@@ -2528,6 +2539,7 @@ async def pq_start(
                     "success": True,
                     "name": "analytics_worker",
                     "state": "RUNNING",
+                    "state_category": "ACTIVE",  # ACTIVE | TRANSITIONAL | TERMINAL | INVALID
                     "session_id": "enterprise:prod:analytics_worker",
                     "error": None
                 },
@@ -2537,6 +2549,7 @@ async def pq_start(
                     "success": False,
                     "name": None,
                     "state": None,
+                    "state_category": None,
                     "session_id": None,
                     "error": "Timeout waiting for PQ to start"
                 }
@@ -2562,10 +2575,10 @@ async def pq_start(
         # Common setup and validation for batch operations
         (
             parsed_pqs,
-            system_name,
             controller,
             validated_timeout,
             validated_max_concurrent,
+            system_name,
             setup_error,
         ) = await _setup_batch_pq_operation(
             context, pq_id, "pq_start", timeout_seconds, max_concurrent
@@ -2575,7 +2588,6 @@ async def pq_start(
 
         # Type narrowing: when setup_error is None, all values are guaranteed non-None
         parsed_pqs = cast(list[tuple[str, CorePlusQuerySerial]], parsed_pqs)
-        system_name = cast(str, system_name)
         controller = cast(CorePlusControllerClient, controller)
         validated_timeout = cast(int, validated_timeout)
         validated_max_concurrent = cast(int, validated_max_concurrent)
@@ -2599,11 +2611,23 @@ async def pq_start(
                 "success": False,
                 "name": None,
                 "state": None,
+                "state_category": None,
                 "session_id": None,
                 "error": None,
             }
 
             try:
+                # Check current state before attempting start
+                current_info = await controller.get(
+                    serial, timeout_seconds=validated_timeout
+                )
+                if current_info.state and current_info.state.status.is_running:
+                    item_result["error"] = "Cannot start a PQ that is already RUNNING"
+                    _LOGGER.warning(
+                        f"[mcp_systems_server:pq_start] PQ {pid} is already RUNNING, skipping start"
+                    )
+                    return item_result
+
                 # Start the PQ and wait
                 _LOGGER.debug(
                     f"[mcp_systems_server:pq_start] Calling start_and_wait for PQ {pid} (timeout={validated_timeout}s)"
@@ -2618,16 +2642,18 @@ async def pq_start(
                     serial, timeout_seconds=validated_timeout
                 )
                 pq_name = pq_info.config.pb.name
-                state_name = pq_info.state.status.name if pq_info.state else "UNKNOWN"
+                status_obj = pq_info.state.status if pq_info.state else None
+                state_name = status_obj.name if status_obj is not None else "UNKNOWN"
 
                 # Success
                 item_result["success"] = True
                 item_result["name"] = pq_name
                 item_result["state"] = state_name
+                item_result["state_category"] = _pq_state_category(state_name)
 
                 # Add session_id if running (session_id uses name, not serial)
                 _add_session_id_if_running(
-                    item_result, state_name, system_name, pq_name
+                    item_result, status_obj, pq_name, system_name
                 )
 
                 _LOGGER.debug(
@@ -2675,6 +2701,7 @@ async def pq_start(
                         "success": False,
                         "name": None,
                         "state": None,
+                        "state_category": None,
                         "session_id": None,
                         "error": f"Unexpected error: {type(r).__name__}: {r}",
                     }
@@ -2724,7 +2751,6 @@ async def pq_start(
     return result
 
 
-@mcp_server.tool()
 async def pq_stop(
     context: Context,
     pq_id: str | list[str],
@@ -2824,10 +2850,10 @@ async def pq_stop(
         # Common setup and validation for batch operations
         (
             parsed_pqs,
-            _,
             controller,
             validated_timeout,
             validated_max_concurrent,
+            system_name,
             setup_error,
         ) = await _setup_batch_pq_operation(
             context, pq_id, "pq_stop", timeout_seconds, max_concurrent
@@ -2978,16 +3004,15 @@ async def pq_stop(
     return result
 
 
-@mcp_server.tool()
 async def pq_restart(
     context: Context,
     pq_id: str | list[str],
     timeout_seconds: int = DEFAULT_PQ_TIMEOUT,
     max_concurrent: int = DEFAULT_MAX_CONCURRENT,
 ) -> dict:
-    """MCP Tool: Restart one or more stopped or failed persistent queries.
+    """MCP Tool: Restart one or more persistent queries.
 
-    Restarts stopped or failed PQs using their original configurations.
+    Restarts PQs using their original configurations, stopping them first if currently running.
     More efficient than delete + recreate for the same configuration.
 
     **Batch Support**: This operation supports batch execution for efficiency.
@@ -3018,13 +3043,19 @@ async def pq_restart(
     - Use pq_id from pq_list to identify PQs
     - If you only have PQ names, use pq_name_to_id to look up the pq_ids first
     - Best-effort: partial success is possible, check summary and individual results
-    - Each result item has same fields: pq_id, serial, success, name, state, session_id (conditional), error
-    - If success=True: name, state have values, error is None
-    - If success=False: name/state are None, error has message
+    - Each result item has same fields: pq_id, serial, success, name, state, state_category, session_id, error
+    - If success=True: name, state, and state_category have values; session_id is populated
+      when state is RUNNING, EXECUTING, or INITIALIZING and omitted otherwise; error is None
+    - If success=False: name/state/state_category/session_id are None, error has message
     - Works for stopped, failed, or completed PQs
     - Preserves PQ serial numbers and configurations
     - More efficient than deleting and recreating
     - Increase timeout_seconds for PQs that take longer to restart
+    - state_category == "TRANSITIONAL" (e.g. state CONNECTING or INITIALIZING) is a valid
+      success outcome when the timeout is short — success=True means the restart was accepted
+      and the PQ was last seen in a non-failed state, NOT that it is fully RUNNING;
+      use pq_details to confirm RUNNING if the caller requires it
+    - Branch on `state_category == "ACTIVE"` rather than `state == "RUNNING"`
 
     Args:
         context (Context): MCP context object
@@ -3043,8 +3074,9 @@ async def pq_restart(
                     "serial": 12345,
                     "success": True,
                     "name": "analytics_worker",
-                    "state": "RUNNING",
-                    "session_id": "enterprise:prod:analytics_worker",
+                    "state": "CONNECTING",          # may be RUNNING if fully started within timeout
+                    "state_category": "TRANSITIONAL",  # ACTIVE | TRANSITIONAL | TERMINAL | INVALID
+                    "session_id": None,             # present only when RUNNING, EXECUTING, or INITIALIZING
                     "error": None
                 },
                 {
@@ -3053,6 +3085,7 @@ async def pq_restart(
                     "success": False,
                     "name": None,
                     "state": None,
+                    "state_category": None,
                     "session_id": None,
                     "error": "Timeout waiting for PQ to restart"
                 }
@@ -3078,10 +3111,10 @@ async def pq_restart(
         # Common setup and validation for batch operations
         (
             parsed_pqs,
-            system_name,
             controller,
             validated_timeout,
             validated_max_concurrent,
+            system_name,
             setup_error,
         ) = await _setup_batch_pq_operation(
             context, pq_id, "pq_restart", timeout_seconds, max_concurrent
@@ -3091,7 +3124,6 @@ async def pq_restart(
 
         # Type narrowing: when setup_error is None, all values are guaranteed non-None
         parsed_pqs = cast(list[tuple[str, CorePlusQuerySerial]], parsed_pqs)
-        system_name = cast(str, system_name)
         controller = cast(CorePlusControllerClient, controller)
         validated_timeout = cast(int, validated_timeout)
         validated_max_concurrent = cast(int, validated_max_concurrent)
@@ -3115,6 +3147,7 @@ async def pq_restart(
                 "success": False,
                 "name": None,
                 "state": None,
+                "state_category": None,
                 "session_id": None,
                 "error": None,
             }
@@ -3134,16 +3167,18 @@ async def pq_restart(
                     serial, timeout_seconds=validated_timeout
                 )
                 pq_name = pq_info.config.pb.name
-                state_name = pq_info.state.status.name if pq_info.state else "UNKNOWN"
+                status_obj = pq_info.state.status if pq_info.state else None
+                state_name = status_obj.name if status_obj is not None else "UNKNOWN"
 
                 # Success
                 item_result["success"] = True
                 item_result["name"] = pq_name
                 item_result["state"] = state_name
+                item_result["state_category"] = _pq_state_category(state_name)
 
                 # Add session_id if running (session_id uses name, not serial)
                 _add_session_id_if_running(
-                    item_result, state_name, system_name, pq_name
+                    item_result, status_obj, pq_name, system_name
                 )
 
                 _LOGGER.debug(
@@ -3191,6 +3226,7 @@ async def pq_restart(
                         "success": False,
                         "name": None,
                         "state": None,
+                        "state_category": None,
                         "session_id": None,
                         "error": f"Unexpected error: {type(r).__name__}: {r}",
                     }
@@ -3238,3 +3274,23 @@ async def pq_restart(
         result["isError"] = True
 
     return result
+
+
+def register_tools(server: FastMCP) -> None:
+    """Register all persistent query (PQ) tools with the given FastMCP server.
+
+    These tools are specific to the DHE server and should NOT be registered
+    on the DHC server.
+
+    Args:
+        server (FastMCP): The server to register tools with.
+    """
+    server.tool()(pq_name_to_id)
+    server.tool()(pq_list)
+    server.tool()(pq_details)
+    server.tool()(pq_create)
+    server.tool()(pq_delete)
+    server.tool()(pq_modify)
+    server.tool()(pq_start)
+    server.tool()(pq_stop)
+    server.tool()(pq_restart)

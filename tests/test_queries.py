@@ -5,16 +5,23 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pyarrow
 import pytest
 
-from deephaven_mcp._exceptions import UnsupportedOperationError
+from deephaven_mcp._exceptions import InternalError, UnsupportedOperationError
 from deephaven_mcp.queries import (
     _apply_filters,
     _apply_row_limit,
     _extract_meta_table,
+    _extract_partition_column_defs,
+    _find_recent_partition_filters,
+    _format_partition_filter,
+    _get_distinct_column_values,
     _load_catalog_table,
     _validate_python_session,
+    find_catalog_table_recent_partition,
     get_catalog_meta_table,
     get_catalog_table,
     get_catalog_table_data,
+    get_catalog_table_partition_columns,
+    get_catalog_table_partition_values,
     get_dh_versions,
     get_pip_packages_table,
     get_programming_language_version,
@@ -104,11 +111,11 @@ async def test_apply_filters_empty_list():
 
 @pytest.mark.asyncio
 async def test_apply_row_limit_with_head_complete():
-    """Test _apply_row_limit with head=True when table is smaller than max_rows."""
+    """Test _apply_row_limit with head=True when probe size is smaller than max_rows."""
     table_mock = MagicMock()
-    table_mock.size = 500
-    limited_table_mock = MagicMock()
-    table_mock.head = lambda n: limited_table_mock
+    probe_table_mock = MagicMock()
+    probe_table_mock.size = 500  # probe got 500 < max_rows=1000
+    table_mock.head = MagicMock(return_value=probe_table_mock)
 
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
@@ -117,17 +124,20 @@ async def test_apply_row_limit_with_head_complete():
         result_table, is_complete = await _apply_row_limit(
             table_mock, max_rows=1000, head=True, context_name="test table"
         )
-        assert result_table is limited_table_mock
-        assert is_complete is True  # 500 <= 1000
+        table_mock.head.assert_called_once_with(1001)  # probe = max_rows + 1
+        assert result_table is probe_table_mock  # probe itself returned (complete)
+        assert is_complete is True
 
 
 @pytest.mark.asyncio
 async def test_apply_row_limit_with_head_incomplete():
-    """Test _apply_row_limit with head=True when table is larger than max_rows."""
+    """Test _apply_row_limit with head=True when probe size exceeds max_rows."""
     table_mock = MagicMock()
-    table_mock.size = 2000
+    probe_table_mock = MagicMock()
+    probe_table_mock.size = 1001  # probe got 1001 > max_rows=1000
     limited_table_mock = MagicMock()
-    table_mock.head = lambda n: limited_table_mock
+    # head is called twice: once for probe (1001), once for actual limit (1000)
+    table_mock.head = MagicMock(side_effect=[probe_table_mock, limited_table_mock])
 
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
@@ -136,17 +146,19 @@ async def test_apply_row_limit_with_head_incomplete():
         result_table, is_complete = await _apply_row_limit(
             table_mock, max_rows=1000, head=True, context_name="test table"
         )
+        assert table_mock.head.call_args_list[0][0][0] == 1001  # probe
+        assert table_mock.head.call_args_list[1][0][0] == 1000  # actual limit
         assert result_table is limited_table_mock
-        assert is_complete is False  # 2000 > 1000
+        assert is_complete is False
 
 
 @pytest.mark.asyncio
 async def test_apply_row_limit_with_tail_complete():
-    """Test _apply_row_limit with head=False (tail) when table is smaller than max_rows."""
+    """Test _apply_row_limit with head=False (tail) when probe size is smaller than max_rows."""
     table_mock = MagicMock()
-    table_mock.size = 500
-    limited_table_mock = MagicMock()
-    table_mock.tail = lambda n: limited_table_mock
+    probe_table_mock = MagicMock()
+    probe_table_mock.size = 500  # probe got 500 < max_rows=1000
+    table_mock.tail = MagicMock(return_value=probe_table_mock)
 
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
@@ -155,17 +167,19 @@ async def test_apply_row_limit_with_tail_complete():
         result_table, is_complete = await _apply_row_limit(
             table_mock, max_rows=1000, head=False, context_name="test table"
         )
-        assert result_table is limited_table_mock
-        assert is_complete is True  # 500 <= 1000
+        table_mock.tail.assert_called_once_with(1001)
+        assert result_table is probe_table_mock
+        assert is_complete is True
 
 
 @pytest.mark.asyncio
 async def test_apply_row_limit_with_tail_incomplete():
-    """Test _apply_row_limit with head=False (tail) when table is larger than max_rows."""
+    """Test _apply_row_limit with head=False (tail) when probe size exceeds max_rows."""
     table_mock = MagicMock()
-    table_mock.size = 2000
+    probe_table_mock = MagicMock()
+    probe_table_mock.size = 1001  # probe got 1001 > max_rows=1000
     limited_table_mock = MagicMock()
-    table_mock.tail = lambda n: limited_table_mock
+    table_mock.tail = MagicMock(side_effect=[probe_table_mock, limited_table_mock])
 
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
@@ -174,8 +188,10 @@ async def test_apply_row_limit_with_tail_incomplete():
         result_table, is_complete = await _apply_row_limit(
             table_mock, max_rows=1000, head=False, context_name="test table"
         )
+        assert table_mock.tail.call_args_list[0][0][0] == 1001  # probe
+        assert table_mock.tail.call_args_list[1][0][0] == 1000  # actual limit
         assert result_table is limited_table_mock
-        assert is_complete is False  # 2000 > 1000
+        assert is_complete is False
 
 
 @pytest.mark.asyncio
@@ -192,11 +208,11 @@ async def test_apply_row_limit_no_limit():
 
 @pytest.mark.asyncio
 async def test_apply_row_limit_exact_size_match():
-    """Test _apply_row_limit when table size exactly matches max_rows."""
+    """Test _apply_row_limit when table has exactly max_rows rows (probe.size == max_rows)."""
     table_mock = MagicMock()
-    table_mock.size = 1000
-    limited_table_mock = MagicMock()
-    table_mock.head = lambda n: limited_table_mock
+    probe_table_mock = MagicMock()
+    probe_table_mock.size = 1000  # probe got exactly max_rows — not > max_rows
+    table_mock.head = MagicMock(return_value=probe_table_mock)
 
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
@@ -205,8 +221,56 @@ async def test_apply_row_limit_exact_size_match():
         result_table, is_complete = await _apply_row_limit(
             table_mock, max_rows=1000, head=True, context_name="test table"
         )
+        table_mock.head.assert_called_once_with(1001)
+        assert result_table is probe_table_mock  # probe returned as-is
+        assert is_complete is True
+
+
+@pytest.mark.asyncio
+async def test_apply_row_limit_unreliable_table_size_regression():
+    """Regression: is_complete must be False even when table.size appears smaller than max_rows.
+
+    Reproduces the reported bug where catalog_tables_list with max_rows=5 returned
+    is_complete=True for a catalog with 986 tables, because table.size returned 0
+    (live/ticking table not yet fully populated) before data arrived.  The probe-based
+    fix checks probe_table.size instead, which is reliable for bounded head/tail views.
+    """
+    table_mock = MagicMock()
+    table_mock.size = 0  # unreliable: live table not yet populated
+    probe_table_mock = MagicMock()
+    probe_table_mock.size = 6  # probe correctly sees 6 rows (> max_rows=5)
+    limited_table_mock = MagicMock()
+    table_mock.head = MagicMock(side_effect=[probe_table_mock, limited_table_mock])
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with patch("deephaven_mcp.queries.asyncio.to_thread", new=fake_to_thread):
+        result_table, is_complete = await _apply_row_limit(
+            table_mock, max_rows=5, head=True, context_name="catalog table"
+        )
+        # Old buggy code used table.size: 0 <= 5 → is_complete=True (wrong)
+        # Probe fix uses probe_table.size: 6 > 5 → is_complete=False (correct)
         assert result_table is limited_table_mock
-        assert is_complete is True  # 1000 <= 1000
+        assert is_complete is False
+
+
+@pytest.mark.asyncio
+async def test_apply_row_limit_size_none_raises_internal_error():
+    """_apply_row_limit raises InternalError if probe_table.size returns None."""
+    table_mock = MagicMock()
+    probe_table_mock = MagicMock()
+    probe_table_mock.size = None
+    table_mock.head = MagicMock(return_value=probe_table_mock)
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with patch("deephaven_mcp.queries.asyncio.to_thread", new=fake_to_thread):
+        with pytest.raises(InternalError):
+            await _apply_row_limit(
+                table_mock, max_rows=1000, head=True, context_name="test table"
+            )
 
 
 # ===== get_table tests =====
@@ -260,6 +324,7 @@ async def test_get_table_head_complete_table():
     original_table_mock = MagicMock()
     original_table_mock.size = 500  # Table has 500 rows
     head_table_mock = MagicMock()
+    head_table_mock.size = 500  # probe size also 500 < max_rows=1000
     arrow_mock = MagicMock(spec=pyarrow.Table)
     arrow_mock.__len__ = lambda: 500  # Arrow table also has 500 rows
     head_table_mock.to_arrow = lambda: arrow_mock
@@ -284,11 +349,15 @@ async def test_get_table_head_incomplete_table():
     """Test get_table with head=True when table is larger than max_rows"""
     original_table_mock = MagicMock()
     original_table_mock.size = 2000  # Table has 2000 rows
-    head_table_mock = MagicMock()
+    probe_table_mock = MagicMock()
+    probe_table_mock.size = 1001  # probe gets 1001 > max_rows=1000
+    limited_table_mock = MagicMock()
     arrow_mock = MagicMock(spec=pyarrow.Table)
     arrow_mock.__len__ = lambda: 1000  # Arrow table has 1000 rows (limited)
-    head_table_mock.to_arrow = lambda: arrow_mock
-    original_table_mock.head = lambda n: head_table_mock
+    limited_table_mock.to_arrow = lambda: arrow_mock
+    original_table_mock.head = MagicMock(
+        side_effect=[probe_table_mock, limited_table_mock]
+    )
 
     session_mock = MagicMock()
     session_mock.open_table = AsyncMock(return_value=original_table_mock)
@@ -301,7 +370,7 @@ async def test_get_table_head_incomplete_table():
             session_mock, "foo", max_rows=1000, head=True
         )
         assert result_table is arrow_mock
-        assert is_complete is False  # 2000 > 1000, so incomplete
+        assert is_complete is False  # probe_size 1001 > 1000
 
 
 @pytest.mark.asyncio
@@ -310,6 +379,7 @@ async def test_get_table_tail_complete_table():
     original_table_mock = MagicMock()
     original_table_mock.size = 300  # Table has 300 rows
     tail_table_mock = MagicMock()
+    tail_table_mock.size = 300  # probe size 300 < max_rows=500
     arrow_mock = MagicMock(spec=pyarrow.Table)
     arrow_mock.__len__ = lambda: 300  # Arrow table has 300 rows
     tail_table_mock.to_arrow = lambda: arrow_mock
@@ -334,11 +404,15 @@ async def test_get_table_tail_incomplete_table():
     """Test get_table with head=False (tail) when table is larger than max_rows"""
     original_table_mock = MagicMock()
     original_table_mock.size = 1500  # Table has 1500 rows
-    tail_table_mock = MagicMock()
+    probe_table_mock = MagicMock()
+    probe_table_mock.size = 801  # probe gets 801 > max_rows=800
+    limited_table_mock = MagicMock()
     arrow_mock = MagicMock(spec=pyarrow.Table)
     arrow_mock.__len__ = lambda: 800  # Arrow table has 800 rows (limited)
-    tail_table_mock.to_arrow = lambda: arrow_mock
-    original_table_mock.tail = lambda n: tail_table_mock
+    limited_table_mock.to_arrow = lambda: arrow_mock
+    original_table_mock.tail = MagicMock(
+        side_effect=[probe_table_mock, limited_table_mock]
+    )
 
     session_mock = MagicMock()
     session_mock.open_table = AsyncMock(return_value=original_table_mock)
@@ -351,7 +425,7 @@ async def test_get_table_tail_incomplete_table():
             session_mock, "foo", max_rows=800, head=False
         )
         assert result_table is arrow_mock
-        assert is_complete is False  # 1500 > 800, so incomplete
+        assert is_complete is False  # probe_size 801 > 800
 
 
 @pytest.mark.asyncio
@@ -360,6 +434,7 @@ async def test_get_table_exact_size_match():
     original_table_mock = MagicMock()
     original_table_mock.size = 1000  # Table has exactly 1000 rows
     head_table_mock = MagicMock()
+    head_table_mock.size = 1000  # probe size == max_rows (not > max_rows)
     arrow_mock = MagicMock(spec=pyarrow.Table)
     arrow_mock.__len__ = lambda: 1000  # Arrow table has 1000 rows
     head_table_mock.to_arrow = lambda: arrow_mock
@@ -541,6 +616,11 @@ async def test_get_pip_packages_table_success(caplog):
             mock_get_table.assert_awaited_once_with(
                 session_mock, "_pip_packages_table", max_rows=None
             )
+            # Verify the script deduplicates packages by name (distributions() can yield
+            # the same package multiple times from different path finders).
+            script_arg = session_mock.run_script.call_args[0][0]
+            assert "seen" in script_arg, "Script must deduplicate distributions by name"
+            assert "if name not in seen" in script_arg
 
 
 @pytest.mark.asyncio
@@ -911,10 +991,14 @@ async def test_get_catalog_table_success_no_filters():
     # Create mock catalog table
     catalog_table_mock = MagicMock()
     catalog_table_mock.size = 5000
+    probe_table_mock = MagicMock()
+    probe_table_mock.size = 1001  # probe size 1001 > max_rows=1000
     limited_table_mock = MagicMock()
     arrow_mock = MagicMock(spec=pyarrow.Table)
     limited_table_mock.to_arrow = lambda: arrow_mock
-    catalog_table_mock.head = lambda n: limited_table_mock
+    catalog_table_mock.head = MagicMock(
+        side_effect=[probe_table_mock, limited_table_mock]
+    )
 
     # Create mock session
     session_mock = MagicMock(spec=CorePlusSession)
@@ -928,7 +1012,7 @@ async def test_get_catalog_table_success_no_filters():
             session_mock, max_rows=1000, filters=None, distinct_namespaces=False
         )
         assert result_table is arrow_mock
-        assert is_complete is False  # 5000 > 1000, so incomplete
+        assert is_complete is False  # probe_size 1001 > 1000
         session_mock.catalog_table.assert_awaited_once()
 
 
@@ -939,7 +1023,7 @@ async def test_get_catalog_table_success_with_filters():
 
     # Create mock filtered table
     filtered_table_mock = MagicMock()
-    filtered_table_mock.size = 50
+    filtered_table_mock.size = 50  # probe size 50 < max_rows=1000
     filtered_table_mock.head = lambda n: filtered_table_mock
     arrow_mock = MagicMock(spec=pyarrow.Table)
     filtered_table_mock.to_arrow = lambda: arrow_mock
@@ -1062,7 +1146,7 @@ async def test_get_catalog_table_distinct_namespaces_success_no_filters():
 
     # Create mock namespace table (after sort)
     sorted_namespace_table_mock = MagicMock()
-    sorted_namespace_table_mock.size = 50
+    sorted_namespace_table_mock.size = 50  # probe size 50 < max_rows=1000
     sorted_namespace_table_mock.head = lambda n: sorted_namespace_table_mock
     arrow_mock = MagicMock(spec=pyarrow.Table)
     sorted_namespace_table_mock.to_arrow = lambda: arrow_mock
@@ -1098,7 +1182,7 @@ async def test_get_catalog_namespaces_success_with_filters():
 
     # Create mock filtered namespace table (after where)
     filtered_namespace_table_mock = MagicMock()
-    filtered_namespace_table_mock.size = 10
+    filtered_namespace_table_mock.size = 10  # probe size 10 < max_rows=1000
     filtered_namespace_table_mock.head = lambda n: filtered_namespace_table_mock
     arrow_mock = MagicMock(spec=pyarrow.Table)
     filtered_namespace_table_mock.to_arrow = lambda: arrow_mock
@@ -1173,7 +1257,9 @@ async def test_get_catalog_namespaces_incomplete():
     from deephaven_mcp.client import CorePlusSession
     from deephaven_mcp.queries import get_catalog_table
 
-    # Create mock limited table (after head)
+    # Create mock probe table and limited table (head called twice: probe then actual limit)
+    probe_table_mock = MagicMock()
+    probe_table_mock.size = 1001  # probe size 1001 > max_rows=1000
     limited_table_mock = MagicMock()
     arrow_mock = MagicMock(spec=pyarrow.Table)
     limited_table_mock.to_arrow = lambda: arrow_mock
@@ -1181,7 +1267,9 @@ async def test_get_catalog_namespaces_incomplete():
     # Create mock sorted namespace table with more rows than max_rows
     sorted_namespace_table_mock = MagicMock()
     sorted_namespace_table_mock.size = 2000
-    sorted_namespace_table_mock.head = lambda n: limited_table_mock
+    sorted_namespace_table_mock.head = MagicMock(
+        side_effect=[probe_table_mock, limited_table_mock]
+    )
 
     # Create mock namespace table (after select_distinct)
     namespace_table_mock = MagicMock()
@@ -1203,7 +1291,7 @@ async def test_get_catalog_namespaces_incomplete():
             session_mock, max_rows=1000, distinct_namespaces=True
         )
         assert result_table is arrow_mock
-        assert is_complete is False  # 2000 > 1000, so incomplete
+        assert is_complete is False  # probe_size 1001 > 1000
 
 
 @pytest.mark.asyncio
@@ -1407,14 +1495,13 @@ async def test_get_catalog_table_data_success_with_limit():
     session_mock = MagicMock(spec=CorePlusSession)
     mock_table = MagicMock()
     mock_limited_table = MagicMock()
+    mock_probe_table = MagicMock()
+    mock_probe_table.size = 101  # probe size 101 > max_rows=100
     mock_arrow_table = MagicMock(spec=pyarrow.Table)
     mock_arrow_table.num_rows = 100
 
-    # Mock table size
-    mock_table.size = 1000
-
-    # Mock head() for row limiting
-    mock_table.head = MagicMock(return_value=mock_limited_table)
+    # head called twice: probe (101) then actual limit (100)
+    mock_table.head = MagicMock(side_effect=[mock_probe_table, mock_limited_table])
     mock_limited_table.to_arrow = MagicMock(return_value=mock_arrow_table)
 
     # historical_table succeeds
@@ -1429,10 +1516,11 @@ async def test_get_catalog_table_data_success_with_limit():
             session_mock, "market_data", "daily_prices", max_rows=100, head=True
         )
 
+    assert mock_table.head.call_args_list[0][0][0] == 101  # probe
+    assert mock_table.head.call_args_list[1][0][0] == 100  # actual limit
     assert result is mock_arrow_table
-    assert is_complete is False  # 100 rows retrieved from 1000 total
+    assert is_complete is False  # probe_size 101 > 100
     session_mock.historical_table.assert_called_once_with("market_data", "daily_prices")
-    mock_table.head.assert_called_once_with(100)
 
 
 @pytest.mark.asyncio
@@ -1474,14 +1562,13 @@ async def test_get_catalog_table_data_with_tail():
     session_mock = MagicMock(spec=CorePlusSession)
     mock_table = MagicMock()
     mock_limited_table = MagicMock()
+    mock_probe_table = MagicMock()
+    mock_probe_table.size = 51  # probe size 51 > max_rows=50
     mock_arrow_table = MagicMock(spec=pyarrow.Table)
     mock_arrow_table.num_rows = 50
 
-    # Mock table size
-    mock_table.size = 1000
-
-    # Mock tail() for row limiting
-    mock_table.tail = MagicMock(return_value=mock_limited_table)
+    # tail called twice: probe (51) then actual limit (50)
+    mock_table.tail = MagicMock(side_effect=[mock_probe_table, mock_limited_table])
     mock_limited_table.to_arrow = MagicMock(return_value=mock_arrow_table)
 
     # historical_table succeeds
@@ -1496,10 +1583,11 @@ async def test_get_catalog_table_data_with_tail():
             session_mock, "market_data", "trades", max_rows=50, head=False
         )
 
+    assert mock_table.tail.call_args_list[0][0][0] == 51  # probe
+    assert mock_table.tail.call_args_list[1][0][0] == 50  # actual limit
     assert result is mock_arrow_table
-    assert is_complete is False  # 50 rows retrieved from 1000 total
+    assert is_complete is False  # probe_size 51 > 50
     session_mock.historical_table.assert_called_once_with("market_data", "trades")
-    mock_table.tail.assert_called_once_with(50)
 
 
 @pytest.mark.asyncio
@@ -1557,3 +1645,269 @@ async def test_get_catalog_table_data_load_failure():
         await get_catalog_table_data(
             session_mock, "market_data", "missing_table", max_rows=100
         )
+
+
+# ===== _find_recent_partition_filters branch coverage =====
+
+
+@pytest.mark.asyncio
+async def test_find_recent_partition_filters_empty_distinct_values():
+    """_find_recent_partition_filters returns None when no distinct values exist."""
+    mock_table = MagicMock()
+
+    with (
+        patch("deephaven_mcp.queries._extract_partition_column_defs") as mock_extract,
+        patch("deephaven_mcp.queries._get_distinct_column_values") as mock_distinct,
+    ):
+        mock_extract.return_value = [{"name": "Date", "type": "java.time.LocalDate"}]
+        mock_distinct.return_value = []
+
+        result = await _find_recent_partition_filters(
+            mock_table, "DbInternal", "ProcessEventLog"
+        )
+
+    assert result is None
+    mock_table.where.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_find_recent_partition_filters_none_value_skipped():
+    """_find_recent_partition_filters skips None values in distinct list."""
+    mock_table = MagicMock()
+    mock_table.where.return_value.size = 1
+
+    with (
+        patch("deephaven_mcp.queries._extract_partition_column_defs") as mock_extract,
+        patch("deephaven_mcp.queries._get_distinct_column_values") as mock_distinct,
+    ):
+        mock_extract.return_value = [{"name": "Date", "type": "java.time.LocalDate"}]
+        # First value is None (skipped), second has data
+        mock_distinct.return_value = [None, "2024-01-14"]
+
+        async def fake_to_thread(fn, *args, **kwargs):
+            return fn(*args, **kwargs)
+
+        with patch("deephaven_mcp.queries.asyncio.to_thread", new=fake_to_thread):
+            result = await _find_recent_partition_filters(
+                mock_table, "DbInternal", "ProcessEventLog"
+            )
+
+    # None was skipped; "2024-01-14" should be returned
+    assert result == ["Date == `2024-01-14`"]
+    mock_table.where.assert_called_once_with(["Date == `2024-01-14`"])
+
+
+@pytest.mark.asyncio
+async def test_find_recent_partition_filters_probe_exception_warns_and_continues():
+    """_find_recent_partition_filters logs WARNING on probe exception and tries next value."""
+    mock_table = MagicMock()
+
+    call_count = {"n": 0}
+
+    def where_side_effect(f):
+        idx = call_count["n"]
+        call_count["n"] += 1
+        m = MagicMock()
+        if idx == 0:
+            raise RuntimeError("access denied for partition 2024-01-15")
+        m.size = 3
+        return m
+
+    mock_table.where.side_effect = where_side_effect
+
+    with (
+        patch("deephaven_mcp.queries._extract_partition_column_defs") as mock_extract,
+        patch("deephaven_mcp.queries._get_distinct_column_values") as mock_distinct,
+    ):
+        mock_extract.return_value = [{"name": "Date", "type": "java.time.LocalDate"}]
+        mock_distinct.return_value = ["2024-01-15", "2024-01-14"]
+
+        async def fake_to_thread(fn, *args, **kwargs):
+            return fn(*args, **kwargs)
+
+        with patch("deephaven_mcp.queries.asyncio.to_thread", new=fake_to_thread):
+            result = await _find_recent_partition_filters(
+                mock_table, "DbInternal", "ProcessEventLog"
+            )
+
+    # First probe raised, second probe succeeded
+    assert result == ["Date == `2024-01-14`"]
+
+
+@pytest.mark.asyncio
+async def test_find_recent_partition_filters_size_none_raises_internal_error():
+    """_find_recent_partition_filters raises InternalError if table.where().size returns None."""
+    mock_table = MagicMock()
+    mock_table.where.return_value.size = None
+
+    with (
+        patch("deephaven_mcp.queries._extract_partition_column_defs") as mock_extract,
+        patch("deephaven_mcp.queries._get_distinct_column_values") as mock_distinct,
+    ):
+        mock_extract.return_value = [{"name": "Date", "type": "java.time.LocalDate"}]
+        mock_distinct.return_value = ["2024-01-15"]
+
+        async def fake_to_thread(fn, *args, **kwargs):
+            return fn(*args, **kwargs)
+
+        with patch("deephaven_mcp.queries.asyncio.to_thread", new=fake_to_thread):
+            with pytest.raises(InternalError):
+                await _find_recent_partition_filters(
+                    mock_table, "DbInternal", "ProcessEventLog"
+                )
+
+
+# ===== Public partition utility function tests =====
+
+
+@pytest.mark.asyncio
+async def test_get_catalog_table_partition_columns_success():
+    """get_catalog_table_partition_columns loads table and extracts partition column defs."""
+    from deephaven_mcp.client import CorePlusSession
+
+    session_mock = MagicMock(spec=CorePlusSession)
+    mock_table = MagicMock()
+    expected = [{"name": "Date", "type": "java.time.LocalDate"}]
+
+    with (
+        patch("deephaven_mcp.queries._load_catalog_table") as mock_load,
+        patch("deephaven_mcp.queries._extract_partition_column_defs") as mock_extract,
+    ):
+        mock_load.return_value = mock_table
+        mock_extract.return_value = expected
+
+        result = await get_catalog_table_partition_columns(
+            session_mock, "DbInternal", "ProcessEventLog"
+        )
+
+    assert result == expected
+    mock_load.assert_called_once_with(session_mock, "DbInternal", "ProcessEventLog")
+    mock_extract.assert_called_once_with(mock_table)
+
+
+@pytest.mark.asyncio
+async def test_get_catalog_table_partition_values_success():
+    """get_catalog_table_partition_values loads table and returns distinct values."""
+    from deephaven_mcp.client import CorePlusSession
+
+    session_mock = MagicMock(spec=CorePlusSession)
+    mock_table = MagicMock()
+    expected = ["2024-01-15", "2024-01-14"]
+
+    with (
+        patch("deephaven_mcp.queries._load_catalog_table") as mock_load,
+        patch("deephaven_mcp.queries._get_distinct_column_values") as mock_distinct,
+    ):
+        mock_load.return_value = mock_table
+        mock_distinct.return_value = expected
+
+        result = await get_catalog_table_partition_values(
+            session_mock, "DbInternal", "ProcessEventLog", "Date"
+        )
+
+    assert result == expected
+    mock_load.assert_called_once_with(session_mock, "DbInternal", "ProcessEventLog")
+    mock_distinct.assert_called_once_with(mock_table, "Date", descending=True)
+
+
+@pytest.mark.asyncio
+async def test_find_catalog_table_recent_partition_success():
+    """find_catalog_table_recent_partition loads table and delegates to _find_recent_partition_filters."""
+    from deephaven_mcp.client import CorePlusSession
+
+    session_mock = MagicMock(spec=CorePlusSession)
+    mock_table = MagicMock()
+    expected = ["Date == `2024-01-15`"]
+
+    with (
+        patch("deephaven_mcp.queries._load_catalog_table") as mock_load,
+        patch("deephaven_mcp.queries._find_recent_partition_filters") as mock_find,
+    ):
+        mock_load.return_value = mock_table
+        mock_find.return_value = expected
+
+        result = await find_catalog_table_recent_partition(
+            session_mock, "DbInternal", "ProcessEventLog"
+        )
+
+    assert result == expected
+    mock_load.assert_called_once_with(session_mock, "DbInternal", "ProcessEventLog")
+    mock_find.assert_called_once_with(mock_table, "DbInternal", "ProcessEventLog")
+
+
+# ===== get_catalog_table_data auto-detection branch coverage =====
+
+
+@pytest.mark.asyncio
+async def test_get_catalog_table_data_auto_detect_logs_when_filters_found():
+    """get_catalog_table_data logs INFO when auto-detection returns filters."""
+    from deephaven_mcp.client import CorePlusSession
+
+    session_mock = MagicMock(spec=CorePlusSession)
+    mock_table = MagicMock()
+    mock_arrow_table = MagicMock(spec=pyarrow.Table)
+
+    # After _apply_filters calls table.where(filters), we get filtered_table.
+    # _apply_row_limit then calls filtered_table.head(probe_n).
+    filtered_table = mock_table.where.return_value
+    probe_table = filtered_table.head.return_value
+    probe_table.size = 3  # 3 <= 10 → is_complete=True
+    probe_table.to_arrow.return_value = mock_arrow_table
+
+    session_mock.historical_table = AsyncMock(return_value=mock_table)
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    auto_filters = ["Date == `2024-01-15`"]
+
+    with (
+        patch("deephaven_mcp.queries._find_recent_partition_filters") as mock_find,
+        patch("deephaven_mcp.queries.asyncio.to_thread", new=fake_to_thread),
+    ):
+        mock_find.return_value = auto_filters
+
+        result, is_complete = await get_catalog_table_data(
+            session_mock, "DbInternal", "ProcessEventLog", max_rows=10, filters=None
+        )
+
+    assert is_complete is True
+    mock_find.assert_called_once()
+    # Verify auto-detected filters were applied via table.where(auto_filters)
+    mock_table.where.assert_called_once_with(auto_filters)
+
+
+@pytest.mark.asyncio
+async def test_get_catalog_table_data_auto_detect_exception_warns_and_proceeds():
+    """get_catalog_table_data logs WARNING and proceeds without filter when auto-detection raises."""
+    from deephaven_mcp.client import CorePlusSession
+
+    session_mock = MagicMock(spec=CorePlusSession)
+    mock_table = MagicMock()
+    mock_arrow_table = MagicMock(spec=pyarrow.Table)
+
+    # No filter applied after exception; _apply_row_limit runs directly on mock_table.
+    probe_table = mock_table.head.return_value
+    probe_table.size = 3  # 3 <= 10 → is_complete=True
+    probe_table.to_arrow.return_value = mock_arrow_table
+
+    session_mock.historical_table = AsyncMock(return_value=mock_table)
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch("deephaven_mcp.queries._find_recent_partition_filters") as mock_find,
+        patch("deephaven_mcp.queries.asyncio.to_thread", new=fake_to_thread),
+    ):
+        mock_find.side_effect = RuntimeError("meta table unavailable")
+
+        # Should NOT raise — auto-detect failure is recoverable
+        result, is_complete = await get_catalog_table_data(
+            session_mock, "DbInternal", "ProcessEventLog", max_rows=10, filters=None
+        )
+
+    assert is_complete is True
+    mock_find.assert_called_once()
+    # No where() filter applied (auto-detect failed, graceful degradation)
+    mock_table.where.assert_not_called()

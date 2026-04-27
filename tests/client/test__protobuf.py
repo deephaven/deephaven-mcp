@@ -137,6 +137,50 @@ def test_coreplus_query_info_handles_missing_state(monkeypatch):
     assert info.spares == []
 
 
+def test_coreplus_query_status_name_strips_pqs_prefix(monkeypatch):
+    """``name`` must strip a leading ``PQS_`` prefix from the raw library output."""
+    monkeypatch.setattr(
+        _protobuf,
+        "ControllerClient",
+        type("CC", (), {"status_name": staticmethod(lambda x: "PQS_RUNNING")}),
+    )
+    status = _protobuf.CorePlusQueryStatus(object())
+    assert status.name == "RUNNING"
+    # __str__ and string equality use .name, so they must see the stripped form.
+    assert str(status) == "RUNNING"
+    assert status == "RUNNING"
+
+
+def test_coreplus_query_status_name_passthrough_when_no_prefix(monkeypatch):
+    """If the library ever returns an unprefixed name, pass it through unchanged."""
+    monkeypatch.setattr(
+        _protobuf,
+        "ControllerClient",
+        type("CC", (), {"status_name": staticmethod(lambda x: "RUNNING")}),
+    )
+    status = _protobuf.CorePlusQueryStatus(object())
+    assert status.name == "RUNNING"
+
+
+def test_coreplus_query_status_is_initializing(monkeypatch):
+    """``is_initializing`` must return True only when the stripped name is INITIALIZING."""
+    # INITIALIZING case (raw name carries the PQS_ prefix).
+    monkeypatch.setattr(
+        _protobuf,
+        "ControllerClient",
+        type("CC", (), {"status_name": staticmethod(lambda x: "PQS_INITIALIZING")}),
+    )
+    assert _protobuf.CorePlusQueryStatus(object()).is_initializing is True
+
+    # Non-initializing case.
+    monkeypatch.setattr(
+        _protobuf,
+        "ControllerClient",
+        type("CC", (), {"status_name": staticmethod(lambda x: "PQS_RUNNING")}),
+    )
+    assert _protobuf.CorePlusQueryStatus(object()).is_initializing is False
+
+
 def test_coreplus_query_status_comparisons(monkeypatch):
     # Patch ControllerClient for is_running, etc.
     monkeypatch.setattr(
@@ -184,3 +228,33 @@ def test_coreplus_query_status_comparisons(monkeypatch):
     assert status == 1
     assert status == pb_enum
     assert str(status) == "RUNNING"
+
+
+# ---------------------------------------------------------------------------
+# PQ_STATES
+# ---------------------------------------------------------------------------
+
+
+def test_pq_states_is_state_to_category_map():
+    """PQ_STATES maps every state string to one of the four valid category strings."""
+    valid_categories = {"ACTIVE", "TRANSITIONAL", "TERMINAL", "INVALID"}
+    assert isinstance(_protobuf.PQ_STATES, dict)
+    for state, category in _protobuf.PQ_STATES.items():
+        assert isinstance(state, str)
+        assert (
+            category in valid_categories
+        ), f"{state!r} maps to unknown category {category!r}"
+
+
+def test_pq_states_known_mappings():
+    pq_states = _protobuf.PQ_STATES
+    assert pq_states["RUNNING"] == "ACTIVE"
+    assert pq_states["EXECUTING"] == "ACTIVE"
+    assert pq_states["CONNECTING"] == "TRANSITIONAL"
+    assert pq_states["INITIALIZING"] == "TRANSITIONAL"
+    assert pq_states["UNINITIALIZED"] == "TRANSITIONAL"
+    assert pq_states["STOPPED"] == "TERMINAL"
+    assert pq_states["FAILED"] == "TERMINAL"
+    assert pq_states["COMPLETED"] == "TERMINAL"
+    assert pq_states["KILLED"] == "TERMINAL"
+    assert pq_states["UNSPECIFIED"] == "INVALID"

@@ -1,5 +1,4 @@
-"""
-Catalog MCP Tools - Enterprise Core+ Data Catalog Operations.
+"""Catalog MCP Tools - Enterprise Core+ Data Catalog Operations.
 
 Provides MCP tools for querying Deephaven Enterprise (Core+) data catalogs:
 - catalog_tables_list: List all tables across catalog namespaces
@@ -13,20 +12,17 @@ These tools require Deephaven Enterprise (Core+) and are not available in Commun
 import logging
 from typing import cast
 
-from mcp.server.fastmcp import Context
+from mcp.server.fastmcp import Context, FastMCP
 
 from deephaven_mcp import queries
 from deephaven_mcp._exceptions import UnsupportedOperationError
 from deephaven_mcp.client import CorePlusSession
 from deephaven_mcp.formatters import format_table_data
-from deephaven_mcp.mcp_systems_server._tools.mcp_server import (
-    mcp_server,
-)
 from deephaven_mcp.mcp_systems_server._tools.shared import (
-    _check_response_size,
-    _format_meta_table_result,
-    _get_enterprise_session,
-    _get_session_from_context,
+    check_response_size,
+    format_meta_table_result,
+    get_enterprise_session,
+    get_session_from_context,
 )
 from deephaven_mcp.mcp_systems_server._tools.table import (
     ESTIMATED_BYTES_PER_CELL,
@@ -46,8 +42,7 @@ async def _get_catalog_data(
     format: str,
     tool_name: str,
 ) -> dict:
-    """
-    Retrieve catalog data (tables or namespaces) from an enterprise session.
+    """Retrieve catalog data (tables or namespaces) from an enterprise session.
 
     Internal helper function that consolidates common catalog retrieval logic.
 
@@ -77,7 +72,7 @@ async def _get_catalog_data(
 
     try:
         # Use helper to get session from context
-        session = await _get_session_from_context(tool_name, context, session_id)
+        session = await get_session_from_context(tool_name, context, session_id)
 
         # Get catalog data using queries module (includes enterprise check and filtering)
         _LOGGER.debug(
@@ -97,7 +92,7 @@ async def _get_catalog_data(
 
         # Estimate response size for safety
         estimated_size = arrow_table.nbytes
-        size_check_result = _check_response_size(tool_name, estimated_size)
+        size_check_result = check_response_size(tool_name, estimated_size)
         if size_check_result:
             return size_check_result
 
@@ -164,7 +159,6 @@ async def _get_catalog_data(
     return result
 
 
-@mcp_server.tool()
 async def catalog_tables_list(
     context: Context,
     session_id: str,
@@ -172,8 +166,7 @@ async def catalog_tables_list(
     filters: list[str] | None = None,
     format: str = "optimize-rendering",
 ) -> dict:
-    """
-    MCP Tool: Retrieve catalog entries as a TABULAR LIST from a Deephaven Enterprise (Core+) session.
+    """MCP Tool: Retrieve catalog entries as a TABULAR LIST from a Deephaven Enterprise (Core+) session.
 
     **Returns**: Catalog table entries formatted as TABULAR DATA for display. Each row represents
     a table available in the enterprise catalog/database. This tabular data should be displayed as a table
@@ -199,11 +192,13 @@ async def catalog_tables_list(
 
     Terminology Note:
     - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
-    - 'ENTERPRISE' sessions run Deephaven Enterprise (also called 'Core+' or 'CorePlus')
-    - This tool only works with enterprise sessions; community sessions do not have catalog tables
-    - 'Catalog' and 'database' are interchangeable terms - the catalog is the database of available tables
+    - 'Deephaven Community' and 'Deephaven Core' are interchangeable names for the same product
+    - 'Deephaven Enterprise', 'Deephaven Core+', and 'Deephaven CorePlus' are interchangeable names for the same product
+    - In Deephaven, "schema" and "meta table" refer to the same concept - the table's column definitions including names, types, and properties.
+    - In Deephaven, "catalog" and "database" are interchangeable terms - the catalog is the database of available tables.
     - 'DHC' is shorthand for Deephaven Community (also called 'Core')
     - 'DHE' is shorthand for Deephaven Enterprise (also called 'Core+')
+    - This tool only works with enterprise sessions; community sessions do not have catalog tables
 
     Table Rendering:
     - **This tool returns TABULAR CATALOG DATA that MUST be displayed as a table to users**
@@ -222,6 +217,11 @@ async def catalog_tables_list(
     - Combine with catalog_tables_schema to get full metadata for discovered tables
     - Essential first step before querying enterprise data sources
     - Use filters to narrow down large catalogs/databases efficiently
+    - **Catalog listing ≠ data access**: a table appearing in the catalog is not
+      guaranteed to be loadable — it may be protected by access controls, not yet
+      populated, or otherwise inaccessible. Treat results as a *candidate set* and
+      handle fetch failures (e.g. FetchTableOp errors) gracefully — skip or report
+      the unavailable table rather than treating the failure as fatal.
 
     Filter Syntax Reference:
     Filters use Deephaven query language with backticks (`) for string literals.
@@ -379,7 +379,6 @@ async def catalog_tables_list(
     )
 
 
-@mcp_server.tool()
 async def catalog_namespaces_list(
     context: Context,
     session_id: str,
@@ -387,8 +386,7 @@ async def catalog_namespaces_list(
     filters: list[str] | None = None,
     format: str = "optimize-rendering",
 ) -> dict:
-    """
-    MCP Tool: Retrieve catalog namespaces as a TABULAR LIST from a Deephaven Enterprise (Core+) session.
+    """MCP Tool: Retrieve catalog namespaces as a TABULAR LIST from a Deephaven Enterprise (Core+) session.
 
     **Returns**: Namespace information formatted as TABULAR DATA for display. Each row represents
     a data domain available in the enterprise catalog/database. This tabular data should be displayed as a
@@ -415,12 +413,14 @@ async def catalog_namespaces_list(
 
     Terminology Note:
     - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
-    - 'ENTERPRISE' sessions run Deephaven Enterprise (also called 'Core+' or 'CorePlus')
-    - This tool only works with enterprise sessions; community sessions do not have catalog tables
-    - 'Namespace' refers to a data domain or organizational grouping of tables
-    - 'Catalog' and 'database' are interchangeable terms - the catalog is the database of available tables
+    - 'Deephaven Community' and 'Deephaven Core' are interchangeable names for the same product
+    - 'Deephaven Enterprise', 'Deephaven Core+', and 'Deephaven CorePlus' are interchangeable names for the same product
+    - In Deephaven, "schema" and "meta table" refer to the same concept - the table's column definitions including names, types, and properties.
+    - In Deephaven, "catalog" and "database" are interchangeable terms - the catalog is the database of available tables.
     - 'DHC' is shorthand for Deephaven Community (also called 'Core')
     - 'DHE' is shorthand for Deephaven Enterprise (also called 'Core+')
+    - This tool only works with enterprise sessions; community sessions do not have catalog tables
+    - 'Namespace' refers to a data domain or organizational grouping of tables
 
     Table Rendering:
     - **This tool returns TABULAR NAMESPACE DATA that MUST be displayed as a table to users**
@@ -522,7 +522,39 @@ async def catalog_namespaces_list(
     )
 
 
-@mcp_server.tool()
+def _build_catalog_filters(
+    namespace: str | None,
+    table_names: list[str] | None,
+    filters: list[str] | None,
+) -> list[str]:
+    """Build the combined Deephaven query-language filter list for a catalog query.
+
+    Merges the caller-supplied ``filters`` with any implicit constraints derived
+    from ``namespace`` and ``table_names``.  All conditions are combined with AND
+    logic by the catalog query engine.
+
+    Args:
+        namespace (str | None): If provided, appends ``"Namespace = `<namespace>`"``
+            to restrict results to a single namespace.
+        table_names (list[str] | None): If provided, appends
+            ``"TableName in `<n1>`, `<n2>`, ..."`` to restrict results to the
+            named tables.
+        filters (list[str] | None): Caller-supplied Deephaven query-language filter
+            strings.  Copied as-is into the result; ``None`` is treated as empty.
+
+    Returns:
+        list[str]: Combined filter list ready to pass to ``queries.get_catalog_table``.
+            Empty list means no filtering (return all rows).
+    """
+    combined: list[str] = list(filters) if filters else []
+    if namespace:
+        combined.append(f"Namespace = `{namespace}`")
+    if table_names:
+        table_names_quoted = ", ".join(f"`{name}`" for name in table_names)
+        combined.append(f"TableName in {table_names_quoted}")
+    return combined
+
+
 async def catalog_tables_schema(
     context: Context,
     session_id: str,
@@ -531,8 +563,7 @@ async def catalog_tables_schema(
     filters: list[str] | None = None,
     max_tables: int | None = 100,
 ) -> dict:
-    """
-    MCP Tool: Retrieve catalog table schemas as TABULAR METADATA from a Deephaven Enterprise (Core+) session.
+    """MCP Tool: Retrieve catalog table schemas as TABULAR METADATA from a Deephaven Enterprise (Core+) session.
 
     **Returns**: Schema information formatted as TABULAR DATA where each row represents a column
     in a catalog/database table. This tabular metadata should be displayed as a table to users for easy
@@ -550,13 +581,14 @@ async def catalog_tables_schema(
 
     Terminology Note:
     - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
-    - 'ENTERPRISE' sessions run Deephaven Enterprise (also called 'Core+' or 'CorePlus')
-    - This tool only works with enterprise sessions; community sessions do not have catalog tables
-    - 'Namespace' refers to a data domain or organizational grouping of tables in the catalog
-    - 'Catalog' and 'database' are interchangeable terms - the catalog is the database of available tables
-    - 'Schema' and 'meta table' are interchangeable terms - both refer to table metadata
+    - 'Deephaven Community' and 'Deephaven Core' are interchangeable names for the same product
+    - 'Deephaven Enterprise', 'Deephaven Core+', and 'Deephaven CorePlus' are interchangeable names for the same product
+    - In Deephaven, "schema" and "meta table" refer to the same concept - the table's column definitions including names, types, and properties.
+    - In Deephaven, "catalog" and "database" are interchangeable terms - the catalog is the database of available tables.
     - 'DHC' is shorthand for Deephaven Community (also called 'Core')
     - 'DHE' is shorthand for Deephaven Enterprise (also called 'Core+')
+    - This tool only works with enterprise sessions; community sessions do not have catalog tables
+    - 'Namespace' refers to a data domain or organizational grouping of tables in the catalog
 
     Table Rendering:
     - **This tool returns TABULAR SCHEMA METADATA that MUST be displayed as a table to users**
@@ -603,7 +635,7 @@ async def catalog_tables_schema(
             filters=["Namespace = `market_data`", "TableName.contains(`price`)"]
 
     Args:
-        context (Context): The MCP context object, required by MCP protocol but not actively used.
+        context (Context): The MCP context object, used to access the enterprise session.
         session_id (str): ID of the Deephaven enterprise session to query. Must be an enterprise (Core+) session.
         namespace (str | None, optional): Filter to tables in this specific namespace. If None, searches all namespaces.
                                          Defaults to None.
@@ -625,13 +657,22 @@ async def catalog_tables_schema(
                 - 'success' (bool): True if this table's schema was retrieved successfully
                 - 'namespace' (str): Namespace (data domain) the table belongs to
                 - 'table' (str): Table name
-                - 'schema' (list[dict], optional): List of column definitions (name/type pairs) if successful
+                - 'schema' (list[dict], optional): List of column definitions if successful. Each dict contains 'name' (str) and 'type' (str).
+                - 'row_count' (int, optional): Number of columns in the schema if successful
                 - 'error' (str, optional): Error message if this table's schema retrieval failed
                 - 'isError' (bool, optional): Present and True if this table had an error
-            - 'count' (int, optional): Number of schemas returned if successful
+            - 'count' (int, optional): Number of schemas returned if successful (includes error entries)
             - 'is_complete' (bool, optional): True if all matching tables were processed, False if truncated by max_tables
             - 'error' (str, optional): Error message if the entire operation failed.
             - 'isError' (bool, optional): Present and True if this is an error response.
+
+    Not-Found Behavior:
+        When table_names is explicitly provided, any name absent from the catalog generates a
+        per-item error entry in 'schemas' (success=False, isError=True). This mirrors
+        session_tables_schema behavior — callers can iterate 'schemas' and check 'success' on
+        each entry without needing to detect missing tables via silent empty results.
+        If table_names is not provided ("give me all matching tables"), an empty result is correct
+        and no per-item errors are generated.
 
     Error Scenarios:
         - Non-enterprise session: Returns error if session is not an enterprise (Core+) session
@@ -640,6 +681,7 @@ async def catalog_tables_schema(
         - Session connection issues: Returns error if unable to communicate with Deephaven server
         - Catalog access error: Returns error if unable to retrieve catalog table
         - Individual table errors: Reported in per-table results, don't stop overall operation
+        - Table not in catalog: When table_names specified, missing tables reported as per-item errors
 
     Performance Considerations:
         - Default max_tables=100 is safe for most use cases
@@ -724,7 +766,7 @@ async def catalog_tables_schema(
 
     try:
         # Get and validate enterprise session
-        session, error = await _get_enterprise_session(
+        session, error = await get_enterprise_session(
             "catalog_tables_schema", context, session_id
         )
 
@@ -737,15 +779,7 @@ async def catalog_tables_schema(
             f"[mcp_systems_server:catalog_tables_schema] Session established for enterprise session: '{session_id}'"
         )
 
-        # Build combined filters list
-        combined_filters = []
-        if filters:
-            combined_filters.extend(filters)
-        if namespace:
-            combined_filters.append(f"Namespace = `{namespace}`")
-        if table_names:
-            table_names_quoted = ", ".join(f"`{name}`" for name in table_names)
-            combined_filters.append(f"TableName in {table_names_quoted}")
+        combined_filters = _build_catalog_filters(namespace, table_names, filters)
 
         _LOGGER.debug(
             f"[mcp_systems_server:catalog_tables_schema] Combined filters: {combined_filters!r}"
@@ -772,6 +806,13 @@ async def catalog_tables_schema(
 
         # is_complete_catalog already reflects whether the catalog was truncated
         is_complete = is_complete_catalog
+
+        # Track which explicitly requested table_names were found in the catalog
+        found_names: set[str] = (
+            {str(entry["TableName"]) for entry in catalog_entries}
+            if table_names
+            else set()
+        )
 
         _LOGGER.debug(
             f"[mcp_systems_server:catalog_tables_schema] Processing {len(catalog_entries)} catalog entries "
@@ -800,7 +841,7 @@ async def catalog_tables_schema(
                 )
 
                 # Use helper to format result (include namespace for catalog tables)
-                result = _format_meta_table_result(
+                result = format_meta_table_result(
                     arrow_meta_table, catalog_table_name, namespace=catalog_namespace
                 )
                 schemas.append(result)
@@ -826,6 +867,27 @@ async def catalog_tables_schema(
                     }
                 )
 
+        # Append per-item errors for explicitly requested table_names not found in catalog.
+        # Mirrors session_tables_schema behavior: callers should not have to detect "not found"
+        # via silent empty results — they get an error entry for each missing name.
+        if table_names:
+            for missing_name in table_names:
+                if missing_name not in found_names:
+                    _LOGGER.warning(
+                        f"[mcp_systems_server:catalog_tables_schema] Table '{missing_name}' not found in catalog"
+                        + (f" namespace '{namespace}'" if namespace else "")
+                    )
+                    schemas.append(
+                        {
+                            "success": False,
+                            "namespace": namespace,
+                            "table": missing_name,
+                            "error": f"Table '{missing_name}' not found in catalog"
+                            + (f" namespace '{namespace}'" if namespace else ""),
+                            "isError": True,
+                        }
+                    )
+
         _LOGGER.info(
             f"[mcp_systems_server:catalog_tables_schema] Completed: Retrieved {len(schemas)} schema(s), "
             f"is_complete={is_complete}"
@@ -846,7 +908,6 @@ async def catalog_tables_schema(
         return {"success": False, "error": str(e), "isError": True}
 
 
-@mcp_server.tool()
 async def catalog_table_sample(
     context: Context,
     session_id: str,
@@ -855,9 +916,9 @@ async def catalog_table_sample(
     max_rows: int | None = 100,
     head: bool = True,
     format: str = "optimize-rendering",
+    filters: list[str] | None = None,
 ) -> dict:
-    r"""
-    MCP Tool: Retrieve sample TABULAR DATA from a catalog table in a Deephaven Enterprise (Core+) session.
+    r"""MCP Tool: Retrieve sample TABULAR DATA from a catalog table in a Deephaven Enterprise (Core+) session.
 
     **Returns**: Sample table data formatted as TABULAR DATA for display. This tabular data should be
     displayed as a table to users for previewing catalog table contents.
@@ -880,12 +941,14 @@ async def catalog_table_sample(
 
     Terminology Note:
     - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
-    - 'ENTERPRISE' sessions run Deephaven Enterprise (also called 'Core+' or 'CorePlus')
-    - This tool only works with enterprise sessions; community sessions do not have catalog tables
-    - 'Namespace' refers to a data domain or organizational grouping of tables in the catalog
-    - 'Catalog' and 'database' are interchangeable terms - the catalog is the database of available tables
+    - 'Deephaven Community' and 'Deephaven Core' are interchangeable names for the same product
+    - 'Deephaven Enterprise', 'Deephaven Core+', and 'Deephaven CorePlus' are interchangeable names for the same product
+    - In Deephaven, "schema" and "meta table" refer to the same concept - the table's column definitions including names, types, and properties.
+    - In Deephaven, "catalog" and "database" are interchangeable terms - the catalog is the database of available tables.
     - 'DHC' is shorthand for Deephaven Community (also called 'Core')
     - 'DHE' is shorthand for Deephaven Enterprise (also called 'Core+')
+    - This tool only works with enterprise sessions; community sessions do not have catalog tables
+    - 'Namespace' refers to a data domain or organizational grouping of tables in the catalog
 
     Table Rendering:
     - **This tool returns TABULAR SAMPLE DATA that MUST be displayed as a table to users**
@@ -904,6 +967,10 @@ async def catalog_table_sample(
     - Use 'optimize-rendering' (default) for best table display in AI interfaces
     - Use 'optimize-accuracy' for highest comprehension (markdown-kv format, more tokens)
     - Check 'format' field in response to know actual format used
+    - **Partitioned tables** (e.g. DbInternal, System tables) may return 0 rows without a
+      partition filter. By default (filters=None), the tool auto-detects the table's partition
+      columns and applies a filter for the most recent partition with data. Pass filters=[] to
+      disable auto-detection, or pass an explicit filter list to override.
 
     Args:
         context (Context): The MCP context object.
@@ -927,6 +994,15 @@ async def catalog_table_sample(
                                - "csv": String with comma-separated values, includes header row
                                - "yaml": String with YAML-formatted records list
                                - "xml": String with XML records structure
+        filters (list[str] | None, optional): Partition filter behavior. Defaults to None (auto-detect).
+                              - None (default): automatically detect the table's partition columns and apply
+                                a filter for the most recent partition that has data. This prevents silently
+                                empty results on partitioned tables such as DbInternal or System tables.
+                              - [] (empty list): no filter applied; skips auto-detection entirely.
+                              - ["expr", ...]: apply these explicit Deephaven DQL where-clause filters
+                                (e.g. ["Date == `2024-01-15`"]) and skip auto-detection.
+                              Partition columns and valid values can be discovered via catalog_tables_schema
+                              (look for IsPartitioning=True columns).
 
     Returns:
         dict: Structured result object with the following keys:
@@ -947,6 +1023,10 @@ async def catalog_table_sample(
         - Community session: Returns error if session is not an enterprise (Core+) session
         - Invalid namespace: Returns error if namespace doesn't exist in the catalog
         - Invalid table_name: Returns error if table doesn't exist in the namespace
+        - Inaccessible catalog entry: table is listed in the catalog but cannot be
+          loaded (access controls, no data, type incompatibility, etc.). Returns a
+          FetchTableOp or similar error. Catalog listings are a candidate set; handle
+          this gracefully.
         - Invalid format: Returns error if format is not one of the supported options
         - Response too large: Returns error if estimated response would exceed 50MB limit
         - Session connection issues: Returns error if unable to communicate with Deephaven server
@@ -989,12 +1069,13 @@ async def catalog_table_sample(
     """
     _LOGGER.info(
         f"[mcp_systems_server:catalog_table_sample] Invoked: session_id={session_id!r}, "
-        f"namespace={namespace!r}, table_name={table_name!r}, max_rows={max_rows}, head={head}, format={format!r}"
+        f"namespace={namespace!r}, table_name={table_name!r}, max_rows={max_rows}, head={head}, "
+        f"format={format!r}, filters={filters!r}"
     )
 
     try:
         # Get and validate enterprise session
-        session, error = await _get_enterprise_session(
+        session, error = await get_enterprise_session(
             "catalog_table_sample", context, session_id
         )
 
@@ -1012,14 +1093,19 @@ async def catalog_table_sample(
             f"[mcp_systems_server:catalog_table_sample] Retrieving catalog table data for '{namespace}.{table_name}'"
         )
         arrow_table, is_complete = await queries.get_catalog_table_data(
-            session, namespace, table_name, max_rows=max_rows, head=head
+            session,
+            namespace,
+            table_name,
+            max_rows=max_rows,
+            head=head,
+            filters=filters,
         )
 
         # Check response size before formatting
         row_count = len(arrow_table)
         col_count = len(arrow_table.schema)
         estimated_size = row_count * col_count * ESTIMATED_BYTES_PER_CELL
-        size_error = _check_response_size(f"{namespace}.{table_name}", estimated_size)
+        size_error = check_response_size(f"{namespace}.{table_name}", estimated_size)
 
         if size_error:
             return size_error
@@ -1046,3 +1132,18 @@ async def catalog_table_sample(
             exc_info=True,
         )
         return {"success": False, "error": str(e), "isError": True}
+
+
+def register_tools(server: FastMCP) -> None:
+    """Register all catalog tools with the given FastMCP server.
+
+    These tools are specific to the DHE server and should NOT be registered
+    on the DHC server.
+
+    Args:
+        server (FastMCP): The server to register tools with.
+    """
+    server.tool()(catalog_tables_list)
+    server.tool()(catalog_namespaces_list)
+    server.tool()(catalog_tables_schema)
+    server.tool()(catalog_table_sample)

@@ -621,6 +621,147 @@ async def test_make_pq_config_permanent_query_clears_scheduling(
 
 
 @pytest.mark.asyncio
+async def test_make_pq_config_temporary_schedule_none_no_default_installed(
+    coreplus_controller_client, dummy_controller_client, controller_client_mod
+):
+    """Temporary PQ (auto_delete_timeout set) with schedule=None: no default override.
+
+    The scheduling installed by ``make_temporary_config`` must be preserved — the
+    method must not clear it or append a continuous scheduler.
+    """
+    mock_config = MagicMock()
+    mock_scheduling = MagicMock()
+    mock_config.scheduling = mock_scheduling
+    dummy_controller_client.make_temporary_config.return_value = mock_config
+
+    with patch.object(controller_client_mod, "CorePlusQueryConfig", autospec=True):
+        await coreplus_controller_client.make_pq_config(
+            name="test-pq",
+            heap_size_gb=8.0,
+            auto_delete_timeout=300,  # Temporary query
+            schedule=None,
+        )
+
+        # Scheduling must not be cleared and must not be extended.
+        mock_scheduling.__delitem__.assert_not_called()
+        mock_scheduling.extend.assert_not_called()
+        mock_scheduling.append.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_make_pq_config_permanent_schedule_empty_clears_without_default(
+    coreplus_controller_client, dummy_controller_client, controller_client_mod
+):
+    """Permanent PQ with schedule=[]: scheduling must be empty (no default installed).
+
+    schedule=[] is an explicit "no scheduling" signal and must override the default
+    continuous scheduler that would otherwise be installed for a permanent PQ.
+    """
+    mock_config = MagicMock()
+    mock_scheduling = MagicMock()
+    mock_config.scheduling = mock_scheduling
+    dummy_controller_client.make_temporary_config.return_value = mock_config
+
+    with patch.object(controller_client_mod, "CorePlusQueryConfig", autospec=True):
+        await coreplus_controller_client.make_pq_config(
+            name="test-pq",
+            heap_size_gb=8.0,
+            auto_delete_timeout=None,  # Permanent
+            schedule=[],  # Explicit "no scheduling"
+        )
+
+        # Scheduling was cleared exactly once (for the override).
+        mock_scheduling.__delitem__.assert_called_once_with(slice(None))
+        # No default continuous entries were appended.
+        mock_scheduling.append.assert_not_called()
+        # extend([]) is not called because the body skips it for empty override.
+        mock_scheduling.extend.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_make_pq_config_temporary_schedule_empty_clears(
+    coreplus_controller_client, dummy_controller_client, controller_client_mod
+):
+    """Temporary PQ with schedule=[]: existing temp scheduling must be cleared."""
+    mock_config = MagicMock()
+    mock_scheduling = MagicMock()
+    mock_config.scheduling = mock_scheduling
+    dummy_controller_client.make_temporary_config.return_value = mock_config
+
+    with patch.object(controller_client_mod, "CorePlusQueryConfig", autospec=True):
+        await coreplus_controller_client.make_pq_config(
+            name="test-pq",
+            heap_size_gb=8.0,
+            auto_delete_timeout=300,  # Temporary
+            schedule=[],  # Explicit clear
+        )
+
+        mock_scheduling.__delitem__.assert_called_once_with(slice(None))
+        mock_scheduling.append.assert_not_called()
+        mock_scheduling.extend.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_make_pq_config_permanent_schedule_explicit_replaces_default(
+    coreplus_controller_client, dummy_controller_client, controller_client_mod
+):
+    """Permanent PQ with a non-empty schedule: caller's list replaces default wholesale.
+
+    Crucially, no entries from the default continuous scheduler must leak into the
+    final scheduling list — the caller's list is authoritative.
+    """
+    mock_config = MagicMock()
+    mock_scheduling = MagicMock()
+    mock_config.scheduling = mock_scheduling
+    dummy_controller_client.make_temporary_config.return_value = mock_config
+
+    caller_schedule = [
+        "SchedulerType=com.illumon.iris.controller.IrisQuerySchedulerDaily",
+        "StartTime=09:00:00",
+        "SchedulingDisabled=true",
+    ]
+
+    with patch.object(controller_client_mod, "CorePlusQueryConfig", autospec=True):
+        await coreplus_controller_client.make_pq_config(
+            name="test-pq",
+            heap_size_gb=8.0,
+            auto_delete_timeout=None,  # Permanent
+            schedule=caller_schedule,
+        )
+
+        # extend called exactly once, with exactly the caller's list.
+        mock_scheduling.extend.assert_called_once_with(caller_schedule)
+        # The default continuous scheduler's append path must NOT have run,
+        # so no default entries like "SchedulingDisabled=false" were appended.
+        mock_scheduling.append.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_make_pq_config_temporary_schedule_explicit_replaces_temp(
+    coreplus_controller_client, dummy_controller_client, controller_client_mod
+):
+    """Temporary PQ with a non-empty schedule: caller's list replaces temp scheduling."""
+    mock_config = MagicMock()
+    mock_scheduling = MagicMock()
+    mock_config.scheduling = mock_scheduling
+    dummy_controller_client.make_temporary_config.return_value = mock_config
+
+    caller_schedule = ["SchedulerType=Daily", "StartTime=08:00:00"]
+
+    with patch.object(controller_client_mod, "CorePlusQueryConfig", autospec=True):
+        await coreplus_controller_client.make_pq_config(
+            name="test-pq",
+            heap_size_gb=8.0,
+            auto_delete_timeout=300,  # Temporary
+            schedule=caller_schedule,
+        )
+
+        mock_scheduling.__delitem__.assert_called_once_with(slice(None))
+        mock_scheduling.extend.assert_called_once_with(caller_schedule)
+        mock_scheduling.append.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_restart_query_success(
     coreplus_controller_client, dummy_controller_client
 ):

@@ -1,5 +1,4 @@
-"""
-Deephaven MCP Resource Management Public API.
+"""Deephaven MCP Resource Management Public API.
 
 This module defines the public API for resource management in Deephaven MCP. It re-exports
 core resource manager types, registries, session launchers, and utility functions from
@@ -14,7 +13,7 @@ Overview:
        configuration and cached for reuse.
 
     2. **Dynamic Sessions** (on-demand): Launch new Deephaven servers on-demand using
-       DynamicCommunitySessionManager with Docker or python. Automatically allocates ports,
+       DynamicCommunitySessionManager with Docker or Python. Automatically allocates ports,
        manages lifecycle, and handles cleanup.
 
 Exports - Session Managers:
@@ -42,14 +41,15 @@ Exports - Session Managers:
       for item caching, liveness checking, and async-safe resource management.
 
 Exports - Registries:
+    - BaseRegistry: Abstract generic base class for all session registries. Provides coroutine-safe
+      management of named async-closable items with lifecycle tracking (initialize/get/get_all/close).
+
     - CommunitySessionRegistry: Registry for all configured CommunitySessionManager instances.
       Provides centralized access to all community sessions loaded from configuration.
 
-    - CorePlusSessionFactoryRegistry: Registry for all configured CorePlusSessionFactoryManager
-      instances. Provides centralized access to all enterprise factory configurations.
-
-    - CombinedSessionRegistry: Combined registry that provides unified access to both
-      community and enterprise sessions. Simplifies code that needs to work with either type.
+    - EnterpriseSessionRegistry: Purpose-built registry for the DHE MCP server. Manages exactly
+      one enterprise system (factory), discovers PQ sessions asynchronously, and supports
+      mutation methods for MCP-created sessions.
 
 Exports - Session Launchers:
     - LaunchedSession: Abstract base class for launched sessions. Defines interface for
@@ -79,10 +79,18 @@ Exports - Enums:
       UNAUTHORIZED, MISCONFIGURED, and UNKNOWN. Used by managers to track connection health
       and determine when to recreate resources.
 
+Exports - Registry State:
+    - InitializationPhase: Enum representing the initialization phase of a registry
+      (e.g., PENDING, INITIALIZING, READY, FAILED). Used to track and report registry
+      startup progress.
+
+    - RegistrySnapshot: Dataclass capturing a point-in-time snapshot of a registry's
+      state, including sessions, initialization phase, and any initialization errors.
+
 Features:
     - Coroutine-safe item cache keyed by name, protected by asyncio.Lock
     - Automatic item reuse with liveness checking and stale resource cleanup
-    - Dynamic session launching via Docker containers or pip-installed processes
+    - Dynamic session launching via Docker containers or Python-based processes
     - Native async file I/O for secure certificate loading (TLS, client certs/keys)
     - Health checking for dynamically launched sessions with configurable timeouts
     - Utility functions for port allocation and cryptographic token generation
@@ -166,12 +174,12 @@ from ._manager import (
     SystemType,
 )
 from ._registry import (
-    CommunitySessionRegistry,
-    CorePlusSessionFactoryRegistry,
+    BaseRegistry,
     InitializationPhase,
     RegistrySnapshot,
 )
-from ._registry_combined import CombinedSessionRegistry
+from ._registry_community import CommunitySessionRegistry
+from ._registry_enterprise import EnterpriseSessionRegistry
 from ._utils import find_available_port, generate_auth_token
 
 __all__ = [
@@ -183,9 +191,9 @@ __all__ = [
     "DynamicCommunitySessionManager",
     "EnterpriseSessionManager",
     "CorePlusSessionFactoryManager",
+    "BaseRegistry",
     "CommunitySessionRegistry",
-    "CorePlusSessionFactoryRegistry",
-    "CombinedSessionRegistry",
+    "EnterpriseSessionRegistry",
     "InitializationPhase",
     "RegistrySnapshot",
     "LaunchedSession",

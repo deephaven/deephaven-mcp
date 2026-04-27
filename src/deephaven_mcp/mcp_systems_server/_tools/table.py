@@ -1,5 +1,4 @@
-"""
-Table Operations MCP Tools - Query and Export Table Data.
+"""Table Operations MCP Tools - Query and Export Table Data.
 
 Provides MCP tools for working with tables in Deephaven sessions:
 - session_tables_list: List all available tables in a session
@@ -12,17 +11,14 @@ These tools work with both Community and Enterprise sessions.
 import logging
 
 import pyarrow
-from mcp.server.fastmcp import Context
+from mcp.server.fastmcp import Context, FastMCP
 
 from deephaven_mcp import queries
 from deephaven_mcp.formatters import format_table_data
-from deephaven_mcp.mcp_systems_server._tools.mcp_server import (
-    mcp_server,
-)
 from deephaven_mcp.mcp_systems_server._tools.shared import (
-    _check_response_size,
-    _format_meta_table_result,
-    _get_session_from_context,
+    check_response_size,
+    format_meta_table_result,
+    get_session_from_context,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -31,8 +27,7 @@ _LOGGER = logging.getLogger(__name__)
 # Response size estimation constants
 # Conservative estimate: ~20 chars + 8 bytes numeric + JSON overhead + safety margin
 ESTIMATED_BYTES_PER_CELL = 50
-"""
-Estimated bytes per table cell for response size calculation.
+"""Estimated bytes per table cell for response size calculation.
 
 This rough estimate is used to prevent memory issues when retrieving large tables.
 The estimation assumes:
@@ -54,8 +49,7 @@ def _build_table_data_response(
     table_name: str | None = None,
     namespace: str | None = None,
 ) -> dict:
-    """
-    Build a standardized table data response with schema, formatting, and metadata.
+    """Build a standardized table data response with schema, formatting, and metadata.
 
     This helper consolidates the common pattern of:
     1. Extracting schema from Arrow table
@@ -110,12 +104,10 @@ def _build_table_data_response(
     return response
 
 
-@mcp_server.tool()
 async def session_tables_schema(
     context: Context, session_id: str, table_names: list[str] | None = None
 ) -> dict:
-    """
-    MCP Tool: Retrieve table schemas as TABULAR METADATA from a Deephaven session.
+    """MCP Tool: Retrieve table schemas as TABULAR METADATA from a Deephaven session.
 
     **Returns**: Schema information formatted as TABULAR DATA where each row represents a column
     in the source table. This tabular metadata should be displayed as a table to users for easy
@@ -199,13 +191,13 @@ async def session_tables_schema(
         # Get full schemas for all tables in the session
         Tool: session_tables_schema
         Parameters: {
-            "session_id": "community:localhost:10000"
+            "session_id": "community:config:local"
         }
 
         # Get full schemas for specific tables
         Tool: session_tables_schema
         Parameters: {
-            "session_id": "community:localhost:10000",
+            "session_id": "community:config:local",
             "table_names": ["trades", "quotes", "orders"]
         }
 
@@ -222,7 +214,7 @@ async def session_tables_schema(
     schemas = []
     try:
         # Use helper to get session from context
-        session = await _get_session_from_context(
+        session = await get_session_from_context(
             "session_tables_schema", context, session_id
         )
 
@@ -250,7 +242,7 @@ async def session_tables_schema(
                 )
 
                 # Use helper to format result (no namespace for session tables)
-                result = _format_meta_table_result(
+                result = format_meta_table_result(
                     meta_arrow_table, table_name, namespace=None
                 )
                 schemas.append(result)
@@ -260,14 +252,14 @@ async def session_tables_schema(
                 )
             except Exception as table_exc:
                 _LOGGER.error(
-                    f"[mcp_systems_server:session_tables_schema] Failed to get schema for table '{table_name}': {table_exc!r}",
+                    f"[mcp_systems_server:session_tables_schema] Failed to get schema for table '{table_name}' in session '{session_id}': {table_exc!r}",
                     exc_info=True,
                 )
                 schemas.append(
                     {
                         "success": False,
                         "table": table_name,
-                        "error": str(table_exc),
+                        "error": f"Failed to get schema for table '{table_name}' in session '{session_id}': {type(table_exc).__name__}: {table_exc}",
                         "isError": True,
                     }
                 )
@@ -284,10 +276,8 @@ async def session_tables_schema(
         return {"success": False, "error": str(e), "isError": True}
 
 
-@mcp_server.tool()
 async def session_tables_list(context: Context, session_id: str) -> dict:
-    """
-    MCP Tool: Retrieve the names of all tables in a Deephaven session.
+    """MCP Tool: Retrieve the names of all tables in a Deephaven session.
 
     Returns a simple list of table names without schemas or metadata. This is a lightweight
     alternative to table_schemas when you only need to discover what tables exist in a session.
@@ -304,14 +294,14 @@ async def session_tables_list(context: Context, session_id: str) -> dict:
 
     AI Agent Usage:
     - Use this for quick table discovery when you don't need schema details
-    - Much faster than table_schemas for large sessions with many tables
-    - Follow up with table_schemas or get_table_meta for specific tables you're interested in
+    - Much faster than session_tables_schema for large sessions with many tables
+    - Follow up with session_tables_schema for specific tables you're interested in
     - Works with both Community and Enterprise sessions
     - Check 'count' field to see how many tables exist
     - Always check 'success' field before accessing 'table_names'
 
     Args:
-        context (Context): The MCP context object, required by MCP protocol but not actively used.
+        context (Context): The MCP context object used to access the session registry.
         session_id (str): ID of the Deephaven session to query. Must match an existing active session.
 
     Returns:
@@ -331,7 +321,7 @@ async def session_tables_list(context: Context, session_id: str) -> dict:
     Example Successful Response:
         {
             'success': True,
-            'session_id': 'community:localhost:10000',
+            'session_id': 'community:config:local',
             'table_names': ['trades', 'quotes', 'orders'],
             'count': 3
         }
@@ -339,7 +329,7 @@ async def session_tables_list(context: Context, session_id: str) -> dict:
     Example Error Response:
         {
             'success': False,
-            'error': 'Session not found: community:localhost:10000',
+            'error': 'Session not found: community:config:local',
             'isError': True
         }
 
@@ -355,7 +345,7 @@ async def session_tables_list(context: Context, session_id: str) -> dict:
 
     try:
         # Use helper to get session from context
-        session = await _get_session_from_context(
+        session = await get_session_from_context(
             "session_tables_list", context, session_id
         )
 
@@ -380,10 +370,13 @@ async def session_tables_list(context: Context, session_id: str) -> dict:
             f"[mcp_systems_server:session_tables_list] Failed for session: '{session_id}', error: {e!r}",
             exc_info=True,
         )
-        return {"success": False, "error": str(e), "isError": True}
+        return {
+            "success": False,
+            "error": f"Failed to list tables for session '{session_id}': {type(e).__name__}: {e}",
+            "isError": True,
+        }
 
 
-@mcp_server.tool()
 async def session_table_data(
     context: Context,
     session_id: str,
@@ -421,7 +414,7 @@ async def session_table_data(
     - 'DHE' is shorthand for Deephaven Enterprise (also called 'Core+')
 
     Args:
-        context (Context): The MCP context object, required by MCP protocol but not actively used.
+        context (Context): The MCP context object used to access the session registry.
         session_id (str): ID of the Deephaven session to query. Must match an existing active session.
         table_name (str): Name of the table to retrieve data from. Must exist in the specified session.
         max_rows (int | None, optional): Maximum number of rows to retrieve. Defaults to 1000 for safety.
@@ -491,14 +484,14 @@ async def session_table_data(
         # Get first 1000 rows with default format
         Tool: session_table_data
         Parameters: {
-            "session_id": "community:localhost:10000",
+            "session_id": "community:config:local",
             "table_name": "my_table"
         }
 
         # Get last 500 rows (most recent for time-series)
         Tool: session_table_data
         Parameters: {
-            "session_id": "community:localhost:10000",
+            "session_id": "community:config:local",
             "table_name": "trades",
             "max_rows": 500,
             "head": false
@@ -516,7 +509,7 @@ async def session_table_data(
         # Get data optimized for AI comprehension
         Tool: session_table_data
         Parameters: {
-            "session_id": "community:localhost:10000",
+            "session_id": "community:config:local",
             "table_name": "customer_records",
             "max_rows": 100,
             "format": "optimize-accuracy"
@@ -525,7 +518,7 @@ async def session_table_data(
         # Get entire small table in JSON row format
         Tool: session_table_data
         Parameters: {
-            "session_id": "community:localhost:10000",
+            "session_id": "community:config:local",
             "table_name": "config_settings",
             "max_rows": null,
             "format": "json-row"
@@ -549,7 +542,7 @@ async def session_table_data(
 
     try:
         # Use helper to get session from context
-        session = await _get_session_from_context(
+        session = await get_session_from_context(
             "session_table_data", context, session_id
         )
 
@@ -565,7 +558,7 @@ async def session_table_data(
         row_count = len(arrow_table)
         col_count = len(arrow_table.schema)
         estimated_size = row_count * col_count * ESTIMATED_BYTES_PER_CELL
-        size_error = _check_response_size(table_name, estimated_size)
+        size_error = check_response_size(table_name, estimated_size)
 
         if size_error:
             return size_error
@@ -587,10 +580,10 @@ async def session_table_data(
     except ValueError as e:
         # Format validation error from formatters package
         _LOGGER.error(
-            f"[mcp_systems_server:session_table_data] Invalid format parameter: {e!r}"
+            f"[mcp_systems_server:session_table_data] Invalid format parameter '{format}' for table '{table_name}' in session '{session_id}': {e!r}"
         )
         result["error"] = (
-            f"Invalid format parameter for table '{table_name}': {type(e).__name__}: {e}"
+            f"Invalid format parameter '{format}' for table '{table_name}' in session '{session_id}': {type(e).__name__}: {e}"
         )
         result["isError"] = True
 
@@ -606,3 +599,16 @@ async def session_table_data(
         result["isError"] = True
 
     return result
+
+
+def register_tools(server: FastMCP) -> None:
+    """Register all table operation tools with the given FastMCP server.
+
+    These tools are shared between the DHE and DHC servers.
+
+    Args:
+        server (FastMCP): The server to register tools with.
+    """
+    server.tool()(session_tables_schema)
+    server.tool()(session_tables_list)
+    server.tool()(session_table_data)
