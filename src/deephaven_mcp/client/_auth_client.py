@@ -169,7 +169,7 @@ class CorePlusAuthClient(
         )
         try:
             result = await asyncio.to_thread(
-                self.wrapped.create_token,  # type: ignore[attr-defined]
+                self.wrapped.create_token,
                 service,
                 username,
                 duration_seconds,

@@ -67,7 +67,7 @@ from ._base import is_enterprise_available
 if is_enterprise_available:
     from deephaven_enterprise.client.controller import ControllerClient
 else:
-    ControllerClient = None  # type: ignore[misc,assignment]  # pragma: no cover
+    ControllerClient = None  # pragma: no cover
 
 
 PQ_STATES: dict[str, str] = {
@@ -280,7 +280,7 @@ class CorePlusQueryStatus(ProtobufWrapper):
         Returns:
             bool: True if the query is in a running state, False otherwise.
         """
-        return ControllerClient.is_running(self.pb)
+        return bool(ControllerClient.is_running(self.pb))
 
     @property
     def is_completed(self) -> bool:
@@ -293,7 +293,7 @@ class CorePlusQueryStatus(ProtobufWrapper):
         Returns:
             bool: True if the query has completed successfully, False otherwise.
         """
-        return ControllerClient.is_completed(self.pb)
+        return bool(ControllerClient.is_completed(self.pb))
 
     @property
     def is_terminal(self) -> bool:
@@ -309,7 +309,7 @@ class CorePlusQueryStatus(ProtobufWrapper):
         Returns:
             bool: True if the query is in a terminal state, False otherwise.
         """
-        return ControllerClient.is_terminal(self.pb)
+        return bool(ControllerClient.is_terminal(self.pb))
 
     @property
     def is_uninitialized(self) -> bool:
@@ -321,7 +321,7 @@ class CorePlusQueryStatus(ProtobufWrapper):
         Returns:
             bool: True if the query is in the uninitialized state, False otherwise.
         """
-        return ControllerClient.is_status_uninitialized(self.pb)
+        return bool(ControllerClient.is_status_uninitialized(self.pb))
 
     @property
     def is_initializing(self) -> bool:
