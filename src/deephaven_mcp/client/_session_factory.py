@@ -31,8 +31,8 @@ Example:
         # Authenticate
         await factory.password("username", "password")
 
-        # Connect to a new worker
-        session = await factory.connect_to_new_worker()
+        # Connect to a new worker (heap_size_gb is required)
+        session = await factory.connect_to_new_worker(heap_size_gb=4)
 
         # Use the session
         table = await session.empty_table(10)
@@ -265,7 +265,7 @@ class CorePlusSessionFactory(
                 await factory.password("username", "password")
 
                 # Now you can create sessions, etc.
-                session = await factory.connect_to_new_worker()
+                session = await factory.connect_to_new_worker(heap_size_gb=4)
                 return session
             ```
 
@@ -460,7 +460,7 @@ class CorePlusSessionFactory(
                 factory = await CorePlusSessionFactory.from_config(config)
 
                 # Use the factory directly - no authentication needed
-                session = await factory.connect_to_new_worker()
+                session = await factory.connect_to_new_worker(heap_size_gb=4)
                 return session
             ```
 
@@ -708,7 +708,7 @@ class CorePlusSessionFactory(
                 await factory.password("username", "password")
 
                 # Use the factory...
-                session = await factory.connect_to_new_worker()
+                session = await factory.connect_to_new_worker(heap_size_gb=4)
 
                 # When finished, properly close everything
                 await session.close()
@@ -765,8 +765,8 @@ class CorePlusSessionFactory(
 
     async def connect_to_new_worker(
         self: "CorePlusSessionFactory",
+        heap_size_gb: float | int,
         name: str | None = None,
-        heap_size_gb: float | int | None = None,
         server: str | None = None,
         extra_jvm_args: list[str] | None = None,
         extra_environment_vars: list[str] | None = None,
@@ -790,12 +790,12 @@ class CorePlusSessionFactory(
         in a CorePlusSession for consistent behavior across the API.
 
         Args:
+            heap_size_gb (float | int): JVM heap size in gigabytes (e.g., 8 or 2.5 for -Xmx8g or -Xmx2560m). Determines the maximum amount of memory available
+                to the worker process. Larger values are necessary for processing larger datasets, but
+                require more system resources.
             name (str | None): Optional name for the worker process. If None (default), an auto-generated name based
                 on the current timestamp will be used. A descriptive name can make it easier to
                 identify your worker in monitoring tools and logs.
-            heap_size_gb (float | int | None): JVM heap size in gigabytes (e.g., 8 or 2.5 for -Xmx8g or -Xmx2560m). Determines the maximum amount of memory available
-                to the worker process. Larger values are necessary for processing larger datasets, but
-                require more system resources. If None (default), the server's default heap size is used.
             server (str | None): Specific server to run the worker on. If None (default), the server will be chosen
                 automatically from available resources. Useful for targeting specific hardware configurations.
             extra_jvm_args (list[str] | None): Additional JVM arguments to configure the worker's Java Virtual Machine.
@@ -854,8 +854,8 @@ class CorePlusSessionFactory(
                 factory = await CorePlusSessionFactory.from_url("https://myserver.example.com/iris/connection.json")
                 await factory.password("username", "password")
 
-                # Create a worker and get a session
-                session = await factory.connect_to_new_worker()
+                # Create a worker and get a session (heap_size_gb is required)
+                session = await factory.connect_to_new_worker(heap_size_gb=4)
 
                 # Create and manipulate tables
                 table = session.table([1, 2, 3], columns=["Value"])
@@ -1451,7 +1451,7 @@ class CorePlusSessionFactory(
                 await factory.private_key("/path/to/priv-mykeyname.base64.txt")
 
                 # Use the authenticated session factory
-                session = await factory.connect_to_new_worker()
+                session = await factory.connect_to_new_worker(heap_size_gb=4)
             ```
 
         Example with StringIO:
@@ -1577,7 +1577,7 @@ class CorePlusSessionFactory(
                 await factory.saml()
 
                 # Now we can use the authenticated session factory
-                session = await factory.connect_to_new_worker()
+                session = await factory.connect_to_new_worker(heap_size_gb=4)
 
                 # Use the session to work with tables
                 table = await session.empty_table(10)

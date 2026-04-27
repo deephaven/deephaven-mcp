@@ -809,10 +809,10 @@ The configuration file supports the following fields:
   - `connection_timeout` (integer | float, **optional, default: 10.0**): Timeout in seconds for establishing connection to the Enterprise system.
 
 - Optional Worker Creation Configuration:
-  - `session_creation` (object, **optional**): Configuration for creating enterprise workers on this system. If omitted, worker creation tools will not be available for this system.
+  - `session_creation` (object, **optional**): Configuration for creating enterprise workers on this system. If omitted, `session_enterprise_create` returns a "not configured" error.
     - `max_concurrent_sessions` (integer, **optional, default: 5**): Maximum number of concurrent sessions that can be created on this system. Set to 0 to disable session creation. Used for resource management and safety.
-    - `defaults` (object, **optional**): Default values for worker creation parameters. All fields are optional - if omitted, Deephaven server defaults are used.
-      - `heap_size_gb` (float | int, **optional**): Default JVM heap size in gigabytes for new workers (e.g., 4 or 2.5). Enterprise library handles conversion internally.
+    - `defaults` (object, **required when section is present**): Default values for worker creation parameters.
+      - `heap_size_gb` (float | int, **required**): JVM heap size in gigabytes for new workers (e.g., 4 or 2.5). The Deephaven API provides no server-side default; this value must always be specified.
       - `programming_language` (string, **optional**): Default programming language for new workers ("Python" or "Groovy", default: "Python"). Creates configuration_transformer internally.
       - `auto_delete_timeout` (integer, **optional**): Default auto-deletion timeout in seconds for idle workers (API default: 600).
       - `server` (string, **optional**): Default target server/environment name where workers will be created.

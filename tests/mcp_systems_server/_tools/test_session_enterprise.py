@@ -902,6 +902,32 @@ async def test_enterprise_systems_status_completed_no_errors():
 
 
 @pytest.mark.asyncio
+async def test_session_enterprise_create_no_session_creation_config():
+    """session_enterprise_create returns error when session_creation section is absent."""
+    mock_registry = MagicMock()
+    mock_registry.system_name = _TEST_SYSTEM_NAME
+    mock_config_manager = MagicMock()
+    mock_config_manager.get_config = AsyncMock(
+        return_value={
+            "connection_json_url": "https://prod.example.com/iris/connection.json",
+            "auth_type": "password",
+            "username": "admin",
+            "password": "secret",
+        }
+    )
+
+    context = MockContext(
+        {"config_manager": mock_config_manager, "session_registry": mock_registry}
+    )
+
+    result = await session_enterprise_create(context, "test-worker")
+
+    assert result["isError"] is True
+    assert result["success"] is False
+    assert "session_creation" in result["error"]
+
+
+@pytest.mark.asyncio
 async def test_session_enterprise_create_success_with_defaults():
     """Test session_enterprise_create with config defaults."""
     mock_registry = MagicMock()
@@ -1070,7 +1096,10 @@ async def test_session_enterprise_create_auto_generate_name():
         "auth_type": "password",
         "username": "test",
         "password": "test",
-        "session_creation": {"max_concurrent_sessions": 3},
+        "session_creation": {
+            "max_concurrent_sessions": 3,
+            "defaults": {"heap_size_gb": 4},
+        },
     }
 
     # get_config() returns flat config directly
@@ -1116,7 +1145,12 @@ async def test_session_enterprise_create_system_not_found():
     mock_config_manager = MagicMock()
 
     # Flat config with sessions enabled
-    flat_config = {"session_creation": {"max_concurrent_sessions": 5}}
+    flat_config = {
+        "session_creation": {
+            "max_concurrent_sessions": 5,
+            "defaults": {"heap_size_gb": 4},
+        }
+    }
     mock_config_manager.get_config = AsyncMock(return_value=flat_config)
 
     # factory_manager.get() raises a connection error
@@ -1242,7 +1276,10 @@ async def test_session_enterprise_create_factory_creation_failure():
         "auth_type": "password",
         "username": "user",
         "password": "pass",
-        "session_creation": {"max_concurrent_sessions": 5},
+        "session_creation": {
+            "max_concurrent_sessions": 5,
+            "defaults": {"heap_size_gb": 4},
+        },
     }
 
     # get_config() returns flat config directly
@@ -1863,7 +1900,12 @@ async def test_session_enterprise_create_system_not_found_v2():
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
 
     # Flat config with sessions enabled
-    flat_config = {"session_creation": {"max_concurrent_sessions": 5}}
+    flat_config = {
+        "session_creation": {
+            "max_concurrent_sessions": 5,
+            "defaults": {"heap_size_gb": 4},
+        }
+    }
     mock_config_manager.get_config = AsyncMock(return_value=flat_config)
 
     # factory_manager.get() raises a connection error

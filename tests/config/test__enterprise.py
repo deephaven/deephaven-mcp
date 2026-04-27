@@ -270,6 +270,19 @@ def test_private_key_auth_invalid_key_type():
         )
 
 
+def test_auth_type_logic_unknown_type_is_noop():
+    """auth types without specific validation rules are silently skipped.
+
+    _validate_enterprise_system_auth_type_logic is designed to be extended with
+    additional elif branches; unknown auth types fall through without raising.
+    """
+    from deephaven_mcp.config._enterprise import (
+        _validate_enterprise_system_auth_type_logic,
+    )
+
+    _validate_enterprise_system_auth_type_logic("sys", {}, "saml")
+
+
 # --- unknown fields ---
 
 
@@ -363,22 +376,57 @@ def test_connection_timeout_very_small_float_valid():
 # --- session_creation ---
 
 
+def test_session_creation_absent_is_valid():
+    """Missing session_creation is valid — the section is optional."""
+    validate_enterprise_config(_valid_config())
+
+
+def test_session_creation_missing_defaults_raises():
+    """session_creation present but without defaults raises — defaults is required when section present."""
+    with pytest.raises(
+        EnterpriseSystemConfigurationError,
+        match=r"'session_creation.defaults' is required.*but is missing",
+    ):
+        validate_enterprise_config(_valid_config(session_creation={}))
+
+
+def test_session_creation_missing_heap_size_raises():
+    """session_creation.defaults without heap_size_gb raises."""
+    with pytest.raises(
+        EnterpriseSystemConfigurationError,
+        match=r"'session_creation.defaults.heap_size_gb' is required.*but is missing",
+    ):
+        validate_enterprise_config(_valid_config(session_creation={"defaults": {}}))
+
+
 def test_session_creation_valid_minimal():
-    """session_creation with empty dict passes."""
-    validate_enterprise_config(_valid_config(session_creation={}))
+    """session_creation with heap_size_gb passes."""
+    validate_enterprise_config(
+        _valid_config(session_creation={"defaults": {"heap_size_gb": 4}})
+    )
 
 
 def test_session_creation_valid_with_max_workers():
     """session_creation with max_concurrent_sessions passes."""
     validate_enterprise_config(
-        _valid_config(session_creation={"max_concurrent_sessions": 10})
+        _valid_config(
+            session_creation={
+                "max_concurrent_sessions": 10,
+                "defaults": {"heap_size_gb": 4},
+            }
+        )
     )
 
 
 def test_session_creation_valid_max_workers_zero():
     """session_creation max_concurrent_sessions=0 (disable) is valid."""
     validate_enterprise_config(
-        _valid_config(session_creation={"max_concurrent_sessions": 0})
+        _valid_config(
+            session_creation={
+                "max_concurrent_sessions": 0,
+                "defaults": {"heap_size_gb": 4},
+            }
+        )
     )
 
 
@@ -389,7 +437,12 @@ def test_session_creation_invalid_max_workers_negative():
         match=r"'max_concurrent_sessions'.*must be a non-negative integer, but got -1",
     ):
         validate_enterprise_config(
-            _valid_config(session_creation={"max_concurrent_sessions": -1})
+            _valid_config(
+                session_creation={
+                    "max_concurrent_sessions": -1,
+                    "defaults": {"heap_size_gb": 4},
+                }
+            )
         )
 
 
@@ -440,7 +493,11 @@ def test_session_creation_invalid_extra_jvm_args_wrong_type():
         match=r"'extra_jvm_args'.*must be of type list",
     ):
         validate_enterprise_config(
-            _valid_config(session_creation={"defaults": {"extra_jvm_args": "bad"}})
+            _valid_config(
+                session_creation={
+                    "defaults": {"heap_size_gb": 4, "extra_jvm_args": "bad"}
+                }
+            )
         )
 
 
@@ -451,7 +508,11 @@ def test_session_creation_invalid_admin_groups_wrong_type():
         match=r"'admin_groups'.*must be of type list",
     ):
         validate_enterprise_config(
-            _valid_config(session_creation={"defaults": {"admin_groups": "bad"}})
+            _valid_config(
+                session_creation={
+                    "defaults": {"heap_size_gb": 4, "admin_groups": "bad"}
+                }
+            )
         )
 
 
@@ -462,7 +523,11 @@ def test_session_creation_invalid_viewer_groups_wrong_type():
         match=r"'viewer_groups'.*must be of type list",
     ):
         validate_enterprise_config(
-            _valid_config(session_creation={"defaults": {"viewer_groups": "bad"}})
+            _valid_config(
+                session_creation={
+                    "defaults": {"heap_size_gb": 4, "viewer_groups": "bad"}
+                }
+            )
         )
 
 
@@ -473,7 +538,11 @@ def test_session_creation_invalid_timeout_seconds_wrong_type():
         match=r"'timeout_seconds'.*must be one of types \(int, float\)",
     ):
         validate_enterprise_config(
-            _valid_config(session_creation={"defaults": {"timeout_seconds": "bad"}})
+            _valid_config(
+                session_creation={
+                    "defaults": {"heap_size_gb": 4, "timeout_seconds": "bad"}
+                }
+            )
         )
 
 
@@ -484,7 +553,11 @@ def test_session_creation_invalid_session_arguments_wrong_type():
         match=r"'session_arguments'.*must be of type dict",
     ):
         validate_enterprise_config(
-            _valid_config(session_creation={"defaults": {"session_arguments": "bad"}})
+            _valid_config(
+                session_creation={
+                    "defaults": {"heap_size_gb": 4, "session_arguments": "bad"}
+                }
+            )
         )
 
 
@@ -496,7 +569,9 @@ def test_session_creation_invalid_extra_environment_vars_wrong_type():
     ):
         validate_enterprise_config(
             _valid_config(
-                session_creation={"defaults": {"extra_environment_vars": "bad"}}
+                session_creation={
+                    "defaults": {"heap_size_gb": 4, "extra_environment_vars": "bad"}
+                }
             )
         )
 
@@ -508,7 +583,11 @@ def test_session_creation_invalid_programming_language_wrong_type():
         match=r"'programming_language'.*must be of type str",
     ):
         validate_enterprise_config(
-            _valid_config(session_creation={"defaults": {"programming_language": 123}})
+            _valid_config(
+                session_creation={
+                    "defaults": {"heap_size_gb": 4, "programming_language": 123}
+                }
+            )
         )
 
 
@@ -540,7 +619,9 @@ def test_session_creation_valid_session_arguments():
     """session_arguments dict with various values passes."""
     validate_enterprise_config(
         _valid_config(
-            session_creation={"defaults": {"session_arguments": {"a": 1, "b": "x"}}}
+            session_creation={
+                "defaults": {"heap_size_gb": 4, "session_arguments": {"a": 1, "b": "x"}}
+            }
         )
     )
 
@@ -591,19 +672,6 @@ def test_validate_enterprise_config_tuple_type_auth_specific(monkeypatch):
                 "test_tuple_field": 3.14,
             }
         )
-
-
-def test_session_creation_not_dict_via_session_creation_validator():
-    """_validate_enterprise_system_session_creation raises for non-dict session_creation."""
-    from deephaven_mcp.config._enterprise import (
-        _validate_enterprise_system_session_creation,
-    )
-
-    with pytest.raises(
-        EnterpriseSystemConfigurationError,
-        match="'session_creation'.*must be a dictionary",
-    ):
-        _validate_enterprise_system_session_creation("sys", {"session_creation": "bad"})
 
 
 # ---------------------------------------------------------------------------

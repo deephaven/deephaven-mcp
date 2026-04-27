@@ -62,7 +62,7 @@ _BASE_ENTERPRISE_SYSTEM_FIELDS: dict[str, type | tuple[type, ...]] = {
 
 _OPTIONAL_ENTERPRISE_SYSTEM_FIELDS: dict[str, type | tuple[type, ...]] = {
     "system_name": str,  # Validated explicitly in validate_enterprise_config; kept here to suppress spurious "unknown field" warning
-    "session_creation": dict,  # Optional session creation configuration (max_concurrent_sessions, defaults)
+    "session_creation": dict,  # Optional; enables session creation when present. If present, defaults.heap_size_gb is required.
     "connection_timeout": (
         int,
         float,
@@ -138,20 +138,23 @@ def validate_enterprise_config(config: Any) -> dict[str, Any]:
 
     Optional Fields:
         - connection_timeout (int | float > 0, bool excluded): Timeout in seconds (default: 10.0)
-        - session_creation (dict): Session management settings
-            - max_concurrent_sessions (int ≥ 0): 0=disabled, >0=limit
-            - defaults (dict): Default session parameters, all optional:
-                - heap_size_gb (int | float): JVM heap size in gigabytes
-                - auto_delete_timeout (int): Auto-delete timeout in seconds
-                - server (str): Target server name
-                - engine (str): Execution engine name
-                - extra_jvm_args (list): Additional JVM arguments
-                - extra_environment_vars (list): Additional environment variables
-                - admin_groups (list): Groups with admin access
-                - viewer_groups (list): Groups with view-only access
-                - timeout_seconds (int | float): Session timeout in seconds
-                - session_arguments (dict): Additional session arguments
-                - programming_language (str): Default programming language
+        - session_creation (dict): Optional section that enables ``session_enterprise_create``.
+            If absent, ``session_enterprise_create`` returns a "not configured" error.
+            When present, ``defaults`` and ``defaults.heap_size_gb`` are required.
+            - max_concurrent_sessions (int ≥ 0): 0=disabled, >0=limit (default: 5)
+            - defaults (dict): **Required when section is present.** Default session parameters.
+                - heap_size_gb (int | float): **Required.** JVM heap size in gigabytes.
+                    The Deephaven API provides no server-side default for this value.
+                - auto_delete_timeout (int): Auto-delete timeout in seconds (optional)
+                - server (str): Target server name (optional)
+                - engine (str): Execution engine name (optional)
+                - extra_jvm_args (list): Additional JVM arguments (optional)
+                - extra_environment_vars (list): Additional environment variables (optional)
+                - admin_groups (list): Groups with admin access (optional)
+                - viewer_groups (list): Groups with view-only access (optional)
+                - timeout_seconds (int | float): Session timeout in seconds (optional)
+                - session_arguments (dict): Additional session arguments (optional)
+                - programming_language (str): Default programming language (optional)
 
     Args:
         config (Any): The configuration object. Expected to be a dictionary,
@@ -495,19 +498,21 @@ def _validate_enterprise_system_session_creation(
 ) -> None:
     """Validate the optional session_creation configuration section.
 
-    Validates the structure and content of the session_creation section if present.
-    The entire section is optional, and if present, all fields within it are also optional.
-    max_concurrent_sessions must be a non-negative integer if specified. Note: bool values
-    are technically accepted (since bool is a subclass of int), but are not intended for use.
-    All default values within the defaults subsection are optional.
+    The section is optional; if absent, validation passes immediately. When present,
+    defaults.heap_size_gb is required because the Deephaven API has no server-side
+    default for it. max_concurrent_sessions must be a non-negative integer if specified.
+    Note: bool values are technically accepted (since bool is a subclass of int), but are
+    not intended for use. All other default values within the defaults subsection are
+    optional.
 
     Args:
         system_name (str): The name of the enterprise system being validated.
         config (dict[str, Any]): The configuration dictionary for the system.
 
     Raises:
-        EnterpriseSystemConfigurationError: If the session_creation configuration
-            is invalid, including incorrect types or invalid values.
+        EnterpriseSystemConfigurationError: If the section is present but invalid:
+            not a dict, defaults is missing or not a dict, heap_size_gb is absent or
+            the wrong type, or any optional field has an incorrect type.
     """
     session_creation = config.get("session_creation")
     if session_creation is None:
@@ -515,11 +520,6 @@ def _validate_enterprise_system_session_creation(
             f"[config:_validate_enterprise_system_session_creation] Enterprise system '{system_name}' has no session_creation configuration (optional)."
         )
         return
-
-    if not isinstance(session_creation, dict):
-        msg = f"'session_creation' for enterprise system '{system_name}' must be a dictionary, but got {type(session_creation).__name__}."
-        _LOGGER.error(f"[config:_validate_enterprise_system_session_creation] {msg}")
-        raise EnterpriseSystemConfigurationError(msg)
 
     # max_concurrent_sessions is optional - validate if present
     if "max_concurrent_sessions" in session_creation:
@@ -531,42 +531,46 @@ def _validate_enterprise_system_session_creation(
             )
             raise EnterpriseSystemConfigurationError(msg)
 
-    # Validate defaults section if present (all fields optional)
+    # Validate defaults section — required because heap_size_gb has no server-side default
     defaults = session_creation.get("defaults")
-    if defaults is not None:
-        if not isinstance(defaults, dict):
-            msg = f"'defaults' in session_creation for enterprise system '{system_name}' must be a dictionary, but got {type(defaults).__name__}."
-            _LOGGER.error(
-                f"[config:_validate_enterprise_system_session_creation] {msg}"
-            )
-            raise EnterpriseSystemConfigurationError(msg)
+    if defaults is None:
+        msg = f"'session_creation.defaults' is required for enterprise system '{system_name}' but is missing."
+        _LOGGER.error(f"[config:_validate_enterprise_system_session_creation] {msg}")
+        raise EnterpriseSystemConfigurationError(msg)
 
-        # Optional field validations
-        _validate_optional_session_default(
-            system_name, defaults, "heap_size_gb", (int, float)
-        )
-        _validate_optional_session_default(
-            system_name, defaults, "auto_delete_timeout", int
-        )
-        _validate_optional_session_default(system_name, defaults, "server", str)
-        _validate_optional_session_default(system_name, defaults, "engine", str)
-        _validate_optional_session_default(
-            system_name, defaults, "extra_jvm_args", list
-        )
-        _validate_optional_session_default(
-            system_name, defaults, "extra_environment_vars", list
-        )
-        _validate_optional_session_default(system_name, defaults, "admin_groups", list)
-        _validate_optional_session_default(system_name, defaults, "viewer_groups", list)
-        _validate_optional_session_default(
-            system_name, defaults, "timeout_seconds", (int, float)
-        )
-        _validate_optional_session_default(
-            system_name, defaults, "session_arguments", dict
-        )
-        _validate_optional_session_default(
-            system_name, defaults, "programming_language", str
-        )
+    if not isinstance(defaults, dict):
+        msg = f"'defaults' in session_creation for enterprise system '{system_name}' must be a dictionary, but got {type(defaults).__name__}."
+        _LOGGER.error(f"[config:_validate_enterprise_system_session_creation] {msg}")
+        raise EnterpriseSystemConfigurationError(msg)
+
+    # heap_size_gb is required — the Deephaven API provides no server-side default
+    if "heap_size_gb" not in defaults:
+        msg = f"'session_creation.defaults.heap_size_gb' is required for enterprise system '{system_name}' but is missing."
+        _LOGGER.error(f"[config:_validate_enterprise_system_session_creation] {msg}")
+        raise EnterpriseSystemConfigurationError(msg)
+    _validate_field_type(
+        system_name, "heap_size_gb", defaults["heap_size_gb"], (int, float)
+    )
+
+    # Optional field validations
+    _validate_optional_session_default(
+        system_name, defaults, "auto_delete_timeout", int
+    )
+    _validate_optional_session_default(system_name, defaults, "server", str)
+    _validate_optional_session_default(system_name, defaults, "engine", str)
+    _validate_optional_session_default(system_name, defaults, "extra_jvm_args", list)
+    _validate_optional_session_default(
+        system_name, defaults, "extra_environment_vars", list
+    )
+    _validate_optional_session_default(system_name, defaults, "admin_groups", list)
+    _validate_optional_session_default(system_name, defaults, "viewer_groups", list)
+    _validate_optional_session_default(
+        system_name, defaults, "timeout_seconds", (int, float)
+    )
+    _validate_optional_session_default(system_name, defaults, "session_arguments", dict)
+    _validate_optional_session_default(
+        system_name, defaults, "programming_language", str
+    )
 
     _LOGGER.debug(
         f"[config:_validate_enterprise_system_session_creation] Session creation configuration for enterprise system '{system_name}' is valid."

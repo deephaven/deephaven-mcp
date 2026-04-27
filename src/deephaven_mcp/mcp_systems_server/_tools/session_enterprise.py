@@ -457,7 +457,12 @@ async def session_enterprise_create(
 
         # Get enterprise system configuration (flat config returned directly)
         system_config = await config_manager.get_config()
-        session_creation_config = system_config.get("session_creation", {})
+        session_creation_config = system_config.get("session_creation")
+        if session_creation_config is None:
+            error_msg = f"Enterprise session creation not configured for system '{system_name}'. Add a 'session_creation' section to the configuration."
+            _LOGGER.error(f"[mcp_systems_server:session_enterprise_create] {error_msg}")
+            result.update({"success": False, "error": error_msg, "isError": True})
+            return result
         max_sessions = session_creation_config.get(
             "max_concurrent_sessions", DEFAULT_MAX_CONCURRENT_SESSIONS
         )
@@ -480,8 +485,8 @@ async def session_enterprise_create(
             result.update(error_response)
             return result
 
-        # Resolve configuration parameters
-        defaults = session_creation_config.get("defaults", {})
+        # Resolve configuration parameters (defaults guaranteed by config validation)
+        defaults = session_creation_config["defaults"]
         resolved_config = _resolve_session_parameters(
             heap_size_gb,
             auto_delete_timeout,

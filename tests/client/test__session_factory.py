@@ -261,12 +261,14 @@ async def test_connect_to_new_worker_success(
         return_value="wrapped_session",
     ) as mock_core_plus_session:
         result = await coreplus_session_manager.connect_to_new_worker(
-            name="worker", session_arguments={"programming_language": "python"}
+            name="worker",
+            heap_size_gb=4,
+            session_arguments={"programming_language": "python"},
         )
 
         dummy_session_manager.connect_to_new_worker.assert_called_once_with(
             name="worker",
-            heap_size_gb=None,
+            heap_size_gb=4,
             server=None,
             extra_jvm_args=None,
             extra_environment_vars=None,
@@ -289,7 +291,9 @@ async def test_connect_to_new_worker_resource_error(
     dummy_session_manager.connect_to_new_worker.side_effect = exc.ResourceError("fail")
     with pytest.raises(exc.ResourceError):
         await coreplus_session_manager.connect_to_new_worker(
-            name="worker", session_arguments={"programming_language": "python"}
+            heap_size_gb=4,
+            name="worker",
+            session_arguments={"programming_language": "python"},
         )
 
 
@@ -302,7 +306,9 @@ async def test_connect_to_new_worker_creation_error(
     )
     with pytest.raises(exc.SessionCreationError):
         await coreplus_session_manager.connect_to_new_worker(
-            name="worker", session_arguments={"programming_language": "python"}
+            heap_size_gb=4,
+            name="worker",
+            session_arguments={"programming_language": "python"},
         )
 
 
@@ -313,7 +319,9 @@ async def test_connect_to_new_worker_connection_error(
     dummy_session_manager.connect_to_new_worker.side_effect = ConnectionError("fail")
     with pytest.raises(exc.DeephavenConnectionError):
         await coreplus_session_manager.connect_to_new_worker(
-            name="worker", session_arguments={"programming_language": "python"}
+            heap_size_gb=4,
+            name="worker",
+            session_arguments={"programming_language": "python"},
         )
 
 
@@ -324,7 +332,9 @@ async def test_connect_to_new_worker_other_error(
     dummy_session_manager.connect_to_new_worker.side_effect = Exception("fail")
     with pytest.raises(exc.SessionCreationError):
         await coreplus_session_manager.connect_to_new_worker(
-            name="worker", session_arguments={"programming_language": "python"}
+            heap_size_gb=4,
+            name="worker",
+            session_arguments={"programming_language": "python"},
         )
 
 
@@ -1351,7 +1361,9 @@ async def test_connect_to_new_worker_timeout(
     )
 
     with pytest.raises(exc.DeephavenConnectionError) as exc_info:
-        await coreplus_session_manager.connect_to_new_worker(timeout_seconds=60.0)
+        await coreplus_session_manager.connect_to_new_worker(
+            heap_size_gb=4, timeout_seconds=60.0
+        )
     assert "timed out" in str(exc_info.value)
 
 

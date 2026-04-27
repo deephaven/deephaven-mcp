@@ -646,10 +646,10 @@ The enterprise server (`dh-mcp-enterprise-server`) uses a **flat** JSON or JSON5
 | `password_env_var` | string | `auth_type="password"` | Environment variable containing the password (recommended) |
 | `private_key_path` | string | `auth_type="private_key"` | Absolute path to the Deephaven private keypair file (proprietary format, typically named `priv-<keyname>.base64.txt`; provided by your IT/security team) |
 | `connection_timeout` | int or float | No | Timeout in seconds for connecting to the system (default: 10.0) |
-| `session_creation` | object | No | Session creation settings (limits and defaults) for `session_enterprise_create`. All fields are optional; defaults are used if omitted |
+| `session_creation` | object | No | Optional section that enables `session_enterprise_create`. If absent, the tool returns a "not configured" error. When present, `defaults` and `defaults.heap_size_gb` are required. |
 | `session_creation.max_concurrent_sessions` | integer | No | Max concurrent sessions (default: 5). Set to 0 to disable `session_enterprise_create` |
-| `session_creation.defaults` | object | No | Default parameters applied to `session_enterprise_create` when the caller does not specify them |
-| `session_creation.defaults.heap_size_gb` | int or float | No | Default JVM heap size in GB |
+| `session_creation.defaults` | object | Yes (when section present) | Default parameters applied to `session_enterprise_create` when the caller does not specify them |
+| `session_creation.defaults.heap_size_gb` | int or float | Yes (when section present) | JVM heap size in GB. Required — the Deephaven API has no server-side default for this value. |
 | `session_creation.defaults.auto_delete_timeout` | integer | No | Default auto-delete timeout in seconds |
 | `session_creation.defaults.server` | string | No | Default target server name within the DHE system |
 | `session_creation.defaults.engine` | string | No | Default execution engine name |
