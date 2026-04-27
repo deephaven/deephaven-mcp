@@ -145,7 +145,9 @@ async def _apply_row_limit(
 
         probe_size = await asyncio.to_thread(lambda: probe_table.size)
         if probe_size is None:
-            raise InternalError(f"[queries:_apply_row_limit] Table .size returned None for {context_name}")
+            raise InternalError(
+                f"[queries:_apply_row_limit] Table .size returned None for {context_name}"
+            )
 
         if probe_size > max_rows:
             # More rows exist — apply the actual limit
@@ -398,7 +400,9 @@ async def _extract_partition_column_defs(table: Table) -> list[dict]:
     return [
         {"name": n, "type": t}
         for n, is_p, t in zip(
-            d.get("Name", []), d.get("IsPartitioning", []), d.get("DataType", []),
+            d.get("Name", []),
+            d.get("IsPartitioning", []),
+            d.get("DataType", []),
             strict=True,
         )
         if is_p
@@ -477,7 +481,9 @@ async def _find_recent_partition_filters(
             continue
         filter_str = _format_partition_filter(primary_col, val)
         try:
-            probe_size = await asyncio.to_thread(lambda fs=filter_str: table.where([fs]).size)
+            probe_size = await asyncio.to_thread(
+                lambda fs=filter_str: table.where([fs]).size  # type: ignore[misc]
+            )
         except Exception as e:
             _LOGGER.warning(
                 f"[queries:_find_recent_partition_filters] "
@@ -485,7 +491,9 @@ async def _find_recent_partition_filters(
             )
             continue
         if probe_size is None:
-            raise InternalError(f"[queries:_find_recent_partition_filters] Table .size returned None for '{namespace}.{table_name}'")
+            raise InternalError(
+                f"[queries:_find_recent_partition_filters] Table .size returned None for '{namespace}.{table_name}'"
+            )
         if probe_size > 0:
             _LOGGER.debug(
                 f"[queries:_find_recent_partition_filters] "

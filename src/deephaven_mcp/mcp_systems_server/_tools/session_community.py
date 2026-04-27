@@ -1269,7 +1269,11 @@ async def session_community_delete(
             "instance_tracker"
         ]
         await _delete_session_resources(
-            session_id, session_name, session_manager, session_registry, instance_tracker
+            session_id,
+            session_name,
+            session_manager,
+            session_registry,
+            instance_tracker,
         )
 
         _LOGGER.info(

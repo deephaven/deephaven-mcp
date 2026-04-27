@@ -232,7 +232,7 @@ class SessionCreationError(SessionError):
     Usage:
         ```python
         try:
-            session = await session_manager.connect_to_new_worker()
+            session = await session_manager.connect_to_new_worker(heap_size_gb=4)
         except SessionCreationError as e:
             logger.error(f"Failed to create session: {e}")
             # Implement fallback or retry logic

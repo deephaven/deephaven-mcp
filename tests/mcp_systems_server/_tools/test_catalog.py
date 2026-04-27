@@ -1194,13 +1194,17 @@ def test_build_catalog_filters_filters_only():
 
 def test_build_catalog_filters_namespace_only():
     """A namespace produces exactly one filter with correct backtick syntax."""
-    result = _build_catalog_filters(namespace="market_data", table_names=None, filters=None)
+    result = _build_catalog_filters(
+        namespace="market_data", table_names=None, filters=None
+    )
     assert result == ["Namespace = `market_data`"]
 
 
 def test_build_catalog_filters_table_names_only():
     """table_names produces a single 'TableName in ...' filter with backtick-quoted names."""
-    result = _build_catalog_filters(namespace=None, table_names=["prices", "trades"], filters=None)
+    result = _build_catalog_filters(
+        namespace=None, table_names=["prices", "trades"], filters=None
+    )
     assert result == ["TableName in `prices`, `trades`"]
 
 

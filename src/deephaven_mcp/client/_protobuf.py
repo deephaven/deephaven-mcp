@@ -55,6 +55,7 @@ from google.protobuf.message import Message
 if TYPE_CHECKING:
     import deephaven_enterprise.client.auth  # pragma: no cover
     import deephaven_enterprise.client.controller  # pragma: no cover
+    import deephaven_enterprise.proto.controller  # pragma: no cover
     from typing_extensions import override  # pragma: no cover
 elif sys.version_info >= (3, 12):
     from typing import override  # pragma: no cover
@@ -66,7 +67,7 @@ from ._base import is_enterprise_available
 if is_enterprise_available:
     from deephaven_enterprise.client.controller import ControllerClient
 else:
-    ControllerClient = None  # pragma: no cover
+    ControllerClient = None  # type: ignore[misc,assignment]  # pragma: no cover
 
 
 PQ_STATES: dict[str, str] = {
@@ -229,7 +230,7 @@ class CorePlusQueryStatus(ProtobufWrapper):
     @override
     def __init__(
         self,
-        status: "deephaven_enterprise.proto.controller.PersistentQueryStatusEnum",  # noqa: F821
+        status: "deephaven_enterprise.proto.controller.PersistentQueryStatusEnum",
     ):
         """Initialize with a protobuf status enum value.
 
@@ -248,10 +249,10 @@ class CorePlusQueryStatus(ProtobufWrapper):
     def __eq__(self, other: object) -> bool:
         """Compare this status with another status or string."""
         if isinstance(other, CorePlusQueryStatus):
-            return cast(bool, self.pb == other.pb)
+            return bool(self.pb == other.pb)
         elif isinstance(other, str):
             return self.name == other
-        return cast(bool, self.pb == other)
+        return bool(self.pb == other)
 
     @property
     def name(self) -> str:
@@ -265,7 +266,7 @@ class CorePlusQueryStatus(ProtobufWrapper):
             str: The stripped enum name (e.g., ``"RUNNING"``, ``"COMPLETED"``,
                 ``"FAILED"``).
         """
-        raw = cast(str, ControllerClient.status_name(self.pb))
+        raw: str = ControllerClient.status_name(self.pb)
         return raw[len("PQS_") :] if raw.startswith("PQS_") else raw
 
     @property
@@ -279,7 +280,7 @@ class CorePlusQueryStatus(ProtobufWrapper):
         Returns:
             bool: True if the query is in a running state, False otherwise.
         """
-        return cast(bool, ControllerClient.is_running(self.pb))
+        return ControllerClient.is_running(self.pb)
 
     @property
     def is_completed(self) -> bool:
@@ -292,7 +293,7 @@ class CorePlusQueryStatus(ProtobufWrapper):
         Returns:
             bool: True if the query has completed successfully, False otherwise.
         """
-        return cast(bool, ControllerClient.is_completed(self.pb))
+        return ControllerClient.is_completed(self.pb)
 
     @property
     def is_terminal(self) -> bool:
@@ -308,7 +309,7 @@ class CorePlusQueryStatus(ProtobufWrapper):
         Returns:
             bool: True if the query is in a terminal state, False otherwise.
         """
-        return cast(bool, ControllerClient.is_terminal(self.pb))
+        return ControllerClient.is_terminal(self.pb)
 
     @property
     def is_uninitialized(self) -> bool:
@@ -320,7 +321,7 @@ class CorePlusQueryStatus(ProtobufWrapper):
         Returns:
             bool: True if the query is in the uninitialized state, False otherwise.
         """
-        return cast(bool, ControllerClient.is_status_uninitialized(self.pb))
+        return ControllerClient.is_status_uninitialized(self.pb)
 
     @property
     def is_initializing(self) -> bool:

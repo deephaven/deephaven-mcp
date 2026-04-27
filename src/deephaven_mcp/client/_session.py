@@ -42,7 +42,7 @@ Example (enterprise):
     async def main():
         factory = await CorePlusSessionFactory.from_config({"url": "https://myserver.example.com/iris/connection.json"})
         await factory.password("username", "password")
-        session = await factory.connect_to_new_worker()
+        session = await factory.connect_to_new_worker(heap_size_gb=4)
         info = await session.pqinfo()
         print(f"Connected to query {info.id} with status {info.status}")
         hist = await session.historical_table("market_data", "daily_prices")
@@ -1380,7 +1380,7 @@ class CorePlusSession(
             await factory.password("username", "password")
 
             # Connect to a worker to get a CorePlusSession
-            session = await factory.connect_to_new_worker()
+            session = await factory.connect_to_new_worker(heap_size_gb=4)
 
             # Get information about this persistent query
             query_info = await session.pqinfo()

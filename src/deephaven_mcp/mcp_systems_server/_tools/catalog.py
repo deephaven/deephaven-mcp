@@ -809,7 +809,9 @@ async def catalog_tables_schema(
 
         # Track which explicitly requested table_names were found in the catalog
         found_names: set[str] = (
-            {str(entry["TableName"]) for entry in catalog_entries} if table_names else set()
+            {str(entry["TableName"]) for entry in catalog_entries}
+            if table_names
+            else set()
         )
 
         _LOGGER.debug(

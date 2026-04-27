@@ -268,7 +268,9 @@ async def test_apply_row_limit_size_none_raises_internal_error():
 
     with patch("deephaven_mcp.queries.asyncio.to_thread", new=fake_to_thread):
         with pytest.raises(InternalError):
-            await _apply_row_limit(table_mock, max_rows=1000, head=True, context_name="test table")
+            await _apply_row_limit(
+                table_mock, max_rows=1000, head=True, context_name="test table"
+            )
 
 
 # ===== get_table tests =====
@@ -1750,7 +1752,9 @@ async def test_find_recent_partition_filters_size_none_raises_internal_error():
 
         with patch("deephaven_mcp.queries.asyncio.to_thread", new=fake_to_thread):
             with pytest.raises(InternalError):
-                await _find_recent_partition_filters(mock_table, "DbInternal", "ProcessEventLog")
+                await _find_recent_partition_filters(
+                    mock_table, "DbInternal", "ProcessEventLog"
+                )
 
 
 # ===== Public partition utility function tests =====

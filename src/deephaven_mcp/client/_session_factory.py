@@ -766,7 +766,7 @@ class CorePlusSessionFactory(
     async def connect_to_new_worker(
         self: "CorePlusSessionFactory",
         name: str | None = None,
-        heap_size_gb: int | None = None,
+        heap_size_gb: float | int | None = None,
         server: str | None = None,
         extra_jvm_args: list[str] | None = None,
         extra_environment_vars: list[str] | None = None,
@@ -793,7 +793,7 @@ class CorePlusSessionFactory(
             name (str | None): Optional name for the worker process. If None (default), an auto-generated name based
                 on the current timestamp will be used. A descriptive name can make it easier to
                 identify your worker in monitoring tools and logs.
-            heap_size_gb (int | None): JVM heap size in gigabytes (e.g., 8 for -Xmx8g). Determines the maximum amount of memory available
+            heap_size_gb (float | int | None): JVM heap size in gigabytes (e.g., 8 or 2.5 for -Xmx8g or -Xmx2560m). Determines the maximum amount of memory available
                 to the worker process. Larger values are necessary for processing larger datasets, but
                 require more system resources. If None (default), the server's default heap size is used.
             server (str | None): Specific server to run the worker on. If None (default), the server will be chosen
@@ -854,7 +854,7 @@ class CorePlusSessionFactory(
                 factory = await CorePlusSessionFactory.from_url("https://myserver.example.com/iris/connection.json")
                 await factory.password("username", "password")
 
-                # Create a default worker and get a session
+                # Create a worker and get a session
                 session = await factory.connect_to_new_worker()
 
                 # Create and manipulate tables
@@ -1386,7 +1386,7 @@ class CorePlusSessionFactory(
                 timeout=timeout_seconds,
             )
             _LOGGER.debug(f"[CorePlusSessionFactory:ping] Ping result: {result}")
-            return cast(bool, result)
+            return bool(result)
         except TimeoutError:
             _LOGGER.error(
                 f"[CorePlusSessionFactory:ping] Timed out after {timeout_seconds}s"
