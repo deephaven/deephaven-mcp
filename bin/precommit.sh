@@ -11,11 +11,8 @@ uv run isort . --skip _version.py --skip .venv
 # Format code with black
 uv run black . --exclude '(_version.py|.venv)'
 
-# Lint code with ruff
+# Lint code with ruff (includes pydocstyle D-rules)
 uv run ruff check src --fix --exclude _version.py --exclude .venv
-
-# Check docstring style with pydocstyle
-uv run pydocstyle src
 
 # Run static type checking with mypy
 uv run mypy src/

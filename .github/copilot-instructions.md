@@ -102,10 +102,9 @@ Always run code quality checks before committing:
 Individual checks:
 
 - `uv run black --check --diff . --exclude '_version\.py|\.venv'` -- formatting check, takes 1.3 seconds
-- `uv run ruff check src --exclude _version.py` -- linting, takes 0.015 seconds  
+- `uv run ruff check src --exclude _version.py` -- linting (includes pydocstyle D-rules), takes 0.015 seconds  
 - `uv run isort . --check-only --diff --skip _version.py --skip .venv` -- import sorting, takes 0.34 seconds
 - `uv run mypy src/` -- type checking, takes ~15 seconds (part of precommit.sh)
-- `uv run pydocstyle src` -- docstring style check
 
 ## Testing MCP Functionality
 

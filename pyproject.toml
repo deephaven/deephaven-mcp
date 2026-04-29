@@ -68,7 +68,6 @@ lint = [
     "black>=24.0.0",           # Code formatter
     "ruff>=0.1.0",             # Linter and code quality tool
     "isort>=5.12.0",           # Import sorter
-    "pydocstyle>=6.3.0",       # Docstring style checker
     
     # Type checking and static analysis
     "mypy>=1.6.0",             # Static type checker
@@ -127,17 +126,19 @@ target-version = ["py310"]
 [tool.ruff]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "B", "C", "U", "Q", "S"]  # Select specific linting rules
+select = ["E", "F", "I", "B", "C", "U", "Q", "S", "D"]  # Includes pydocstyle (D) rules
 ignore = ["E501"]  # Ignore line length warnings since we use black
+
+[tool.ruff.lint.pydocstyle]
+convention = "pep257"  # Same docstring convention previously enforced by pydocstyle
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["D"]        # Don't enforce docstring rules on tests
+"test_*.py" = ["D"]       # Don't enforce docstring rules on tests
 
 # Isort configuration for import sorting
 [tool.isort]
 profile = "black"  # Use black's style for import sorting
-
-# pydocstyle configuration for docstring linting
-[tool.pydocstyle]
-convention = "pep257"
-match = '(?!test_).*\.py'  # Ignore test files by default
 
 # Pytest configuration for testing
 [tool.pytest.ini_options]

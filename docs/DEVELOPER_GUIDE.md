@@ -2891,9 +2891,8 @@ To help maintain a consistent and high-quality codebase, the [`bin/precommit.sh`
 |--------------|------------------------------------------------|-------------------------------------|------------------|
 | isort        | Sort Python imports                            | `uv run isort . --skip _version.py --skip .venv` | Import order, grouping |
 | black        | Format Python code                             | `uv run black . --exclude '(_version.py\|.venv)'` | PEP 8 formatting |
-| ruff         | Lint code, autofix common issues               | `uv run ruff check src --fix --exclude _version.py --exclude .venv` | Linting, best practices |
+| ruff         | Lint code, autofix common issues, docstring style (PEP 257) | `uv run ruff check src --fix --exclude _version.py --exclude .venv` | Linting, best practices, PEP 257 docstrings |
 | mypy         | Static type checking                           | `uv run mypy src/`                  | Type correctness |
-| pydocstyle   | Docstring style/linting                        | `uv run pydocstyle src`             | PEP 257 docstrings |
 | markdownlint | Lint and format markdown documentation         | `npx --yes markdownlint-cli2 --fix` | Markdown style, consistency |
 
 The script will run all of these tools in order. If any step fails, the script will stop and print an error. Fix the reported issues and rerun the script until it completes successfully. Only commit code that passes all code quality checks.
@@ -2902,8 +2901,8 @@ The script will run all of these tools in order. If any step fails, the script w
 
 - All public modules, classes, and functions must have clear, PEP 257-compliant docstrings (unless explicitly ignored in config)
 - Docstrings should start with a summary line, use proper formatting, and describe parameters, return values, and exceptions where relevant
-- `pydocstyle` is configured in `pyproject.toml` (see `[tool.pydocstyle]`)
-- Test files are excluded from docstring checks by default (see `match` pattern)
+- Docstring rules are enforced via ruff's pydocstyle (`D`) rules, configured in `pyproject.toml` (see `[tool.ruff.lint.pydocstyle]`, `convention = "pep257"`)
+- Test files are excluded from docstring checks via `[tool.ruff.lint.per-file-ignores]`
 
 **Markdown documentation policy:**
 
@@ -2925,7 +2924,6 @@ uv run pytest  # Runs all unit tests (use -m integration for integration tests)
 uv run isort . --skip _version.py --skip .venv
 uv run black . --exclude '(_version.py|.venv)'
 uv run ruff check src --fix --exclude _version.py --exclude .venv
-uv run pydocstyle src
 uv run mypy src/
 
 # Check import order only (no changes)
