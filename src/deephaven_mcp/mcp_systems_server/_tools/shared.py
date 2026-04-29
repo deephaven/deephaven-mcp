@@ -109,7 +109,7 @@ def get_mcp_session_id(ctx: Context) -> str:
     if request is not None:
         session_id = request.headers.get("mcp-session-id")
         if session_id:
-            return session_id
+            return str(session_id)
     raise InternalError(
         "No mcp-session-id found in request headers. "
         "All MCP tool calls must originate from an authenticated session."
