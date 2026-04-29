@@ -670,22 +670,22 @@ async def test_from_config_invalid_config(monkeypatch):
         with pytest.raises(Exception):
             await sm_mod.CorePlusSessionFactory.from_config(worker_cfg)
 
-    # Also test the specific EnterpriseSystemConfigurationError path (covers the
+    # Also test the specific ConfigurationError path (covers the
     # except block that logs the error before re-raising)
-    from deephaven_mcp.config import EnterpriseSystemConfigurationError
+    from deephaven_mcp.config import ConfigurationError
 
     with (
         patch("deephaven_mcp.client._session_factory.is_enterprise_available", True),
         patch(
             "deephaven_mcp.client._session_factory.validate_enterprise_config",
-            side_effect=EnterpriseSystemConfigurationError(
+            side_effect=ConfigurationError(
                 "Required field 'x' missing in enterprise system 'test-system'"
             ),
         ),
     ):
         import deephaven_mcp.client._session_factory as sm_mod
 
-        with pytest.raises(EnterpriseSystemConfigurationError):
+        with pytest.raises(ConfigurationError):
             await sm_mod.CorePlusSessionFactory.from_config(worker_cfg)
 
 

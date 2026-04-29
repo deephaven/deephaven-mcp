@@ -2,10 +2,8 @@ import pytest
 
 from deephaven_mcp._exceptions import (
     AuthenticationError,
-    CommunitySessionConfigurationError,
     ConfigurationError,
     DeephavenConnectionError,
-    EnterpriseSystemConfigurationError,
     InternalError,
     McpError,
     MissingEnterprisePackageError,
@@ -97,16 +95,6 @@ class TestExceptionParameterized:
                 "session launch error",
             ),
             (
-                CommunitySessionConfigurationError,
-                [ConfigurationError, McpError],
-                "community session configuration error",
-            ),
-            (
-                EnterpriseSystemConfigurationError,
-                [ConfigurationError, McpError],
-                "enterprise system configuration error",
-            ),
-            (
                 MissingEnterprisePackageError,
                 [InternalError, McpError, RuntimeError],
                 "Core+ features are not available (deephaven-coreplus-client Python package not installed)",
@@ -171,8 +159,6 @@ class TestExceptionModule:
             "RegistryItemNotFoundError",
             # Configuration exceptions
             "ConfigurationError",
-            "CommunitySessionConfigurationError",
-            "EnterpriseSystemConfigurationError",
         }
         # Check that the exported set exactly matches the expected exceptions
         assert (

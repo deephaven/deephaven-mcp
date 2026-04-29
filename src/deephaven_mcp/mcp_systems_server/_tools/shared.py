@@ -14,9 +14,14 @@ import logging
 import pyarrow
 from mcp.server.fastmcp import Context
 
+from deephaven_mcp._exceptions import InternalError
 from deephaven_mcp.client import BaseSession, CorePlusSession
+from deephaven_mcp.config import ConfigManager
+from deephaven_mcp.mcp_systems_server._lifespan import LifespanContext
 from deephaven_mcp.resource_manager import (
     BaseRegistry,
+    CommunitySessionRegistry,
+    EnterpriseSessionRegistry,
     InitializationPhase,
 )
 
@@ -76,6 +81,115 @@ def format_initialization_status(
     return init_info or None
 
 
+def get_config_manager(context: Context) -> ConfigManager:
+    """Extract the ConfigManager from the MCP lifespan context.
+
+    Args:
+        context (Context): The MCP context object.
+
+    Returns:
+        ConfigManager: The server's config manager instance.
+    """
+    lifespan_context: LifespanContext[BaseRegistry] = (
+        context.request_context.lifespan_context
+    )
+    return lifespan_context["config_manager"]
+
+
+def get_mcp_session_id(ctx: Context) -> str:
+    """Extract the MCP session ID from the request headers.
+
+    Raises:
+        InternalError: If the mcp-session-id header is absent. Every MCP request over
+            streamable-HTTP carries an mcp-session-id; absence indicates a misconfigured
+            transport or unauthorized caller. There is no fallback — a default would
+            collapse per-session isolation and is a security risk.
+    """
+    request = ctx.request_context.request
+    if request is not None:
+        session_id = request.headers.get("mcp-session-id")
+        if session_id:
+            return str(session_id)
+    raise InternalError(
+        "No mcp-session-id found in request headers. "
+        "All MCP tool calls must originate from an authenticated session."
+    )
+
+
+async def get_registry_from_context(context: Context) -> BaseRegistry:
+    """Get the per-MCP-session Deephaven registry, creating it on first access.
+
+    Extracts the mcp-session-id from the request headers, then returns the
+    per-session registry from the lifespan context, creating one if this is the
+    session's first tool call.
+
+    Args:
+        context (Context): The MCP context object.
+
+    Returns:
+        BaseRegistry: The per-session registry for the current MCP session.
+
+    Raises:
+        InternalError: If the mcp-session-id header is absent.
+    """
+    mcp_session_id = get_mcp_session_id(context)
+    lifespan_context: LifespanContext[BaseRegistry] = (
+        context.request_context.lifespan_context
+    )
+    session_registry_manager = lifespan_context["session_registry_manager"]
+    return await session_registry_manager.get_or_create_registry(
+        mcp_session_id, get_config_manager(context)
+    )
+
+
+async def get_community_registry(context: Context) -> CommunitySessionRegistry:
+    """Get the per-MCP-session community registry, creating it on first access.
+
+    Delegates to :func:`get_registry_from_context` and validates that the result is a
+    :class:`~deephaven_mcp.resource_manager.CommunitySessionRegistry`.
+
+    Args:
+        context (Context): The MCP context object.
+
+    Returns:
+        CommunitySessionRegistry: The per-session community registry.
+
+    Raises:
+        InternalError: If the mcp-session-id header is absent or the registry is not a
+            CommunitySessionRegistry (indicates a server misconfiguration).
+    """
+    registry = await get_registry_from_context(context)
+    if not isinstance(registry, CommunitySessionRegistry):
+        raise InternalError(
+            f"Expected CommunitySessionRegistry, got {type(registry).__name__}."
+        )
+    return registry
+
+
+async def get_enterprise_registry(context: Context) -> EnterpriseSessionRegistry:
+    """Get the per-MCP-session enterprise registry, creating it on first access.
+
+    Delegates to :func:`get_registry_from_context` and validates that the result is an
+    :class:`~deephaven_mcp.resource_manager.EnterpriseSessionRegistry`.
+
+    Args:
+        context (Context): The MCP context object.
+
+    Returns:
+        EnterpriseSessionRegistry: The per-session enterprise registry.
+
+    Raises:
+        InternalError: If the mcp-session-id header is absent or the registry is not an
+            EnterpriseSessionRegistry (indicates a server misconfiguration).
+    """
+    registry = await get_registry_from_context(context)
+    if not isinstance(registry, EnterpriseSessionRegistry):
+        raise InternalError(
+            f"Expected EnterpriseSessionRegistry, got {type(registry).__name__}."
+        )
+    return registry
+
+
 async def get_session_from_context(
     function_name: str, context: Context, session_id: str
 ) -> BaseSession:
@@ -83,7 +197,7 @@ async def get_session_from_context(
 
     This helper eliminates duplication of the common pattern for accessing
     sessions from the MCP context. It handles the standard flow of:
-    1. Extracting session_registry from context
+    1. Extracting the per-MCP-session registry via session_registry_manager
     2. Getting the session_manager for the session_id
     3. Establishing the session connection
 
@@ -96,15 +210,14 @@ async def get_session_from_context(
         BaseSession: The active session connection
 
     Raises:
+        InternalError: If the mcp-session-id header is absent
         RegistryItemNotFoundError: If session_id not found in registry
         Exception: If session cannot be established or context is invalid
     """
     _LOGGER.debug(
         f"[mcp_systems_server:{function_name}] Accessing session registry from context"
     )
-    session_registry: BaseRegistry = context.request_context.lifespan_context[
-        "session_registry"
-    ]
+    session_registry = await get_registry_from_context(context)
 
     _LOGGER.debug(
         f"[mcp_systems_server:{function_name}] Retrieving session manager for '{session_id}'"

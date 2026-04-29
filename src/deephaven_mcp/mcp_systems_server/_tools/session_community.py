@@ -15,7 +15,7 @@ from typing import Any, Literal, cast
 from mcp.server.fastmcp import Context, FastMCP
 
 from deephaven_mcp._exceptions import (
-    CommunitySessionConfigurationError,
+    ConfigurationError,
     InvalidSessionNameError,
     RegistryItemNotFoundError,
 )
@@ -24,12 +24,17 @@ from deephaven_mcp.mcp_systems_server._tools.session import (
     DEFAULT_MAX_CONCURRENT_SESSIONS,
     DEFAULT_PROGRAMMING_LANGUAGE,
 )
+from deephaven_mcp.mcp_systems_server._tools.shared import (
+    get_community_registry,
+    get_config_manager,
+)
 from deephaven_mcp.resource_manager import (
     BaseItemManager,
     CommunitySessionManager,
     CommunitySessionRegistry,
     DockerLaunchedSession,
     DynamicCommunitySessionManager,
+    InstanceTracker,
     LaunchedSession,
     PythonLaunchedSession,
     SystemType,
@@ -37,7 +42,6 @@ from deephaven_mcp.resource_manager import (
     generate_auth_token,
     launch_session,
 )
-from deephaven_mcp.resource_manager._instance_tracker import InstanceTracker
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -475,7 +479,7 @@ def _resolve_auth_token(
             - (token_string, True) if token was auto-generated
 
     Raises:
-        CommunitySessionConfigurationError: If auth_token_env_var is configured but the environment variable is not set.
+        ConfigurationError: If auth_token_env_var is configured but the environment variable is not set.
     """
     # Check if auth type requires a PSK token (must be exact match for full class name)
     if auth_type != "io.deephaven.authentication.psk.PskAuthenticationHandler":
@@ -494,7 +498,7 @@ def _resolve_auth_token(
         # If auth_token_env_var is explicitly configured but not set, this is an error
         error_msg = f"Environment variable '{env_var}' specified in auth_token_env_var is not set"
         _LOGGER.error(f"[mcp_systems_server:session_community_create] {error_msg}")
-        raise CommunitySessionConfigurationError(error_msg)
+        raise ConfigurationError(error_msg)
 
     # Check config default
     if "auth_token" in defaults:
@@ -902,12 +906,8 @@ async def session_community_create(
 
     try:
         # Get config and session registry
-        config_manager: ConfigManager = context.request_context.lifespan_context[
-            "config_manager"
-        ]
-        session_registry: CommunitySessionRegistry = (
-            context.request_context.lifespan_context["session_registry"]
-        )
+        config_manager = get_config_manager(context)
+        session_registry = await get_community_registry(context)
 
         # Get and validate configuration
         defaults, max_concurrent_sessions, config_error = (
@@ -1214,9 +1214,7 @@ async def session_community_delete(
 
     try:
         # Get session registry
-        session_registry: CommunitySessionRegistry = (
-            context.request_context.lifespan_context["session_registry"]
-        )
+        session_registry = await get_community_registry(context)
 
         # Parse and validate the session_id
         try:
@@ -1428,9 +1426,7 @@ async def session_community_credentials(
 
     try:
         # Get config manager from context
-        config_manager: ConfigManager = context.request_context.lifespan_context[
-            "config_manager"
-        ]
+        config_manager = get_config_manager(context)
 
         # Check credential retrieval mode from security config
         config = await config_manager.get_config()
@@ -1472,9 +1468,7 @@ async def session_community_credentials(
             }
 
         # Get session registry and session manager
-        session_registry: CommunitySessionRegistry = (
-            context.request_context.lifespan_context["session_registry"]
-        )
+        session_registry = await get_community_registry(context)
 
         try:
             mgr = await session_registry.get(session_id)

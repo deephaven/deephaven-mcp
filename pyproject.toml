@@ -3,7 +3,7 @@ name = "deephaven-mcp"
 dynamic = ["version"]
 description = "Unified Python package providing Model Context Protocol (MCP) servers for Deephaven: orchestrate Community Core data workers and power Documentation Q&A with LLMs. Supports AI-driven data workflows and agentic documentation assistance in a single deployable package."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 authors = [
     { name = "Deephaven Data Labs", email = "support@deephaven.io" }
 ]
@@ -15,7 +15,6 @@ classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
@@ -24,7 +23,6 @@ classifiers = [
 ]
 dependencies = [
     # Core async file/network dependencies
-    "typing_extensions>=4.3.0", # Backports for typing features (override, etc.)
     "aiofiles>=23.2.1",         # Async file support
     "aiohttp>=3.11.18",         # Async HTTP client (stress testing, SSE)
     "httpx>=0.24.0",            # HTTP client
@@ -33,7 +31,7 @@ dependencies = [
     "mcp-proxy",                # SSE/Streamable-HTTP proxy support
     # Deephaven integration
     "pydeephaven>=0.39",      # Deephaven Python API
-    "numba>=0.63.1",          # Force Python 3.11+ compatible numba (see https://github.com/deephaven/deephaven-mcp/issues/145)
+    "numba>=0.63.1",          # Force Python 3.12+ compatible numba (see https://github.com/deephaven/deephaven-mcp/issues/145)
     # Docs/LLM and web server dependencies
     "fastapi>=0.116.0",         # FastAPI web framework for Docs server
     "uvicorn[standard]>=0.35.0", # ASGI server for FastAPI
@@ -53,9 +51,9 @@ dependencies = [
 
 # Testing (coverage, etc.)
 test = [
-    "pytest>=8.0.0",           # Test framework
-    "pytest-asyncio>=0.23.0",  # Async test support
-    "pytest-cov>=4.1.0",       # Code coverage reporting
+    "pytest>=9.0.3",           # Test framework
+    "pytest-asyncio>=1.3.0",   # Async test support
+    "pytest-cov>=7.1.0",       # Code coverage reporting
     "pytest-timeout>=2.1.0",   # Test timeout support for integration tests
     "deephaven-server>=0.39",  # Deephaven server for integration tests
     "pytz",                    # Required by deephaven-server <41.1 (missing from its dependencies) - https://deephaven.atlassian.net/browse/DOC-1132
@@ -70,12 +68,10 @@ lint = [
     "black>=24.0.0",           # Code formatter
     "ruff>=0.1.0",             # Linter and code quality tool
     "isort>=5.12.0",           # Import sorter
-    "pydocstyle>=6.3.0",       # Docstring style checker
     
     # Type checking and static analysis
     "mypy>=1.6.0",             # Static type checker
     "types-aiofiles",          # Type stubs for aiofiles
-    "typing_extensions>=4.3.0", # Typing backports for type checking
 ]
 
 # Community Core session creation (python launch method)
@@ -130,17 +126,19 @@ target-version = ["py310"]
 [tool.ruff]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "B", "C", "U", "Q", "S"]  # Select specific linting rules
+select = ["E", "F", "I", "B", "C", "U", "Q", "S", "D"]  # Includes pydocstyle (D) rules
 ignore = ["E501"]  # Ignore line length warnings since we use black
+
+[tool.ruff.lint.pydocstyle]
+convention = "pep257"  # Same docstring convention previously enforced by pydocstyle
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["D"]        # Don't enforce docstring rules on tests
+"test_*.py" = ["D"]       # Don't enforce docstring rules on tests
 
 # Isort configuration for import sorting
 [tool.isort]
 profile = "black"  # Use black's style for import sorting
-
-# pydocstyle configuration for docstring linting
-[tool.pydocstyle]
-convention = "pep257"
-match = '(?!test_).*\.py'  # Ignore test files by default
 
 # Pytest configuration for testing
 [tool.pytest.ini_options]
@@ -166,7 +164,7 @@ omit = [
 
 # Mypy configuration for type checking
 [tool.mypy]
-python_version = "3.11"  # Target Python version
+python_version = "3.12"  # Target Python version
 ignore_missing_imports = true  # Allow imports that may not be present at runtime
 strict_optional = true  # Enable strict optional checking
 warn_unused_ignores = true  # Warn about unused # type: ignore comments

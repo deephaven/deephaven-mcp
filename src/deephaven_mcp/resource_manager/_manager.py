@@ -74,17 +74,9 @@ Thread Safety:
 import asyncio
 import enum
 import logging
-import sys
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, Any, Generic, Protocol, TypeVar
-
-if TYPE_CHECKING:
-    from typing_extensions import override  # pragma: no cover
-elif sys.version_info >= (3, 12):
-    from typing import override  # pragma: no cover
-else:
-    from typing_extensions import override  # pragma: no cover
+from typing import Any, Protocol, override
 
 from deephaven_mcp._exceptions import (
     AuthenticationError,
@@ -180,9 +172,6 @@ class AsyncClosable(Protocol):
             ```
         """
         raise NotImplementedError  # pragma: no cover
-
-
-T = TypeVar("T", bound=AsyncClosable)
 
 
 class ResourceLivenessStatus(enum.Enum):
@@ -302,7 +291,7 @@ class SystemType(enum.StrEnum):
         return self.name
 
 
-class BaseItemManager(Generic[T], ABC):
+class BaseItemManager[T: AsyncClosable](ABC):
     """Generic async resource manager providing lazy initialization and lifecycle management.
 
     This abstract base class establishes a comprehensive framework for managing single

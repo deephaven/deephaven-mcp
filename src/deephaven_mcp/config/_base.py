@@ -4,13 +4,26 @@ This module provides the abstract :class:`ConfigManager` base class and shared
 file-loading utilities used by both the community and enterprise server config managers.
 
 Concrete subclasses live in their respective modules:
-- :class:`~deephaven_mcp.config._community.CommunityServerConfigManager` in ``_community.py``
-- :class:`~deephaven_mcp.config._enterprise.EnterpriseServerConfigManager` in ``_enterprise.py``
+
+- :class:`~deephaven_mcp.config.community.CommunityServerConfigManager` in ``community.py``
+- :class:`~deephaven_mcp.config.enterprise.EnterpriseServerConfigManager` in ``enterprise.py``
+
+Private module-level helpers used by the concrete subclasses:
+
+- :func:`_get_config_path`: resolve path from ``DH_MCP_CONFIG_FILE``.
+- :func:`_load_and_validate_config`: combined load + validate with error wrapping.
+- :func:`_log_config_summary`: pretty-prints the (optionally redacted) config to the log.
+
+And one internal helper used only within this module:
+
+- :func:`_load_config_from_file`: async JSON/JSON5 read with error wrapping
+  (called by :func:`_load_and_validate_config`).
 """
 
 __all__ = [
     "ConfigManager",
     "CONFIG_ENV_VAR",
+    "DEFAULT_MCP_SESSION_IDLE_TIMEOUT_SECONDS",
 ]
 
 import abc
@@ -30,6 +43,14 @@ _LOGGER = logging.getLogger(__name__)
 CONFIG_ENV_VAR = "DH_MCP_CONFIG_FILE"
 """Name of the environment variable specifying the path to the Deephaven MCP config file."""
 
+DEFAULT_MCP_SESSION_IDLE_TIMEOUT_SECONDS: float = 3600.0
+"""Default MCP session idle timeout in seconds (1 hour).
+
+After this many seconds of inactivity from an MCP client, its per-session
+Deephaven registry is closed by the TTL sweeper.  Overridable per-server via the
+``mcp_session_idle_timeout_seconds`` config file key.
+"""
+
 
 class ConfigManager(abc.ABC):
     """Abstract base class for Deephaven MCP configuration managers.
@@ -39,8 +60,8 @@ class ConfigManager(abc.ABC):
     loading and validation logic.
 
     Subclasses:
-        - :class:`~deephaven_mcp.config._community.CommunityServerConfigManager`: Loads community-format config files.
-        - :class:`~deephaven_mcp.config._enterprise.EnterpriseServerConfigManager`: Loads flat enterprise-format config files.
+        - :class:`~deephaven_mcp.config.community.CommunityServerConfigManager`: Loads community-format config files.
+        - :class:`~deephaven_mcp.config.enterprise.EnterpriseServerConfigManager`: Loads flat enterprise-format config files.
 
     Common features:
         - **Coroutine-safe**: Uses asyncio.Lock to prevent concurrent loads.
@@ -80,15 +101,71 @@ class ConfigManager(abc.ABC):
     async def get_config(self) -> dict[str, Any]:
         """Load and return the validated configuration (coroutine-safe).
 
-        Subclasses must implement format-specific loading and validation.
+        Subclasses must implement format-specific loading and validation. The
+        implementation is expected to:
+
+        - Return the cached dict on subsequent calls (the cache is cleared by
+          :meth:`clear_config_cache`).
+        - Validate the configuration against the subclass's schema before
+          caching and returning it.
+        - Hold ``self._lock`` while mutating ``self._cache`` to ensure
+          coroutine-safety.
+
+        Returns:
+            dict[str, Any]: The validated configuration dictionary.
+
+        Raises:
+            RuntimeError: If no config path was provided to ``__init__`` and
+                the ``DH_MCP_CONFIG_FILE`` environment variable is unset.
+            ConfigurationError: If the file cannot be read, parsed, or fails
+                schema validation.
         """
         ...
+
+    async def get_mcp_session_idle_timeout_seconds(self) -> float:
+        """Return the MCP session idle timeout in seconds.
+
+        Reads the optional ``mcp_session_idle_timeout_seconds`` key from the
+        loaded configuration and returns it as a float.  If the key is absent,
+        :data:`DEFAULT_MCP_SESSION_IDLE_TIMEOUT_SECONDS` is returned.
+
+        The value is guaranteed to be positive because the concrete config
+        validators reject non-positive values during :meth:`get_config`.
+
+        Returns:
+            float: Idle timeout in seconds. Always positive.
+
+        Raises:
+            RuntimeError: Propagated from :meth:`get_config` when the config
+                path is unresolvable.
+            ConfigurationError: Propagated from :meth:`get_config` when the
+                file cannot be read, parsed, or validated.
+        """
+        config = await self.get_config()
+        return float(
+            config.get(
+                "mcp_session_idle_timeout_seconds",
+                DEFAULT_MCP_SESSION_IDLE_TIMEOUT_SECONDS,
+            )
+        )
 
     @abc.abstractmethod
     async def _set_config_cache(self, config: dict[str, Any]) -> None:
         """PRIVATE: Inject a configuration dictionary into the cache (for testing).
 
-        Subclasses must validate ``config`` against their schema before caching.
+        Intended only for unit tests that need to seed a manager with a
+        specific configuration without touching the filesystem. Subclasses
+        must validate ``config`` against their schema before caching it so
+        that downstream ``get_config`` calls observe the same invariants as
+        after a real file load.
+
+        Args:
+            config (dict[str, Any]): A raw configuration dictionary to validate
+                and cache.
+
+        Raises:
+            ConfigurationError: If ``config`` fails the subclass's schema
+                validation.
         """
         ...
 
@@ -157,7 +234,10 @@ def _get_config_path() -> str:
     """Retrieve the configuration file path from the DH_MCP_CONFIG_FILE environment variable.
 
     Returns:
-        str: The absolute or relative path to the Deephaven MCP configuration JSON file.
+        str: The raw value of ``DH_MCP_CONFIG_FILE``, which should be an
+            absolute or relative path to a Deephaven MCP configuration
+            JSON/JSON5 file. No existence or format check is performed here;
+            those happen in :func:`_load_config_from_file`.
 
     Raises:
         RuntimeError: If the DH_MCP_CONFIG_FILE environment variable is not set.
@@ -207,18 +287,26 @@ def _log_config_summary(
 ) -> None:
     """Log a summary of the loaded Deephaven MCP configuration.
 
-    Logs the configuration at INFO level as pretty-printed (indented, key-sorted)
-    JSON produced by ``json5.dumps``. If a ``redactor`` callable is supplied, it is
-    applied to the config first so that sensitive fields (auth tokens, passwords,
-    private keys, etc.) can be replaced with ``"[REDACTED]"`` before logging; if
-    ``redactor`` is ``None`` the configuration is logged as-is with no redaction.
-    If JSON serialization fails, the (optionally redacted) config is logged as a
-    Python ``dict`` representation instead.
+    Always emits an INFO "Configuration summary:" header, followed by the
+    configuration body. The body is pretty-printed (indented, key-sorted)
+    JSON produced by ``json5.dumps`` and logged at INFO level. If a
+    ``redactor`` callable is supplied, it is applied to the config first so
+    that sensitive fields (auth tokens, passwords, private keys, etc.) can be
+    replaced with ``"[REDACTED]"`` before logging; if ``redactor`` is
+    ``None`` the configuration is logged as-is with no redaction. If JSON
+    serialization fails (``TypeError`` or ``ValueError``), a WARNING is
+    emitted describing the failure and the (optionally redacted) config is
+    then logged at INFO level as its Python ``dict`` representation instead.
 
     Args:
         config (dict[str, Any]): The loaded and validated configuration dictionary.
-        label (str): Log prefix label identifying the caller.
-            Defaults to ``"ConfigManager:get_config"``.
+        label (str): Log prefix label identifying the caller. Real callers
+            should pass a subclass-specific label such as
+            ``"CommunityServerConfigManager:get_config"`` or
+            ``"EnterpriseServerConfigManager:get_config"``; the default
+            ``"ConfigManager:get_config"`` is a generic placeholder since
+            :class:`ConfigManager` is abstract and cannot be instantiated
+            directly.
         redactor (Callable[[dict[str, Any]], dict[str, Any]] | None): Optional function to
             redact sensitive fields before logging. If ``None``, the config is logged
             without redaction.

@@ -651,9 +651,14 @@ Controls which community session credentials can be retrieved via the MCP tool. 
     "credential_retrieval_mode": "dynamic_only"
   },
   "sessions": { /* static sessions */ },
-  "session_creation": { /* dynamic session config */ }
+  "session_creation": { /* dynamic session config */ },
+  "mcp_session_idle_timeout_seconds": 3600.0  // optional; see below
 }
 ```
+
+**Top-Level Server Settings:**
+
+- `mcp_session_idle_timeout_seconds` (integer | float, **optional, default: 3600.0**): Seconds of MCP client inactivity after which the per-session Deephaven registry is closed and resources are reclaimed. Must be positive.
 
 #### Community Session Creation Configuration
 
@@ -807,6 +812,7 @@ The configuration file supports the following fields:
 
 - Optional Connection Settings:
   - `connection_timeout` (integer | float, **optional, default: 10.0**): Timeout in seconds for establishing connection to the Enterprise system.
+  - `mcp_session_idle_timeout_seconds` (integer | float, **optional, default: 3600.0**): Seconds of MCP client inactivity after which the per-session Deephaven registry is closed and resources are reclaimed. Must be positive.
 
 - Optional Worker Creation Configuration:
   - `session_creation` (object, **optional**): Configuration for creating enterprise workers on this system. If omitted, `session_enterprise_create` returns a "not configured" error.
@@ -1055,7 +1061,7 @@ On error:
 }
 ```
 
-**Description**: This tool reloads the Deephaven session configuration from the file specified in `DH_MCP_CONFIG_FILE` and clears all active session objects. It uses dependency injection via the Context to access the config manager, session registry, and a coroutine-safe reload lock. The operation is protected by the provided lock to prevent concurrent reloads. All sessions will be automatically recreated with the new configuration on next access.
+**Description**: This tool reloads the Deephaven session configuration from the file specified in `DH_MCP_CONFIG_FILE` and clears the calling MCP client's session registry. It uses dependency injection via the Context to access the config manager, `McpSessionManager`, and a coroutine-safe reload lock. The operation is protected by the provided lock to prevent concurrent reloads. Only the calling client's Deephaven connections are reset; other MCP client sessions are unaffected. The registry is lazily recreated with the new configuration on the next tool call.
 
 #### `enterprise_systems_status`
 
@@ -1146,11 +1152,11 @@ On error:
 }
 ```
 
-**Description**: This tool creates a new enterprise session on the configured enterprise system and registers it in the session registry for future use. The session is configured with either provided parameters or defaults from the enterprise system configuration. Parameter resolution follows the priority: tool parameter → config default → API default.
+**Description**: This tool creates a new enterprise session on the configured enterprise system and registers it in the calling MCP client's per-session registry for future use. The session is configured with either provided parameters or defaults from the enterprise system configuration. Parameter resolution follows the priority: tool parameter → config default → API default.
 
 ##### `session_enterprise_delete`
 
-**Purpose**: Delete an enterprise session by terminating it and removing it from the session registry.
+**Purpose**: Delete an enterprise session by terminating it and removing it from the calling MCP client's session registry.
 
 **Parameters**:
 
@@ -1187,7 +1193,7 @@ Cross-server error:
 }
 ```
 
-**Description**: This tool permanently terminates an enterprise session and removes it from the session registry. The session cannot be recovered after deletion. Use with caution as any unsaved work in the session will be lost.
+**Description**: This tool permanently terminates an enterprise session and removes it from the calling MCP client's session registry. The session cannot be recovered after deletion. Use with caution as any unsaved work in the session will be lost.
 
 #### Persistent Query (PQ) Management Tools
 
@@ -2885,9 +2891,8 @@ To help maintain a consistent and high-quality codebase, the [`bin/precommit.sh`
 |--------------|------------------------------------------------|-------------------------------------|------------------|
 | isort        | Sort Python imports                            | `uv run isort . --skip _version.py --skip .venv` | Import order, grouping |
 | black        | Format Python code                             | `uv run black . --exclude '(_version.py\|.venv)'` | PEP 8 formatting |
-| ruff         | Lint code, autofix common issues               | `uv run ruff check src --fix --exclude _version.py --exclude .venv` | Linting, best practices |
+| ruff         | Lint code, autofix common issues, docstring style (PEP 257) | `uv run ruff check src --fix --exclude _version.py --exclude .venv` | Linting, best practices, PEP 257 docstrings |
 | mypy         | Static type checking                           | `uv run mypy src/`                  | Type correctness |
-| pydocstyle   | Docstring style/linting                        | `uv run pydocstyle src`             | PEP 257 docstrings |
 | markdownlint | Lint and format markdown documentation         | `npx --yes markdownlint-cli2 --fix` | Markdown style, consistency |
 
 The script will run all of these tools in order. If any step fails, the script will stop and print an error. Fix the reported issues and rerun the script until it completes successfully. Only commit code that passes all code quality checks.
@@ -2896,8 +2901,8 @@ The script will run all of these tools in order. If any step fails, the script w
 
 - All public modules, classes, and functions must have clear, PEP 257-compliant docstrings (unless explicitly ignored in config)
 - Docstrings should start with a summary line, use proper formatting, and describe parameters, return values, and exceptions where relevant
-- `pydocstyle` is configured in `pyproject.toml` (see `[tool.pydocstyle]`)
-- Test files are excluded from docstring checks by default (see `match` pattern)
+- Docstring rules are enforced via ruff's pydocstyle (`D`) rules, configured in `pyproject.toml` (see `[tool.ruff.lint.pydocstyle]`, `convention = "pep257"`)
+- Test files are excluded from docstring checks via `[tool.ruff.lint.per-file-ignores]`
 
 **Markdown documentation policy:**
 
@@ -2919,7 +2924,6 @@ uv run pytest  # Runs all unit tests (use -m integration for integration tests)
 uv run isort . --skip _version.py --skip .venv
 uv run black . --exclude '(_version.py|.venv)'
 uv run ruff check src --fix --exclude _version.py --exclude .venv
-uv run pydocstyle src
 uv run mypy src/
 
 # Check import order only (no changes)

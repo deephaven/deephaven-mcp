@@ -10,7 +10,6 @@ These tools work with both Community and Enterprise sessions.
 import logging
 import time
 from collections.abc import Awaitable, Callable
-from typing import TypeVar
 
 from mcp.server.fastmcp import Context, FastMCP
 
@@ -18,14 +17,12 @@ from deephaven_mcp import queries
 from deephaven_mcp.client import BaseSession
 from deephaven_mcp.mcp_systems_server._tools.shared import (
     format_initialization_status,
+    get_registry_from_context,
 )
 from deephaven_mcp.resource_manager import (
     BaseItemManager,
-    BaseRegistry,
     DynamicCommunitySessionManager,
 )
-
-T = TypeVar("T")
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -116,9 +113,7 @@ async def sessions_list(context: Context) -> dict:
         _LOGGER.debug(
             "[mcp_systems_server:sessions_list] Accessing session registry from context"
         )
-        session_registry: BaseRegistry = context.request_context.lifespan_context[
-            "session_registry"
-        ]
+        session_registry = await get_registry_from_context(context)
         _LOGGER.debug(
             "[mcp_systems_server:sessions_list] Retrieving all sessions from registry"
         )
@@ -212,7 +207,7 @@ async def _get_session_liveness_info(
         return False, "OFFLINE", str(e)
 
 
-async def _get_session_property(
+async def _get_session_property[T](
     mgr: BaseItemManager,
     session_id: str,
     available: bool,
@@ -389,9 +384,7 @@ async def session_details(
         _LOGGER.debug(
             "[mcp_systems_server:session_details] Accessing session registry from context"
         )
-        session_registry: BaseRegistry = context.request_context.lifespan_context[
-            "session_registry"
-        ]
+        session_registry = await get_registry_from_context(context)
 
         # Get the specific session manager directly
         _LOGGER.debug(

@@ -9,7 +9,11 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
-from conftest import MockContext, create_mock_instance_tracker
+from conftest import (
+    MockContext,
+    create_mock_instance_tracker,
+    create_mock_session_registry_manager,
+)
 
 from deephaven_mcp import config
 from deephaven_mcp._exceptions import RegistryItemNotFoundError
@@ -21,6 +25,7 @@ from deephaven_mcp.mcp_systems_server._tools.session_community import (
     session_community_delete,
 )
 from deephaven_mcp.resource_manager import (
+    CommunitySessionRegistry,
     DockerLaunchedSession,
     DynamicCommunitySessionManager,
     EnterpriseSessionManager,
@@ -34,7 +39,7 @@ from deephaven_mcp.resource_manager import (
 async def test_session_community_create_success():
     """Test successful community session creation."""
     mock_config_manager = MagicMock()
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
     # Mock config
     community_config = {
@@ -90,7 +95,9 @@ async def test_session_community_create_success():
         context = MockContext(
             {
                 "config_manager": mock_config_manager,
-                "session_registry": mock_session_registry,
+                "session_registry_manager": create_mock_session_registry_manager(
+                    registry=mock_session_registry
+                ),
                 "instance_tracker": create_mock_instance_tracker(),
             }
         )
@@ -115,7 +122,7 @@ async def test_session_community_create_success():
 async def test_session_community_create_not_configured():
     """Test community session creation when not configured."""
     mock_config_manager = MagicMock()
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
     # No session_creation config
     full_config = {}
@@ -124,7 +131,9 @@ async def test_session_community_create_not_configured():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry": mock_session_registry,
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
@@ -144,7 +153,7 @@ async def test_session_community_create_not_configured():
 async def test_session_community_create_sessions_disabled():
     """Test community session creation when max_concurrent_sessions is 0 (disabled)."""
     mock_config_manager = MagicMock()
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
     community_config = {
         "session_creation": {
@@ -195,7 +204,9 @@ async def test_session_community_create_sessions_disabled():
         context = MockContext(
             {
                 "config_manager": mock_config_manager,
-                "session_registry": mock_session_registry,
+                "session_registry_manager": create_mock_session_registry_manager(
+                    registry=mock_session_registry
+                ),
                 "instance_tracker": create_mock_instance_tracker(),
             }
         )
@@ -216,7 +227,7 @@ async def test_session_community_create_sessions_disabled():
 async def test_session_community_create_max_sessions_reached():
     """Test community session creation when max sessions reached."""
     mock_config_manager = MagicMock()
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
     community_config = {
         "session_creation": {
@@ -232,7 +243,9 @@ async def test_session_community_create_max_sessions_reached():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry": mock_session_registry,
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
@@ -252,7 +265,7 @@ async def test_session_community_create_max_sessions_reached():
 async def test_session_community_create_launch_failure():
     """Test community session creation when launch fails."""
     mock_config_manager = MagicMock()
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
     community_config = {
         "session_creation": {
@@ -287,7 +300,9 @@ async def test_session_community_create_launch_failure():
         context = MockContext(
             {
                 "config_manager": mock_config_manager,
-                "session_registry": mock_session_registry,
+                "session_registry_manager": create_mock_session_registry_manager(
+                    registry=mock_session_registry
+                ),
                 "instance_tracker": create_mock_instance_tracker(),
             }
         )
@@ -307,7 +322,7 @@ async def test_session_community_create_launch_failure():
 async def test_session_community_delete_success():
     """Test successful community session deletion."""
     mock_config_manager = MagicMock()
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
     # Create a mock launched session (Docker by default)
     mock_launched_session = MagicMock(spec=DockerLaunchedSession)
@@ -328,7 +343,9 @@ async def test_session_community_delete_success():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry": mock_session_registry,
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
@@ -352,7 +369,7 @@ async def test_session_community_delete_success():
 async def test_session_community_delete_python_session():
     """Test deleting a python-launched session to cover untrack_python_process call."""
     mock_config_manager = MagicMock()
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
     mock_instance_tracker = create_mock_instance_tracker()
 
     # Create a mock python-launched session
@@ -374,7 +391,9 @@ async def test_session_community_delete_python_session():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry": mock_session_registry,
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
             "instance_tracker": mock_instance_tracker,
         }
     )
@@ -402,7 +421,7 @@ async def test_session_community_delete_python_session():
 async def test_session_community_delete_not_found():
     """Test community session deletion when session not found."""
     mock_config_manager = MagicMock()
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
     mock_session_registry.get = AsyncMock(
         side_effect=RegistryItemNotFoundError("Not found")
@@ -411,7 +430,9 @@ async def test_session_community_delete_not_found():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry": mock_session_registry,
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
@@ -431,12 +452,14 @@ async def test_session_community_delete_not_found():
 async def test_session_community_delete_not_dynamic():
     """Test community session deletion when session_id source is not 'dynamic'."""
     mock_config_manager = MagicMock()
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry": mock_session_registry,
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
@@ -460,7 +483,7 @@ async def test_session_community_create_case_insensitive_params():
     pass  # no longer needed
 
     mock_config_manager = MagicMock()
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
     # Mock config with session creation enabled
     mock_config_manager.get_config = AsyncMock(
@@ -488,7 +511,9 @@ async def test_session_community_create_case_insensitive_params():
         context = MockContext(
             {
                 "config_manager": mock_config_manager,
-                "session_registry": mock_session_registry,
+                "session_registry_manager": create_mock_session_registry_manager(
+                    registry=mock_session_registry
+                ),
                 "instance_tracker": create_mock_instance_tracker(),
             }
         )
@@ -519,7 +544,7 @@ async def test_session_community_create_validates_programming_language_with_pyth
     pass  # no longer needed
 
     mock_config_manager = MagicMock()
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
     mock_config_manager.get_config = AsyncMock(
         return_value={
@@ -535,7 +560,9 @@ async def test_session_community_create_validates_programming_language_with_pyth
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry": mock_session_registry,
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
@@ -562,7 +589,7 @@ async def test_session_community_create_validates_docker_image_with_python():
     pass  # no longer needed
 
     mock_config_manager = MagicMock()
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
     mock_config_manager.get_config = AsyncMock(
         return_value={
@@ -578,7 +605,9 @@ async def test_session_community_create_validates_docker_image_with_python():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry": mock_session_registry,
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
@@ -605,7 +634,7 @@ async def test_session_community_create_validates_docker_memory_limit_with_pytho
     pass  # no longer needed
 
     mock_config_manager = MagicMock()
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
     mock_config_manager.get_config = AsyncMock(
         return_value={
@@ -621,7 +650,9 @@ async def test_session_community_create_validates_docker_memory_limit_with_pytho
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry": mock_session_registry,
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
@@ -648,7 +679,7 @@ async def test_session_community_create_validates_docker_cpu_limit_with_python()
     pass  # no longer needed
 
     mock_config_manager = MagicMock()
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
     mock_config_manager.get_config = AsyncMock(
         return_value={
@@ -664,7 +695,9 @@ async def test_session_community_create_validates_docker_cpu_limit_with_python()
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry": mock_session_registry,
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
@@ -691,7 +724,7 @@ async def test_session_community_create_validates_docker_volumes_with_python():
     pass  # no longer needed
 
     mock_config_manager = MagicMock()
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
     mock_config_manager.get_config = AsyncMock(
         return_value={
@@ -707,7 +740,9 @@ async def test_session_community_create_validates_docker_volumes_with_python():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry": mock_session_registry,
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
@@ -734,7 +769,7 @@ async def test_session_community_create_validates_python_venv_path_with_docker()
     pass  # no longer needed
 
     mock_config_manager = MagicMock()
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
     mock_config_manager.get_config = AsyncMock(
         return_value={
@@ -750,7 +785,9 @@ async def test_session_community_create_validates_python_venv_path_with_docker()
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry": mock_session_registry,
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
@@ -777,7 +814,7 @@ async def test_session_community_create_validates_mutually_exclusive_params():
     pass  # no longer needed
 
     mock_config_manager = MagicMock()
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
     mock_config_manager.get_config = AsyncMock(
         return_value={
@@ -793,7 +830,9 @@ async def test_session_community_create_validates_mutually_exclusive_params():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry": mock_session_registry,
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
@@ -819,12 +858,14 @@ async def test_session_community_create_validates_mutually_exclusive_params():
 async def test_session_community_delete_validates_source():
     """session_community_delete returns error for non-dynamic source in session_id."""
     mock_config_manager = MagicMock()
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry": mock_session_registry,
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
@@ -847,7 +888,7 @@ async def test_session_community_delete_validates_source():
 async def test_session_community_delete_allows_dynamic_sessions():
     """session_community_delete succeeds for a valid dynamic session_id."""
     mock_config_manager = MagicMock()
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
     # Create a mock dynamic session manager with source="dynamic"
     mock_dynamic_manager = MagicMock()
@@ -862,7 +903,9 @@ async def test_session_community_delete_allows_dynamic_sessions():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry": mock_session_registry,
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
@@ -887,7 +930,7 @@ async def test_session_community_delete_allows_dynamic_sessions():
 @pytest.mark.asyncio
 async def test_session_community_delete_close_failure_continues():
     """session_community_delete logs warning and continues when close() raises."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
     mock_manager = MagicMock(spec=DynamicCommunitySessionManager)
     mock_manager.full_name = "community:dynamic:close-fail"
@@ -902,7 +945,9 @@ async def test_session_community_delete_close_failure_continues():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry": mock_session_registry,
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
@@ -920,7 +965,7 @@ async def test_session_community_delete_close_failure_continues():
 @pytest.mark.asyncio
 async def test_session_community_delete_removal_missing_in_registry():
     """session_community_delete logs warning when remove_session returns None."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
     mock_manager = MagicMock(spec=DynamicCommunitySessionManager)
     mock_manager.full_name = "community:dynamic:ghost"
@@ -935,7 +980,9 @@ async def test_session_community_delete_removal_missing_in_registry():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry": mock_session_registry,
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
@@ -950,7 +997,7 @@ async def test_session_community_delete_removal_missing_in_registry():
 @pytest.mark.asyncio
 async def test_session_community_delete_registry_remove_raises():
     """session_community_delete returns error when remove_session raises."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
     mock_manager = MagicMock(spec=DynamicCommunitySessionManager)
     mock_manager.full_name = "community:dynamic:boom"
@@ -967,7 +1014,9 @@ async def test_session_community_delete_registry_remove_raises():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry": mock_session_registry,
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
@@ -984,7 +1033,7 @@ async def test_session_community_delete_registry_remove_raises():
 @pytest.mark.asyncio
 async def test_session_community_delete_outer_exception():
     """session_community_delete outer except handler fires when unexpected error occurs."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
     mock_manager = MagicMock(spec=DynamicCommunitySessionManager)
     mock_manager.full_name = "community:dynamic:unexpected"
     mock_manager.source = "dynamic"
@@ -997,7 +1046,9 @@ async def test_session_community_delete_outer_exception():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry": mock_session_registry,
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
@@ -1026,12 +1077,14 @@ async def test_session_community_delete_outer_exception():
 @pytest.mark.asyncio
 async def test_session_community_delete_invalid_session_id_format():
     """session_community_delete returns error for malformed session_id."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry": mock_session_registry,
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
@@ -1047,12 +1100,14 @@ async def test_session_community_delete_invalid_session_id_format():
 @pytest.mark.asyncio
 async def test_session_community_delete_wrong_system_type():
     """session_community_delete returns error when session_id is not community type."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry": mock_session_registry,
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
@@ -1069,7 +1124,7 @@ async def test_session_community_delete_wrong_system_type():
 async def test_session_community_create_explicit_docker_image():
     """Test coverage for line 3830: explicit docker_image parameter override."""
     mock_config_manager = MagicMock()
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
     community_config = {
         "session_creation": {
@@ -1119,7 +1174,9 @@ async def test_session_community_create_explicit_docker_image():
         context = MockContext(
             {
                 "config_manager": mock_config_manager,
-                "session_registry": mock_session_registry,
+                "session_registry_manager": create_mock_session_registry_manager(
+                    registry=mock_session_registry
+                ),
                 "instance_tracker": create_mock_instance_tracker(),
             }
         )
@@ -1141,7 +1198,7 @@ async def test_session_community_create_explicit_docker_image():
 async def test_session_community_create_groovy_programming_language():
     """Test coverage for lines 3836-3837: Groovy programming language parameter."""
     mock_config_manager = MagicMock()
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
     community_config = {
         "session_creation": {
@@ -1191,7 +1248,9 @@ async def test_session_community_create_groovy_programming_language():
         context = MockContext(
             {
                 "config_manager": mock_config_manager,
-                "session_registry": mock_session_registry,
+                "session_registry_manager": create_mock_session_registry_manager(
+                    registry=mock_session_registry
+                ),
                 "instance_tracker": create_mock_instance_tracker(),
             }
         )
@@ -1213,7 +1272,7 @@ async def test_session_community_create_groovy_programming_language():
 async def test_session_community_create_unsupported_programming_language():
     """Test coverage for lines 3839-3843: unsupported programming language error."""
     mock_config_manager = MagicMock()
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
     community_config = {
         "session_creation": {
@@ -1232,7 +1291,9 @@ async def test_session_community_create_unsupported_programming_language():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry": mock_session_registry,
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
@@ -1254,7 +1315,7 @@ async def test_session_community_create_unsupported_programming_language():
 async def test_session_community_create_groovy_from_config_defaults():
     """Test coverage for lines 3849-3850: Groovy as config default."""
     mock_config_manager = MagicMock()
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
     community_config = {
         "session_creation": {
@@ -1306,7 +1367,9 @@ async def test_session_community_create_groovy_from_config_defaults():
         context = MockContext(
             {
                 "config_manager": mock_config_manager,
-                "session_registry": mock_session_registry,
+                "session_registry_manager": create_mock_session_registry_manager(
+                    registry=mock_session_registry
+                ),
                 "instance_tracker": create_mock_instance_tracker(),
             }
         )
@@ -1327,7 +1390,7 @@ async def test_session_community_create_groovy_from_config_defaults():
 async def test_session_community_create_invalid_config_programming_language():
     """Test coverage for lines 3853-3857: invalid programming language in config."""
     mock_config_manager = MagicMock()
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
     community_config = {
         "session_creation": {
@@ -1348,7 +1411,9 @@ async def test_session_community_create_invalid_config_programming_language():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry": mock_session_registry,
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
@@ -1369,7 +1434,7 @@ async def test_session_community_create_invalid_config_programming_language():
 async def test_session_community_create_missing_auth_token_env_var():
     """Test that missing auth_token_env_var returns configuration error."""
     mock_config_manager = MagicMock()
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
     community_config = {
         "session_creation": {
@@ -1392,7 +1457,9 @@ async def test_session_community_create_missing_auth_token_env_var():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry": mock_session_registry,
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
@@ -1413,7 +1480,7 @@ async def test_session_community_create_missing_auth_token_env_var():
 async def test_session_community_credentials_disabled_by_default():
     """Test that credential retrieval is disabled by default (mode='none')."""
     mock_config_manager = MagicMock()
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
     # Config without security section (defaults to mode='none')
     config = {
@@ -1428,7 +1495,9 @@ async def test_session_community_credentials_disabled_by_default():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry": mock_session_registry,
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
         }
     )
 
@@ -1449,7 +1518,7 @@ async def test_session_community_credentials_disabled_by_default():
 async def test_session_community_credentials_explicit_none():
     """Test that credential retrieval respects explicit 'none' mode."""
     mock_config_manager = MagicMock()
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
     # Config with explicit mode='none'
     config = {"security": {"credential_retrieval_mode": "none"}}
@@ -1459,7 +1528,9 @@ async def test_session_community_credentials_explicit_none():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry": mock_session_registry,
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
         }
     )
 
@@ -1477,7 +1548,7 @@ async def test_session_community_credentials_explicit_none():
 async def test_session_community_credentials_dynamic_success():
     """Test successful credential retrieval for dynamic session with mode='dynamic_only'."""
     mock_config_manager = MagicMock()
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
     # Config with mode='dynamic_only'
     config = {"security": {"credential_retrieval_mode": "dynamic_only"}}
@@ -1507,7 +1578,9 @@ async def test_session_community_credentials_dynamic_success():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry": mock_session_registry,
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
         }
     )
 
@@ -1531,7 +1604,7 @@ async def test_session_community_credentials_dynamic_success():
 async def test_session_community_credentials_anonymous_auth():
     """Test credential retrieval with anonymous auth (no token)."""
     mock_config_manager = MagicMock()
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
     config = {"security": {"credential_retrieval_mode": "all"}}
 
@@ -1558,7 +1631,9 @@ async def test_session_community_credentials_anonymous_auth():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry": mock_session_registry,
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
         }
     )
 
@@ -1575,7 +1650,7 @@ async def test_session_community_credentials_anonymous_auth():
 async def test_session_community_credentials_no_config():
     """Test when community config is empty."""
     mock_config_manager = MagicMock()
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
     # Empty config - should default to disabled
     config = {}
@@ -1584,7 +1659,9 @@ async def test_session_community_credentials_no_config():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry": mock_session_registry,
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
         }
     )
 
@@ -1602,7 +1679,7 @@ async def test_session_community_credentials_no_config():
 async def test_session_community_credentials_session_not_found():
     """Test when session does not exist."""
     mock_config_manager = MagicMock()
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
     config = {"security": {"credential_retrieval_mode": "all"}}
 
@@ -1616,7 +1693,9 @@ async def test_session_community_credentials_session_not_found():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry": mock_session_registry,
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
         }
     )
 
@@ -1633,7 +1712,7 @@ async def test_session_community_credentials_session_not_found():
 async def test_session_community_credentials_not_dynamic_session():
     """Test when session is not a DynamicCommunitySessionManager."""
     mock_config_manager = MagicMock()
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
     config = {"security": {"credential_retrieval_mode": "all"}}
 
@@ -1647,7 +1726,9 @@ async def test_session_community_credentials_not_dynamic_session():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry": mock_session_registry,
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
         }
     )
 
@@ -1666,7 +1747,7 @@ async def test_session_community_credentials_static_session():
     from deephaven_mcp.resource_manager._manager import StaticCommunitySessionManager
 
     mock_config_manager = MagicMock()
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
     config = {"security": {"credential_retrieval_mode": "static_only"}}
 
@@ -1686,7 +1767,9 @@ async def test_session_community_credentials_static_session():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry": mock_session_registry,
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
         }
     )
 
@@ -1712,7 +1795,7 @@ async def test_session_community_credentials_static_session_anonymous():
     from deephaven_mcp.resource_manager._manager import StaticCommunitySessionManager
 
     mock_config_manager = MagicMock()
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
     config = {"security": {"credential_retrieval_mode": "all"}}
 
@@ -1732,7 +1815,9 @@ async def test_session_community_credentials_static_session_anonymous():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry": mock_session_registry,
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
         }
     )
 
@@ -1755,7 +1840,7 @@ async def test_session_community_credentials_static_session_anonymous():
 async def test_session_community_credentials_invalid_session_id():
     """Test when session_id has invalid format."""
     mock_config_manager = MagicMock()
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
     config = {"security": {"credential_retrieval_mode": "all"}}
 
@@ -1764,7 +1849,9 @@ async def test_session_community_credentials_invalid_session_id():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry": mock_session_registry,
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
         }
     )
 
@@ -1782,7 +1869,7 @@ async def test_session_community_credentials_invalid_session_id():
 async def test_session_community_credentials_exception_handling():
     """Test exception handling in session_community_credentials."""
     mock_config_manager = MagicMock()
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
     # Make get_config raise an exception
     mock_config_manager.get_config = AsyncMock(
@@ -1792,7 +1879,9 @@ async def test_session_community_credentials_exception_handling():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry": mock_session_registry,
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
         }
     )
 
@@ -1811,7 +1900,7 @@ async def test_session_community_credentials_dynamic_only_denies_static():
     from deephaven_mcp.resource_manager._manager import StaticCommunitySessionManager
 
     mock_config_manager = MagicMock()
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
     config = {"security": {"credential_retrieval_mode": "dynamic_only"}}
 
@@ -1831,7 +1920,9 @@ async def test_session_community_credentials_dynamic_only_denies_static():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry": mock_session_registry,
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
         }
     )
 
@@ -1849,7 +1940,7 @@ async def test_session_community_credentials_dynamic_only_denies_static():
 async def test_session_community_credentials_static_only_denies_dynamic():
     """Test that mode='static_only' denies dynamic session credentials."""
     mock_config_manager = MagicMock()
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
     config = {"security": {"credential_retrieval_mode": "static_only"}}
 
@@ -1878,7 +1969,9 @@ async def test_session_community_credentials_static_only_denies_dynamic():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry": mock_session_registry,
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
         }
     )
 
@@ -1898,7 +1991,7 @@ async def test_session_community_credentials_all_allows_both():
     from deephaven_mcp.resource_manager._manager import StaticCommunitySessionManager
 
     mock_config_manager = MagicMock()
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
     config = {"security": {"credential_retrieval_mode": "all"}}
 
@@ -1920,7 +2013,9 @@ async def test_session_community_credentials_all_allows_both():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry": mock_session_registry,
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
         }
     )
 
@@ -2095,7 +2190,7 @@ async def test_session_community_create_groovy_session_type_in_config():
     default to Python.
     """
     mock_config_manager = MagicMock()
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
     community_config = {
         "session_creation": {
@@ -2158,7 +2253,9 @@ async def test_session_community_create_groovy_session_type_in_config():
         context = MockContext(
             {
                 "config_manager": mock_config_manager,
-                "session_registry": mock_session_registry,
+                "session_registry_manager": create_mock_session_registry_manager(
+                    registry=mock_session_registry
+                ),
                 "instance_tracker": create_mock_instance_tracker(),
             }
         )
@@ -2192,7 +2289,7 @@ async def test_session_community_create_groovy_session_type_in_config():
 async def test_session_community_create_python_session_type_in_config():
     """Regression test: Verify programming_language='Python' results in session_type='python'."""
     mock_config_manager = MagicMock()
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
     community_config = {
         "session_creation": {
@@ -2254,7 +2351,9 @@ async def test_session_community_create_python_session_type_in_config():
         context = MockContext(
             {
                 "config_manager": mock_config_manager,
-                "session_registry": mock_session_registry,
+                "session_registry_manager": create_mock_session_registry_manager(
+                    registry=mock_session_registry
+                ),
                 "instance_tracker": create_mock_instance_tracker(),
             }
         )
@@ -2276,7 +2375,7 @@ async def test_session_community_create_python_session_type_in_config():
 async def test_session_community_create_default_session_type_in_config():
     """Regression test: Verify omitting programming_language defaults to Python."""
     mock_config_manager = MagicMock()
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
     community_config = {
         "session_creation": {
@@ -2338,7 +2437,9 @@ async def test_session_community_create_default_session_type_in_config():
         context = MockContext(
             {
                 "config_manager": mock_config_manager,
-                "session_registry": mock_session_registry,
+                "session_registry_manager": create_mock_session_registry_manager(
+                    registry=mock_session_registry
+                ),
                 "instance_tracker": create_mock_instance_tracker(),
             }
         )

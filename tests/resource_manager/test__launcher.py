@@ -535,7 +535,11 @@ class TestPythonLaunchedSessionLaunch:
     """Tests for PythonLaunchedSession class."""
 
     @pytest.mark.asyncio
-    async def test_launch_success(self):
+    @patch(
+        "deephaven_mcp.resource_manager._launcher._find_deephaven_executable",
+        return_value="/fake/bin/deephaven",
+    )
+    async def test_launch_success(self, _mock_find):
         """Test successful python launch."""
 
         with patch("asyncio.create_subprocess_exec") as mock_subprocess:
@@ -559,7 +563,11 @@ class TestPythonLaunchedSessionLaunch:
             assert result.launch_method == "python"
 
     @pytest.mark.asyncio
-    async def test_launch_with_jvm_args(self):
+    @patch(
+        "deephaven_mcp.resource_manager._launcher._find_deephaven_executable",
+        return_value="/fake/bin/deephaven",
+    )
+    async def test_launch_with_jvm_args(self, _mock_find):
         """Test launch with JVM args."""
 
         with patch("asyncio.create_subprocess_exec") as mock_subprocess:
@@ -586,7 +594,11 @@ class TestPythonLaunchedSessionLaunch:
             assert "server" in call_args
 
     @pytest.mark.asyncio
-    async def test_launch_with_environment_vars(self):
+    @patch(
+        "deephaven_mcp.resource_manager._launcher._find_deephaven_executable",
+        return_value="/fake/bin/deephaven",
+    )
+    async def test_launch_with_environment_vars(self, _mock_find):
         """Test launch with environment variables."""
 
         with patch("asyncio.create_subprocess_exec") as mock_subprocess:
@@ -615,7 +627,11 @@ class TestPythonLaunchedSessionLaunch:
             assert result.process == mock_process
 
     @pytest.mark.asyncio
-    async def test_drain_tasks_coverage(self):
+    @patch(
+        "deephaven_mcp.resource_manager._launcher._find_deephaven_executable",
+        return_value="/fake/bin/deephaven",
+    )
+    async def test_drain_tasks_coverage(self, _mock_find):
         """Test that drain tasks are created and handle streams correctly."""
         with patch("asyncio.create_subprocess_exec") as mock_subprocess:
             mock_process = AsyncMock()
@@ -1038,7 +1054,11 @@ class TestPythonLauncherEdgeCases:
     """Edge case tests for PythonLaunchedSession."""
 
     @pytest.mark.asyncio
-    async def test_launch_without_auth_token(self):
+    @patch(
+        "deephaven_mcp.resource_manager._launcher._find_deephaven_executable",
+        return_value="/fake/bin/deephaven",
+    )
+    async def test_launch_without_auth_token(self, _mock_find):
         """Test python launch without auth token (anonymous)."""
 
         with patch("asyncio.create_subprocess_exec") as mock_subprocess:
@@ -1067,7 +1087,11 @@ class TestPythonLauncherEdgeCases:
             assert jvm_args_found
 
     @pytest.mark.asyncio
-    async def test_launch_exception_handling(self):
+    @patch(
+        "deephaven_mcp.resource_manager._launcher._find_deephaven_executable",
+        return_value="/fake/bin/deephaven",
+    )
+    async def test_launch_exception_handling(self, _mock_find):
         """Test python launch exception handling."""
 
         with patch("asyncio.create_subprocess_exec") as mock_subprocess:

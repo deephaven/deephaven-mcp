@@ -73,8 +73,7 @@ race conditions.
 import asyncio
 import logging
 import os
-import sys
-from typing import TYPE_CHECKING, Any, Generic, TypeVar
+from typing import TYPE_CHECKING, Any, override
 
 import pyarrow as pa
 from pydeephaven import Session
@@ -83,11 +82,6 @@ from pydeephaven.table import InputTable, Table
 
 if TYPE_CHECKING:
     import deephaven_enterprise.client.session_manager  # pragma: no cover
-    from typing_extensions import override  # pragma: no cover
-elif sys.version_info >= (3, 12):
-    from typing import override  # pragma: no cover
-else:
-    from typing_extensions import override  # pragma: no cover
 
 from deephaven_mcp._exceptions import (
     DeephavenConnectionError,
@@ -97,9 +91,9 @@ from deephaven_mcp._exceptions import (
     SessionError,
 )
 from deephaven_mcp.config import (
-    CommunitySessionConfigurationError,
+    ConfigurationError,
     redact_community_session_config,
-    validate_single_community_session_config,
+    validate_community_session_config,
 )
 from deephaven_mcp.io import load_bytes
 
@@ -110,10 +104,7 @@ from ._protobuf import CorePlusQueryInfo
 _LOGGER = logging.getLogger(__name__)
 
 
-T = TypeVar("T", bound=Session)
-
-
-class BaseSession(ClientObjectWrapper[T], Generic[T]):
+class BaseSession[T: Session](ClientObjectWrapper[T]):
     """
     Base class for asynchronous Deephaven session wrappers.
 
@@ -1103,7 +1094,7 @@ class CoreSession(BaseSession[Session]):
         """
         Asynchronously create a CoreSession from a community (core) session configuration dictionary.
 
-        This method first validates the configuration using validate_single_community_session_config.
+        This method first validates the configuration using validate_community_session_config.
         It then prepares all session parameters (including TLS and auth logic),
         creates the underlying pydeephaven.Session, and returns a CoreSession instance.
         Sensitive fields in the config are redacted before logging. If session creation fails,
@@ -1118,13 +1109,13 @@ class CoreSession(BaseSession[Session]):
             CoreSession: A new CoreSession instance wrapping a pydeephaven Session.
 
         Raises:
-            CommunitySessionConfigurationError: If the configuration is invalid.
+            ConfigurationError: If the configuration is invalid.
             DeephavenConnectionError: If connection times out.
             SessionCreationError: If session creation fails for any reason.
         """
         try:
-            validate_single_community_session_config("from_config", worker_cfg)
-        except CommunitySessionConfigurationError as e:
+            validate_community_session_config("from_config", worker_cfg)
+        except ConfigurationError as e:
             _LOGGER.error(
                 f"[CoreSession:from_config] Invalid community session config: {e}"
             )

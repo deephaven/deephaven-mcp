@@ -15,7 +15,7 @@ Exception Hierarchy:
     - Query exceptions: QueryError (extends McpError)
     - Connection exceptions: DeephavenConnectionError (extends McpError)
     - Resource exceptions: ResourceError (extends McpError), RegistryItemNotFoundError (extends ResourceError and KeyError)
-    - Configuration exceptions: ConfigurationError (extends McpError), CommunitySessionConfigurationError (extends ConfigurationError), EnterpriseSystemConfigurationError (extends ConfigurationError)
+    - Configuration exceptions: ConfigurationError (extends McpError)
 
 Usage Example:
     ```python
@@ -58,8 +58,6 @@ __all__ = [
     "RegistryItemNotFoundError",
     # Configuration exceptions
     "ConfigurationError",
-    "CommunitySessionConfigurationError",
-    "EnterpriseSystemConfigurationError",
 ]
 
 
@@ -511,10 +509,6 @@ class ConfigurationError(McpError):
         (files, environment variables) that can be corrected by the user. This is
         distinct from InternalError, which indicates bugs in the MCP code itself.
 
-    Use more specific subclasses when possible:
-        - CommunitySessionConfigurationError: For community session configuration issues
-        - EnterpriseSystemConfigurationError: For enterprise system configuration issues
-
     Common causes include:
         - Invalid JSON syntax in configuration files
         - Missing required configuration fields
@@ -530,73 +524,6 @@ class ConfigurationError(McpError):
         except ConfigurationError as e:
             logger.error(f"Configuration error: {e}")
             # Provide guidance to user on fixing configuration
-        ```
-    """
-
-    pass
-
-
-class CommunitySessionConfigurationError(ConfigurationError):
-    """Raised when community session configuration is invalid.
-
-    This exception is raised during validation of community session configuration
-    data from the `deephaven_mcp.json` configuration file. It indicates that
-    session parameters are missing, invalid, or conflicting in the ``sessions``
-    section of the configuration.
-
-    Community sessions are statically configured Deephaven Community (Core) instances
-    that the MCP server connects to. Configuration errors prevent these sessions from
-    being initialized and registered.
-
-    Common causes include:
-        - Invalid host or port values (wrong type, out of range)
-        - Missing required authentication parameters
-        - Conflicting authentication methods specified (e.g., both PSK and anonymous)
-        - Invalid session timeout or connection parameter values
-        - Malformed session configuration objects (wrong structure)
-        - Session names that conflict with reserved keywords
-
-    Usage:
-        ```python
-        try:
-            session_config = validate_community_session_config(config_data)
-        except CommunitySessionConfigurationError as e:
-            logger.error(f"Community session configuration error: {e}")
-            # Guide user to fix community session configuration in deephaven_mcp.json
-        ```
-    """
-
-    pass
-
-
-class EnterpriseSystemConfigurationError(ConfigurationError):
-    """Raised when enterprise system configuration is invalid.
-
-    This exception is raised during validation of a Deephaven Enterprise (Core+) system
-    configuration. Each enterprise system is managed by its own ``dh-mcp-enterprise-server``
-    instance, which reads a flat config file where all fields (including ``system_name``) sit at
-    the top level. This error indicates that connection parameters, authentication settings, or
-    other enterprise-specific configuration is missing, invalid, or conflicting in that file.
-
-    Configuration errors prevent the enterprise system from being initialized and its session
-    factory from being registered.
-
-    Common causes include:
-        - Missing required ``system_name`` field
-        - Invalid or malformed ``connection_json_url``
-        - Missing or invalid authentication credentials (username, password, private_key)
-        - Conflicting authentication methods (e.g., both password and private_key)
-        - Invalid TLS/SSL configuration
-        - Missing required parameters (``auth_type``, ``connection_json_url``)
-        - Malformed session creation configuration objects
-
-    Usage:
-        ```python
-        try:
-            validate_enterprise_config(config_data)
-        except EnterpriseSystemConfigurationError as e:
-            logger.error(f"Enterprise system configuration error: {e}")
-            # Guide user to fix the enterprise server config file
         ```
     """
 

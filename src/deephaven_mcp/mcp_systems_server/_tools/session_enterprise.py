@@ -17,16 +17,15 @@ from mcp.server.fastmcp import Context, FastMCP
 from deephaven_mcp._exceptions import InvalidSessionNameError, RegistryItemNotFoundError
 from deephaven_mcp.client import CorePlusSession
 from deephaven_mcp.client._protobuf import CorePlusQueryConfig
-from deephaven_mcp.config import (
-    ConfigManager,
-    redact_enterprise_system_config,
-)
+from deephaven_mcp.config import redact_enterprise_config
 from deephaven_mcp.mcp_systems_server._tools.session import (
     DEFAULT_MAX_CONCURRENT_SESSIONS,
     DEFAULT_PROGRAMMING_LANGUAGE,
 )
 from deephaven_mcp.mcp_systems_server._tools.shared import (
     format_initialization_status,
+    get_config_manager,
+    get_enterprise_registry,
 )
 from deephaven_mcp.resource_manager import (
     BaseItemManager,
@@ -141,12 +140,8 @@ async def enterprise_systems_status(
     """
     _LOGGER.info("[mcp_systems_server:enterprise_systems_status] Invoked.")
     try:
-        session_registry: EnterpriseSessionRegistry = (
-            context.request_context.lifespan_context["session_registry"]
-        )
-        config_manager: ConfigManager = context.request_context.lifespan_context[
-            "config_manager"
-        ]
+        session_registry = await get_enterprise_registry(context)
+        config_manager = get_config_manager(context)
         # Get atomic snapshot for initialization state
         snapshot = await session_registry.get_all()
 
@@ -164,7 +159,7 @@ async def enterprise_systems_status(
 
         # Flat config is the system config directly
         raw_config = await config_manager.get_config()
-        redacted_config = redact_enterprise_system_config(raw_config)
+        redacted_config = redact_enterprise_config(raw_config)
 
         system_info: dict[str, object] = {
             "name": session_registry.system_name,
@@ -437,12 +432,8 @@ async def session_enterprise_create(
 
     try:
         # Get config and session registry
-        config_manager: ConfigManager = context.request_context.lifespan_context[
-            "config_manager"
-        ]
-        session_registry: EnterpriseSessionRegistry = (
-            context.request_context.lifespan_context["session_registry"]
-        )
+        config_manager = get_config_manager(context)
+        session_registry = await get_enterprise_registry(context)
         system_name = session_registry.system_name
         _LOGGER.info(
             f"[mcp_systems_server:session_enterprise_create] Invoked: "
@@ -755,9 +746,7 @@ async def session_enterprise_delete(
 
     try:
         # Get session registry
-        session_registry: EnterpriseSessionRegistry = (
-            context.request_context.lifespan_context["session_registry"]
-        )
+        session_registry = await get_enterprise_registry(context)
         system_name = session_registry.system_name
         _LOGGER.info(
             f"[mcp_systems_server:session_enterprise_delete] Invoked: "
