@@ -26,7 +26,7 @@ import enum
 import logging
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, override
+from typing import override
 
 from deephaven_mcp import config
 from deephaven_mcp._exceptions import (

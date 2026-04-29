@@ -176,9 +176,11 @@ __all__ = [
     "CONFIG_ENV_VAR",
     "DEFAULT_MCP_SESSION_IDLE_TIMEOUT_SECONDS",
     # Validators used by external callers
-    "validate_enterprise_config",
+    "validate_community_config",
     "validate_community_session_config",
+    "validate_enterprise_config",
     # Redaction used by external callers
+    "redact_community_config",
     "redact_community_session_config",
     "redact_enterprise_config",
     # Constants used by external callers

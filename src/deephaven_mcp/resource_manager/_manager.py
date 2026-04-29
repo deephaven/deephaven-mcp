@@ -76,7 +76,7 @@ import enum
 import logging
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, Any, Protocol, override
+from typing import Any, Protocol, override
 
 from deephaven_mcp._exceptions import (
     AuthenticationError,
