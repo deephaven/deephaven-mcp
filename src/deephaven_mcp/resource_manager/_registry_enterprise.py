@@ -39,12 +39,14 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass
-from typing import override
+from typing import Any, override
 
 from deephaven_mcp._exceptions import (
+    AuthenticationError,
     InternalError,
     RegistryItemNotFoundError,
 )
+from deephaven_mcp.auth.credentials import Credentials
 from deephaven_mcp.client import CorePlusControllerClient, CorePlusSession
 from deephaven_mcp.config import ConfigManager
 
@@ -203,7 +205,7 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
     Usage::
 
         registry = EnterpriseSessionRegistry()
-        await registry.initialize(config_manager)  # config_manager returns flat DHE config
+        await registry.initialize(config_manager)  # config_manager returns the DHE system config
         session_mgr = await registry.get("enterprise:system:my-pq")
         factory = registry.factory_manager
         await registry.close()
@@ -242,6 +244,8 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
         """Initialize the registry.  Call ``await initialize()`` before use."""
         super().__init__()
         self._system_name: str = ""
+        self._config: dict[str, Any] | None = None
+        self._creds: Credentials | None = None
         self._factory_manager: CorePlusSessionFactoryManager | None = None
         self._controller_client: CorePlusControllerClient | None = None
         self._phase: InitializationPhase = InitializationPhase.NOT_STARTED
@@ -257,7 +261,7 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
     def system_name(self) -> str:
         """Return the enterprise system name.
 
-        This value comes from the ``system_name`` field in the flat DHE config and
+        This value comes from the ``system_name`` field in the DHE system config and
         appears as the source segment in all enterprise session identifiers
         (e.g. ``"enterprise:<system_name>:<pq-name>"``).
 
@@ -278,9 +282,23 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
             CorePlusSessionFactoryManager: The single factory manager for this DHE server.
 
         Raises:
-            InternalError: If the registry has not been initialized.
+            InternalError: If the registry has not been initialized, or
+                if :meth:`bind_credentials` has not been called for this
+                MCP session. Reaching the latter case indicates an MCP
+                tool ran without first binding the request's credentials
+                — a wiring bug in the middleware/tool layer, not a
+                client-side error.
         """
         self._check_initialized()
+        self._check_bound()
+        # Defensive field-level check, separate from _check_bound().
+        # _check_bound() guards the public contract ("the caller must
+        # have invoked bind_credentials"). This check guards the
+        # internal invariant that _factory_manager is actually
+        # populated. The two answer different questions and protect
+        # against different failure modes (e.g. close() clears
+        # _factory_manager before _creds, and a future refactor could
+        # split the set-together pair).
         if self._factory_manager is None:
             raise InternalError(
                 f"{self.__class__.__name__} factory manager is not available"
@@ -293,46 +311,114 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
 
     @override
     async def _load_items(self, config_manager: ConfigManager) -> None:
-        """Create the single enterprise factory manager from flat config.
+        """Stash the enterprise system config so :meth:`bind_credentials` can use it.
 
-        Called by ``super().initialize()`` while holding ``self._lock``.
+        Called by ``super().initialize()`` while holding ``self._lock``. The
+        factory manager is **not** created here — credentials are not yet
+        known. Phase remains :attr:`InitializationPhase.NOT_STARTED` until
+        :meth:`bind_credentials` runs.
 
         Args:
-            config_manager (ConfigManager): Must be an ``EnterpriseServerConfigManager``; its
-                ``get_config()`` returns the flat enterprise system config dict.
+            config_manager (ConfigManager): Must be an
+                ``EnterpriseServerConfigManager``; its ``get_config()``
+                returns the enterprise system config dict.
         """
-        flat_config = await config_manager.get_config()
-        self._system_name = flat_config["system_name"]
-        self._factory_manager = CorePlusSessionFactoryManager(
-            self._system_name, flat_config
-        )
-        self._phase = InitializationPhase.PARTIAL
+        self._config = await config_manager.get_config()
+        self._system_name = self._config["system_name"]
         _LOGGER.info(
-            f"[{self.__class__.__name__}] factory manager created for '{self._system_name}'"
+            f"[{self.__class__.__name__}] config loaded for '{self._system_name}'; "
+            f"awaiting bind_credentials"
         )
 
     @override
     async def initialize(self, config_manager: ConfigManager) -> None:
-        """Initialize the registry and start background enterprise discovery.
+        """Initialize the registry from config (no factory creation).
 
-        Phase 1 (under ``self._lock``): calls ``super().initialize()`` which
-        calls ``_load_items`` — creates the factory manager.
+        Calls ``super().initialize()`` which calls :meth:`_load_items` to
+        store the config. Discovery is **not** started here — the
+        per-MCP-session factory cannot be built without credentials. Tools
+        must call :meth:`bind_credentials` (typically at the top of every
+        handler) before using :meth:`get` / :meth:`get_all`.
 
-        Phase 2 (background task): discovers enterprise PQ sessions from the
-        factory controller.
-
-        Idempotent — subsequent calls return immediately without restarting discovery.
+        Idempotent — subsequent calls are a no-op.
 
         Args:
             config_manager (ConfigManager): Configuration source.
         """
         await super().initialize(config_manager)
 
+    async def bind_credentials(self, creds: Credentials) -> None:
+        """Attach the request's credentials to this MCP-session registry.
+
+        Called by enterprise MCP tools at the top of every handler with the
+        :class:`~deephaven_mcp.auth.credentials.Credentials` derived by the auth
+        middleware from the request's ``X-Deephaven-*`` headers.
+
+        Behaviour:
+
+        - First call: creates the per-credentials
+          :class:`CorePlusSessionFactoryManager`, transitions ``_phase`` to
+          :attr:`InitializationPhase.PARTIAL`, and launches the background
+          discovery task. The single-flight discovery task is the same one
+          previously started by :meth:`initialize`.
+        - Subsequent calls with the *same* credentials (identified by
+          frozen-dataclass equality): no-op.
+        - Subsequent calls with *different* credentials: raises
+          :class:`AuthenticationError`. An MCP session is bound to one
+          user; changing identity within a session is a client-side
+          auth violation, not a code bug.
+
+        Args:
+            creds (Credentials): The credentials to bind. Whether the
+                concrete subclass is actually usable for enterprise
+                auth is decided by the downstream factory
+                (:meth:`CorePlusSessionFactory.from_credentials`) when
+                the background discovery task runs; unsupported types
+                surface there as an
+                :class:`~deephaven_mcp._exceptions.AuthenticationError`
+                stored on ``self._error`` and visible to later
+                :meth:`get` callers. The middleware is expected to
+                reject unsupported types at request entry, so reaching
+                the factory's rejection branch indicates a middleware
+                bug rather than a client error.
+
+        Raises:
+            AuthenticationError: If a different credential was
+                previously bound on this same registry instance. This
+                signals a client-side identity change within a single
+                MCP session, which is not supported.
+            InternalError: If the registry is not yet initialized, or
+                if the registry somehow has no config loaded despite
+                being marked initialized. Both indicate broken
+                internal invariants rather than client-side auth
+                problems.
+        """
         async with self._lock:
-            if self._discovery_task is not None:
-                return
+            self._check_initialized()
+            if self._creds is not None:
+                if self._creds == creds:
+                    return
+                raise AuthenticationError(
+                    f"{self.__class__.__name__} is already bound to a "
+                    f"different set of credentials; an MCP session must "
+                    f"present a stable identity for its lifetime."
+                )
+            if self._config is None:
+                raise InternalError(
+                    f"{self.__class__.__name__} has no config loaded; "
+                    f"_load_items did not run."
+                )
+            self._creds = creds
+            self._factory_manager = CorePlusSessionFactoryManager(
+                self._system_name, self._config, creds
+            )
+            self._phase = InitializationPhase.PARTIAL
             self._discovery_task = asyncio.create_task(
                 self._discover_enterprise_sessions()
+            )
+            _LOGGER.info(
+                f"[{self.__class__.__name__}] credentials bound for "
+                f"'{self._system_name}'; discovery started"
             )
 
     @override
@@ -394,6 +480,8 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
             self._added_session_ids.clear()
             self._phase = InitializationPhase.NOT_STARTED
             self._error = None
+            self._config = None
+            self._creds = None
             items_to_close = list(self._items.values())
             self._items.clear()
 
@@ -411,14 +499,40 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
     # BaseRegistry overrides — read interface
     # ------------------------------------------------------------------
 
+    def _check_bound(self) -> None:
+        """Raise if :meth:`bind_credentials` has not been called.
+
+        Intended as a guard at the top of public read methods that need a
+        bound, per-MCP-session identity (``get``, ``get_all``,
+        ``factory_manager``). Reaching this branch means an MCP tool ran
+        without binding the request's credentials, which is a wiring bug
+        in the middleware/tool layer — not a client-side condition.
+
+        Distinct from :meth:`_check_initialized`, which guards against
+        use before/after :meth:`initialize` / :meth:`close`. The two
+        guards address different lifecycle errors and are both expected
+        to be called at the top of public reads.
+
+        Raises:
+            InternalError: If ``self._creds`` is ``None``.
+        """
+        if self._creds is None:
+            raise InternalError(
+                f"{self.__class__.__name__}.bind_credentials was not "
+                f"called before this read; every MCP tool handler must "
+                f"bind the request's credentials before accessing the "
+                f"registry."
+            )
+
     async def _check_and_sync(self) -> None:
-        """Verify initialized and trigger an enterprise sync if in COMPLETED phase.
+        """Verify initialized + bound and trigger a sync if in COMPLETED phase.
 
         Shared preamble for :meth:`get` and :meth:`get_all`.  Callers must
         re-check ``_check_initialized()`` under ``self._lock`` after this returns,
         since a concurrent ``close()`` could have run during the sync.
         """
         self._check_initialized()
+        self._check_bound()
         async with self._lock:
             phase = self._phase
         if phase == InitializationPhase.COMPLETED:

@@ -78,6 +78,7 @@ from typing import Literal
 import aiohttp
 
 from deephaven_mcp._exceptions import SessionLaunchError
+from deephaven_mcp._redaction import REDACTED
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -94,7 +95,7 @@ def _redact_auth_token_from_command(cmd: list[str], auth_token: str | None) -> s
     """
     cmd_str = " ".join(cmd)
     if auth_token:
-        cmd_str = cmd_str.replace(auth_token, "[REDACTED]")
+        cmd_str = cmd_str.replace(auth_token, REDACTED)
     return cmd_str
 
 

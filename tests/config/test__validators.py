@@ -4,6 +4,8 @@ import pytest
 
 from deephaven_mcp._exceptions import ConfigurationError
 from deephaven_mcp.config._validators import (
+    resolve_required_env_var,
+    resolve_secret_field,
     validate_allowed_fields,
     validate_field_type,
     validate_mutually_exclusive,
@@ -334,3 +336,165 @@ def test_validate_optional_string_dict_int_value():
         ConfigurationError, match=r"'env_vars\[K\]' value must be a string"
     ):
         validate_optional_string_dict({"env_vars": {"K": 99}}, "env_vars")
+
+
+# ---------------------------------------------------------------------------
+# resolve_required_env_var
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_required_env_var_returns_value(monkeypatch):
+    """A set, non-empty env var returns its value."""
+    monkeypatch.setenv("DH_TEST_VAR", "secret-value")
+    assert (
+        resolve_required_env_var(
+            field_name="auth.psk_env_var",
+            env_var_name="DH_TEST_VAR",
+            context="test ctx",
+        )
+        == "secret-value"
+    )
+
+
+def test_resolve_required_env_var_unset_raises(monkeypatch):
+    """An unset env var raises ConfigurationError mentioning the field and var."""
+    monkeypatch.delenv("DH_TEST_VAR", raising=False)
+    with pytest.raises(
+        ConfigurationError,
+        match=r"test ctx: 'auth.psk_env_var' refers to environment variable 'DH_TEST_VAR'",
+    ):
+        resolve_required_env_var(
+            field_name="auth.psk_env_var",
+            env_var_name="DH_TEST_VAR",
+            context="test ctx",
+        )
+
+
+def test_resolve_required_env_var_empty_raises(monkeypatch):
+    """An env var set to empty string raises ConfigurationError."""
+    monkeypatch.setenv("DH_TEST_VAR", "")
+    with pytest.raises(ConfigurationError, match=r"unset or empty"):
+        resolve_required_env_var(
+            field_name="auth.psk_env_var",
+            env_var_name="DH_TEST_VAR",
+            context="test ctx",
+        )
+
+
+# ---------------------------------------------------------------------------
+# resolve_secret_field
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_secret_field_inline_returns_value():
+    """Inline field set returns inline value."""
+    config = {"psk": "inline-secret"}
+    assert (
+        resolve_secret_field(
+            config=config,
+            inline_field="psk",
+            env_var_field="psk_env_var",
+            context="ctx",
+        )
+        == "inline-secret"
+    )
+
+
+def test_resolve_secret_field_env_var_returns_value(monkeypatch):
+    """Only env_var field set: resolves through the environment."""
+    monkeypatch.setenv("DH_TEST_PSK", "env-secret")
+    config = {"psk_env_var": "DH_TEST_PSK"}
+    assert (
+        resolve_secret_field(
+            config=config,
+            inline_field="psk",
+            env_var_field="psk_env_var",
+            context="ctx",
+        )
+        == "env-secret"
+    )
+
+
+def test_resolve_secret_field_neither_returns_none():
+    """Neither field set returns None (caller decides what that means)."""
+    assert (
+        resolve_secret_field(
+            config={},
+            inline_field="psk",
+            env_var_field="psk_env_var",
+            context="ctx",
+        )
+        is None
+    )
+
+
+def test_resolve_secret_field_env_var_unset_raises(monkeypatch):
+    """env_var field names a variable that is unset → ConfigurationError."""
+    monkeypatch.delenv("DH_TEST_PSK", raising=False)
+    with pytest.raises(ConfigurationError, match=r"DH_TEST_PSK"):
+        resolve_secret_field(
+            config={"psk_env_var": "DH_TEST_PSK"},
+            inline_field="psk",
+            env_var_field="psk_env_var",
+            context="ctx",
+        )
+
+
+def test_resolve_secret_field_inline_takes_precedence(monkeypatch):
+    """If both fields are present (validator failure), inline wins; env not consulted."""
+    # If the env var were consulted, this would raise; assert it isn't.
+    monkeypatch.delenv("DH_TEST_PSK", raising=False)
+    config = {"psk": "inline-secret", "psk_env_var": "DH_TEST_PSK"}
+    assert (
+        resolve_secret_field(
+            config=config,
+            inline_field="psk",
+            env_var_field="psk_env_var",
+            context="ctx",
+        )
+        == "inline-secret"
+    )
+
+
+def test_resolve_secret_field_inline_empty_falls_through_to_env(monkeypatch):
+    """Inline present but empty string is treated as absent; env is consulted."""
+    monkeypatch.setenv("DH_TEST_PSK", "env-secret")
+    config = {"psk": "", "psk_env_var": "DH_TEST_PSK"}
+    assert (
+        resolve_secret_field(
+            config=config,
+            inline_field="psk",
+            env_var_field="psk_env_var",
+            context="ctx",
+        )
+        == "env-secret"
+    )
+
+
+def test_resolve_secret_field_inline_non_string_falls_through(monkeypatch):
+    """Non-string inline value (e.g. None) is treated as absent."""
+    monkeypatch.setenv("DH_TEST_PSK", "env-secret")
+    config = {"psk": None, "psk_env_var": "DH_TEST_PSK"}
+    assert (
+        resolve_secret_field(
+            config=config,
+            inline_field="psk",
+            env_var_field="psk_env_var",
+            context="ctx",
+        )
+        == "env-secret"
+    )
+
+
+def test_resolve_secret_field_env_var_non_string_returns_none():
+    """Non-string env_var value (e.g. None) is treated as absent → None."""
+    config = {"psk_env_var": None}
+    assert (
+        resolve_secret_field(
+            config=config,
+            inline_field="psk",
+            env_var_field="psk_env_var",
+            context="ctx",
+        )
+        is None
+    )

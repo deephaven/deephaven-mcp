@@ -15,6 +15,7 @@ from deephaven_mcp.config import (
 )
 from deephaven_mcp.config.community import (
     _redact_session_creation_config,
+    _validate_auth_config,
     _validate_security_config,
     _validate_session_creation_config,
     _validate_session_creation_defaults,
@@ -482,3 +483,89 @@ async def test_manager_log_summary_fallback_on_json_error(tmp_path, caplog):
 
     # Restore explicit reference (noop since patch.object unwinds on exit).
     assert original_dumps is json5.dumps
+
+
+# ---------------------------------------------------------------------------
+# _validate_auth_config
+# ---------------------------------------------------------------------------
+
+
+def test_auth_empty_block_rejected_when_defaults_to_enabled():
+    with pytest.raises(ConfigurationError, match="enabled: true"):
+        _validate_auth_config({})
+
+
+def test_auth_inline_psk_ok():
+    _validate_auth_config({"psk": "s3cret"})
+
+
+def test_auth_env_var_ok():
+    _validate_auth_config({"psk_env_var": "DH_MCP_PSK"})
+
+
+def test_auth_both_inline_and_env_is_mutually_exclusive():
+    with pytest.raises(ConfigurationError, match="mutually exclusive"):
+        _validate_auth_config({"psk": "s", "psk_env_var": "X"})
+
+
+def test_auth_enabled_false_without_secret_ok():
+    _validate_auth_config({"enabled": False})
+
+
+def test_auth_enabled_false_with_secret_rejected():
+    with pytest.raises(ConfigurationError, match="enabled: false"):
+        _validate_auth_config({"enabled": False, "psk": "s"})
+
+
+def test_auth_unknown_field_rejected():
+    with pytest.raises(ConfigurationError, match="Unknown field"):
+        _validate_auth_config({"psk": "s", "bogus": True})
+
+
+def test_auth_enabled_wrong_type_rejected():
+    with pytest.raises(ConfigurationError, match="psk"):
+        # psk must be str, not int; covers the type-check branch.
+        _validate_auth_config({"psk": 1234})
+
+
+# Note: tests for community PSK resolution moved out of this file.
+# - The underlying env-var resolution mechanics are tested in
+#   tests/config/test__validators.py against resolve_secret_field /
+#   resolve_required_env_var.
+# - The 'enabled: false -> None' policy and end-to-end PSK wiring at
+#   server startup are tested in tests/mcp_systems_server/test_server.py
+#   against _load_community_startup_state.
+
+
+# ---------------------------------------------------------------------------
+# validate_community_config: auth block wiring
+# ---------------------------------------------------------------------------
+
+
+def test_validate_community_config_accepts_auth_block():
+    cfg = {"auth": {"psk": "s"}}
+    validate_community_config(cfg)
+
+
+def test_validate_community_config_rejects_bad_auth_block():
+    cfg = {"auth": {"psk": "s", "psk_env_var": "X"}}
+    with pytest.raises(ConfigurationError):
+        validate_community_config(cfg)
+
+
+# ---------------------------------------------------------------------------
+# redact_community_config: auth token
+# ---------------------------------------------------------------------------
+
+
+def test_redact_community_config_redacts_psk():
+    cfg = {"auth": {"psk": "s3cret"}}
+    out = redact_community_config(cfg)
+    assert out["auth"]["psk"] == "[REDACTED]"
+    assert cfg["auth"]["psk"] == "s3cret"  # original untouched
+
+
+def test_redact_community_config_preserves_env_var_name():
+    cfg = {"auth": {"psk_env_var": "DH_PSK"}}
+    out = redact_community_config(cfg)
+    assert out["auth"]["psk_env_var"] == "DH_PSK"

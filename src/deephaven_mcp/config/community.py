@@ -6,6 +6,10 @@ Validates and redacts community config files and provides the
 Community config file format (flat — all keys at top level)::
 
     {
+        "auth": {
+            "enabled": true,
+            "psk_env_var": "DH_MCP_COMMUNITY_PSK"
+        },
         "security": {"credential_retrieval_mode": "dynamic_only"},
         "sessions": {
             "local": {"host": "localhost", "port": 10000, "auth_type": "PSK", "auth_token": "..."}
@@ -14,8 +18,16 @@ Community config file format (flat — all keys at top level)::
         "mcp_session_idle_timeout_seconds": 3600
     }
 
-Valid top-level keys: ``security``, ``sessions``, ``session_creation``,
-``mcp_session_idle_timeout_seconds``. Unknown keys at any level are rejected.
+Valid top-level keys: ``auth``, ``security``, ``sessions``,
+``session_creation``, ``mcp_session_idle_timeout_seconds``. Unknown keys
+at any level are rejected.
+
+The ``auth`` block governs how HTTP clients authenticate to the MCP server
+itself, using a Jupyter-style pre-shared key. It is distinct from the
+per-worker ``auth_token`` values inside
+``sessions[*]``/``session_creation.defaults``, which are pydeephaven
+client parameters controlling how the MCP server authenticates to
+individual community workers.
 
 Public API (re-exported via :mod:`deephaven_mcp.config`):
 
@@ -44,6 +56,7 @@ import types
 from typing import Any
 
 from deephaven_mcp._exceptions import ConfigurationError
+from deephaven_mcp._redaction import REDACTED
 
 from ._base import (
     ConfigManager,
@@ -135,12 +148,26 @@ _ALLOWED_SESSION_CREATION_DEFAULTS: dict[str, type | tuple[type, ...]] = {
 """Allowed fields inside ``session_creation.defaults``."""
 
 _ALLOWED_TOP_LEVEL_FIELDS: dict[str, type | tuple[type, ...]] = {
+    "auth": dict,
     "security": dict,
     "sessions": dict,
     "session_creation": dict,
     "mcp_session_idle_timeout_seconds": (int, float),
 }
 """Allowed top-level keys in a community config file."""
+
+_ALLOWED_AUTH_FIELDS: dict[str, type | tuple[type, ...]] = {
+    "enabled": bool,
+    "psk": str,
+    "psk_env_var": str,
+}
+"""Allowed fields in the top-level ``auth`` section.
+
+Governs the pre-shared key that gates access to the MCP server itself.
+``enabled`` defaults to ``True`` when omitted. Exactly one of ``psk`` or
+``psk_env_var`` must be present when ``enabled`` is ``True``. Both are
+forbidden when ``enabled`` is ``False``.
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -175,12 +202,12 @@ def redact_community_session_config(
     """
     out = dict(session_config)
     if out.get("auth_token"):
-        out["auth_token"] = "[REDACTED]"  # noqa: S105
+        out["auth_token"] = REDACTED  # noqa: S105
     if redact_binary_values:
         for key in ("tls_root_certs", "client_cert_chain", "client_private_key"):
             value = out.get(key)
             if value and isinstance(value, bytes | bytearray):
-                out[key] = "[REDACTED]"
+                out[key] = REDACTED
     return out
 
 
@@ -191,7 +218,7 @@ def _redact_session_creation_config(
     out = copy.deepcopy(session_creation_config)
     defaults = out.get("defaults")
     if isinstance(defaults, dict) and "auth_token" in defaults:
-        defaults["auth_token"] = "[REDACTED]"  # noqa: S105
+        defaults["auth_token"] = REDACTED  # noqa: S105
     return out
 
 
@@ -218,6 +245,9 @@ def redact_community_config(config: dict[str, Any]) -> dict[str, Any]:
             output.
     """
     out = copy.deepcopy(config)
+    auth = out.get("auth")
+    if isinstance(auth, dict) and "psk" in auth:
+        auth["psk"] = REDACTED  # noqa: S105
     sessions = out.get("sessions")
     if isinstance(sessions, dict):
         out["sessions"] = {
@@ -228,6 +258,68 @@ def redact_community_config(config: dict[str, Any]) -> dict[str, Any]:
     if isinstance(session_creation, dict):
         out["session_creation"] = _redact_session_creation_config(session_creation)
     return out
+
+
+# ---------------------------------------------------------------------------
+# Validation — auth
+# ---------------------------------------------------------------------------
+
+
+def _validate_auth_config(auth_config: Any) -> None:
+    """Validate the optional top-level ``auth`` section.
+
+    Schema:
+
+    - All values must match :data:`_ALLOWED_AUTH_FIELDS`.
+    - ``enabled`` (bool, optional, defaults to ``True``).
+    - When ``enabled`` is ``True``: exactly one of ``psk`` or
+      ``psk_env_var`` must be provided.
+    - When ``enabled`` is ``False``: neither ``psk`` nor ``psk_env_var``
+      may be provided.
+
+    Args:
+        auth_config (Any): The ``auth`` value from the config (already
+            confirmed to be a dict by :func:`validate_community_config`).
+
+    Raises:
+        ConfigurationError: On any schema violation.
+    """
+    context = "'auth' section"
+    validate_allowed_fields(context, auth_config, _ALLOWED_AUTH_FIELDS)
+    validate_mutually_exclusive(context, auth_config, "psk", "psk_env_var")
+
+    enabled = auth_config.get("enabled", True)
+    has_secret = "psk" in auth_config or "psk_env_var" in auth_config
+
+    if enabled and not has_secret:
+        msg = (
+            f"{context} has 'enabled: true' but neither 'psk' nor "
+            "'psk_env_var' was provided. When authentication is enabled, "
+            "the config must specify exactly one:\n"
+            "\n"
+            '    "psk": "<your-secret-here>"           '
+            "(secret stored directly in config)\n"
+            "\n"
+            '    "psk_env_var": "<ENV_VAR_NAME>"       '
+            "(config names an env var holding the secret)\n"
+            "\n"
+            "To run without authentication (local development only — "
+            "server will refuse to start unless bound to 127.0.0.1 / "
+            "localhost), set 'enabled: false' instead."
+        )
+        _LOGGER.error(f"[config:_validate_auth_config] {msg}")
+        raise ConfigurationError(msg)
+
+    if not enabled and has_secret:
+        msg = (
+            f"{context} has 'enabled: false' but also specifies a PSK "
+            "('psk' or 'psk_env_var'). When authentication is disabled "
+            "the server runs without a secret. Either:\n"
+            "  - remove the 'psk' / 'psk_env_var' field, or\n"
+            "  - set 'enabled: true' to require the PSK on every request."
+        )
+        _LOGGER.error(f"[config:_validate_auth_config] {msg}")
+        raise ConfigurationError(msg)
 
 
 # ---------------------------------------------------------------------------
@@ -417,6 +509,8 @@ def validate_community_config(config: Any) -> dict[str, Any]:
         "community configuration", config, _ALLOWED_TOP_LEVEL_FIELDS
     )
 
+    if "auth" in config:
+        _validate_auth_config(config["auth"])
     if "security" in config:
         _validate_security_config(config["security"])
     if "sessions" in config:

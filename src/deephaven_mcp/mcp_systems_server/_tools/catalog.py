@@ -19,14 +19,12 @@ from deephaven_mcp._exceptions import UnsupportedOperationError
 from deephaven_mcp.client import CorePlusSession
 from deephaven_mcp.formatters import format_table_data
 from deephaven_mcp.mcp_systems_server._tools.shared import (
+    ESTIMATED_BYTES_PER_CELL,
+    build_table_data_response,
     check_response_size,
     format_meta_table_result,
     get_enterprise_session,
     get_session_from_context,
-)
-from deephaven_mcp.mcp_systems_server._tools.table import (
-    ESTIMATED_BYTES_PER_CELL,
-    _build_table_data_response,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -1114,7 +1112,7 @@ async def catalog_table_sample(
         _LOGGER.debug(
             f"[mcp_systems_server:catalog_table_sample] Formatting {row_count} rows in format '{format}'"
         )
-        response = _build_table_data_response(
+        response = build_table_data_response(
             arrow_table, is_complete, format, table_name=table_name, namespace=namespace
         )
 

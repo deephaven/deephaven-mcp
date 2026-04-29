@@ -736,66 +736,83 @@ async def test_check_liveness_exception():
 class TestCorePlusSessionFactoryManager:
     """Tests for the CorePlusSessionFactoryManager."""
 
+    def _make_creds(self):
+        from deephaven_mcp.auth.credentials import PasswordCredentials
+
+        return PasswordCredentials(username="u", password="p")
+
     def test_initialization(self):
         """Test that the manager initializes with the correct properties."""
         config = {"host": "localhost"}
-        manager = CorePlusSessionFactoryManager(name="test_factory", config=config)
+        creds = self._make_creds()
+        manager = CorePlusSessionFactoryManager(
+            name="test_factory", config=config, creds=creds
+        )
 
         assert manager.system_type == SystemType.ENTERPRISE
         assert manager.source == "factory"
         assert manager.name == "test_factory"
         assert manager._config == config
+        assert manager._creds is creds
 
     """Tests for the CorePlusSessionFactoryManager class."""
 
     @pytest.mark.asyncio
     @patch(
-        "deephaven_mcp.client.CorePlusSessionFactory.from_config",
+        "deephaven_mcp.client.CorePlusSessionFactory.from_credentials",
         new_callable=AsyncMock,
     )
-    async def test_create_item(self, mock_from_config):
-        """Test that _create_item correctly calls the factory's from_config method."""
+    async def test_create_item(self, mock_from_credentials):
+        """Test that _create_item correctly calls the factory's from_credentials method."""
         mock_factory = AsyncMock(spec=client.CorePlusSessionFactory)
-        mock_from_config.return_value = mock_factory
+        mock_from_credentials.return_value = mock_factory
 
         config = {"host": "localhost"}
-        manager = CorePlusSessionFactoryManager(name="test_factory", config=config)
+        creds = self._make_creds()
+        manager = CorePlusSessionFactoryManager(
+            name="test_factory", config=config, creds=creds
+        )
 
         created_factory = await manager._create_item()
 
         assert created_factory is mock_factory
-        mock_from_config.assert_awaited_once_with(config)
+        mock_from_credentials.assert_awaited_once_with(config, creds)
 
     @pytest.mark.asyncio
     @patch(
-        "deephaven_mcp.client.CorePlusSessionFactory.from_config",
+        "deephaven_mcp.client.CorePlusSessionFactory.from_credentials",
         new_callable=AsyncMock,
     )
-    async def test_create_item_timeout(self, mock_from_config):
+    async def test_create_item_timeout(self, mock_from_credentials):
         """Test that _create_item raises DeephavenConnectionError on timeout."""
         from deephaven_mcp._exceptions import DeephavenConnectionError
 
-        # Simulate a timeout by making from_config hang
-        async def slow_operation(config):
+        # Simulate a timeout by making from_credentials hang
+        async def slow_operation(config, creds):
             await asyncio.sleep(20)  # Longer than default timeout
 
-        mock_from_config.side_effect = slow_operation
+        mock_from_credentials.side_effect = slow_operation
 
         config = {"host": "unreachable", "connection_timeout": 0.1}
-        manager = CorePlusSessionFactoryManager(name="test_factory", config=config)
+        creds = self._make_creds()
+        manager = CorePlusSessionFactoryManager(
+            name="test_factory", config=config, creds=creds
+        )
 
         with pytest.raises(
             DeephavenConnectionError, match="timed out after 0.1 seconds"
         ):
             await manager._create_item()
 
-        mock_from_config.assert_awaited_once_with(config)
+        mock_from_credentials.assert_awaited_once_with(config, creds)
 
     @pytest.mark.asyncio
     async def test_check_liveness(self):
         """Test that _check_liveness correctly calls the item's ping method."""
         mock_factory = AsyncMock(spec=client.CorePlusSessionFactory)
-        manager = CorePlusSessionFactoryManager(name="test_factory", config={})
+        manager = CorePlusSessionFactoryManager(
+            name="test_factory", config={}, creds=self._make_creds()
+        )
 
         # Test when ping returns True
         mock_factory.ping.return_value = True

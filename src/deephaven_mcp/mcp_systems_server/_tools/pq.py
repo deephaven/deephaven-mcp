@@ -24,9 +24,9 @@ from mcp.server.fastmcp import Context, FastMCP
 from deephaven_mcp._exceptions import (
     MissingEnterprisePackageError,
 )
-from deephaven_mcp.client._controller_client import CorePlusControllerClient
-from deephaven_mcp.client._protobuf import (
+from deephaven_mcp.client import (
     PQ_STATES,
+    CorePlusControllerClient,
     CorePlusQueryConfig,
     CorePlusQuerySerial,
     CorePlusQueryState,

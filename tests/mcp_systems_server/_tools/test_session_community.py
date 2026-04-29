@@ -1473,7 +1473,7 @@ async def test_session_community_create_missing_auth_token_env_var():
     assert result["success"] is False
     assert result["isError"] is True
     assert "MISSING_ENV_VAR" in result["error"]
-    assert "not set" in result["error"]
+    assert "unset or empty" in result["error"]
 
 
 @pytest.mark.asyncio

@@ -37,6 +37,12 @@ def test___all__():
     assert isinstance(deephaven_mcp.client.__all__, list)
 
 
+def test_pq_states_in_all():
+    import deephaven_mcp.client
+
+    assert "PQ_STATES" in deephaven_mcp.client.__all__
+
+
 def test_expected_symbols_in_all():
     import deephaven_mcp.client
 
@@ -114,6 +120,7 @@ def test___all__():
         "CorePlusQueryState",
         "CorePlusQueryInfo",
         "CorePlusToken",
+        "PQ_STATES",
     }
     assert set(client.__all__) == expected
 
@@ -135,6 +142,7 @@ def test_import_star_behavior():
         "CorePlusQueryState",
         "CorePlusQueryInfo",
         "CorePlusToken",
+        "PQ_STATES",
     }
     ns = {}
     exec("from deephaven_mcp.client import *", ns)

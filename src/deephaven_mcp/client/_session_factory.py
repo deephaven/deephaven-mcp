@@ -60,10 +60,9 @@ Note:
 import asyncio
 import io
 import logging
-import os
 import time
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 import pydeephaven
 
@@ -78,6 +77,11 @@ from deephaven_mcp._exceptions import (
     ResourceError,
     SessionCreationError,
     SessionError,
+)
+from deephaven_mcp.auth.credentials import (
+    Credentials,
+    PasswordCredentials,
+    PrivateKeyCredentials,
 )
 from deephaven_mcp.config import (
     ConfigurationError,
@@ -277,6 +281,9 @@ class CorePlusSessionFactory(
         if not is_enterprise_available:
             raise MissingEnterprisePackageError()
         else:
+            # Imported lazily: deephaven_enterprise is an optional dependency
+            # (see is_enterprise_available in _base.py). A top-level import
+            # would break community-only installs at module load time.
             from deephaven_enterprise.client.session_manager import SessionManager
 
             _LOGGER.debug(
@@ -318,204 +325,99 @@ class CorePlusSessionFactory(
 
             return instance
 
-    @staticmethod
-    def _resolve_password(
-        config: dict[str, Any],
-        log_prefix: str = "[CorePlusSessionFactory:from_config]",
-    ) -> str:
-        """Resolve password from config dictionary or environment variable.
-
-        This helper extracts the password for enterprise system authentication.
-        It supports two configuration approaches:
-
-        1. Direct password: Use 'password' key with the password value
-        2. Environment variable: Use 'password_env_var' key with the name of an
-           environment variable containing the password (recommended for security)
-
-        If 'password_env_var' is specified and 'password' is None, the environment
-        variable is used. Unlike auth tokens, passwords are required - an
-        AuthenticationError is raised if no password can be resolved.
-
-        Args:
-            config (dict[str, Any]): Configuration dictionary containing 'password' and/or
-                'password_env_var' keys.
-            log_prefix (str): Prefix for log messages (default: "[CorePlusSessionFactory:from_config]").
-
-        Returns:
-            str: The resolved password string.
-
-        Raises:
-            AuthenticationError: If the specified environment variable is not set,
-                or if no password is provided at all.
-        """
-        password = config.get("password")
-        password_env_var = config.get("password_env_var")
-
-        if password is None and password_env_var is not None:
-            password = os.environ.get(password_env_var)
-            if password is None:
-                _LOGGER.error(
-                    f"{log_prefix} Environment variable '{password_env_var}' not set for password authentication."
-                )
-                raise AuthenticationError(
-                    f"Environment variable '{password_env_var}' not set for password authentication."
-                )
-        if password is None:
-            _LOGGER.error(
-                f"{log_prefix} No password provided for password authentication."
-            )
-            raise AuthenticationError(
-                "No password provided for password authentication."
-            )
-        return str(password)
-
     @classmethod
-    async def from_config(
+    async def from_credentials(
         cls,
         config: dict[str, Any],
+        creds: Credentials,
         timeout_seconds: float = SESSION_CONNECT_TIMEOUT_SECONDS,
     ) -> "CorePlusSessionFactory":
-        """Create and authenticate a CorePlusSessionFactory from a configuration dictionary.
+        """Create and authenticate a factory using mechanism-only credentials.
 
-        This factory method provides a complete solution for creating and initializing a
-        CorePlusSessionFactory from a configuration dictionary. It handles the entire process:
+        This is the per-request authentication path used by the enterprise
+        MCP server: the server's config supplies only the connection
+        target (``connection_json_url``) and operational defaults; the
+        actual credentials are supplied by the caller (typically derived
+        from the ``X-Deephaven-*`` HTTP headers by an
+        :class:`~deephaven_mcp.auth.backends.AuthBackend`).
 
-        1. Validates the configuration format and required fields
-        2. Creates a connection to the specified Deephaven server
-        3. Automatically authenticates using the provided credentials
-        4. Returns a fully ready-to-use factory instance
+        Steps performed:
 
-        This is the recommended approach when working with configuration files, environment-based
-        setups, or any scenario where connection details and authentication information are stored
-        in a structured format rather than hardcoded in the application.
-
-        Configuration Format:
-        The configuration dictionary must follow the flat enterprise system format with these
-        required fields:
-
-        - 'system_name': Identifier for the enterprise system
-        - 'connection_json_url': URL to the Deephaven server's connection.json file
-        - 'auth_type': Authentication method to use ('password', 'private_key', or 'saml')
-
-        Additional fields based on auth_type:
-
-        - For 'password' authentication:
-            * 'username': The username for authentication
-            * Either 'password': The actual password (not recommended for production)
-              or 'password_env_var': Name of environment variable containing the password
-            * Optional 'effective_user': User to operate as after authentication
-
-        - For 'private_key' authentication:
-            * 'private_key_path': The path to the Deephaven private keypair file (proprietary format,
-              typically named `priv-<keyname>.base64.txt`; provided by your IT/security team)
-
-        - For 'saml' authentication:
-            * No additional fields required, but SAML must be configured on the server.
-            * Note: `from_config()` cannot perform SAML authentication automatically because
-              SAML requires interactive browser-based login. When `auth_type` is 'saml',
-              this method returns an unauthenticated factory and logs a warning. Call
-              `saml()` manually on the returned instance to complete authentication.
+        1. Validate ``config`` against the enterprise schema (rejects any
+           legacy credential fields).
+        2. Build a ``SessionManager`` from ``config['connection_json_url']``
+           in a worker thread, with ``timeout_seconds`` enforced.
+        3. Authenticate using ``creds`` (dispatching on its concrete
+           type).
+        4. Subscribe the wrapped controller client.
 
         Args:
-            config (dict[str, Any]): Configuration dictionary for the enterprise system connection.
-                Must contain the required fields as described above.
-            timeout_seconds (float): Maximum time in seconds to wait for connection.
-                Defaults to SESSION_CONNECT_TIMEOUT_SECONDS.
+            config (dict[str, Any]): Validated enterprise configuration
+                dictionary. Only ``connection_json_url`` is read by this
+                method; the rest is validated for early rejection of
+                misconfiguration.
+            creds (Credentials): Mechanism-only credentials produced by
+                an
+                :class:`~deephaven_mcp.auth.backends.AuthBackend`. Only
+                :class:`PasswordCredentials` and
+                :class:`PrivateKeyCredentials` can authenticate a
+                Deephaven Enterprise session; any other concrete type
+                raises :class:`AuthenticationError`. The concrete type
+                selects the upstream auth call.
+            timeout_seconds (float): Maximum time to wait both for the
+                ``SessionManager`` constructor and for the controller
+                subscription. Defaults to
+                :data:`SESSION_CONNECT_TIMEOUT_SECONDS`.
 
         Returns:
-            CorePlusSessionFactory: A fully initialized and authenticated factory instance
-                ready for immediate use. You can directly call methods like connect_to_new_worker()
-                without needing to perform separate authentication steps.
+            CorePlusSessionFactory: A fully authenticated factory.
 
         Raises:
-            MissingEnterprisePackageError: If the required deephaven-coreplus-client
-                package is not installed.
-            DeephavenConnectionError: If unable to connect to the specified server URL,
-                such as network issues or invalid connection.json format.
-            AuthenticationError: If authentication fails due to missing or invalid credentials,
-                incorrect format, or server-side authentication issues.
-            ConfigurationError: If the configuration dictionary is invalid,
-                missing required fields, or contains incompatible settings.
-
-        Example - Password authentication with environment variable:
-            ```python
-            import asyncio
-            import os
-            from deephaven_mcp.client import CorePlusSessionFactory
-
-            # Set password in environment (in practice, this would be set externally)
-            os.environ["DH_PASSWORD"] = "my_secure_password"
-
-            async def create_from_config():
-                # Define configuration with environment variable for password
-                config = {
-                    "system_name": "prod",
-                    "connection_json_url": "https://example.deephaven.io/iris/connection.json",
-                    "auth_type": "password",
-                    "username": "admin",
-                    "password_env_var": "DH_PASSWORD"
-                }
-
-                # Create and authenticate in one step
-                factory = await CorePlusSessionFactory.from_config(config)
-
-                # Use the factory directly - no authentication needed
-                session = await factory.connect_to_new_worker(heap_size_gb=4)
-                return session
-            ```
-
-        Example - Private key authentication:
-            ```python
-            async def create_with_key():
-                # Define configuration with private key path
-                config = {
-                    "system_name": "prod",
-                    "connection_json_url": "https://example.deephaven.io/iris/connection.json",
-                    "auth_type": "private_key",
-                    "private_key_path": "/path/to/priv-mykeyname.base64.txt"
-                }
-
-                # Create and authenticate in one step
-                factory = await CorePlusSessionFactory.from_config(config)
-                return factory
-            ```
-
-        Note:
-            This method performs authentication as part of initialization. If authentication
-            fails, an exception will be raised and no factory will be returned. For security
-            best practices, avoid storing credentials directly in the configuration and instead
-            use environment variables or secure credential storage systems.
+            MissingEnterprisePackageError: If the
+                ``deephaven-coreplus-client`` package is not installed.
+            ConfigurationError: If ``config`` fails enterprise schema
+                validation.
+            DeephavenConnectionError: If the underlying ``SessionManager``
+                cannot be constructed within ``timeout_seconds`` (or at
+                all).
+            AuthenticationError: If ``creds`` is a type this factory
+                does not support (e.g. :class:`PSKCredentials`), or if
+                the upstream authentication call rejects it. Syntactic
+                validation of credential material (e.g. UTF-8 check for
+                private-key bytes) happens at backend construction time
+                in :mod:`deephaven_mcp.auth.backends`, not here.
         """
         if not is_enterprise_available:
             raise MissingEnterprisePackageError()
 
-        # Validate config
         try:
             validate_enterprise_config(config)
         except ConfigurationError as e:
             _LOGGER.error(
-                f"[CorePlusSessionFactory:from_config] Invalid enterprise system config: {e}"
+                f"[CorePlusSessionFactory:from_credentials] Invalid enterprise system config: {e}"
             )
             raise
 
         url = config["connection_json_url"]
-        auth_type = config["auth_type"]
+        creds_type = type(creds).__name__
         _LOGGER.debug(
-            f"[CorePlusSessionFactory:from_config] Creating SessionManager from config: url={url}, auth_type={auth_type}"
+            f"[CorePlusSessionFactory:from_credentials] Creating SessionManager: "
+            f"url={url}, creds={creds_type}"
         )
+        # Imported lazily: deephaven_enterprise is an optional dependency
+        # (see is_enterprise_available in _base.py). A top-level import
+        # would break community-only installs at module load time.
         from deephaven_enterprise.client.session_manager import SessionManager
 
         start_time = time.monotonic()
         try:
-            # Run the blocking SessionManager constructor in a background thread so
-            # that this method is cancellable and doesn't block the event loop.
             manager = await asyncio.wait_for(
                 asyncio.to_thread(SessionManager, url),
                 timeout=timeout_seconds,
             )
         except TimeoutError:
             _LOGGER.error(
-                f"[CorePlusSessionFactory:from_config] Connection to {url} timed out after {timeout_seconds}s"
+                f"[CorePlusSessionFactory:from_credentials] Connection to {url} timed out after {timeout_seconds}s"
             )
             raise DeephavenConnectionError(
                 f"Connection to Deephaven at {url} timed out after {timeout_seconds} seconds. "
@@ -524,7 +426,7 @@ class CorePlusSessionFactory(
         except Exception as e:
             elapsed = time.monotonic() - start_time
             _LOGGER.error(
-                f"[CorePlusSessionFactory:from_config] Failed to create SessionManager with URL {url} after {elapsed:.2f}s: {e}"
+                f"[CorePlusSessionFactory:from_credentials] Failed to create SessionManager with URL {url} after {elapsed:.2f}s: {e}"
             )
             raise DeephavenConnectionError(
                 f"Failed to establish connection to Deephaven at {url} after {elapsed:.2f}s: {e}"
@@ -532,46 +434,42 @@ class CorePlusSessionFactory(
 
         elapsed = time.monotonic() - start_time
         _LOGGER.info(
-            f"[CorePlusSessionFactory:from_config] Successfully created SessionManager from config (url={url}, auth_type={auth_type}) in {elapsed:.2f}s"
+            f"[CorePlusSessionFactory:from_credentials] Successfully created SessionManager "
+            f"(url={url}) in {elapsed:.2f}s"
         )
 
         instance = cls(manager)
 
-        # Perform authentication if credentials are provided
-        if auth_type == "password":
-            username = config.get("username")
-            password = cls._resolve_password(config)
-            effective_user = config.get("effective_user")
-            await instance.password(cast(str, username), password, effective_user)
-        elif auth_type == "private_key":
-            private_key_path = config.get("private_key_path")
-            if private_key_path is None:
-                _LOGGER.error(
-                    "[CorePlusSessionFactory:from_config] No private_key_path provided for private_key authentication."
-                )
+        match creds:
+            case PasswordCredentials(
+                username=username, password=password, effective_user=effective_user
+            ):
+                await instance.password(username, password, effective_user)
+            case PrivateKeyCredentials(key_text=key_text):
+                await instance.private_key(io.StringIO(key_text))
+            case _:
+                # The signature accepts the abstract Credentials base
+                # class; this arm rejects any concrete subclass that
+                # cannot authenticate against Deephaven Enterprise (e.g.
+                # PSKCredentials, or a future mechanism this factory
+                # does not understand).
                 raise AuthenticationError(
-                    "No private_key_path provided for private_key authentication."
+                    f"Unsupported credentials type {creds_type!r} for "
+                    f"enterprise authentication."
                 )
-            await instance.private_key(private_key_path)
-        else:
-            _LOGGER.warning(
-                f"[CorePlusSessionFactory:from_config] Auth type '{auth_type}' is not supported for automatic authentication. Returning unauthenticated manager."
-            )
 
-        # Subscribe to controller client for persistent query operations
         _LOGGER.info(
-            f"[CorePlusSessionFactory:from_config] Subscribing to controller for persistent query state (auth_type={auth_type})"
+            f"[CorePlusSessionFactory:from_credentials] Subscribing to controller "
+            f"(creds={creds_type})"
         )
         subscribe_start = time.monotonic()
         await instance._controller_client.subscribe(timeout_seconds=timeout_seconds)
         subscribe_elapsed = time.monotonic() - subscribe_start
         _LOGGER.info(
-            f"[CorePlusSessionFactory:from_config] Controller subscription completed in {subscribe_elapsed:.2f}s"
+            f"[CorePlusSessionFactory:from_credentials] Controller subscription "
+            f"completed in {subscribe_elapsed:.2f}s"
         )
 
-        _LOGGER.info(
-            f"[CorePlusSessionFactory:from_config] Successfully created and authenticated SessionManager from config (auth_type={auth_type})"
-        )
         return instance
 
     @property

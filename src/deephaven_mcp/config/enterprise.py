@@ -8,9 +8,10 @@ Enterprise config file format (flat — all fields at top level)::
     {
         "system_name": "prod",
         "connection_json_url": "https://dhe.example.com/iris/connection.json",
-        "auth_type": "password",
-        "username": "user",
-        "password_env_var": "DHE_PASSWORD",
+        "auth": {
+            "backends": ["password", "private_key"],
+            "allow_effective_user": false
+        },
         "session_creation": {
             "max_concurrent_sessions": 5,
             "defaults": {"heap_size_gb": 4, "programming_language": "Python"}
@@ -19,18 +20,30 @@ Enterprise config file format (flat — all fields at top level)::
 
 Top-level schema:
 
-- **Required**: ``system_name``, ``connection_json_url``, ``auth_type``.
-- **Auth-specific** (required per ``auth_type``):
-
-  * ``"password"``: ``username`` plus exactly one of ``password`` or
-    ``password_env_var``.
-  * ``"private_key"``: ``private_key_path``.
-
+- **Required**: ``system_name``, ``connection_json_url``, ``auth``.
 - **Optional**: ``session_creation``, ``connection_timeout``,
   ``mcp_session_idle_timeout_seconds``.
 
-Supported ``auth_type`` values: ``"password"``, ``"private_key"``. Unknown
-fields at every level are rejected.
+The ``auth`` block (required):
+
+- ``backends`` (list[str], required, non-empty): a subset of
+  ``{"password", "private_key"}``. Identifies which authentication
+  backends the server will mount in front of its streamable-HTTP app.
+- ``allow_effective_user`` (bool, optional, default ``False``): when
+  ``True``, the password backend honors the optional
+  ``X-Deephaven-Effective-User`` HTTP header. Only valid when
+  ``"password"`` is in ``backends``.
+
+Per-request authentication
+--------------------------
+The enterprise MCP server no longer accepts credentials in its config
+file. Every request must carry the caller's credentials in the
+``X-Deephaven-*`` HTTP headers; the auth middleware exchanges them for a
+:class:`~deephaven_mcp.auth.credentials.PasswordCredentials` or
+:class:`~deephaven_mcp.auth.credentials.PrivateKeyCredentials`, which is later exchanged for
+an authenticated ``CorePlusSessionFactory``.
+
+Unknown fields at every level are rejected.
 
 Public API (re-exported via :mod:`deephaven_mcp.config`):
 
@@ -38,13 +51,15 @@ Public API (re-exported via :mod:`deephaven_mcp.config`):
 - :func:`validate_enterprise_config`
 - :func:`redact_enterprise_config`
 - :data:`DEFAULT_CONNECTION_TIMEOUT_SECONDS`
+- :data:`SUPPORTED_AUTH_BACKENDS`
 """
 
 __all__ = [
-    "EnterpriseServerConfigManager",
-    "validate_enterprise_config",
-    "redact_enterprise_config",
     "DEFAULT_CONNECTION_TIMEOUT_SECONDS",
+    "EnterpriseServerConfigManager",
+    "SUPPORTED_AUTH_BACKENDS",
+    "redact_enterprise_config",
+    "validate_enterprise_config",
 ]
 
 import logging
@@ -61,7 +76,6 @@ from ._base import (
 from ._validators import (
     validate_allowed_fields,
     validate_field_type,
-    validate_mutually_exclusive,
     validate_non_negative_int,
     validate_optional_positive_number,
 )
@@ -76,32 +90,35 @@ _LOGGER = logging.getLogger(__name__)
 DEFAULT_CONNECTION_TIMEOUT_SECONDS = 10.0
 """Default timeout in seconds for establishing connections to enterprise systems."""
 
-_BASE_ENTERPRISE_FIELDS: dict[str, type | tuple[type, ...]] = {
+SUPPORTED_AUTH_BACKENDS: frozenset[str] = frozenset({"password", "private_key"})
+"""The set of values allowed in ``auth.backends``."""
+
+_REQUIRED_TOP_LEVEL_FIELDS: dict[str, type | tuple[type, ...]] = {
     "system_name": str,
     "connection_json_url": str,
-    "auth_type": str,
+    "auth": dict,
 }
-"""Base fields that every enterprise config must contain."""
+"""Required top-level fields and their expected types."""
 
-_OPTIONAL_ENTERPRISE_FIELDS: dict[str, type | tuple[type, ...]] = {
+_OPTIONAL_TOP_LEVEL_FIELDS: dict[str, type | tuple[type, ...]] = {
     "session_creation": dict,
     "connection_timeout": (int, float),
     "mcp_session_idle_timeout_seconds": (int, float),
 }
 """Optional top-level fields and their expected types."""
 
-_AUTH_SPECIFIC_FIELDS: dict[str, dict[str, type | tuple[type, ...]]] = {
-    "password": {
-        "username": str,
-        "password": str,
-        "password_env_var": str,
-    },
-    "private_key": {
-        "private_key_path": str,
-    },
+_ALLOWED_TOP_LEVEL_FIELDS: dict[str, type | tuple[type, ...]] = {
+    **_REQUIRED_TOP_LEVEL_FIELDS,
+    **_OPTIONAL_TOP_LEVEL_FIELDS,
 }
-"""Per-``auth_type`` field schemas. Requirements and mutual-exclusivity are
-enforced separately in :func:`_validate_auth_type_logic`."""
+"""Union of required and optional top-level fields, used for unknown-field
+rejection."""
+
+_ALLOWED_AUTH_FIELDS: dict[str, type | tuple[type, ...]] = {
+    "backends": list,
+    "allow_effective_user": bool,
+}
+"""Allowed fields inside the ``auth`` block."""
 
 _ALLOWED_SESSION_CREATION_FIELDS: dict[str, type | tuple[type, ...]] = {
     "max_concurrent_sessions": int,
@@ -123,7 +140,8 @@ _ALLOWED_SESSION_CREATION_DEFAULTS: dict[str, type | tuple[type, ...]] = {
     "programming_language": str,
 }
 """Allowed fields inside ``session_creation.defaults``. ``heap_size_gb`` is
-required when ``session_creation.defaults`` is present; the rest are optional."""
+required when ``session_creation.defaults`` is present; the rest are
+optional."""
 
 
 # ---------------------------------------------------------------------------
@@ -132,29 +150,27 @@ required when ``session_creation.defaults`` is present; the rest are optional.""
 
 
 def redact_enterprise_config(system_config: dict[str, Any]) -> dict[str, Any]:
-    """Return a copy of ``system_config`` with the ``password`` field redacted.
+    """Return a shallow copy of ``system_config`` safe for logging.
 
-    Only the literal ``password`` field is redacted. Other auth-adjacent
-    fields are intentionally preserved: ``password_env_var`` holds the *name*
-    of an environment variable (not the secret itself), and
-    ``private_key_path`` is a filesystem path. Neither reveals secret material
-    on its own, so both are safe to include in log output.
+    The current enterprise config schema carries no secret material —
+    credentials are delivered per-request via HTTP headers, never via
+    the config file — so this function returns a plain shallow copy.
+    The function is kept (rather than removed) as a stable redaction
+    surface: future schema changes that introduce sensitive fields can
+    be redacted here without forcing every caller to learn the new
+    shape.
 
-    The returned dictionary is a shallow copy; the input ``system_config`` is
-    never mutated.
+    The returned dictionary is a shallow copy; the input
+    ``system_config`` is never mutated.
 
     Args:
-        system_config (dict[str, Any]): The enterprise system configuration
-            dictionary.
+        system_config (dict[str, Any]): The enterprise system
+            configuration dictionary.
 
     Returns:
-        dict[str, Any]: A new dictionary with ``password`` replaced by
-            ``"[REDACTED]"`` if present; all other fields preserved unchanged.
+        dict[str, Any]: A shallow copy of ``system_config``.
     """
-    out = system_config.copy()
-    if "password" in out:
-        out["password"] = "[REDACTED]"  # noqa: S105
-    return out
+    return system_config.copy()
 
 
 # ---------------------------------------------------------------------------
@@ -162,31 +178,20 @@ def redact_enterprise_config(system_config: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def _validate_top_level_fields(
-    system_name: str, config: dict[str, Any]
-) -> tuple[str, dict[str, type | tuple[type, ...]]]:
-    """Validate base + optional + auth-specific top-level fields.
-
-    Also determines the ``auth_type`` and returns the merged schema of all
-    allowed top-level fields for that auth type.
+def _validate_top_level_fields(system_name: str, config: dict[str, Any]) -> None:
+    """Validate base + optional top-level fields and reject unknowns.
 
     Args:
-        system_name (str): The ``system_name`` value from ``config``, used
-            only in error messages.
+        system_name (str): The ``system_name`` value from ``config``,
+            used only in error messages.
         config (dict[str, Any]): The enterprise configuration dictionary.
 
-    Returns:
-        tuple[str, dict[str, type | tuple[type, ...]]]: A tuple of
-            ``(auth_type, merged_allowed_fields_schema)`` where the schema
-            unions the base, optional, and auth-specific field tables.
-
     Raises:
-        ConfigurationError: If a required base field is missing or has the
-            wrong type, if ``auth_type`` is not one of the supported values,
-            or if any unknown top-level field is present.
+        ConfigurationError: If a required base field is missing or has
+            the wrong type, or if any unknown top-level field is
+            present.
     """
-    # 1. Required base fields must be present and correctly typed.
-    for field_name, expected_type in _BASE_ENTERPRISE_FIELDS.items():
+    for field_name, expected_type in _REQUIRED_TOP_LEVEL_FIELDS.items():
         if field_name not in config:
             msg = (
                 f"Required field '{field_name}' missing in enterprise system "
@@ -201,71 +206,82 @@ def _validate_top_level_fields(
             expected_type,
         )
 
-    # 2. Validate auth_type value and select the matching auth-specific schema.
-    auth_type = config["auth_type"]
-    if auth_type not in _AUTH_SPECIFIC_FIELDS:
-        msg = (
-            f"'auth_type' for enterprise system '{system_name}' must be one "
-            f"of {sorted(_AUTH_SPECIFIC_FIELDS.keys())}, but got "
-            f"'{auth_type}'."
-        )
-        _LOGGER.error(f"[config:_validate_top_level_fields] {msg}")
-        raise ConfigurationError(msg)
-
-    # 3. Build merged allowed set for strict unknown-field rejection.
-    allowed = {
-        **_BASE_ENTERPRISE_FIELDS,
-        **_OPTIONAL_ENTERPRISE_FIELDS,
-        **_AUTH_SPECIFIC_FIELDS[auth_type],
-    }
-    validate_allowed_fields(f"enterprise system '{system_name}'", config, allowed)
-
-    return auth_type, allowed
+    validate_allowed_fields(
+        f"enterprise system '{system_name}'",
+        config,
+        _ALLOWED_TOP_LEVEL_FIELDS,
+    )
 
 
-def _validate_auth_type_logic(
-    system_name: str, config: dict[str, Any], auth_type: str
-) -> None:
-    """Enforce auth-type-specific required fields and mutual-exclusivity rules.
+def _validate_auth_block(system_name: str, auth: dict[str, Any]) -> None:
+    """Validate the required ``auth`` block.
 
-    For ``auth_type == "password"``: ``username`` is required, and exactly
-    one of ``password`` or ``password_env_var`` must be provided. For
-    ``auth_type == "private_key"``: ``private_key_path`` is required.
+    Enforces:
+
+    - ``auth`` only contains keys in :data:`_ALLOWED_AUTH_FIELDS`.
+    - ``auth.backends`` is a non-empty list of unique strings, each in
+      :data:`SUPPORTED_AUTH_BACKENDS`.
+    - ``auth.allow_effective_user`` (when present) is a ``bool`` and may
+      only be ``True`` when ``"password"`` is in ``auth.backends``.
 
     Args:
         system_name (str): The ``system_name`` value, used only in error
             messages.
-        config (dict[str, Any]): The enterprise configuration dictionary.
-        auth_type (str): The already-validated ``auth_type`` value (one of
-            the keys in :data:`_AUTH_SPECIFIC_FIELDS`).
+        auth (dict[str, Any]): The ``auth`` block from the enterprise
+            configuration dictionary; already validated to be a ``dict``.
 
     Raises:
-        ConfigurationError: If any auth-type-specific required field is
-            missing, or if ``password`` and ``password_env_var`` are both
-            specified.
+        ConfigurationError: For any violation of the rules above.
     """
-    context = f"enterprise system '{system_name}'"
-    if auth_type == "password":
-        if "username" not in config:
-            msg = f"{context} with auth_type 'password' must define 'username'."
-            _LOGGER.error(f"[config:_validate_auth_type_logic] {msg}")
-            raise ConfigurationError(msg)
-        validate_mutually_exclusive(context, config, "password", "password_env_var")
-        if "password" not in config and "password_env_var" not in config:
+    context = f"auth for enterprise system '{system_name}'"
+    validate_allowed_fields(context, auth, _ALLOWED_AUTH_FIELDS)
+
+    if "backends" not in auth:
+        msg = (
+            f"Required field 'backends' missing in {context}. Provide a "
+            f"non-empty list whose elements are drawn from "
+            f"{sorted(SUPPORTED_AUTH_BACKENDS)}."
+        )
+        _LOGGER.error(f"[config:_validate_auth_block] {msg}")
+        raise ConfigurationError(msg)
+
+    backends = auth["backends"]
+    validate_field_type(context, "backends", backends, list)
+    if len(backends) == 0:
+        msg = f"'backends' for {context} must be a non-empty list."
+        _LOGGER.error(f"[config:_validate_auth_block] {msg}")
+        raise ConfigurationError(msg)
+    if len(set(backends)) != len(backends):
+        msg = f"'backends' for {context} must not contain duplicate entries."
+        _LOGGER.error(f"[config:_validate_auth_block] {msg}")
+        raise ConfigurationError(msg)
+    for entry in backends:
+        if not isinstance(entry, str):
             msg = (
-                f"{context} with auth_type 'password' must define 'password' "
-                f"or 'password_env_var'."
+                f"'backends' for {context} must contain only strings; "
+                f"got element of type {type(entry).__name__}."
             )
-            _LOGGER.error(f"[config:_validate_auth_type_logic] {msg}")
+            _LOGGER.error(f"[config:_validate_auth_block] {msg}")
             raise ConfigurationError(msg)
-    elif auth_type == "private_key":
-        if "private_key_path" not in config:
+        if entry not in SUPPORTED_AUTH_BACKENDS:
             msg = (
-                f"{context} with auth_type 'private_key' must define "
-                f"'private_key_path'."
+                f"'backends' for {context} contains unsupported entry "
+                f"'{entry}'; allowed values are "
+                f"{sorted(SUPPORTED_AUTH_BACKENDS)}."
             )
-            _LOGGER.error(f"[config:_validate_auth_type_logic] {msg}")
+            _LOGGER.error(f"[config:_validate_auth_block] {msg}")
             raise ConfigurationError(msg)
+
+    allow_effective_user = auth.get("allow_effective_user", False)
+    if "allow_effective_user" in auth:
+        validate_field_type(context, "allow_effective_user", allow_effective_user, bool)
+    if allow_effective_user and "password" not in backends:
+        msg = (
+            f"'allow_effective_user' for {context} can only be true when "
+            f"'password' is included in 'backends'."
+        )
+        _LOGGER.error(f"[config:_validate_auth_block] {msg}")
+        raise ConfigurationError(msg)
 
 
 def _validate_session_creation(system_name: str, config: dict[str, Any]) -> None:
@@ -273,13 +289,13 @@ def _validate_session_creation(system_name: str, config: dict[str, Any]) -> None
 
     If absent, passes silently. When present:
 
-    - ``session_creation`` may contain only ``max_concurrent_sessions`` and
-      ``defaults``.
+    - ``session_creation`` may contain only ``max_concurrent_sessions``
+      and ``defaults``.
     - ``max_concurrent_sessions`` must be a non-negative int.
     - ``defaults`` is required and must be a dict.
     - ``defaults.heap_size_gb`` is required.
-    - Other ``defaults.*`` fields are optional but must match the allowed
-      schema; unknowns are rejected.
+    - Other ``defaults.*`` fields are optional but must match the
+      allowed schema; unknowns are rejected.
 
     Args:
         system_name (str): The ``system_name`` value, used only in error
@@ -288,10 +304,10 @@ def _validate_session_creation(system_name: str, config: dict[str, Any]) -> None
             (already validated at the top level).
 
     Raises:
-        ConfigurationError: If ``session_creation`` contains unknown fields,
-            ``max_concurrent_sessions`` is invalid, ``defaults`` is missing
-            or contains unknown fields, or ``defaults.heap_size_gb`` is
-            missing.
+        ConfigurationError: If ``session_creation`` contains unknown
+            fields, ``max_concurrent_sessions`` is invalid, ``defaults``
+            is missing or contains unknown fields, or
+            ``defaults.heap_size_gb`` is missing.
     """
     session_creation = config.get("session_creation")
     if session_creation is None:
@@ -342,29 +358,24 @@ def validate_enterprise_config(config: Any) -> dict[str, Any]:
     Required fields:
         - ``system_name`` (str)
         - ``connection_json_url`` (str)
-        - ``auth_type`` (str): ``"password"`` or ``"private_key"``
-
-    Authentication requirements:
-        - ``password``: requires ``username`` and exactly one of ``password``
-          or ``password_env_var``.
-        - ``private_key``: requires ``private_key_path``.
+        - ``auth`` (dict): see :func:`_validate_auth_block`.
 
     Optional fields:
         - ``connection_timeout`` (int|float > 0)
         - ``mcp_session_idle_timeout_seconds`` (int|float > 0)
-        - ``session_creation`` (dict): when present, ``defaults.heap_size_gb``
-          is required.
+        - ``session_creation`` (dict): when present,
+          ``defaults.heap_size_gb`` is required.
 
     Unknown fields at every level are rejected.
 
     Args:
-        config (Any): The configuration to validate; must be a ``dict`` for
-            validation to succeed.
+        config (Any): The configuration to validate; must be a ``dict``
+            for validation to succeed.
 
     Returns:
         dict[str, Any]: The same ``config`` object, unchanged, after
-            successful validation. Returning the object (rather than ``None``)
-            matches the validator signature expected by
+            successful validation. Returning the object (rather than
+            ``None``) matches the validator signature expected by
             :func:`deephaven_mcp.config._base._load_and_validate_config`.
 
     Raises:
@@ -388,8 +399,8 @@ def validate_enterprise_config(config: Any) -> dict[str, Any]:
     system_name_raw = config.get("system_name", "<unset>")
     system_name = system_name_raw if isinstance(system_name_raw, str) else "<invalid>"
 
-    auth_type, _allowed = _validate_top_level_fields(system_name, config)
-    _validate_auth_type_logic(system_name, config, auth_type)
+    _validate_top_level_fields(system_name, config)
+    _validate_auth_block(system_name, config["auth"])
 
     validate_optional_positive_number(config, "connection_timeout")
     validate_optional_positive_number(config, "mcp_session_idle_timeout_seconds")
@@ -420,22 +431,23 @@ async def _load_and_validate_enterprise_config(config_path: str) -> dict[str, An
 class EnterpriseServerConfigManager(ConfigManager):
     """ConfigManager for the DHE MCP server (``dh-mcp-enterprise-server``).
 
-    Reads a *flat* enterprise config file where the system fields sit at the
-    top level (no system-name nesting). Validates the config as a single
-    enterprise system and returns it directly.
+    Reads a *flat* enterprise config file where the system fields sit at
+    the top level (no system-name nesting). Validates the config as a
+    single enterprise system and returns it directly.
     """
 
     async def get_config(self) -> dict[str, Any]:
         """Load and validate the flat enterprise config file (coroutine-safe).
 
         Returns:
-            dict[str, Any]: The flat enterprise system config dict (fields at
-                top level).
+            dict[str, Any]: The flat enterprise system config dict
+                (fields at top level).
 
         Raises:
             RuntimeError: If no config path is provided and
                 ``DH_MCP_CONFIG_FILE`` is unset.
-            ConfigurationError: If the file cannot be read or fails validation.
+            ConfigurationError: If the file cannot be read or fails
+                validation.
         """
         _LOGGER.debug(
             "[EnterpriseServerConfigManager:get_config] Loading enterprise "
@@ -470,11 +482,11 @@ class EnterpriseServerConfigManager(ConfigManager):
     async def _set_config_cache(self, config: dict[str, Any]) -> None:
         """PRIVATE: Inject a configuration dictionary into the cache (for testing).
 
-        ``config`` is passed through :func:`validate_enterprise_config` before
-        being cached, fulfilling the parent class's contract that subclasses
-        must validate against their schema. Intended only for unit tests that
-        need to seed a manager with a specific configuration without touching
-        the filesystem.
+        ``config`` is passed through :func:`validate_enterprise_config`
+        before being cached, fulfilling the parent class's contract that
+        subclasses must validate against their schema. Intended only for
+        unit tests that need to seed a manager with a specific
+        configuration without touching the filesystem.
 
         Args:
             config (dict[str, Any]): A raw configuration dictionary to
@@ -486,3 +498,39 @@ class EnterpriseServerConfigManager(ConfigManager):
         """
         async with self._lock:
             self._cache = validate_enterprise_config(config)
+
+
+# ---------------------------------------------------------------------------
+# Auth helpers
+# ---------------------------------------------------------------------------
+
+
+def get_enterprise_auth_backends(config: dict[str, Any]) -> list[str]:
+    """Return the configured ``auth.backends`` list.
+
+    Convenience accessor used by server startup to construct middleware
+    backends without re-implementing the schema lookup.
+
+    Args:
+        config (dict[str, Any]): A validated enterprise configuration
+            dictionary.
+
+    Returns:
+        list[str]: The configured backends, in declaration order.
+    """
+    return list(config["auth"]["backends"])
+
+
+def get_enterprise_allow_effective_user(config: dict[str, Any]) -> bool:
+    """Return the configured ``auth.allow_effective_user`` flag.
+
+    Args:
+        config (dict[str, Any]): A validated enterprise configuration
+            dictionary.
+
+    Returns:
+        bool: ``True`` if ``auth.allow_effective_user`` is set to
+            ``True``; ``False`` otherwise (including when the field is
+            absent).
+    """
+    return bool(config["auth"].get("allow_effective_user", False))

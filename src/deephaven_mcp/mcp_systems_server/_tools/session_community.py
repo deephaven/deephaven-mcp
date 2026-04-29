@@ -9,17 +9,15 @@ These tools work with Deephaven Community (Core) sessions only.
 """
 
 import logging
-import os
 from typing import Any, Literal, cast
 
 from mcp.server.fastmcp import Context, FastMCP
 
 from deephaven_mcp._exceptions import (
-    ConfigurationError,
     InvalidSessionNameError,
     RegistryItemNotFoundError,
 )
-from deephaven_mcp.config import ConfigManager
+from deephaven_mcp.config import ConfigManager, resolve_secret_field
 from deephaven_mcp.mcp_systems_server._tools.session import (
     DEFAULT_MAX_CONCURRENT_SESSIONS,
     DEFAULT_PROGRAMMING_LANGUAGE,
@@ -489,20 +487,17 @@ def _resolve_auth_token(
     if auth_token:
         return auth_token, False
 
-    # Check environment variable from config
-    if "auth_token_env_var" in defaults:
-        env_var = defaults["auth_token_env_var"]
-        token = os.environ.get(env_var)
-        if token:
-            return token, False
-        # If auth_token_env_var is explicitly configured but not set, this is an error
-        error_msg = f"Environment variable '{env_var}' specified in auth_token_env_var is not set"
-        _LOGGER.error(f"[mcp_systems_server:session_community_create] {error_msg}")
-        raise ConfigurationError(error_msg)
-
-    # Check config default
-    if "auth_token" in defaults:
-        return defaults["auth_token"], False
+    # Check inline config or environment variable from config (validator
+    # enforces these are mutually exclusive). resolve_secret_field raises
+    # ConfigurationError if auth_token_env_var names an unset/empty var.
+    resolved = resolve_secret_field(
+        config=defaults,
+        inline_field="auth_token",
+        env_var_field="auth_token_env_var",
+        context="community session_creation defaults",
+    )
+    if resolved is not None:
+        return resolved, False
 
     # Auto-generate
     token = generate_auth_token()

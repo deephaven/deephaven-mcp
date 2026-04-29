@@ -72,7 +72,6 @@ race conditions.
 
 import asyncio
 import logging
-import os
 from typing import TYPE_CHECKING, Any, override
 
 import pyarrow as pa
@@ -93,6 +92,7 @@ from deephaven_mcp._exceptions import (
 from deephaven_mcp.config import (
     ConfigurationError,
     redact_community_session_config,
+    resolve_secret_field,
     validate_community_session_config,
 )
 from deephaven_mcp.io import load_bytes
@@ -1048,42 +1048,41 @@ class CoreSession(BaseSession[Session]):
     ) -> str:
         """Resolve auth token from config dictionary or environment variable.
 
-        This helper extracts the authentication token for community session connections.
-        It supports two configuration approaches:
-
-        1. Direct token: Use 'auth_token' key with the token value
-        2. Environment variable: Use 'auth_token_env_var' key with the name of an
-           environment variable containing the token (more secure for production)
-
-        If 'auth_token_env_var' is specified, it takes precedence over 'auth_token'.
-        If the environment variable is not set, an empty string is returned with a warning.
+        Supports the project-wide ``<field>`` / ``<field>_env_var`` schema
+        convention, validated to be mutually exclusive by
+        :func:`validate_community_session_config`. Either ``auth_token``
+        is set inline, or ``auth_token_env_var`` names an environment
+        variable holding the token. If neither is set, returns the empty
+        string (the caller's anonymous-auth fallback).
 
         Args:
-            worker_cfg: Configuration dictionary containing 'auth_token' and/or
-                'auth_token_env_var' keys.
-            log_prefix: Prefix for log messages (default: "[CoreSession:from_config]").
+            worker_cfg: Configuration dictionary that may contain
+                ``auth_token`` and/or ``auth_token_env_var`` keys.
+            log_prefix: Prefix for log messages
+                (default: ``"[CoreSession:from_config]"``).
 
         Returns:
-            The resolved authentication token string. Returns empty string if no token
-            is configured or if the specified environment variable is not set.
+            The resolved authentication token string, or ``""`` if
+            neither field is set.
+
+        Raises:
+            ConfigurationError: If ``auth_token_env_var`` names an
+                environment variable that is unset or empty. (Previously
+                this returned the empty string with a warning; the
+                stricter behavior surfaces configuration mistakes at
+                resolve time rather than as a confusing downstream
+                authentication failure.)
         """
-        auth_token = worker_cfg.get("auth_token")
-        auth_token_env_var = worker_cfg.get("auth_token_env_var")
-        if auth_token_env_var:
-            _LOGGER.info(
-                f"{log_prefix} Attempting to read auth token from environment variable: {auth_token_env_var}"
-            )
-            token_from_env = os.getenv(auth_token_env_var)
-            if token_from_env is not None:
-                _LOGGER.info(
-                    f"{log_prefix} Successfully read auth token from environment variable {auth_token_env_var}."
-                )
-                return token_from_env
-            _LOGGER.warning(
-                f"{log_prefix} Environment variable {auth_token_env_var} specified for auth_token but not found. Using empty token."
-            )
-            return ""
-        return auth_token if auth_token is not None else ""
+        resolved = resolve_secret_field(
+            config=worker_cfg,
+            inline_field="auth_token",
+            env_var_field="auth_token_env_var",
+            context="community session config",
+        )
+        if resolved is not None:
+            _LOGGER.info(f"{log_prefix} Resolved auth token from configuration.")
+            return resolved
+        return ""
 
     @classmethod
     async def from_config(

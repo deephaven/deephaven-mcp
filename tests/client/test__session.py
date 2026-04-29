@@ -74,6 +74,7 @@ from pydeephaven.query import Query
 from pydeephaven.table import InputTable, Table
 
 from deephaven_mcp._exceptions import (
+    ConfigurationError,
     DeephavenConnectionError,
     QueryError,
     ResourceError,
@@ -697,17 +698,19 @@ async def test_core_from_config_auth_token_from_env_var(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_core_from_config_auth_token_env_var_not_set(monkeypatch, caplog):
+async def test_core_from_config_auth_token_env_var_not_set(monkeypatch):
+    """If auth_token_env_var names an unset env var, raise ConfigurationError.
+
+    Previously this returned an empty token with a warning; the strict
+    behavior surfaces a misconfigured env var at resolve time rather
+    than as a confusing downstream authentication failure.
+    """
     env_var = "MY_MISSING_TOKEN_VAR"
     monkeypatch.delenv(env_var, raising=False)
     config = {"auth_token_env_var": env_var}
     monkeypatch.setattr("deephaven_mcp.client._session.Session", DummyPDHSession)
-    session = await CoreSession.from_config(config)
-    assert isinstance(session, CoreSession)
-    assert (
-        f"Environment variable {env_var} specified for auth_token but not found. Using empty token."
-        in caplog.text
-    )
+    with pytest.raises(ConfigurationError, match=env_var):
+        await CoreSession.from_config(config)
 
 
 @pytest.mark.asyncio

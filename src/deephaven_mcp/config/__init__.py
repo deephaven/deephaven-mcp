@@ -179,6 +179,9 @@ __all__ = [
     "validate_community_config",
     "validate_community_session_config",
     "validate_enterprise_config",
+    # Resolution helpers used by external callers
+    "resolve_required_env_var",
+    "resolve_secret_field",
     # Redaction used by external callers
     "redact_community_config",
     "redact_community_session_config",
@@ -195,6 +198,10 @@ from ._base import (
     CONFIG_ENV_VAR,
     DEFAULT_MCP_SESSION_IDLE_TIMEOUT_SECONDS,
     ConfigManager,
+)
+from ._validators import (
+    resolve_required_env_var,
+    resolve_secret_field,
 )
 from .community import (
     CommunityServerConfigManager,

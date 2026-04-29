@@ -15,8 +15,7 @@ from typing import Any
 from mcp.server.fastmcp import Context, FastMCP
 
 from deephaven_mcp._exceptions import InvalidSessionNameError, RegistryItemNotFoundError
-from deephaven_mcp.client import CorePlusSession
-from deephaven_mcp.client._protobuf import CorePlusQueryConfig
+from deephaven_mcp.client import CorePlusQueryConfig, CorePlusSession
 from deephaven_mcp.config import redact_enterprise_config
 from deephaven_mcp.mcp_systems_server._tools.session import (
     DEFAULT_MAX_CONCURRENT_SESSIONS,
@@ -30,10 +29,8 @@ from deephaven_mcp.mcp_systems_server._tools.shared import (
 from deephaven_mcp.resource_manager import (
     BaseItemManager,
     EnterpriseSessionManager,
-    SystemType,
-)
-from deephaven_mcp.resource_manager._registry_enterprise import (
     EnterpriseSessionRegistry,
+    SystemType,
 )
 
 _LOGGER = logging.getLogger(__name__)

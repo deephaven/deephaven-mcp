@@ -85,6 +85,7 @@ from deephaven_mcp._exceptions import (
     InvalidSessionNameError,
     SessionCreationError,
 )
+from deephaven_mcp.auth.credentials import Credentials
 from deephaven_mcp.client import (
     CorePlusSession,
     CorePlusSessionFactory,
@@ -2559,18 +2560,24 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
         - One-to-one mapping between manager and session
         - Optimized for individual session lifecycle management
 
-    Configuration Architecture:
-        The manager accepts rich configuration dictionaries that define:
-        - **Server Configuration**: URLs, ports, connection parameters
-        - **Authentication Settings**: Credentials, tokens, certificates, auth protocols
-        - **Factory Options**: Connection pooling, timeout settings, retry policies
-        - **Enterprise Features**: Multi-tenancy, workspace configuration, security settings
-        - **Performance Tuning**: Connection limits, caching strategies, optimization flags
+    Configuration and Credentials Architecture:
+        The manager takes two separate constructor inputs:
+
+        - **config** (``dict``): Server and factory parameters that define WHERE
+          and HOW to connect. Typical keys include: ``connection_json_url``,
+          ``connection_timeout``, and any other fields consumed by
+          :meth:`CorePlusSessionFactory.from_credentials`. Auth material is
+          NOT stored in ``config``.
+        - **creds** (:class:`~deephaven_mcp.auth.credentials.Credentials`):
+          Authentication material separated from ``config`` so that (a) a
+          single config can be reused with different identities and
+          (b) secrets never end up inside config dicts that may be logged or
+          persisted.
 
     Integration Patterns:
         **Factory-Based Session Creation**:
         ```python
-        factory_manager = CorePlusSessionFactoryManager("enterprise", config)
+        factory_manager = CorePlusSessionFactoryManager("enterprise", config, creds)
         factory = await factory_manager.get()
         session = await factory.create_session(source="app", name="worker-1")
         ```
@@ -2578,12 +2585,12 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
         **Multi-Configuration Support**:
         ```python
         configs = {
-            "prod": {"url": "prod-server", "auth": prod_auth},
-            "dev": {"url": "dev-server", "auth": dev_auth},
-            "test": {"url": "test-server", "auth": test_auth}
+            "prod": {"connection_json_url": "https://prod/iris/connection.json"},
+            "dev": {"connection_json_url": "https://dev/iris/connection.json"},
+            "test": {"connection_json_url": "https://test/iris/connection.json"},
         }
         managers = {
-            env: CorePlusSessionFactoryManager(env, config)
+            env: CorePlusSessionFactoryManager(env, config, creds)
             for env, config in configs.items()
         }
         ```
@@ -2653,7 +2660,12 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
         SystemType.ENTERPRISE: The system type constant for Enterprise deployments
     """
 
-    def __init__(self, name: str, config: dict[str, Any]):
+    def __init__(
+        self,
+        name: str,
+        config: dict[str, Any],
+        creds: Credentials,
+    ):
         """Initialize a new Enterprise session factory manager with configuration-driven creation.
 
         Creates a new manager instance for handling Deephaven Enterprise session factories
@@ -2667,48 +2679,32 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
             - **source**: Set to "factory" to indicate this manages factory instances
             - **name**: The unique identifier for this specific factory manager instance
             - **full_name**: Computed as "enterprise:factory:{name}" for global uniqueness
-            - **config**: The complete configuration dictionary for factory creation
+            - **config**: Server/factory parameters (connection URL, timeouts, etc.)
+            - **creds**: Authentication material, passed separately from ``config``
 
-        Configuration-Driven Architecture:
-            Unlike EnterpriseSessionManager's function-based approach, this manager uses
-            a rich configuration dictionary that supports:
-            - **Server Configuration**: URLs, ports, connection parameters, timeouts
-            - **Authentication Settings**: Credentials, tokens, certificates, auth protocols
-            - **Factory Options**: Connection pooling, caching, retry policies
-            - **Enterprise Features**: Multi-tenancy, workspace settings, security options
-            - **Performance Tuning**: Connection limits, optimization flags, resource limits
+        Separation of Config and Credentials:
+            Unlike EnterpriseSessionManager's function-based approach, this manager
+            takes a configuration dictionary plus a
+            :class:`~deephaven_mcp.auth.credentials.Credentials` object. Keeping
+            the two inputs separate means a single ``config`` can be reused with
+            different identities (password, private key, etc.) and prevents
+            secrets from ending up in config dicts that may be logged, serialised,
+            or persisted.
 
         Configuration Dictionary Structure:
-            The config dictionary supports comprehensive Enterprise factory settings:
+            ``config`` carries server and factory parameters only -- never auth
+            material. Keys are those consumed by
+            :meth:`CorePlusSessionFactory.from_credentials`:
             ```python
             config = {
-                # Server connection settings
-                "url": "https://enterprise.deephaven.io",
-                "port": 8443,
-                "timeout": 30.0,
-
-                # Authentication configuration
-                "auth": {
-                    "type": "saml",
-                    "saml_config": {...},
-                    "credentials": {...}
-                },
-
-                # Factory-specific options
-                "factory_options": {
-                    "connection_pool_size": 10,
-                    "cache_sessions": True,
-                    "retry_policy": {...}
-                },
-
-                # Enterprise features
-                "enterprise": {
-                    "multi_tenant": True,
-                    "workspace_config": {...},
-                    "security_settings": {...}
-                }
+                "connection_json_url": "https://enterprise.example.com/iris/connection.json",
+                "connection_timeout": 30.0,
+                # ... any other fields the factory accepts
             }
             ```
+            Authentication material is supplied via the separate ``creds``
+            parameter (see :class:`PasswordCredentials`,
+            :class:`PrivateKeyCredentials`).
 
         Deferred Factory Creation:
             The factory creation is deferred until actual use:
@@ -2722,7 +2718,8 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
             **Single Factory Management**:
             ```python
             config = load_enterprise_config("production")
-            manager = CorePlusSessionFactoryManager("prod-factory", config)
+            creds = PasswordCredentials(username="alice", password="...")
+            manager = CorePlusSessionFactoryManager("prod-factory", config, creds)
             factory = await manager.get()  # Creates factory on first access
             session = await factory.create_session("app", "worker-1")
             ```
@@ -2731,14 +2728,14 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
             ```python
             environments = {"prod": prod_config, "dev": dev_config, "test": test_config}
             managers = {
-                env: CorePlusSessionFactoryManager(f"{env}-factory", config)
+                env: CorePlusSessionFactoryManager(f"{env}-factory", config, creds)
                 for env, config in environments.items()
             }
             ```
 
             **Health Monitoring Setup**:
             ```python
-            manager = CorePlusSessionFactoryManager("enterprise", config)
+            manager = CorePlusSessionFactoryManager("enterprise", config, creds)
 
             async def monitor_factory():
                 status, detail = await manager.liveness_status(ensure_item=True)
@@ -2766,10 +2763,18 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
                 debugging, registry management, and creating the full_name identifier.
                 Should be descriptive and unique within its registry context
                 (e.g., "prod-factory", "dev-east-factory", "test-factory").
-            config: Comprehensive configuration dictionary containing all parameters
-                needed to create a CorePlusSessionFactory. Must include server connection
-                details, authentication settings, and factory options. The exact structure
-                depends on the CorePlusSessionFactory requirements and Enterprise deployment.
+            config: Server/factory configuration dictionary passed to
+                :meth:`CorePlusSessionFactory.from_credentials`. Contains
+                ``connection_json_url``, ``connection_timeout``, and related
+                non-secret connection parameters. Does NOT carry authentication
+                material -- that is supplied via ``creds``.
+            creds: Authentication material
+                (:class:`~deephaven_mcp.auth.credentials.Credentials`) forwarded
+                to :meth:`CorePlusSessionFactory.from_credentials` when the
+                factory is lazily created. Must be a type the enterprise
+                factory supports (:class:`PasswordCredentials` or
+                :class:`PrivateKeyCredentials`); :class:`PSKCredentials` is
+                rejected at factory-creation time.
 
         Thread Safety:
             This constructor is thread-safe and can be called from any asyncio task.
@@ -2787,6 +2792,7 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
             name=name,
         )
         self._config = config
+        self._creds = creds
 
     @override
     async def _create_item(self) -> CorePlusSessionFactory:
@@ -2798,7 +2804,7 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
 
         Implementation:
             1. Extracts `connection_timeout` from config (defaults to DEFAULT_CONNECTION_TIMEOUT_SECONDS)
-            2. Calls CorePlusSessionFactory.from_config() with timeout wrapper
+            2. Calls CorePlusSessionFactory.from_credentials(config, creds) with timeout wrapper
             3. Logs creation progress (DEBUG) and completion (INFO)
             4. Handles timeout errors with appropriate logging and exception
 
@@ -2818,9 +2824,9 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
         Raises:
             DeephavenConnectionError: If connection times out after the configured duration.
                 Includes timeout value and troubleshooting guidance in the error message.
-            AuthenticationError: If Core+ authentication fails (raised by from_config).
-            ConfigurationError: If configuration is invalid (raised by from_config).
-            Exception: Other errors from CorePlusSessionFactory.from_config().
+            AuthenticationError: If Core+ authentication fails (raised by from_credentials).
+            ConfigurationError: If configuration is invalid (raised by from_credentials).
+            Exception: Other errors from CorePlusSessionFactory.from_credentials().
 
         Notes:
             - This method is marked @override to implement BaseItemManager abstract method
@@ -2830,7 +2836,7 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
 
         See Also:
             BaseItemManager.get(): Public method triggering lazy initialization
-            CorePlusSessionFactory.from_config(): Underlying factory creation method
+            CorePlusSessionFactory.from_credentials(): Underlying factory creation method
             EnterpriseSessionManager._create_item(): Session-level creation counterpart
         """
         # Extract timeout from config (uses DEFAULT_CONNECTION_TIMEOUT_SECONDS if not specified)
@@ -2845,7 +2851,8 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
         # Wrap factory creation with timeout to prevent hanging on unreachable systems
         try:
             factory = await asyncio.wait_for(
-                CorePlusSessionFactory.from_config(self._config), timeout=timeout
+                CorePlusSessionFactory.from_credentials(self._config, self._creds),
+                timeout=timeout,
             )
             _LOGGER.info(
                 f"[{self.__class__.__name__}] Successfully created enterprise factory for '{self.full_name}'"
