@@ -95,16 +95,6 @@ class TestExceptionParameterized:
                 "session launch error",
             ),
             (
-                ConfigurationError,
-                [ConfigurationError, McpError],
-                "community session configuration error",
-            ),
-            (
-                ConfigurationError,
-                [ConfigurationError, McpError],
-                "enterprise system configuration error",
-            ),
-            (
                 MissingEnterprisePackageError,
                 [InternalError, McpError, RuntimeError],
                 "Core+ features are not available (deephaven-coreplus-client Python package not installed)",
@@ -168,8 +158,6 @@ class TestExceptionModule:
             "ResourceError",
             "RegistryItemNotFoundError",
             # Configuration exceptions
-            "ConfigurationError",
-            "ConfigurationError",
             "ConfigurationError",
         }
         # Check that the exported set exactly matches the expected exceptions

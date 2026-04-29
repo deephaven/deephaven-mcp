@@ -26,6 +26,7 @@ from mcp.server.fastmcp import FastMCP
 
 from deephaven_mcp.config import (
     CommunityServerConfigManager,
+    ConfigManager,
     EnterpriseServerConfigManager,
 )
 from deephaven_mcp.mcp_systems_server._lifespan import (
@@ -124,27 +125,40 @@ def _register_shared_tools(server: FastMCP) -> None:
         module.register_tools(server)
 
 
-def _read_idle_timeout(config_path: str | None, config_manager_class: type) -> float:
-    """Read mcp_session_idle_timeout_seconds from config."""
-    timeout: float = asyncio.run(
-        config_manager_class(
-            config_path=config_path
-        ).get_mcp_session_idle_timeout_seconds()
-    )
-    return timeout
+async def _load_config_and_idle_timeout(manager: ConfigManager) -> float:
+    """Load config (validating it) and read idle timeout from the same manager.
+
+    Because ``ConfigManager`` caches the loaded dict after the first
+    ``get_config()`` call, the subsequent ``get_mcp_session_idle_timeout_seconds``
+    call reuses that cached config — a single file read performs both
+    validation and timeout extraction, avoiding duplicate I/O and the
+    possibility of observing a different file state between the two reads.
+    """
+    await manager.get_config()
+    return await manager.get_mcp_session_idle_timeout_seconds()
 
 
-def _validate_config_or_exit(
+def _validate_config_and_get_idle_timeout(
     config_path: str | None, config_manager_class: type, label: str
-) -> None:
-    """Validate config at server startup; exit(1) if invalid."""
+) -> float:
+    """Validate config at server startup and return the idle timeout.
+
+    Uses a single ``ConfigManager`` instance for both validation and idle
+    timeout extraction so the config file is read exactly once. Calls
+    ``sys.exit(1)`` if validation fails.
+
+    Returns:
+        float: ``mcp_session_idle_timeout_seconds`` from the validated config.
+    """
     _LOGGER.info(f"[{label}] Validating configuration before server startup...")
+    manager = config_manager_class(config_path=config_path)
     try:
-        asyncio.run(config_manager_class(config_path=config_path).get_config())
+        idle_timeout: float = asyncio.run(_load_config_and_idle_timeout(manager))
     except Exception as e:
         _LOGGER.error(f"[{label}] Configuration error — server will not start: {e}")
         sys.exit(1)
     _LOGGER.info(f"[{label}] Configuration validated successfully.")
+    return idle_timeout
 
 
 def enterprise() -> None:
@@ -158,8 +172,9 @@ def enterprise() -> None:
         f"[enterprise] Starting DHE MCP server: host={host!r}, port={port}, "
         f"config={config_path!r}"
     )
-    _validate_config_or_exit(config_path, EnterpriseServerConfigManager, "enterprise")
-    idle_timeout = _read_idle_timeout(config_path, EnterpriseServerConfigManager)
+    idle_timeout = _validate_config_and_get_idle_timeout(
+        config_path, EnterpriseServerConfigManager, "enterprise"
+    )
     session_registry_manager: SessionRegistryManager[EnterpriseSessionRegistry] = (
         SessionRegistryManager(
             registry_class=EnterpriseSessionRegistry,
@@ -198,8 +213,9 @@ def community() -> None:
         f"[community] Starting DHC MCP server: host={host!r}, port={port}, "
         f"config={config_path!r}"
     )
-    _validate_config_or_exit(config_path, CommunityServerConfigManager, "community")
-    idle_timeout = _read_idle_timeout(config_path, CommunityServerConfigManager)
+    idle_timeout = _validate_config_and_get_idle_timeout(
+        config_path, CommunityServerConfigManager, "community"
+    )
     session_registry_manager: SessionRegistryManager[CommunitySessionRegistry] = (
         SessionRegistryManager(
             registry_class=CommunitySessionRegistry,

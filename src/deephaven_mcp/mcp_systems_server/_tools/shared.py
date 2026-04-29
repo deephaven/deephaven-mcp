@@ -197,7 +197,7 @@ async def get_session_from_context(
 
     This helper eliminates duplication of the common pattern for accessing
     sessions from the MCP context. It handles the standard flow of:
-    1. Extracting the per-MCP-session registry via mcp_session_manager
+    1. Extracting the per-MCP-session registry via session_registry_manager
     2. Getting the session_manager for the session_id
     3. Establishing the session connection
 

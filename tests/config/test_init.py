@@ -69,12 +69,14 @@ def test_default_mcp_session_idle_timeout_importable():
 
 
 def test_exception_types_importable():
-    from deephaven_mcp.config import (
-        ConfigurationError,
-    )
+    from deephaven_mcp._exceptions import ConfigurationError as _CanonicalConfigError
+    from deephaven_mcp._exceptions import McpError
+    from deephaven_mcp.config import ConfigurationError
 
-    assert issubclass(ConfigurationError, ConfigurationError)
-    assert issubclass(ConfigurationError, ConfigurationError)
+    # The public re-export must be the same class object as the canonical one
+    # in deephaven_mcp._exceptions, not a shadowed alias.
+    assert ConfigurationError is _CanonicalConfigError
+    assert issubclass(ConfigurationError, McpError)
     assert issubclass(ConfigurationError, Exception)
 
 

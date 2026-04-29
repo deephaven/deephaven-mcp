@@ -130,55 +130,82 @@ def test_shared_tools_excludes_enterprise_exclusive_modules():
 
 
 # ---------------------------------------------------------------------------
-# _read_idle_timeout
+# _validate_config_and_get_idle_timeout
 # ---------------------------------------------------------------------------
 
 
-def test_read_idle_timeout_success():
-    """_read_idle_timeout returns the float from get_mcp_session_idle_timeout_seconds."""
+def test_validate_config_and_get_idle_timeout_success_uses_single_manager():
+    """Success path: single ConfigManager instance is used for both get_config and
+    get_mcp_session_idle_timeout_seconds (no double file read)."""
     mock_class = MagicMock()
     mock_instance = MagicMock()
+    mock_instance.get_config = AsyncMock(return_value={"system_name": "prod"})
     mock_instance.get_mcp_session_idle_timeout_seconds = AsyncMock(return_value=900.0)
     mock_class.return_value = mock_instance
 
-    result = server._read_idle_timeout("/some/config.json", mock_class)
+    with patch("sys.exit") as mock_exit:
+        result = server._validate_config_and_get_idle_timeout(
+            "/some/config.json", mock_class, "test"
+        )
 
     assert result == 900.0
+    # The config manager class should be instantiated exactly once and
+    # both async methods called on that same instance.
     mock_class.assert_called_once_with(config_path="/some/config.json")
+    mock_instance.get_config.assert_awaited_once()
+    mock_instance.get_mcp_session_idle_timeout_seconds.assert_awaited_once()
+    mock_exit.assert_not_called()
+
+
+def test_validate_config_and_get_idle_timeout_config_error_exits():
+    """ConfigurationError during validation triggers sys.exit(1)."""
+    mock_class = MagicMock()
+    mock_instance = MagicMock()
+    mock_instance.get_config = AsyncMock(
+        side_effect=ConfigurationError("missing required field")
+    )
+    mock_class.return_value = mock_instance
+
+    with pytest.raises(SystemExit) as exc_info:
+        server._validate_config_and_get_idle_timeout(
+            "/bad/config.json", mock_class, "enterprise"
+        )
+
+    assert exc_info.value.code == 1
+
+
+def test_validate_config_and_get_idle_timeout_runtime_error_exits():
+    """RuntimeError (e.g. missing env var) during validation triggers sys.exit(1)."""
+    mock_class = MagicMock()
+    mock_instance = MagicMock()
+    mock_instance.get_config = AsyncMock(
+        side_effect=RuntimeError("Environment variable DH_MCP_CONFIG_FILE is not set.")
+    )
+    mock_class.return_value = mock_instance
+
+    with pytest.raises(SystemExit) as exc_info:
+        server._validate_config_and_get_idle_timeout(None, mock_class, "community")
+
+    assert exc_info.value.code == 1
+
+
+def test_validate_config_and_get_idle_timeout_passes_config_path_none():
+    """config_path=None is forwarded to the ConfigManager constructor."""
+    mock_class = MagicMock()
+    mock_instance = MagicMock()
+    mock_instance.get_config = AsyncMock(return_value={})
+    mock_instance.get_mcp_session_idle_timeout_seconds = AsyncMock(return_value=60.0)
+    mock_class.return_value = mock_instance
+
+    with patch("sys.exit"):
+        server._validate_config_and_get_idle_timeout(None, mock_class, "test")
+
+    mock_class.assert_called_once_with(config_path=None)
 
 
 # ---------------------------------------------------------------------------
 # enterprise()
 # ---------------------------------------------------------------------------
-
-
-def _enterprise_patches(mock_server, mock_lifespan=None):
-    """Return the standard set of patches for enterprise() tests."""
-    if mock_lifespan is None:
-        mock_lifespan = MagicMock()
-    return (
-        patch("deephaven_mcp._logging.setup_logging"),
-        patch("deephaven_mcp._logging.setup_global_exception_logging"),
-        patch("deephaven_mcp._logging.setup_signal_handler_logging"),
-        patch("deephaven_mcp._monkeypatch.monkeypatch_uvicorn_exception_handling"),
-        patch("deephaven_mcp.mcp_systems_server.server._validate_config_or_exit"),
-        patch(
-            "deephaven_mcp.mcp_systems_server.server._read_idle_timeout",
-            return_value=1800.0,
-        ),
-        patch("deephaven_mcp.mcp_systems_server.server.SessionRegistryManager"),
-        patch(
-            "deephaven_mcp.mcp_systems_server.server.FastMCP", return_value=mock_server
-        ),
-        patch(
-            "deephaven_mcp.mcp_systems_server.server.make_enterprise_lifespan",
-            return_value=mock_lifespan,
-        ),
-        patch("deephaven_mcp.mcp_systems_server.server._register_shared_tools"),
-        patch("deephaven_mcp.mcp_systems_server.server.session_enterprise"),
-        patch("deephaven_mcp.mcp_systems_server.server.catalog"),
-        patch("deephaven_mcp.mcp_systems_server.server.pq"),
-    )
 
 
 def test_enterprise_defaults(monkeypatch):
@@ -197,9 +224,8 @@ def test_enterprise_defaults(monkeypatch):
         patch("deephaven_mcp._logging.setup_global_exception_logging"),
         patch("deephaven_mcp._logging.setup_signal_handler_logging"),
         patch("deephaven_mcp._monkeypatch.monkeypatch_uvicorn_exception_handling"),
-        patch("deephaven_mcp.mcp_systems_server.server._validate_config_or_exit"),
         patch(
-            "deephaven_mcp.mcp_systems_server.server._read_idle_timeout",
+            "deephaven_mcp.mcp_systems_server.server._validate_config_and_get_idle_timeout",
             return_value=1800.0,
         ),
         patch("deephaven_mcp.mcp_systems_server.server.SessionRegistryManager"),
@@ -250,9 +276,8 @@ def test_enterprise_cli_args(monkeypatch):
         patch("deephaven_mcp._logging.setup_global_exception_logging"),
         patch("deephaven_mcp._logging.setup_signal_handler_logging"),
         patch("deephaven_mcp._monkeypatch.monkeypatch_uvicorn_exception_handling"),
-        patch("deephaven_mcp.mcp_systems_server.server._validate_config_or_exit"),
         patch(
-            "deephaven_mcp.mcp_systems_server.server._read_idle_timeout",
+            "deephaven_mcp.mcp_systems_server.server._validate_config_and_get_idle_timeout",
             return_value=1800.0,
         ),
         patch("deephaven_mcp.mcp_systems_server.server.SessionRegistryManager"),
@@ -292,9 +317,8 @@ def test_enterprise_env_var_fallback(monkeypatch):
         patch("deephaven_mcp._logging.setup_global_exception_logging"),
         patch("deephaven_mcp._logging.setup_signal_handler_logging"),
         patch("deephaven_mcp._monkeypatch.monkeypatch_uvicorn_exception_handling"),
-        patch("deephaven_mcp.mcp_systems_server.server._validate_config_or_exit"),
         patch(
-            "deephaven_mcp.mcp_systems_server.server._read_idle_timeout",
+            "deephaven_mcp.mcp_systems_server.server._validate_config_and_get_idle_timeout",
             return_value=1800.0,
         ),
         patch("deephaven_mcp.mcp_systems_server.server.SessionRegistryManager"),
@@ -339,9 +363,8 @@ def test_enterprise_registers_shared_and_exclusive_tools(monkeypatch):
         patch("deephaven_mcp._logging.setup_global_exception_logging"),
         patch("deephaven_mcp._logging.setup_signal_handler_logging"),
         patch("deephaven_mcp._monkeypatch.monkeypatch_uvicorn_exception_handling"),
-        patch("deephaven_mcp.mcp_systems_server.server._validate_config_or_exit"),
         patch(
-            "deephaven_mcp.mcp_systems_server.server._read_idle_timeout",
+            "deephaven_mcp.mcp_systems_server.server._validate_config_and_get_idle_timeout",
             return_value=1800.0,
         ),
         patch("deephaven_mcp.mcp_systems_server.server.SessionRegistryManager"),
@@ -390,9 +413,8 @@ def test_enterprise_logs_stopped_onserver_exit(monkeypatch):
         patch("deephaven_mcp._logging.setup_global_exception_logging"),
         patch("deephaven_mcp._logging.setup_signal_handler_logging"),
         patch("deephaven_mcp._monkeypatch.monkeypatch_uvicorn_exception_handling"),
-        patch("deephaven_mcp.mcp_systems_server.server._validate_config_or_exit"),
         patch(
-            "deephaven_mcp.mcp_systems_server.server._read_idle_timeout",
+            "deephaven_mcp.mcp_systems_server.server._validate_config_and_get_idle_timeout",
             return_value=1800.0,
         ),
         patch("deephaven_mcp.mcp_systems_server.server.SessionRegistryManager"),
@@ -437,9 +459,8 @@ def test_community_defaults(monkeypatch):
         patch("deephaven_mcp._logging.setup_global_exception_logging"),
         patch("deephaven_mcp._logging.setup_signal_handler_logging"),
         patch("deephaven_mcp._monkeypatch.monkeypatch_uvicorn_exception_handling"),
-        patch("deephaven_mcp.mcp_systems_server.server._validate_config_or_exit"),
         patch(
-            "deephaven_mcp.mcp_systems_server.server._read_idle_timeout",
+            "deephaven_mcp.mcp_systems_server.server._validate_config_and_get_idle_timeout",
             return_value=1800.0,
         ),
         patch("deephaven_mcp.mcp_systems_server.server.SessionRegistryManager"),
@@ -488,9 +509,8 @@ def test_community_cli_args(monkeypatch):
         patch("deephaven_mcp._logging.setup_global_exception_logging"),
         patch("deephaven_mcp._logging.setup_signal_handler_logging"),
         patch("deephaven_mcp._monkeypatch.monkeypatch_uvicorn_exception_handling"),
-        patch("deephaven_mcp.mcp_systems_server.server._validate_config_or_exit"),
         patch(
-            "deephaven_mcp.mcp_systems_server.server._read_idle_timeout",
+            "deephaven_mcp.mcp_systems_server.server._validate_config_and_get_idle_timeout",
             return_value=1800.0,
         ),
         patch("deephaven_mcp.mcp_systems_server.server.SessionRegistryManager"),
@@ -528,9 +548,8 @@ def test_community_env_var_fallback(monkeypatch):
         patch("deephaven_mcp._logging.setup_global_exception_logging"),
         patch("deephaven_mcp._logging.setup_signal_handler_logging"),
         patch("deephaven_mcp._monkeypatch.monkeypatch_uvicorn_exception_handling"),
-        patch("deephaven_mcp.mcp_systems_server.server._validate_config_or_exit"),
         patch(
-            "deephaven_mcp.mcp_systems_server.server._read_idle_timeout",
+            "deephaven_mcp.mcp_systems_server.server._validate_config_and_get_idle_timeout",
             return_value=1800.0,
         ),
         patch("deephaven_mcp.mcp_systems_server.server.SessionRegistryManager"),
@@ -571,9 +590,8 @@ def test_community_registers_shared_and_exclusive_tools(monkeypatch):
         patch("deephaven_mcp._logging.setup_global_exception_logging"),
         patch("deephaven_mcp._logging.setup_signal_handler_logging"),
         patch("deephaven_mcp._monkeypatch.monkeypatch_uvicorn_exception_handling"),
-        patch("deephaven_mcp.mcp_systems_server.server._validate_config_or_exit"),
         patch(
-            "deephaven_mcp.mcp_systems_server.server._read_idle_timeout",
+            "deephaven_mcp.mcp_systems_server.server._validate_config_and_get_idle_timeout",
             return_value=1800.0,
         ),
         patch("deephaven_mcp.mcp_systems_server.server.SessionRegistryManager"),
@@ -618,9 +636,8 @@ def test_community_logs_stopped_onserver_exit(monkeypatch):
         patch("deephaven_mcp._logging.setup_global_exception_logging"),
         patch("deephaven_mcp._logging.setup_signal_handler_logging"),
         patch("deephaven_mcp._monkeypatch.monkeypatch_uvicorn_exception_handling"),
-        patch("deephaven_mcp.mcp_systems_server.server._validate_config_or_exit"),
         patch(
-            "deephaven_mcp.mcp_systems_server.server._read_idle_timeout",
+            "deephaven_mcp.mcp_systems_server.server._validate_config_and_get_idle_timeout",
             return_value=1800.0,
         ),
         patch("deephaven_mcp.mcp_systems_server.server.SessionRegistryManager"),
@@ -644,81 +661,19 @@ def test_community_logs_stopped_onserver_exit(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# _validate_config_or_exit
-# ---------------------------------------------------------------------------
-
-
-def test_validate_config_or_exit_success():
-    """_validate_config_or_exit does not call sys.exit when get_config succeeds."""
-    mock_class = MagicMock()
-    mock_instance = MagicMock()
-    mock_instance.get_config = AsyncMock(return_value={"system_name": "prod"})
-    mock_class.return_value = mock_instance
-
-    with patch("sys.exit") as mock_exit:
-        server._validate_config_or_exit("/path/to/config.json", mock_class, "test")
-
-    mock_class.assert_called_once_with(config_path="/path/to/config.json")
-    mock_exit.assert_not_called()
-
-
-def test_validate_config_or_exit_config_error():
-    """_validate_config_or_exit calls sys.exit(1) when get_config raises ConfigurationError."""
-    mock_class = MagicMock()
-    mock_instance = MagicMock()
-    mock_instance.get_config = AsyncMock(
-        side_effect=ConfigurationError("missing required field")
-    )
-    mock_class.return_value = mock_instance
-
-    with patch("sys.exit") as mock_exit:
-        server._validate_config_or_exit("/bad/config.json", mock_class, "enterprise")
-
-    mock_exit.assert_called_once_with(1)
-
-
-def test_validate_config_or_exit_runtime_error():
-    """_validate_config_or_exit calls sys.exit(1) when get_config raises RuntimeError (no env var)."""
-    mock_class = MagicMock()
-    mock_instance = MagicMock()
-    mock_instance.get_config = AsyncMock(
-        side_effect=RuntimeError("Environment variable DH_MCP_CONFIG_FILE is not set.")
-    )
-    mock_class.return_value = mock_instance
-
-    with patch("sys.exit") as mock_exit:
-        server._validate_config_or_exit(None, mock_class, "community")
-
-    mock_exit.assert_called_once_with(1)
-
-
-def test_validate_config_or_exit_passes_config_path():
-    """_validate_config_or_exit passes config_path=None correctly."""
-    mock_class = MagicMock()
-    mock_instance = MagicMock()
-    mock_instance.get_config = AsyncMock(return_value={})
-    mock_class.return_value = mock_instance
-
-    with patch("sys.exit"):
-        server._validate_config_or_exit(None, mock_class, "test")
-
-    mock_class.assert_called_once_with(config_path=None)
-
-
-# ---------------------------------------------------------------------------
 # enterprise() / community() — validation is called with correct args
 # ---------------------------------------------------------------------------
 
 
 def test_enterprise_validates_config_before_start(monkeypatch):
-    """enterprise() calls _validate_config_or_exit with the right args before server.run."""
+    """enterprise() calls _validate_config_and_get_idle_timeout with the right args before server.run."""
     monkeypatch.delenv("DH_MCP_CONFIG_FILE", raising=False)
     monkeypatch.delenv("MCP_HOST", raising=False)
     monkeypatch.delenv("MCP_PORT", raising=False)
 
     mock_server = MagicMock()
     mock_server.name = "deephaven-mcp-enterprise"
-    mock_validate = MagicMock()
+    mock_validate = MagicMock(return_value=1800.0)
 
     with (
         patch("sys.argv", ["dh-mcp-enterprise-server", "--config", "/my/dhe.json"]),
@@ -727,12 +682,8 @@ def test_enterprise_validates_config_before_start(monkeypatch):
         patch("deephaven_mcp._logging.setup_signal_handler_logging"),
         patch("deephaven_mcp._monkeypatch.monkeypatch_uvicorn_exception_handling"),
         patch(
-            "deephaven_mcp.mcp_systems_server.server._validate_config_or_exit",
+            "deephaven_mcp.mcp_systems_server.server._validate_config_and_get_idle_timeout",
             mock_validate,
-        ),
-        patch(
-            "deephaven_mcp.mcp_systems_server.server._read_idle_timeout",
-            return_value=1800.0,
         ),
         patch("deephaven_mcp.mcp_systems_server.server.SessionRegistryManager"),
         patch(
@@ -757,14 +708,14 @@ def test_enterprise_validates_config_before_start(monkeypatch):
 
 
 def test_community_validates_config_before_start(monkeypatch):
-    """community() calls _validate_config_or_exit with the right args before server.run."""
+    """community() calls _validate_config_and_get_idle_timeout with the right args before server.run."""
     monkeypatch.delenv("DH_MCP_CONFIG_FILE", raising=False)
     monkeypatch.delenv("MCP_HOST", raising=False)
     monkeypatch.delenv("MCP_PORT", raising=False)
 
     mock_server = MagicMock()
     mock_server.name = "deephaven-mcp-community"
-    mock_validate = MagicMock()
+    mock_validate = MagicMock(return_value=1800.0)
 
     with (
         patch("sys.argv", ["dh-mcp-community-server", "--config", "/my/dhc.json"]),
@@ -773,12 +724,8 @@ def test_community_validates_config_before_start(monkeypatch):
         patch("deephaven_mcp._logging.setup_signal_handler_logging"),
         patch("deephaven_mcp._monkeypatch.monkeypatch_uvicorn_exception_handling"),
         patch(
-            "deephaven_mcp.mcp_systems_server.server._validate_config_or_exit",
+            "deephaven_mcp.mcp_systems_server.server._validate_config_and_get_idle_timeout",
             mock_validate,
-        ),
-        patch(
-            "deephaven_mcp.mcp_systems_server.server._read_idle_timeout",
-            return_value=1800.0,
         ),
         patch("deephaven_mcp.mcp_systems_server.server.SessionRegistryManager"),
         patch(
