@@ -17,7 +17,7 @@ from mcp.server.fastmcp import Context, FastMCP
 from deephaven_mcp._exceptions import InvalidSessionNameError, RegistryItemNotFoundError
 from deephaven_mcp.client import CorePlusSession
 from deephaven_mcp.client._protobuf import CorePlusQueryConfig
-from deephaven_mcp.config import redact_enterprise_system_config
+from deephaven_mcp.config import redact_enterprise_config
 from deephaven_mcp.mcp_systems_server._tools.session import (
     DEFAULT_MAX_CONCURRENT_SESSIONS,
     DEFAULT_PROGRAMMING_LANGUAGE,
@@ -159,7 +159,7 @@ async def enterprise_systems_status(
 
         # Flat config is the system config directly
         raw_config = await config_manager.get_config()
-        redacted_config = redact_enterprise_system_config(raw_config)
+        redacted_config = redact_enterprise_config(raw_config)
 
         system_info: dict[str, object] = {
             "name": session_registry.system_name,

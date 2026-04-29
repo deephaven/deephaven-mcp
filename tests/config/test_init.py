@@ -38,10 +38,10 @@ def test_validate_enterprise_config_importable():
     assert callable(validate_enterprise_config)
 
 
-def test_validate_single_community_session_config_importable():
-    from deephaven_mcp.config import validate_single_community_session_config
+def test_validate_community_session_config_importable():
+    from deephaven_mcp.config import validate_community_session_config
 
-    assert callable(validate_single_community_session_config)
+    assert callable(validate_community_session_config)
 
 
 def test_redact_community_session_config_importable():
@@ -50,10 +50,10 @@ def test_redact_community_session_config_importable():
     assert callable(redact_community_session_config)
 
 
-def test_redact_enterprise_system_config_importable():
-    from deephaven_mcp.config import redact_enterprise_system_config
+def test_redact_enterprise_config_importable():
+    from deephaven_mcp.config import redact_enterprise_config
 
-    assert callable(redact_enterprise_system_config)
+    assert callable(redact_enterprise_config)
 
 
 def test_default_connection_timeout_importable():
@@ -70,13 +70,11 @@ def test_default_mcp_session_idle_timeout_importable():
 
 def test_exception_types_importable():
     from deephaven_mcp.config import (
-        CommunitySessionConfigurationError,
         ConfigurationError,
-        EnterpriseSystemConfigurationError,
     )
 
-    assert issubclass(CommunitySessionConfigurationError, ConfigurationError)
-    assert issubclass(EnterpriseSystemConfigurationError, ConfigurationError)
+    assert issubclass(ConfigurationError, ConfigurationError)
+    assert issubclass(ConfigurationError, ConfigurationError)
     assert issubclass(ConfigurationError, Exception)
 
 

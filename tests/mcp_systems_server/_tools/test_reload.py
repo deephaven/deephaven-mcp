@@ -71,7 +71,9 @@ async def test_mcp_reload_success():
     result = await mcp_reload_community(context)
     assert result == {"success": True}
     config_manager.clear_config_cache.assert_awaited_once()
-    session_registry_manager.close_session.assert_awaited_once_with("test-mcp-session-id")
+    session_registry_manager.close_session.assert_awaited_once_with(
+        "test-mcp-session-id"
+    )
 
 
 @pytest.mark.asyncio
@@ -90,7 +92,9 @@ async def test_mcp_reload_calls_close_session_with_correct_id():
     )
     result = await _do_reload(context)
     assert result == {"success": True}
-    session_registry_manager.close_session.assert_awaited_once_with("my-special-session-abc")
+    session_registry_manager.close_session.assert_awaited_once_with(
+        "my-special-session-abc"
+    )
 
 
 @pytest.mark.asyncio

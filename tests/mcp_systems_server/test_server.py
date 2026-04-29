@@ -162,7 +162,10 @@ def _enterprise_patches(mock_server, mock_lifespan=None):
         patch("deephaven_mcp._logging.setup_signal_handler_logging"),
         patch("deephaven_mcp._monkeypatch.monkeypatch_uvicorn_exception_handling"),
         patch("deephaven_mcp.mcp_systems_server.server._validate_config_or_exit"),
-        patch("deephaven_mcp.mcp_systems_server.server._read_idle_timeout", return_value=1800.0),
+        patch(
+            "deephaven_mcp.mcp_systems_server.server._read_idle_timeout",
+            return_value=1800.0,
+        ),
         patch("deephaven_mcp.mcp_systems_server.server.SessionRegistryManager"),
         patch(
             "deephaven_mcp.mcp_systems_server.server.FastMCP", return_value=mock_server
@@ -195,7 +198,10 @@ def test_enterprise_defaults(monkeypatch):
         patch("deephaven_mcp._logging.setup_signal_handler_logging"),
         patch("deephaven_mcp._monkeypatch.monkeypatch_uvicorn_exception_handling"),
         patch("deephaven_mcp.mcp_systems_server.server._validate_config_or_exit"),
-        patch("deephaven_mcp.mcp_systems_server.server._read_idle_timeout", return_value=1800.0),
+        patch(
+            "deephaven_mcp.mcp_systems_server.server._read_idle_timeout",
+            return_value=1800.0,
+        ),
         patch("deephaven_mcp.mcp_systems_server.server.SessionRegistryManager"),
         patch(
             "deephaven_mcp.mcp_systems_server.server.FastMCP", return_value=mock_server
@@ -245,7 +251,10 @@ def test_enterprise_cli_args(monkeypatch):
         patch("deephaven_mcp._logging.setup_signal_handler_logging"),
         patch("deephaven_mcp._monkeypatch.monkeypatch_uvicorn_exception_handling"),
         patch("deephaven_mcp.mcp_systems_server.server._validate_config_or_exit"),
-        patch("deephaven_mcp.mcp_systems_server.server._read_idle_timeout", return_value=1800.0),
+        patch(
+            "deephaven_mcp.mcp_systems_server.server._read_idle_timeout",
+            return_value=1800.0,
+        ),
         patch("deephaven_mcp.mcp_systems_server.server.SessionRegistryManager"),
         patch(
             "deephaven_mcp.mcp_systems_server.server.FastMCP", return_value=mock_server
@@ -284,7 +293,10 @@ def test_enterprise_env_var_fallback(monkeypatch):
         patch("deephaven_mcp._logging.setup_signal_handler_logging"),
         patch("deephaven_mcp._monkeypatch.monkeypatch_uvicorn_exception_handling"),
         patch("deephaven_mcp.mcp_systems_server.server._validate_config_or_exit"),
-        patch("deephaven_mcp.mcp_systems_server.server._read_idle_timeout", return_value=1800.0),
+        patch(
+            "deephaven_mcp.mcp_systems_server.server._read_idle_timeout",
+            return_value=1800.0,
+        ),
         patch("deephaven_mcp.mcp_systems_server.server.SessionRegistryManager"),
         patch(
             "deephaven_mcp.mcp_systems_server.server.FastMCP", return_value=mock_server
@@ -328,7 +340,10 @@ def test_enterprise_registers_shared_and_exclusive_tools(monkeypatch):
         patch("deephaven_mcp._logging.setup_signal_handler_logging"),
         patch("deephaven_mcp._monkeypatch.monkeypatch_uvicorn_exception_handling"),
         patch("deephaven_mcp.mcp_systems_server.server._validate_config_or_exit"),
-        patch("deephaven_mcp.mcp_systems_server.server._read_idle_timeout", return_value=1800.0),
+        patch(
+            "deephaven_mcp.mcp_systems_server.server._read_idle_timeout",
+            return_value=1800.0,
+        ),
         patch("deephaven_mcp.mcp_systems_server.server.SessionRegistryManager"),
         patch(
             "deephaven_mcp.mcp_systems_server.server.FastMCP", return_value=mock_server
@@ -376,7 +391,10 @@ def test_enterprise_logs_stopped_onserver_exit(monkeypatch):
         patch("deephaven_mcp._logging.setup_signal_handler_logging"),
         patch("deephaven_mcp._monkeypatch.monkeypatch_uvicorn_exception_handling"),
         patch("deephaven_mcp.mcp_systems_server.server._validate_config_or_exit"),
-        patch("deephaven_mcp.mcp_systems_server.server._read_idle_timeout", return_value=1800.0),
+        patch(
+            "deephaven_mcp.mcp_systems_server.server._read_idle_timeout",
+            return_value=1800.0,
+        ),
         patch("deephaven_mcp.mcp_systems_server.server.SessionRegistryManager"),
         patch(
             "deephaven_mcp.mcp_systems_server.server.FastMCP", return_value=mock_server
@@ -420,7 +438,10 @@ def test_community_defaults(monkeypatch):
         patch("deephaven_mcp._logging.setup_signal_handler_logging"),
         patch("deephaven_mcp._monkeypatch.monkeypatch_uvicorn_exception_handling"),
         patch("deephaven_mcp.mcp_systems_server.server._validate_config_or_exit"),
-        patch("deephaven_mcp.mcp_systems_server.server._read_idle_timeout", return_value=1800.0),
+        patch(
+            "deephaven_mcp.mcp_systems_server.server._read_idle_timeout",
+            return_value=1800.0,
+        ),
         patch("deephaven_mcp.mcp_systems_server.server.SessionRegistryManager"),
         patch(
             "deephaven_mcp.mcp_systems_server.server.FastMCP", return_value=mock_server
@@ -468,7 +489,10 @@ def test_community_cli_args(monkeypatch):
         patch("deephaven_mcp._logging.setup_signal_handler_logging"),
         patch("deephaven_mcp._monkeypatch.monkeypatch_uvicorn_exception_handling"),
         patch("deephaven_mcp.mcp_systems_server.server._validate_config_or_exit"),
-        patch("deephaven_mcp.mcp_systems_server.server._read_idle_timeout", return_value=1800.0),
+        patch(
+            "deephaven_mcp.mcp_systems_server.server._read_idle_timeout",
+            return_value=1800.0,
+        ),
         patch("deephaven_mcp.mcp_systems_server.server.SessionRegistryManager"),
         patch(
             "deephaven_mcp.mcp_systems_server.server.FastMCP", return_value=mock_server
@@ -505,7 +529,10 @@ def test_community_env_var_fallback(monkeypatch):
         patch("deephaven_mcp._logging.setup_signal_handler_logging"),
         patch("deephaven_mcp._monkeypatch.monkeypatch_uvicorn_exception_handling"),
         patch("deephaven_mcp.mcp_systems_server.server._validate_config_or_exit"),
-        patch("deephaven_mcp.mcp_systems_server.server._read_idle_timeout", return_value=1800.0),
+        patch(
+            "deephaven_mcp.mcp_systems_server.server._read_idle_timeout",
+            return_value=1800.0,
+        ),
         patch("deephaven_mcp.mcp_systems_server.server.SessionRegistryManager"),
         patch(
             "deephaven_mcp.mcp_systems_server.server.FastMCP", return_value=mock_server
@@ -545,7 +572,10 @@ def test_community_registers_shared_and_exclusive_tools(monkeypatch):
         patch("deephaven_mcp._logging.setup_signal_handler_logging"),
         patch("deephaven_mcp._monkeypatch.monkeypatch_uvicorn_exception_handling"),
         patch("deephaven_mcp.mcp_systems_server.server._validate_config_or_exit"),
-        patch("deephaven_mcp.mcp_systems_server.server._read_idle_timeout", return_value=1800.0),
+        patch(
+            "deephaven_mcp.mcp_systems_server.server._read_idle_timeout",
+            return_value=1800.0,
+        ),
         patch("deephaven_mcp.mcp_systems_server.server.SessionRegistryManager"),
         patch(
             "deephaven_mcp.mcp_systems_server.server.FastMCP", return_value=mock_server
@@ -589,7 +619,10 @@ def test_community_logs_stopped_onserver_exit(monkeypatch):
         patch("deephaven_mcp._logging.setup_signal_handler_logging"),
         patch("deephaven_mcp._monkeypatch.monkeypatch_uvicorn_exception_handling"),
         patch("deephaven_mcp.mcp_systems_server.server._validate_config_or_exit"),
-        patch("deephaven_mcp.mcp_systems_server.server._read_idle_timeout", return_value=1800.0),
+        patch(
+            "deephaven_mcp.mcp_systems_server.server._read_idle_timeout",
+            return_value=1800.0,
+        ),
         patch("deephaven_mcp.mcp_systems_server.server.SessionRegistryManager"),
         patch(
             "deephaven_mcp.mcp_systems_server.server.FastMCP", return_value=mock_server
@@ -697,7 +730,10 @@ def test_enterprise_validates_config_before_start(monkeypatch):
             "deephaven_mcp.mcp_systems_server.server._validate_config_or_exit",
             mock_validate,
         ),
-        patch("deephaven_mcp.mcp_systems_server.server._read_idle_timeout", return_value=1800.0),
+        patch(
+            "deephaven_mcp.mcp_systems_server.server._read_idle_timeout",
+            return_value=1800.0,
+        ),
         patch("deephaven_mcp.mcp_systems_server.server.SessionRegistryManager"),
         patch(
             "deephaven_mcp.mcp_systems_server.server.FastMCP", return_value=mock_server
@@ -740,7 +776,10 @@ def test_community_validates_config_before_start(monkeypatch):
             "deephaven_mcp.mcp_systems_server.server._validate_config_or_exit",
             mock_validate,
         ),
-        patch("deephaven_mcp.mcp_systems_server.server._read_idle_timeout", return_value=1800.0),
+        patch(
+            "deephaven_mcp.mcp_systems_server.server._read_idle_timeout",
+            return_value=1800.0,
+        ),
         patch("deephaven_mcp.mcp_systems_server.server.SessionRegistryManager"),
         patch(
             "deephaven_mcp.mcp_systems_server.server.FastMCP", return_value=mock_server

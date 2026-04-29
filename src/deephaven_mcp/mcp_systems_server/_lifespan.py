@@ -26,7 +26,9 @@ from deephaven_mcp.config import (
     ConfigManager,
     EnterpriseServerConfigManager,
 )
-from deephaven_mcp.mcp_systems_server._session_registry_manager import SessionRegistryManager
+from deephaven_mcp.mcp_systems_server._session_registry_manager import (
+    SessionRegistryManager,
+)
 from deephaven_mcp.resource_manager import (
     BaseRegistry,
     InstanceTracker,
@@ -76,7 +78,9 @@ def _make_lifespan[R: BaseRegistry](
     session_registry_manager: SessionRegistryManager[R],
     label: str,
     config_path: str | None,
-) -> Callable[[FastMCP[LifespanContext[R]]], AbstractAsyncContextManager[LifespanContext[R]]]:
+) -> Callable[
+    [FastMCP[LifespanContext[R]]], AbstractAsyncContextManager[LifespanContext[R]]
+]:
     """Create a lifespan context manager shared by community and enterprise servers.
 
     Lifecycle of the returned context manager:
@@ -122,7 +126,9 @@ def _make_lifespan[R: BaseRegistry](
     """
 
     @asynccontextmanager
-    async def _lifespan(server: FastMCP[LifespanContext[R]]) -> AsyncIterator[LifespanContext[R]]:
+    async def _lifespan(
+        server: FastMCP[LifespanContext[R]],
+    ) -> AsyncIterator[LifespanContext[R]]:
         _LOGGER.info(
             f"[{label}_lifespan] Starting {label.upper()} MCP server '{server.name}'"
         )
@@ -181,7 +187,9 @@ def _make_lifespan[R: BaseRegistry](
 def make_enterprise_lifespan[R: BaseRegistry](
     session_registry_manager: SessionRegistryManager[R],
     config_path: str | None = None,
-) -> Callable[[FastMCP[LifespanContext[R]]], AbstractAsyncContextManager[LifespanContext[R]]]:
+) -> Callable[
+    [FastMCP[LifespanContext[R]]], AbstractAsyncContextManager[LifespanContext[R]]
+]:
     """Create a FastMCP lifespan for the DHE MCP server.
 
     The returned lifespan initializes an :class:`EnterpriseServerConfigManager` that reads
@@ -209,7 +217,9 @@ def make_enterprise_lifespan[R: BaseRegistry](
 def make_community_lifespan[R: BaseRegistry](
     session_registry_manager: SessionRegistryManager[R],
     config_path: str | None = None,
-) -> Callable[[FastMCP[LifespanContext[R]]], AbstractAsyncContextManager[LifespanContext[R]]]:
+) -> Callable[
+    [FastMCP[LifespanContext[R]]], AbstractAsyncContextManager[LifespanContext[R]]
+]:
     """Create a FastMCP lifespan for the DHC MCP server.
 
     The returned lifespan initializes a :class:`CommunityServerConfigManager` that reads

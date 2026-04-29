@@ -9,7 +9,11 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
-from conftest import MockContext, create_mock_instance_tracker, create_mock_session_registry_manager
+from conftest import (
+    MockContext,
+    create_mock_instance_tracker,
+    create_mock_session_registry_manager,
+)
 
 from deephaven_mcp import config
 from deephaven_mcp._exceptions import RegistryItemNotFoundError
@@ -93,7 +97,9 @@ async def test_session_community_create_with_auth_token_parameter():
         context = MockContext(
             {
                 "config_manager": mock_config_manager,
-                "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
+                "session_registry_manager": create_mock_session_registry_manager(
+                    registry=mock_session_registry
+                ),
                 "instance_tracker": create_mock_instance_tracker(),
             }
         )
@@ -165,7 +171,9 @@ async def test_session_community_create_with_auth_token_env_var_set():
         context = MockContext(
             {
                 "config_manager": mock_config_manager,
-                "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
+                "session_registry_manager": create_mock_session_registry_manager(
+                    registry=mock_session_registry
+                ),
                 "instance_tracker": create_mock_instance_tracker(),
             }
         )
@@ -232,7 +240,9 @@ async def test_session_community_create_with_auth_token_from_defaults():
         context = MockContext(
             {
                 "config_manager": mock_config_manager,
-                "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
+                "session_registry_manager": create_mock_session_registry_manager(
+                    registry=mock_session_registry
+                ),
                 "instance_tracker": create_mock_instance_tracker(),
             }
         )
@@ -267,7 +277,9 @@ async def test_session_community_create_session_already_exists():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
@@ -335,7 +347,9 @@ async def test_session_community_create_health_check_timeout_with_cleanup():
         context = MockContext(
             {
                 "config_manager": mock_config_manager,
-                "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
+                "session_registry_manager": create_mock_session_registry_manager(
+                    registry=mock_session_registry
+                ),
                 "instance_tracker": create_mock_instance_tracker(),
             }
         )
@@ -407,7 +421,9 @@ async def test_session_community_create_with_python_launch_method():
         context = MockContext(
             {
                 "config_manager": mock_config_manager,
-                "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
+                "session_registry_manager": create_mock_session_registry_manager(
+                    registry=mock_session_registry
+                ),
                 "instance_tracker": create_mock_instance_tracker(),
             }
         )
@@ -431,7 +447,9 @@ async def test_session_community_delete_non_community_session():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
@@ -470,7 +488,9 @@ async def test_session_community_delete_close_fails_but_continues():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
@@ -510,7 +530,9 @@ async def test_session_community_delete_removal_fails():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
@@ -536,7 +558,9 @@ async def test_session_community_delete_unexpected_exception():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
@@ -591,7 +615,9 @@ async def test_session_details_dynamic_community_with_all_fields():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
@@ -646,7 +672,9 @@ async def test_session_details_dynamic_community_with_python_process_id():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
@@ -695,7 +723,9 @@ async def test_session_details_dynamic_community_with_partial_fields():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
@@ -755,7 +785,12 @@ async def test_session_details_logs_version_info():
 
     # Setup context.request_context.lifespan_context properly
     request_context = MagicMock()
-    request_context.lifespan_context = {"config_manager": MagicMock(), "session_registry_manager": create_mock_session_registry_manager(registry=session_registry)}
+    request_context.lifespan_context = {
+        "config_manager": MagicMock(),
+        "session_registry_manager": create_mock_session_registry_manager(
+            registry=session_registry
+        ),
+    }
     context.request_context = request_context
 
     # Mock the queries module to return version information
@@ -821,7 +856,12 @@ async def test_sessions_list_success():
 
     # Mock context
     mock_context = MagicMock()
-    mock_context.request_context.lifespan_context = {"config_manager": MagicMock(), "session_registry_manager": create_mock_session_registry_manager(registry=mock_registry)}
+    mock_context.request_context.lifespan_context = {
+        "config_manager": MagicMock(),
+        "session_registry_manager": create_mock_session_registry_manager(
+            registry=mock_registry
+        ),
+    }
 
     # Call function
     result = await sessions_list(mock_context)
@@ -866,7 +906,12 @@ async def test_sessions_list_with_unknown_type():
 
     # Mock context
     mock_context = MagicMock()
-    mock_context.request_context.lifespan_context = {"config_manager": MagicMock(), "session_registry_manager": create_mock_session_registry_manager(registry=mock_registry)}
+    mock_context.request_context.lifespan_context = {
+        "config_manager": MagicMock(),
+        "session_registry_manager": create_mock_session_registry_manager(
+            registry=mock_registry
+        ),
+    }
 
     # Call function
     result = await sessions_list(mock_context)
@@ -902,7 +947,12 @@ async def test_sessions_list_with_processing_error():
 
     # Mock context
     mock_context = MagicMock()
-    mock_context.request_context.lifespan_context = {"config_manager": MagicMock(), "session_registry_manager": create_mock_session_registry_manager(registry=mock_registry)}
+    mock_context.request_context.lifespan_context = {
+        "config_manager": MagicMock(),
+        "session_registry_manager": create_mock_session_registry_manager(
+            registry=mock_registry
+        ),
+    }
 
     # Call function
     result = await sessions_list(mock_context)
@@ -939,7 +989,12 @@ async def test_session_details_session_not_found():
     mock_registry.get.side_effect = Exception("Session not found")
 
     mock_context = MagicMock()
-    mock_context.request_context.lifespan_context = {"config_manager": MagicMock(), "session_registry_manager": create_mock_session_registry_manager(registry=mock_registry)}
+    mock_context.request_context.lifespan_context = {
+        "config_manager": MagicMock(),
+        "session_registry_manager": create_mock_session_registry_manager(
+            registry=mock_registry
+        ),
+    }
 
     result = await session_details(mock_context, "nonexistent")
 
@@ -970,7 +1025,12 @@ async def test_session_details_with_session_error():
 
     # Mock context
     mock_context = MagicMock()
-    mock_context.request_context.lifespan_context = {"config_manager": MagicMock(), "session_registry_manager": create_mock_session_registry_manager(registry=mock_registry)}
+    mock_context.request_context.lifespan_context = {
+        "config_manager": MagicMock(),
+        "session_registry_manager": create_mock_session_registry_manager(
+            registry=mock_registry
+        ),
+    }
 
     # Call function
     result = await session_details(mock_context, "session1")
@@ -1008,7 +1068,12 @@ async def test_session_details_with_processing_error():
 
     # Mock context
     mock_context = MagicMock()
-    mock_context.request_context.lifespan_context = {"config_manager": MagicMock(), "session_registry_manager": create_mock_session_registry_manager(registry=mock_registry)}
+    mock_context.request_context.lifespan_context = {
+        "config_manager": MagicMock(),
+        "session_registry_manager": create_mock_session_registry_manager(
+            registry=mock_registry
+        ),
+    }
 
     # Call function
     result = await session_details(mock_context, "session1")
@@ -1070,7 +1135,12 @@ async def test_session_details_success_with_programming_language():
 
     # Mock context
     mock_context = MagicMock()
-    mock_context.request_context.lifespan_context = {"config_manager": MagicMock(), "session_registry_manager": create_mock_session_registry_manager(registry=mock_registry)}
+    mock_context.request_context.lifespan_context = {
+        "config_manager": MagicMock(),
+        "session_registry_manager": create_mock_session_registry_manager(
+            registry=mock_registry
+        ),
+    }
 
     # Call function
     result = await session_details(mock_context, "session1", attempt_to_connect=True)
@@ -1119,7 +1189,12 @@ async def test_session_details_success_without_programming_language():
 
     # Mock context
     mock_context = MagicMock()
-    mock_context.request_context.lifespan_context = {"config_manager": MagicMock(), "session_registry_manager": create_mock_session_registry_manager(registry=mock_registry)}
+    mock_context.request_context.lifespan_context = {
+        "config_manager": MagicMock(),
+        "session_registry_manager": create_mock_session_registry_manager(
+            registry=mock_registry
+        ),
+    }
 
     # Call function
     result = await session_details(mock_context, "session1", attempt_to_connect=True)
@@ -1208,7 +1283,9 @@ async def test_session_details_to_dict_exception():
         context = MockContext(
             {
                 "config_manager": mock_config_manager,
-                "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
+                "session_registry_manager": create_mock_session_registry_manager(
+                    registry=mock_session_registry
+                ),
                 "instance_tracker": create_mock_instance_tracker(),
             }
         )
@@ -1254,7 +1331,9 @@ async def test_sessions_list_discovery_in_progress():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
@@ -1281,7 +1360,9 @@ async def test_sessions_list_discovery_in_progress_with_errors():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
@@ -1310,7 +1391,9 @@ async def test_sessions_list_completed_with_errors():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
@@ -1337,7 +1420,9 @@ async def test_sessions_list_completed_no_errors():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
@@ -1370,7 +1455,9 @@ async def test_sessions_list_shows_errors_even_with_sessions():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
             "instance_tracker": create_mock_instance_tracker(),
         }
     )

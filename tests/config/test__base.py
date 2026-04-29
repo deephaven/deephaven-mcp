@@ -151,7 +151,6 @@ async def test_get_mcp_session_idle_timeout_float_passthrough():
     assert result == 300.5
 
 
-
 @pytest.mark.asyncio
 async def test_config_manager_init_with_explicit_path():
     """ConfigManager stores an explicit config_path."""

@@ -80,7 +80,7 @@ from deephaven_mcp._exceptions import (
     SessionError,
 )
 from deephaven_mcp.config import (
-    EnterpriseSystemConfigurationError,
+    ConfigurationError,
     validate_enterprise_config,
 )
 
@@ -434,7 +434,7 @@ class CorePlusSessionFactory(
                 such as network issues or invalid connection.json format.
             AuthenticationError: If authentication fails due to missing or invalid credentials,
                 incorrect format, or server-side authentication issues.
-            EnterpriseSystemConfigurationError: If the configuration dictionary is invalid,
+            ConfigurationError: If the configuration dictionary is invalid,
                 missing required fields, or contains incompatible settings.
 
         Example - Password authentication with environment variable:
@@ -492,7 +492,7 @@ class CorePlusSessionFactory(
         # Validate config
         try:
             validate_enterprise_config(config)
-        except EnterpriseSystemConfigurationError as e:
+        except ConfigurationError as e:
             _LOGGER.error(
                 f"[CorePlusSessionFactory:from_config] Invalid enterprise system config: {e}"
             )

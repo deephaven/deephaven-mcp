@@ -628,7 +628,9 @@ async def test_core_from_config_invalid_mutually_exclusive(monkeypatch):
     config = {"host": "localhost", "auth_token": "tok", "auth_token_env_var": "ENV"}
     with pytest.raises(Exception) as exc_info:
         await CoreSession.from_config(config)
-    assert "both 'auth_token' and 'auth_token_env_var' are set" in str(exc_info.value)
+    assert "'auth_token' and 'auth_token_env_var' are mutually exclusive" in str(
+        exc_info.value
+    )
 
 
 @pytest.mark.asyncio

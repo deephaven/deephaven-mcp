@@ -22,6 +22,7 @@ def test_version_module_sanity():
 def test_package_version_matches_internal():
     import deephaven_mcp
     import deephaven_mcp._version as v
+
     assert hasattr(deephaven_mcp, "__version__")
     assert isinstance(deephaven_mcp.__version__, str)
     assert deephaven_mcp.__version__ == v.__version__

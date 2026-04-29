@@ -90,7 +90,9 @@ def get_config_manager(context: Context) -> ConfigManager:
     Returns:
         ConfigManager: The server's config manager instance.
     """
-    lifespan_context: LifespanContext[BaseRegistry] = context.request_context.lifespan_context
+    lifespan_context: LifespanContext[BaseRegistry] = (
+        context.request_context.lifespan_context
+    )
     return lifespan_context["config_manager"]
 
 
@@ -131,7 +133,9 @@ async def get_registry_from_context(context: Context) -> BaseRegistry:
         InternalError: If the mcp-session-id header is absent.
     """
     mcp_session_id = get_mcp_session_id(context)
-    lifespan_context: LifespanContext[BaseRegistry] = context.request_context.lifespan_context
+    lifespan_context: LifespanContext[BaseRegistry] = (
+        context.request_context.lifespan_context
+    )
     session_registry_manager = lifespan_context["session_registry_manager"]
     return await session_registry_manager.get_or_create_registry(
         mcp_session_id, get_config_manager(context)

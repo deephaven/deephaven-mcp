@@ -9,7 +9,11 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
-from conftest import MockContext, create_mock_instance_tracker, create_mock_session_registry_manager
+from conftest import (
+    MockContext,
+    create_mock_instance_tracker,
+    create_mock_session_registry_manager,
+)
 
 from deephaven_mcp import config
 from deephaven_mcp._exceptions import RegistryItemNotFoundError
@@ -93,7 +97,12 @@ async def test_session_enterprise_create_auto_name_no_username_and_language_tran
         mock_registry.count_added_sessions = AsyncMock(return_value=0)
 
         context = MockContext(
-            {"config_manager": mock_config_manager, "session_registry_manager": create_mock_session_registry_manager(registry=mock_registry)}
+            {
+                "config_manager": mock_config_manager,
+                "session_registry_manager": create_mock_session_registry_manager(
+                    registry=mock_registry
+                ),
+            }
         )
 
         # Use a non-Python programming language to exercise configuration_transformer
@@ -145,7 +154,12 @@ async def test_session_enterprise_delete_removal_missing_in_registry():
     mock_registry.remove_session = AsyncMock(return_value=None)
 
     context = MockContext(
-        {"config_manager": mock_config_manager, "session_registry_manager": create_mock_session_registry_manager(registry=mock_registry)}
+        {
+            "config_manager": mock_config_manager,
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_registry
+            ),
+        }
     )
 
     full_config = {"enterprise": {"systems": enterprise_config}}
@@ -172,7 +186,12 @@ async def test_session_enterprise_delete_cleanup_created_sessions_empty():
     mock_registry.get = AsyncMock(return_value=mock_session_manager)
 
     context = MockContext(
-        {"config_manager": mock_config_manager, "session_registry_manager": create_mock_session_registry_manager(registry=mock_registry)}
+        {
+            "config_manager": mock_config_manager,
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_registry
+            ),
+        }
     )
 
     full_config = {"enterprise": {"systems": enterprise_config}}
@@ -204,7 +223,12 @@ async def test_session_enterprise_delete_registry_pop_raises_error():
     )
 
     context = MockContext(
-        {"config_manager": mock_config_manager, "session_registry_manager": create_mock_session_registry_manager(registry=mock_registry)}
+        {
+            "config_manager": mock_config_manager,
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_registry
+            ),
+        }
     )
 
     full_config = {"enterprise": {"systems": enterprise_config}}
@@ -231,7 +255,12 @@ async def test_session_enterprise_delete_outer_exception_logger_info_raises():
     mock_registry.get = AsyncMock(return_value=mock_session_manager)
 
     context = MockContext(
-        {"config_manager": mock_config_manager, "session_registry_manager": create_mock_session_registry_manager(registry=mock_registry)}
+        {
+            "config_manager": mock_config_manager,
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_registry
+            ),
+        }
     )
 
     # Only raise on the second info() call (the first is before the try block)
@@ -283,7 +312,9 @@ async def test_enterprise_systems_status_success():
     # Create context
     context = MockContext(
         {
-            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
             "config_manager": mock_config_manager,
             "instance_tracker": create_mock_instance_tracker(),
         }
@@ -291,7 +322,7 @@ async def test_enterprise_systems_status_success():
 
     # Mock the redact function to match the actual implementation
     with patch(
-        "deephaven_mcp.config._enterprise.redact_enterprise_system_config"
+        "deephaven_mcp.config.enterprise.redact_enterprise_config"
     ) as mock_redact:
         mock_redact.side_effect = lambda config: config
 
@@ -343,7 +374,9 @@ async def test_enterprise_systems_status_with_attempt_to_connect():
     # Create context
     context = MockContext(
         {
-            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
             "config_manager": mock_config_manager,
             "instance_tracker": create_mock_instance_tracker(),
         }
@@ -351,7 +384,7 @@ async def test_enterprise_systems_status_with_attempt_to_connect():
 
     # Mock the redact function
     with patch(
-        "deephaven_mcp.config._enterprise.redact_enterprise_system_config",
+        "deephaven_mcp.config.enterprise.redact_enterprise_config",
         return_value={},
     ):
         # Call the function with attempt_to_connect=True
@@ -400,14 +433,16 @@ async def test_enterprise_systems_status_no_systems():
     # Create context
     context = MockContext(
         {
-            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
             "config_manager": mock_config_manager,
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
 
     with patch(
-        "deephaven_mcp.config._enterprise.redact_enterprise_system_config",
+        "deephaven_mcp.config.enterprise.redact_enterprise_config",
         return_value={},
     ):
         # Call the function
@@ -454,14 +489,16 @@ async def test_enterprise_systems_status_all_status_types():
 
         context = MockContext(
             {
-                "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
+                "session_registry_manager": create_mock_session_registry_manager(
+                    registry=mock_session_registry
+                ),
                 "config_manager": mock_config_manager,
                 "instance_tracker": create_mock_instance_tracker(),
             }
         )
 
         with patch(
-            "deephaven_mcp.config._enterprise.redact_enterprise_system_config",
+            "deephaven_mcp.config.enterprise.redact_enterprise_config",
             return_value={},
         ):
             result = await enterprise_systems_status(context)
@@ -501,7 +538,9 @@ async def test_enterprise_systems_status_config_error():
     # Create context
     context = MockContext(
         {
-            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
             "config_manager": mock_config_manager,
             "instance_tracker": create_mock_instance_tracker(),
         }
@@ -531,7 +570,9 @@ async def test_enterprise_systems_status_registry_error():
     # Create context
     context = MockContext(
         {
-            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
             "config_manager": mock_config_manager,
             "instance_tracker": create_mock_instance_tracker(),
         }
@@ -571,7 +612,9 @@ async def test_enterprise_systems_status_liveness_error():
     # Create context
     context = MockContext(
         {
-            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
             "config_manager": mock_config_manager,
             "instance_tracker": create_mock_instance_tracker(),
         }
@@ -610,14 +653,16 @@ async def test_enterprise_systems_status_no_enterprise_registry():
     # Create context
     context = MockContext(
         {
-            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
             "config_manager": mock_config_manager,
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
 
     with patch(
-        "deephaven_mcp.config._enterprise.redact_enterprise_system_config",
+        "deephaven_mcp.config.enterprise.redact_enterprise_config",
         return_value={},
     ):
         # Call the function
@@ -660,14 +705,16 @@ async def test_enterprise_systems_status_factory_snapshot_unexpected_phase():
 
     context = MockContext(
         {
-            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
             "config_manager": mock_config_manager,
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
 
     with patch(
-        "deephaven_mcp.config._enterprise.redact_enterprise_system_config",
+        "deephaven_mcp.config.enterprise.redact_enterprise_config",
         return_value={},
     ):
         result = await enterprise_systems_status(context)
@@ -709,14 +756,16 @@ async def test_enterprise_systems_status_factory_snapshot_with_errors():
 
     context = MockContext(
         {
-            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
             "config_manager": mock_config_manager,
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
 
     with patch(
-        "deephaven_mcp.config._enterprise.redact_enterprise_system_config",
+        "deephaven_mcp.config.enterprise.redact_enterprise_config",
         return_value={},
     ):
         result = await enterprise_systems_status(context)
@@ -760,14 +809,16 @@ async def test_enterprise_systems_status_discovery_in_progress():
 
     context = MockContext(
         {
-            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
             "config_manager": mock_config_manager,
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
 
     with patch(
-        "deephaven_mcp.config._enterprise.redact_enterprise_system_config",
+        "deephaven_mcp.config.enterprise.redact_enterprise_config",
         return_value={},
     ):
         result = await enterprise_systems_status(context)
@@ -802,14 +853,16 @@ async def test_enterprise_systems_status_discovery_in_progress_with_errors():
 
     context = MockContext(
         {
-            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
             "config_manager": mock_config_manager,
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
 
     with patch(
-        "deephaven_mcp.config._enterprise.redact_enterprise_system_config",
+        "deephaven_mcp.config.enterprise.redact_enterprise_config",
         return_value={},
     ):
         result = await enterprise_systems_status(context)
@@ -846,14 +899,16 @@ async def test_enterprise_systems_status_completed_with_errors():
 
     context = MockContext(
         {
-            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
             "config_manager": mock_config_manager,
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
 
     with patch(
-        "deephaven_mcp.config._enterprise.redact_enterprise_system_config",
+        "deephaven_mcp.config.enterprise.redact_enterprise_config",
         return_value={},
     ):
         result = await enterprise_systems_status(context)
@@ -886,14 +941,16 @@ async def test_enterprise_systems_status_completed_no_errors():
 
     context = MockContext(
         {
-            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
             "config_manager": mock_config_manager,
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
 
     with patch(
-        "deephaven_mcp.config._enterprise.redact_enterprise_system_config",
+        "deephaven_mcp.config.enterprise.redact_enterprise_config",
         return_value={},
     ):
         result = await enterprise_systems_status(context)
@@ -918,7 +975,12 @@ async def test_session_enterprise_create_no_session_creation_config():
     )
 
     context = MockContext(
-        {"config_manager": mock_config_manager, "session_registry_manager": create_mock_session_registry_manager(registry=mock_registry)}
+        {
+            "config_manager": mock_config_manager,
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_registry
+            ),
+        }
     )
 
     result = await session_enterprise_create(context, "test-worker")
@@ -973,7 +1035,12 @@ async def test_session_enterprise_create_success_with_defaults():
     mock_registry.count_added_sessions = AsyncMock(return_value=0)
 
     context = MockContext(
-        {"config_manager": mock_config_manager, "session_registry_manager": create_mock_session_registry_manager(registry=mock_registry)}
+        {
+            "config_manager": mock_config_manager,
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_registry
+            ),
+        }
     )
 
     result = await session_enterprise_create(context, "test-worker")
@@ -1050,7 +1117,12 @@ async def test_session_enterprise_create_success_with_overrides():
     mock_registry.count_added_sessions = AsyncMock(return_value=0)
 
     context = MockContext(
-        {"config_manager": mock_config_manager, "session_registry_manager": create_mock_session_registry_manager(registry=mock_registry)}
+        {
+            "config_manager": mock_config_manager,
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_registry
+            ),
+        }
     )
 
     result = await session_enterprise_create(
@@ -1128,7 +1200,12 @@ async def test_session_enterprise_create_auto_generate_name():
         mock_registry.count_added_sessions = AsyncMock(return_value=0)
 
         context = MockContext(
-            {"config_manager": mock_config_manager, "session_registry_manager": create_mock_session_registry_manager(registry=mock_registry)}
+            {
+                "config_manager": mock_config_manager,
+                "session_registry_manager": create_mock_session_registry_manager(
+                    registry=mock_registry
+                ),
+            }
         )
 
         result = await session_enterprise_create(context)
@@ -1166,7 +1243,12 @@ async def test_session_enterprise_create_system_not_found():
     mock_registry.count_added_sessions = AsyncMock(return_value=0)
 
     context = MockContext(
-        {"config_manager": mock_config_manager, "session_registry_manager": create_mock_session_registry_manager(registry=mock_registry)}
+        {
+            "config_manager": mock_config_manager,
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_registry
+            ),
+        }
     )
 
     result = await session_enterprise_create(context, "worker")
@@ -1215,7 +1297,12 @@ async def test_session_enterprise_create_max_workers_exceeded():
     mock_registry.get = AsyncMock(side_effect=mock_session_get)
 
     context = MockContext(
-        {"config_manager": mock_config_manager, "session_registry_manager": create_mock_session_registry_manager(registry=mock_registry)}
+        {
+            "config_manager": mock_config_manager,
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_registry
+            ),
+        }
     )
 
     result = await session_enterprise_create(context, "worker3")
@@ -1252,7 +1339,12 @@ async def test_session_enterprise_create_session_conflict():
     mock_registry.count_added_sessions = AsyncMock(return_value=0)
 
     context = MockContext(
-        {"config_manager": mock_config_manager, "session_registry_manager": create_mock_session_registry_manager(registry=mock_registry)}
+        {
+            "config_manager": mock_config_manager,
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_registry
+            ),
+        }
     )
 
     result = await session_enterprise_create(context, "existing-worker")
@@ -1304,7 +1396,12 @@ async def test_session_enterprise_create_factory_creation_failure():
     )
 
     context = MockContext(
-        {"config_manager": mock_config_manager, "session_registry_manager": create_mock_session_registry_manager(registry=mock_registry)}
+        {
+            "config_manager": mock_config_manager,
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_registry
+            ),
+        }
     )
 
     result = await session_enterprise_create(context, "failing-worker")
@@ -1334,7 +1431,12 @@ async def test_session_enterprise_create_disabled_by_zero_max_workers():
     mock_config_manager.get_config = AsyncMock(return_value=flat_config)
 
     context = MockContext(
-        {"config_manager": mock_config_manager, "session_registry_manager": create_mock_session_registry_manager(registry=mock_registry)}
+        {
+            "config_manager": mock_config_manager,
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_registry
+            ),
+        }
     )
 
     result = await session_enterprise_create(context, "test-worker")
@@ -1372,7 +1474,12 @@ async def test_session_enterprise_delete_success():
     mock_registry.remove_session = AsyncMock(return_value=mock_session_manager)
 
     context = MockContext(
-        {"config_manager": mock_config_manager, "session_registry_manager": create_mock_session_registry_manager(registry=mock_registry)}
+        {
+            "config_manager": mock_config_manager,
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_registry
+            ),
+        }
     )
 
     result = await session_enterprise_delete(context, "enterprise:system:test-worker")
@@ -1403,7 +1510,12 @@ async def test_session_enterprise_delete_system_not_found():
     )
 
     context = MockContext(
-        {"config_manager": mock_config_manager, "session_registry_manager": create_mock_session_registry_manager(registry=mock_registry)}
+        {
+            "config_manager": mock_config_manager,
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_registry
+            ),
+        }
     )
 
     result = await session_enterprise_delete(context, "enterprise:system:worker")
@@ -1438,7 +1550,12 @@ async def test_session_enterprise_delete_session_not_found():
     )
 
     context = MockContext(
-        {"config_manager": mock_config_manager, "session_registry_manager": create_mock_session_registry_manager(registry=mock_registry)}
+        {
+            "config_manager": mock_config_manager,
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_registry
+            ),
+        }
     )
 
     result = await session_enterprise_delete(
@@ -1476,7 +1593,12 @@ async def test_session_enterprise_delete_not_enterprise_session():
     mock_registry.get = AsyncMock(return_value=mock_session_manager)
 
     context = MockContext(
-        {"config_manager": mock_config_manager, "session_registry_manager": create_mock_session_registry_manager(registry=mock_registry)}
+        {
+            "config_manager": mock_config_manager,
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_registry
+            ),
+        }
     )
 
     result = await session_enterprise_delete(
@@ -1516,7 +1638,12 @@ async def test_session_enterprise_delete_close_failure_continues():
     mock_registry.remove_session = AsyncMock(return_value=mock_session_manager)
 
     context = MockContext(
-        {"config_manager": mock_config_manager, "session_registry_manager": create_mock_session_registry_manager(registry=mock_registry)}
+        {
+            "config_manager": mock_config_manager,
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_registry
+            ),
+        }
     )
 
     result = await session_enterprise_delete(
@@ -1541,7 +1668,12 @@ async def test_session_enterprise_delete_invalid_session_id_format():
     mock_registry.system_name = _TEST_SYSTEM_NAME
 
     context = MockContext(
-        {"config_manager": MagicMock(), "session_registry_manager": create_mock_session_registry_manager(registry=mock_registry)}
+        {
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_registry
+            ),
+        }
     )
 
     result = await session_enterprise_delete(context, session_id="not-a-valid-id")
@@ -1558,7 +1690,12 @@ async def test_session_enterprise_delete_wrong_system_type():
     mock_registry.system_name = _TEST_SYSTEM_NAME
 
     context = MockContext(
-        {"config_manager": MagicMock(), "session_registry_manager": create_mock_session_registry_manager(registry=mock_registry)}
+        {
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_registry
+            ),
+        }
     )
 
     result = await session_enterprise_delete(context, session_id="community:system:s1")
@@ -1575,7 +1712,12 @@ async def test_session_enterprise_delete_wrong_server():
     mock_registry.system_name = "prod"  # This server manages "prod"
 
     context = MockContext(
-        {"config_manager": MagicMock(), "session_registry_manager": create_mock_session_registry_manager(registry=mock_registry)}
+        {
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_registry
+            ),
+        }
     )
 
     # session_id says "dev", but this server manages "prod"
@@ -1744,7 +1886,9 @@ async def test_session_enterprise_create_success():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
         }
     )
 
@@ -1803,7 +1947,9 @@ async def test_session_enterprise_create_auto_generated_name():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
         }
     )
 
@@ -1834,7 +1980,9 @@ async def test_session_enterprise_create_max_sessions_reached():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
         }
     )
 
@@ -1878,7 +2026,9 @@ async def test_session_enterprise_create_disabled():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
         }
     )
 
@@ -1923,7 +2073,9 @@ async def test_session_enterprise_create_system_not_found_v2():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
         }
     )
 
@@ -1959,7 +2111,9 @@ async def test_session_enterprise_delete_success_v2():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
         }
     )
 
@@ -2005,7 +2159,9 @@ async def test_session_enterprise_delete_not_found():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
         }
     )
 
@@ -2036,7 +2192,9 @@ async def test_session_enterprise_delete_system_not_found_v2():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
+            "session_registry_manager": create_mock_session_registry_manager(
+                registry=mock_session_registry
+            ),
         }
     )
 

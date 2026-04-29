@@ -7,10 +7,10 @@ Deephaven MCP configuration from a JSON or JSON5 file. Specifically it exposes:
   :class:`EnterpriseServerConfigManager`) whose ``get_config()`` methods load and
   cache the config file coroutine-safely.
 - Synchronous *validation helpers* (:func:`validate_enterprise_config`,
-  :func:`validate_single_community_session_config`) for programmatic validation
+  :func:`validate_community_session_config`) for programmatic validation
   of already-parsed configuration dictionaries.
 - Synchronous *redaction helpers* (:func:`redact_community_session_config`,
-  :func:`redact_enterprise_system_config`) for producing log-safe copies of
+  :func:`redact_enterprise_config`) for producing log-safe copies of
   configuration dictionaries.
 
 Configuration is loaded from the path given by the ``DH_MCP_CONFIG_FILE``
@@ -85,7 +85,9 @@ It may contain the following top-level keys (all optional):
       If this key is absent, dynamic session creation is not configured.
 
 Community Config Validation rules:
-  - Only `sessions`, `session_creation`, and `security` are valid top-level keys; any other key will cause validation to fail.
+  - Only `sessions`, `session_creation`, `security`, and
+    `mcp_session_idle_timeout_seconds` are valid top-level keys; any other key
+    will cause validation to fail.
   - If `sessions` is present, each session's fields must have the correct type.
   - No unknown fields are permitted at any level of the configuration.
   - Sensitive values are redacted from logs for security:
@@ -143,7 +145,10 @@ Enterprise Config Validation rules:
   - For ``"private_key"`` auth: ``private_key_path`` is required.
   - ``connection_timeout`` must be a positive number if present; booleans are rejected.
   - ``max_concurrent_sessions`` must be a non-negative integer if present.
-  - Unknown fields generate a warning but do not cause validation to fail.
+  - When ``session_creation`` is present, ``defaults`` is required and
+    ``defaults.heap_size_gb`` is required.
+  - Unknown fields are rejected at every level (top level, ``session_creation``,
+    and ``session_creation.defaults``).
   - Sensitive field ``password`` is redacted in logs.
 
 Environment Variables:
@@ -172,37 +177,33 @@ __all__ = [
     "DEFAULT_MCP_SESSION_IDLE_TIMEOUT_SECONDS",
     # Validators used by external callers
     "validate_enterprise_config",
-    "validate_single_community_session_config",
+    "validate_community_session_config",
     # Redaction used by external callers
     "redact_community_session_config",
-    "redact_enterprise_system_config",
+    "redact_enterprise_config",
     # Constants used by external callers
     "DEFAULT_CONNECTION_TIMEOUT_SECONDS",
     # Exceptions
-    "CommunitySessionConfigurationError",
-    "EnterpriseSystemConfigurationError",
     "ConfigurationError",
 ]
 
-from deephaven_mcp._exceptions import (
-    CommunitySessionConfigurationError,
-    ConfigurationError,
-    EnterpriseSystemConfigurationError,
-)
+from deephaven_mcp._exceptions import ConfigurationError
 
 from ._base import (
     CONFIG_ENV_VAR,
-    ConfigManager,
     DEFAULT_MCP_SESSION_IDLE_TIMEOUT_SECONDS,
+    ConfigManager,
 )
-from ._community import (
+from .community import (
     CommunityServerConfigManager,
+    redact_community_config,
     redact_community_session_config,
-    validate_single_community_session_config,
+    validate_community_config,
+    validate_community_session_config,
 )
-from ._enterprise import (
+from .enterprise import (
     DEFAULT_CONNECTION_TIMEOUT_SECONDS,
     EnterpriseServerConfigManager,
-    redact_enterprise_system_config,
+    redact_enterprise_config,
     validate_enterprise_config,
 )

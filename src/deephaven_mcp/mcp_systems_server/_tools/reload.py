@@ -13,8 +13,13 @@ import logging
 
 from mcp.server.fastmcp import Context, FastMCP
 
-from deephaven_mcp.mcp_systems_server._session_registry_manager import SessionRegistryManager
-from deephaven_mcp.mcp_systems_server._tools.shared import get_config_manager, get_mcp_session_id
+from deephaven_mcp.mcp_systems_server._session_registry_manager import (
+    SessionRegistryManager,
+)
+from deephaven_mcp.mcp_systems_server._tools.shared import (
+    get_config_manager,
+    get_mcp_session_id,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -28,9 +33,9 @@ async def _do_reload(context: Context) -> dict:
         refresh_lock: asyncio.Lock = context.request_context.lifespan_context[
             "refresh_lock"
         ]
-        session_registry_manager: SessionRegistryManager = context.request_context.lifespan_context[
-            "session_registry_manager"
-        ]
+        session_registry_manager: SessionRegistryManager = (
+            context.request_context.lifespan_context["session_registry_manager"]
+        )
 
         async with refresh_lock:
             await get_config_manager(context).clear_config_cache()

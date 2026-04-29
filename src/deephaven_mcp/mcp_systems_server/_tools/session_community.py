@@ -15,7 +15,7 @@ from typing import Any, Literal, cast
 from mcp.server.fastmcp import Context, FastMCP
 
 from deephaven_mcp._exceptions import (
-    CommunitySessionConfigurationError,
+    ConfigurationError,
     InvalidSessionNameError,
     RegistryItemNotFoundError,
 )
@@ -24,7 +24,10 @@ from deephaven_mcp.mcp_systems_server._tools.session import (
     DEFAULT_MAX_CONCURRENT_SESSIONS,
     DEFAULT_PROGRAMMING_LANGUAGE,
 )
-from deephaven_mcp.mcp_systems_server._tools.shared import get_community_registry, get_config_manager
+from deephaven_mcp.mcp_systems_server._tools.shared import (
+    get_community_registry,
+    get_config_manager,
+)
 from deephaven_mcp.resource_manager import (
     BaseItemManager,
     CommunitySessionManager,
@@ -476,7 +479,7 @@ def _resolve_auth_token(
             - (token_string, True) if token was auto-generated
 
     Raises:
-        CommunitySessionConfigurationError: If auth_token_env_var is configured but the environment variable is not set.
+        ConfigurationError: If auth_token_env_var is configured but the environment variable is not set.
     """
     # Check if auth type requires a PSK token (must be exact match for full class name)
     if auth_type != "io.deephaven.authentication.psk.PskAuthenticationHandler":
@@ -495,7 +498,7 @@ def _resolve_auth_token(
         # If auth_token_env_var is explicitly configured but not set, this is an error
         error_msg = f"Environment variable '{env_var}' specified in auth_token_env_var is not set"
         _LOGGER.error(f"[mcp_systems_server:session_community_create] {error_msg}")
-        raise CommunitySessionConfigurationError(error_msg)
+        raise ConfigurationError(error_msg)
 
     # Check config default
     if "auth_token" in defaults:

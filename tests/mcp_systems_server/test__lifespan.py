@@ -50,7 +50,9 @@ async def test_make_enterprise_lifespan_yields_context_keys():
             AsyncMock(),
         ),
     ):
-        lifespan = make_enterprise_lifespan(session_registry_manager, config_path="/mock/enterprise.json")
+        lifespan = make_enterprise_lifespan(
+            session_registry_manager, config_path="/mock/enterprise.json"
+        )
         async with lifespan(DummyServer()) as context:
             assert "config_manager" in context
             assert "session_registry_manager" in context
@@ -87,7 +89,9 @@ async def test_make_enterprise_lifespan_start_called():
             AsyncMock(),
         ),
     ):
-        lifespan = make_enterprise_lifespan(session_registry_manager, config_path="/mock/enterprise.json")
+        lifespan = make_enterprise_lifespan(
+            session_registry_manager, config_path="/mock/enterprise.json"
+        )
         async with lifespan(DummyServer()):
             session_registry_manager.start.assert_awaited_once()
 
@@ -120,7 +124,9 @@ async def test_make_enterprise_lifespan_stop_called_on_shutdown():
             AsyncMock(),
         ),
     ):
-        lifespan = make_enterprise_lifespan(session_registry_manager, config_path="/mock/enterprise.json")
+        lifespan = make_enterprise_lifespan(
+            session_registry_manager, config_path="/mock/enterprise.json"
+        )
         async with lifespan(DummyServer()):
             pass
         session_registry_manager.stop.assert_awaited_once()
@@ -134,7 +140,9 @@ async def test_make_enterprise_lifespan_stop_called_on_config_error():
     config_manager = AsyncMock()
     instance_tracker = AsyncMock()
     instance_tracker.instance_id = "test-enterprise-id"
-    config_manager.get_config = AsyncMock(side_effect=RuntimeError("config load failed"))
+    config_manager.get_config = AsyncMock(
+        side_effect=RuntimeError("config load failed")
+    )
     instance_tracker.unregister = AsyncMock()
 
     with (
@@ -155,7 +163,9 @@ async def test_make_enterprise_lifespan_stop_called_on_config_error():
             AsyncMock(),
         ),
     ):
-        lifespan = make_enterprise_lifespan(session_registry_manager, config_path="/mock/enterprise.json")
+        lifespan = make_enterprise_lifespan(
+            session_registry_manager, config_path="/mock/enterprise.json"
+        )
         with pytest.raises(RuntimeError, match="config load failed"):
             async with lifespan(DummyServer()):
                 pass  # pragma: no cover
@@ -192,7 +202,9 @@ async def test_make_enterprise_lifespan_tracker_unregister_called_even_if_stop_r
             AsyncMock(),
         ),
     ):
-        lifespan = make_enterprise_lifespan(session_registry_manager, config_path="/mock/enterprise.json")
+        lifespan = make_enterprise_lifespan(
+            session_registry_manager, config_path="/mock/enterprise.json"
+        )
         async with lifespan(DummyServer()):
             pass
         session_registry_manager.stop.assert_awaited_once()
@@ -232,7 +244,9 @@ async def test_make_community_lifespan_yields_context_keys():
             AsyncMock(),
         ),
     ):
-        lifespan = make_community_lifespan(session_registry_manager, config_path="/mock/community.json")
+        lifespan = make_community_lifespan(
+            session_registry_manager, config_path="/mock/community.json"
+        )
         async with lifespan(DummyServer()) as context:
             assert "config_manager" in context
             assert "session_registry_manager" in context
@@ -269,7 +283,9 @@ async def test_make_community_lifespan_start_called():
             AsyncMock(),
         ),
     ):
-        lifespan = make_community_lifespan(session_registry_manager, config_path="/mock/community.json")
+        lifespan = make_community_lifespan(
+            session_registry_manager, config_path="/mock/community.json"
+        )
         async with lifespan(DummyServer()):
             session_registry_manager.start.assert_awaited_once()
 
@@ -302,7 +318,9 @@ async def test_make_community_lifespan_stop_called_on_shutdown():
             AsyncMock(),
         ),
     ):
-        lifespan = make_community_lifespan(session_registry_manager, config_path="/mock/community.json")
+        lifespan = make_community_lifespan(
+            session_registry_manager, config_path="/mock/community.json"
+        )
         async with lifespan(DummyServer()):
             pass
         session_registry_manager.stop.assert_awaited_once()
@@ -316,7 +334,9 @@ async def test_make_community_lifespan_stop_called_on_config_error():
     config_manager = AsyncMock()
     instance_tracker = AsyncMock()
     instance_tracker.instance_id = "test-community-id"
-    config_manager.get_config = AsyncMock(side_effect=RuntimeError("community config failed"))
+    config_manager.get_config = AsyncMock(
+        side_effect=RuntimeError("community config failed")
+    )
     instance_tracker.unregister = AsyncMock()
 
     with (
@@ -337,7 +357,9 @@ async def test_make_community_lifespan_stop_called_on_config_error():
             AsyncMock(),
         ),
     ):
-        lifespan = make_community_lifespan(session_registry_manager, config_path="/mock/community.json")
+        lifespan = make_community_lifespan(
+            session_registry_manager, config_path="/mock/community.json"
+        )
         with pytest.raises(RuntimeError, match="community config failed"):
             async with lifespan(DummyServer()):
                 pass  # pragma: no cover
@@ -374,7 +396,9 @@ async def test_make_community_lifespan_tracker_unregister_called_even_if_stop_ra
             AsyncMock(),
         ),
     ):
-        lifespan = make_community_lifespan(session_registry_manager, config_path="/mock/community.json")
+        lifespan = make_community_lifespan(
+            session_registry_manager, config_path="/mock/community.json"
+        )
         async with lifespan(DummyServer()):
             pass
         session_registry_manager.stop.assert_awaited_once()
@@ -389,7 +413,9 @@ async def test_make_enterprise_lifespan_unregister_exception_is_swallowed():
     instance_tracker = AsyncMock()
     instance_tracker.instance_id = "test-enterprise-id"
     config_manager.get_config = AsyncMock(return_value={})
-    instance_tracker.unregister = AsyncMock(side_effect=RuntimeError("unregister failed"))
+    instance_tracker.unregister = AsyncMock(
+        side_effect=RuntimeError("unregister failed")
+    )
 
     with (
         patch(
@@ -409,7 +435,9 @@ async def test_make_enterprise_lifespan_unregister_exception_is_swallowed():
             AsyncMock(),
         ),
     ):
-        lifespan = make_enterprise_lifespan(session_registry_manager, config_path="/mock/enterprise.json")
+        lifespan = make_enterprise_lifespan(
+            session_registry_manager, config_path="/mock/enterprise.json"
+        )
         async with lifespan(DummyServer()):
             pass
         instance_tracker.unregister.assert_awaited_once()
@@ -423,7 +451,9 @@ async def test_make_community_lifespan_unregister_exception_is_swallowed():
     instance_tracker = AsyncMock()
     instance_tracker.instance_id = "test-community-id"
     config_manager.get_config = AsyncMock(return_value={})
-    instance_tracker.unregister = AsyncMock(side_effect=RuntimeError("unregister failed"))
+    instance_tracker.unregister = AsyncMock(
+        side_effect=RuntimeError("unregister failed")
+    )
 
     with (
         patch(
@@ -443,7 +473,9 @@ async def test_make_community_lifespan_unregister_exception_is_swallowed():
             AsyncMock(),
         ),
     ):
-        lifespan = make_community_lifespan(session_registry_manager, config_path="/mock/community.json")
+        lifespan = make_community_lifespan(
+            session_registry_manager, config_path="/mock/community.json"
+        )
         async with lifespan(DummyServer()):
             pass
         instance_tracker.unregister.assert_awaited_once()
