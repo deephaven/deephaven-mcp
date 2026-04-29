@@ -37,6 +37,8 @@ def test_imports_and_all():
         "launch_session",
         "find_available_port",
         "generate_auth_token",
+        "InstanceTracker",
+        "cleanup_orphaned_resources",
     ]
     assert sorted(mod.__all__) == sorted(expected_all)
 

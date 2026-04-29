@@ -646,6 +646,7 @@ The enterprise server (`dh-mcp-enterprise-server`) uses a **flat** JSON or JSON5
 | `password_env_var` | string | `auth_type="password"` | Environment variable containing the password (recommended) |
 | `private_key_path` | string | `auth_type="private_key"` | Absolute path to the Deephaven private keypair file (proprietary format, typically named `priv-<keyname>.base64.txt`; provided by your IT/security team) |
 | `connection_timeout` | int or float | No | Timeout in seconds for connecting to the system (default: 10.0) |
+| `mcp_session_idle_timeout_seconds` | int or float | No | Seconds of MCP client inactivity after which the per-session Deephaven registry is closed and resources are reclaimed (default: 3600.0 — 1 hr). Must be positive. |
 | `session_creation` | object | No | Optional section that enables `session_enterprise_create`. If absent, the tool returns a "not configured" error. When present, `defaults` and `defaults.heap_size_gb` are required. |
 | `session_creation.max_concurrent_sessions` | integer | No | Max concurrent sessions (default: 5). Set to 0 to disable `session_enterprise_create` |
 | `session_creation.defaults` | object | Yes (when section present) | Default parameters applied to `session_enterprise_create` when the caller does not specify them |
@@ -675,7 +676,7 @@ dh-mcp-enterprise-server --config /path/to/dhe_staging.json --port 8004 >dh-mcp-
 
 ### Configuring DHC (Community) Server
 
-The community server (`dh-mcp-community-server`) uses a flat JSON or JSON5 config file. Valid top-level keys are `"sessions"`, `"session_creation"`, and `"security"` (all optional).
+The community server (`dh-mcp-community-server`) uses a flat JSON or JSON5 config file. Valid top-level keys are `"sessions"`, `"session_creation"`, `"security"`, and `"mcp_session_idle_timeout_seconds"` (all optional).
 
 **Config file location**: Pass via `--config` CLI flag or `DH_MCP_CONFIG_FILE` environment variable.
 
@@ -776,6 +777,14 @@ The community server (`dh-mcp-community-server`) uses a flat JSON or JSON5 confi
 | `tls_root_certs` | string | Optional | Absolute path to PEM file with trusted root CA certificates for TLS verification |
 | `client_cert_chain` | string | Optional | Absolute path to PEM file with client's TLS certificate chain (for mTLS) |
 | `client_private_key` | string | Optional | Absolute path to PEM file with client's private key (for mTLS) |
+
+#### Community Server Settings
+
+Top-level fields that apply to the server as a whole (not per-session):
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `mcp_session_idle_timeout_seconds` | int or float | No | Seconds of MCP client inactivity after which the per-session Deephaven registry is closed and resources are reclaimed (default: 3600.0 — 1 hr). Must be positive. |
 
 #### Community Session Creation Configuration
 

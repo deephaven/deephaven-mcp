@@ -25,7 +25,6 @@ Attributes:
 """
 
 import logging
-from typing import Generic, TypeVar
 
 from deephaven_mcp._exceptions import InternalError
 
@@ -63,11 +62,8 @@ try:
 except ImportError:
     _LOGGER.debug("Enterprise features not available")
 
-# Type variable for the wrapped object
-T = TypeVar("T")
 
-
-class ClientObjectWrapper(Generic[T]):
+class ClientObjectWrapper[T]:
     """Base class for client wrappers with generic type support.
 
     This class serves as a foundation for wrappers around Deephaven client objects.

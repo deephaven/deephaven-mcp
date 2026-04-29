@@ -6,20 +6,29 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pyarrow
 import pytest
-from conftest import MockContext
+from conftest import MockContext, create_mock_session_registry_manager
 
-from deephaven_mcp._exceptions import RegistryItemNotFoundError
+from deephaven_mcp._exceptions import InternalError, RegistryItemNotFoundError
 from deephaven_mcp.client import BaseSession, CorePlusSession
 from deephaven_mcp.mcp_systems_server._tools.shared import (
     _redact_recursive,
     check_response_size,
     format_initialization_status,
     format_meta_table_result,
+    get_community_registry,
+    get_config_manager,
+    get_enterprise_registry,
     get_enterprise_session,
+    get_mcp_session_id,
+    get_registry_from_context,
     get_session_from_context,
     redact_json_sensitive_fields,
 )
-from deephaven_mcp.resource_manager import InitializationPhase
+from deephaven_mcp.resource_manager import (
+    CommunitySessionRegistry,
+    EnterpriseSessionRegistry,
+    InitializationPhase,
+)
 
 # ===========================================================================
 # format_initialization_status tests
@@ -92,6 +101,168 @@ def test_format_initialization_status_loading_with_errors():
 
 
 # ===========================================================================
+# get_mcp_session_id tests
+# ===========================================================================
+
+
+def test_get_mcp_session_id_returns_correct_id():
+    """get_mcp_session_id returns the session ID from the request header."""
+    context = MockContext({}, mcp_session_id="my-session-123")
+    result = get_mcp_session_id(context)
+    assert result == "my-session-123"
+
+
+def test_get_mcp_session_id_raises_when_header_absent():
+    """get_mcp_session_id raises InternalError when mcp-session-id header is absent."""
+
+    class MockRequestNoHeader:
+        headers = {}
+
+    class MockRequestContextNoHeader:
+        request = MockRequestNoHeader()
+        lifespan_context = {}
+
+    class MockContextNoHeader:
+        request_context = MockRequestContextNoHeader()
+
+    with pytest.raises(InternalError):
+        get_mcp_session_id(MockContextNoHeader())
+
+
+def test_get_mcp_session_id_raises_when_request_is_none():
+    """get_mcp_session_id raises InternalError when request is None."""
+
+    class MockRequestContextNullRequest:
+        request = None
+        lifespan_context = {}
+
+    class MockContextNullRequest:
+        request_context = MockRequestContextNullRequest()
+
+    with pytest.raises(InternalError):
+        get_mcp_session_id(MockContextNullRequest())
+
+
+# ===========================================================================
+# get_config_manager tests
+# ===========================================================================
+
+
+def test_get_config_manager_returns_config_manager():
+    """get_config_manager returns the config_manager from the lifespan context."""
+    mock_config_manager = MagicMock()
+    context = MockContext({"config_manager": mock_config_manager})
+    assert get_config_manager(context) is mock_config_manager
+
+
+# ===========================================================================
+# get_community_registry tests
+# ===========================================================================
+
+
+@pytest.mark.asyncio
+async def test_get_community_registry_returns_registry():
+    """get_community_registry returns a CommunitySessionRegistry."""
+    mock_registry = MagicMock(spec=CommunitySessionRegistry)
+    context = MockContext(
+        {
+            "session_registry_manager": create_mock_session_registry_manager(mock_registry),
+            "config_manager": MagicMock(),
+        }
+    )
+    result = await get_community_registry(context)
+    assert result is mock_registry
+
+
+@pytest.mark.asyncio
+async def test_get_community_registry_raises_on_wrong_type():
+    """get_community_registry raises InternalError when registry is not a CommunitySessionRegistry."""
+    mock_registry = MagicMock(spec=EnterpriseSessionRegistry)
+    context = MockContext(
+        {
+            "session_registry_manager": create_mock_session_registry_manager(mock_registry),
+            "config_manager": MagicMock(),
+        }
+    )
+    with pytest.raises(InternalError, match="CommunitySessionRegistry"):
+        await get_community_registry(context)
+
+
+# ===========================================================================
+# get_enterprise_registry tests
+# ===========================================================================
+
+
+@pytest.mark.asyncio
+async def test_get_enterprise_registry_returns_registry():
+    """get_enterprise_registry returns an EnterpriseSessionRegistry."""
+    mock_registry = MagicMock(spec=EnterpriseSessionRegistry)
+    context = MockContext(
+        {
+            "session_registry_manager": create_mock_session_registry_manager(mock_registry),
+            "config_manager": MagicMock(),
+        }
+    )
+    result = await get_enterprise_registry(context)
+    assert result is mock_registry
+
+
+@pytest.mark.asyncio
+async def test_get_enterprise_registry_raises_on_wrong_type():
+    """get_enterprise_registry raises InternalError when registry is not an EnterpriseSessionRegistry."""
+    mock_registry = MagicMock(spec=CommunitySessionRegistry)
+    context = MockContext(
+        {
+            "session_registry_manager": create_mock_session_registry_manager(mock_registry),
+            "config_manager": MagicMock(),
+        }
+    )
+    with pytest.raises(InternalError, match="EnterpriseSessionRegistry"):
+        await get_enterprise_registry(context)
+
+
+# ===========================================================================
+# get_registry_from_context tests
+# ===========================================================================
+
+
+@pytest.mark.asyncio
+async def test_get_registry_from_context_returns_registry():
+    """get_registry_from_context returns the registry from session_registry_manager."""
+    mock_registry = MagicMock()
+    mock_session_manager = create_mock_session_registry_manager(mock_registry)
+    context = MockContext(
+        {
+            "session_registry_manager": mock_session_manager,
+            "config_manager": MagicMock(),
+        }
+    )
+    result = await get_registry_from_context(context)
+    assert result is mock_registry
+    mock_session_manager.get_or_create_registry.assert_awaited_once_with(
+        "test-mcp-session-id", context.request_context.lifespan_context["config_manager"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_registry_from_context_raises_when_no_session_id():
+    """get_registry_from_context raises InternalError when mcp-session-id header absent."""
+
+    class MockRequestContextNoHeader:
+        request = None
+        lifespan_context = {
+            "session_registry_manager": create_mock_session_registry_manager(),
+            "config_manager": MagicMock(),
+        }
+
+    class MockContextNoHeader:
+        request_context = MockRequestContextNoHeader()
+
+    with pytest.raises(InternalError):
+        await get_registry_from_context(MockContextNoHeader())
+
+
+# ===========================================================================
 # get_session_from_context tests
 # ===========================================================================
 
@@ -105,7 +276,12 @@ async def test_get_session_from_context_success():
     mock_registry = MagicMock()
     mock_registry.get = AsyncMock(return_value=mock_session_manager)
 
-    context = MockContext({"session_registry": mock_registry})
+    context = MockContext(
+        {
+            "session_registry_manager": create_mock_session_registry_manager(mock_registry),
+            "config_manager": MagicMock(),
+        }
+    )
 
     result = await get_session_from_context("test_function", context, "test:session:id")
 
@@ -124,7 +300,12 @@ async def test_get_session_from_context_session_not_found():
         )
     )
 
-    context = MockContext({"session_registry": mock_registry})
+    context = MockContext(
+        {
+            "session_registry_manager": create_mock_session_registry_manager(mock_registry),
+            "config_manager": MagicMock(),
+        }
+    )
 
     with pytest.raises(RegistryItemNotFoundError, match="No item with name"):
         await get_session_from_context("test_function", context, "nonexistent:session")
@@ -138,7 +319,12 @@ async def test_get_session_from_context_keyerror_still_propagates():
     mock_registry = MagicMock()
     mock_registry.get = AsyncMock(side_effect=KeyError("Session not found"))
 
-    context = MockContext({"session_registry": mock_registry})
+    context = MockContext(
+        {
+            "session_registry_manager": create_mock_session_registry_manager(mock_registry),
+            "config_manager": MagicMock(),
+        }
+    )
 
     with pytest.raises(KeyError, match="Session not found"):
         await get_session_from_context("test_function", context, "nonexistent:session")
@@ -154,7 +340,12 @@ async def test_get_session_from_context_session_connection_fails():
     mock_registry = MagicMock()
     mock_registry.get = AsyncMock(return_value=mock_session_manager)
 
-    context = MockContext({"session_registry": mock_registry})
+    context = MockContext(
+        {
+            "session_registry_manager": create_mock_session_registry_manager(mock_registry),
+            "config_manager": MagicMock(),
+        }
+    )
 
     with pytest.raises(Exception, match="Failed to establish connection"):
         await get_session_from_context("test_function", context, "test:session:id")
@@ -207,7 +398,12 @@ async def test_get_enterprise_session_success():
     mock_registry = MagicMock()
     mock_registry.get = AsyncMock(return_value=mock_session_manager)
 
-    context = MockContext({"session_registry": mock_registry})
+    context = MockContext(
+        {
+            "session_registry_manager": create_mock_session_registry_manager(mock_registry),
+            "config_manager": MagicMock(),
+        }
+    )
 
     session, error = await get_enterprise_session(
         "test_function", context, "test-session-id"
@@ -226,7 +422,12 @@ async def test_get_enterprise_session_not_enterprise():
     mock_registry = MagicMock()
     mock_registry.get = AsyncMock(return_value=mock_session_manager)
 
-    context = MockContext({"session_registry": mock_registry})
+    context = MockContext(
+        {
+            "session_registry_manager": create_mock_session_registry_manager(mock_registry),
+            "config_manager": MagicMock(),
+        }
+    )
 
     session, error = await get_enterprise_session(
         "test_function", context, "test-session-id"
@@ -246,7 +447,12 @@ async def test_get_enterprise_session_exception():
     mock_registry = MagicMock()
     mock_registry.get = AsyncMock(side_effect=Exception("connection refused"))
 
-    context = MockContext({"session_registry": mock_registry})
+    context = MockContext(
+        {
+            "session_registry_manager": create_mock_session_registry_manager(mock_registry),
+            "config_manager": MagicMock(),
+        }
+    )
 
     session, error = await get_enterprise_session(
         "test_function", context, "test-session-id"

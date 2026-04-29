@@ -37,17 +37,9 @@ Enterprise refresh is a four-phase operation:
 
 import asyncio
 import logging
-import sys
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from typing_extensions import override  # pragma: no cover
-elif sys.version_info >= (3, 12):
-    from typing import override  # pragma: no cover
-else:
-    from typing_extensions import override  # pragma: no cover
+from typing import TYPE_CHECKING, override
 
 from deephaven_mcp._exceptions import (
     InternalError,

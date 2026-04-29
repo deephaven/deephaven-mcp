@@ -169,6 +169,7 @@ __all__ = [
     "EnterpriseServerConfigManager",
     # Constants
     "CONFIG_ENV_VAR",
+    "DEFAULT_MCP_SESSION_IDLE_TIMEOUT_SECONDS",
     # Validators used by external callers
     "validate_enterprise_config",
     "validate_single_community_session_config",
@@ -192,6 +193,7 @@ from deephaven_mcp._exceptions import (
 from ._base import (
     CONFIG_ENV_VAR,
     ConfigManager,
+    DEFAULT_MCP_SESSION_IDLE_TIMEOUT_SECONDS,
 )
 from ._community import (
     CommunityServerConfigManager,

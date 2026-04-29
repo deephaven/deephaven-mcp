@@ -11,6 +11,7 @@ Concrete subclasses live in their respective modules:
 __all__ = [
     "ConfigManager",
     "CONFIG_ENV_VAR",
+    "DEFAULT_MCP_SESSION_IDLE_TIMEOUT_SECONDS",
 ]
 
 import abc
@@ -29,6 +30,14 @@ _LOGGER = logging.getLogger(__name__)
 
 CONFIG_ENV_VAR = "DH_MCP_CONFIG_FILE"
 """Name of the environment variable specifying the path to the Deephaven MCP config file."""
+
+DEFAULT_MCP_SESSION_IDLE_TIMEOUT_SECONDS: float = 3600.0
+"""Default MCP session idle timeout in seconds (1 hour).
+
+After this many seconds of inactivity from an MCP client, its per-session
+Deephaven registry is closed by the TTL sweeper.  Overridable per-server via the
+``mcp_session_idle_timeout_seconds`` config file key.
+"""
 
 
 class ConfigManager(abc.ABC):
@@ -83,6 +92,21 @@ class ConfigManager(abc.ABC):
         Subclasses must implement format-specific loading and validation.
         """
         ...
+
+    async def get_mcp_session_idle_timeout_seconds(self) -> float:
+        """Return the MCP session idle timeout in seconds.
+
+        Reads the optional ``mcp_session_idle_timeout_seconds`` key from the
+        loaded configuration and returns it as a float.  If the key is absent,
+        :data:`DEFAULT_MCP_SESSION_IDLE_TIMEOUT_SECONDS` is returned.
+
+        Returns:
+            float: Idle timeout in seconds.  Always positive.
+        """
+        config = await self.get_config()
+        return float(
+            config.get("mcp_session_idle_timeout_seconds", DEFAULT_MCP_SESSION_IDLE_TIMEOUT_SECONDS)
+        )
 
     @abc.abstractmethod
     async def _set_config_cache(self, config: dict[str, Any]) -> None:

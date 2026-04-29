@@ -75,6 +75,12 @@ from ._base import (
     _load_and_validate_config,
     _log_config_summary,
 )
+from ._validators import (
+    validate_optional_positive_number,
+    validate_optional_string_dict,
+    validate_optional_string_list,
+    validate_positive_number,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -647,44 +653,6 @@ def _validate_defaults_enum_fields(defaults: dict[str, Any]) -> None:
         )
 
 
-def _validate_positive_number(field_name: str, value: float | int) -> None:
-    """Validate a numeric field is positive.
-
-    Args:
-        field_name (str): Name of the field being validated.
-        value (float | int): Numeric value to check.
-
-    Raises:
-        CommunitySessionConfigurationError: If value is not positive (must be > 0).
-    """
-    if value <= 0:
-        _LOGGER.error(
-            f"[config:_validate_positive_number] '{field_name}' must be positive, got {value}"
-        )
-        raise CommunitySessionConfigurationError(
-            f"'{field_name}' must be positive, got {value}"
-        )
-
-
-def _validate_string_list(field_name: str, items: list) -> None:
-    """Validate a list contains only strings.
-
-    Args:
-        field_name (str): Name of the field being validated.
-        items (list): List to check.
-
-    Raises:
-        CommunitySessionConfigurationError: If list contains non-string items.
-    """
-    for i, item in enumerate(items):
-        if not isinstance(item, str):
-            _LOGGER.error(
-                f"[config:_validate_string_list] '{field_name}[{i}]' must be a string, got {type(item).__name__}"
-            )
-            raise CommunitySessionConfigurationError(
-                f"'{field_name}[{i}]' must be a string, got {type(item).__name__}"
-            )
-
 
 def _validate_defaults_numeric_ranges(defaults: dict[str, Any]) -> None:
     """Validate numeric defaults fields are within valid ranges.
@@ -696,32 +664,14 @@ def _validate_defaults_numeric_ranges(defaults: dict[str, Any]) -> None:
         defaults (dict[str, Any]): The defaults dictionary to validate.
 
     Raises:
-        CommunitySessionConfigurationError: If numeric value is out of range (not positive
-            for size/timeout fields, or negative for retry count).
+        ConfigurationError: If a size or timeout field is not positive.
+        CommunitySessionConfigurationError: If startup_retries is negative.
     """
-    if "heap_size_gb" in defaults:
-        _validate_positive_number("heap_size_gb", defaults["heap_size_gb"])
-
-    if (
-        "docker_memory_limit_gb" in defaults
-        and defaults["docker_memory_limit_gb"] is not None
-    ):
-        _validate_positive_number(
-            "docker_memory_limit_gb", defaults["docker_memory_limit_gb"]
-        )
-
-    if "docker_cpu_limit" in defaults and defaults["docker_cpu_limit"] is not None:
-        _validate_positive_number("docker_cpu_limit", defaults["docker_cpu_limit"])
-
-    if "startup_timeout_seconds" in defaults:
-        _validate_positive_number(
-            "startup_timeout_seconds", defaults["startup_timeout_seconds"]
-        )
-
-    if "startup_check_interval_seconds" in defaults:
-        _validate_positive_number(
-            "startup_check_interval_seconds", defaults["startup_check_interval_seconds"]
-        )
+    validate_optional_positive_number(defaults, "heap_size_gb")
+    validate_optional_positive_number(defaults, "docker_memory_limit_gb")
+    validate_optional_positive_number(defaults, "docker_cpu_limit")
+    validate_optional_positive_number(defaults, "startup_timeout_seconds")
+    validate_optional_positive_number(defaults, "startup_check_interval_seconds")
 
     if "startup_retries" in defaults:
         retries = defaults["startup_retries"]
@@ -744,32 +694,12 @@ def _validate_defaults_collection_contents(defaults: dict[str, Any]) -> None:
         defaults (dict[str, Any]): The defaults dictionary to validate.
 
     Raises:
-        CommunitySessionConfigurationError: If collection contents are invalid (non-string
-            items in lists, or non-string keys/values in environment_vars dict).
+        ConfigurationError: If collection contents are invalid (non-string items in lists,
+            or non-string keys/values in environment_vars dict).
     """
-    if "docker_volumes" in defaults:
-        _validate_string_list("docker_volumes", defaults["docker_volumes"])
-
-    if "extra_jvm_args" in defaults:
-        _validate_string_list("extra_jvm_args", defaults["extra_jvm_args"])
-
-    if "environment_vars" in defaults:
-        env_vars = defaults["environment_vars"]
-        for key, value in env_vars.items():
-            if not isinstance(key, str):
-                _LOGGER.error(
-                    f"[config:_validate_defaults_collection_contents] 'environment_vars' key must be a string, got {type(key).__name__}"
-                )
-                raise CommunitySessionConfigurationError(
-                    f"'environment_vars' key must be a string, got {type(key).__name__}"
-                )
-            if not isinstance(value, str):
-                _LOGGER.error(
-                    f"[config:_validate_defaults_collection_contents] 'environment_vars[{key}]' value must be a string, got {type(value).__name__}"
-                )
-                raise CommunitySessionConfigurationError(
-                    f"'environment_vars[{key}]' value must be a string, got {type(value).__name__}"
-                )
+    validate_optional_string_list(defaults, "docker_volumes")
+    validate_optional_string_list(defaults, "extra_jvm_args")
+    validate_optional_string_dict(defaults, "environment_vars")
 
 
 def _validate_session_creation_defaults(defaults: dict[str, Any]) -> None:
@@ -847,6 +777,11 @@ _SCHEMA_PATHS: dict[tuple[str, ...], _ConfigPathSpec] = {
         expected_type=dict,
         validator=validate_community_session_creation_config,
         redactor=redact_community_session_creation_config,
+    ),
+    ("mcp_session_idle_timeout_seconds",): _ConfigPathSpec(
+        required=False,
+        expected_type=(int, float),
+        validator=lambda v: validate_positive_number("mcp_session_idle_timeout_seconds", v),
     ),
 }
 
@@ -1044,11 +979,15 @@ def _validate_key_type_and_value(
 
     # Type validation
     if not isinstance(value, spec.expected_type):
+        if isinstance(spec.expected_type, tuple):
+            type_desc = " or ".join(t.__name__ for t in spec.expected_type)
+        else:
+            type_desc = spec.expected_type.__name__
         _LOGGER.error(
-            f"[config:_validate_community_config] Config path {current_path} must be of type {spec.expected_type.__name__}, got {type(value).__name__}"
+            f"[config:_validate_community_config] Config path {current_path} must be of type {type_desc}, got {type(value).__name__}"
         )
         raise ConfigurationError(
-            f"Config path {current_path} must be of type {spec.expected_type.__name__}, got {type(value).__name__}"
+            f"Config path {current_path} must be of type {type_desc}, got {type(value).__name__}"
         )
 
     # Specialized validation

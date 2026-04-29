@@ -46,8 +46,7 @@ Usage Note:
     wrap specific protobuf message types at runtime.
 """
 
-import sys
-from typing import TYPE_CHECKING, Any, NewType, cast
+from typing import TYPE_CHECKING, Any, NewType, cast, override
 
 from google.protobuf.json_format import MessageToDict, MessageToJson
 from google.protobuf.message import Message
@@ -56,11 +55,6 @@ if TYPE_CHECKING:
     import deephaven_enterprise.client.auth  # pragma: no cover
     import deephaven_enterprise.client.controller  # pragma: no cover
     import deephaven_enterprise.proto.controller  # pragma: no cover
-    from typing_extensions import override  # pragma: no cover
-elif sys.version_info >= (3, 12):
-    from typing import override  # pragma: no cover
-else:
-    from typing_extensions import override  # pragma: no cover
 
 from ._base import is_enterprise_available
 

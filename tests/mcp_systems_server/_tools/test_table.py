@@ -9,7 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
-from conftest import MockContext, create_mock_instance_tracker
+from conftest import MockContext, create_mock_instance_tracker, create_mock_session_registry_manager
 
 from deephaven_mcp import config
 from deephaven_mcp.mcp_systems_server._tools.table import (
@@ -52,7 +52,7 @@ async def test_session_tables_schema_empty_table_names():
     mock_session_manager = AsyncMock()
     mock_session_manager.get = AsyncMock(return_value=DummySession())
     session_registry.get = AsyncMock(return_value=mock_session_manager)
-    context = MockContext({"session_registry": session_registry})
+    context = MockContext({"config_manager": MagicMock(), "session_registry_manager": create_mock_session_registry_manager(registry=session_registry)})
     res = await session_tables_schema(context, session_id="worker", table_names=[])
     assert isinstance(res, dict)
     assert res == {"success": True, "schemas": [], "count": 0}
@@ -86,7 +86,7 @@ async def test_session_tables_schema_interface_contract():
 
     mock_get_meta_table = AsyncMock(return_value=MockArrowTable())
 
-    context = MockContext({"session_registry": session_registry})
+    context = MockContext({"config_manager": MagicMock(), "session_registry_manager": create_mock_session_registry_manager(registry=session_registry)})
 
     with patch("deephaven_mcp.queries.get_session_meta_table", mock_get_meta_table):
         result = await session_tables_schema(
@@ -146,7 +146,7 @@ async def test_session_tables_schema_no_tables():
     mock_session_manager = AsyncMock()
     mock_session_manager.get = AsyncMock(return_value=DummySession())
     session_registry.get = AsyncMock(return_value=mock_session_manager)
-    context = MockContext({"session_registry": session_registry})
+    context = MockContext({"config_manager": MagicMock(), "session_registry_manager": create_mock_session_registry_manager(registry=session_registry)})
     res = await session_tables_schema(context, session_id="worker", table_names=None)
     assert isinstance(res, dict)
     assert res == {"success": True, "schemas": [], "count": 0}
@@ -188,7 +188,8 @@ async def test_session_tables_schema_success():
 
     context = MockContext(
         {
-            "session_registry": session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=session_registry),
         }
     )
 
@@ -258,7 +259,8 @@ async def test_session_tables_schema_all_tables():
 
     context = MockContext(
         {
-            "session_registry": session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=session_registry),
         }
     )
 
@@ -321,7 +323,8 @@ async def test_session_tables_schema_schema_key_error():
 
     context = MockContext(
         {
-            "session_registry": session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=session_registry),
         }
     )
 
@@ -361,7 +364,8 @@ async def test_session_tables_schema_session_error():
 
     context = MockContext(
         {
-            "session_registry": session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=session_registry),
         }
     )
     res = await session_tables_schema(context, session_id="worker", table_names=["t1"])
@@ -387,7 +391,7 @@ async def test_session_tables_list_success_multiple_tables():
     session_registry = MagicMock()
     session_registry.get = AsyncMock(return_value=mock_session_manager)
 
-    context = MockContext({"session_registry": session_registry})
+    context = MockContext({"config_manager": MagicMock(), "session_registry_manager": create_mock_session_registry_manager(registry=session_registry)})
 
     # Call list_tables
     result = await session_tables_list(context, session_id="test-session")
@@ -420,7 +424,7 @@ async def test_session_tables_list_success_empty_session():
     session_registry = MagicMock()
     session_registry.get = AsyncMock(return_value=mock_session_manager)
 
-    context = MockContext({"session_registry": session_registry})
+    context = MockContext({"config_manager": MagicMock(), "session_registry_manager": create_mock_session_registry_manager(registry=session_registry)})
 
     # Call list_tables
     result = await session_tables_list(context, session_id="empty-session")
@@ -442,7 +446,7 @@ async def test_session_tables_list_invalid_session_id():
         side_effect=Exception("Session not found: invalid-session")
     )
 
-    context = MockContext({"session_registry": session_registry})
+    context = MockContext({"config_manager": MagicMock(), "session_registry_manager": create_mock_session_registry_manager(registry=session_registry)})
 
     # Call list_tables
     result = await session_tables_list(context, session_id="invalid-session")
@@ -464,7 +468,7 @@ async def test_session_tables_list_session_connection_failure():
     session_registry = MagicMock()
     session_registry.get = AsyncMock(return_value=mock_session_manager)
 
-    context = MockContext({"session_registry": session_registry})
+    context = MockContext({"config_manager": MagicMock(), "session_registry_manager": create_mock_session_registry_manager(registry=session_registry)})
 
     # Call list_tables
     result = await session_tables_list(context, session_id="test-session")
@@ -492,7 +496,7 @@ async def test_session_tables_list_session_tables_method_failure():
     session_registry = MagicMock()
     session_registry.get = AsyncMock(return_value=mock_session_manager)
 
-    context = MockContext({"session_registry": session_registry})
+    context = MockContext({"config_manager": MagicMock(), "session_registry_manager": create_mock_session_registry_manager(registry=session_registry)})
 
     # Call list_tables
     result = await session_tables_list(context, session_id="test-session")
@@ -520,7 +524,7 @@ async def test_session_tables_list_community_session():
     session_registry = MagicMock()
     session_registry.get = AsyncMock(return_value=mock_session_manager)
 
-    context = MockContext({"session_registry": session_registry})
+    context = MockContext({"config_manager": MagicMock(), "session_registry_manager": create_mock_session_registry_manager(registry=session_registry)})
 
     # Call list_tables
     result = await session_tables_list(context, session_id="community:local:test")
@@ -544,7 +548,7 @@ async def test_session_table_data_success_default_params():
     mock_registry.get = AsyncMock(return_value=mock_session_manager)
     mock_session_manager.get = AsyncMock(return_value=mock_session)
 
-    context = MockContext({"session_registry": mock_registry})
+    context = MockContext({"config_manager": MagicMock(), "session_registry_manager": create_mock_session_registry_manager(registry=mock_registry)})
 
     # Mock arrow table (small size to trigger markdown-kv format)
     mock_arrow_table = MagicMock()
@@ -602,7 +606,7 @@ async def test_session_table_data_success_custom_params():
     mock_registry.get = AsyncMock(return_value=mock_session_manager)
     mock_session_manager.get = AsyncMock(return_value=mock_session)
 
-    context = MockContext({"session_registry": mock_registry})
+    context = MockContext({"config_manager": MagicMock(), "session_registry_manager": create_mock_session_registry_manager(registry=mock_registry)})
 
     # Mock arrow table
     mock_arrow_table = MagicMock()
@@ -641,7 +645,7 @@ async def test_session_table_data_success_full_table():
     mock_registry.get = AsyncMock(return_value=mock_session_manager)
     mock_session_manager.get = AsyncMock(return_value=mock_session)
 
-    context = MockContext({"session_registry": mock_registry})
+    context = MockContext({"config_manager": MagicMock(), "session_registry_manager": create_mock_session_registry_manager(registry=mock_registry)})
 
     # Mock arrow table (large size to trigger CSV format)
     mock_arrow_table = MagicMock()
@@ -689,7 +693,7 @@ async def test_session_table_data_invalid_format():
     mock_registry.get = AsyncMock(return_value=mock_session_manager)
     mock_session_manager.get = AsyncMock(return_value=mock_session)
 
-    context = MockContext({"session_registry": mock_registry})
+    context = MockContext({"config_manager": MagicMock(), "session_registry_manager": create_mock_session_registry_manager(registry=mock_registry)})
 
     # Mock arrow table
     mock_arrow_table = MagicMock()
@@ -723,7 +727,7 @@ async def test_session_table_data_size_limit_exceeded():
     mock_registry.get = AsyncMock(return_value=mock_session_manager)
     mock_session_manager.get = AsyncMock(return_value=mock_session)
 
-    context = MockContext({"session_registry": mock_registry})
+    context = MockContext({"config_manager": MagicMock(), "session_registry_manager": create_mock_session_registry_manager(registry=mock_registry)})
 
     # Test values to trigger size limit (large table * many columns = large estimated size)
     large_row_count = 1_000_000  # Large number of rows to trigger size limit
@@ -752,7 +756,7 @@ async def test_session_table_data_session_not_found():
     mock_registry = MagicMock()
     mock_registry.get = AsyncMock(side_effect=Exception("Session not found"))
 
-    context = MockContext({"session_registry": mock_registry})
+    context = MockContext({"config_manager": MagicMock(), "session_registry_manager": create_mock_session_registry_manager(registry=mock_registry)})
 
     result = await session_table_data(context, "invalid_session", "table1")
 
@@ -771,7 +775,7 @@ async def test_session_table_data_table_not_found():
     mock_registry.get = AsyncMock(return_value=mock_session_manager)
     mock_session_manager.get = AsyncMock(return_value=mock_session)
 
-    context = MockContext({"session_registry": mock_registry})
+    context = MockContext({"config_manager": MagicMock(), "session_registry_manager": create_mock_session_registry_manager(registry=mock_registry)})
 
     with patch(
         "deephaven_mcp.mcp_systems_server._tools.table.queries.get_table"

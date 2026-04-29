@@ -29,8 +29,14 @@ from deephaven_mcp.config import (
     EnterpriseServerConfigManager,
 )
 from deephaven_mcp.mcp_systems_server._lifespan import (
+    LifespanContext,
     make_community_lifespan,
     make_enterprise_lifespan,
+)
+from deephaven_mcp.mcp_systems_server._session_registry_manager import SessionRegistryManager
+from deephaven_mcp.resource_manager import (
+    CommunitySessionRegistry,
+    EnterpriseSessionRegistry,
 )
 from deephaven_mcp.mcp_systems_server._tools import (
     catalog,
@@ -116,6 +122,13 @@ def _register_shared_tools(server: FastMCP) -> None:
         module.register_tools(server)
 
 
+def _read_idle_timeout(config_path: str | None, config_manager_class: type) -> float:
+    """Read mcp_session_idle_timeout_seconds from config."""
+    return asyncio.run(
+        config_manager_class(config_path=config_path).get_mcp_session_idle_timeout_seconds()
+    )
+
+
 def _validate_config_or_exit(
     config_path: str | None, config_manager_class: type, label: str
 ) -> None:
@@ -141,9 +154,14 @@ def enterprise() -> None:
         f"config={config_path!r}"
     )
     _validate_config_or_exit(config_path, EnterpriseServerConfigManager, "enterprise")
-    server = FastMCP(
+    idle_timeout = _read_idle_timeout(config_path, EnterpriseServerConfigManager)
+    session_registry_manager: SessionRegistryManager[EnterpriseSessionRegistry] = SessionRegistryManager(
+        registry_class=EnterpriseSessionRegistry,
+        idle_timeout_seconds=idle_timeout,
+    )
+    server: FastMCP[LifespanContext[EnterpriseSessionRegistry]] = FastMCP(
         "deephaven-mcp-enterprise",
-        lifespan=make_enterprise_lifespan(config_path),
+        lifespan=make_enterprise_lifespan(session_registry_manager, config_path),
         host=host,
         port=port,
     )
@@ -174,9 +192,14 @@ def community() -> None:
         f"config={config_path!r}"
     )
     _validate_config_or_exit(config_path, CommunityServerConfigManager, "community")
-    server = FastMCP(
+    idle_timeout = _read_idle_timeout(config_path, CommunityServerConfigManager)
+    session_registry_manager: SessionRegistryManager[CommunitySessionRegistry] = SessionRegistryManager(
+        registry_class=CommunitySessionRegistry,
+        idle_timeout_seconds=idle_timeout,
+    )
+    server: FastMCP[LifespanContext[CommunitySessionRegistry]] = FastMCP(
         "deephaven-mcp-community",
-        lifespan=make_community_lifespan(config_path),
+        lifespan=make_community_lifespan(session_registry_manager, config_path),
         host=host,
         port=port,
     )

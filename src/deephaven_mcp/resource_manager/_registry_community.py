@@ -6,12 +6,7 @@ community sessions from configuration and supports dynamic session mutation
 """
 
 import logging
-import sys
-
-if sys.version_info >= (3, 12):
-    from typing import override  # pragma: no cover
-else:
-    from typing_extensions import override  # pragma: no cover
+from typing import override
 
 from deephaven_mcp import config
 

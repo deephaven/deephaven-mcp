@@ -42,6 +42,7 @@ from ._base import (
     _load_and_validate_config,
     _log_config_summary,
 )
+from ._validators import validate_optional_positive_number
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -67,6 +68,10 @@ _OPTIONAL_ENTERPRISE_SYSTEM_FIELDS: dict[str, type | tuple[type, ...]] = {
         int,
         float,
     ),  # Optional timeout in seconds for initial connection
+    "mcp_session_idle_timeout_seconds": (
+        int,
+        float,
+    ),  # Optional idle timeout in seconds for MCP session Deephaven connections
 }
 """Optional fields that can be included in enterprise system configurations."""
 
@@ -204,7 +209,8 @@ def validate_enterprise_config(config: Any) -> dict[str, Any]:
         system_name, config, auth_type, all_allowed_fields
     )
     _validate_enterprise_system_auth_type_logic(system_name, config, auth_type)
-    _validate_enterprise_system_connection_timeout(system_name, config)
+    validate_optional_positive_number(config, "connection_timeout")
+    validate_optional_positive_number(config, "mcp_session_idle_timeout_seconds")
     _validate_enterprise_system_session_creation(system_name, config)
     _LOGGER.debug(
         f"[config:validate_enterprise_config] Enterprise system '{system_name}' validation passed"
@@ -457,40 +463,6 @@ def _validate_enterprise_system_auth_type_logic(
             msg = f"Enterprise system '{system_name}' with auth_type 'private_key' must define 'private_key_path'."
             _LOGGER.error(f"[config:_validate_enterprise_system_auth_type_logic] {msg}")
             raise EnterpriseSystemConfigurationError(msg)
-
-
-def _validate_enterprise_system_connection_timeout(
-    system_name: str, config: dict[str, Any]
-) -> None:
-    """Validate the optional connection_timeout configuration field.
-
-    Validates that if connection_timeout is specified, it is a positive number
-    (int or float, but not bool). A timeout of 0 or negative values are invalid.
-
-    Args:
-        system_name (str): The name of the enterprise system being validated.
-        config (dict[str, Any]): The configuration dictionary for the system.
-
-    Raises:
-        EnterpriseSystemConfigurationError: If connection_timeout is present but
-            not a positive number (int or float > 0), or if it's a bool.
-    """
-    if "connection_timeout" not in config:
-        return  # Field is optional
-
-    timeout = config["connection_timeout"]
-
-    # Validate type (reject bool even though it's technically a subclass of int)
-    if isinstance(timeout, bool) or not isinstance(timeout, int | float):
-        msg = f"'connection_timeout' for enterprise system '{system_name}' must be a number (int or float), but got {type(timeout).__name__}."
-        _LOGGER.error(f"[config:_validate_enterprise_system_connection_timeout] {msg}")
-        raise EnterpriseSystemConfigurationError(msg)
-
-    # Validate value is positive
-    if timeout <= 0:
-        msg = f"'connection_timeout' for enterprise system '{system_name}' must be positive, but got {timeout}."
-        _LOGGER.error(f"[config:_validate_enterprise_system_connection_timeout] {msg}")
-        raise EnterpriseSystemConfigurationError(msg)
 
 
 def _validate_enterprise_system_session_creation(

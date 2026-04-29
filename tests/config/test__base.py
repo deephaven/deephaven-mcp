@@ -10,6 +10,7 @@ import pytest
 from deephaven_mcp._exceptions import ConfigurationError
 from deephaven_mcp.config._base import (
     CONFIG_ENV_VAR,
+    DEFAULT_MCP_SESSION_IDLE_TIMEOUT_SECONDS,
     ConfigManager,
     _get_config_path,
     _load_and_validate_config,
@@ -98,6 +99,57 @@ async def test_config_manager_clear_cache():
     mgr._cache = {"key": "value"}
     await mgr.clear_config_cache()
     assert mgr._cache is None
+
+
+@pytest.mark.asyncio
+async def test_get_mcp_session_idle_timeout_default():
+    """get_mcp_session_idle_timeout_seconds returns DEFAULT_MCP_SESSION_IDLE_TIMEOUT_SECONDS when key is absent."""
+
+    class Concrete(ConfigManager):
+        async def get_config(self):
+            return {}
+
+        async def _set_config_cache(self, config):
+            pass
+
+    mgr = Concrete()
+    result = await mgr.get_mcp_session_idle_timeout_seconds()
+    assert result == DEFAULT_MCP_SESSION_IDLE_TIMEOUT_SECONDS
+    assert isinstance(result, float)
+
+
+@pytest.mark.asyncio
+async def test_get_mcp_session_idle_timeout_from_config():
+    """get_mcp_session_idle_timeout_seconds returns the configured value."""
+
+    class Concrete(ConfigManager):
+        async def get_config(self):
+            return {"mcp_session_idle_timeout_seconds": 600}
+
+        async def _set_config_cache(self, config):
+            pass
+
+    mgr = Concrete()
+    result = await mgr.get_mcp_session_idle_timeout_seconds()
+    assert result == 600.0
+    assert isinstance(result, float)
+
+
+@pytest.mark.asyncio
+async def test_get_mcp_session_idle_timeout_float_passthrough():
+    """get_mcp_session_idle_timeout_seconds coerces int to float."""
+
+    class Concrete(ConfigManager):
+        async def get_config(self):
+            return {"mcp_session_idle_timeout_seconds": 300.5}
+
+        async def _set_config_cache(self, config):
+            pass
+
+    mgr = Concrete()
+    result = await mgr.get_mcp_session_idle_timeout_seconds()
+    assert result == 300.5
+
 
 
 @pytest.mark.asyncio

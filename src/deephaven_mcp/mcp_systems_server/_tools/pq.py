@@ -32,10 +32,12 @@ from deephaven_mcp.client._protobuf import (
     CorePlusQueryState,
     CorePlusQueryStatus,
 )
-from deephaven_mcp.mcp_systems_server._tools.shared import redact_json_sensitive_fields
+from deephaven_mcp.mcp_systems_server._tools.shared import (
+    get_enterprise_registry,
+    redact_json_sensitive_fields,
+)
 from deephaven_mcp.resource_manager import (
     BaseItemManager,
-    EnterpriseSessionRegistry,
     SystemType,
 )
 
@@ -720,9 +722,7 @@ async def _setup_batch_pq_operation(
         # Type narrowing: all returned values except error are non-None here
     """
     # Get session registry and system name first (needed for pq_id validation)
-    session_registry: EnterpriseSessionRegistry = (
-        context.request_context.lifespan_context["session_registry"]
-    )
+    session_registry = await get_enterprise_registry(context)
     system_name = session_registry.system_name
 
     # Validate parameters
@@ -925,9 +925,7 @@ async def pq_name_to_id(
 
     try:
         # Get session registry, system name, and factory
-        session_registry: EnterpriseSessionRegistry = (
-            context.request_context.lifespan_context["session_registry"]
-        )
+        session_registry = await get_enterprise_registry(context)
         system_name = session_registry.system_name
         _LOGGER.info(
             f"[mcp_systems_server:pq_name_to_id] Invoked: system_name={system_name!r}, pq_name={pq_name!r}"
@@ -1065,9 +1063,7 @@ async def pq_list(
 
     try:
         # Get session registry, system name, and factory
-        session_registry: EnterpriseSessionRegistry = (
-            context.request_context.lifespan_context["session_registry"]
-        )
+        session_registry = await get_enterprise_registry(context)
         system_name = session_registry.system_name
         _LOGGER.info(
             f"[mcp_systems_server:pq_list] Invoked: system_name={system_name!r}"
@@ -1350,9 +1346,7 @@ async def pq_details(
 
     try:
         # Get session registry and system name first (needed for pq_id validation)
-        session_registry: EnterpriseSessionRegistry = (
-            context.request_context.lifespan_context["session_registry"]
-        )
+        session_registry = await get_enterprise_registry(context)
         system_name = session_registry.system_name
 
         # Early validation: parse pq_id to fail fast on invalid format
@@ -1617,9 +1611,7 @@ async def pq_create(
             return result
 
         # Get session registry, system name, and factory
-        session_registry: EnterpriseSessionRegistry = (
-            context.request_context.lifespan_context["session_registry"]
-        )
+        session_registry = await get_enterprise_registry(context)
         system_name = session_registry.system_name
         _LOGGER.info(
             f"[mcp_systems_server:pq_create] Invoked: system_name={system_name!r}, "
@@ -2334,9 +2326,7 @@ async def pq_modify(
             return result
 
         # Get session registry and system name first (needed for pq_id validation)
-        session_registry: EnterpriseSessionRegistry = (
-            context.request_context.lifespan_context["session_registry"]
-        )
+        session_registry = await get_enterprise_registry(context)
         system_name = session_registry.system_name
 
         # Parse pq_id to get serial

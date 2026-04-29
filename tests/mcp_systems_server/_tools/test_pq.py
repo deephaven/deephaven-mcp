@@ -10,7 +10,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
-from conftest import MockContext, create_mock_instance_tracker
+from conftest import MockContext, create_mock_instance_tracker, create_mock_session_registry_manager
 
 
 # Test-specific helper functions (only used in this file)
@@ -166,6 +166,7 @@ from deephaven_mcp.resource_manager import (
     DockerLaunchedSession,
     DynamicCommunitySessionManager,
     EnterpriseSessionManager,
+    EnterpriseSessionRegistry,
     PythonLaunchedSession,
     ResourceLivenessStatus,
     SystemType,
@@ -177,7 +178,7 @@ _TEST_SYSTEM_NAME = "system"
 @pytest.mark.asyncio
 async def test_pq_name_to_id_success():
     """Test successful PQ name to ID conversion."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
     mock_factory = MagicMock()
@@ -191,7 +192,8 @@ async def test_pq_name_to_id_success():
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -208,7 +210,7 @@ async def test_pq_name_to_id_success():
 @pytest.mark.asyncio
 async def test_pq_name_to_id_not_found():
     """Test pq_name_to_id when PQ name not found."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
     mock_factory = MagicMock()
@@ -224,7 +226,8 @@ async def test_pq_name_to_id_not_found():
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -238,7 +241,7 @@ async def test_pq_name_to_id_not_found():
 @pytest.mark.asyncio
 async def test_pq_name_to_id_connection_failed():
     """Test pq_name_to_id when factory connection fails."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
 
@@ -247,7 +250,8 @@ async def test_pq_name_to_id_connection_failed():
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -260,7 +264,7 @@ async def test_pq_name_to_id_connection_failed():
 @pytest.mark.asyncio
 async def test_pq_name_to_id_exception():
     """Test pq_name_to_id when exception occurs."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
 
@@ -269,7 +273,8 @@ async def test_pq_name_to_id_exception():
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -646,7 +651,7 @@ def test_format_pq_config_long_min_value_sentinel(mock_restart_enum):
 @pytest.mark.asyncio
 async def test_pq_restart_multiple():
     """Test pq_restart with multiple PQs."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
     mock_factory = MagicMock()
@@ -664,7 +669,8 @@ async def test_pq_restart_multiple():
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -694,7 +700,7 @@ async def test_pq_restart_multiple():
 @pytest.mark.asyncio
 async def test_pq_restart_partial_failure():
     """Test pq_restart with one success and one failure."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
     mock_factory = MagicMock()
@@ -715,7 +721,8 @@ async def test_pq_restart_partial_failure():
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -744,7 +751,7 @@ async def test_pq_restart_partial_failure():
 @pytest.mark.asyncio
 async def test_pq_delete_partial_failure():
     """Test pq_delete with one success and one failure."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
     mock_factory = MagicMock()
@@ -775,7 +782,8 @@ async def test_pq_delete_partial_failure():
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -801,7 +809,7 @@ async def test_pq_delete_partial_failure():
 @pytest.mark.asyncio
 async def test_pq_start_partial_failure():
     """Test pq_start with one success and one failure."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
     mock_factory = MagicMock()
@@ -831,7 +839,8 @@ async def test_pq_start_partial_failure():
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -861,7 +870,7 @@ async def test_pq_start_partial_failure():
 @pytest.mark.asyncio
 async def test_pq_stop_partial_failure():
     """Test pq_stop with one success and one failure."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
     mock_factory = MagicMock()
@@ -882,7 +891,8 @@ async def test_pq_stop_partial_failure():
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -1753,7 +1763,7 @@ def test_format_pq_spares_filters_none():
 @pytest.mark.asyncio
 async def test_pq_list_success():
     """Test successful PQ listing."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
     mock_factory = MagicMock()
@@ -1773,7 +1783,8 @@ async def test_pq_list_success():
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -1829,7 +1840,7 @@ async def test_pq_list_success():
 @pytest.mark.asyncio
 async def test_pq_list_connection_failed():
     """Test pq_list when factory connection fails."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
 
@@ -1838,7 +1849,8 @@ async def test_pq_list_connection_failed():
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -1851,7 +1863,7 @@ async def test_pq_list_connection_failed():
 @pytest.mark.asyncio
 async def test_pq_list_exception():
     """Test pq_list when exception occurs."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
 
@@ -1860,7 +1872,8 @@ async def test_pq_list_exception():
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -1884,7 +1897,7 @@ async def test_pq_details_success_by_name(mock_exported_enum, mock_restart_enum)
         x, f"EOT_UNKNOWN_{x}"
     )
 
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
     mock_factory = MagicMock()
@@ -1901,7 +1914,8 @@ async def test_pq_details_success_by_name(mock_exported_enum, mock_restart_enum)
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -2001,7 +2015,7 @@ async def test_pq_details_success_by_name(mock_exported_enum, mock_restart_enum)
 @pytest.mark.asyncio
 async def test_pq_details_success_by_serial():
     """Test successful PQ details retrieval for stopped PQ."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
     mock_factory = MagicMock()
@@ -2018,7 +2032,8 @@ async def test_pq_details_success_by_serial():
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -2036,7 +2051,7 @@ async def test_pq_details_success_by_serial():
 @pytest.mark.asyncio
 async def test_pq_details_not_found():
     """Test pq_details when PQ not found."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
     mock_factory = MagicMock()
@@ -2052,7 +2067,8 @@ async def test_pq_details_not_found():
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -2065,12 +2081,13 @@ async def test_pq_details_not_found():
 @pytest.mark.asyncio
 async def test_pq_details_invalid_pq_id():
     """Test pq_details with invalid pq_id format."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -2084,7 +2101,7 @@ async def test_pq_details_invalid_pq_id():
 @pytest.mark.asyncio
 async def test_pq_details_connection_failed():
     """Test pq_details when factory connection fails."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
 
@@ -2093,7 +2110,8 @@ async def test_pq_details_connection_failed():
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -2106,7 +2124,7 @@ async def test_pq_details_connection_failed():
 @pytest.mark.asyncio
 async def test_pq_details_exception():
     """Test pq_details when exception occurs."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
 
@@ -2115,7 +2133,8 @@ async def test_pq_details_exception():
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -2129,7 +2148,7 @@ async def test_pq_details_exception():
 @pytest.mark.asyncio
 async def test_pq_details_not_found_by_serial():
     """Test pq_details when PQ not found by serial."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
     mock_factory = MagicMock()
@@ -2145,7 +2164,8 @@ async def test_pq_details_not_found_by_serial():
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -2158,7 +2178,7 @@ async def test_pq_details_not_found_by_serial():
 @pytest.mark.asyncio
 async def test_pq_create_success():
     """Test successful PQ creation."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
     mock_factory = MagicMock()
@@ -2177,7 +2197,8 @@ async def test_pq_create_success():
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -2198,7 +2219,7 @@ async def test_pq_create_success():
 @pytest.mark.asyncio
 async def test_pq_create_success_groovy():
     """Test successful PQ creation with Groovy programming language."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
     mock_factory = MagicMock()
@@ -2217,7 +2238,8 @@ async def test_pq_create_success_groovy():
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -2239,7 +2261,7 @@ async def test_pq_create_success_groovy():
 @pytest.mark.asyncio
 async def test_pq_create_invalid_language():
     """Test pq_create with invalid programming language."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
     mock_factory = MagicMock()
@@ -2249,7 +2271,10 @@ async def test_pq_create_invalid_language():
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
 
-    context = MockContext({"session_registry": mock_session_registry})
+    context = MockContext({
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
+        })
 
     result = await pq_create(
         context,
@@ -2266,7 +2291,7 @@ async def test_pq_create_invalid_language():
 @pytest.mark.asyncio
 async def test_pq_create_connection_failed():
     """Test pq_create when factory connection fails."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
 
@@ -2275,7 +2300,8 @@ async def test_pq_create_connection_failed():
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -2288,7 +2314,7 @@ async def test_pq_create_connection_failed():
 @pytest.mark.asyncio
 async def test_pq_create_exception():
     """Test pq_create when exception occurs."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
 
@@ -2297,7 +2323,8 @@ async def test_pq_create_exception():
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -2362,7 +2389,7 @@ def test_validate_and_parse_pq_ids_invalid_format():
 @pytest.mark.asyncio
 async def test_pq_delete_success_by_name():
     """Test successful PQ deletion using pq_id."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
     mock_factory = MagicMock()
@@ -2380,7 +2407,8 @@ async def test_pq_delete_success_by_name():
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -2405,7 +2433,7 @@ async def test_pq_delete_success_by_name():
 @pytest.mark.asyncio
 async def test_pq_delete_success_custom_timeout():
     """Test successful PQ deletion with custom timeout."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
     mock_factory = MagicMock()
@@ -2423,7 +2451,8 @@ async def test_pq_delete_success_custom_timeout():
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -2444,12 +2473,13 @@ async def test_pq_delete_success_custom_timeout():
 @pytest.mark.asyncio
 async def test_pq_delete_invalid_pq_id():
     """Test pq_delete with invalid pq_id format."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -2463,7 +2493,7 @@ async def test_pq_delete_invalid_pq_id():
 @pytest.mark.asyncio
 async def test_pq_delete_connection_failed():
     """Test pq_delete when factory connection fails."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
 
@@ -2472,7 +2502,8 @@ async def test_pq_delete_connection_failed():
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -2485,7 +2516,7 @@ async def test_pq_delete_connection_failed():
 @pytest.mark.asyncio
 async def test_pq_delete_exception():
     """Test pq_delete when exception occurs."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
 
@@ -2494,7 +2525,8 @@ async def test_pq_delete_exception():
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -2508,7 +2540,7 @@ async def test_pq_delete_exception():
 @pytest.mark.asyncio
 async def test_pq_delete_multiple():
     """Test successful deletion of multiple PQs."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
     mock_factory = MagicMock()
@@ -2528,7 +2560,8 @@ async def test_pq_delete_multiple():
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -2562,12 +2595,13 @@ async def test_pq_delete_multiple():
 @pytest.mark.asyncio
 async def test_pq_delete_different_systems_error():
     """Test error when trying to delete PQs with invalid pq_id system names."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -2584,12 +2618,13 @@ async def test_pq_delete_different_systems_error():
 @pytest.mark.asyncio
 async def test_pq_delete_empty_list():
     """Test error when trying to delete with empty pq_id list."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -2604,9 +2639,12 @@ async def test_pq_delete_empty_list():
 @pytest.mark.asyncio
 async def test_pq_delete_negative_timeout():
     """Test pq_delete with negative timeout triggers validation error."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
-    context = MockContext({"session_registry": mock_session_registry})
+    context = MockContext({
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
+        })
 
     result = await pq_delete(context, "enterprise:system:12345", timeout_seconds=-1)
 
@@ -2619,9 +2657,12 @@ async def test_pq_delete_negative_timeout():
 @pytest.mark.asyncio
 async def test_pq_delete_zero_max_concurrent():
     """Test pq_delete with max_concurrent=0 triggers validation error."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
-    context = MockContext({"session_registry": mock_session_registry})
+    context = MockContext({
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
+        })
 
     result = await pq_delete(context, "enterprise:system:12345", max_concurrent=0)
 
@@ -2634,7 +2675,7 @@ async def test_pq_delete_zero_max_concurrent():
 @pytest.mark.asyncio
 async def test_pq_modify_success():
     """Test successful PQ modification without restart."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
     mock_factory = MagicMock()
@@ -2655,7 +2696,8 @@ async def test_pq_modify_success():
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -2691,7 +2733,7 @@ async def test_pq_modify_success():
 @pytest.mark.asyncio
 async def test_pq_modify_with_restart():
     """Test successful PQ modification with restart."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
     mock_factory = MagicMock()
@@ -2710,7 +2752,8 @@ async def test_pq_modify_with_restart():
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -2741,7 +2784,7 @@ async def test_pq_modify_with_restart():
 @pytest.mark.asyncio
 async def test_pq_modify_script_body_running_no_restart_warns():
     """Test that modifying script_body on a RUNNING PQ without restart produces a warning."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
     mock_factory = MagicMock()
@@ -2755,7 +2798,10 @@ async def test_pq_modify_script_body_running_no_restart_warns():
     mock_controller.map = AsyncMock(return_value={12345: current_pq_info})
     mock_controller.modify_query = AsyncMock()
 
-    context = MockContext({"session_registry": mock_session_registry})
+    context = MockContext({
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
+        })
 
     result = await pq_modify(
         context,
@@ -2774,7 +2820,7 @@ async def test_pq_modify_script_body_running_no_restart_warns():
 @pytest.mark.asyncio
 async def test_pq_modify_stopped_pq_no_warning():
     """Test that modifying script_body on a STOPPED PQ without restart produces no warning."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
     mock_factory = MagicMock()
@@ -2788,7 +2834,10 @@ async def test_pq_modify_stopped_pq_no_warning():
     mock_controller.map = AsyncMock(return_value={12345: current_pq_info})
     mock_controller.modify_query = AsyncMock()
 
-    context = MockContext({"session_registry": mock_session_registry})
+    context = MockContext({
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
+        })
 
     result = await pq_modify(
         context,
@@ -2805,7 +2854,7 @@ async def test_pq_modify_stopped_pq_no_warning():
 @pytest.mark.asyncio
 async def test_pq_modify_metadata_only_no_warning():
     """Test that modifying only metadata (pq_name) on a RUNNING PQ produces no warning."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
     mock_factory = MagicMock()
@@ -2819,7 +2868,10 @@ async def test_pq_modify_metadata_only_no_warning():
     mock_controller.map = AsyncMock(return_value={12345: current_pq_info})
     mock_controller.modify_query = AsyncMock()
 
-    context = MockContext({"session_registry": mock_session_registry})
+    context = MockContext({
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
+        })
 
     result = await pq_modify(
         context,
@@ -2836,7 +2888,7 @@ async def test_pq_modify_metadata_only_no_warning():
 @pytest.mark.asyncio
 async def test_pq_modify_running_with_restart_no_warning():
     """Test that modifying script on a RUNNING PQ with restart=True produces no warning."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
     mock_factory = MagicMock()
@@ -2850,7 +2902,10 @@ async def test_pq_modify_running_with_restart_no_warning():
     mock_controller.map = AsyncMock(return_value={12345: current_pq_info})
     mock_controller.modify_query = AsyncMock()
 
-    context = MockContext({"session_registry": mock_session_registry})
+    context = MockContext({
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
+        })
 
     result = await pq_modify(
         context,
@@ -2867,7 +2922,7 @@ async def test_pq_modify_running_with_restart_no_warning():
 @pytest.mark.asyncio
 async def test_pq_modify_script_path():
     """Test pq_modify with script_path (without script_body) for coverage."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
     mock_factory = MagicMock()
@@ -2885,7 +2940,8 @@ async def test_pq_modify_script_path():
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -3034,12 +3090,13 @@ def test_apply_pq_config_list_fields_schedule_explicit_replaces_wholesale():
 @pytest.mark.asyncio
 async def test_pq_modify_mutually_exclusive_scripts():
     """Test pq_modify with both script_body and script_path (mutually exclusive)."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -3059,12 +3116,13 @@ async def test_pq_modify_mutually_exclusive_scripts():
 @pytest.mark.asyncio
 async def test_pq_modify_invalid_pq_id():
     """Test pq_modify with invalid pq_id format."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -3082,7 +3140,7 @@ async def test_pq_modify_invalid_pq_id():
 @pytest.mark.asyncio
 async def test_pq_modify_connection_failed():
     """Test pq_modify when factory connection fails."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
 
@@ -3091,7 +3149,8 @@ async def test_pq_modify_connection_failed():
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -3109,7 +3168,7 @@ async def test_pq_modify_connection_failed():
 @pytest.mark.asyncio
 async def test_pq_modify_pq_not_found():
     """Test pq_modify when PQ serial not found in controller map."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
     mock_factory = MagicMock()
@@ -3125,7 +3184,8 @@ async def test_pq_modify_pq_not_found():
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -3144,7 +3204,7 @@ async def test_pq_modify_pq_not_found():
 @pytest.mark.asyncio
 async def test_pq_modify_invalid_language():
     """Test pq_modify with invalid programming language."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
     mock_factory = MagicMock()
@@ -3161,7 +3221,8 @@ async def test_pq_modify_invalid_language():
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -3179,7 +3240,7 @@ async def test_pq_modify_invalid_language():
 @pytest.mark.asyncio
 async def test_pq_modify_no_changes():
     """Test pq_modify with no parameters provided (should error)."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
     mock_factory = MagicMock()
@@ -3196,7 +3257,8 @@ async def test_pq_modify_no_changes():
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -3222,7 +3284,7 @@ async def test_pq_modify_all_parameters(mock_restart_enum):
     # Mock RestartUsersEnum.Value() to return numeric enum value
     mock_restart_enum.Value.return_value = 1  # RU_ADMIN = 1
 
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
     mock_factory = MagicMock()
@@ -3240,7 +3302,8 @@ async def test_pq_modify_all_parameters(mock_restart_enum):
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -3301,7 +3364,7 @@ async def test_pq_modify_all_parameters(mock_restart_enum):
 @pytest.mark.asyncio
 async def test_pq_modify_clear_auto_delete_timeout():
     """Test pq_modify with auto_delete_timeout=0 to make query permanent."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
     mock_factory = MagicMock()
@@ -3322,7 +3385,8 @@ async def test_pq_modify_clear_auto_delete_timeout():
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -3350,7 +3414,7 @@ async def test_pq_modify_clear_auto_delete_timeout():
 @patch("deephaven_mcp.mcp_systems_server._tools.pq.RestartUsersEnum", None)
 async def test_pq_modify_restart_users_enum_not_available():
     """Test pq_modify when RestartUsersEnum is None (enterprise package not installed)."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
     mock_factory = MagicMock()
@@ -3367,7 +3431,8 @@ async def test_pq_modify_restart_users_enum_not_available():
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -3395,7 +3460,7 @@ async def test_pq_modify_invalid_restart_users_value(mock_restart_enum):
         "RU_UNSPECIFIED",
     ]
 
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
     mock_factory = MagicMock()
@@ -3412,7 +3477,8 @@ async def test_pq_modify_invalid_restart_users_value(mock_restart_enum):
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -3431,7 +3497,7 @@ async def test_pq_modify_invalid_restart_users_value(mock_restart_enum):
 @pytest.mark.asyncio
 async def test_pq_modify_exception():
     """Test pq_modify when exception occurs."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
 
@@ -3440,7 +3506,8 @@ async def test_pq_modify_exception():
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -3458,7 +3525,7 @@ async def test_pq_modify_exception():
 @pytest.mark.asyncio
 async def test_pq_start_success():
     """Test successful PQ start using pq_id."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
     mock_factory = MagicMock()
@@ -3480,7 +3547,8 @@ async def test_pq_start_success():
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -3508,7 +3576,7 @@ async def test_pq_start_success():
 @pytest.mark.asyncio
 async def test_pq_start_already_running():
     """Test that pq_start returns an error when the PQ is already RUNNING."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
     mock_factory = MagicMock()
@@ -3522,7 +3590,10 @@ async def test_pq_start_already_running():
     mock_pq_running = create_mock_pq_info(12345, "analytics", "RUNNING", 8.0)
     mock_controller.get = AsyncMock(return_value=mock_pq_running)
 
-    context = MockContext({"session_registry": mock_session_registry})
+    context = MockContext({
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
+        })
 
     result = await pq_start(context, pq_id="enterprise:system:12345")
 
@@ -3539,12 +3610,13 @@ async def test_pq_start_already_running():
 @pytest.mark.asyncio
 async def test_pq_start_invalid_pq_id():
     """Test pq_start with invalid pq_id format."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -3558,7 +3630,7 @@ async def test_pq_start_invalid_pq_id():
 @pytest.mark.asyncio
 async def test_pq_start_connection_failed():
     """Test pq_start when factory connection fails."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
 
@@ -3567,7 +3639,8 @@ async def test_pq_start_connection_failed():
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -3580,7 +3653,7 @@ async def test_pq_start_connection_failed():
 @pytest.mark.asyncio
 async def test_pq_start_exception():
     """Test pq_start when exception occurs."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
 
@@ -3589,7 +3662,8 @@ async def test_pq_start_exception():
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -3603,7 +3677,7 @@ async def test_pq_start_exception():
 @pytest.mark.asyncio
 async def test_pq_start_multiple():
     """Test successful start of multiple PQs."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
     mock_factory = MagicMock()
@@ -3630,7 +3704,8 @@ async def test_pq_start_multiple():
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -3664,12 +3739,13 @@ async def test_pq_start_multiple():
 @pytest.mark.asyncio
 async def test_pq_start_different_systems_error():
     """Test error when trying to start PQs with invalid pq_id system names."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -3686,12 +3762,13 @@ async def test_pq_start_different_systems_error():
 @pytest.mark.asyncio
 async def test_pq_start_empty_list():
     """Test error when trying to start with empty pq_id list."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -3706,7 +3783,7 @@ async def test_pq_start_empty_list():
 @pytest.mark.asyncio
 async def test_pq_stop_success():
     """Test successful PQ stop using pq_id with default timeout."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
     mock_factory = MagicMock()
@@ -3724,7 +3801,8 @@ async def test_pq_stop_success():
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -3750,7 +3828,7 @@ async def test_pq_stop_success():
 @pytest.mark.asyncio
 async def test_pq_stop_success_custom_timeout():
     """Test successful PQ stop using pq_id with custom timeout."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
     mock_factory = MagicMock()
@@ -3768,7 +3846,8 @@ async def test_pq_stop_success_custom_timeout():
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -3794,12 +3873,13 @@ async def test_pq_stop_success_custom_timeout():
 @pytest.mark.asyncio
 async def test_pq_stop_empty_list():
     """Test pq_stop with empty pq_id list."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -3813,12 +3893,13 @@ async def test_pq_stop_empty_list():
 @pytest.mark.asyncio
 async def test_pq_stop_invalid_pq_id_in_list():
     """Test pq_stop with invalid pq_id in list."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -3832,7 +3913,7 @@ async def test_pq_stop_invalid_pq_id_in_list():
 @pytest.mark.asyncio
 async def test_pq_stop_connection_failed():
     """Test pq_stop when factory connection fails."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
 
@@ -3841,7 +3922,8 @@ async def test_pq_stop_connection_failed():
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -3854,7 +3936,7 @@ async def test_pq_stop_connection_failed():
 @pytest.mark.asyncio
 async def test_pq_stop_exception():
     """Test pq_stop when exception occurs."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
 
@@ -3863,7 +3945,8 @@ async def test_pq_stop_exception():
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -3877,7 +3960,7 @@ async def test_pq_stop_exception():
 @pytest.mark.asyncio
 async def test_pq_restart_success():
     """Test successful PQ restart using pq_id."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
     mock_factory = MagicMock()
@@ -3895,7 +3978,8 @@ async def test_pq_restart_success():
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -3921,12 +4005,13 @@ async def test_pq_restart_success():
 @pytest.mark.asyncio
 async def test_pq_restart_empty_list():
     """Test pq_restart with empty pq_id list."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -3940,12 +4025,13 @@ async def test_pq_restart_empty_list():
 @pytest.mark.asyncio
 async def test_pq_restart_invalid_pq_id_in_list():
     """Test pq_restart with invalid pq_id in list."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -3961,7 +4047,7 @@ async def test_pq_restart_invalid_pq_id_in_list():
 @pytest.mark.asyncio
 async def test_pq_restart_connection_failed():
     """Test pq_restart when factory connection fails."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
 
@@ -3970,7 +4056,8 @@ async def test_pq_restart_connection_failed():
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -3983,7 +4070,7 @@ async def test_pq_restart_connection_failed():
 @pytest.mark.asyncio
 async def test_pq_restart_exception():
     """Test pq_restart when exception occurs."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
 
@@ -3992,7 +4079,8 @@ async def test_pq_restart_exception():
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -4006,7 +4094,7 @@ async def test_pq_restart_exception():
 @pytest.mark.asyncio
 async def test_pq_stop_multiple():
     """Test successful stop of multiple PQs."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
     mock_factory = MagicMock()
@@ -4025,7 +4113,8 @@ async def test_pq_stop_multiple():
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -4061,7 +4150,7 @@ async def test_pq_stop_multiple():
 @pytest.mark.asyncio
 async def test_pq_restart_multiple():
     """Test successful restart of multiple PQs."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
     mock_factory = MagicMock()
@@ -4080,7 +4169,8 @@ async def test_pq_restart_multiple():
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -4116,12 +4206,13 @@ async def test_pq_restart_multiple():
 @pytest.mark.asyncio
 async def test_pq_stop_different_systems_error():
     """Test error when trying to stop PQs with invalid pq_id system names."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -4138,12 +4229,13 @@ async def test_pq_stop_different_systems_error():
 @pytest.mark.asyncio
 async def test_pq_restart_different_systems_error():
     """Test error when trying to restart PQs with invalid pq_id system names."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -4247,7 +4339,7 @@ def test_validate_max_concurrent_valid():
 @pytest.mark.asyncio
 async def test_pq_delete_parallel_execution_with_semaphore():
     """Test that pq_delete executes operations in parallel with semaphore limiting."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
     mock_factory = MagicMock()
@@ -4276,7 +4368,8 @@ async def test_pq_delete_parallel_execution_with_semaphore():
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -4320,7 +4413,7 @@ async def test_pq_delete_parallel_execution_with_semaphore():
 @pytest.mark.asyncio
 async def test_pq_delete_handles_unexpected_exception():
     """Test that pq_delete handles unexpected exceptions with return_exceptions=True."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
     mock_factory = MagicMock()
@@ -4351,7 +4444,10 @@ async def test_pq_delete_handles_unexpected_exception():
     mock_controller.get = AsyncMock(side_effect=mock_get_side_effect)
     mock_controller.delete_query = AsyncMock()
 
-    context = MockContext({"session_registry": mock_session_registry})
+    context = MockContext({
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
+        })
 
     result = await pq_delete(
         context,
@@ -4387,7 +4483,7 @@ async def test_pq_delete_handles_unexpected_exception():
 @pytest.mark.asyncio
 async def test_pq_start_parallel_execution():
     """Test that pq_start executes operations in parallel."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
     mock_factory = MagicMock()
@@ -4422,7 +4518,8 @@ async def test_pq_start_parallel_execution():
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -4445,7 +4542,7 @@ async def test_pq_start_parallel_execution():
 @pytest.mark.asyncio
 async def test_pq_stop_parallel_with_mixed_results():
     """Test pq_stop parallel execution with mixed success/failure."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
     mock_factory = MagicMock()
@@ -4472,7 +4569,8 @@ async def test_pq_stop_parallel_with_mixed_results():
 
     context = MockContext(
         {
-            "session_registry": mock_session_registry,
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
         }
     )
 
@@ -4503,7 +4601,7 @@ async def test_pq_stop_parallel_with_mixed_results():
 @pytest.mark.asyncio
 async def test_pq_restart_parallel_execution():
     """Test pq_restart parallel execution."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
     mock_factory = MagicMock()
@@ -4522,7 +4620,10 @@ async def test_pq_restart_parallel_execution():
         )
     )
 
-    context = MockContext({"session_registry": mock_session_registry})
+    context = MockContext({
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
+        })
 
     # Test with 4 PQs
     result = await pq_restart(
@@ -4545,7 +4646,7 @@ async def test_pq_restart_parallel_execution():
 @pytest.mark.asyncio
 async def test_pq_delete_exception_escapes_to_gather(monkeypatch):
     """Test pq_delete handles raw Exception objects from asyncio.gather."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
     mock_factory = MagicMock()
@@ -4562,7 +4663,10 @@ async def test_pq_delete_exception_escapes_to_gather(monkeypatch):
         )
     )
 
-    context = MockContext({"session_registry": mock_session_registry})
+    context = MockContext({
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
+        })
 
     # Monkeypatch asyncio.gather to inject a raw exception into the results
     original_gather = asyncio.gather
@@ -4598,7 +4702,7 @@ async def test_pq_delete_exception_escapes_to_gather(monkeypatch):
 @pytest.mark.asyncio
 async def test_pq_start_exception_escapes_to_gather(monkeypatch):
     """Test pq_start handles raw Exception objects from asyncio.gather."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
     mock_factory = MagicMock()
@@ -4615,7 +4719,10 @@ async def test_pq_start_exception_escapes_to_gather(monkeypatch):
         )
     )
 
-    context = MockContext({"session_registry": mock_session_registry})
+    context = MockContext({
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
+        })
 
     # Monkeypatch asyncio.gather to inject a raw exception
     original_gather = asyncio.gather
@@ -4648,7 +4755,7 @@ async def test_pq_start_exception_escapes_to_gather(monkeypatch):
 @pytest.mark.asyncio
 async def test_pq_stop_exception_escapes_to_gather(monkeypatch):
     """Test pq_stop handles raw Exception objects from asyncio.gather."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
     mock_factory = MagicMock()
@@ -4665,7 +4772,10 @@ async def test_pq_stop_exception_escapes_to_gather(monkeypatch):
         )
     )
 
-    context = MockContext({"session_registry": mock_session_registry})
+    context = MockContext({
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
+        })
 
     # Monkeypatch asyncio.gather to inject a raw exception
     original_gather = asyncio.gather
@@ -4698,7 +4808,7 @@ async def test_pq_stop_exception_escapes_to_gather(monkeypatch):
 @pytest.mark.asyncio
 async def test_pq_restart_exception_escapes_to_gather(monkeypatch):
     """Test pq_restart handles raw Exception objects from asyncio.gather."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
     mock_factory = MagicMock()
@@ -4715,7 +4825,10 @@ async def test_pq_restart_exception_escapes_to_gather(monkeypatch):
         )
     )
 
-    context = MockContext({"session_registry": mock_session_registry})
+    context = MockContext({
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
+        })
 
     # Monkeypatch asyncio.gather to inject a raw exception
     original_gather = asyncio.gather
@@ -4748,9 +4861,12 @@ async def test_pq_restart_exception_escapes_to_gather(monkeypatch):
 @pytest.mark.asyncio
 async def test_pq_create_script_body_and_path_mutually_exclusive():
     """Test pq_create rejects both script_body and script_path being specified."""
-    mock_session_registry = MagicMock()
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
 
-    context = MockContext({"session_registry": mock_session_registry})
+    context = MockContext({
+            "config_manager": MagicMock(),
+            "session_registry_manager": create_mock_session_registry_manager(registry=mock_session_registry),
+        })
 
     result = await pq_create(
         context,

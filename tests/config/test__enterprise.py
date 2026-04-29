@@ -335,7 +335,7 @@ def test_connection_timeout_missing_is_valid():
 def test_connection_timeout_zero_invalid():
     """connection_timeout=0 raises."""
     with pytest.raises(
-        EnterpriseSystemConfigurationError,
+        ConfigurationError,
         match="must be positive, but got 0",
     ):
         validate_enterprise_config(_valid_config(connection_timeout=0))
@@ -344,7 +344,7 @@ def test_connection_timeout_zero_invalid():
 def test_connection_timeout_negative_invalid():
     """Negative connection_timeout raises."""
     with pytest.raises(
-        EnterpriseSystemConfigurationError,
+        ConfigurationError,
         match="must be positive, but got -5",
     ):
         validate_enterprise_config(_valid_config(connection_timeout=-5))
@@ -362,7 +362,7 @@ def test_connection_timeout_wrong_type_string():
 def test_connection_timeout_wrong_type_bool():
     """Bool connection_timeout raises (bool is a subclass of int but explicitly rejected)."""
     with pytest.raises(
-        EnterpriseSystemConfigurationError,
+        ConfigurationError,
         match=r"'connection_timeout'.*must be a number \(int or float\), but got bool",
     ):
         validate_enterprise_config(_valid_config(connection_timeout=True))
@@ -371,6 +371,62 @@ def test_connection_timeout_wrong_type_bool():
 def test_connection_timeout_very_small_float_valid():
     """Very small positive float is valid."""
     validate_enterprise_config(_valid_config(connection_timeout=0.01))
+
+
+# --- mcp_session_idle_timeout_seconds ---
+
+
+def test_mcp_session_idle_timeout_valid_int():
+    """mcp_session_idle_timeout_seconds with integer value passes."""
+    validate_enterprise_config(_valid_config(mcp_session_idle_timeout_seconds=600))
+
+
+def test_mcp_session_idle_timeout_valid_float():
+    """mcp_session_idle_timeout_seconds with float value passes."""
+    validate_enterprise_config(_valid_config(mcp_session_idle_timeout_seconds=1800.0))
+
+
+def test_mcp_session_idle_timeout_missing_is_valid():
+    """Missing mcp_session_idle_timeout_seconds is valid (optional)."""
+    validate_enterprise_config(_valid_config())
+
+
+def test_mcp_session_idle_timeout_zero_invalid():
+    """mcp_session_idle_timeout_seconds=0 raises."""
+    with pytest.raises(
+        ConfigurationError,
+        match="must be positive, but got 0",
+    ):
+        validate_enterprise_config(_valid_config(mcp_session_idle_timeout_seconds=0))
+
+
+def test_mcp_session_idle_timeout_negative_invalid():
+    """Negative mcp_session_idle_timeout_seconds raises."""
+    with pytest.raises(
+        ConfigurationError,
+        match="must be positive, but got -10",
+    ):
+        validate_enterprise_config(_valid_config(mcp_session_idle_timeout_seconds=-10))
+
+
+def test_mcp_session_idle_timeout_bool_invalid():
+    """Bool mcp_session_idle_timeout_seconds raises."""
+    with pytest.raises(
+        ConfigurationError,
+        match="must be a number",
+    ):
+        validate_enterprise_config(_valid_config(mcp_session_idle_timeout_seconds=True))
+
+
+def test_mcp_session_idle_timeout_string_invalid():
+    """String mcp_session_idle_timeout_seconds raises."""
+    with pytest.raises(
+        EnterpriseSystemConfigurationError,
+        match="must be one of types",
+    ):
+        validate_enterprise_config(
+            _valid_config(mcp_session_idle_timeout_seconds="1800")
+        )
 
 
 # --- session_creation ---

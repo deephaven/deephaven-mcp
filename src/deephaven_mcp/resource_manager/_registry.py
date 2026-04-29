@@ -24,17 +24,9 @@ import abc
 import asyncio
 import enum
 import logging
-import sys
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Generic, TypeVar
-
-if TYPE_CHECKING:
-    from typing_extensions import override  # pragma: no cover
-elif sys.version_info >= (3, 12):
-    from typing import override  # pragma: no cover
-else:
-    from typing_extensions import override  # pragma: no cover
+from typing import TYPE_CHECKING, override
 
 from deephaven_mcp import config
 from deephaven_mcp._exceptions import (
@@ -50,8 +42,6 @@ from ._manager import (
 )
 
 _LOGGER = logging.getLogger(__name__)
-
-T = TypeVar("T", bound=AsyncClosable)
 
 
 class InitializationPhase(enum.Enum):
@@ -86,7 +76,7 @@ class InitializationPhase(enum.Enum):
 
 
 @dataclass(frozen=True)
-class RegistrySnapshot(Generic[T]):
+class RegistrySnapshot[T: AsyncClosable]:
     """Atomic snapshot of registry items and initialization state.
 
     Returned by :meth:`BaseRegistry.get_all` to provide a consistent view
@@ -154,7 +144,7 @@ class RegistrySnapshot(Generic[T]):
         )
 
 
-class BaseRegistry(abc.ABC, Generic[T]):
+class BaseRegistry[T: AsyncClosable](abc.ABC):
     """Generic, async, coroutine-safe abstract base class for a named item registry.
 
     Manages a ``dict[str, T]`` of async-closable items.  Subclasses implement

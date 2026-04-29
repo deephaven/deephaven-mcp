@@ -493,7 +493,7 @@ def test_session_creation_auth_token_and_env_var_mutually_exclusive():
 def test_session_creation_invalid_heap_size_negative():
     config = {"defaults": {"heap_size_gb": -1}}
     with pytest.raises(
-        CommunitySessionConfigurationError,
+        ConfigurationError,
         match="'heap_size_gb' must be positive",
     ):
         validate_community_session_creation_config(config)
@@ -502,7 +502,7 @@ def test_session_creation_invalid_heap_size_negative():
 def test_session_creation_invalid_docker_memory_limit_negative():
     config = {"defaults": {"docker_memory_limit_gb": -1.0}}
     with pytest.raises(
-        CommunitySessionConfigurationError,
+        ConfigurationError,
         match="'docker_memory_limit_gb' must be positive",
     ):
         validate_community_session_creation_config(config)
@@ -511,7 +511,7 @@ def test_session_creation_invalid_docker_memory_limit_negative():
 def test_session_creation_invalid_docker_cpu_limit_negative():
     config = {"defaults": {"docker_cpu_limit": -1.0}}
     with pytest.raises(
-        CommunitySessionConfigurationError,
+        ConfigurationError,
         match="'docker_cpu_limit' must be positive",
     ):
         validate_community_session_creation_config(config)
@@ -520,7 +520,7 @@ def test_session_creation_invalid_docker_cpu_limit_negative():
 def test_session_creation_invalid_startup_timeout_negative():
     config = {"defaults": {"startup_timeout_seconds": -1.0}}
     with pytest.raises(
-        CommunitySessionConfigurationError,
+        ConfigurationError,
         match="'startup_timeout_seconds' must be positive",
     ):
         validate_community_session_creation_config(config)
@@ -529,7 +529,7 @@ def test_session_creation_invalid_startup_timeout_negative():
 def test_session_creation_invalid_startup_check_interval_negative():
     config = {"defaults": {"startup_check_interval_seconds": -1.0}}
     with pytest.raises(
-        CommunitySessionConfigurationError,
+        ConfigurationError,
         match="'startup_check_interval_seconds' must be positive",
     ):
         validate_community_session_creation_config(config)
@@ -612,7 +612,7 @@ def test_session_creation_docker_volumes_item_not_string():
         }
     }
     with pytest.raises(
-        CommunitySessionConfigurationError,
+        ConfigurationError,
         match="'docker_volumes\\[1\\]' must be a string",
     ):
         validate_community_session_creation_config(config)
@@ -625,7 +625,7 @@ def test_session_creation_extra_jvm_args_item_not_string():
         }
     }
     with pytest.raises(
-        CommunitySessionConfigurationError,
+        ConfigurationError,
         match="'extra_jvm_args\\[1\\]' must be a string",
     ):
         validate_community_session_creation_config(config)
@@ -638,7 +638,7 @@ def test_session_creation_environment_vars_key_not_string():
         }
     }
     with pytest.raises(
-        CommunitySessionConfigurationError,
+        ConfigurationError,
         match="'environment_vars' key must be a string",
     ):
         validate_community_session_creation_config(config)
@@ -651,7 +651,7 @@ def test_session_creation_environment_vars_value_not_string():
         }
     }
     with pytest.raises(
-        CommunitySessionConfigurationError,
+        ConfigurationError,
         match="'environment_vars\\[KEY\\]' value must be a string",
     ):
         validate_community_session_creation_config(config)
@@ -823,6 +823,61 @@ def test_validate_community_config_raises_on_wrong_type_for_schema_key():
 def test_validate_community_config_wraps_session_error_as_config_error():
     with pytest.raises(ConfigurationError):
         _validate_community_config({"sessions": {"x": {"host": 1}}})
+
+
+def test_validate_community_config_mcp_session_idle_timeout_valid_float():
+    """mcp_session_idle_timeout_seconds with float value is accepted."""
+    assert _validate_community_config({"mcp_session_idle_timeout_seconds": 1800.0}) == {
+        "mcp_session_idle_timeout_seconds": 1800.0
+    }
+
+
+def test_validate_community_config_mcp_session_idle_timeout_valid_int():
+    """mcp_session_idle_timeout_seconds with int value is accepted."""
+    assert _validate_community_config({"mcp_session_idle_timeout_seconds": 600}) == {
+        "mcp_session_idle_timeout_seconds": 600
+    }
+
+
+def test_validate_community_config_mcp_session_idle_timeout_absent_is_valid():
+    """mcp_session_idle_timeout_seconds is optional."""
+    assert _validate_community_config({}) == {}
+
+
+def test_validate_community_config_mcp_session_idle_timeout_bool_invalid():
+    """Bool is rejected — bool is a subclass of int but not a valid timeout value."""
+    with pytest.raises(
+        ConfigurationError,
+        match="must be a number",
+    ):
+        _validate_community_config({"mcp_session_idle_timeout_seconds": True})
+
+
+def test_validate_community_config_mcp_session_idle_timeout_zero_invalid():
+    """mcp_session_idle_timeout_seconds=0 raises."""
+    with pytest.raises(
+        ConfigurationError,
+        match="mcp_session_idle_timeout_seconds.*must be positive",
+    ):
+        _validate_community_config({"mcp_session_idle_timeout_seconds": 0})
+
+
+def test_validate_community_config_mcp_session_idle_timeout_negative_invalid():
+    """Negative mcp_session_idle_timeout_seconds raises."""
+    with pytest.raises(
+        ConfigurationError,
+        match="mcp_session_idle_timeout_seconds.*must be positive",
+    ):
+        _validate_community_config({"mcp_session_idle_timeout_seconds": -100})
+
+
+def test_validate_community_config_mcp_session_idle_timeout_string_invalid():
+    """String mcp_session_idle_timeout_seconds raises (wrong type)."""
+    with pytest.raises(
+        ConfigurationError,
+        match="must be of type int or float",
+    ):
+        _validate_community_config({"mcp_session_idle_timeout_seconds": "1800"})
 
 
 # ---------------------------------------------------------------------------

@@ -157,6 +157,7 @@ Usage Example - Dynamic Sessions:
     >>> await launched.stop()
 """
 
+from ._instance_tracker import InstanceTracker, cleanup_orphaned_resources
 from ._launcher import (
     DockerLaunchedSession,
     LaunchedSession,
@@ -202,4 +203,6 @@ __all__ = [
     "launch_session",
     "find_available_port",
     "generate_auth_token",
+    "InstanceTracker",
+    "cleanup_orphaned_resources",
 ]

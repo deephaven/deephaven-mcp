@@ -73,8 +73,7 @@ race conditions.
 import asyncio
 import logging
 import os
-import sys
-from typing import TYPE_CHECKING, Any, Generic, TypeVar
+from typing import TYPE_CHECKING, Any, override
 
 import pyarrow as pa
 from pydeephaven import Session
@@ -83,11 +82,6 @@ from pydeephaven.table import InputTable, Table
 
 if TYPE_CHECKING:
     import deephaven_enterprise.client.session_manager  # pragma: no cover
-    from typing_extensions import override  # pragma: no cover
-elif sys.version_info >= (3, 12):
-    from typing import override  # pragma: no cover
-else:
-    from typing_extensions import override  # pragma: no cover
 
 from deephaven_mcp._exceptions import (
     DeephavenConnectionError,
@@ -110,10 +104,7 @@ from ._protobuf import CorePlusQueryInfo
 _LOGGER = logging.getLogger(__name__)
 
 
-T = TypeVar("T", bound=Session)
-
-
-class BaseSession(ClientObjectWrapper[T], Generic[T]):
+class BaseSession[T: Session](ClientObjectWrapper[T]):
     """
     Base class for asynchronous Deephaven session wrappers.
 

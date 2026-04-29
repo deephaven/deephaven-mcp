@@ -1,16 +1,15 @@
 """Smoke tests for deephaven_mcp.config public re-export surface.
 
-Verifies that all symbols declared in __all__ are importable from the package.
-Logic is tested in test__base.py, test__community.py, and test__enterprise.py.
+Verifies that all symbols declared in __all__ are importable from the package
+and have the expected values. Logic is tested in test__base.py,
+test__community.py, and test__enterprise.py.
 """
-
-import pytest
 
 
 def test_config_env_var_importable():
     from deephaven_mcp.config import CONFIG_ENV_VAR
 
-    assert isinstance(CONFIG_ENV_VAR, str)
+    assert CONFIG_ENV_VAR == "DH_MCP_CONFIG_FILE"
 
 
 def test_config_manager_importable():
@@ -60,7 +59,13 @@ def test_redact_enterprise_system_config_importable():
 def test_default_connection_timeout_importable():
     from deephaven_mcp.config import DEFAULT_CONNECTION_TIMEOUT_SECONDS
 
-    assert isinstance(DEFAULT_CONNECTION_TIMEOUT_SECONDS, float)
+    assert DEFAULT_CONNECTION_TIMEOUT_SECONDS == 10.0
+
+
+def test_default_mcp_session_idle_timeout_importable():
+    from deephaven_mcp.config import DEFAULT_MCP_SESSION_IDLE_TIMEOUT_SECONDS
+
+    assert DEFAULT_MCP_SESSION_IDLE_TIMEOUT_SECONDS == 3600.0
 
 
 def test_exception_types_importable():
@@ -70,9 +75,9 @@ def test_exception_types_importable():
         EnterpriseSystemConfigurationError,
     )
 
-    assert issubclass(CommunitySessionConfigurationError, Exception)
+    assert issubclass(CommunitySessionConfigurationError, ConfigurationError)
+    assert issubclass(EnterpriseSystemConfigurationError, ConfigurationError)
     assert issubclass(ConfigurationError, Exception)
-    assert issubclass(EnterpriseSystemConfigurationError, Exception)
 
 
 def test_all_surface_importable():
