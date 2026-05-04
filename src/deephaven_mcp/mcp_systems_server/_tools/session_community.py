@@ -23,6 +23,7 @@ from deephaven_mcp.mcp_systems_server._tools.session import (
     DEFAULT_PROGRAMMING_LANGUAGE,
 )
 from deephaven_mcp.mcp_systems_server._tools.shared import (
+    error_response,
     get_community_registry,
     get_config_manager,
 )
@@ -97,7 +98,7 @@ async def _get_session_creation_config(
     if not session_creation_config:
         error_msg = "Community session creation not configured in deephaven_mcp.json"
         _LOGGER.error(f"[mcp_systems_server:session_community_create] {error_msg}")
-        return {}, 0, {"success": False, "error": error_msg, "isError": True}
+        return {}, 0, error_response(error_msg)
 
     defaults = session_creation_config.get("defaults", {})
     max_concurrent_sessions = session_creation_config.get(
@@ -125,7 +126,7 @@ async def _check_session_limit(
     if current_count >= max_concurrent_sessions:
         error_msg = f"Session limit reached: {current_count}/{max_concurrent_sessions} sessions active"
         _LOGGER.error(f"[mcp_systems_server:session_community_create] {error_msg}")
-        return {"success": False, "error": error_msg, "isError": True}
+        return error_response(error_msg)
 
     return None
 
@@ -171,19 +172,19 @@ def _validate_launch_method_params(
         if param_value and launch_method != "docker":
             error_msg = f"'{param_name}' parameter only applies to docker launch method, not '{launch_method}'"
             _LOGGER.error(f"[mcp_systems_server:session_community_create] {error_msg}")
-            return {"success": False, "error": error_msg, "isError": True}
+            return error_response(error_msg)
 
     # Python-only parameters
     if python_venv_path and launch_method != "python":
         error_msg = f"'python_venv_path' parameter only applies to python launch method, not '{launch_method}'"
         _LOGGER.error(f"[mcp_systems_server:session_community_create] {error_msg}")
-        return {"success": False, "error": error_msg, "isError": True}
+        return error_response(error_msg)
 
     # Check mutual exclusivity
     if programming_language and docker_image:
         error_msg = "Cannot specify both 'programming_language' and 'docker_image' - use one or the other"
         _LOGGER.error(f"[mcp_systems_server:session_community_create] {error_msg}")
-        return {"success": False, "error": error_msg, "isError": True}
+        return error_response(error_msg)
 
     return None
 
@@ -226,7 +227,7 @@ def _resolve_docker_image(
         else:
             error_msg = f"Unsupported programming_language: '{programming_language}'. Must be 'Python' or 'Groovy'"
             _LOGGER.error(f"[mcp_systems_server:session_community_create] {error_msg}")
-            return "", {"success": False, "error": error_msg, "isError": True}
+            return "", error_response(error_msg)
 
     # Use config defaults
     resolved_lang = defaults.get("programming_language", DEFAULT_PROGRAMMING_LANGUAGE)
@@ -239,7 +240,7 @@ def _resolve_docker_image(
     else:
         error_msg = f"Invalid programming_language in config: '{resolved_lang}'. Must be 'Python' or 'Groovy'"
         _LOGGER.error(f"[mcp_systems_server:session_community_create] {error_msg}")
-        return "", {"success": False, "error": error_msg, "isError": True}
+        return "", error_response(error_msg)
 
 
 def _resolve_community_session_parameters(
@@ -306,11 +307,7 @@ def _resolve_community_session_parameters(
     raw_auth_type = auth_type or defaults.get("auth_type", DEFAULT_AUTH_TYPE)
     resolved_auth_type, auth_error = _normalize_auth_type(raw_auth_type)
     if auth_error:
-        return {}, {
-            "success": False,
-            "error": f"Invalid auth_type: {auth_error}",
-            "isError": True,
-        }
+        return {}, error_response(f"Invalid auth_type: {auth_error}")
 
     # Validate method-specific parameters
     validation_error = _validate_launch_method_params(
@@ -658,7 +655,7 @@ async def _launch_process_and_wait_for_ready(
             )
 
         error_msg = f"Session failed to start within {resolved_startup_timeout} seconds"
-        return None, None, {"success": False, "error": error_msg, "isError": True}
+        return None, None, error_response(error_msg)
 
     return launched_session, port, None
 
@@ -998,11 +995,7 @@ async def session_community_create(
             instance_tracker,
         )
         if launch_error or launched_session is None or port is None:
-            return launch_error or {
-                "success": False,
-                "error": "Session launch failed",
-                "isError": True,
-            }
+            return launch_error or error_response("Session launch failed")
 
         # Create and register session manager
         await _register_session_manager(
@@ -1431,36 +1424,30 @@ async def session_community_credentials(
 
         # Validate session_id format - must be a community session
         if not session_id.startswith("community:"):
-            return {
-                "success": False,
-                "error": f"Invalid session_id '{session_id}'. This tool only works for community sessions (format: 'community:config:name' or 'community:dynamic:name')",
-                "isError": True,
-            }
+            return error_response(
+                f"Invalid session_id '{session_id}'. This tool only works for community sessions (format: 'community:config:name' or 'community:dynamic:name')"
+            )
 
         # Check if credential retrieval is disabled globally (mode='none')
         if credential_retrieval_mode == "none":
             _LOGGER.warning(
                 f"[mcp_systems_server:session_community_credentials] DENIED: Credential retrieval disabled (mode='none') for session_id '{session_id}'"
             )
-            return {
-                "success": False,
-                "error": (
-                    "Credential retrieval is disabled (mode='none'). To enable, configure in deephaven_mcp.json:\n\n"
-                    "Available modes:\n"
-                    '  - "none": Disable all credential retrieval (secure default)\n'
-                    '  - "dynamic_only": Allow only auto-generated session credentials\n'
-                    '  - "static_only": Allow only pre-configured session credentials\n'
-                    '  - "all": Allow all credential retrieval\n\n'
-                    "Configuration example:\n"
-                    "{\n"
-                    '  "security": {\n'
-                    '    "credential_retrieval_mode": "dynamic_only"\n'
-                    "  }\n"
-                    "}\n\n"
-                    "Documentation: https://github.com/deephaven/deephaven-mcp/"
-                ),
-                "isError": True,
-            }
+            return error_response(
+                "Credential retrieval is disabled (mode='none'). To enable, configure in deephaven_mcp.json:\n\n"
+                "Available modes:\n"
+                '  - "none": Disable all credential retrieval (secure default)\n'
+                '  - "dynamic_only": Allow only auto-generated session credentials\n'
+                '  - "static_only": Allow only pre-configured session credentials\n'
+                '  - "all": Allow all credential retrieval\n\n'
+                "Configuration example:\n"
+                "{\n"
+                '  "security": {\n'
+                '    "credential_retrieval_mode": "dynamic_only"\n'
+                "  }\n"
+                "}\n\n"
+                "Documentation: https://github.com/deephaven/deephaven-mcp/"
+            )
 
         # Get session registry and session manager
         session_registry = await get_community_registry(context)
@@ -1468,19 +1455,11 @@ async def session_community_credentials(
         try:
             mgr = await session_registry.get(session_id)
         except Exception as e:
-            return {
-                "success": False,
-                "error": f"Session '{session_id}' not found: {str(e)}",
-                "isError": True,
-            }
+            return error_response(f"Session '{session_id}' not found: {str(e)}")
 
         # Verify it's a community session manager
         if not isinstance(mgr, CommunitySessionManager):
-            return {
-                "success": False,
-                "error": f"Session '{session_id}' is not a community session",
-                "isError": True,
-            }
+            return error_response(f"Session '{session_id}' is not a community session")
 
         # Determine session type
         is_dynamic = isinstance(mgr, DynamicCommunitySessionManager)
@@ -1491,28 +1470,20 @@ async def session_community_credentials(
             _LOGGER.warning(
                 f"[mcp_systems_server:session_community_credentials] DENIED: Static session credential retrieval disabled (mode='dynamic_only') for session_id '{session_id}'"
             )
-            return {
-                "success": False,
-                "error": (
-                    f"Credential retrieval for static sessions is disabled. Current mode: 'dynamic_only'. "
-                    f"Session '{session_id}' is a static (config-based) session. "
-                    f"To retrieve static session credentials, set security.credential_retrieval_mode to 'all' or 'static_only' in deephaven_mcp.json."
-                ),
-                "isError": True,
-            }
+            return error_response(
+                f"Credential retrieval for static sessions is disabled. Current mode: 'dynamic_only'. "
+                f"Session '{session_id}' is a static (config-based) session. "
+                f"To retrieve static session credentials, set security.credential_retrieval_mode to 'all' or 'static_only' in deephaven_mcp.json."
+            )
         elif credential_retrieval_mode == "static_only" and is_dynamic:
             _LOGGER.warning(
                 f"[mcp_systems_server:session_community_credentials] DENIED: Dynamic session credential retrieval disabled (mode='static_only') for session_id '{session_id}'"
             )
-            return {
-                "success": False,
-                "error": (
-                    f"Credential retrieval for dynamic sessions is disabled. Current mode: 'static_only'. "
-                    f"Session '{session_id}' is a dynamic (on-demand) session. "
-                    f"To retrieve dynamic session credentials, set security.credential_retrieval_mode to 'all' or 'dynamic_only' in deephaven_mcp.json."
-                ),
-                "isError": True,
-            }
+            return error_response(
+                f"Credential retrieval for dynamic sessions is disabled. Current mode: 'static_only'. "
+                f"Session '{session_id}' is a dynamic (on-demand) session. "
+                f"To retrieve dynamic session credentials, set security.credential_retrieval_mode to 'all' or 'dynamic_only' in deephaven_mcp.json."
+            )
 
         # Credential retrieval is allowed - proceed
         session_type_str = "dynamic" if is_dynamic else "static"
@@ -1564,7 +1535,7 @@ async def session_community_credentials(
             f"[mcp_systems_server:session_community_credentials] Failed: {e!r}",
             exc_info=True,
         )
-        return {"success": False, "error": str(e), "isError": True}
+        return error_response(str(e))
 
 
 def register_tools(server: FastMCP) -> None:

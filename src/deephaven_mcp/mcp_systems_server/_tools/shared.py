@@ -32,6 +32,11 @@ from deephaven_mcp.resource_manager import (
 _LOGGER = logging.getLogger(__name__)
 
 
+def error_response(msg: str) -> dict[str, object]:
+    """Return a standard MCP tool error response dict."""
+    return {"success": False, "error": msg, "isError": True}
+
+
 def format_initialization_status(
     phase: InitializationPhase,
     init_errors: dict[str, str],
@@ -338,13 +343,13 @@ async def get_enterprise_session(
                 f"but session '{session_id}' is {type(session).__name__}"
             )
             _LOGGER.error(f"[mcp_systems_server:{function_name}] {error_msg}")
-            return None, {"success": False, "error": error_msg, "isError": True}
+            return None, error_response(error_msg)
 
         return session, None
     except Exception as e:
         error_msg = f"Failed to get session '{session_id}': {e}"
         _LOGGER.error(f"[mcp_systems_server:{function_name}] {error_msg}")
-        return None, {"success": False, "error": error_msg, "isError": True}
+        return None, error_response(error_msg)
 
 
 # Size limits for table data responses
@@ -379,11 +384,9 @@ def check_response_size(table_name: str, estimated_size: int) -> dict | None:
         )
 
     if estimated_size > MAX_RESPONSE_SIZE:
-        return {
-            "success": False,
-            "error": f"Response would be ~{estimated_size/1_000_000:.1f}MB (max 50MB). Please reduce max_rows.",
-            "isError": True,
-        }
+        return error_response(
+            f"Response would be ~{estimated_size/1_000_000:.1f}MB (max 50MB). Please reduce max_rows."
+        )
 
     return None  # Size is acceptable
 

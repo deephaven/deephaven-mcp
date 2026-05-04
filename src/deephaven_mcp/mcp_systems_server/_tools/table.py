@@ -15,6 +15,7 @@ from mcp.server.fastmcp import Context, FastMCP
 from deephaven_mcp import queries
 from deephaven_mcp.mcp_systems_server._tools.shared import (
     ESTIMATED_BYTES_PER_CELL,
+    error_response,
     build_table_data_response,
     check_response_size,
     format_meta_table_result,
@@ -193,7 +194,7 @@ async def session_tables_schema(
             f"[mcp_systems_server:session_tables_schema] Failed for session: '{session_id}', error: {e!r}",
             exc_info=True,
         )
-        return {"success": False, "error": str(e), "isError": True}
+        return error_response(str(e))
 
 
 async def session_tables_list(context: Context, session_id: str) -> dict:
@@ -290,11 +291,9 @@ async def session_tables_list(context: Context, session_id: str) -> dict:
             f"[mcp_systems_server:session_tables_list] Failed for session: '{session_id}', error: {e!r}",
             exc_info=True,
         )
-        return {
-            "success": False,
-            "error": f"Failed to list tables for session '{session_id}': {type(e).__name__}: {e}",
-            "isError": True,
-        }
+        return error_response(
+            f"Failed to list tables for session '{session_id}': {type(e).__name__}: {e}"
+        )
 
 
 async def session_table_data(

@@ -75,15 +75,13 @@ class PrivateKeyBackend(AuthBackend):
                 if ``X-Deephaven-Username`` is missing or empty; or if
                 the key header is not valid base64.
         """
-        key_header = headers.get(HEADER_PRIVATE_KEY)
+        key_header = self._require_header(headers, HEADER_PRIVATE_KEY)
         if key_header is None:
             return None
-        if not key_header:
-            raise AuthenticationError(f"{HEADER_PRIVATE_KEY} header must not be empty.")
-        username = headers.get(HEADER_USERNAME)
+        username = self._require_header(headers, HEADER_USERNAME)
         if not username:
             raise AuthenticationError(
-                f"{HEADER_USERNAME} header is required with " f"{HEADER_PRIVATE_KEY}."
+                f"{HEADER_USERNAME} header is required with {HEADER_PRIVATE_KEY}."
             )
         # Validate base64 at authenticate time so malformed requests fail
         # at the edge rather than deep inside the consumer that spends
@@ -98,7 +96,7 @@ class PrivateKeyBackend(AuthBackend):
         return self._make_principal(username)
 
     async def derive_credentials(
-        self, principal: Principal, headers: Mapping[str, str]
+        self, _principal: Principal, headers: Mapping[str, str]
     ) -> PrivateKeyCredentials:
         """Return a :class:`PrivateKeyCredentials` for the authenticated principal.
 
@@ -126,7 +124,7 @@ class PrivateKeyBackend(AuthBackend):
         is the upstream ``SessionManager``'s responsibility, not ours.
 
         Args:
-            principal (Principal): Unused; required by the
+            _principal (Principal): Unused; required by the
                 :class:`AuthBackend` contract.
             headers (Mapping[str, str]): Lowercase-keyed request headers.
 
@@ -141,7 +139,6 @@ class PrivateKeyBackend(AuthBackend):
                 this indicates a malformed credential on the client
                 side.
         """
-        del principal
         key_bytes = base64.b64decode(headers[HEADER_PRIVATE_KEY], validate=True)
         try:
             key_text = key_bytes.decode("utf-8")

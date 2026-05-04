@@ -14,6 +14,7 @@ from deephaven_mcp.mcp_systems_server._tools.shared import (
     _redact_recursive,
     build_table_data_response,
     check_response_size,
+    error_response,
     format_initialization_status,
     format_meta_table_result,
     get_community_registry,
@@ -460,6 +461,36 @@ async def test_get_session_from_context_session_connection_fails():
 
     mock_registry.get.assert_called_once_with("test:session:id")
     mock_session_manager.get.assert_called_once()
+
+
+# ===========================================================================
+# error_response tests
+# ===========================================================================
+
+
+def test_error_response_structure():
+    result = error_response("something went wrong")
+    assert result == {"success": False, "error": "something went wrong", "isError": True}
+
+
+def test_error_response_success_is_false():
+    assert error_response("x")["success"] is False
+
+
+def test_error_response_is_error_is_true():
+    assert error_response("x")["isError"] is True
+
+
+def test_error_response_preserves_message():
+    msg = "Session 'foo' not found"
+    assert error_response(msg)["error"] == msg
+
+
+def test_error_response_empty_message():
+    result = error_response("")
+    assert result["error"] == ""
+    assert result["success"] is False
+    assert result["isError"] is True
 
 
 # ===========================================================================

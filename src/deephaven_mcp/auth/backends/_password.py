@@ -91,15 +91,13 @@ class PasswordBackend(AuthBackend):
                 ``X-Deephaven-Effective-User`` is present while
                 ``allow_effective_user`` is ``False``.
         """
-        password = headers.get(HEADER_PASSWORD)
+        password = self._require_header(headers, HEADER_PASSWORD)
         if password is None:
             return None
-        if not password:
-            raise AuthenticationError(f"{HEADER_PASSWORD} header must not be empty.")
-        username = headers.get(HEADER_USERNAME)
+        username = self._require_header(headers, HEADER_USERNAME)
         if not username:
             raise AuthenticationError(
-                f"{HEADER_USERNAME} header is required with " f"{HEADER_PASSWORD}."
+                f"{HEADER_USERNAME} header is required with {HEADER_PASSWORD}."
             )
         effective_user = headers.get(HEADER_EFFECTIVE_USER)
         if effective_user and not self.allow_effective_user:

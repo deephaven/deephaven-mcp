@@ -188,6 +188,6 @@ class PrivateKeyCredentials(Credentials):
     def __repr__(self) -> str:
         """Return a representation that shows key length but redacts contents."""
         return (
-            f"PrivateKeyCredentials(key_text={REDACTED}; "
+            f"PrivateKeyCredentials(key_text={REDACTED}, "
             f"{len(self.key_text)} chars)"
         )

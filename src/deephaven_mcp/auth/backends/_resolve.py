@@ -48,16 +48,16 @@ async def authenticate_and_resolve(
             that were tried), or if ``backends`` is empty (indicating a
             server-side misconfiguration).
     """
+    if not backends:
+        raise AuthenticationError(
+            "No authentication backends are configured on this server."
+        )
     lowered: dict[str, str] = {k.lower(): v for k, v in headers.items()}
     for backend in backends:
         principal = await backend.authenticate(lowered)
         if principal is not None:
             credentials = await backend.derive_credentials(principal, lowered)
             return principal, credentials
-    if not backends:
-        raise AuthenticationError(
-            "No authentication backends are configured on this server."
-        )
     tried = ", ".join(b.name for b in backends)
     raise AuthenticationError(
         f"No registered authentication backend accepted the supplied headers "

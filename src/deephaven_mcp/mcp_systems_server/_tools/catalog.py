@@ -20,6 +20,7 @@ from deephaven_mcp.client import CorePlusSession
 from deephaven_mcp.formatters import format_table_data
 from deephaven_mcp.mcp_systems_server._tools.shared import (
     ESTIMATED_BYTES_PER_CELL,
+    error_response,
     build_table_data_response,
     check_response_size,
     format_meta_table_result,
@@ -903,7 +904,7 @@ async def catalog_tables_schema(
             f"[mcp_systems_server:catalog_tables_schema] Failed for session: '{session_id}', error: {e!r}",
             exc_info=True,
         )
-        return {"success": False, "error": str(e), "isError": True}
+        return error_response(str(e))
 
 
 async def catalog_table_sample(
@@ -1129,7 +1130,7 @@ async def catalog_table_sample(
             f"namespace: '{namespace}', table: '{table_name}', error: {e!r}",
             exc_info=True,
         )
-        return {"success": False, "error": str(e), "isError": True}
+        return error_response(str(e))
 
 
 def register_tools(server: FastMCP) -> None:

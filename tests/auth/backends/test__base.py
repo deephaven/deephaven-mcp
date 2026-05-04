@@ -258,3 +258,24 @@ async def test_conforming_subclass_authenticate_and_derive():
 
 def test_conforming_subclass_isinstance_authbackend():
     assert isinstance(_ConformingBackend(), AuthBackend)
+
+
+# ---------------------------------------------------------------------------
+# _require_header helper.
+# ---------------------------------------------------------------------------
+
+
+def test_require_header_absent_returns_none():
+    b = _ConformingBackend()
+    assert b._require_header({}, "x-missing") is None
+
+
+def test_require_header_present_returns_value():
+    b = _ConformingBackend()
+    assert b._require_header({"x-token": "abc"}, "x-token") == "abc"
+
+
+def test_require_header_empty_raises():
+    b = _ConformingBackend()
+    with pytest.raises(AuthenticationError, match="x-token header must not be empty"):
+        b._require_header({"x-token": ""}, "x-token")

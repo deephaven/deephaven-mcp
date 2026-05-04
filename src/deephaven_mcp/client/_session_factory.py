@@ -161,7 +161,7 @@ class CorePlusSessionFactory(
 
         In most cases, prefer the class factory methods over direct instantiation:
         - Use `from_url()` when you have a connection URL to the Deephaven server.
-        - Use `from_config()` when you have a configuration dictionary.
+        - Use `from_credentials()` when you have a configuration dictionary and credentials.
 
         Args:
             session_manager (deephaven_enterprise.client.session_manager.SessionManager):

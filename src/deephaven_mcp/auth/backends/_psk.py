@@ -91,18 +91,16 @@ class PSKBackend(AuthBackend):
             AuthenticationError: If the header is present but empty, or
                 its value does not match the configured PSK.
         """
-        presented = headers.get(HEADER_PSK)
+        presented = self._require_header(headers, HEADER_PSK)
         if presented is None:
             return None
-        if not presented:
-            raise AuthenticationError(f"{HEADER_PSK} header must not be empty.")
         if not hmac.compare_digest(presented, self.expected_psk):
             raise AuthenticationError(f"Invalid pre-shared key in {HEADER_PSK} header.")
 
         return self._make_principal(self.principal_subject)
 
     async def derive_credentials(
-        self, principal: Principal, headers: Mapping[str, str]
+        self, _principal: Principal, headers: Mapping[str, str]
     ) -> PSKCredentials:
         """Return a :class:`PSKCredentials` carrying the PSK from the request.
 
@@ -119,7 +117,7 @@ class PSKBackend(AuthBackend):
         time-of-check/time-of-use gap.
 
         Args:
-            principal (Principal): Unused; present to satisfy the
+            _principal (Principal): Unused; present to satisfy the
                 :class:`AuthBackend` contract.
             headers (Mapping[str, str]): Lowercase-keyed request
                 headers. The ``X-Deephaven-PSK`` entry is required and
@@ -130,7 +128,6 @@ class PSKBackend(AuthBackend):
                 downstream consumers (for example a session manager
                 forwarding the key to an upstream worker).
         """
-        del principal
         return PSKCredentials(psk=headers[HEADER_PSK])
 
     def _challenge_scheme(self) -> str:

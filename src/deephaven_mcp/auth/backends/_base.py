@@ -270,6 +270,33 @@ class AuthBackend(abc.ABC):
             return base
         return f'{base}, headers="{", ".join(headers)}"'
 
+    @staticmethod
+    def _require_header(headers: Mapping[str, str], header_name: str) -> str | None:
+        """Return the value of *header_name*, or ``None`` if absent.
+
+        Raises :class:`AuthenticationError` if the header is present but
+        empty, so callers can distinguish "not my header" (``None``) from
+        "my header but malformed" (exception) without repeating the
+        two-step guard in every backend.
+
+        Args:
+            headers (Mapping[str, str]): Lowercase-keyed request headers.
+            header_name (str): The lowercase header name to look up.
+
+        Returns:
+            str | None: The non-empty header value, or ``None`` if the
+                header is absent.
+
+        Raises:
+            AuthenticationError: If the header is present but empty.
+        """
+        value = headers.get(header_name)
+        if value is None:
+            return None
+        if not value:
+            raise AuthenticationError(f"{header_name} header must not be empty.")
+        return value
+
     def _make_principal(
         self,
         subject: str,
