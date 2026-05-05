@@ -12,8 +12,12 @@ Core Architecture:
     and logging patterns.
 
 Manager Types:
-    CommunitySessionManager: Manages CoreSession instances for Community deployments
-        using configuration-based initialization.
+    CommunitySessionManager: Base class managing CoreSession instances for Community
+        deployments; in practice one of the two concrete subclasses below is used.
+    StaticCommunitySessionManager: Manages CoreSession instances connecting to
+        pre-configured Community servers declared in ``deephaven_mcp.json``.
+    DynamicCommunitySessionManager: Manages CoreSession instances for on-demand
+        servers launched by the MCP server itself (Docker / Python).
     EnterpriseSessionManager: Manages CorePlusSession instances for Enterprise deployments
         using flexible creation functions.
     CorePlusSessionFactoryManager: Manages CorePlusSessionFactory instances that serve
@@ -41,8 +45,8 @@ Liveness Monitoring:
 
 Usage Pattern:
     ```python
-    # Create manager
-    manager = CommunitySessionManager("worker1", config)
+    # Create manager (use StaticCommunitySessionManager for configured servers)
+    manager = StaticCommunitySessionManager("worker1", config)
 
     # Get resource (lazy initialization)
     session = await manager.get()
@@ -62,7 +66,10 @@ Key Classes:
     ResourceLivenessStatus: Enum representing resource health states
     SystemType: Enum for Deephaven deployment types (COMMUNITY, ENTERPRISE)
     BaseItemManager: Generic base class providing core lifecycle management
-    CommunitySessionManager: Concrete manager for Community sessions
+    CommunitySessionManager: Concrete manager for Community sessions (typically used
+        via its Static/Dynamic subclasses rather than instantiated directly)
+    StaticCommunitySessionManager: Manager for configured (pre-existing) Community servers
+    DynamicCommunitySessionManager: Manager for on-demand launched Community servers
     EnterpriseSessionManager: Concrete manager for Enterprise sessions
     CorePlusSessionFactoryManager: Concrete manager for Enterprise session factories
 

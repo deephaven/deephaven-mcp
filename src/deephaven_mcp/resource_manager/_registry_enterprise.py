@@ -6,12 +6,13 @@ DHE server that manages exactly one enterprise system (factory) per instance.
 Architecture
 ------------
 ``EnterpriseSessionRegistry`` inherits the ``_items`` dict, ``_lock``, and
-``_initialized`` flag from ``BaseRegistry``.  It adds:
+``_initialized`` flag from ``BaseRegistry``, and ``_added_session_ids``
+(tracking sessions added via ``add_session()`` for counting) from
+``MutableSessionRegistry``.  It adds:
 
 - ``_factory_manager`` — the single ``CorePlusSessionFactoryManager`` for this instance.
 - ``_controller_client`` — cached controller client for the factory.
-- ``_added_session_ids`` — tracks sessions added via ``add_session()`` for counting.
-- ``_phase`` / ``_errors`` — enterprise discovery lifecycle state.
+- ``_phase`` / ``_error`` — enterprise discovery lifecycle state.
 - ``_discovery_task`` — background task for initial enterprise discovery.
 - ``_refresh_lock`` — serializes concurrent enterprise refresh operations.
 
@@ -206,6 +207,7 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
 
         registry = EnterpriseSessionRegistry()
         await registry.initialize(config_manager)  # config_manager returns the DHE system config
+        await registry.bind_credentials(creds)     # required before any read
         session_mgr = await registry.get("enterprise:system:my-pq")
         factory = registry.factory_manager
         await registry.close()
@@ -359,8 +361,9 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
         - First call: creates the per-credentials
           :class:`CorePlusSessionFactoryManager`, transitions ``_phase`` to
           :attr:`InitializationPhase.PARTIAL`, and launches the background
-          discovery task. The single-flight discovery task is the same one
-          previously started by :meth:`initialize`.
+          discovery task. (The task is created here — not in
+          :meth:`initialize` — because the factory manager requires
+          credentials.)
         - Subsequent calls with the *same* credentials (identified by
           frozen-dataclass equality): no-op.
         - Subsequent calls with *different* credentials: raises
@@ -792,11 +795,19 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
     async def _discover_enterprise_sessions(self) -> None:
         """One-shot background task: discover enterprise sessions at startup.
 
-        Sets ``_phase`` to ``LOADING``, calls ``_sync_enterprise_sessions``,
-        then sets ``_phase`` to ``COMPLETED``.
+        Outcomes:
 
-        On ``CancelledError`` (from ``close()``), sets ``_phase`` to ``FAILED``
-        and re-raises.
+        - **Success**: sets ``_phase`` to ``LOADING``, runs
+          ``_sync_enterprise_sessions``, then sets ``_phase`` to ``COMPLETED``.
+        - **CancelledError** (from ``close()``): sets ``_phase`` to
+          ``FAILED`` and re-raises so the awaiter in ``close()`` observes
+          the cancellation.
+        - **Other Exception**: records the error on ``_error`` and still
+          sets ``_phase`` to ``COMPLETED`` (with ``exc_info`` logged).
+          Leaving the phase at ``LOADING`` would permanently block every
+          ``get`` / ``get_all`` call, so a soft-failure policy is used:
+          the registry is considered "done trying" and subsequent reads
+          see the error via ``_error``.
         """
         start = time.monotonic()
         _LOGGER.info(

@@ -166,10 +166,13 @@ class AuthBackend(abc.ABC):
           short-circuits the chain with ``401 Unauthorized``.
 
         Args:
-            headers (Mapping[str, str]): Case-insensitive view of the
-                request headers. Implementations must not assume any
-                specific casing; headers are lowercased by the
-                middleware before this call.
+            headers (Mapping[str, str]): Lowercase-keyed view of the
+                request headers. The middleware (and
+                :func:`~deephaven_mcp.auth.backends.authenticate_and_resolve`
+                for non-HTTP callers) lowercases all header names before
+                calling this method, so implementations look up values
+                using lowercase names (see the ``HEADER_*`` constants in
+                :mod:`deephaven_mcp.auth.backends._headers`).
 
         Returns:
             Principal | None: A :class:`Principal` built from the
@@ -207,7 +210,7 @@ class AuthBackend(abc.ABC):
             principal (Principal): The principal returned by this
                 backend's :meth:`authenticate` for this request. Its
                 fields have already been verified and may be trusted.
-            headers (Mapping[str, str]): The same case-insensitive
+            headers (Mapping[str, str]): The same lowercase-keyed
                 header view that was passed to :meth:`authenticate`,
                 available for re-reading values that were not captured
                 on the :class:`Principal`.

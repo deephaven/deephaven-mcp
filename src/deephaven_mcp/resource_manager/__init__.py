@@ -17,9 +17,10 @@ Overview:
        manages lifecycle, and handles cleanup.
 
 Exports - Session Managers:
-    - CommunitySessionManager: Abstract base class for Deephaven Community session managers.
-      Provides common functionality for both static and dynamic sessions. Not typically
-      instantiated directly - use StaticCommunitySessionManager or DynamicCommunitySessionManager.
+    - CommunitySessionManager: Common-functionality base class for Deephaven Community
+      session managers, providing the shared logic used by both static and dynamic
+      sessions. Concrete (not abstract) but **by convention** not instantiated
+      directly; use StaticCommunitySessionManager or DynamicCommunitySessionManager instead.
 
     - StaticCommunitySessionManager: Manages lifecycle of statically configured Deephaven
       Community sessions. Connects to pre-existing servers specified in configuration files.
@@ -80,12 +81,23 @@ Exports - Enums:
       and determine when to recreate resources.
 
 Exports - Registry State:
-    - InitializationPhase: Enum representing the initialization phase of a registry
-      (e.g., PENDING, INITIALIZING, READY, FAILED). Used to track and report registry
-      startup progress.
+    - InitializationPhase: Enum representing the initialization phase of a registry.
+      Values: NOT_STARTED, PARTIAL, LOADING, COMPLETED, FAILED. Simple registries
+      jump directly to COMPLETED; complex registries (e.g. EnterpriseSessionRegistry)
+      progress through NOT_STARTED → PARTIAL → LOADING → COMPLETED, or fall to
+      FAILED on critical errors.
 
     - RegistrySnapshot: Dataclass capturing a point-in-time snapshot of a registry's
       state, including sessions, initialization phase, and any initialization errors.
+
+Exports - Instance Tracking:
+    - InstanceTracker: Tracks resources created by this MCP server instance (for
+      example dynamically launched Docker containers) so they can be cleaned up
+      if the server is forcibly terminated.
+
+    - cleanup_orphaned_resources: Remove resources left behind by a previous,
+      abnormally-terminated server instance that matches this instance's tracking
+      label.
 
 Features:
     - Coroutine-safe item cache keyed by name, protected by asyncio.Lock

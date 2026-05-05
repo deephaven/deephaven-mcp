@@ -42,6 +42,23 @@ Community Server Configuration Schema:
 The community config file must be a JSON or JSON5 object. JSON5 allows single-line (//) and multi-line (/* */) comments, trailing commas, and other JSON5 features.
 It may contain the following top-level keys (all optional):
 
+  - `auth` (dict, optional):
+      Governs how HTTP clients authenticate to the MCP server itself using a
+      Jupyter-style pre-shared key. Distinct from the per-worker `auth_token`
+      values inside `sessions[*]` / `session_creation.defaults`, which control
+      how the MCP server authenticates to individual community workers.
+      The `auth` dict may contain:
+
+        - `enabled` (bool, optional, default: true): Whether MCP-server PSK auth is required.
+        - `psk` (str, optional): The pre-shared key stored inline.
+          Mutually exclusive with `psk_env_var`.
+        - `psk_env_var` (str, optional): Name of an environment variable
+          holding the pre-shared key. Mutually exclusive with `psk`.
+
+      Rules:
+        - When `enabled` is true, exactly one of `psk` or `psk_env_var` must be provided.
+        - When `enabled` is false, neither may be provided.
+
   - `security` (dict, optional):
       Security settings for community sessions.
       If this key is present, its value must be a dictionary (which can be empty, e.g., {}).
@@ -85,7 +102,7 @@ It may contain the following top-level keys (all optional):
       If this key is absent, dynamic session creation is not configured.
 
 Community Config Validation rules:
-  - Only `sessions`, `session_creation`, `security`, and
+  - Only `auth`, `sessions`, `session_creation`, `security`, and
     `mcp_session_idle_timeout_seconds` are valid top-level keys; any other key
     will cause validation to fail.
   - If `sessions` is present, each session's fields must have the correct type.
@@ -105,6 +122,12 @@ The enterprise config file is a flat JSON or JSON5 object. All fields sit at the
 are no ``community`` or ``security`` sections. Each ``dh-mcp-enterprise-server`` instance is
 configured for exactly one enterprise system.
 
+The enterprise MCP server does **not** accept credentials in its config file. Every request
+must carry the caller's credentials in ``X-Deephaven-*`` HTTP headers; the auth middleware
+exchanges them for a :class:`~deephaven_mcp.auth.credentials.PasswordCredentials` or
+:class:`~deephaven_mcp.auth.credentials.PrivateKeyCredentials`, which is later exchanged for
+an authenticated ``CorePlusSessionFactory``.
+
 Required fields:
 
   - `system_name` (str): Human-readable identifier for this enterprise system.
@@ -113,43 +136,40 @@ Required fields:
   - `connection_json_url` (str): Full URL to the Core+ ``connection.json`` endpoint
       (e.g. ``"https://dhe.example.com/iris/connection.json"``).
 
-  - `auth_type` (str): Authentication method. Must be one of:
-      * ``"password"``: Username/password authentication. Requires ``username`` and either
-        ``password`` or ``password_env_var`` (mutually exclusive).
-      * ``"private_key"``: Private key file authentication. Requires ``private_key_path``.
+  - `auth` (dict): Authentication-middleware configuration. Required fields inside:
 
-Authentication fields (required when auth_type is "password"):
-
-  - `username` (str): Username for authentication.
-  - `password` (str): Password in plaintext. Use this OR ``password_env_var``, not both.
-  - `password_env_var` (str): Name of an environment variable holding the password.
-      Use this OR ``password``, not both. Preferred over hardcoding the password.
-
-Authentication fields (required when auth_type is "private_key"):
-
-  - `private_key_path` (str): Filesystem path to the private key file used for authentication.
+      * `backends` (list[str], required, non-empty): a subset of
+        ``{"password", "private_key"}``. Identifies which authentication
+        backends the server will mount in front of its streamable-HTTP app.
+      * `allow_effective_user` (bool, optional, default ``False``): when
+        ``True``, the password backend honors the optional
+        ``X-Deephaven-Effective-User`` HTTP header. Only valid when
+        ``"password"`` is in ``backends``.
 
 Optional fields:
 
   - `connection_timeout` (int | float, > 0): Connection timeout in seconds.
       Default: ``10.0``. Booleans are not accepted even though bool is a subclass of int.
 
+  - `mcp_session_idle_timeout_seconds` (int | float, > 0): Idle timeout for MCP sessions.
+
   - `session_creation` (dict, optional): Session lifecycle configuration.
-      If absent, dynamic session creation uses server defaults.
+      When present, ``defaults`` is required and ``defaults.heap_size_gb`` is required.
 
 Enterprise Config Validation rules:
-  - ``system_name``, ``connection_json_url``, and ``auth_type`` are always required.
-  - ``auth_type`` must be exactly ``"password"`` or ``"private_key"``; no custom values.
-  - For ``"password"`` auth: ``username`` is required; exactly one of ``password`` or
-    ``password_env_var`` must be present.
-  - For ``"private_key"`` auth: ``private_key_path`` is required.
-  - ``connection_timeout`` must be a positive number if present; booleans are rejected.
-  - ``max_concurrent_sessions`` must be a non-negative integer if present.
+  - ``system_name``, ``connection_json_url``, and ``auth`` are always required.
+  - ``auth.backends`` must be a non-empty list of unique strings, each drawn from
+    ``{"password", "private_key"}``.
+  - ``auth.allow_effective_user`` may only be ``true`` when ``"password"`` is in ``auth.backends``.
+  - ``connection_timeout`` and ``mcp_session_idle_timeout_seconds`` must be positive
+    numbers if present; booleans are rejected.
+  - ``session_creation.max_concurrent_sessions`` must be a non-negative integer if present.
   - When ``session_creation`` is present, ``defaults`` is required and
     ``defaults.heap_size_gb`` is required.
-  - Unknown fields are rejected at every level (top level, ``session_creation``,
+  - Unknown fields are rejected at every level (top level, ``auth``, ``session_creation``,
     and ``session_creation.defaults``).
-  - Sensitive field ``password`` is redacted in logs.
+  - The current enterprise schema carries no secrets; :func:`redact_enterprise_config`
+    returns a plain shallow copy as a stable redaction surface for future schema changes.
 
 Environment Variables:
 ---------------------

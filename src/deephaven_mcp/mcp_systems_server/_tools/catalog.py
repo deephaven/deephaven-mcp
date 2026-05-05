@@ -363,7 +363,7 @@ async def catalog_tables_list(
         }
     """
     _LOGGER.info(
-        f"[mcp_systems_server:catalog_tables] Invoked: session_id={session_id!r}, "
+        f"[mcp_systems_server:catalog_tables_list] Invoked: session_id={session_id!r}, "
         f"max_rows={max_rows}, filters={filters!r}, format={format!r}"
     )
 
@@ -374,7 +374,7 @@ async def catalog_tables_list(
         max_rows=max_rows,
         filters=filters,
         format=format,
-        tool_name="catalog_tables",
+        tool_name="catalog_tables_list",
     )
 
 
@@ -506,7 +506,7 @@ async def catalog_namespaces_list(
         }
     """
     _LOGGER.info(
-        f"[mcp_systems_server:catalog_namespaces] Invoked: session_id={session_id!r}, "
+        f"[mcp_systems_server:catalog_namespaces_list] Invoked: session_id={session_id!r}, "
         f"max_rows={max_rows}, filters={filters!r}, format={format!r}"
     )
 
@@ -517,7 +517,7 @@ async def catalog_namespaces_list(
         max_rows=max_rows,
         filters=filters,
         format=format,
-        tool_name="catalog_namespaces",
+        tool_name="catalog_namespaces_list",
     )
 
 

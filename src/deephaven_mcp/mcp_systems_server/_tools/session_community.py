@@ -803,8 +803,11 @@ async def session_community_create(
             If provided, uses the deephaven installation from that venv (e.g., "/path/to/venv").
             If None (default), uses the same venv as the MCP server.
             Raises error if used with docker launch method.
-        heap_size_gb (float | int | None): JVM heap size in gigabytes (e.g., 4 or 2.5 for -Xmx4g or -Xmx2.5g).
-            Applies to both docker and python launches.
+        heap_size_gb (float | int | None): JVM heap size in gigabytes.
+            Applies to both docker and python launches. Integer values use the ``g``
+            suffix (e.g. ``4`` → ``-Xmx4g``); float values with a decimal part are
+            converted to megabytes because the JVM does not accept decimal ``g``
+            values (e.g. ``2.5`` → ``-Xmx2560m``).
             Defaults to configuration value or 4.
         extra_jvm_args (list[str] | None): Additional JVM arguments as list of strings.
         environment_vars (dict[str, str] | None): Environment variables to set in the session.

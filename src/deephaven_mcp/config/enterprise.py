@@ -51,6 +51,10 @@ Public API (re-exported via :mod:`deephaven_mcp.config`):
 - :func:`validate_enterprise_config`
 - :func:`redact_enterprise_config`
 - :data:`DEFAULT_CONNECTION_TIMEOUT_SECONDS`
+
+Also exported from this module (imported directly, not via
+:mod:`deephaven_mcp.config`):
+
 - :data:`SUPPORTED_AUTH_BACKENDS`
 """
 

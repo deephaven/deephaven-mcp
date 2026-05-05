@@ -201,8 +201,9 @@ async def session_tables_list(context: Context, session_id: str) -> dict:
     """MCP Tool: Retrieve the names of all tables in a Deephaven session.
 
     Returns a simple list of table names without schemas or metadata. This is a lightweight
-    alternative to table_schemas when you only need to discover what tables exist in a session.
-    Much faster than table_schemas since it doesn't fetch schema information for each table.
+    alternative to session_tables_schema when you only need to discover what tables exist in
+    a session. Much faster than session_tables_schema since it doesn't fetch schema
+    information for each table.
 
     Terminology Note:
     - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance

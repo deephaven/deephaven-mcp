@@ -225,9 +225,10 @@ def _redact_session_creation_config(
 def redact_community_config(config: dict[str, Any]) -> dict[str, Any]:
     """Return a deep copy of ``config`` with every sensitive field redacted.
 
-    Walks the two subsections that can contain secrets and applies the
+    Walks the three subsections that can contain secrets and applies the
     matching per-unit redactor:
 
+    - ``auth.psk``, if present, is replaced with ``"[REDACTED]"``.
     - ``sessions.<name>`` entries are redacted via
       :func:`redact_community_session_config` (with binary TLS material also
       redacted).

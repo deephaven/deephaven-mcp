@@ -17,7 +17,7 @@ Example (standard):
     ```python
     import asyncio
     import pyarrow as pa
-    from deephaven_mcp.sessions import CommunitySessionManager
+    from deephaven_mcp.resource_manager import CommunitySessionManager
 
     async def main():
         manager = CommunitySessionManager("localhost", 10000)
@@ -136,7 +136,7 @@ class BaseSession[T: Session](ClientObjectWrapper[T]):
     Example:
         ```python
         import asyncio
-        from deephaven_mcp.sessions import CommunitySessionManager
+        from deephaven_mcp.resource_manager import CommunitySessionManager
 
         async def main():
             manager = CommunitySessionManager("localhost", 10000)
@@ -1010,7 +1010,7 @@ class CoreSession(BaseSession[Session]):
     Example:
         ```python
         import asyncio
-        from deephaven_mcp.sessions import CommunitySessionManager
+        from deephaven_mcp.resource_manager import CommunitySessionManager
 
         async def main():
             manager = CommunitySessionManager("localhost", 10000)
@@ -1421,9 +1421,12 @@ class CorePlusSession(
                      DndSession object with proper enterprise capabilities.
 
         Raises:
-            InternalError: If the provided session is not a DndSession instance or doesn't
-                         support the required enterprise functionality.
-            ValueError: If the session parameter is None or invalid.
+            InternalError: If ``is_enterprise=True`` is passed to the
+                           parent :class:`ClientObjectWrapper` constructor but the
+                           ``deephaven_enterprise`` package is not available in the
+                           current environment. This typically indicates a deployment
+                           configuration problem rather than a caller-visible bug.
+            ValueError: If the ``session`` argument is ``None``.
 
         Note:
             - This class is typically not instantiated directly by users but rather obtained

@@ -57,8 +57,9 @@ class PasswordBackend(AuthBackend):
         Args:
             allow_effective_user (bool): If ``True``, accept an optional
                 ``X-Deephaven-Effective-User`` header and propagate its
-                value into :class:`PasswordCredentials`. If ``False`` (default),
-                the header must be absent; otherwise the request is
+                value into :class:`PasswordCredentials`. If ``False``
+                (default), the header must be absent or empty; a
+                present-and-non-empty value causes the request to be
                 rejected with :class:`AuthenticationError`.
             realm (str | None): Realm string advertised in the
                 ``WWW-Authenticate`` challenge header. Defaults to

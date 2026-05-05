@@ -222,7 +222,10 @@ def _run_startup_validation_or_exit[M: ConfigManager, T](
     try:
         result = asyncio.run(async_loader(manager))
     except Exception as e:
-        _LOGGER.error(f"[{label}] Configuration error — server will not start: {e}")
+        _LOGGER.error(
+            f"[{label}] Configuration error — server will not start: {e}",
+            exc_info=True,
+        )
         sys.exit(1)
     _LOGGER.info(f"[{label}] Configuration validated successfully.")
     return result

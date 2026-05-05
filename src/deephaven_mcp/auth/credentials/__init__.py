@@ -6,10 +6,11 @@ returned by backends (:class:`PSKCredentials`,
 :class:`PasswordCredentials`, :class:`PrivateKeyCredentials`), all of
 which inherit from the abstract base :class:`Credentials`.
 
-The module has **no behavioral coupling** to the rest of the system: it
-imports only from the standard library and is therefore importable from
-any consumer (a session factory, a future CLI, tests) without dragging
-in backend or middleware machinery.
+The module has **no behavioral coupling** to the rest of the system:
+it depends only on the standard library and the small
+:mod:`deephaven_mcp._redaction` constant module, and is therefore
+importable from any consumer (a session factory, a future CLI, tests)
+without dragging in backend or middleware machinery.
 """
 
 from ._credentials import (

@@ -1,10 +1,11 @@
-"""Authentication backend Protocol, concrete backends, and chain runner.
+"""Authentication backend abstract base class, concrete backends, and chain runner.
 
 This subpackage contains the **mechanism layer** of the ``auth``
 framework:
 
-- :class:`AuthBackend` — the Protocol every backend implements, plus the
-  :class:`AuthenticationError` raised on invalid credentials.
+- :class:`AuthBackend` — the :class:`abc.ABC` every backend inherits
+  from, plus the :class:`AuthenticationError` raised on invalid
+  credentials.
 - :func:`authenticate_and_resolve` — the pure-function chain runner used
   by the middleware and by non-HTTP callers (e.g. a future CLI, tests).
 - Concrete backends (:class:`PSKBackend`, :class:`PasswordBackend`,

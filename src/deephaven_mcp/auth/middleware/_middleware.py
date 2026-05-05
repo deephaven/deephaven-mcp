@@ -125,7 +125,8 @@ class AuthenticationMiddleware:
             )
         except AuthenticationError as exc:
             _LOGGER.warning(
-                f"[AuthenticationMiddleware] Rejected request to {path!r}: {exc}"
+                f"[AuthenticationMiddleware:__call__] Rejected request to "
+                f"{path!r}: {exc}"
             )
             await _send_401(send, self.backends, str(exc))
             return

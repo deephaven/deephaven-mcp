@@ -108,6 +108,15 @@ def get_config_manager(context: Context) -> ConfigManager:
 def get_mcp_session_id(ctx: Context) -> str:
     """Extract the MCP session ID from the request headers.
 
+    Args:
+        ctx (Context): The MCP context object containing the HTTP
+            request whose headers include ``mcp-session-id``.
+
+    Returns:
+        str: The value of the ``mcp-session-id`` header, used as the
+            per-MCP-session key by the lifespan's session-registry
+            manager.
+
     Raises:
         InternalError: If the mcp-session-id header is absent. Every MCP request over
             streamable-HTTP carries an mcp-session-id; absence indicates a misconfigured
@@ -234,11 +243,19 @@ async def get_enterprise_registry(context: Context) -> EnterpriseSessionRegistry
 
     Raises:
         InternalError: If the mcp-session-id header is absent, the
-            registry is not an :class:`EnterpriseSessionRegistry` (server
-            misconfiguration), the request has no scope-attached
-            credentials, or the request carries a credential type that
-            is not valid for enterprise (e.g.
-            :class:`~deephaven_mcp.auth.credentials.PSKCredentials`).
+            registry is not an :class:`EnterpriseSessionRegistry`
+            (server misconfiguration), or the request has no
+            scope-attached credentials.
+        AuthenticationError: If the request's credentials differ from
+            an already-bound identity for this MCP session
+            (:meth:`bind_credentials` enforces stable per-session
+            identity). Note that rejection of credential *types*
+            unsupported by enterprise (e.g.
+            :class:`~deephaven_mcp.auth.credentials.PSKCredentials`)
+            happens later, inside the background discovery task via
+            :meth:`CorePlusSessionFactory.from_credentials`, and surfaces
+            on the registry's ``_error`` field rather than being raised
+            from this function.
     """
     registry = await get_registry_from_context(context)
     if not isinstance(registry, EnterpriseSessionRegistry):
@@ -246,9 +263,12 @@ async def get_enterprise_registry(context: Context) -> EnterpriseSessionRegistry
             f"Expected EnterpriseSessionRegistry, got {type(registry).__name__}."
         )
     creds = _get_request_credentials(context)
-    # bind_credentials is the single rejection point for unsupported
-    # credential subclasses (e.g. PSKCredentials, which only the
-    # community server accepts); it raises InternalError on mismatch.
+    # bind_credentials enforces stable per-MCP-session identity: it raises
+    # AuthenticationError if a different credential was previously bound.
+    # It does NOT validate credential type — rejection of unsupported
+    # subclasses (e.g. PSKCredentials for enterprise) happens later inside
+    # CorePlusSessionFactory.from_credentials in the background discovery
+    # task, surfacing on registry._error rather than raised from here.
     await registry.bind_credentials(creds)
     return registry
 
@@ -379,7 +399,8 @@ def check_response_size(table_name: str, estimated_size: int) -> dict | None:
     """
     if estimated_size > WARNING_SIZE:
         _LOGGER.warning(
-            f"Large response (~{estimated_size/1_000_000:.1f}MB) for table '{table_name}'. "
+            f"[mcp_systems_server:check_response_size] Large response "
+            f"(~{estimated_size/1_000_000:.1f}MB) for table '{table_name}'. "
             f"Consider reducing max_rows for better performance."
         )
 
@@ -600,6 +621,7 @@ def redact_json_sensitive_fields(json_str: str | None) -> str | None:
         parsed = json.loads(json_str)
     except (json.JSONDecodeError, ValueError):
         _LOGGER.warning(
+            "[mcp_systems_server:redact_json_sensitive_fields] "
             "type_specific JSON field is not valid JSON; content suppressed"
         )
         return "[UNPARSEABLE]"

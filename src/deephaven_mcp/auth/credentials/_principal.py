@@ -89,8 +89,9 @@ class Principal:
         raw (dict[str, str]): Authenticator-defined non-secret extras
             (for example the name of the authenticator that produced
             this principal, or IdP claims). Never contains secret
-            material. Intentionally untyped because its schema is
-            authenticator-defined.
+            material. The ``dict[str, str]`` shape is fixed, but the
+            set of keys and their meanings is authenticator-defined and
+            deliberately left unconstrained by the type system.
     """
 
     subject: str

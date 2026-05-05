@@ -736,11 +736,12 @@ class CorePlusSessionFactory(
             ResourceError: If there are insufficient server resources (memory, CPU, etc.) to create
                 the worker, or if resource allocation limits have been reached.
             SessionCreationError: If an error occurs during worker creation or connection establishment,
-                such as invalid configuration parameters or initialization failures.
+                such as invalid configuration parameters, initialization failures, or authentication
+                problems. Authentication issues surface as ``SessionCreationError`` with the original
+                exception available via ``__cause__``.
             DeephavenConnectionError: If there is a network or communication problem with the Deephaven
                 server during worker creation or connection, or if worker creation exceeds
                 the specified timeout_seconds.
-            AuthenticationError: If the current authentication is invalid or has insufficient permissions.
 
         Example - Basic usage:
             ```python
@@ -913,9 +914,9 @@ class CorePlusSessionFactory(
             DeephavenConnectionError: If a network-related issue occurs while connecting to the worker,
                 such as connectivity problems, server unavailability, or connection timeout.
             SessionCreationError: If there's an error establishing the session connection for any other
-                reason, such as version incompatibility or resource constraints.
-            AuthenticationError: If the current authentication is invalid or has insufficient permissions
-                to connect to the specified worker.
+                reason, such as version incompatibility, resource constraints, or authentication
+                problems. Authentication issues surface as ``SessionCreationError`` with the original
+                exception available via ``__cause__``.
 
         Example - Connecting by name:
             ```python
@@ -1050,12 +1051,11 @@ class CorePlusSessionFactory(
 
         Raises:
             ResourceError: If the key cannot be deleted due to issues such as the key not being
-                found in the system, insufficient permissions to delete the key, or other
-                server-side key storage problems.
+                found in the system, insufficient permissions, server-side key storage problems,
+                or authentication failures. Authentication issues surface as ``ResourceError``
+                with the original exception available via ``__cause__``.
             DeephavenConnectionError: If there is a problem connecting to the server during the
                 deletion operation, such as network issues, server unavailability, or timeout.
-            AuthenticationError: If the current authentication is invalid or has expired,
-                requiring re-authentication before key management operations can be performed.
 
         Example:
             ```python
@@ -1555,11 +1555,11 @@ class CorePlusSessionFactory(
 
         Raises:
             ResourceError: If uploading the key fails due to issues such as invalid key format,
-                malformed PEM data, server-side key storage problems, or permission issues.
+                malformed PEM data, server-side key storage problems, permission issues, or
+                authentication failures. Authentication issues surface as ``ResourceError`` with
+                the original exception available via ``__cause__``.
             DeephavenConnectionError: If there is a problem connecting to the authentication server
                 such as network issues, server unavailability, or timeout.
-            AuthenticationError: If the current session is not authenticated or lacks the necessary
-                permissions to upload keys.
 
         Note:
             - You must be authenticated before calling this method
