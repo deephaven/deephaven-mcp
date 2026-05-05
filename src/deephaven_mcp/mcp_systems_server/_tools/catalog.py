@@ -20,9 +20,9 @@ from deephaven_mcp.client import CorePlusSession
 from deephaven_mcp.formatters import format_table_data
 from deephaven_mcp.mcp_systems_server._tools.shared import (
     ESTIMATED_BYTES_PER_CELL,
-    error_response,
     build_table_data_response,
     check_response_size,
+    error_response,
     format_meta_table_result,
     get_enterprise_session,
     get_session_from_context,

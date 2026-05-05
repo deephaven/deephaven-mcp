@@ -470,7 +470,11 @@ async def test_get_session_from_context_session_connection_fails():
 
 def test_error_response_structure():
     result = error_response("something went wrong")
-    assert result == {"success": False, "error": "something went wrong", "isError": True}
+    assert result == {
+        "success": False,
+        "error": "something went wrong",
+        "isError": True,
+    }
 
 
 def test_error_response_success_is_false():

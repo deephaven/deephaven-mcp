@@ -15,9 +15,9 @@ from mcp.server.fastmcp import Context, FastMCP
 from deephaven_mcp import queries
 from deephaven_mcp.mcp_systems_server._tools.shared import (
     ESTIMATED_BYTES_PER_CELL,
-    error_response,
     build_table_data_response,
     check_response_size,
+    error_response,
     format_meta_table_result,
     get_session_from_context,
 )
