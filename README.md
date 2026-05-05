@@ -241,38 +241,68 @@ uv pip install "deephaven-mcp[enterprise]"
 
 #### 3. Create Configuration File
 
-Create a config file (e.g., `dhe.json`) for your enterprise system. Each enterprise server instance manages **one** DHE system:
+Create a config file (e.g., `dhe.json`) for your enterprise system. Each enterprise server instance manages **one** DHE system.
 
-**Password authentication:**
+> **Per-request authentication.** The enterprise MCP server does **not**
+> store any user credentials in its config file. The config only tells
+> the server *which* authentication backends to accept. Each MCP client
+> (your AI tool / IDE) must send its own Deephaven credentials in
+> `X-Deephaven-*` HTTP headers on every request. See
+> [Client authentication headers](#client-authentication-headers) below.
+
+**Typical config — accept both password and private-key auth:**
 
 ```json5
 {
   "system_name": "prod",                                          // A short name for this system
   "connection_json_url": "https://dhe.example.com/iris/connection.json",  // From your administrator
-  "auth_type": "password",
-  "username": "your-username",
-  "password_env_var": "DHE_PASSWORD"                              // Read password from environment
+  "auth": {
+    "backends": ["password", "private_key"],                      // Allow either auth method
+    "allow_effective_user": false                                 // Set true to honor X-Deephaven-Effective-User
+  }
 }
 ```
 
-Set your password in the environment:
-
-```bash
-export DHE_PASSWORD="your-password-here"
-```
-
-**Private key authentication:**
+**Password-only:**
 
 ```json5
 {
   "system_name": "prod",
   "connection_json_url": "https://dhe.example.com/iris/connection.json",
-  "auth_type": "private_key",
-  "private_key_path": "/absolute/path/to/priv-mykeyname.base64.txt"  // Provided by your IT/security team
+  "auth": { "backends": ["password"] }
 }
 ```
 
-> **Security Note**: Restrict config file permissions: `chmod 600 dhe.json`
+**Private-key only:**
+
+```json5
+{
+  "system_name": "prod",
+  "connection_json_url": "https://dhe.example.com/iris/connection.json",
+  "auth": { "backends": ["private_key"] }
+}
+```
+
+> **Security Note**: Restrict config file permissions: `chmod 600 dhe.json`.
+> Even though this file no longer contains secrets, protecting it prevents
+> an attacker from silently changing `connection_json_url` or loosening
+> `allow_effective_user`.
+
+##### Client authentication headers
+
+Every request your MCP client sends to the enterprise server must carry
+the caller's Deephaven credentials in HTTP headers:
+
+| Header | Used by | Required | Description |
+|--------|---------|----------|-------------|
+| `X-Deephaven-Username` | both | yes | Your Deephaven username. |
+| `X-Deephaven-Password` | password backend | yes (password) | Cleartext Deephaven password. Always send over TLS. |
+| `X-Deephaven-Effective-User` | password backend | optional | Only honored when `allow_effective_user: true` in the server config. |
+| `X-Deephaven-Private-Key` | private_key backend | yes (private_key) | Base64-encoded contents of your Deephaven `priv-<keyname>.base64.txt` keypair file (provided by your IT/security team). |
+
+The enterprise server must be deployed behind TLS — the headers above
+carry secrets in cleartext on the wire. Consult your MCP client's
+documentation for how to inject custom HTTP headers on every request.
 
 #### 4. Start the Enterprise Server and Configure Your AI Tool
 
@@ -589,29 +619,45 @@ The enterprise server (`dh-mcp-enterprise-server`) uses a **flat** JSON or JSON5
 
 **File Format**: Supports standard JSON and JSON5 (comments and trailing commas allowed).
 
+> **Per-request authentication.** The enterprise server holds **no**
+> user credentials itself. It declares which auth backends are allowed
+> via the `auth` block, and every MCP request must present the caller's
+> own Deephaven credentials in `X-Deephaven-*` HTTP headers. See
+> [Client authentication headers](#client-authentication-headers) for
+> the full header list.
+
 #### DHE Config Examples
 
-**Password authentication:**
+**Accept both password and private-key auth (recommended default):**
 
 ```json5
 {
   "system_name": "prod",
   "connection_json_url": "https://dhe.example.com/iris/connection.json",
-  "auth_type": "password",
-  "username": "admin",
-  "password_env_var": "DHE_PASSWORD"  // recommended: read from env var
+  "auth": {
+    "backends": ["password", "private_key"],
+    "allow_effective_user": false
+  }
 }
 ```
 
-**Private key authentication:**
+**Password-only:**
 
 ```json5
 {
   "system_name": "prod",
   "connection_json_url": "https://dhe.example.com/iris/connection.json",
-  "auth_type": "private_key",
-  // Proprietary keypair file from your IT team, typically named priv-<keyname>.base64.txt
-  "private_key_path": "/absolute/path/to/priv-mykeyname.base64.txt"
+  "auth": { "backends": ["password"] }
+}
+```
+
+**Private-key only:**
+
+```json5
+{
+  "system_name": "prod",
+  "connection_json_url": "https://dhe.example.com/iris/connection.json",
+  "auth": { "backends": ["private_key"] }
 }
 ```
 
@@ -621,9 +667,7 @@ The enterprise server (`dh-mcp-enterprise-server`) uses a **flat** JSON or JSON5
 {
   "system_name": "prod",
   "connection_json_url": "https://dhe.example.com/iris/connection.json",
-  "auth_type": "password",
-  "username": "admin",
-  "password_env_var": "DHE_PASSWORD",
+  "auth": { "backends": ["password"] },
   "session_creation": {
     "max_concurrent_sessions": 5,
     "defaults": {
@@ -640,11 +684,9 @@ The enterprise server (`dh-mcp-enterprise-server`) uses a **flat** JSON or JSON5
 |-------|------|----------|-------------|
 | `system_name` | string | Yes | Name for this enterprise system — appears in all session and PQ identifiers (e.g. `"enterprise:prod:my-pq"`) |
 | `connection_json_url` | string | Yes | URL to the Enterprise server's `connection.json` file |
-| `auth_type` | string | Yes | `"password"` or `"private_key"` |
-| `username` | string | `auth_type="password"` | Username for password auth |
-| `password` | string | `auth_type="password"` | Password (use `password_env_var` instead for security) |
-| `password_env_var` | string | `auth_type="password"` | Environment variable containing the password (recommended) |
-| `private_key_path` | string | `auth_type="private_key"` | Absolute path to the Deephaven private keypair file (proprietary format, typically named `priv-<keyname>.base64.txt`; provided by your IT/security team) |
+| `auth` | object | Yes | Authentication backends config (see fields below). The server accepts a request when any listed backend's required headers are present. |
+| `auth.backends` | array of string | Yes | Non-empty subset of `["password", "private_key"]`. Each entry enables one HTTP auth backend. |
+| `auth.allow_effective_user` | boolean | No | Default `false`. When `true`, the `"password"` backend honors the optional `X-Deephaven-Effective-User` header so privileged callers can act as another user. |
 | `connection_timeout` | int or float | No | Timeout in seconds for connecting to the system (default: 10.0) |
 | `mcp_session_idle_timeout_seconds` | int or float | No | Seconds of MCP client inactivity after which the per-session Deephaven registry is closed and resources are reclaimed (default: 3600.0 — 1 hr). Must be positive. |
 | `session_creation` | object | No | Optional section that enables `session_enterprise_create`. If absent, the tool returns a "not configured" error. When present, `defaults` and `defaults.heap_size_gb` are required. |
@@ -670,13 +712,18 @@ dh-mcp-enterprise-server --config /path/to/dhe_prod.json --port 8002 >dh-mcp-ent
 dh-mcp-enterprise-server --config /path/to/dhe_staging.json --port 8004 >dh-mcp-enterprise-staging.log 2>&1 &
 ```
 
-> **Security Note**: Config files may contain sensitive credentials. Restrict permissions with `chmod 600 /path/to/dhe_prod.json`.
+> **Security Note**: Enterprise config files no longer contain user
+> credentials (those now flow from `X-Deephaven-*` HTTP headers), but
+> should still be locked down (e.g. `chmod 600 /path/to/dhe_prod.json`)
+> to prevent unauthorized changes to `connection_json_url` or
+> `allow_effective_user`. The enterprise server must be deployed behind
+> TLS — the auth headers carry secrets in cleartext on the wire.
 
 ---
 
 ### Configuring DHC (Community) Server
 
-The community server (`dh-mcp-community-server`) uses a flat JSON or JSON5 config file. Valid top-level keys are `"sessions"`, `"session_creation"`, `"security"`, and `"mcp_session_idle_timeout_seconds"` (all optional).
+The community server (`dh-mcp-community-server`) uses a flat JSON or JSON5 config file. Valid top-level keys are `"auth"`, `"sessions"`, `"session_creation"`, `"security"`, and `"mcp_session_idle_timeout_seconds"` (all optional). The `"auth"` block configures the PSK gate that controls who may connect to the community MCP server itself; see [`docs/ENV.md`](docs/ENV.md#community-mcp-server-gate-authpsk_env_var) for `auth.psk_env_var` and related fields.
 
 **Config file location**: Pass via `--config` CLI flag or `DH_MCP_CONFIG_FILE` environment variable.
 
@@ -935,9 +982,11 @@ The variables needed to get started are:
   - Default: `INFO`
   - Example: `PYTHONLOGLEVEL=DEBUG`
 
-- **Custom authentication variables**: Any environment variable specified in your config's `auth_token_env_var` or `password_env_var` field will be used to source authentication tokens
-  - Example: If config specifies `"password_env_var": "DHE_PASSWORD"`, then set `DHE_PASSWORD=your-password`
-  - Note: This is a more secure alternative to hardcoding credentials in configuration files
+- **Custom authentication variables**: The community server supports two env-var indirection fields. Pick a variable name in your `deephaven_mcp.json`, then export the corresponding env var in your shell:
+  - **`sessions[*].auth_token_env_var`** — sources the per-worker `auth_token` (pydeephaven client token) from the named env var. Mutually exclusive with the inline `auth_token`.
+  - **`auth.psk_env_var`** — sources the community **MCP server gate** PSK from the named env var. Mutually exclusive with the inline `auth.psk`.
+  - Example: If your config has `"auth_token_env_var": "MY_DH_TOKEN"`, then `export MY_DH_TOKEN=your-secret`.
+  - Note: The enterprise server holds **no** user credentials in its config (per-request auth via `X-Deephaven-*` headers), so it has no env-var indirection fields. See [`docs/ENV.md`](docs/ENV.md) for the full list.
 
 ---
 
