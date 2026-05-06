@@ -2313,6 +2313,7 @@ async def test_check_session_id_available_conflict():
     )
 
     assert result is not None
+    assert result["success"] is False
     assert result["error"] == "Session 'existing-session-id' already exists"
     assert result["isError"] is True
 

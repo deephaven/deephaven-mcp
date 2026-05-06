@@ -44,6 +44,24 @@ def test_validate_community_session_config_importable():
     assert callable(validate_community_session_config)
 
 
+def test_resolve_required_env_var_importable():
+    from deephaven_mcp.config import resolve_required_env_var
+    from deephaven_mcp.config._validators import resolve_required_env_var as _canonical
+
+    # The public re-export must be the same callable object as the
+    # canonical one in deephaven_mcp.config._validators.
+    assert resolve_required_env_var is _canonical
+
+
+def test_resolve_secret_field_importable():
+    from deephaven_mcp.config import resolve_secret_field
+    from deephaven_mcp.config._validators import resolve_secret_field as _canonical
+
+    # The public re-export must be the same callable object as the
+    # canonical one in deephaven_mcp.config._validators.
+    assert resolve_secret_field is _canonical
+
+
 def test_redact_community_session_config_importable():
     from deephaven_mcp.config import redact_community_session_config
 

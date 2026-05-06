@@ -12,7 +12,9 @@ from deephaven_mcp._exceptions import InternalError, RegistryItemNotFoundError
 from deephaven_mcp.client import BaseSession, CorePlusSession
 from deephaven_mcp.mcp_systems_server._tools.shared import (
     _redact_recursive,
+    build_table_data_response,
     check_response_size,
+    error_response,
     format_initialization_status,
     format_meta_table_result,
     get_community_registry,
@@ -198,8 +200,67 @@ async def test_get_community_registry_raises_on_wrong_type():
 
 
 @pytest.mark.asyncio
-async def test_get_enterprise_registry_returns_registry():
-    """get_enterprise_registry returns an EnterpriseSessionRegistry."""
+async def test_get_enterprise_registry_returns_registry_and_binds_creds():
+    """get_enterprise_registry returns the registry and binds the request creds."""
+    from deephaven_mcp.auth.credentials import PasswordCredentials
+
+    mock_registry = MagicMock(spec=EnterpriseSessionRegistry)
+    mock_registry.bind_credentials = AsyncMock()
+    creds = PasswordCredentials(username="alice", password="pw")
+    context = MockContext(
+        {
+            "session_registry_manager": create_mock_session_registry_manager(
+                mock_registry
+            ),
+            "config_manager": MagicMock(),
+        },
+        creds=creds,
+    )
+    result = await get_enterprise_registry(context)
+    assert result is mock_registry
+    mock_registry.bind_credentials.assert_awaited_once_with(creds)
+
+
+@pytest.mark.asyncio
+async def test_get_enterprise_registry_propagates_bind_credentials_rejection():
+    """``shared.get_enterprise_registry`` propagates errors from ``bind_credentials``.
+
+    The helper forwards the per-request credentials to the registry's
+    :meth:`bind_credentials` and must propagate whatever exception that
+    call raises, without re-implementing the rejection logic itself.
+    Note that decisions about which credential *types* are supported by
+    enterprise are not made here: type acceptance is handled by the auth
+    middleware and the downstream
+    :meth:`CorePlusSessionFactory.from_credentials` call inside the
+    background discovery task. ``bind_credentials`` itself primarily
+    enforces stable per-MCP-session identity. This test uses
+    :class:`PSKCredentials` purely as a convenient stand-in object and
+    asserts only that the error raised by ``bind_credentials`` is
+    surfaced unchanged.
+    """
+    from deephaven_mcp.auth.credentials import PSKCredentials
+
+    rejection = InternalError("Unsupported credentials type 'PSKCredentials'")
+    mock_registry = MagicMock(spec=EnterpriseSessionRegistry)
+    mock_registry.bind_credentials = AsyncMock(side_effect=rejection)
+    creds = PSKCredentials(psk="x")
+    context = MockContext(
+        {
+            "session_registry_manager": create_mock_session_registry_manager(
+                mock_registry
+            ),
+            "config_manager": MagicMock(),
+        },
+        creds=creds,
+    )
+    with pytest.raises(InternalError, match="Unsupported credentials type"):
+        await get_enterprise_registry(context)
+    mock_registry.bind_credentials.assert_awaited_once_with(creds)
+
+
+@pytest.mark.asyncio
+async def test_get_enterprise_registry_missing_creds_raises():
+    """Missing scope[SCOPE_KEY_CREDENTIALS] raises InternalError."""
     mock_registry = MagicMock(spec=EnterpriseSessionRegistry)
     context = MockContext(
         {
@@ -207,10 +268,67 @@ async def test_get_enterprise_registry_returns_registry():
                 mock_registry
             ),
             "config_manager": MagicMock(),
-        }
+        },
+        creds=None,
     )
-    result = await get_enterprise_registry(context)
-    assert result is mock_registry
+    with pytest.raises(InternalError, match="Authenticated credentials are missing"):
+        await get_enterprise_registry(context)
+
+
+def test_get_request_credentials_rejects_non_credentials_scope_value():
+    """Wrong type at scope[SCOPE_KEY_CREDENTIALS] raises InternalError.
+
+    If the auth middleware (or a misconfigured test fixture) attaches an
+    object that is not a :class:`Credentials` instance to the ASGI
+    scope, the helper must raise :class:`InternalError` with a clear
+    "wrong type" message rather than silently returning the bogus value
+    to downstream callers.
+    """
+    from deephaven_mcp.mcp_systems_server._tools.shared import (
+        _get_request_credentials,
+    )
+
+    # Pass a plain string in place of a Credentials instance.
+    context = MockContext({}, creds="not-a-credentials-instance")
+    with pytest.raises(InternalError, match="not a Credentials instance"):
+        _get_request_credentials(context)
+
+
+def test_get_request_credentials_no_request_raises():
+    """The private credentials helper raises when context has no request."""
+    from deephaven_mcp.mcp_systems_server._tools.shared import (
+        _get_request_credentials,
+    )
+
+    class _NoReqRequestContext:
+        request = None
+
+    class _NoReqContext:
+        request_context = _NoReqRequestContext()
+
+    with pytest.raises(InternalError, match="no associated HTTP request"):
+        _get_request_credentials(_NoReqContext())
+
+
+@pytest.mark.asyncio
+async def test_get_enterprise_registry_idempotent_re_bind():
+    """Re-binding the same creds in subsequent calls is fine (idempotent)."""
+    from deephaven_mcp.auth.credentials import PasswordCredentials
+
+    mock_registry = MagicMock(spec=EnterpriseSessionRegistry)
+    mock_registry.bind_credentials = AsyncMock()
+    creds = PasswordCredentials(username="alice", password="pw")
+    mock_session_manager = create_mock_session_registry_manager(mock_registry)
+    context = MockContext(
+        {
+            "session_registry_manager": mock_session_manager,
+            "config_manager": MagicMock(),
+        },
+        creds=creds,
+    )
+    await get_enterprise_registry(context)
+    await get_enterprise_registry(context)
+    assert mock_registry.bind_credentials.await_count == 2
 
 
 @pytest.mark.asyncio
@@ -369,6 +487,40 @@ async def test_get_session_from_context_session_connection_fails():
 
     mock_registry.get.assert_called_once_with("test:session:id")
     mock_session_manager.get.assert_called_once()
+
+
+# ===========================================================================
+# error_response tests
+# ===========================================================================
+
+
+def test_error_response_structure():
+    result = error_response("something went wrong")
+    assert result == {
+        "success": False,
+        "error": "something went wrong",
+        "isError": True,
+    }
+
+
+def test_error_response_success_is_false():
+    assert error_response("x")["success"] is False
+
+
+def test_error_response_is_error_is_true():
+    assert error_response("x")["isError"] is True
+
+
+def test_error_response_preserves_message():
+    msg = "Session 'foo' not found"
+    assert error_response(msg)["error"] == msg
+
+
+def test_error_response_empty_message():
+    result = error_response("")
+    assert result["error"] == ""
+    assert result["success"] is False
+    assert result["isError"] is True
 
 
 # ===========================================================================
@@ -539,6 +691,101 @@ def test_format_meta_table_result_meta_columns_schema():
 
     col_names = [c["name"] for c in result["meta_columns"]]
     assert col_names == ["Name", "DataType", "IsPartitioning"]
+
+
+# ===========================================================================
+# build_table_data_response tests
+# ===========================================================================
+
+
+def _make_data_arrow_table() -> pyarrow.Table:
+    """Small arrow table with two typed columns for data-response tests."""
+    return pyarrow.table(
+        {
+            "id": pyarrow.array([1, 2, 3], type=pyarrow.int64()),
+            "name": pyarrow.array(["a", "b", "c"], type=pyarrow.string()),
+        }
+    )
+
+
+def test_build_table_data_response_schema_and_rowcount():
+    """Response includes typed schema and accurate row_count."""
+    arrow_table = _make_data_arrow_table()
+    result = build_table_data_response(arrow_table, is_complete=True, format="json-row")
+
+    assert result["success"] is True
+    assert result["is_complete"] is True
+    assert result["row_count"] == 3
+    assert result["schema"] == [
+        {"name": "id", "type": "int64"},
+        {"name": "name", "type": "string"},
+    ]
+    # Actual format is resolved by format_table_data and echoed back.
+    assert isinstance(result["format"], str)
+    assert "data" in result
+
+
+def test_build_table_data_response_is_complete_false_preserved():
+    """is_complete=False flows through unchanged."""
+    arrow_table = _make_data_arrow_table()
+    result = build_table_data_response(
+        arrow_table, is_complete=False, format="json-row"
+    )
+    assert result["is_complete"] is False
+
+
+def test_build_table_data_response_omits_optional_fields_by_default():
+    """Without table_name/namespace, neither key appears in the response."""
+    arrow_table = _make_data_arrow_table()
+    result = build_table_data_response(arrow_table, is_complete=True, format="json-row")
+    assert "table_name" not in result
+    assert "namespace" not in result
+
+
+def test_build_table_data_response_includes_table_name_when_provided():
+    """table_name is echoed into the response when passed."""
+    arrow_table = _make_data_arrow_table()
+    result = build_table_data_response(
+        arrow_table, is_complete=True, format="json-row", table_name="prices"
+    )
+    assert result["table_name"] == "prices"
+    assert "namespace" not in result
+
+
+def test_build_table_data_response_includes_namespace_when_provided():
+    """namespace is echoed into the response (catalog-table path) when passed."""
+    arrow_table = _make_data_arrow_table()
+    result = build_table_data_response(
+        arrow_table,
+        is_complete=True,
+        format="json-row",
+        table_name="prices",
+        namespace="market_data",
+    )
+    assert result["namespace"] == "market_data"
+    assert result["table_name"] == "prices"
+
+
+def test_build_table_data_response_passes_format_to_formatter():
+    """The requested format is forwarded to format_table_data as format_type=."""
+    arrow_table = _make_data_arrow_table()
+    with patch(
+        "deephaven_mcp.mcp_systems_server._tools.shared.format_table_data",
+        return_value=("csv", "id,name\n1,a\n"),
+    ) as mock_fmt:
+        result = build_table_data_response(arrow_table, is_complete=True, format="csv")
+    mock_fmt.assert_called_once()
+    assert mock_fmt.call_args.kwargs == {"format_type": "csv"}
+    assert result["format"] == "csv"
+    assert result["data"] == "id,name\n1,a\n"
+
+
+def test_build_table_data_response_empty_table():
+    """Empty arrow table yields row_count=0 and an empty schema is still typed."""
+    empty = pyarrow.table({"x": pyarrow.array([], type=pyarrow.int32())})
+    result = build_table_data_response(empty, is_complete=True, format="json-row")
+    assert result["row_count"] == 0
+    assert result["schema"] == [{"name": "x", "type": "int32"}]
 
 
 # ===========================================================================

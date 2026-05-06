@@ -10,98 +10,19 @@ These tools work with both Community and Enterprise sessions.
 
 import logging
 
-import pyarrow
 from mcp.server.fastmcp import Context, FastMCP
 
 from deephaven_mcp import queries
-from deephaven_mcp.formatters import format_table_data
 from deephaven_mcp.mcp_systems_server._tools.shared import (
+    ESTIMATED_BYTES_PER_CELL,
+    build_table_data_response,
     check_response_size,
+    error_response,
     format_meta_table_result,
     get_session_from_context,
 )
 
 _LOGGER = logging.getLogger(__name__)
-
-
-# Response size estimation constants
-# Conservative estimate: ~20 chars + 8 bytes numeric + JSON overhead + safety margin
-ESTIMATED_BYTES_PER_CELL = 50
-"""Estimated bytes per table cell for response size calculation.
-
-This rough estimate is used to prevent memory issues when retrieving large tables.
-The estimation assumes:
-- Average string length: ~20 characters (20 bytes)
-- Numeric values: ~8 bytes (int64/double)
-- Null values and metadata: ~5 bytes overhead
-- JSON formatting overhead: ~15-20 bytes per cell
-- Safety margin: 50 bytes total per cell
-
-This conservative estimate helps catch potentially problematic responses before
-expensive formatting operations. Can be tuned based on actual data patterns.
-"""
-
-
-def _build_table_data_response(
-    arrow_table: pyarrow.Table,
-    is_complete: bool,
-    format: str,
-    table_name: str | None = None,
-    namespace: str | None = None,
-) -> dict:
-    """Build a standardized table data response with schema, formatting, and metadata.
-
-    This helper consolidates the common pattern of:
-    1. Extracting schema from Arrow table
-    2. Formatting data with format_table_data
-    3. Building response dict with standard fields
-
-    Used by both session table tools and catalog table tools to ensure consistent
-    response structure across all table data retrieval operations.
-
-    Args:
-        arrow_table (pyarrow.Table): The Arrow table containing the data.
-        is_complete (bool): Whether the entire table was retrieved (False if truncated by max_rows).
-        format (str): Desired output format (may be optimization strategy or specific format like "csv", "json-row", etc.).
-        table_name (str | None): Optional table name to include in response. Recommended for clarity.
-        namespace (str | None): Optional namespace to include in response. Use for catalog tables only.
-
-    Returns:
-        dict: Standardized response with success=True and fields:
-            - success (bool): Always True for this helper (errors handled by callers).
-            - format (str): Actual format used (resolved from optimization strategies to specific format).
-            - schema (list[dict]): Column definitions with name and type.
-            - row_count (int): Number of rows in the response.
-            - is_complete (bool): Whether entire table was retrieved.
-            - data (varies): Formatted table data (type depends on format).
-            - table_name (str, optional): Included if table_name parameter provided.
-            - namespace (str, optional): Included if namespace parameter provided (catalog tables).
-    """
-    # Extract schema
-    schema = [
-        {"name": field.name, "type": str(field.type)} for field in arrow_table.schema
-    ]
-
-    # Format data
-    actual_format, formatted_data = format_table_data(arrow_table, format_type=format)
-
-    # Build response
-    response = {
-        "success": True,
-        "format": actual_format,
-        "schema": schema,
-        "row_count": len(arrow_table),
-        "is_complete": is_complete,
-        "data": formatted_data,
-    }
-
-    # Add optional fields
-    if namespace is not None:
-        response["namespace"] = namespace
-    if table_name is not None:
-        response["table_name"] = table_name
-
-    return response
 
 
 async def session_tables_schema(
@@ -273,15 +194,16 @@ async def session_tables_schema(
             f"[mcp_systems_server:session_tables_schema] Failed for session: '{session_id}', error: {e!r}",
             exc_info=True,
         )
-        return {"success": False, "error": str(e), "isError": True}
+        return error_response(str(e))
 
 
 async def session_tables_list(context: Context, session_id: str) -> dict:
     """MCP Tool: Retrieve the names of all tables in a Deephaven session.
 
     Returns a simple list of table names without schemas or metadata. This is a lightweight
-    alternative to table_schemas when you only need to discover what tables exist in a session.
-    Much faster than table_schemas since it doesn't fetch schema information for each table.
+    alternative to session_tables_schema when you only need to discover what tables exist in
+    a session. Much faster than session_tables_schema since it doesn't fetch schema
+    information for each table.
 
     Terminology Note:
     - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
@@ -370,11 +292,9 @@ async def session_tables_list(context: Context, session_id: str) -> dict:
             f"[mcp_systems_server:session_tables_list] Failed for session: '{session_id}', error: {e!r}",
             exc_info=True,
         )
-        return {
-            "success": False,
-            "error": f"Failed to list tables for session '{session_id}': {type(e).__name__}: {e}",
-            "isError": True,
-        }
+        return error_response(
+            f"Failed to list tables for session '{session_id}': {type(e).__name__}: {e}"
+        )
 
 
 async def session_table_data(
@@ -567,7 +487,7 @@ async def session_table_data(
         _LOGGER.debug(
             f"[mcp_systems_server:session_table_data] Formatting data with format='{format}'"
         )
-        response = _build_table_data_response(
+        response = build_table_data_response(
             arrow_table, is_complete, format, table_name=table_name
         )
         result.update(response)

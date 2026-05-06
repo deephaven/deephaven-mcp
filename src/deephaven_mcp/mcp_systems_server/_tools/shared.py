@@ -15,8 +15,12 @@ import pyarrow
 from mcp.server.fastmcp import Context
 
 from deephaven_mcp._exceptions import InternalError
+from deephaven_mcp._redaction import REDACTED
+from deephaven_mcp.auth.credentials import Credentials
+from deephaven_mcp.auth.middleware import SCOPE_KEY_CREDENTIALS
 from deephaven_mcp.client import BaseSession, CorePlusSession
 from deephaven_mcp.config import ConfigManager
+from deephaven_mcp.formatters import format_table_data
 from deephaven_mcp.mcp_systems_server._lifespan import LifespanContext
 from deephaven_mcp.resource_manager import (
     BaseRegistry,
@@ -26,6 +30,11 @@ from deephaven_mcp.resource_manager import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def error_response(msg: str) -> dict[str, object]:
+    """Return a standard MCP tool error response dict."""
+    return {"success": False, "error": msg, "isError": True}
 
 
 def format_initialization_status(
@@ -99,6 +108,15 @@ def get_config_manager(context: Context) -> ConfigManager:
 def get_mcp_session_id(ctx: Context) -> str:
     """Extract the MCP session ID from the request headers.
 
+    Args:
+        ctx (Context): The MCP context object containing the HTTP
+            request whose headers include ``mcp-session-id``.
+
+    Returns:
+        str: The value of the ``mcp-session-id`` header, used as the
+            per-MCP-session key by the lifespan's session-registry
+            manager.
+
     Raises:
         InternalError: If the mcp-session-id header is absent. Every MCP request over
             streamable-HTTP carries an mcp-session-id; absence indicates a misconfigured
@@ -166,27 +184,101 @@ async def get_community_registry(context: Context) -> CommunitySessionRegistry:
     return registry
 
 
-async def get_enterprise_registry(context: Context) -> EnterpriseSessionRegistry:
-    """Get the per-MCP-session enterprise registry, creating it on first access.
+def _get_request_credentials(context: Context) -> Credentials:
+    """Return the per-request :data:`Credentials` attached by the auth middleware.
 
-    Delegates to :func:`get_registry_from_context` and validates that the result is an
-    :class:`~deephaven_mcp.resource_manager.EnterpriseSessionRegistry`.
+    The enterprise auth middleware writes the resolved credentials into the
+    ASGI ``scope`` under :data:`SCOPE_KEY_CREDENTIALS` on every authenticated
+    request. This helper reads that value from
+    ``context.request_context.request.scope``.
 
     Args:
         context (Context): The MCP context object.
 
     Returns:
-        EnterpriseSessionRegistry: The per-session enterprise registry.
+        Credentials: The credentials produced by whichever
+            :class:`~deephaven_mcp.auth.backends.AuthBackend` matched the request.
 
     Raises:
-        InternalError: If the mcp-session-id header is absent or the registry is not an
-            EnterpriseSessionRegistry (indicates a server misconfiguration).
+        InternalError: If the MCP context has no associated HTTP request,
+            if the middleware did not attach credentials to the scope
+            (which would only happen if the enterprise server were
+            mounted without :class:`AuthenticationMiddleware`), or if
+            the scope value at :data:`SCOPE_KEY_CREDENTIALS` is present
+            but is not a :class:`Credentials` instance (which indicates
+            a misconfigured middleware or test fixture).
+    """
+    request = context.request_context.request
+    if request is None:
+        raise InternalError(
+            "MCP context has no associated HTTP request; the enterprise "
+            "server requires per-request authentication."
+        )
+    creds = request.scope.get(SCOPE_KEY_CREDENTIALS)
+    if creds is None:
+        raise InternalError(
+            "Authenticated credentials are missing from the request scope. "
+            "AuthenticationMiddleware must run before any enterprise tool "
+            "handler."
+        )
+    if not isinstance(creds, Credentials):
+        raise InternalError(
+            f"Request scope value at SCOPE_KEY_CREDENTIALS is not a "
+            f"Credentials instance (got {type(creds).__name__}); "
+            f"AuthenticationMiddleware is misconfigured."
+        )
+    return creds
+
+
+async def get_enterprise_registry(context: Context) -> EnterpriseSessionRegistry:
+    """Get the per-MCP-session enterprise registry, ready for use by tools.
+
+    On first access for an MCP session, the registry is created from the
+    server config (no credentials yet). Every call to this helper then
+    binds the per-request credentials to the registry via
+    :meth:`~deephaven_mcp.resource_manager.EnterpriseSessionRegistry.bind_credentials`,
+    which is idempotent for the lifetime of the MCP session: the first
+    bind creates the
+    :class:`~deephaven_mcp.resource_manager._manager.CorePlusSessionFactoryManager`
+    and starts background discovery; subsequent calls with the same
+    credentials are no-ops; calls with different credentials raise.
+
+    Args:
+        context (Context): The MCP context object.
+
+    Returns:
+        EnterpriseSessionRegistry: The per-session enterprise registry,
+            with credentials bound.
+
+    Raises:
+        InternalError: If the mcp-session-id header is absent, the
+            registry is not an :class:`EnterpriseSessionRegistry`
+            (server misconfiguration), or the request has no
+            scope-attached credentials.
+        AuthenticationError: If the request's credentials differ from
+            an already-bound identity for this MCP session
+            (:meth:`bind_credentials` enforces stable per-session
+            identity). Note that rejection of credential *types*
+            unsupported by enterprise (e.g.
+            :class:`~deephaven_mcp.auth.credentials.PSKCredentials`)
+            happens later, inside the background discovery task via
+            :meth:`CorePlusSessionFactory.from_credentials`, and surfaces
+            on the registry's ``_error`` field rather than being raised
+            from this function.
     """
     registry = await get_registry_from_context(context)
     if not isinstance(registry, EnterpriseSessionRegistry):
         raise InternalError(
             f"Expected EnterpriseSessionRegistry, got {type(registry).__name__}."
         )
+    creds = _get_request_credentials(context)
+    # bind_credentials enforces stable per-MCP-session identity: it raises
+    # AuthenticationError if a different credential was previously bound.
+    # It does NOT validate credential type — rejection of unsupported
+    # subclasses (e.g. PSKCredentials for enterprise) happens later inside
+    # CorePlusSessionFactory.from_credentials in the background discovery
+    # task, surfacing on registry._error rather than raised from here.
+    await registry.bind_credentials(creds)
     return registry
 
 
@@ -280,13 +372,13 @@ async def get_enterprise_session(
                 f"but session '{session_id}' is {type(session).__name__}"
             )
             _LOGGER.error(f"[mcp_systems_server:{function_name}] {error_msg}")
-            return None, {"success": False, "error": error_msg, "isError": True}
+            return None, error_response(error_msg)
 
         return session, None
     except Exception as e:
         error_msg = f"Failed to get session '{session_id}': {e}"
         _LOGGER.error(f"[mcp_systems_server:{function_name}] {error_msg}")
-        return None, {"success": False, "error": error_msg, "isError": True}
+        return None, error_response(error_msg)
 
 
 # Size limits for table data responses
@@ -316,16 +408,15 @@ def check_response_size(table_name: str, estimated_size: int) -> dict | None:
     """
     if estimated_size > WARNING_SIZE:
         _LOGGER.warning(
-            f"Large response (~{estimated_size/1_000_000:.1f}MB) for table '{table_name}'. "
+            f"[mcp_systems_server:check_response_size] Large response "
+            f"(~{estimated_size/1_000_000:.1f}MB) for table '{table_name}'. "
             f"Consider reducing max_rows for better performance."
         )
 
     if estimated_size > MAX_RESPONSE_SIZE:
-        return {
-            "success": False,
-            "error": f"Response would be ~{estimated_size/1_000_000:.1f}MB (max 50MB). Please reduce max_rows.",
-            "isError": True,
-        }
+        return error_response(
+            f"Response would be ~{estimated_size/1_000_000:.1f}MB (max 50MB). Please reduce max_rows."
+        )
 
     return None  # Size is acceptable
 
@@ -416,6 +507,89 @@ def format_meta_table_result(
     return result
 
 
+# Response size estimation constants
+# Conservative estimate: ~20 chars + 8 bytes numeric + JSON overhead + safety margin
+ESTIMATED_BYTES_PER_CELL = 50
+"""Estimated bytes per table cell for response size calculation.
+
+This rough estimate is used to prevent memory issues when retrieving large tables.
+The estimation assumes:
+- Average string length: ~20 characters (20 bytes)
+- Numeric values: ~8 bytes (int64/double)
+- Null values and metadata: ~5 bytes overhead
+- JSON formatting overhead: ~15-20 bytes per cell
+- Safety margin: 50 bytes total per cell
+
+This conservative estimate helps catch potentially problematic responses before
+expensive formatting operations. Can be tuned based on actual data patterns.
+
+Typically multiplied by ``rows * cols`` and passed to :func:`check_response_size`
+before invoking :func:`build_table_data_response` to format the data.
+"""
+
+
+def build_table_data_response(
+    arrow_table: pyarrow.Table,
+    is_complete: bool,
+    format: str,
+    table_name: str | None = None,
+    namespace: str | None = None,
+) -> dict:
+    """Build a standardized table data response with schema, formatting, and metadata.
+
+    This helper consolidates the common pattern of:
+    1. Extracting schema from Arrow table
+    2. Formatting data with format_table_data
+    3. Building response dict with standard fields
+
+    Used by both session table tools and catalog table tools to ensure consistent
+    response structure across all table data retrieval operations.
+
+    Args:
+        arrow_table (pyarrow.Table): The Arrow table containing the data.
+        is_complete (bool): Whether the entire table was retrieved (False if truncated by max_rows).
+        format (str): Desired output format (may be optimization strategy or specific format like "csv", "json-row", etc.).
+        table_name (str | None): Optional table name to include in response. Recommended for clarity.
+        namespace (str | None): Optional namespace to include in response. Use for catalog tables only.
+
+    Returns:
+        dict: Standardized response with success=True and fields:
+            - success (bool): Always True for this helper (errors handled by callers).
+            - format (str): Actual format used (resolved from optimization strategies to specific format).
+            - schema (list[dict]): Column definitions with name and type.
+            - row_count (int): Number of rows in the response.
+            - is_complete (bool): Whether entire table was retrieved.
+            - data (varies): Formatted table data (type depends on format).
+            - table_name (str, optional): Included if table_name parameter provided.
+            - namespace (str, optional): Included if namespace parameter provided (catalog tables).
+    """
+    # Extract schema
+    schema = [
+        {"name": field.name, "type": str(field.type)} for field in arrow_table.schema
+    ]
+
+    # Format data
+    actual_format, formatted_data = format_table_data(arrow_table, format_type=format)
+
+    # Build response
+    response = {
+        "success": True,
+        "format": actual_format,
+        "schema": schema,
+        "row_count": len(arrow_table),
+        "is_complete": is_complete,
+        "data": formatted_data,
+    }
+
+    # Add optional fields
+    if namespace is not None:
+        response["namespace"] = namespace
+    if table_name is not None:
+        response["table_name"] = table_name
+
+    return response
+
+
 # =============================================================================
 # Credential redaction utilities
 # =============================================================================
@@ -435,11 +609,7 @@ def _redact_recursive(obj: object) -> object:
     """
     if isinstance(obj, dict):
         return {
-            k: (
-                "[REDACTED]"
-                if k.lower() in _SENSITIVE_JSON_KEYS
-                else _redact_recursive(v)
-            )
+            k: (REDACTED if k.lower() in _SENSITIVE_JSON_KEYS else _redact_recursive(v))
             for k, v in obj.items()
         }
     if isinstance(obj, list):
@@ -460,6 +630,7 @@ def redact_json_sensitive_fields(json_str: str | None) -> str | None:
         parsed = json.loads(json_str)
     except (json.JSONDecodeError, ValueError):
         _LOGGER.warning(
+            "[mcp_systems_server:redact_json_sensitive_fields] "
             "type_specific JSON field is not valid JSON; content suppressed"
         )
         return "[UNPARSEABLE]"

@@ -150,7 +150,7 @@ async def test_session_community_create_auth_token_env_var_not_found():
         # Should fail because explicitly configured env var is not set
         assert result["success"] is False
         assert "NONEXISTENT_VAR" in result["error"]
-        assert "not set" in result["error"]
+        assert "unset or empty" in result["error"]
         assert result["isError"] is True
 
 

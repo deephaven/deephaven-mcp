@@ -24,6 +24,7 @@ Exported Classes and Attributes:
     CorePlusQueryStatus           -- Wrapper for persistent query status
     CorePlusToken                 -- Wrapper for authentication tokens
     ProtobufWrapper               -- Base wrapper for protobuf messages
+    PQ_STATES (dict[str, str])    -- Mapping of PQ state name to lifecycle category
     BaseSession                   -- Base async session wrapper
     CorePlusSessionFactory        -- Factory for creating enterprise sessions
     is_enterprise_available (bool) -- True if enterprise features are available
@@ -36,6 +37,7 @@ from ._auth_client import CorePlusAuthClient
 from ._base import ClientObjectWrapper, is_enterprise_available
 from ._controller_client import CorePlusControllerClient
 from ._protobuf import (
+    PQ_STATES,
     CorePlusQueryConfig,
     CorePlusQueryInfo,
     CorePlusQuerySerial,
@@ -59,6 +61,7 @@ __all__ = [
     "CorePlusQueryStatus",
     "CorePlusToken",
     "ProtobufWrapper",
+    "PQ_STATES",
     "BaseSession",
     "CoreSession",
     "CorePlusSession",

@@ -28,7 +28,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from deephaven_mcp._exceptions import InternalError, RegistryItemNotFoundError
+from deephaven_mcp._exceptions import (
+    AuthenticationError,
+    InternalError,
+    RegistryItemNotFoundError,
+)
 from deephaven_mcp.resource_manager import (
     EnterpriseSessionRegistry,
     InitializationPhase,
@@ -55,13 +59,18 @@ _TEST_SYSTEM_NAME = "system"
 
 
 def _make_initialized_registry() -> EnterpriseSessionRegistry:
-    """Return an initialized EnterpriseSessionRegistry with a mock factory manager."""
+    """Return a fully-bound EnterpriseSessionRegistry with a mock factory manager.
+
+    Mirrors the post-``bind_credentials`` state: ``_factory_manager`` and
+    ``_creds`` are both set, since the production code sets them together.
+    """
     registry = EnterpriseSessionRegistry()
     registry._initialized = True
     registry._phase = InitializationPhase.COMPLETED
     mock_factory = MagicMock(spec=CorePlusSessionFactoryManager)
     registry._factory_manager = mock_factory
     registry._system_name = _TEST_SYSTEM_NAME
+    registry._creds = _password_creds()
     return registry
 
 
@@ -321,6 +330,8 @@ def test_init_default_state():
 
     assert registry._factory_manager is None
     assert registry._controller_client is None
+    assert registry._config is None
+    assert registry._creds is None
     assert registry._added_session_ids == set()
     assert registry._phase == InitializationPhase.NOT_STARTED
     assert registry._error is None
@@ -360,10 +371,27 @@ def test_factory_manager_not_initialized_raises():
         _ = registry.factory_manager
 
 
-def test_factory_manager_initialized_but_none_raises():
-    """factory_manager raises InternalError when initialized but _factory_manager is None."""
+def test_factory_manager_initialized_but_unbound_raises():
+    """factory_manager raises InternalError when initialized but bind_credentials was not called."""
     registry = EnterpriseSessionRegistry()
     registry._initialized = True
+    registry._factory_manager = None
+    registry._creds = None
+
+    with pytest.raises(InternalError, match="bind_credentials was not called"):
+        _ = registry.factory_manager
+
+
+def test_factory_manager_bound_but_factory_none_raises():
+    """factory_manager raises InternalError when bound but _factory_manager is None.
+
+    Guards against the divergent state that exists transiently inside
+    close() (factory cleared before creds) and against any future
+    refactor that splits the bind_credentials set-together pair.
+    """
+    registry = EnterpriseSessionRegistry()
+    registry._initialized = True
+    registry._creds = _password_creds()
     registry._factory_manager = None
 
     with pytest.raises(InternalError, match="factory manager is not available"):
@@ -379,81 +407,205 @@ def test_factory_manager_returns_factory():
 
 
 # ---------------------------------------------------------------------------
-# 5. _load_items
+# 5. _load_items / initialize / bind_credentials
 # ---------------------------------------------------------------------------
 
 
+def _password_creds(
+    username: str = "alice", password: str = "pw", effective: str | None = None
+):
+    from deephaven_mcp.auth.credentials import PasswordCredentials
+
+    return PasswordCredentials(
+        username=username, password=password, effective_user=effective
+    )
+
+
+def _private_key_creds(key_text: str = "keymat"):
+    from deephaven_mcp.auth.credentials import PrivateKeyCredentials
+
+    return PrivateKeyCredentials(key_text=key_text)
+
+
 @pytest.mark.asyncio
-async def test_load_items_creates_factory_manager():
-    """_load_items creates a CorePlusSessionFactoryManager and sets phase to PARTIAL."""
+async def test_load_items_stores_config_no_factory():
+    """_load_items only stores the config; no factory is created yet."""
     registry = EnterpriseSessionRegistry()
     registry._initialized = True
     config_manager = AsyncMock()
-    flat_config = {"host": "myhost", "port": 8080, "system_name": _TEST_SYSTEM_NAME}
-    config_manager.get_config = AsyncMock(return_value=flat_config)
+    config = {"host": "myhost", "port": 8080, "system_name": _TEST_SYSTEM_NAME}
+    config_manager.get_config = AsyncMock(return_value=config)
 
-    mock_factory = MagicMock(spec=CorePlusSessionFactoryManager)
     with patch(
-        "deephaven_mcp.resource_manager._registry_enterprise.CorePlusSessionFactoryManager",
-        return_value=mock_factory,
+        "deephaven_mcp.resource_manager._registry_enterprise.CorePlusSessionFactoryManager"
     ) as mock_cls:
         await registry._load_items(config_manager)
 
-    mock_cls.assert_called_once_with(_TEST_SYSTEM_NAME, flat_config)
+    mock_cls.assert_not_called()
+    assert registry._factory_manager is None
+    assert registry._config is config
+    assert registry._system_name == _TEST_SYSTEM_NAME
+    assert registry._phase == InitializationPhase.NOT_STARTED
+
+
+@pytest.mark.asyncio
+async def test_initialize_does_not_start_discovery():
+    """initialize() loads config but does not kick off the discovery task."""
+    registry = EnterpriseSessionRegistry()
+    config_manager = AsyncMock()
+    config = {"host": "myhost", "system_name": _TEST_SYSTEM_NAME}
+    config_manager.get_config = AsyncMock(return_value=config)
+
+    mock_discover = AsyncMock()
+    with patch.object(registry, "_discover_enterprise_sessions", mock_discover):
+        await registry.initialize(config_manager)
+        await asyncio.sleep(0)
+
+    assert registry._discovery_task is None
+    assert registry._initialized is True
+    assert registry._config is config
+    mock_discover.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# 6. bind_credentials
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_bind_credentials_first_call_creates_factory_and_starts_discovery():
+    """First bind_credentials call creates the factory and launches discovery."""
+    registry = EnterpriseSessionRegistry()
+    config_manager = AsyncMock()
+    config = {"host": "myhost", "system_name": _TEST_SYSTEM_NAME}
+    config_manager.get_config = AsyncMock(return_value=config)
+
+    mock_discover = AsyncMock()
+    mock_factory = MagicMock(spec=CorePlusSessionFactoryManager)
+    creds = _password_creds()
+
+    with (
+        patch.object(registry, "_discover_enterprise_sessions", mock_discover),
+        patch(
+            "deephaven_mcp.resource_manager._registry_enterprise.CorePlusSessionFactoryManager",
+            return_value=mock_factory,
+        ) as mock_cls,
+    ):
+        await registry.initialize(config_manager)
+        await registry.bind_credentials(creds)
+        await asyncio.sleep(0)  # let the discovery task start
+
+    mock_cls.assert_called_once_with(_TEST_SYSTEM_NAME, config, creds)
     assert registry._factory_manager is mock_factory
+    assert registry._creds is creds
+    assert registry._discovery_task is not None
     assert registry._phase == InitializationPhase.PARTIAL
 
 
-# ---------------------------------------------------------------------------
-# 6. initialize
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.asyncio
-async def test_initialize_creates_discovery_task():
-    """initialize() calls super().initialize() and creates a background discovery task."""
-    registry = EnterpriseSessionRegistry()
-    config_manager = AsyncMock()
-    flat_config = {"host": "myhost", "system_name": _TEST_SYSTEM_NAME}
-    config_manager.get_config = AsyncMock(return_value=flat_config)
-
-    mock_factory = MagicMock(spec=CorePlusSessionFactoryManager)
-    with patch(
-        "deephaven_mcp.resource_manager._registry_enterprise.CorePlusSessionFactoryManager",
-        return_value=mock_factory,
-    ):
-        mock_discover = AsyncMock()
-        with patch.object(registry, "_discover_enterprise_sessions", mock_discover):
-            await registry.initialize(config_manager)
-            # Let the event loop run the newly created task
-            await asyncio.sleep(0)
-
-    assert registry._discovery_task is not None
-    assert registry._initialized is True
-
-
-@pytest.mark.asyncio
-async def test_initialize_is_idempotent():
-    """Second call to initialize() does not create a second discovery task."""
+async def test_bind_credentials_idempotent_for_same_creds():
+    """Re-binding the same credentials is a no-op (single factory + task)."""
     registry = EnterpriseSessionRegistry()
     config_manager = AsyncMock()
     config_manager.get_config = AsyncMock(
         return_value={"host": "myhost", "system_name": _TEST_SYSTEM_NAME}
     )
 
+    mock_discover = AsyncMock()
     mock_factory = MagicMock(spec=CorePlusSessionFactoryManager)
-    with patch(
-        "deephaven_mcp.resource_manager._registry_enterprise.CorePlusSessionFactoryManager",
-        return_value=mock_factory,
-    ):
-        mock_discover = AsyncMock()
-        with patch.object(registry, "_discover_enterprise_sessions", mock_discover):
-            await registry.initialize(config_manager)
-            first_task = registry._discovery_task
-            await registry.initialize(config_manager)
-            second_task = registry._discovery_task
 
+    with (
+        patch.object(registry, "_discover_enterprise_sessions", mock_discover),
+        patch(
+            "deephaven_mcp.resource_manager._registry_enterprise.CorePlusSessionFactoryManager",
+            return_value=mock_factory,
+        ) as mock_cls,
+    ):
+        await registry.initialize(config_manager)
+        await registry.bind_credentials(_password_creds())
+        first_task = registry._discovery_task
+        await registry.bind_credentials(_password_creds())  # equal value
+        second_task = registry._discovery_task
+
+    assert mock_cls.call_count == 1
     assert first_task is second_task
+
+
+@pytest.mark.asyncio
+async def test_bind_credentials_different_creds_raises():
+    """Binding different credentials on the same registry instance is rejected."""
+    registry = EnterpriseSessionRegistry()
+    config_manager = AsyncMock()
+    config_manager.get_config = AsyncMock(
+        return_value={"host": "myhost", "system_name": _TEST_SYSTEM_NAME}
+    )
+
+    mock_discover = AsyncMock()
+
+    with (
+        patch.object(registry, "_discover_enterprise_sessions", mock_discover),
+        patch(
+            "deephaven_mcp.resource_manager._registry_enterprise.CorePlusSessionFactoryManager",
+            return_value=MagicMock(spec=CorePlusSessionFactoryManager),
+        ),
+    ):
+        await registry.initialize(config_manager)
+        await registry.bind_credentials(_password_creds(username="alice"))
+        with pytest.raises(AuthenticationError, match="different set of credentials"):
+            await registry.bind_credentials(_password_creds(username="bob"))
+
+
+@pytest.mark.asyncio
+async def test_bind_credentials_different_type_distinguished():
+    """Password vs private-key with same-looking text are different fingerprints."""
+    registry = EnterpriseSessionRegistry()
+    config_manager = AsyncMock()
+    config_manager.get_config = AsyncMock(
+        return_value={"host": "myhost", "system_name": _TEST_SYSTEM_NAME}
+    )
+
+    mock_discover = AsyncMock()
+
+    with (
+        patch.object(registry, "_discover_enterprise_sessions", mock_discover),
+        patch(
+            "deephaven_mcp.resource_manager._registry_enterprise.CorePlusSessionFactoryManager",
+            return_value=MagicMock(spec=CorePlusSessionFactoryManager),
+        ),
+    ):
+        await registry.initialize(config_manager)
+        await registry.bind_credentials(_password_creds())
+        with pytest.raises(AuthenticationError, match="different set of credentials"):
+            await registry.bind_credentials(_private_key_creds())
+
+
+# Note: there is no longer a ``test_bind_credentials_rejects_unsupported_type``
+# at this layer. The registry no longer maintains a local list of supported
+# credential types; rejection of unsupported types is the sole responsibility
+# of :meth:`CorePlusSessionFactory.from_credentials`, and is exercised by
+# ``tests/client/test__session_factory.py::test_from_credentials_unsupported_creds_type``.
+# At runtime, an unsupported type bound on the registry surfaces as an
+# ``AuthenticationError`` raised from the background discovery task,
+# logged and stored on ``self._error`` for later ``get()`` callers.
+
+
+@pytest.mark.asyncio
+async def test_bind_credentials_not_initialized_raises():
+    """bind_credentials before initialize() is rejected."""
+    registry = EnterpriseSessionRegistry()
+    with pytest.raises(InternalError):
+        await registry.bind_credentials(_password_creds())
+
+
+@pytest.mark.asyncio
+async def test_bind_credentials_missing_config_raises():
+    """Defensive: if _config is somehow None after initialized, raise."""
+    registry = EnterpriseSessionRegistry()
+    registry._initialized = True
+    registry._config = None
+    registry._system_name = _TEST_SYSTEM_NAME
+    with pytest.raises(InternalError, match="no config loaded"):
+        await registry.bind_credentials(_password_creds())
 
 
 # ---------------------------------------------------------------------------
@@ -552,6 +704,30 @@ async def test_close_clears_controller_client_and_errors():
 # ---------------------------------------------------------------------------
 # 8. get
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_unbound_raises():
+    """get() raises InternalError when bind_credentials was not called."""
+    registry = EnterpriseSessionRegistry()
+    registry._initialized = True
+    registry._phase = InitializationPhase.COMPLETED
+    registry._creds = None
+
+    with pytest.raises(InternalError, match="bind_credentials was not called"):
+        await registry.get("enterprise:system:any-pq")
+
+
+@pytest.mark.asyncio
+async def test_get_all_unbound_raises():
+    """get_all() raises InternalError when bind_credentials was not called."""
+    registry = EnterpriseSessionRegistry()
+    registry._initialized = True
+    registry._phase = InitializationPhase.COMPLETED
+    registry._creds = None
+
+    with pytest.raises(InternalError, match="bind_credentials was not called"):
+        await registry.get_all()
 
 
 @pytest.mark.asyncio

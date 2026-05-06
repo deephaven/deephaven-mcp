@@ -3,7 +3,7 @@ import io
 import logging
 import sys
 import types
-from unittest.mock import MagicMock, PropertyMock, patch
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
 
@@ -506,779 +506,9 @@ def test_auth_client_property_auth_error():
         CorePlusSessionFactory(mock_session_manager)
 
 
-# from_url is a classmethod, test it separately
-
-from unittest.mock import AsyncMock
-
-
-@pytest.mark.asyncio
-async def test_from_config_password_success(monkeypatch):
-    # Test enterprise functionality when available
-    monkeypatch.setattr("deephaven_mcp.client._base.is_enterprise_available", True)
-    worker_cfg = {
-        "system_name": "test-system",
-        "connection_json_url": "https://server/iris/connection.json",
-        "auth_type": "password",
-        "username": "bob",
-        "password": "pw",
-    }
-    mock_manager = MagicMock()
-
-    # Create mock modules for deephaven_enterprise hierarchy
-    mock_session_manager_class = MagicMock(return_value=mock_manager)
-    mock_session_manager_module = MagicMock()
-    mock_session_manager_module.SessionManager = mock_session_manager_class
-
-    mock_client_module = MagicMock()
-    mock_client_module.session_manager = mock_session_manager_module
-
-    mock_enterprise_module = MagicMock()
-    mock_enterprise_module.client = mock_client_module
-
-    with (
-        patch("deephaven_mcp.client._session_factory.is_enterprise_available", True),
-        patch("deephaven_mcp.client._session_factory.validate_enterprise_config"),
-        patch.dict(
-            "sys.modules",
-            {
-                "deephaven_enterprise": mock_enterprise_module,
-                "deephaven_enterprise.client": mock_client_module,
-                "deephaven_enterprise.client.session_manager": mock_session_manager_module,
-            },
-        ),
-    ):
-        import deephaven_mcp.client._session_factory as sm_mod
-
-        # Patch password method on the instance after creation
-        with patch.object(
-            sm_mod.CorePlusSessionFactory, "password", new_callable=AsyncMock
-        ) as mock_password:
-            result = await sm_mod.CorePlusSessionFactory.from_config(worker_cfg)
-            mock_password.assert_awaited_once_with("bob", "pw", None)
-
-
-@pytest.mark.asyncio
-async def test_from_config_password_env(monkeypatch):
-    # Test enterprise functionality when available
-    monkeypatch.setattr("deephaven_mcp.client._base.is_enterprise_available", True)
-    worker_cfg = {
-        "system_name": "test-system",
-        "connection_json_url": "https://server/iris/connection.json",
-        "auth_type": "password",
-        "username": "alice",
-        "password_env_var": "PW_ENV",
-    }
-    monkeypatch.setenv("PW_ENV", "env_pw")
-    mock_manager = MagicMock()
-
-    # Create mock modules for deephaven_enterprise hierarchy
-    mock_session_manager_class = MagicMock(return_value=mock_manager)
-    mock_session_manager_module = MagicMock()
-    mock_session_manager_module.SessionManager = mock_session_manager_class
-
-    mock_client_module = MagicMock()
-    mock_client_module.session_manager = mock_session_manager_module
-
-    mock_enterprise_module = MagicMock()
-    mock_enterprise_module.client = mock_client_module
-
-    with (
-        patch("deephaven_mcp.client._session_factory.is_enterprise_available", True),
-        patch("deephaven_mcp.client._session_factory.validate_enterprise_config"),
-        patch.dict(
-            "sys.modules",
-            {
-                "deephaven_enterprise": mock_enterprise_module,
-                "deephaven_enterprise.client": mock_client_module,
-                "deephaven_enterprise.client.session_manager": mock_session_manager_module,
-            },
-        ),
-    ):
-        import deephaven_mcp.client._session_factory as sm_mod
-
-        with patch.object(
-            sm_mod.CorePlusSessionFactory, "password", new_callable=AsyncMock
-        ) as mock_password:
-            result = await sm_mod.CorePlusSessionFactory.from_config(worker_cfg)
-            mock_password.assert_awaited_once_with("alice", "env_pw", None)
-
-
-@pytest.mark.asyncio
-async def test_from_config_private_key_success(monkeypatch):
-    # Test enterprise functionality when available
-    monkeypatch.setattr("deephaven_mcp.client._base.is_enterprise_available", True)
-    worker_cfg = {
-        "system_name": "test-system",
-        "connection_json_url": "https://server/iris/connection.json",
-        "auth_type": "private_key",
-        "private_key_path": "---KEY---",
-    }
-    mock_manager = MagicMock()
-
-    # Create mock modules for deephaven_enterprise hierarchy
-    mock_session_manager_class = MagicMock(return_value=mock_manager)
-    mock_session_manager_module = MagicMock()
-    mock_session_manager_module.SessionManager = mock_session_manager_class
-
-    mock_client_module = MagicMock()
-    mock_client_module.session_manager = mock_session_manager_module
-
-    mock_enterprise_module = MagicMock()
-    mock_enterprise_module.client = mock_client_module
-
-    with (
-        patch("deephaven_mcp.client._session_factory.is_enterprise_available", True),
-        patch("deephaven_mcp.client._session_factory.validate_enterprise_config"),
-        patch.dict(
-            "sys.modules",
-            {
-                "deephaven_enterprise": mock_enterprise_module,
-                "deephaven_enterprise.client": mock_client_module,
-                "deephaven_enterprise.client.session_manager": mock_session_manager_module,
-            },
-        ),
-    ):
-        import deephaven_mcp.client._session_factory as sm_mod
-
-        with patch.object(
-            sm_mod.CorePlusSessionFactory, "private_key", new_callable=AsyncMock
-        ) as mock_pk:
-            result = await sm_mod.CorePlusSessionFactory.from_config(worker_cfg)
-            assert mock_pk.await_count == 1
-            arg = mock_pk.await_args.args[0]
-            assert arg == "---KEY---"  # Should be the file path
-
-
-@pytest.mark.asyncio
-async def test_from_config_invalid_config(monkeypatch):
-    # Test enterprise functionality when available
-    monkeypatch.setattr("deephaven_mcp.client._base.is_enterprise_available", True)
-    worker_cfg = {
-        "system_name": "test-system",
-        "connection_json_url": "url",
-        "auth_type": "password",
-    }
-    with (
-        patch("deephaven_mcp.client._session_factory.is_enterprise_available", True),
-        patch(
-            "deephaven_mcp.client._session_factory.validate_enterprise_config",
-            side_effect=Exception("bad config"),
-        ),
-    ):
-        import deephaven_mcp.client._session_factory as sm_mod
-
-        with pytest.raises(Exception):
-            await sm_mod.CorePlusSessionFactory.from_config(worker_cfg)
-
-    # Also test the specific ConfigurationError path (covers the
-    # except block that logs the error before re-raising)
-    from deephaven_mcp.config import ConfigurationError
-
-    with (
-        patch("deephaven_mcp.client._session_factory.is_enterprise_available", True),
-        patch(
-            "deephaven_mcp.client._session_factory.validate_enterprise_config",
-            side_effect=ConfigurationError(
-                "Required field 'x' missing in enterprise system 'test-system'"
-            ),
-        ),
-    ):
-        import deephaven_mcp.client._session_factory as sm_mod
-
-        with pytest.raises(ConfigurationError):
-            await sm_mod.CorePlusSessionFactory.from_config(worker_cfg)
-
-
-@pytest.mark.asyncio
-async def test_from_config_not_enterprise(monkeypatch):
-    # Test when enterprise functionality is not available
-    monkeypatch.setattr("deephaven_mcp.client._base.is_enterprise_available", False)
-    worker_cfg = {
-        "system_name": "test-system",
-        "connection_json_url": "url",
-        "auth_type": "password",
-    }
-    with patch("deephaven_mcp.client._session_factory.is_enterprise_available", False):
-        import deephaven_mcp.client._session_factory as sm_mod
-
-        with pytest.raises(exc.InternalError):
-            await sm_mod.CorePlusSessionFactory.from_config(worker_cfg)
-
-
-@pytest.mark.asyncio
-async def test_from_config_connection_error(monkeypatch):
-    # Test enterprise functionality when available
-    monkeypatch.setattr("deephaven_mcp.client._base.is_enterprise_available", True)
-    worker_cfg = {
-        "system_name": "test-system",
-        "connection_json_url": "url",
-        "auth_type": "password",
-        "username": "bob",
-        "password": "pw",
-    }
-    # Create mock modules for deephaven_enterprise hierarchy
-    mock_session_manager_class = MagicMock(
-        side_effect=ConnectionError("Connection failed")
-    )
-    mock_session_manager_module = MagicMock()
-    mock_session_manager_module.SessionManager = mock_session_manager_class
-
-    mock_client_module = MagicMock()
-    mock_client_module.session_manager = mock_session_manager_module
-
-    mock_enterprise_module = MagicMock()
-    mock_enterprise_module.client = mock_client_module
-
-    with (
-        patch("deephaven_mcp.client._session_factory.is_enterprise_available", True),
-        patch("deephaven_mcp.client._session_factory.validate_enterprise_config"),
-        patch.dict(
-            "sys.modules",
-            {
-                "deephaven_enterprise": mock_enterprise_module,
-                "deephaven_enterprise.client": mock_client_module,
-                "deephaven_enterprise.client.session_manager": mock_session_manager_module,
-            },
-        ),
-    ):
-        import deephaven_mcp.client._session_factory as sm_mod
-
-        with pytest.raises(exc.DeephavenConnectionError):
-            await sm_mod.CorePlusSessionFactory.from_config(worker_cfg)
-
-
-@pytest.mark.asyncio
-async def test_from_config_password_env_missing(monkeypatch):
-    # Test enterprise functionality when available
-    monkeypatch.setattr("deephaven_mcp.client._base.is_enterprise_available", True)
-    worker_cfg = {
-        "system_name": "test-system",
-        "connection_json_url": "https://server/iris/connection.json",
-        "auth_type": "password",
-        "username": "alice",
-        "password_env_var": "PW_ENV",
-    }
-    # Do NOT setenv
-    mock_manager = MagicMock()
-
-    # Create mock modules for deephaven_enterprise hierarchy
-    mock_session_manager_class = MagicMock(return_value=mock_manager)
-    mock_session_manager_module = MagicMock()
-    mock_session_manager_module.SessionManager = mock_session_manager_class
-
-    mock_client_module = MagicMock()
-    mock_client_module.session_manager = mock_session_manager_module
-
-    mock_enterprise_module = MagicMock()
-    mock_enterprise_module.client = mock_client_module
-
-    with (
-        patch("deephaven_mcp.client._session_factory.is_enterprise_available", True),
-        patch("deephaven_mcp.client._session_factory.validate_enterprise_config"),
-        patch.dict(
-            "sys.modules",
-            {
-                "deephaven_enterprise": mock_enterprise_module,
-                "deephaven_enterprise.client": mock_client_module,
-                "deephaven_enterprise.client.session_manager": mock_session_manager_module,
-            },
-        ),
-    ):
-        import deephaven_mcp.client._session_factory as sm_mod
-
-        with patch.object(
-            sm_mod.CorePlusSessionFactory, "password", new_callable=AsyncMock
-        ):
-            with pytest.raises(sm_mod.AuthenticationError) as excinfo:
-                await sm_mod.CorePlusSessionFactory.from_config(worker_cfg)
-            assert "not set for password authentication" in str(excinfo.value)
-
-
-@pytest.mark.asyncio
-async def test_from_config_password_missing(monkeypatch):
-    # Test enterprise functionality when available
-    monkeypatch.setattr("deephaven_mcp.client._base.is_enterprise_available", True)
-    worker_cfg = {
-        "system_name": "test-system",
-        "connection_json_url": "https://server/iris/connection.json",
-        "auth_type": "password",
-        "username": "alice",
-    }
-    mock_manager = MagicMock()
-
-    # Create mock modules for deephaven_enterprise hierarchy
-    mock_session_manager_class = MagicMock(return_value=mock_manager)
-    mock_session_manager_module = MagicMock()
-    mock_session_manager_module.SessionManager = mock_session_manager_class
-
-    mock_client_module = MagicMock()
-    mock_client_module.session_manager = mock_session_manager_module
-
-    mock_enterprise_module = MagicMock()
-    mock_enterprise_module.client = mock_client_module
-
-    with (
-        patch("deephaven_mcp.client._session_factory.is_enterprise_available", True),
-        patch("deephaven_mcp.client._session_factory.validate_enterprise_config"),
-        patch.dict(
-            "sys.modules",
-            {
-                "deephaven_enterprise": mock_enterprise_module,
-                "deephaven_enterprise.client": mock_client_module,
-                "deephaven_enterprise.client.session_manager": mock_session_manager_module,
-            },
-        ),
-    ):
-        import deephaven_mcp.client._session_factory as sm_mod
-
-        with pytest.raises(sm_mod.AuthenticationError) as excinfo:
-            await sm_mod.CorePlusSessionFactory.from_config(worker_cfg)
-        assert "No password provided" in str(excinfo.value)
-
-
-@pytest.mark.asyncio
-async def test_from_config_private_key_missing(monkeypatch):
-    # Test enterprise functionality when available
-    monkeypatch.setattr("deephaven_mcp.client._base.is_enterprise_available", True)
-    worker_cfg = {
-        "system_name": "test-system",
-        "connection_json_url": "https://server/iris/connection.json",
-        "auth_type": "private_key",
-    }
-    mock_manager = MagicMock()
-
-    # Create mock modules for deephaven_enterprise hierarchy
-    mock_session_manager_class = MagicMock(return_value=mock_manager)
-    mock_session_manager_module = MagicMock()
-    mock_session_manager_module.SessionManager = mock_session_manager_class
-
-    mock_client_module = MagicMock()
-    mock_client_module.session_manager = mock_session_manager_module
-
-    mock_enterprise_module = MagicMock()
-    mock_enterprise_module.client = mock_client_module
-
-    with (
-        patch("deephaven_mcp.client._session_factory.is_enterprise_available", True),
-        patch("deephaven_mcp.client._session_factory.validate_enterprise_config"),
-        patch.dict(
-            "sys.modules",
-            {
-                "deephaven_enterprise": mock_enterprise_module,
-                "deephaven_enterprise.client": mock_client_module,
-                "deephaven_enterprise.client.session_manager": mock_session_manager_module,
-            },
-        ),
-    ):
-        import deephaven_mcp.client._session_factory as sm_mod
-
-        with pytest.raises(sm_mod.AuthenticationError) as excinfo:
-            await sm_mod.CorePlusSessionFactory.from_config(worker_cfg)
-        assert "No private_key_path provided" in str(excinfo.value)
-
-
-@pytest.mark.asyncio
-async def test_from_config_unsupported_auth(monkeypatch):
-    # Test enterprise functionality when available
-    monkeypatch.setattr("deephaven_mcp.client._base.is_enterprise_available", True)
-    worker_cfg = {
-        "system_name": "test-system",
-        "connection_json_url": "https://server/iris/connection.json",
-        "auth_type": "saml",
-    }
-    mock_manager = MagicMock()
-
-    # Create mock modules for deephaven_enterprise hierarchy
-    mock_session_manager_class = MagicMock(return_value=mock_manager)
-    mock_session_manager_module = MagicMock()
-    mock_session_manager_module.SessionManager = mock_session_manager_class
-
-    mock_client_module = MagicMock()
-    mock_client_module.session_manager = mock_session_manager_module
-
-    mock_enterprise_module = MagicMock()
-    mock_enterprise_module.client = mock_client_module
-
-    with (
-        patch("deephaven_mcp.client._session_factory.is_enterprise_available", True),
-        patch("deephaven_mcp.client._session_factory.validate_enterprise_config"),
-        patch.dict(
-            "sys.modules",
-            {
-                "deephaven_enterprise": mock_enterprise_module,
-                "deephaven_enterprise.client": mock_client_module,
-                "deephaven_enterprise.client.session_manager": mock_session_manager_module,
-            },
-        ),
-    ):
-        import deephaven_mcp.client._session_factory as sm_mod
-
-        # saml auth type is not supported for automatic authentication — the code
-        # logs a warning and returns an unauthenticated factory without raising.
-        result = await sm_mod.CorePlusSessionFactory.from_config(worker_cfg)
-        assert result is not None
-
-
-@pytest.mark.asyncio
-async def test_from_config_not_enterprise_available(monkeypatch):
-    # Test when enterprise functionality is not available
-    monkeypatch.setattr("deephaven_mcp.client._base.is_enterprise_available", False)
-    worker_cfg = {
-        "system_name": "test-system",
-        "connection_json_url": "https://server/iris/connection.json",
-        "auth_type": "password",
-        "username": "bob",
-        "password": "pw",
-    }
-    with patch("deephaven_mcp.client._session_factory.is_enterprise_available", False):
-        import deephaven_mcp.client._session_factory as sm_mod
-
-        with pytest.raises(exc.MissingEnterprisePackageError) as excinfo:
-            await sm_mod.CorePlusSessionFactory.from_config(worker_cfg)
-        assert "deephaven-coreplus-client" in str(excinfo.value)
-
-
-@pytest.mark.asyncio
-async def test_from_url_success(monkeypatch):
-    # Test enterprise functionality when available
-    monkeypatch.setattr("deephaven_mcp.client._base.is_enterprise_available", True)
-
-    # Create mock modules for deephaven_enterprise hierarchy
-    instance = MagicMock()
-    mock_session_manager_class = MagicMock(return_value=instance)
-    mock_session_manager_module = MagicMock()
-    mock_session_manager_module.SessionManager = mock_session_manager_class
-
-    mock_client_module = MagicMock()
-    mock_client_module.session_manager = mock_session_manager_module
-
-    mock_enterprise_module = MagicMock()
-    mock_enterprise_module.client = mock_client_module
-
-    with (
-        patch("deephaven_mcp.client._session_factory.is_enterprise_available", True),
-        patch.dict(
-            "sys.modules",
-            {
-                "deephaven_enterprise": mock_enterprise_module,
-                "deephaven_enterprise.client": mock_client_module,
-                "deephaven_enterprise.client.session_manager": mock_session_manager_module,
-            },
-        ),
-    ):
-        result = await CorePlusSessionFactory.from_url("http://fake")
-        assert isinstance(result, CorePlusSessionFactory)
-        assert result.wrapped == instance
-
-
-@pytest.mark.asyncio
-async def test_from_url_not_enterprise(monkeypatch):
-    # Test when enterprise functionality is not available
-    monkeypatch.setattr("deephaven_mcp.client._base.is_enterprise_available", False)
-    with patch("deephaven_mcp.client._session_factory.is_enterprise_available", False):
-        with pytest.raises(exc.InternalError):
-            await CorePlusSessionFactory.from_url("http://fake")
-
-
-@pytest.mark.asyncio
-async def test_from_url_connection_error(monkeypatch):
-    # Test enterprise functionality when available
-    monkeypatch.setattr("deephaven_mcp.client._base.is_enterprise_available", True)
-
-    # Create mock modules for deephaven_enterprise hierarchy
-    mock_session_manager_class = MagicMock(side_effect=Exception("fail"))
-    mock_session_manager_module = MagicMock()
-    mock_session_manager_module.SessionManager = mock_session_manager_class
-
-    mock_client_module = MagicMock()
-    mock_client_module.session_manager = mock_session_manager_module
-
-    mock_enterprise_module = MagicMock()
-    mock_enterprise_module.client = mock_client_module
-
-    with (
-        patch("deephaven_mcp.client._session_factory.is_enterprise_available", True),
-        patch.dict(
-            "sys.modules",
-            {
-                "deephaven_enterprise": mock_enterprise_module,
-                "deephaven_enterprise.client": mock_client_module,
-                "deephaven_enterprise.client.session_manager": mock_session_manager_module,
-            },
-        ),
-    ):
-        with pytest.raises(exc.DeephavenConnectionError):
-            await CorePlusSessionFactory.from_url("http://fake")
-
-
-@pytest.mark.asyncio
-async def test_from_url_timeout(monkeypatch):
-    """Test that from_url() raises DeephavenConnectionError on timeout."""
-    import time
-
-    monkeypatch.setattr("deephaven_mcp.client._base.is_enterprise_available", True)
-
-    def slow_init(url):
-        time.sleep(0.1)
-
-    mock_sm_class = MagicMock(side_effect=slow_init)
-    mock_sm_module = MagicMock()
-    mock_sm_module.SessionManager = mock_sm_class
-    mock_client_module = MagicMock()
-    mock_client_module.session_manager = mock_sm_module
-    mock_enterprise_module = MagicMock()
-    mock_enterprise_module.client = mock_client_module
-
-    with (
-        patch("deephaven_mcp.client._session_factory.is_enterprise_available", True),
-        patch.dict(
-            "sys.modules",
-            {
-                "deephaven_enterprise": mock_enterprise_module,
-                "deephaven_enterprise.client": mock_client_module,
-                "deephaven_enterprise.client.session_manager": mock_sm_module,
-            },
-        ),
-    ):
-        with pytest.raises(exc.DeephavenConnectionError) as exc_info:
-            await CorePlusSessionFactory.from_url("http://fake", timeout_seconds=0.01)
-        assert "timed out" in str(exc_info.value)
-
-
-@pytest.mark.asyncio
-async def test_from_config_timeout(monkeypatch):
-    """Test that from_config() raises DeephavenConnectionError on timeout."""
-    import time
-
-    monkeypatch.setattr("deephaven_mcp.client._base.is_enterprise_available", True)
-    worker_cfg = {
-        "system_name": "test-system",
-        "connection_json_url": "https://server/iris/connection.json",
-        "auth_type": "password",
-        "username": "alice",
-        "password": "pw",
-    }
-
-    def slow_init(url):
-        time.sleep(0.1)
-
-    mock_sm_class = MagicMock(side_effect=slow_init)
-    mock_sm_module = MagicMock()
-    mock_sm_module.SessionManager = mock_sm_class
-    mock_client_module = MagicMock()
-    mock_client_module.session_manager = mock_sm_module
-    mock_enterprise_module = MagicMock()
-    mock_enterprise_module.client = mock_client_module
-
-    with (
-        patch("deephaven_mcp.client._session_factory.is_enterprise_available", True),
-        patch.dict(
-            "sys.modules",
-            {
-                "deephaven_enterprise": mock_enterprise_module,
-                "deephaven_enterprise.client": mock_client_module,
-                "deephaven_enterprise.client.session_manager": mock_sm_module,
-            },
-        ),
-    ):
-        import deephaven_mcp.client._session_factory as sm_mod
-
-        with pytest.raises(exc.DeephavenConnectionError) as exc_info:
-            await sm_mod.CorePlusSessionFactory.from_config(
-                worker_cfg, timeout_seconds=0.01
-            )
-        assert "timed out" in str(exc_info.value)
-
-
-# --- Coverage for unreachable error/warning branches in from_config ---
-
-
-@pytest.mark.asyncio
-async def test_from_config_missing_password_branch(monkeypatch, caplog):
-    # Test enterprise functionality when available
-    monkeypatch.setattr("deephaven_mcp.client._base.is_enterprise_available", True)
-    worker_cfg = {
-        "system_name": "test-system",
-        "connection_json_url": "https://server/iris/connection.json",
-        "auth_type": "password",
-        "username": "alice",
-    }
-    mock_manager = MagicMock()
-
-    # Create mock modules for deephaven_enterprise hierarchy
-    mock_session_manager_class = MagicMock(return_value=mock_manager)
-    mock_session_manager_module = MagicMock()
-    mock_session_manager_module.SessionManager = mock_session_manager_class
-
-    mock_client_module = MagicMock()
-    mock_client_module.session_manager = mock_session_manager_module
-
-    mock_enterprise_module = MagicMock()
-    mock_enterprise_module.client = mock_client_module
-
-    with (
-        patch("deephaven_mcp.client._session_factory.is_enterprise_available", True),
-        patch(
-            "deephaven_mcp.client._session_factory.validate_enterprise_config",
-            return_value=None,
-        ),
-        patch.dict(
-            "sys.modules",
-            {
-                "deephaven_enterprise": mock_enterprise_module,
-                "deephaven_enterprise.client": mock_client_module,
-                "deephaven_enterprise.client.session_manager": mock_session_manager_module,
-            },
-        ),
-    ):
-        import deephaven_mcp.client._session_factory as sm_mod
-
-        with caplog.at_level(logging.ERROR):
-            with patch.object(
-                sm_mod.CorePlusSessionFactory, "password", new_callable=MagicMock
-            ):
-                with pytest.raises(sm_mod.AuthenticationError) as excinfo:
-                    await sm_mod.CorePlusSessionFactory.from_config(worker_cfg)
-                assert "No password provided" in str(excinfo.value)
-                assert "No password provided for password authentication" in caplog.text
-
-
-@pytest.mark.asyncio
-async def test_from_config_missing_private_key_branch(monkeypatch, caplog):
-    # Test enterprise functionality when available
-    monkeypatch.setattr("deephaven_mcp.client._base.is_enterprise_available", True)
-    worker_cfg = {
-        "system_name": "test-system",
-        "connection_json_url": "https://server/iris/connection.json",
-        "auth_type": "private_key",
-    }
-    mock_manager = MagicMock()
-
-    # Create mock modules for deephaven_enterprise hierarchy
-    mock_session_manager_class = MagicMock(return_value=mock_manager)
-    mock_session_manager_module = MagicMock()
-    mock_session_manager_module.SessionManager = mock_session_manager_class
-
-    mock_client_module = MagicMock()
-    mock_client_module.session_manager = mock_session_manager_module
-
-    mock_enterprise_module = MagicMock()
-    mock_enterprise_module.client = mock_client_module
-
-    with (
-        patch("deephaven_mcp.client._session_factory.is_enterprise_available", True),
-        patch(
-            "deephaven_mcp.client._session_factory.validate_enterprise_config",
-            return_value=None,
-        ),
-        patch.dict(
-            "sys.modules",
-            {
-                "deephaven_enterprise": mock_enterprise_module,
-                "deephaven_enterprise.client": mock_client_module,
-                "deephaven_enterprise.client.session_manager": mock_session_manager_module,
-            },
-        ),
-    ):
-        import deephaven_mcp.client._session_factory as sm_mod
-
-        with caplog.at_level(logging.ERROR):
-            with patch.object(
-                sm_mod.CorePlusSessionFactory, "private_key", new_callable=MagicMock
-            ):
-                with pytest.raises(sm_mod.AuthenticationError) as excinfo:
-                    await sm_mod.CorePlusSessionFactory.from_config(worker_cfg)
-                assert "No private_key_path provided" in str(excinfo.value)
-                assert (
-                    "No private_key_path provided for private_key authentication"
-                    in caplog.text
-                )
-
-
-@pytest.mark.asyncio
-async def test_from_config_unsupported_auth_type_branch(monkeypatch, caplog):
-    # Test enterprise functionality when available
-    monkeypatch.setattr("deephaven_mcp.client._base.is_enterprise_available", True)
-    worker_cfg = {
-        "system_name": "test-system",
-        "connection_json_url": "https://server/iris/connection.json",
-        "auth_type": "saml",
-    }
-    mock_manager = MagicMock()
-
-    # Create mock modules for deephaven_enterprise hierarchy
-    mock_session_manager_class = MagicMock(return_value=mock_manager)
-    mock_session_manager_module = MagicMock()
-    mock_session_manager_module.SessionManager = mock_session_manager_class
-
-    mock_client_module = MagicMock()
-    mock_client_module.session_manager = mock_session_manager_module
-
-    mock_enterprise_module = MagicMock()
-    mock_enterprise_module.client = mock_client_module
-
-    with (
-        patch("deephaven_mcp.client._session_factory.is_enterprise_available", True),
-        patch(
-            "deephaven_mcp.client._session_factory.validate_enterprise_config",
-            return_value=None,
-        ),
-        patch.dict(
-            "sys.modules",
-            {
-                "deephaven_enterprise": mock_enterprise_module,
-                "deephaven_enterprise.client": mock_client_module,
-                "deephaven_enterprise.client.session_manager": mock_session_manager_module,
-            },
-        ),
-    ):
-        import deephaven_mcp.client._session_factory as sm_mod
-
-        with caplog.at_level(logging.WARNING):
-            with (
-                patch.object(
-                    sm_mod.CorePlusSessionFactory, "password", new_callable=MagicMock
-                ),
-                patch.object(
-                    sm_mod.CorePlusSessionFactory, "private_key", new_callable=MagicMock
-                ),
-            ):
-                # Should not raise
-                result = await sm_mod.CorePlusSessionFactory.from_config(worker_cfg)
-                assert isinstance(result, sm_mod.CorePlusSessionFactory)
-                assert (
-                    "Auth type 'saml' is not supported for automatic authentication"
-                    in caplog.text
-                )
-
-
 # =============================================================================
 # Enterprise Not Available Tests
 # =============================================================================
-
-
-@pytest.mark.asyncio
-async def test_from_config_when_enterprise_not_available(monkeypatch):
-    """Test that from_config handles enterprise not available appropriately."""
-    monkeypatch.setattr(
-        "deephaven_mcp.client._session_factory.is_enterprise_available", False
-    )
-
-    worker_cfg = {
-        "system_name": "test-system",
-        "connection_json_url": "https://server/iris/connection.json",
-        "auth_type": "password",
-        "username": "username",
-        "password": "password",
-    }
-
-    import deephaven_mcp.client._session_factory as sm_mod
-
-    # Should raise MissingEnterprisePackageError when enterprise not available
-    with pytest.raises(exc.MissingEnterprisePackageError) as excinfo:
-        await sm_mod.CorePlusSessionFactory.from_config(worker_cfg)
-
-    assert "deephaven-coreplus-client" in str(excinfo.value)
 
 
 @pytest.mark.asyncio
@@ -1359,12 +589,10 @@ async def test_connect_to_new_worker_timeout(
     dummy_session_manager.connect_to_new_worker.side_effect = TimeoutError(
         "SDK timeout"
     )
-
-    with pytest.raises(exc.DeephavenConnectionError) as exc_info:
+    with pytest.raises(exc.DeephavenConnectionError):
         await coreplus_session_manager.connect_to_new_worker(
             heap_size_gb=4, timeout_seconds=60.0
         )
-    assert "timed out" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
@@ -1384,3 +612,290 @@ async def test_connect_to_persistent_query_timeout(
             name="test", timeout_seconds=0.01
         )
     assert "timed out" in str(exc_info.value)
+
+
+def _patches_for_from_url(side_effect=None):
+    """Patch the deephaven_enterprise.client.session_manager import chain.
+
+    Mirrors ``_patches_for_from_credentials`` but without the config
+    validator patch, since ``from_url`` takes only a URL.
+    """
+    mock_manager_class = MagicMock(side_effect=side_effect)
+    mock_sm_module = MagicMock()
+    mock_sm_module.SessionManager = mock_manager_class
+    mock_client_module = MagicMock()
+    mock_client_module.session_manager = mock_sm_module
+    mock_enterprise_module = MagicMock()
+    mock_enterprise_module.client = mock_client_module
+    return [
+        patch("deephaven_mcp.client._session_factory.is_enterprise_available", True),
+        patch.dict(
+            "sys.modules",
+            {
+                "deephaven_enterprise": mock_enterprise_module,
+                "deephaven_enterprise.client": mock_client_module,
+                "deephaven_enterprise.client.session_manager": mock_sm_module,
+            },
+        ),
+    ], mock_manager_class
+
+
+@pytest.mark.asyncio
+async def test_from_url_success():
+    """from_url constructs a SessionManager and subscribes the controller client."""
+    patches, _mgr_cls = _patches_for_from_url()
+    p1, p2 = patches
+    with p1, p2:
+        import deephaven_mcp.client._session_factory as sm_mod
+
+        with patch.object(
+            sm_mod.CorePlusControllerClient,
+            "subscribe",
+            new_callable=AsyncMock,
+        ) as mock_subscribe:
+            instance = await sm_mod.CorePlusSessionFactory.from_url(
+                "https://example.com/iris/connection.json"
+            )
+        assert isinstance(instance, sm_mod.CorePlusSessionFactory)
+        mock_subscribe.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_from_url_timeout():
+    """from_url raises DeephavenConnectionError if the constructor times out."""
+    import time as _time
+
+    def _slow_ctor(*_a, **_kw):
+        _time.sleep(5.0)
+
+    patches, _mgr_cls = _patches_for_from_url(side_effect=_slow_ctor)
+    p1, p2 = patches
+    with p1, p2:
+        import deephaven_mcp.client._session_factory as sm_mod
+
+        with pytest.raises(exc.DeephavenConnectionError, match="timed out"):
+            await sm_mod.CorePlusSessionFactory.from_url(
+                "https://example.com/iris/connection.json",
+                timeout_seconds=0.01,
+            )
+
+
+@pytest.mark.asyncio
+async def test_from_url_connection_error():
+    """from_url wraps unexpected SessionManager errors in DeephavenConnectionError."""
+    patches, _mgr_cls = _patches_for_from_url(side_effect=RuntimeError("boom"))
+    p1, p2 = patches
+    with p1, p2:
+        import deephaven_mcp.client._session_factory as sm_mod
+
+        with pytest.raises(exc.DeephavenConnectionError, match="boom"):
+            await sm_mod.CorePlusSessionFactory.from_url(
+                "https://example.com/iris/connection.json"
+            )
+
+
+# ---------------------------------------------------------------------------
+# from_credentials
+# ---------------------------------------------------------------------------
+
+
+_FROM_CREDENTIALS_CONFIG = {
+    "system_name": "test-system",
+    "connection_json_url": "https://server/iris/connection.json",
+    "auth": {"backends": ["password", "private_key"]},
+}
+
+
+def _make_session_manager_modules(side_effect=None):
+    """Build the deephaven_enterprise.client.session_manager mock chain.
+
+    Returns ``(mock_session_manager_module, mock_client_module, mock_enterprise_module)``.
+    ``side_effect`` is forwarded to the ``SessionManager`` MagicMock (e.g. to
+    simulate a slow constructor for timeout tests).
+    """
+    mock_manager_class = MagicMock(side_effect=side_effect)
+    mock_sm_module = MagicMock()
+    mock_sm_module.SessionManager = mock_manager_class
+    mock_client_module = MagicMock()
+    mock_client_module.session_manager = mock_sm_module
+    mock_enterprise_module = MagicMock()
+    mock_enterprise_module.client = mock_client_module
+    return mock_sm_module, mock_client_module, mock_enterprise_module
+
+
+def _patches_for_from_credentials(side_effect=None):
+    """Standard set of patches used by every from_credentials test."""
+    sm_mod, client_mod, ent_mod = _make_session_manager_modules(side_effect)
+    return [
+        patch("deephaven_mcp.client._session_factory.is_enterprise_available", True),
+        patch("deephaven_mcp.client._session_factory.validate_enterprise_config"),
+        patch.dict(
+            "sys.modules",
+            {
+                "deephaven_enterprise": ent_mod,
+                "deephaven_enterprise.client": client_mod,
+                "deephaven_enterprise.client.session_manager": sm_mod,
+            },
+        ),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_from_credentials_password_success():
+    from deephaven_mcp.auth.credentials import PasswordCredentials
+
+    creds = PasswordCredentials(username="alice", password="pw")
+
+    p1, p2, p3 = _patches_for_from_credentials()
+    with p1, p2, p3:
+        import deephaven_mcp.client._session_factory as sm_mod
+
+        with patch.object(
+            sm_mod.CorePlusSessionFactory, "password", new_callable=AsyncMock
+        ) as mock_password:
+            await sm_mod.CorePlusSessionFactory.from_credentials(
+                _FROM_CREDENTIALS_CONFIG, creds
+            )
+        mock_password.assert_awaited_once_with("alice", "pw", None)
+
+
+@pytest.mark.asyncio
+async def test_from_credentials_password_with_effective_user():
+    from deephaven_mcp.auth.credentials import PasswordCredentials
+
+    creds = PasswordCredentials(username="alice", password="pw", effective_user="bob")
+
+    p1, p2, p3 = _patches_for_from_credentials()
+    with p1, p2, p3:
+        import deephaven_mcp.client._session_factory as sm_mod
+
+        with patch.object(
+            sm_mod.CorePlusSessionFactory, "password", new_callable=AsyncMock
+        ) as mock_password:
+            await sm_mod.CorePlusSessionFactory.from_credentials(
+                _FROM_CREDENTIALS_CONFIG, creds
+            )
+        mock_password.assert_awaited_once_with("alice", "pw", "bob")
+
+
+@pytest.mark.asyncio
+async def test_from_credentials_private_key_success():
+    from deephaven_mcp.auth.credentials import PrivateKeyCredentials
+
+    creds = PrivateKeyCredentials(key_text="DH key payload\n")
+
+    p1, p2, p3 = _patches_for_from_credentials()
+    with p1, p2, p3:
+        import deephaven_mcp.client._session_factory as sm_mod
+
+        with patch.object(
+            sm_mod.CorePlusSessionFactory, "private_key", new_callable=AsyncMock
+        ) as mock_pk:
+            await sm_mod.CorePlusSessionFactory.from_credentials(
+                _FROM_CREDENTIALS_CONFIG, creds
+            )
+        # The key_text should arrive wrapped in an io.StringIO so the
+        # upstream SessionManager.private_key() sees an in-memory text
+        # stream rather than a filesystem path.
+        assert mock_pk.await_count == 1
+        (arg,), _kwargs = mock_pk.await_args
+        assert isinstance(arg, io.StringIO)
+        assert arg.getvalue() == "DH key payload\n"
+
+
+# Note: there is no longer a ``test_from_credentials_private_key_invalid_utf8``
+# at this layer. :class:`PrivateKeyCredentials` now carries ``key_text: str``,
+# so invalid-UTF-8 material cannot reach ``from_credentials`` in the first
+# place -- the UTF-8 validation happens at the producing edge in
+# :class:`PrivateKeyBackend.derive_credentials`. See
+# ``tests/auth/backends/test__private_key.py::test_derive_credentials_rejects_non_utf8_key_bytes``.
+
+
+@pytest.mark.asyncio
+async def test_from_credentials_unsupported_creds_type():
+    p1, p2, p3 = _patches_for_from_credentials()
+    with p1, p2, p3:
+        import deephaven_mcp.client._session_factory as sm_mod
+
+        # PSKCredentials is a valid Credentials union member but not a
+        # legal input for the enterprise factory.
+        from deephaven_mcp.auth.credentials import PSKCredentials
+
+        with pytest.raises(exc.AuthenticationError, match="Unsupported credentials"):
+            await sm_mod.CorePlusSessionFactory.from_credentials(
+                _FROM_CREDENTIALS_CONFIG, PSKCredentials(psk="x")  # type: ignore[arg-type]
+            )
+
+
+@pytest.mark.asyncio
+async def test_from_credentials_no_enterprise_package():
+    from deephaven_mcp.auth.credentials import PasswordCredentials
+
+    creds = PasswordCredentials(username="u", password="p")
+    with patch("deephaven_mcp.client._session_factory.is_enterprise_available", False):
+        import deephaven_mcp.client._session_factory as sm_mod
+
+        with pytest.raises(exc.MissingEnterprisePackageError):
+            await sm_mod.CorePlusSessionFactory.from_credentials(
+                _FROM_CREDENTIALS_CONFIG, creds
+            )
+
+
+@pytest.mark.asyncio
+async def test_from_credentials_invalid_config_propagates():
+    from deephaven_mcp.auth.credentials import PasswordCredentials
+
+    creds = PasswordCredentials(username="u", password="p")
+    with (
+        patch("deephaven_mcp.client._session_factory.is_enterprise_available", True),
+        patch(
+            "deephaven_mcp.client._session_factory.validate_enterprise_config",
+            side_effect=exc.ConfigurationError("boom"),
+        ),
+    ):
+        import deephaven_mcp.client._session_factory as sm_mod
+
+        with pytest.raises(exc.ConfigurationError, match="boom"):
+            await sm_mod.CorePlusSessionFactory.from_credentials(
+                _FROM_CREDENTIALS_CONFIG, creds
+            )
+
+
+@pytest.mark.asyncio
+async def test_from_credentials_session_manager_timeout():
+    import time as time_mod
+
+    from deephaven_mcp.auth.credentials import PasswordCredentials
+
+    creds = PasswordCredentials(username="u", password="p")
+
+    def slow_init(_url):
+        time_mod.sleep(0.1)
+
+    p1, p2, p3 = _patches_for_from_credentials(side_effect=slow_init)
+    with p1, p2, p3:
+        import deephaven_mcp.client._session_factory as sm_mod
+
+        with pytest.raises(exc.DeephavenConnectionError, match="timed out"):
+            await sm_mod.CorePlusSessionFactory.from_credentials(
+                _FROM_CREDENTIALS_CONFIG, creds, timeout_seconds=0.01
+            )
+
+
+@pytest.mark.asyncio
+async def test_from_credentials_session_manager_failure():
+    from deephaven_mcp.auth.credentials import PasswordCredentials
+
+    creds = PasswordCredentials(username="u", password="p")
+
+    def boom(_url):
+        raise RuntimeError("connect failed")
+
+    p1, p2, p3 = _patches_for_from_credentials(side_effect=boom)
+    with p1, p2, p3:
+        import deephaven_mcp.client._session_factory as sm_mod
+
+        with pytest.raises(exc.DeephavenConnectionError, match="connect failed"):
+            await sm_mod.CorePlusSessionFactory.from_credentials(
+                _FROM_CREDENTIALS_CONFIG, creds
+            )

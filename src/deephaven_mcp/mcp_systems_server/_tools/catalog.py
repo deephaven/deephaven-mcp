@@ -19,14 +19,13 @@ from deephaven_mcp._exceptions import UnsupportedOperationError
 from deephaven_mcp.client import CorePlusSession
 from deephaven_mcp.formatters import format_table_data
 from deephaven_mcp.mcp_systems_server._tools.shared import (
+    ESTIMATED_BYTES_PER_CELL,
+    build_table_data_response,
     check_response_size,
+    error_response,
     format_meta_table_result,
     get_enterprise_session,
     get_session_from_context,
-)
-from deephaven_mcp.mcp_systems_server._tools.table import (
-    ESTIMATED_BYTES_PER_CELL,
-    _build_table_data_response,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -364,7 +363,7 @@ async def catalog_tables_list(
         }
     """
     _LOGGER.info(
-        f"[mcp_systems_server:catalog_tables] Invoked: session_id={session_id!r}, "
+        f"[mcp_systems_server:catalog_tables_list] Invoked: session_id={session_id!r}, "
         f"max_rows={max_rows}, filters={filters!r}, format={format!r}"
     )
 
@@ -375,7 +374,7 @@ async def catalog_tables_list(
         max_rows=max_rows,
         filters=filters,
         format=format,
-        tool_name="catalog_tables",
+        tool_name="catalog_tables_list",
     )
 
 
@@ -507,7 +506,7 @@ async def catalog_namespaces_list(
         }
     """
     _LOGGER.info(
-        f"[mcp_systems_server:catalog_namespaces] Invoked: session_id={session_id!r}, "
+        f"[mcp_systems_server:catalog_namespaces_list] Invoked: session_id={session_id!r}, "
         f"max_rows={max_rows}, filters={filters!r}, format={format!r}"
     )
 
@@ -518,7 +517,7 @@ async def catalog_namespaces_list(
         max_rows=max_rows,
         filters=filters,
         format=format,
-        tool_name="catalog_namespaces",
+        tool_name="catalog_namespaces_list",
     )
 
 
@@ -905,7 +904,7 @@ async def catalog_tables_schema(
             f"[mcp_systems_server:catalog_tables_schema] Failed for session: '{session_id}', error: {e!r}",
             exc_info=True,
         )
-        return {"success": False, "error": str(e), "isError": True}
+        return error_response(str(e))
 
 
 async def catalog_table_sample(
@@ -1114,7 +1113,7 @@ async def catalog_table_sample(
         _LOGGER.debug(
             f"[mcp_systems_server:catalog_table_sample] Formatting {row_count} rows in format '{format}'"
         )
-        response = _build_table_data_response(
+        response = build_table_data_response(
             arrow_table, is_complete, format, table_name=table_name, namespace=namespace
         )
 
@@ -1131,7 +1130,7 @@ async def catalog_table_sample(
             f"namespace: '{namespace}', table: '{table_name}', error: {e!r}",
             exc_info=True,
         )
-        return {"success": False, "error": str(e), "isError": True}
+        return error_response(str(e))
 
 
 def register_tools(server: FastMCP) -> None:

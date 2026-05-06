@@ -13,6 +13,7 @@ Variables are grouped by server component.
 
 - [Systems Server](#systems-server)
   - [Core](#core)
+  - [Transport-security variables](#transport-security-variables)
   - [Credential variables (user-defined names)](#credential-variables-user-defined-names)
   - [Timeout tuning](#timeout-tuning)
 - [Docs Server](#docs-server)
@@ -78,6 +79,14 @@ Host interface the Community or Enterprise server HTTP server binds to.
 
 Can also be set via the `--host` CLI argument (CLI takes precedence).
 
+> **Security:** Authentication headers (`X-Deephaven-Password`,
+> `X-Deephaven-Private-Key`, `X-Deephaven-PSK`) carry secrets in
+> cleartext on the wire. When `MCP_HOST` is set to a non-loopback
+> address (such as `0.0.0.0`), the server **refuses to start** unless
+> at least one of `MCP_SSL_KEYFILE` + `MCP_SSL_CERTFILE` (paired),
+> `MCP_TRUST_FORWARDED_PROTO`, or `MCP_ALLOW_CLEARTEXT` is set. See
+> the transport-security section below for details.
+
 ---
 
 #### `MCP_PORT`
@@ -94,16 +103,136 @@ Can also be set via the `--port` CLI argument (CLI takes precedence). Precedence
 
 ---
 
+### Transport-security variables
+
+Auth headers (`X-Deephaven-Password`, `X-Deephaven-Private-Key`,
+`X-Deephaven-PSK`) **must** travel over an encrypted transport. On
+startup, when `MCP_HOST` (or `--host`) is set to a non-loopback
+address, the server requires exactly one of:
+
+1. Native TLS terminated by the server itself
+   (`MCP_SSL_KEYFILE` + `MCP_SSL_CERTFILE`).
+2. TLS terminated by a trusted reverse proxy that sets
+   `X-Forwarded-Proto: https`
+   (`MCP_TRUST_FORWARDED_PROTO=1` + `MCP_FORWARDED_ALLOW_IPS=<peer-CIDRs>`).
+3. An explicit cleartext opt-out for trusted private networks
+   (`MCP_ALLOW_CLEARTEXT=1`, logs a loud warning every startup).
+
+If none is configured, startup fails fast with an actionable error
+message. At request time, the same policy is enforced by an ASGI
+middleware: cleartext traffic from a non-loopback peer that lacks the
+appropriate signal is rejected with HTTP `426 Upgrade Required`.
+
+The `/health` endpoint bypasses this check so health probes can
+succeed over either HTTP or HTTPS.
+
+> **See also:** [`docs/SECURITY.md`](SECURITY.md) for the security model and
+> hardening checklist; [Developer Guide → Transport Security (TLS)](DEVELOPER_GUIDE.md#transport-security-tls)
+> for the full decision matrix, deployment patterns (native TLS,
+> reverse-proxy termination, loopback-only), and rationale.
+
+---
+
+#### `MCP_SSL_KEYFILE`
+
+Path to a PEM-encoded private key file for native TLS.
+
+| | |
+|---|---|
+| Required | No (required only for native TLS; must be paired with `MCP_SSL_CERTFILE`) |
+| Default | unset |
+| Example | `/etc/ssl/private/deephaven-mcp.key` |
+
+Can also be set via the `--ssl-keyfile` CLI argument (CLI takes precedence). When this and `MCP_SSL_CERTFILE` are both set, the server binds with TLS via [uvicorn](https://www.uvicorn.org/)'s native support. Setting only one of the two is a startup error.
+
+---
+
+#### `MCP_SSL_CERTFILE`
+
+Path to a PEM-encoded certificate file for native TLS.
+
+| | |
+|---|---|
+| Required | No (required only for native TLS; must be paired with `MCP_SSL_KEYFILE`) |
+| Default | unset |
+| Example | `/etc/ssl/certs/deephaven-mcp.crt` |
+
+Can also be set via the `--ssl-certfile` CLI argument. The certificate file may include the full chain.
+
+---
+
+#### `MCP_TRUST_FORWARDED_PROTO`
+
+Trust the `X-Forwarded-Proto: https` header from a fronting reverse proxy as proof that the client connection used TLS.
+
+| | |
+|---|---|
+| Required | No |
+| Default | `0` (do not trust) |
+| Values | `1`, `true`, `yes` (case-insensitive) treat as truthy; everything else is falsy |
+| Example | `1` |
+
+Can also be set via the `--trust-forwarded-proto` CLI flag. Use this when terminating TLS at a reverse proxy (nginx, Envoy, Cloud Run, ALB, etc.). To prevent header spoofing, the trust only applies when the request comes from a peer in `MCP_FORWARDED_ALLOW_IPS`.
+
+---
+
+#### `MCP_FORWARDED_ALLOW_IPS`
+
+Comma-separated list of peer IPs/CIDRs that are allowed to set the `X-Forwarded-Proto` header.
+
+| | |
+|---|---|
+| Required | No |
+| Default | `127.0.0.1` (loopback only) |
+| Example | `10.0.0.0/8,192.168.0.0/16` or `*` (any peer — risky) |
+
+Can also be set via the `--forwarded-allow-ips` CLI argument. Only honored when `MCP_TRUST_FORWARDED_PROTO=1`. Setting this to `*` disables the spoofing defense entirely and is logged as a `WARNING` at startup; use only when an L4 firewall already restricts who can reach the server.
+
+---
+
+#### `MCP_ALLOW_CLEARTEXT`
+
+Emergency opt-out: explicitly accept cleartext HTTP traffic on a non-loopback bind, even with auth headers in flight.
+
+| | |
+|---|---|
+| Required | No |
+| Default | `0` (do not allow) |
+| Values | `1`, `true`, `yes` (case-insensitive) treat as truthy; everything else is falsy |
+| Example | `1` |
+
+Can also be set via the `--allow-cleartext` CLI flag. Intended only for trusted private networks (LAN-only, air-gapped) where an out-of-band control prevents cleartext exposure. Logs a loud `WARNING` banner at startup and a periodic per-request reminder. **Do not use in production over the public internet.**
+
+---
+
 ### Credential variables (user-defined names)
 
 These are not fixed variable names — you choose the names and reference them
 from your `deephaven_mcp.json` configuration. Deephaven MCP reads the value of
 the named variable at runtime, keeping secrets out of your config file.
 
+#### Community MCP server gate: `auth.psk_env_var`
+
+Any variable name you choose. Holds the pre-shared key that gates access to
+the **community MCP server itself** (i.e. controls who is allowed to connect
+to `dh-mcp-community-server`). Mutually exclusive with the inline `auth.psk`
+field.
+
+```json5
+{
+  "auth": {
+    "enabled": true,
+    "psk_env_var": "DH_MCP_COMMUNITY_PSK"  // set DH_MCP_COMMUNITY_PSK=your-secret
+  }
+}
+```
+
 #### Community session: `auth_token_env_var`
 
-Any variable name you choose. Holds the authentication token for a community
-session.
+Any variable name you choose. Holds the authentication token used by the MCP
+server to connect **out to an individual community Deephaven worker** (a
+pydeephaven client parameter — distinct from the server-gate PSK above).
+Mutually exclusive with the inline `auth_token` field.
 
 ```json5
 {
@@ -116,38 +245,36 @@ session.
 }
 ```
 
-#### Enterprise session: `password_env_var`
+#### Enterprise server: no user credentials in env vars
 
-Any variable name you choose. Holds the password for an enterprise session
-configured with `"auth_type": "password"`.
+> **Note:** As of the authentication redesign, the enterprise server no
+> longer reads user credentials from the config file or environment
+> variables. The server-side config only declares the allowed auth
+> backends; every MCP request must carry the caller's own Deephaven
+> credentials in `X-Deephaven-*` HTTP headers (`X-Deephaven-Username`,
+> `X-Deephaven-Password`, `X-Deephaven-Private-Key`, and — when
+> `auth.allow_effective_user: true` — `X-Deephaven-Effective-User`).
+>
+> The legacy fields `auth_type`, `username`, `password`,
+> `password_env_var`, and `private_key_path` have been removed from the
+> enterprise config schema. Configs that still contain them will fail
+> validation at startup.
 
 ```json5
-// Enterprise config is flat - each enterprise server has its own config file
+// Current enterprise config — no secrets, just the allowed auth backends.
 {
   "system_name": "prod",
   "connection_json_url": "https://your-server.example.com/iris/connection.json",
-  "auth_type": "password",
-  "username": "your-username",
-  "password_env_var": "PROD_DH_PASSWORD"  // set PROD_DH_PASSWORD=your-password
+  "auth": {
+    "backends": ["password", "private_key"],
+    "allow_effective_user": false
+  }
 }
 ```
 
-#### Enterprise session: `private_key_path` (file path, not an env var)
-
-The `"auth_type": "private_key"` enterprise auth type uses `private_key_path`,
-a direct filesystem path to the private key file. Unlike `password_env_var`, there
-is no `*_env_var` indirection for this field — the path is specified directly in
-the config file.
-
-```json5
-// Enterprise config is flat - each enterprise server has its own config file
-{
-  "system_name": "prod",
-  "connection_json_url": "https://your-server.example.com/iris/connection.json",
-  "auth_type": "private_key",
-  "private_key_path": "/path/to/your/private_key.pem"
-}
-```
+How clients supply credentials is documented in the main
+[README](../README.md#client-authentication-headers) and the
+[Developer Guide](./DEVELOPER_GUIDE.md#enterprise-auth-model).
 
 ---
 
@@ -214,7 +341,7 @@ Port the Docs Server HTTP server listens on.
 | | |
 |---|---|
 | Required | No |
-| Default | `8001` (falls back to `PORT` for Cloud Run compatibility) |
+| Default | `8001` (falls back to `PORT` for [Cloud Run](https://cloud.google.com/run) compatibility) |
 | Example | `9000` |
 
 The server checks `MCP_DOCS_PORT` first, then `PORT` (the standard Cloud Run

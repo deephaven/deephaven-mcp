@@ -9,6 +9,7 @@ immediately before raising, to match the logging convention used elsewhere in
 """
 
 import logging
+import os
 from typing import Any
 
 from deephaven_mcp._exceptions import ConfigurationError
@@ -295,3 +296,84 @@ def validate_optional_string_dict(config: dict[str, Any], field_name: str) -> No
     if field_name not in config:
         return
     validate_string_dict(field_name, config[field_name])
+
+
+def resolve_required_env_var(
+    *, field_name: str, env_var_name: str, context: str
+) -> str:
+    """Read a required secret from a named environment variable.
+
+    Used to resolve a config-file ``<field>_env_var`` indirection: the
+    config field stores the *name* of an environment variable, and the
+    actual secret is read from that variable at use time.
+
+    Args:
+        field_name (str): The config field that named the env var, used
+            in error messages (e.g. ``"auth.psk_env_var"``).
+        env_var_name (str): The actual environment variable name (the
+            value of ``field_name`` in the config).
+        context (str): Human-readable description of the surrounding
+            config for error messages (e.g. ``"community 'auth'
+            section"``).
+
+    Returns:
+        str: The non-empty value of the environment variable.
+
+    Raises:
+        ConfigurationError: If the variable is unset or empty.
+    """
+    value = os.environ.get(env_var_name)
+    if not value:
+        msg = (
+            f"{context}: '{field_name}' refers to environment variable "
+            f"'{env_var_name}' which is unset or empty."
+        )
+        _LOGGER.error(f"[_validators:resolve_required_env_var] {msg}")
+        raise ConfigurationError(msg)
+    return value
+
+
+def resolve_secret_field(
+    *,
+    config: dict[str, Any],
+    inline_field: str,
+    env_var_field: str,
+    context: str,
+) -> str | None:
+    """Resolve a secret from an inline value or a ``<field>_env_var`` indirection.
+
+    Honors the project-wide schema convention enforced by
+    :func:`validate_mutually_exclusive`: at most one of the two fields
+    is populated in a validated config. Looks at the inline field
+    first; falls back to the env-var field via
+    :func:`resolve_required_env_var`. Returns ``None`` when neither
+    field is set.
+
+    Args:
+        config (dict[str, Any]): The config dict to read from (e.g. the
+            ``auth`` block, a session config, or a session-creation
+            defaults block).
+        inline_field (str): Name of the inline value field
+            (e.g. ``"psk"``, ``"auth_token"``).
+        env_var_field (str): Name of the env-var indirection field
+            (e.g. ``"psk_env_var"``, ``"auth_token_env_var"``).
+        context (str): Human-readable surrounding-config description
+            for error messages.
+
+    Returns:
+        str | None: Resolved secret string, or ``None`` if neither
+            field is set.
+
+    Raises:
+        ConfigurationError: If ``env_var_field`` names an env var that
+            is unset or empty.
+    """
+    inline = config.get(inline_field)
+    if isinstance(inline, str) and inline:
+        return inline
+    env_var = config.get(env_var_field)
+    if isinstance(env_var, str) and env_var:
+        return resolve_required_env_var(
+            field_name=env_var_field, env_var_name=env_var, context=context
+        )
+    return None

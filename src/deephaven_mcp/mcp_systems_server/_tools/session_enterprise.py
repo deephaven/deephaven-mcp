@@ -15,14 +15,14 @@ from typing import Any
 from mcp.server.fastmcp import Context, FastMCP
 
 from deephaven_mcp._exceptions import InvalidSessionNameError, RegistryItemNotFoundError
-from deephaven_mcp.client import CorePlusSession
-from deephaven_mcp.client._protobuf import CorePlusQueryConfig
+from deephaven_mcp.client import CorePlusQueryConfig, CorePlusSession
 from deephaven_mcp.config import redact_enterprise_config
 from deephaven_mcp.mcp_systems_server._tools.session import (
     DEFAULT_MAX_CONCURRENT_SESSIONS,
     DEFAULT_PROGRAMMING_LANGUAGE,
 )
 from deephaven_mcp.mcp_systems_server._tools.shared import (
+    error_response,
     format_initialization_status,
     get_config_manager,
     get_enterprise_registry,
@@ -30,10 +30,8 @@ from deephaven_mcp.mcp_systems_server._tools.shared import (
 from deephaven_mcp.resource_manager import (
     BaseItemManager,
     EnterpriseSessionManager,
-    SystemType,
-)
-from deephaven_mcp.resource_manager._registry_enterprise import (
     EnterpriseSessionRegistry,
+    SystemType,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -186,7 +184,7 @@ async def enterprise_systems_status(
             f"[mcp_systems_server:enterprise_systems_status] Failed: {e!r}",
             exc_info=True,
         )
-        return {"success": False, "error": str(e), "isError": True}
+        return error_response(str(e))
 
 
 async def _check_session_limit(
@@ -207,7 +205,7 @@ async def _check_session_limit(
     if max_sessions == 0:
         error_msg = f"Session creation is disabled for system '{system_name}' (max_concurrent_sessions = 0)"
         _LOGGER.error(f"[mcp_systems_server:_check_session_limit] {error_msg}")
-        return {"success": False, "error": error_msg, "isError": True}
+        return error_response(error_msg)
 
     # Check if current session count would exceed the limit
     current_session_count = await session_registry.count_added_sessions(
@@ -216,7 +214,7 @@ async def _check_session_limit(
     if current_session_count >= max_sessions:
         error_msg = f"Max concurrent sessions ({max_sessions}) reached for system '{system_name}'"
         _LOGGER.error(f"[mcp_systems_server:_check_session_limit] {error_msg}")
-        return {"success": False, "error": error_msg, "isError": True}
+        return error_response(error_msg)
 
     return None
 
@@ -269,7 +267,7 @@ async def _check_session_id_available(
         # If we got here, session already exists
         error_msg = f"Session '{session_id}' already exists"
         _LOGGER.error(f"[mcp_systems_server:_check_session_id_available] {error_msg}")
-        return {"error": error_msg, "isError": True}
+        return error_response(error_msg)
     except RegistryItemNotFoundError:
         return None  # Good - session doesn't exist yet
 
@@ -452,16 +450,16 @@ async def session_enterprise_create(
         if session_creation_config is None:
             error_msg = f"Enterprise session creation not configured for system '{system_name}'. Add a 'session_creation' section to the configuration."
             _LOGGER.error(f"[mcp_systems_server:session_enterprise_create] {error_msg}")
-            result.update({"success": False, "error": error_msg, "isError": True})
+            result.update(error_response(error_msg))
             return result
         max_sessions = session_creation_config.get(
             "max_concurrent_sessions", DEFAULT_MAX_CONCURRENT_SESSIONS
         )
 
         # Check session limits (both enabled and count)
-        error_response = await _check_session_limit(session_registry, max_sessions)
-        if error_response:
-            result.update(error_response)
+        limit_err = await _check_session_limit(session_registry, max_sessions)
+        if limit_err:
+            result.update(limit_err)
             return result
 
         # Generate session name if not provided
@@ -471,9 +469,9 @@ async def session_enterprise_create(
         session_id = BaseItemManager.make_full_name(
             SystemType.ENTERPRISE, system_name, session_name
         )
-        error_response = await _check_session_id_available(session_registry, session_id)
-        if error_response:
-            result.update(error_response)
+        id_err = await _check_session_id_available(session_registry, session_id)
+        if id_err:
+            result.update(id_err)
             return result
 
         # Resolve configuration parameters (defaults guaranteed by config validation)
