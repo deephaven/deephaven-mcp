@@ -52,4 +52,8 @@ def test_all_surface_complete():
         "AuthenticationMiddleware",
         "SCOPE_KEY_CREDENTIALS",
         "SCOPE_KEY_PRINCIPAL",
+        # TLS enforcement (added with the transport-security work).
+        "TlsEnforcementMiddleware",
+        "TransportSecurityPolicy",
+        "parse_forwarded_allow_ips",
     }

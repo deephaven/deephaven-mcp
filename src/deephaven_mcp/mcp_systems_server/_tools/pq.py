@@ -16,11 +16,11 @@ These tools require Deephaven Enterprise (Core+) and are not available in Commun
 
 import asyncio
 import logging
-import os
 from typing import TYPE_CHECKING, cast
 
 from mcp.server.fastmcp import Context, FastMCP
 
+from deephaven_mcp._env import env_int
 from deephaven_mcp._exceptions import (
     MissingEnterprisePackageError,
 )
@@ -127,9 +127,7 @@ def _make_pq_id(serial: CorePlusQuerySerial, system_name: str) -> str:
     return f"enterprise:{system_name}:{serial}"
 
 
-MCP_TIMEOUT_WARNING_THRESHOLD: int = int(
-    os.environ.get("DH_MCP_TIMEOUT_WARNING_THRESHOLD", "60")
-)
+MCP_TIMEOUT_WARNING_THRESHOLD: int = env_int("DH_MCP_TIMEOUT_WARNING_THRESHOLD", 60)
 """Timeout (seconds) above which MCP tool operations generate a warning.
 
 MCP clients typically have their own connection timeouts; operations exceeding
@@ -137,13 +135,13 @@ this threshold may be cut off by the client before they complete.
 Environment variable override: DH_MCP_TIMEOUT_WARNING_THRESHOLD
 """
 
-DEFAULT_PQ_TIMEOUT: int = int(os.environ.get("DH_MCP_DEFAULT_PQ_TIMEOUT", "30"))
+DEFAULT_PQ_TIMEOUT: int = env_int("DH_MCP_DEFAULT_PQ_TIMEOUT", 30)
 """Default timeout (seconds) for PQ lifecycle operations (start, stop, restart)
 when the caller does not supply an explicit value.
 Environment variable override: DH_MCP_DEFAULT_PQ_TIMEOUT
 """
 
-DEFAULT_MAX_CONCURRENT: int = int(os.environ.get("DH_MCP_DEFAULT_MAX_CONCURRENT", "20"))
+DEFAULT_MAX_CONCURRENT: int = env_int("DH_MCP_DEFAULT_MAX_CONCURRENT", 20)
 """Default cap on the number of PQ operations that may run in parallel within a
 single batch tool call.
 Environment variable override: DH_MCP_DEFAULT_MAX_CONCURRENT

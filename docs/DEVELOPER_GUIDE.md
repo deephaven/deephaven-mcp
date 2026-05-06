@@ -34,6 +34,11 @@ This repository houses the Python-based [Model Context Protocol (MCP)](https://m
     - [Community Server Quick Start](#community-server-quick-start)
     - [Docs Server Quick Start](#docs-server-quick-start)
   - [Command Line Entry Points](#command-line-entry-points)
+  - [Transport Security (TLS)](#transport-security-tls)
+    - [Decision matrix](#decision-matrix)
+    - [CLI flags / env vars](#cli-flags--env-vars)
+    - [Production deployment patterns](#production-deployment-patterns)
+    - [Health-check endpoint](#health-check-endpoint)
   - [MCP Server Implementations](#mcp-server-implementations)
     - [Community Server](#community-server)
       - [Community Server Overview](#community-server-overview)
@@ -465,6 +470,116 @@ This package registers the following console entry points for easy command-line 
 | `dh-mcp-docs-server` | Start the Docs Server | `deephaven_mcp.mcp_docs_server.main:main` |
 
 These commands are automatically available in your PATH after installing the package.
+
+## Transport Security (TLS)
+
+> **See also: [`docs/SECURITY.md`](SECURITY.md)** for the project's security
+> model and hardening checklist. The section below is the deep operator
+> reference: decision matrix, deployment commands, and CLI/env-var details.
+
+The Community and Enterprise MCP servers authenticate every request via
+the `X-Deephaven-*` HTTP headers (`X-Deephaven-Password`,
+`X-Deephaven-Private-Key`, `X-Deephaven-PSK`). Those headers carry
+secrets in cleartext on the wire and **must** travel over an encrypted
+transport. The server enforces this with a defense-in-depth design:
+
+1. **Startup-time validation** — refuses to start when binding to a
+   non-loopback host without an explicit transport-security mechanism.
+2. **Request-time middleware** — rejects cleartext requests from
+   non-loopback peers with HTTP `426 Upgrade Required`.
+
+A loopback bind (`127.0.0.1`, the default) is exempt from both checks
+because traffic never leaves the kernel.
+
+### Decision matrix
+
+| Bind         | Native TLS<br>(ssl-keyfile + ssl-certfile) | Trusted proxy<br>(trust-forwarded-proto) | Allow cleartext | Result                  |
+|--------------|--------------------------------------------|------------------------------------------|-----------------|-------------------------|
+| Loopback     | any                                        | any                                      | any             | **Pass**                |
+| Non-loopback | yes                                        | any                                      | any             | **Pass** (TLS at server) |
+| Non-loopback | no                                         | yes                                      | any             | **Pass** (TLS at proxy)  |
+| Non-loopback | no                                         | no                                       | yes             | **Pass** (loud warning)  |
+| Non-loopback | no                                         | no                                       | no              | **Refuse to start**     |
+
+### CLI flags / env vars
+
+All flags can also be set via the corresponding `MCP_*` environment
+variable. CLI takes precedence over env vars. See [`docs/ENV.md`](ENV.md#transport-security-variables)
+for the full reference.
+
+| CLI flag                  | Env var                      | Purpose                                         |
+|---------------------------|------------------------------|-------------------------------------------------|
+| `--ssl-keyfile <path>`    | `MCP_SSL_KEYFILE`            | Native-TLS private key (PEM); paired with cert. |
+| `--ssl-certfile <path>`   | `MCP_SSL_CERTFILE`           | Native-TLS certificate (PEM); paired with key.  |
+| `--trust-forwarded-proto` | `MCP_TRUST_FORWARDED_PROTO`  | Honor `X-Forwarded-Proto: https` from a trusted proxy. |
+| `--forwarded-allow-ips <list>` | `MCP_FORWARDED_ALLOW_IPS` | Comma-separated peer IPs/CIDRs allowed to set the header (default `127.0.0.1`; `*` = any peer). |
+| `--allow-cleartext`       | `MCP_ALLOW_CLEARTEXT`        | Emergency opt-out for trusted private networks. |
+
+### Production deployment patterns
+
+- **Native TLS**: terminate TLS in uvicorn itself.
+
+  ```sh
+  dh-mcp-community-server \
+      --host 0.0.0.0 --port 8003 \
+      --ssl-keyfile /etc/ssl/private/dh-mcp.key \
+      --ssl-certfile /etc/ssl/certs/dh-mcp.crt
+  ```
+
+- **Reverse proxy (nginx/Envoy/Cloud Run/ALB)**: terminate TLS at the
+  proxy and pass `X-Forwarded-Proto`. The server only honors the
+  header from peers in the allowlist.
+
+  ```sh
+  dh-mcp-enterprise-server \
+      --host 0.0.0.0 --port 8002 \
+      --trust-forwarded-proto \
+      --forwarded-allow-ips 10.0.0.0/8
+  ```
+
+- **Loopback only** (development, single-host deployments):
+
+  ```sh
+  dh-mcp-community-server  # default --host 127.0.0.1
+  ```
+
+- **Trusted private network only** (LAN, air-gapped):
+
+  ```sh
+  dh-mcp-community-server --host 0.0.0.0 --allow-cleartext
+  ```
+
+  > **Warning:** `--allow-cleartext` lets auth headers travel
+  > unencrypted. Only use it on networks where an out-of-band control
+  > already prevents cleartext exposure. The server logs a loud
+  > `WARNING` banner at startup and a periodic per-request reminder.
+
+### Health-check endpoint
+
+Every server (community, enterprise, docs) exposes a `/health` endpoint
+that returns `200 OK` with JSON body `{"status": "ok"}`. The endpoint is
+designed for liveness/readiness probes from load balancers and orchestrator
+agents (Kubernetes, Cloud Run, AWS ALB, etc.) that cannot present TLS
+client certs or auth headers.
+
+On the **systems servers** (community / enterprise) `/health` is registered
+on the FastMCP app via `@server.custom_route("/health", methods=["GET"])`
+and bypasses **both** middleware layers:
+
+- **TLS layer** — `TransportSecurityPolicy.bypass_paths` defaults to
+  `frozenset({"/health"})`, so the request reaches the inner app even on
+  cleartext from a non-loopback peer.
+- **Auth layer** — `AuthenticationMiddleware` is mounted with
+  `bypass_paths=frozenset({"/health"})` (see `_build_community_middleware`
+  and `_build_enterprise_middleware` in `mcp_systems_server/server.py`),
+  so probes succeed without any `X-Deephaven-*` header.
+
+The **docs server** (`dh-mcp-docs-server`) registers `/health` the same way
+but mounts no TLS-enforcement or authentication middleware, so the bypass
+is moot there.
+
+No other path is bypassed; in particular `/healthz` is **not** an alias
+and is rejected normally.
 
 ## MCP Server Implementations
 
@@ -946,6 +1061,13 @@ Each `dh-mcp-enterprise-server` instance manages exactly one DHE system. Run one
 | `--port` | Port to listen on (overrides `MCP_PORT` env var) | `8002` |
 | `-h, --help` | Show help message | - |
 
+> **Note:** The Enterprise Server also accepts the transport-security
+> CLI flags documented in [Transport Security → CLI flags / env
+> vars](#cli-flags--env-vars) (`--ssl-keyfile`, `--ssl-certfile`,
+> `--trust-forwarded-proto`, `--forwarded-allow-ips`,
+> `--allow-cleartext`). They are required when binding to a
+> non-loopback host.
+
 > **Note:** The Enterprise Server is HTTP-only (streamable-http). Run multiple instances on different ports for different systems.
 
 ```sh
@@ -993,6 +1115,13 @@ Follow these steps to start the Community Server:
 | `--host` | Bind host (overrides `MCP_HOST` env var) | `127.0.0.1` |
 | `--port` | Port to listen on (overrides `MCP_PORT` env var) | `8003` |
 | `-h, --help` | Show help message | - |
+
+> **Note:** The Community Server also accepts the transport-security
+> CLI flags documented in [Transport Security → CLI flags / env
+> vars](#cli-flags--env-vars) (`--ssl-keyfile`, `--ssl-certfile`,
+> `--trust-forwarded-proto`, `--forwarded-allow-ips`,
+> `--allow-cleartext`). They are required when binding to a
+> non-loopback host.
 
 > **Note:** The Community Server is HTTP-only (streamable-http). Host and port can be set via `MCP_HOST` / `MCP_PORT` environment variables or `--host` / `--port` CLI arguments.
 
@@ -3021,14 +3150,17 @@ deephaven-mcp/
 │       ├── mcp_systems_server/ # Source for the Systems MCP server
 │       ├── resource_manager/   # Resource (session, etc.) management
 │       ├── __init__.py
+│       ├── _env.py             # Typed env-var helpers (env_str/int/float/bool/required)
 │       ├── _exceptions.py      # Custom exception classes
 │       ├── _logging.py         # Logging configuration
 │       ├── _monkeypatch.py     # Runtime patches
+│       ├── _redaction.py       # Sensitive-value redaction utilities
 │       ├── _version.py         # Version information
 │       ├── io.py               # I/O utilities
 │       ├── openai.py           # OpenAI client integration
 │       └── queries.py          # Query management
 ├── tests/                    # Unit and integration tests
+│   ├── auth/
 │   ├── client/
 │   ├── config/
 │   ├── formatters/
@@ -3220,7 +3352,7 @@ uv run scripts/mcp_docs_stress_http.py \
 - `--requests-per-conn`: Number of requests per connection (default: 100)
 - `--url`: Target endpoint URL
 - `--max-errors`: Maximum number of errors before stopping the test (default: 5)
-- `--rps`: Requests per second limit per connection (default: 0, no limit)
+- `--rps`: Requests per second limit per connection (default: `10000`; effectively unthrottled for typical tests)
 - `--max-response-time`: Maximum allowed response time in seconds (default: 1)
 
 The script will create multiple concurrent connections and send requests to the specified endpoint, reporting errors and response times. It will print "PASSED" if the test completes without exceeding the error threshold, or "FAILED" with the reason if the error threshold is reached.
@@ -3381,15 +3513,25 @@ uv pip install -e ".[dev]"
    - Ensure the server port is open and not firewalled
    - Verify `MCP_HOST` / `MCP_PORT` env vars or `--host` / `--port` CLI args are set correctly if using non-defaults
 
-6. **Missing Dependencies:**
+6. **Transport-Security Startup Refusal / `426 Upgrade Required`:**
+   - **Symptom (startup):** `Refusing to start: server is set to bind to '0.0.0.0' (non-loopback) without any transport-security mechanism enabled.`
+   - **Symptom (runtime):** Requests rejected with HTTP `426 Upgrade Required` and `Upgrade: TLS/1.2, HTTP/1.1` header.
+   - **Cause:** The systems servers reject cleartext non-loopback traffic carrying `X-Deephaven-*` auth headers because those secrets must travel over TLS.
+   - **Fix:** Pick one of the four mechanisms documented in [Transport Security (TLS)](#transport-security-tls):
+     - Enable native TLS with `--ssl-keyfile` + `--ssl-certfile` (or the corresponding `MCP_*` env vars).
+     - Run behind a TLS-terminating reverse proxy and pass `--trust-forwarded-proto` (with `--forwarded-allow-ips` for the proxy's peer CIDRs).
+     - Bind to loopback only (`--host 127.0.0.1`, the default).
+     - Emergency: `--allow-cleartext` (auth headers travel unencrypted; trusted private networks only).
+
+7. **Missing Dependencies:**
    - Ensure all Python dependencies are installed (`uv pip install ".[dev]"`)
    - Java must be installed and in PATH for running Deephaven test servers
 
-7. **Session Errors:**
+8. **Session Errors:**
    - Review logs for session cache or connection errors
    - Try refreshing the session with the `mcp_reload` tool
 
-8. **Development-Specific Issues:**
+9. **Development-Specific Issues:**
    - **Test Execution**: Always use `uv run pytest` instead of `pytest` for consistency
    - **Code Quality**: Run [`bin/precommit.sh`](../bin/precommit.sh) before committing to catch style and lint issues
    - **Virtual Environment**: Ensure you're using the correct virtual environment with `uv` or `pip+venv`

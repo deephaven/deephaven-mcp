@@ -29,13 +29,13 @@ __all__ = [
 import abc
 import asyncio
 import logging
-import os
 from collections.abc import Callable
 from typing import Any, cast
 
 import aiofiles
 import json5
 
+from deephaven_mcp._env import env_required
 from deephaven_mcp._exceptions import ConfigurationError
 
 _LOGGER = logging.getLogger(__name__)
@@ -242,12 +242,13 @@ def _get_config_path() -> str:
     Raises:
         RuntimeError: If the DH_MCP_CONFIG_FILE environment variable is not set.
     """
-    if CONFIG_ENV_VAR not in os.environ:
+    try:
+        config_path = env_required(CONFIG_ENV_VAR)
+    except RuntimeError:
         _LOGGER.error(
             f"[_get_config_path] Environment variable {CONFIG_ENV_VAR} is not set."
         )
-        raise RuntimeError(f"Environment variable {CONFIG_ENV_VAR} is not set.")
-    config_path = os.environ[CONFIG_ENV_VAR]
+        raise
     _LOGGER.info(
         f"[_get_config_path] Environment variable {CONFIG_ENV_VAR} is set to: {config_path}"
     )

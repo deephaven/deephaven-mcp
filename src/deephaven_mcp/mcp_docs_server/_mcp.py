@@ -84,6 +84,8 @@ from mcp.server.fastmcp import Context, FastMCP
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
+from deephaven_mcp._env import env_int, env_required, env_str
+from deephaven_mcp._health import HEALTH_PATH
 from deephaven_mcp._logging import log_process_state
 
 from ..openai import OpenAIClient, OpenAIClientError
@@ -91,33 +93,32 @@ from ..openai import OpenAIClient, OpenAIClientError
 _LOGGER = logging.getLogger(__name__)
 
 # The API key for authenticating with the Inkeep-powered LLM API
-try:
-    _INKEEP_API_KEY: str = os.environ["INKEEP_API_KEY"]
-    """str: The API key for authenticating with the Inkeep-powered LLM API.
+_INKEEP_API_KEY: str = env_required(
+    "INKEEP_API_KEY",
+    error_msg=(
+        "INKEEP_API_KEY environment variable must be set to use the "
+        "Inkeep-powered documentation tools."
+    ),
+)
+"""str: The API key for authenticating with the Inkeep-powered LLM API.
 
-    This environment variable must be set for the docs server to function. The API key
-    is used to authenticate requests to the Inkeep documentation assistant service.
+This environment variable must be set for the docs server to function. The API key
+is used to authenticate requests to the Inkeep documentation assistant service.
 
-    Environment Variable:
-        INKEEP_API_KEY: Required. The API key provided by Inkeep for documentation queries.
+Environment Variable:
+    INKEEP_API_KEY: Required. The API key provided by Inkeep for documentation queries.
 
-    Raises:
-        RuntimeError: If the INKEEP_API_KEY environment variable is not set.
-    """
-except KeyError:
-    raise RuntimeError(
-        "INKEEP_API_KEY environment variable must be set to use the Inkeep-powered documentation tools."
-    ) from None
+Raises:
+    RuntimeError: If the INKEEP_API_KEY environment variable is not set.
+"""
 
-mcp_docs_host: str = os.environ.get("MCP_DOCS_HOST", "127.0.0.1")
+mcp_docs_host: str = env_str("MCP_DOCS_HOST", "127.0.0.1")
 """
 str: The host to bind the FastMCP server to. Defaults to 127.0.0.1 (localhost).
 Set MCP_DOCS_HOST to '0.0.0.0' for external access, or another interface as needed.
 """
 
-mcp_docs_port: int = int(
-    os.environ.get("MCP_DOCS_PORT", os.environ.get("PORT", "8001"))
-)
+mcp_docs_port: int = env_int("MCP_DOCS_PORT", env_int("PORT", 8001))
 """
 int: The port to bind the FastMCP server to. Defaults to 8001.
 Uses MCP_DOCS_PORT if set, otherwise falls back to PORT (for Cloud Run compatibility).
@@ -453,7 +454,7 @@ Discovery:
 """
 
 
-@mcp_server.custom_route("/health", methods=["GET"])  # type: ignore[untyped-decorator]
+@mcp_server.custom_route(HEALTH_PATH, methods=["GET"])  # type: ignore[untyped-decorator]
 async def health_check(request: Request) -> JSONResponse:
     """
     Health check endpoint for the docs server.

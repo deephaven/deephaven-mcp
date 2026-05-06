@@ -20,6 +20,9 @@
 - [Configuration](#configuration)
   - [Configuring DHE (Enterprise) Server](#configuring-dhe-enterprise-server)
   - [Configuring DHC (Community) Server](#configuring-dhc-community-server)
+  - [Security Configuration (Community Server)](#security-configuration-community-server)
+  - [Setting `DH_MCP_CONFIG_FILE`](#setting-dh_mcp_config_file)
+  - [Transport Security (TLS)](#transport-security-tls)
   - [Environment Variables](#environment-variables)
   - [Browser Access to Created Sessions](#browser-access-to-created-sessions)
   - [Applying Configuration Changes](#applying-configuration-changes)
@@ -933,6 +936,9 @@ The `session_creation` key configures dynamic creation of Deephaven Community Co
 
 ### Security Configuration (Community Server)
 
+> **Read [`docs/SECURITY.md`](docs/SECURITY.md) first** for the full security
+> model and hardening checklist. This subsection covers one specific knob.
+
 The optional top-level `security` section in the community config controls the `session_community_credentials` tool.
 
 > **SECURITY WARNING**: When credential retrieval is enabled, your AI assistant can see and access authentication tokens. Only enable if you understand the implications. **NEVER** enable when the MCP server is accessible over untrusted networks.
@@ -956,6 +962,50 @@ Both servers accept the config file path via `--config` CLI flag or the `DH_MCP_
 DH_MCP_CONFIG_FILE=/path/to/dhc.json dh-mcp-community-server
 DH_MCP_CONFIG_FILE=/path/to/dhe.json dh-mcp-enterprise-server
 ```
+
+---
+
+### Transport Security (TLS)
+
+> **Read [`docs/SECURITY.md`](docs/SECURITY.md) first** for the full security
+> model and hardening checklist. The summary below covers transport security
+> specifically.
+
+Auth headers (`X-Deephaven-Password`, `X-Deephaven-Private-Key`,
+`X-Deephaven-PSK`) carry secrets in cleartext on the wire. The
+Community and Enterprise servers refuse to start when binding to a
+non-loopback host (e.g. `--host 0.0.0.0`) without an explicit
+transport-security mechanism, and reject cleartext requests from
+non-loopback peers at runtime with HTTP `426 Upgrade Required`.
+
+Pick one of the following deployment patterns:
+
+- **Native TLS** (server terminates):
+
+  ```bash
+  dh-mcp-community-server --host 0.0.0.0 \
+      --ssl-keyfile /etc/ssl/private/dh-mcp.key \
+      --ssl-certfile /etc/ssl/certs/dh-mcp.crt
+  ```
+
+- **Behind a TLS-terminating reverse proxy** (nginx, Envoy, Cloud Run, ALB):
+
+  ```bash
+  dh-mcp-enterprise-server --host 0.0.0.0 \
+      --trust-forwarded-proto \
+      --forwarded-allow-ips 10.0.0.0/8
+  ```
+
+- **Loopback only** (default, no extra flags needed): bind stays on
+  `127.0.0.1`, traffic never leaves the kernel.
+
+- **Trusted private network** (LAN-only, air-gapped):
+  `--allow-cleartext` (logs a loud `WARNING`; do not use over the
+  public internet).
+
+For the full flag/env-var reference and decision matrix, see
+[Transport Security in the Developer Guide](docs/DEVELOPER_GUIDE.md#transport-security-tls)
+and [transport-security env vars in `docs/ENV.md`](docs/ENV.md#transport-security-variables).
 
 ---
 
@@ -994,7 +1044,7 @@ The variables needed to get started are:
 
 When you create a Deephaven session via the MCP tools, you may want to access it through a web browser. By default, authentication credentials are not returned through MCP tools for security.
 
-### Viewing Credentials in Console
+#### Viewing Credentials in Console
 
 When a session is created with an auto-generated token, the connection information is logged to your console:
 
@@ -1013,7 +1063,7 @@ When a session is created with an auto-generated token, the connection informati
 
 You can copy this URL directly into your browser.
 
-### Retrieving Credentials via MCP Tool (Optional)
+#### Retrieving Credentials via MCP Tool (Optional)
 
 If you want AI agents to retrieve credentials programmatically, you can enable the `session_community_credentials` tool in your configuration:
 
