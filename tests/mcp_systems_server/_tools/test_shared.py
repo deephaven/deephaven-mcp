@@ -223,13 +223,20 @@ async def test_get_enterprise_registry_returns_registry_and_binds_creds():
 
 @pytest.mark.asyncio
 async def test_get_enterprise_registry_propagates_bind_credentials_rejection():
-    """``shared.get_enterprise_registry`` delegates rejection to ``bind_credentials``.
+    """``shared.get_enterprise_registry`` propagates errors from ``bind_credentials``.
 
-    Unsupported credential subclasses (such as :class:`PSKCredentials`)
-    are rejected by the registry's own :meth:`bind_credentials`; the
-    helper must forward those credentials and propagate the resulting
-    :class:`InternalError` rather than re-implementing the type check
-    itself.
+    The helper forwards the per-request credentials to the registry's
+    :meth:`bind_credentials` and must propagate whatever exception that
+    call raises, without re-implementing the rejection logic itself.
+    Note that decisions about which credential *types* are supported by
+    enterprise are not made here: type acceptance is handled by the auth
+    middleware and the downstream
+    :meth:`CorePlusSessionFactory.from_credentials` call inside the
+    background discovery task. ``bind_credentials`` itself primarily
+    enforces stable per-MCP-session identity. This test uses
+    :class:`PSKCredentials` purely as a convenient stand-in object and
+    asserts only that the error raised by ``bind_credentials`` is
+    surfaced unchanged.
     """
     from deephaven_mcp.auth.credentials import PSKCredentials
 
@@ -266,6 +273,25 @@ async def test_get_enterprise_registry_missing_creds_raises():
     )
     with pytest.raises(InternalError, match="Authenticated credentials are missing"):
         await get_enterprise_registry(context)
+
+
+def test_get_request_credentials_rejects_non_credentials_scope_value():
+    """Wrong type at scope[SCOPE_KEY_CREDENTIALS] raises InternalError.
+
+    If the auth middleware (or a misconfigured test fixture) attaches an
+    object that is not a :class:`Credentials` instance to the ASGI
+    scope, the helper must raise :class:`InternalError` with a clear
+    "wrong type" message rather than silently returning the bogus value
+    to downstream callers.
+    """
+    from deephaven_mcp.mcp_systems_server._tools.shared import (
+        _get_request_credentials,
+    )
+
+    # Pass a plain string in place of a Credentials instance.
+    context = MockContext({}, creds="not-a-credentials-instance")
+    with pytest.raises(InternalError, match="not a Credentials instance"):
+        _get_request_credentials(context)
 
 
 def test_get_request_credentials_no_request_raises():

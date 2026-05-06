@@ -201,9 +201,12 @@ def _get_request_credentials(context: Context) -> Credentials:
 
     Raises:
         InternalError: If the MCP context has no associated HTTP request,
-            or if the middleware did not attach credentials to the scope
+            if the middleware did not attach credentials to the scope
             (which would only happen if the enterprise server were
-            mounted without :class:`AuthenticationMiddleware`).
+            mounted without :class:`AuthenticationMiddleware`), or if
+            the scope value at :data:`SCOPE_KEY_CREDENTIALS` is present
+            but is not a :class:`Credentials` instance (which indicates
+            a misconfigured middleware or test fixture).
     """
     request = context.request_context.request
     if request is None:
@@ -211,12 +214,18 @@ def _get_request_credentials(context: Context) -> Credentials:
             "MCP context has no associated HTTP request; the enterprise "
             "server requires per-request authentication."
         )
-    creds: Credentials | None = request.scope.get(SCOPE_KEY_CREDENTIALS)
+    creds = request.scope.get(SCOPE_KEY_CREDENTIALS)
     if creds is None:
         raise InternalError(
             "Authenticated credentials are missing from the request scope. "
             "AuthenticationMiddleware must run before any enterprise tool "
             "handler."
+        )
+    if not isinstance(creds, Credentials):
+        raise InternalError(
+            f"Request scope value at SCOPE_KEY_CREDENTIALS is not a "
+            f"Credentials instance (got {type(creds).__name__}); "
+            f"AuthenticationMiddleware is misconfigured."
         )
     return creds
 
