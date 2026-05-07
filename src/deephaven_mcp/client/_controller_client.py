@@ -528,30 +528,20 @@ class CorePlusControllerClient(
         respond to query state changes, such as UIs that show the current state of all queries
         or monitoring tools that track query lifecycle events.
 
-        Because this method returns normally on both "a change occurred" and
-        "timeout reached" (see ``Note`` below), callers cannot tell which case
-        produced the return. The typical recovery is to call ``map()`` after
-        every return to fetch the (possibly-unchanged) current state, or to
-        switch to ``wait_for_change_from_version`` which returns a ``bool``
-        distinguishing the two cases.
+        A normal return means the wait ended; this method does not distinguish
+        "a change was observed" from "the wait ended for any other reason". If
+        that distinction matters, use ``wait_for_change_from_version``, which
+        returns a ``bool``.
 
         Args:
-            timeout_seconds (float): How long to wait for a change, in seconds. This must be a positive
-                           value. If no changes occur within this period the method returns normally
-                           (see ``Note`` below); no exception is raised on timeout.
+            timeout_seconds (float): How long to wait for a change, in seconds.
 
         Raises:
             DeephavenConnectionError: If unable to connect to the controller service due to
                                     network issues or if the controller becomes unavailable.
+            TimeoutError: Propagated unchanged when the underlying call raises one.
             QueryError: If there is an issue with the query state or subscription, such as if
                        the subscription was not properly established with subscribe().
-
-        Note:
-            Timeout is signalled by a normal return (no exception). The underlying
-            ``Condition.wait`` returns rather than raising when its deadline elapses,
-            so callers cannot distinguish "a change occurred" from "timeout reached"
-            via this method alone. Use ``wait_for_change_from_version`` (which returns
-            a ``bool``) when that distinction matters.
         """
         _LOGGER.debug(
             f"[CorePlusControllerClient:wait_for_change] Waiting for query state change, timeout={timeout_seconds}"
