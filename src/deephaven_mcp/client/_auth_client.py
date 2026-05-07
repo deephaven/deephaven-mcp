@@ -6,13 +6,13 @@ components that require authentication with Deephaven Enterprise servers.
 
 Key Features:
     - Converts blocking AuthClient operations to async using asyncio.to_thread for event loop safety.
-    - Provides async methods for service token retrieval.
-    - Ensures sensitive information (tokens, passwords) is never logged.
+    - Provides async methods for service token creation.
+    - Ensures sensitive information is never logged; only usernames are logged at DEBUG/INFO levels.
     - Consistent and detailed logging for entry, success, and error events.
 
 Classes:
     CorePlusAuthClient: Main async wrapper for deephaven_enterprise.client.auth.AuthClient that provides
-        asynchronous service token retrieval capabilities.
+        asynchronous token creation capabilities.
 
 Types:
     CorePlusToken: A wrapper around Deephaven's native token objects with additional serialization
@@ -33,7 +33,7 @@ Example:
         factory = await CorePlusSessionFactory.from_url("https://myserver.example.com/iris/connection.json")
         await factory.password("username", "password")
         auth_client = factory.auth_client
-        service_token = await auth_client.get_token("PersistentQueryController")
+        service_token = await auth_client.create_token("PersistentQueryController", duration_seconds=3600)
         # Use the token with other services
 """
 
@@ -58,15 +58,15 @@ class CorePlusAuthClient(
     """
     Asynchronous wrapper for the Deephaven AuthClient, providing non-blocking token management.
 
-    This class wraps a synchronous Deephaven AuthClient and exposes async methods for service
-    token retrieval. All blocking operations are executed in threads using asyncio.to_thread to
-    preserve event loop responsiveness and prevent I/O operations from blocking the main asyncio
-    event loop.
+    This class wraps a synchronous Deephaven AuthClient and exposes async methods for token creation.
+    All blocking operations are executed in threads using asyncio.to_thread to preserve event loop
+    responsiveness and prevent I/O operations from blocking the main asyncio event loop.
 
     Typical Usage:
         - Instantiate via CorePlusSessionFactory (not directly).
-        - Obtain service-specific tokens for downstream authentication.
+        - Create service-specific tokens for downstream authentication.
         - Pass tokens to other client components that need authentication.
+        - Set appropriate token duration based on expected usage lifetime.
 
     Event Loop Safety:
         - All network and I/O operations are offloaded to threads using asyncio.to_thread.
@@ -75,7 +75,7 @@ class CorePlusAuthClient(
 
     Logging:
         - Logs entry, success, and error for all token operations at DEBUG or ERROR level.
-        - Sensitive information (tokens, passwords) is never logged.
+        - Usernames may be logged; sensitive information is never logged.
         - Error paths include detailed context to aid troubleshooting.
 
     Example:
@@ -86,7 +86,7 @@ class CorePlusAuthClient(
             factory = await CorePlusSessionFactory.from_url("https://myserver.example.com/iris/connection.json")
             await factory.password("username", "password")
             auth_client = factory.auth_client
-            service_token = await auth_client.get_token("PersistentQueryController")
+            service_token = await auth_client.create_token("PersistentQueryController", duration_seconds=3600)
             # Use the token with other services
     """
 
@@ -103,79 +103,95 @@ class CorePlusAuthClient(
             this class directly.
         """
         super().__init__(auth_client, is_enterprise=True)
-        _LOGGER.debug("[CorePlusAuthClient] Initialized")
+        _LOGGER.info("[CorePlusAuthClient] initialized")
 
-    async def get_token(
+    async def create_token(
         self,
         service: str,
+        username: str = "",
+        duration_seconds: int = 3600,
         timeout_seconds: float | None = None,
     ) -> CorePlusToken:
-        """Get a service-specific authentication token asynchronously.
+        """Create a service-specific authentication token asynchronously.
 
-        This method obtains a single-use token for a specific Deephaven service (e.g.,
-        PersistentQueryController, JavaScriptClient, Console). Service tokens are typically
-        used for inter-service authentication and are consumed by the authentication server
-        during the verification process.
+        This method generates a token for a specific Deephaven service (e.g., PersistentQueryController, JavaScriptClient, Console).
+        Service tokens are typically used for inter-service authentication and have limited permissions.
 
         Args:
             service (str): Name of the target service. Must be recognized by the Deephaven authentication service.
                 Valid service types include: "PersistentQueryController", "JavaScriptClient", "Console", "ApiGateway".
-            timeout_seconds (float | None, optional): Timeout in seconds for the token request.
-                If None, uses the client's default timeout (``rpc_timeout_secs``). The timeout
-                applies to the entire operation including network communication.
+            username (str, optional): Username for whom to create the token. If empty, uses the currently authenticated user.
+                Default is "" (empty string).
+            duration_seconds (int, optional): Token validity period in seconds. Default is 3600 (1 hour).
+                Consider shorter durations for security-sensitive operations and longer durations for
+                long-running background processes.
+            timeout_seconds (float | None, optional): Timeout in seconds for the token creation request.
+                If None, uses the client's default timeout. The timeout applies to the entire
+                operation including network communication.
 
         Returns:
             CorePlusToken: Token scoped to the requested service. This is a wrapper around the native
                 Deephaven token object with additional properties and serialization capabilities
-                for use with other Deephaven Enterprise clients.
+                for use with other Deephaven Enterprise clients. The token contains the encoded JWT,
+                expiration information, and scope details.
 
         Raises:
-            DeephavenConnectionError: If a Python-level ``ConnectionError`` is raised while
-                dispatching the call (uncommon; most upstream gRPC failures are reported as
-                ``AuthenticationError`` instead, see below).
-            AuthenticationError: If token retrieval fails for any other reason. This is the
-                catch-all for upstream ``grpc.RpcError`` (network issues, server unavailability,
-                TLS/certificate errors, gRPC timeouts), authorization failures (invalid
-                credentials, insufficient permissions, invalid service name), rate limiting,
-                and internal auth server errors.
+            DeephavenConnectionError: If unable to connect to the authentication service due to network issues,
+                server unavailability, TLS/certificate errors, or connection timeouts.
+            AuthenticationError: If token creation fails due to authorization issues (invalid credentials),
+                insufficient permissions, invalid service name, rate limiting, or internal auth server errors.
 
         Logging:
-            - Logs entry at DEBUG level with service name and timeout.
+            - Logs entry at DEBUG level with service name, username (or [current user]), and duration.
             - Logs success at DEBUG level with service name.
             - Logs errors at ERROR level with service name and error details.
-            - Sensitive information (tokens, passwords) is never logged.
+            - Sensitive information like tokens and passwords is never logged.
 
         Note:
             Uses asyncio.to_thread for non-blocking operation to ensure the main event loop
             remains responsive even during authentication operations.
 
         Example:
-            # Get a single-use token for PersistentQueryController
-            token = await auth_client.get_token(service="PersistentQueryController")
-            # ``token`` is a CorePlusToken; pass it to APIs that accept Deephaven service tokens.
+            # Create a token for PersistentQueryController with 24-hour validity
+            token = await auth_client.create_token(
+                service="PersistentQueryController",
+                duration_seconds=86400
+            )
+            # Use token with a controller
+            controller = await session_manager.create_controller_client()
+            await controller.set_auth_token(token)
         """
         _LOGGER.debug(
-            f"[CorePlusAuthClient:get_token] Getting service token for service='{service}' (timeout_seconds={timeout_seconds})"
+            "[CorePlusAuthClient] Creating service token for service '%s' (username='%s', duration=%ds)...",
+            service,
+            username or "[current user]",
+            duration_seconds,
         )
         try:
             result = await asyncio.to_thread(
-                self.wrapped.get_token,
+                self.wrapped.create_token,
                 service,
+                username,
+                duration_seconds,
                 timeout_seconds,
             )
             _LOGGER.debug(
-                f"[CorePlusAuthClient:get_token] Service token for '{service}' obtained successfully"
+                "[CorePlusAuthClient] Service token for '%s' created successfully.",
+                service,
             )
             return CorePlusToken(result)
         except ConnectionError as e:
             _LOGGER.error(
-                f"[CorePlusAuthClient:get_token] Failed to connect to authentication service for '{service}': {e}"
+                "[CorePlusAuthClient:create_token] Failed to connect to authentication service: %s",
+                e,
             )
             raise DeephavenConnectionError(
                 f"Unable to connect to authentication service: {e}"
             ) from e
         except Exception as e:
             _LOGGER.error(
-                f"[CorePlusAuthClient:get_token] Service token retrieval failed for '{service}': {e}"
+                "[CorePlusAuthClient] Service token creation failed for '%s': %s",
+                service,
+                e,
             )
-            raise AuthenticationError(f"Token retrieval failed: {e}") from e
+            raise AuthenticationError(f"Token creation failed: {e}") from e

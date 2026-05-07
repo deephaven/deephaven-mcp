@@ -1,7 +1,7 @@
 """YAML formatter for PyArrow tables."""
 
 import pyarrow as pa
-import yaml
+import yaml  # type: ignore[import-untyped]
 
 
 def format_yaml(arrow_table: pa.Table) -> str:
