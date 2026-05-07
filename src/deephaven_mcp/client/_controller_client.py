@@ -1371,9 +1371,7 @@ class CorePlusControllerClient(
         _validate_timeout(timeout_seconds)
         _LOGGER.debug("[CorePlusControllerClient:stop_query] Starting query stop")
         try:
-            await asyncio.to_thread(
-                self.wrapped.stop_query, serials, timeout_seconds
-            )
+            await asyncio.to_thread(self.wrapped.stop_query, serials, timeout_seconds)
             _LOGGER.debug(
                 "[CorePlusControllerClient:stop_query] Query stop completed successfully"
             )
@@ -1429,9 +1427,7 @@ class CorePlusControllerClient(
             f"[CorePlusControllerClient:stop_and_wait] Stopping query and waiting for serial={serial}"
         )
         try:
-            await asyncio.to_thread(
-                self.wrapped.stop_and_wait, serial, timeout_seconds
-            )
+            await asyncio.to_thread(self.wrapped.stop_and_wait, serial, timeout_seconds)
             _LOGGER.debug(
                 f"[CorePlusControllerClient:stop_and_wait] Query {serial} stopped successfully"
             )

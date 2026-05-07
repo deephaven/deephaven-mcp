@@ -852,7 +852,9 @@ def _convert_restart_users_to_enum(
     # the precise protobuf type to all callers, so no cast or
     # ``# type: ignore`` is needed at the assignment site.
     try:
-        return cast("RestartUsersEnum.ValueType", RestartUsersEnum.Value(restart_users_str))
+        return cast(
+            "RestartUsersEnum.ValueType", RestartUsersEnum.Value(restart_users_str)
+        )
     except ValueError:
         # Get all valid enum names from protobuf enum using .keys() method
         valid_values = list(RestartUsersEnum.keys())
