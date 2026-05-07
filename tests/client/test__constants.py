@@ -61,9 +61,14 @@ class TestTimeoutConstants:
         assert isinstance(PQ_MANAGEMENT_TIMEOUT_SECONDS, float)
         assert PQ_MANAGEMENT_TIMEOUT_SECONDS > 0
 
-    def test_pq_wait_timeout_seconds_is_positive_float(self):
-        """PQ_STATE_CHANGE_TIMEOUT_SECONDS should be a positive float."""
-        assert isinstance(PQ_STATE_CHANGE_TIMEOUT_SECONDS, float)
+    def test_pq_wait_timeout_seconds_is_positive_int(self):
+        """PQ_STATE_CHANGE_TIMEOUT_SECONDS should be a positive int.
+
+        Type matches the upstream ``ControllerClient.start_and_wait`` /
+        ``stop_and_wait`` ``timeout_seconds: int`` contract.
+        """
+        assert isinstance(PQ_STATE_CHANGE_TIMEOUT_SECONDS, int)
+        assert not isinstance(PQ_STATE_CHANGE_TIMEOUT_SECONDS, bool)
         assert PQ_STATE_CHANGE_TIMEOUT_SECONDS > 0
 
     def test_pq_wait_timeout_longer_than_operation_timeout(self):
@@ -141,9 +146,21 @@ class TestTimeoutConstantsEnvVarOverrides:
 
     def test_pq_wait_timeout_seconds_env_override(self, monkeypatch):
         """DH_MCP_PQ_STATE_CHANGE_TIMEOUT_SECONDS overrides PQ_STATE_CHANGE_TIMEOUT_SECONDS."""
-        monkeypatch.setenv("DH_MCP_PQ_STATE_CHANGE_TIMEOUT_SECONDS", "240.0")
+        monkeypatch.setenv("DH_MCP_PQ_STATE_CHANGE_TIMEOUT_SECONDS", "240")
         self._reload()
-        assert _constants_module.PQ_STATE_CHANGE_TIMEOUT_SECONDS == 240.0
+        assert _constants_module.PQ_STATE_CHANGE_TIMEOUT_SECONDS == 240
+        assert isinstance(_constants_module.PQ_STATE_CHANGE_TIMEOUT_SECONDS, int)
+
+    def test_pq_wait_timeout_seconds_rejects_fractional_env_var(self, monkeypatch):
+        """Fractional env-var value raises ValueError at import time.
+
+        The constant is ``int`` because it is forwarded verbatim to a
+        Java-backed ``int``-typed upstream API. Accepting a fractional
+        value would silently truncate; surface it as an error instead.
+        """
+        monkeypatch.setenv("DH_MCP_PQ_STATE_CHANGE_TIMEOUT_SECONDS", "240.5")
+        with pytest.raises(ValueError):
+            self._reload()
 
     def test_no_wait_seconds_env_override(self, monkeypatch):
         """DH_MCP_NO_WAIT_SECONDS overrides NO_WAIT_SECONDS."""
