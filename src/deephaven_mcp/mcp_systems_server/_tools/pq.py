@@ -65,8 +65,8 @@ try:
         RestartUsersEnum,
     )
 except ImportError:
-    ExportedObjectTypeEnum = None
-    RestartUsersEnum = None
+    ExportedObjectTypeEnum = None  # type: ignore[misc,assignment]
+    RestartUsersEnum = None  # type: ignore[misc,assignment]
 
 
 _LOGGER = logging.getLogger(__name__)
@@ -2142,7 +2142,7 @@ def _apply_pq_config_modifications(
     # Handle restart_users: convert string to enum numeric value
     if restart_users is not None:
         restart_users_enum = _convert_restart_users_to_enum(restart_users)
-        config_pb.restartUsers = restart_users_enum
+        config_pb.restartUsers = restart_users_enum  # type: ignore[assignment]
         has_changes = True
 
     # Apply simple field updates
