@@ -35,7 +35,7 @@ def dummy_auth_client():
     client = MagicMock()
     client.authenticate = MagicMock(return_value=DummyToken())
     client.authenticate_with_token = MagicMock(return_value=DummyToken())
-    client.create_token = MagicMock(return_value=DummyToken())
+    client.get_token = MagicMock(return_value=DummyToken())
     client.close = MagicMock()
     return client
 
@@ -46,26 +46,38 @@ def coreplus_auth_client(dummy_auth_client):
 
 
 @pytest.mark.asyncio
-async def test_create_token_success(coreplus_auth_client, dummy_auth_client):
-    dummy_auth_client.create_token.return_value = "tok3"
+async def test_get_token_success(coreplus_auth_client, dummy_auth_client):
+    dummy_auth_client.get_token.return_value = "tok3"
     with patch(
         "deephaven_mcp.client._auth_client.CorePlusToken",
         side_effect=lambda t: f"wrapped-{t}",
     ):
-        result = await coreplus_auth_client.create_token("svc", "user", 123)
+        result = await coreplus_auth_client.get_token("svc", timeout_seconds=123)
         assert result == "wrapped-tok3"
-        dummy_auth_client.create_token.assert_called_once_with("svc", "user", 123, None)
+        dummy_auth_client.get_token.assert_called_once_with("svc", 123)
 
 
 @pytest.mark.asyncio
-async def test_create_token_connection_error(coreplus_auth_client, dummy_auth_client):
-    dummy_auth_client.create_token.side_effect = ConnectionError("fail")
+async def test_get_token_default_timeout(coreplus_auth_client, dummy_auth_client):
+    dummy_auth_client.get_token.return_value = "tok-default"
+    with patch(
+        "deephaven_mcp.client._auth_client.CorePlusToken",
+        side_effect=lambda t: f"wrapped-{t}",
+    ):
+        result = await coreplus_auth_client.get_token("svc")
+        assert result == "wrapped-tok-default"
+        dummy_auth_client.get_token.assert_called_once_with("svc", None)
+
+
+@pytest.mark.asyncio
+async def test_get_token_connection_error(coreplus_auth_client, dummy_auth_client):
+    dummy_auth_client.get_token.side_effect = ConnectionError("fail")
     with pytest.raises(DeephavenConnectionError):
-        await coreplus_auth_client.create_token("svc")
+        await coreplus_auth_client.get_token("svc")
 
 
 @pytest.mark.asyncio
-async def test_create_token_other_error(coreplus_auth_client, dummy_auth_client):
-    dummy_auth_client.create_token.side_effect = Exception("fail")
+async def test_get_token_other_error(coreplus_auth_client, dummy_auth_client):
+    dummy_auth_client.get_token.side_effect = Exception("fail")
     with pytest.raises(AuthenticationError):
-        await coreplus_auth_client.create_token("svc")
+        await coreplus_auth_client.get_token("svc")

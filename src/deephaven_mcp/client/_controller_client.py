@@ -237,7 +237,7 @@ class CorePlusControllerClient(
         subscribe once. Subsequent calls will return immediately without error.
 
         Args:
-            timeout_seconds: Maximum time in seconds to wait for subscription to complete.
+            timeout_seconds (float): Maximum time in seconds to wait for subscription to complete.
                 Defaults to SUBSCRIBE_TIMEOUT_SECONDS. If the subscription does not
                 complete within this time, a DeephavenConnectionError is raised.
 
@@ -380,8 +380,9 @@ class CorePlusControllerClient(
 
         Raises:
             DeephavenConnectionError: If unable to connect to the controller service.
-            QueryError: If not subscribed or subscription state is invalid
-            InternalError: If subscribe() was not called before this method
+            QueryError: If the subscription state is invalid (for example, if the
+                subscription has been invalidated server-side).
+            InternalError: If subscribe() was not called before this method.
         """
         if not self._subscribed:
             _LOGGER.error(
@@ -1277,7 +1278,7 @@ class CorePlusControllerClient(
         )
         try:
             await asyncio.to_thread(
-                self.wrapped.start_and_wait, serial, timeout_seconds
+                self.wrapped.start_and_wait, serial, int(timeout_seconds)
             )
             _LOGGER.debug(
                 f"[CorePlusControllerClient:start_and_wait] Query {serial} started successfully"
@@ -1336,16 +1337,20 @@ class CorePlusControllerClient(
         """
         _LOGGER.debug("[CorePlusControllerClient:stop_query] Starting query stop")
         try:
-            await asyncio.to_thread(self.wrapped.stop_query, serials, timeout_seconds)
+            await asyncio.to_thread(
+                self.wrapped.stop_query,
+                serials,
+                int(timeout_seconds) if timeout_seconds is not None else None,
+            )
             _LOGGER.debug(
                 "[CorePlusControllerClient:stop_query] Query stop completed successfully"
             )
         except ConnectionError as e:
             _LOGGER.error(
-                f"[CorePlusControllerClient:stop_query] Connection error when stopping query: {e}"
+                f"[CorePlusControllerClient:stop_query] Connection error while stopping query(s): {e}"
             )
             raise DeephavenConnectionError(
-                f"Connection error when stopping query: {e}"
+                f"Unable to connect to controller service: {e}"
             ) from e
         except (ValueError, KeyError):
             # Re-raise native exceptions unchanged
@@ -1389,7 +1394,9 @@ class CorePlusControllerClient(
             f"[CorePlusControllerClient:stop_and_wait] Stopping query and waiting for serial={serial}"
         )
         try:
-            await asyncio.to_thread(self.wrapped.stop_and_wait, serial, timeout_seconds)
+            await asyncio.to_thread(
+                self.wrapped.stop_and_wait, serial, int(timeout_seconds)
+            )
             _LOGGER.debug(
                 f"[CorePlusControllerClient:stop_and_wait] Query {serial} stopped successfully"
             )
