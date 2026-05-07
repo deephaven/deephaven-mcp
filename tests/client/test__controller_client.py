@@ -1291,3 +1291,91 @@ async def test_wait_for_change_from_version_invalid_timeout(
     with pytest.raises(ValueError, match="timeout_seconds must be a positive value"):
         await coreplus_controller_client.wait_for_change_from_version(42, bad_timeout)
     dummy_controller_client.wait_for_change_from_version.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# _validate_timeout helper
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("good", [None, 0, 1, 60, 120, 9999])
+def test_validate_timeout_accepts(controller_client_mod, good):
+    # Returns None on success; the assertion is "no exception raised".
+    assert controller_client_mod._validate_timeout(good) is None
+
+
+@pytest.mark.parametrize("bad", [-1, -60, -9999])
+def test_validate_timeout_rejects_negative(controller_client_mod, bad):
+    with pytest.raises(ValueError, match="timeout_seconds must be non-negative"):
+        controller_client_mod._validate_timeout(bad)
+
+
+# ---------------------------------------------------------------------------
+# int timeout_seconds passthrough + negative-value guard
+# ---------------------------------------------------------------------------
+#
+# The wrappers' ``timeout_seconds`` parameter type matches the upstream
+# ``ControllerClient`` contract verbatim (``int`` for start_and_wait /
+# stop_and_wait, ``int | None`` for stop_query). The wrappers add nothing
+# but a one-line negative-value guard. These tests pin both behaviors so
+# any future regression that re-introduces conversion / truncation logic
+# gets caught.
+
+
+@pytest.mark.asyncio
+async def test_start_and_wait_passes_int_timeout_to_upstream(
+    coreplus_controller_client, dummy_controller_client
+):
+    await coreplus_controller_client.start_and_wait(42, 60)
+    dummy_controller_client.start_and_wait.assert_called_once_with(42, 60)
+
+
+@pytest.mark.asyncio
+async def test_start_and_wait_rejects_negative_timeout(
+    coreplus_controller_client, dummy_controller_client
+):
+    with pytest.raises(ValueError, match="timeout_seconds must be non-negative"):
+        await coreplus_controller_client.start_and_wait(42, -1)
+    dummy_controller_client.start_and_wait.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_stop_query_passes_int_timeout_to_upstream(
+    coreplus_controller_client, dummy_controller_client
+):
+    await coreplus_controller_client.stop_query([42], 30)
+    dummy_controller_client.stop_query.assert_called_once_with([42], 30)
+
+
+@pytest.mark.asyncio
+async def test_stop_query_preserves_none_timeout(
+    coreplus_controller_client, dummy_controller_client
+):
+    await coreplus_controller_client.stop_query([42], None)
+    dummy_controller_client.stop_query.assert_called_once_with([42], None)
+
+
+@pytest.mark.asyncio
+async def test_stop_query_rejects_negative_timeout(
+    coreplus_controller_client, dummy_controller_client
+):
+    with pytest.raises(ValueError, match="timeout_seconds must be non-negative"):
+        await coreplus_controller_client.stop_query([42], -1)
+    dummy_controller_client.stop_query.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_stop_and_wait_passes_int_timeout_to_upstream(
+    coreplus_controller_client, dummy_controller_client
+):
+    await coreplus_controller_client.stop_and_wait(42, 30)
+    dummy_controller_client.stop_and_wait.assert_called_once_with(42, 30)
+
+
+@pytest.mark.asyncio
+async def test_stop_and_wait_rejects_negative_timeout(
+    coreplus_controller_client, dummy_controller_client
+):
+    with pytest.raises(ValueError, match="timeout_seconds must be non-negative"):
+        await coreplus_controller_client.stop_and_wait(42, -1)
+    dummy_controller_client.stop_and_wait.assert_not_called()

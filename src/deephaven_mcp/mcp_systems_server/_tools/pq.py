@@ -54,19 +54,24 @@ if TYPE_CHECKING:
         NamedStringList,
     )
     from deephaven_enterprise.proto.persistent_query_pb2 import (
+        ExportedObjectTypeEnum,
         PersistentQueryConfigMessage,
         ProcessorConnectionDetailsMessage,
+        RestartUsersEnum,
         WorkerProtocolMessage,
     )
 
+# Runtime sentinels for the optional protobuf enums. ``ExportedObjectTypeEnum``
+# and ``RestartUsersEnum`` are also imported under TYPE_CHECKING above so that
+# annotations like ``RestartUsersEnum.ValueType`` resolve for mypy/pyright.
 try:
     from deephaven_enterprise.proto.persistent_query_pb2 import (
         ExportedObjectTypeEnum,
         RestartUsersEnum,
     )
 except ImportError:
-    ExportedObjectTypeEnum = None
-    RestartUsersEnum = None
+    ExportedObjectTypeEnum = None  # type: ignore[misc,assignment]
+    RestartUsersEnum = None  # type: ignore[misc,assignment]
 
 
 _LOGGER = logging.getLogger(__name__)
@@ -811,14 +816,20 @@ def _validate_and_parse_pq_ids(
     return (parsed_pqs, None)
 
 
-def _convert_restart_users_to_enum(restart_users_str: str) -> int:
-    """Convert restart_users string to protobuf enum numeric value.
+def _convert_restart_users_to_enum(
+    restart_users_str: str,
+) -> "RestartUsersEnum.ValueType":
+    """Convert restart_users string to protobuf enum value.
 
     Args:
         restart_users_str (str): Restart users enum name (e.g., "RU_ADMIN")
 
     Returns:
-        int: Numeric enum value for the protobuf field
+        RestartUsersEnum.ValueType: Typed protobuf enum value suitable for direct
+            assignment to ``PersistentQueryConfigMessage.restartUsers``. The return
+            type is the protobuf-generated ``NewType('ValueType', int)``, which
+            matches the field's declared stub type so no cast is required at the
+            assignment site.
 
     Raises:
         MissingEnterprisePackageError: If RestartUsersEnum is not available (enterprise package not installed)
@@ -827,9 +838,23 @@ def _convert_restart_users_to_enum(restart_users_str: str) -> int:
     if RestartUsersEnum is None:
         raise MissingEnterprisePackageError()
 
-    # Convert string name to numeric enum value using protobuf enum
+    # Convert string name to typed enum value using protobuf enum.
+    #
+    # ``EnumTypeWrapper.Value()`` is declared as untyped in the runtime
+    # ``google.protobuf`` package (no shipped ``.pyi``), so its return is
+    # ``Any``. The deephaven-coreplus-client mypy-protobuf-generated stubs
+    # *do* declare the upstream wrapper as ``_EnumTypeWrapper[ValueType]``,
+    # but resolving that type chain in mypy requires installing
+    # ``types-protobuf``, which in turn fails 100+ pre-existing wrapper
+    # accesses (the broader narrowing fix is out of scope for this change).
+    # The single ``cast`` here pins the type at the exact point upstream
+    # information is lost; the helper's return annotation then propagates
+    # the precise protobuf type to all callers, so no cast or
+    # ``# type: ignore`` is needed at the assignment site.
     try:
-        return cast(int, RestartUsersEnum.Value(restart_users_str))
+        return cast(
+            "RestartUsersEnum.ValueType", RestartUsersEnum.Value(restart_users_str)
+        )
     except ValueError:
         # Get all valid enum names from protobuf enum using .keys() method
         valid_values = list(RestartUsersEnum.keys())
@@ -2139,10 +2164,12 @@ def _apply_pq_config_modifications(
         config_pb.expirationTimeNanos = auto_delete_timeout * 1_000_000_000
         has_changes = True
 
-    # Handle restart_users: convert string to enum numeric value
+    # Handle restart_users: convert string to typed protobuf enum value.
+    # ``_convert_restart_users_to_enum`` returns ``RestartUsersEnum.ValueType``,
+    # which matches the stub-declared type of ``restartUsers`` exactly, so no
+    # cast or suppression is required.
     if restart_users is not None:
-        restart_users_enum = _convert_restart_users_to_enum(restart_users)
-        config_pb.restartUsers = restart_users_enum
+        config_pb.restartUsers = _convert_restart_users_to_enum(restart_users)
         has_changes = True
 
     # Apply simple field updates

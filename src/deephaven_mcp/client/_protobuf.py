@@ -61,7 +61,7 @@ from ._base import is_enterprise_available
 if is_enterprise_available:
     from deephaven_enterprise.client.controller import ControllerClient
 else:
-    ControllerClient = None  # pragma: no cover
+    ControllerClient = None  # type: ignore[misc,assignment]  # pragma: no cover
 
 
 PQ_STATES: dict[str, str] = {
