@@ -1,6 +1,6 @@
 ---
-trigger: glob
-globs: *.md
+name: _markdown-documentation-standards
+description: Documentation format standards for markdown files — JSON/JSON5 code block requirements, placeholder formatting, copy-paste readiness — invoke when editing or creating markdown documentation
 ---
 
 # Documentation Standards
@@ -14,18 +14,24 @@ globs: *.md
    **Correct**:
    ```json5
    {
-     "auth_type": "password",
-     "username": "admin",
-     "password": "your-password-here"  // RECOMMENDED: Use password_env_var for security
+     "sessions": {
+       "local_dev": {
+         "host": "localhost",
+         "auth_token_env_var": "DH_AUTH_TOKEN"  // RECOMMENDED: source the token from an env var
+       }
+     }
    }
    ```
 
    **Incorrect**:
    ```json5
    {
-     "auth_type": "password",
-     "username": "admin",
-     "password": "your-password-here"  // ✅ RECOMMENDED: Use password_env_var for security
+     "sessions": {
+       "local_dev": {
+         "host": "localhost",
+         "auth_token_env_var": "DH_AUTH_TOKEN"  // ✅ RECOMMENDED: source the token from an env var
+       }
+     }
    }
    ```
 

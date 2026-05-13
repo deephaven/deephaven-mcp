@@ -22,6 +22,7 @@
   ],
   "ignores": [
     "**/.windsurf/**",
+    "**/.agents/**",
     "**/venv*/**",
     "**/.venv*/**",
     "**/TEST*/**",

@@ -267,7 +267,7 @@ def redact_community_config(config: dict[str, Any]) -> dict[str, Any]:
 
 
 def _validate_auth_config(auth_config: Any) -> None:
-    """Validate the optional top-level ``auth`` section.
+    """Validate the top-level ``auth`` section.
 
     Schema:
 
@@ -290,9 +290,25 @@ def _validate_auth_config(auth_config: Any) -> None:
     validate_mutually_exclusive(context, auth_config, "psk", "psk_env_var")
 
     enabled = auth_config.get("enabled", True)
-    has_secret = "psk" in auth_config or "psk_env_var" in auth_config
+    # Two checks with different semantics:
+    #   has_usable_secret (truthy): is there a non-empty value the runtime
+    #       could actually authenticate with? Empty string fails this.
+    #       Required because resolve_secret_field() returns None for an
+    #       empty psk / psk_env_var at startup, which would otherwise
+    #       silently drop us into the auth-disabled middleware branch
+    #       despite an operator config that intends auth to be on
+    #       (especially likely when a templating tool like sed / envsubst /
+    #       helm leaves an unset placeholder as "").
+    #   has_secret_field (key-presence): did the operator set a PSK field
+    #       at all? Used only for the "enabled: false but PSK provided"
+    #       check, which exists to flag confused configs even when the
+    #       supplied value happens to be empty.
+    has_usable_secret = bool(auth_config.get("psk")) or bool(
+        auth_config.get("psk_env_var")
+    )
+    has_secret_field = "psk" in auth_config or "psk_env_var" in auth_config
 
-    if enabled and not has_secret:
+    if enabled and not has_usable_secret:
         msg = (
             f"{context} has 'enabled: true' but neither 'psk' nor "
             "'psk_env_var' was provided. When authentication is enabled, "
@@ -311,7 +327,7 @@ def _validate_auth_config(auth_config: Any) -> None:
         _LOGGER.error(f"[config:_validate_auth_config] {msg}")
         raise ConfigurationError(msg)
 
-    if not enabled and has_secret:
+    if not enabled and has_secret_field:
         msg = (
             f"{context} has 'enabled: false' but also specifies a PSK "
             "('psk' or 'psk_env_var'). When authentication is disabled "
@@ -510,8 +526,24 @@ def validate_community_config(config: Any) -> dict[str, Any]:
         "community configuration", config, _ALLOWED_TOP_LEVEL_FIELDS
     )
 
-    if "auth" in config:
-        _validate_auth_config(config["auth"])
+    if "auth" not in config:
+        msg = (
+            "Required field 'auth' missing in community configuration. "
+            "Authentication is enabled by default and must be configured "
+            "explicitly. Provide one of:\n"
+            "\n"
+            '    "auth": { "psk_env_var": "DH_MCP_COMMUNITY_PSK" }   '
+            "(env-var indirection, recommended)\n"
+            "\n"
+            '    "auth": { "psk": "<your-secret-here>" }             '
+            "(secret stored directly in config)\n"
+            "\n"
+            '    "auth": { "enabled": false }                        '
+            "(no auth — only valid on loopback binds)"
+        )
+        _LOGGER.error(f"[config:validate_community_config] {msg}")
+        raise ConfigurationError(msg)
+    _validate_auth_config(config["auth"])
     if "security" in config:
         _validate_security_config(config["security"])
     if "sessions" in config:

@@ -370,12 +370,25 @@ def test_community_config_unknown_top_level():
         validate_community_config({"extra": 1})
 
 
-def test_community_config_empty_ok():
-    assert validate_community_config({}) == {}
+def test_community_config_missing_auth_raises():
+    # The top-level 'auth' block is required. Validator must reject configs
+    # that omit it with a clear "missing field" error guiding the operator
+    # to psk_env_var / psk / enabled:false, rather than silently passing
+    # and crashing later in the startup loader at config["auth"].
+    with pytest.raises(
+        ConfigurationError, match="'auth' missing in community configuration"
+    ):
+        validate_community_config({})
+
+
+def test_community_config_minimal_anonymous_ok():
+    cfg = {"auth": {"enabled": False}}
+    assert validate_community_config(cfg) is cfg
 
 
 def test_community_config_all_sections():
     cfg = {
+        "auth": {"enabled": False},
         "security": {"credential_retrieval_mode": "none"},
         "sessions": {"a": {"host": "h"}},
         "session_creation": {"defaults": {"launch_method": "python"}},
@@ -386,12 +399,16 @@ def test_community_config_all_sections():
 
 def test_community_config_bad_idle_timeout():
     with pytest.raises(ConfigurationError, match="mcp_session_idle_timeout_seconds"):
-        validate_community_config({"mcp_session_idle_timeout_seconds": 0})
+        validate_community_config(
+            {"auth": {"enabled": False}, "mcp_session_idle_timeout_seconds": 0}
+        )
 
 
 def test_community_config_idle_timeout_wrong_type():
     with pytest.raises(ConfigurationError, match="mcp_session_idle_timeout_seconds"):
-        validate_community_config({"mcp_session_idle_timeout_seconds": "x"})
+        validate_community_config(
+            {"auth": {"enabled": False}, "mcp_session_idle_timeout_seconds": "x"}
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -399,19 +416,23 @@ def test_community_config_idle_timeout_wrong_type():
 # ---------------------------------------------------------------------------
 
 
+_MINIMAL_CFG_JSON = '{"auth": {"enabled": false}, "sessions": {}}'
+_MINIMAL_CFG_DICT = {"auth": {"enabled": False}, "sessions": {}}
+
+
 @pytest.mark.asyncio
 async def test_manager_loads_from_explicit_path(tmp_path):
     cfg_file = tmp_path / "config.json"
-    cfg_file.write_text('{"sessions": {}}')
+    cfg_file.write_text(_MINIMAL_CFG_JSON)
     mgr = CommunityServerConfigManager(config_path=str(cfg_file))
     result = await mgr.get_config()
-    assert result == {"sessions": {}}
+    assert result == _MINIMAL_CFG_DICT
 
 
 @pytest.mark.asyncio
 async def test_manager_caches(tmp_path):
     cfg_file = tmp_path / "config.json"
-    cfg_file.write_text('{"sessions": {}}')
+    cfg_file.write_text(_MINIMAL_CFG_JSON)
     mgr = CommunityServerConfigManager(config_path=str(cfg_file))
     r1 = await mgr.get_config()
     r2 = await mgr.get_config()
@@ -421,18 +442,18 @@ async def test_manager_caches(tmp_path):
 @pytest.mark.asyncio
 async def test_manager_uses_env_var(tmp_path, monkeypatch):
     cfg_file = tmp_path / "config.json"
-    cfg_file.write_text('{"sessions": {}}')
+    cfg_file.write_text(_MINIMAL_CFG_JSON)
     monkeypatch.setenv(CONFIG_ENV_VAR, str(cfg_file))
     mgr = CommunityServerConfigManager()
     result = await mgr.get_config()
-    assert result == {"sessions": {}}
+    assert result == _MINIMAL_CFG_DICT
 
 
 @pytest.mark.asyncio
 async def test_manager_set_cache_validates():
     mgr = CommunityServerConfigManager(config_path="/nonexistent")
-    await mgr._set_config_cache({"sessions": {}})
-    assert await mgr.get_config() == {"sessions": {}}
+    await mgr._set_config_cache(dict(_MINIMAL_CFG_DICT))
+    assert await mgr.get_config() == _MINIMAL_CFG_DICT
 
 
 @pytest.mark.asyncio
@@ -445,7 +466,7 @@ async def test_manager_set_cache_invalid_raises():
 @pytest.mark.asyncio
 async def test_manager_clear_cache(tmp_path):
     cfg_file = tmp_path / "config.json"
-    cfg_file.write_text('{"sessions": {}}')
+    cfg_file.write_text(_MINIMAL_CFG_JSON)
     mgr = CommunityServerConfigManager(config_path=str(cfg_file))
     await mgr.get_config()
     await mgr.clear_config_cache()
@@ -469,7 +490,7 @@ async def test_manager_log_summary_fallback_on_json_error(tmp_path, caplog):
     import json5
 
     cfg_file = tmp_path / "config.json"
-    cfg_file.write_text('{"sessions": {}}')
+    cfg_file.write_text(_MINIMAL_CFG_JSON)
     mgr = CommunityServerConfigManager(config_path=str(cfg_file))
 
     original_dumps = json5.dumps
@@ -526,6 +547,44 @@ def test_auth_enabled_wrong_type_rejected():
     with pytest.raises(ConfigurationError, match="psk"):
         # psk must be str, not int; covers the type-check branch.
         _validate_auth_config({"psk": 1234})
+
+
+def test_auth_empty_psk_rejected():
+    # Regression: empty-string psk used to pass _validate_auth_config because
+    # has_secret was a key-presence check ("psk" in auth_config). At startup,
+    # resolve_secret_field returns None for empty strings (the truthy-string
+    # check at _validators.py:resolve_secret_field), so the server would
+    # silently fall into the auth-disabled middleware branch with only a
+    # WARNING banner, despite the operator config explicitly enabling auth.
+    # has_secret is now a truthy check, so this is rejected at validation.
+    with pytest.raises(ConfigurationError, match="enabled: true"):
+        _validate_auth_config({"psk": ""})
+
+
+def test_auth_empty_psk_env_var_rejected():
+    # Same defect class as test_auth_empty_psk_rejected, but for the env-var
+    # indirection field. Templating tools (sed, envsubst, helm) commonly drop
+    # unset placeholders to "", which previously slipped past the validator.
+    with pytest.raises(ConfigurationError, match="enabled: true"):
+        _validate_auth_config({"psk_env_var": ""})
+
+
+def test_auth_empty_psk_with_enabled_false_rejected():
+    # The "enabled: false but PSK provided" rule uses key-presence (not
+    # truthiness), so even an empty string trips it. This is intentional:
+    # a config with both `enabled: false` and a `psk` field — empty or
+    # otherwise — is confused and should be flagged so the operator picks
+    # one consistent intent. (The earlier truthy-only fix accidentally
+    # weakened this; the validator now keeps two separate variables for
+    # the two distinct checks.)
+    with pytest.raises(ConfigurationError, match="enabled: false"):
+        _validate_auth_config({"enabled": False, "psk": ""})
+
+
+def test_auth_enabled_false_clean_ok():
+    # Negative control: `enabled: false` with no PSK fields at all is
+    # accepted (loopback-only deployments).
+    _validate_auth_config({"enabled": False})
 
 
 # Note: tests for community PSK resolution moved out of this file.
