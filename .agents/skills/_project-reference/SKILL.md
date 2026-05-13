@@ -22,14 +22,16 @@ Entry points: `dh-mcp-community-server` (port 8003), `dh-mcp-enterprise-server` 
 **Community Server** — manages one or more DHC / Deephaven Community Core workers:
 ```bash
 DH_MCP_CONFIG_FILE=/path/to/config.json dh-mcp-community-server
-dh-mcp-community-server --config /path/to/config.json --host 0.0.0.0 --port 8003
+# Non-loopback binds require --allow-cleartext, --ssl-keyfile/--ssl-certfile, or --trust-forwarded-proto
+dh-mcp-community-server --config /path/to/config.json --host 0.0.0.0 --port 8003 --allow-cleartext
 # Host/port also via MCP_HOST / MCP_PORT env vars
 ```
 
 **Enterprise Server** — manages a single DHE / Deephaven Enterprise system:
 ```bash
 DH_MCP_CONFIG_FILE=/path/to/enterprise.json dh-mcp-enterprise-server
-dh-mcp-enterprise-server --config /path/to/enterprise.json --host 0.0.0.0 --port 8002
+# Non-loopback binds require --allow-cleartext, --ssl-keyfile/--ssl-certfile, or --trust-forwarded-proto
+dh-mcp-enterprise-server --config /path/to/enterprise.json --host 0.0.0.0 --port 8002 --allow-cleartext
 ```
 
 **Docs Server** — documentation Q&A:
@@ -41,9 +43,12 @@ INKEEP_API_KEY=your-key MCP_DOCS_HOST=0.0.0.0 MCP_DOCS_PORT=8001 dh-mcp-docs-ser
 
 ## Configuration
 
-**Community Server** config schema:
+**Community Server** config schema (`auth` block required at server startup; `sessions` optional):
 ```json
 {
+  "auth": {
+    "psk_env_var": "DH_MCP_COMMUNITY_PSK"
+  },
   "sessions": {
     "session-name": {
       "host": "localhost",
@@ -55,14 +60,14 @@ INKEEP_API_KEY=your-key MCP_DOCS_HOST=0.0.0.0 MCP_DOCS_PORT=8001 dh-mcp-docs-ser
 }
 ```
 
-**Enterprise Server** config schema (all fields at top level, no nesting):
+**Enterprise Server** config schema (`system_name`, `connection_json_url`, and `auth` are required):
 ```json
 {
   "system_name": "prod",
   "connection_json_url": "https://dhe.example.com/iris/connection.json",
-  "auth_type": "password",
-  "username": "user",
-  "password_env_var": "DHE_PASSWORD"
+  "auth": {
+    "backends": ["password"]
+  }
 }
 ```
 
