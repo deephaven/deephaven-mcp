@@ -1,6 +1,6 @@
 ---
 name: run-precommit
-description: Run the precommit script to auto-format, lint, and type-check before committing
+description: Run precommit.sh — applies isort, black, ruff, mypy, and markdownlint in sequence; modifies files in place; run before committing
 ---
 
 ```bash

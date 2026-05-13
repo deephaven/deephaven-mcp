@@ -1,11 +1,13 @@
 ---
 name: pydocs-improve
-description: Improve docstrings in a file for correctness, completeness, and clarity without changing source code
+description: Comprehensively improve Python docstrings — correct inaccuracies, add missing sections, improve clarity; also enforces required MCP tool sections (Terminology Note, Format Accuracy for AI Agents)
 ---
 
 Review the docstrings in the specified file for correctness, completeness, and clarity. Also review the module-level docstring at the top of the file. Only change docstrings — do not change source code.
 
 Only make a change if there is a significant improvement. Unnecessary changes make code review harder.
+
+**Correctness**: Apply the `pydocs-accuracy` criteria — description, Args, Returns, Raises must all match the actual code; no stale documented behavior.
 
 **Type information**: Function signatures must have type annotations, and docstrings must also document types in Google style:
 - Args: `param (type): description`
@@ -23,3 +25,20 @@ Only make a change if there is a significant improvement. Unnecessary changes ma
 If a docstring describes the world *outside* the function (callers, design history, future plans), it's wrong.
 
 **MCP tools** (functions registered via `server.tool()(fn)` inside `register_tools`) are consumed by AI agents. Their docstrings must be very detailed and specific — the AI agent has no other way to know how to use the tool or interpret its results.
+
+All MCP tools in `src/deephaven_mcp/mcp_systems_server/` must include a **"Terminology Note"** section with this exact wording:
+- 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
+- 'Deephaven Community' and 'Deephaven Core' are interchangeable names for the same product
+- 'Deephaven Enterprise', 'Deephaven Core+', and 'Deephaven CorePlus' are interchangeable names for the same product
+- In Deephaven, "schema" and "meta table" refer to the same concept - the table's column definitions including names, types, and properties.
+- In Deephaven, "catalog" and "database" are interchangeable terms - the catalog is the database of available tables.
+- 'DHC' is shorthand for Deephaven Community (also called 'Core')
+- 'DHE' is shorthand for Deephaven Enterprise (also called 'Core+')
+
+All MCP tools in `src/deephaven_mcp/mcp_systems_server/` that return tabular data with a `format` parameter must include a **"Format Accuracy for AI Agents" (based on empirical research)** section immediately after the main tool description and before the "Terminology Note" section, with this exact wording:
+- markdown-kv: 61% accuracy (highest comprehension, more tokens)
+- markdown-table: 55% accuracy (good balance)
+- json-row/json-column: 50% accuracy
+- yaml: 50% accuracy
+- xml: 45% accuracy
+- csv: 44% accuracy (lowest comprehension, fewest tokens)

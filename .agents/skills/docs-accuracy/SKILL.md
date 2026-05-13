@@ -1,6 +1,6 @@
 ---
 name: docs-accuracy
-description: Verify that a document is accurate by checking all details against the source code
+description: Verify a markdown documentation file is factually accurate — checks commands, file paths, config keys, API names, code examples, and URLs against source code; fixes inaccuracies in place
 ---
 
 For the specified document, verify every factual claim against the source code. Check:

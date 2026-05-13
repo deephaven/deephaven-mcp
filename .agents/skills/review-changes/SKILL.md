@@ -1,18 +1,35 @@
 ---
 name: review-changes
-description: Perform a deep review of a set of code changes — design, simplification, DRY, security, pydocs, imports, logging
+description: Perform a deep review of a set of code changes — all file types covered: Python files reviewed in full, documentation files checked for accuracy
 ---
 
-Perform a deep review of the code changes in the current diff. If a branch is specified, review the local code relative to that branch. If no branch is specified, review the uncommitted changes relative to the current branch.
+Review the changeset described in the prompt. Common forms:
 
-1. **Design**: Is the design sound and consistent with the project? Apply the `python-coding-practices` and `mcp-module-organization` skills as relevant.
-2. **Correctness**: Does the code do what it claims? Look for logic errors, incorrect assumptions, and edge cases.
-3. **Simplification and DRY**: Can the code be simplified? Is logic duplicated that could be shared? Flag unnecessary abstraction or over-engineering.
-4. **Code smells**: Long functions, deep nesting, magic numbers, overly complex conditions.
-5. **Security**: Check for credential mishandling, session isolation issues, injection risks, and information disclosure. Ensure no default or fallback session IDs are used.
-6. **Type safety**: Flag any `Any` type hints, `hasattr`, or `getattr` usage without justification (per `python-coding-practices`).
-7. **Docstrings**: Apply the `pydocs-improve` skill to all changed functions and classes.
-8. **Imports**: Remove unused imports. The `run-precommit` skill (ruff) will catch any that remain.
-9. **Logging**: Apply the `logging-standards` skill to review logging coverage and consistency.
-10. **Test coverage**: Are the changes adequately covered by tests?
-11. Do not remove TODOs without a very good reason.
+| Prompt | Git command to get changed files |
+|---|---|
+| "uncommitted changes" (default) | `git diff HEAD --name-only` |
+| "changes on this branch" / "vs main" | `git diff main...HEAD --name-only` |
+| "staged changes" | `git diff --cached --name-only` |
+| "the last commit" | `git diff HEAD~1 HEAD --name-only` |
+| "changes vs &lt;branch&gt;" | `git diff <branch>...HEAD --name-only` |
+
+If no changeset is specified, default to uncommitted changes.
+
+## Steps
+
+1. **Identify changed files**: Run the appropriate git command above to get the full list of changed files.
+
+2. **Review each file** based on its type:
+
+   | File type | Skill to apply |
+   |---|---|
+   | `.py` | `review-python-file` |
+   | `.md`, `.rst` | `docs-accuracy` |
+   | Other (config, scripts, etc.) | Review for correctness and appropriateness |
+
+3. **Cross-cutting review** — assess the changeset as a whole:
+   - **Design consistency**: Is the design coherent across all changed files?
+   - **DRY across files**: Is logic duplicated across the changeset that should be shared?
+   - **Overall test coverage**: Does the changeset as a whole have adequate test coverage?
+
+Do not remove TODOs without a very good reason.

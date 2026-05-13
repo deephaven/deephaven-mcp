@@ -3,7 +3,6 @@ name: check-deps-fresh
 description: Run the dependency freshness check (fresh resolve + mypy + pytest) and diagnose any failures
 ---
 
-// turbo
 1. Run `bash bin/check-deps-fresh.sh` and report the output.
 2. If the script exits successfully, summarize which versions of `pydeephaven`, `deephaven-server`, and `deephaven-coreplus-client` were resolved (extract from the `uv pip list` section). Stop.
 3. If mypy fails, list each error with file/line and a one-sentence root-cause hypothesis. Do NOT edit code yet — wait for the user to confirm before making fixes.

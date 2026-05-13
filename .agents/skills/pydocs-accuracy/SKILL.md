@@ -1,9 +1,9 @@
 ---
 name: pydocs-accuracy
-description: Verify that pydocs and loggers are factually accurate and reflect the actual code
+description: Verify Python docstrings are factually accurate — descriptions, Args, Returns, and Raises all match the actual code; surgical fixes only, no restructuring or additions
 ---
 
-For the specified file or function, verify that all docstrings and log messages are factually accurate. Fix any inaccuracies directly.
+For the specified file or function, verify that all docstrings are factually accurate. Fix any inaccuracies directly.
 
 **Docstrings** — check:
 - Description matches what the function actually does
@@ -11,7 +11,5 @@ For the specified file or function, verify that all docstrings and log messages 
 - `Returns` section matches what the function actually returns
 - `Raises` section lists only exceptions the function actually raises
 - No documented behavior that the code no longer implements
-
-**Log messages** — apply the `logging-standards` skill to verify accuracy and level appropriateness.
 
 **Do not remove TODOs.** Fix inaccuracies; do not rewrite or restructure docstrings beyond what accuracy requires.

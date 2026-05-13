@@ -1,12 +1,12 @@
 ---
 name: docs-improve
-description: Create and execute a plan to improve a documentation file for completeness, accuracy, and organization
+description: Comprehensively improve a markdown documentation file — fill missing content, fix inaccuracies, improve organization, fix broken links, and apply formatting standards
 ---
 
 Create a plan for improving this markdown file, then execute it.
 
 1. Look for content that is missing from this file that needs to be added. Use the source code as a reference. If there is a conflict, the source code should be believed over the readme files.
-2. Look for content that is factually incorrect and needs to be fixed. Use the source code as a reference. If there is a conflict, the source code should be believed over the readme files.
+2. Apply the `docs-accuracy` skill.
 3. Improve the outline and organization for this document.
 4. Reorganize the sections to match the new outline.
 5. Make sure that all referenced files and paths have hyperlinks.
