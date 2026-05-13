@@ -75,4 +75,4 @@ jobs:
         run: uv tool install --python-preference managed mcp-proxy
 
       - name: Verify mcp-proxy is on PATH
-        run: mcp-proxy --help
+        run: command -v mcp-proxy
