@@ -137,4 +137,4 @@ INKEEP_API_KEY=your-key python scripts/mcp_docs_test_client.py \
 
 - **Port conflicts**: Community defaults to 8003, enterprise to 8002, docs to 8001. Override with `--port` or `MCP_PORT` (`MCP_DOCS_PORT` for docs).
 - **Java required**: Deephaven test server requires Java 11+ in PATH.
-- **Reinstalling dependencies**: `uv pip install ".[dev]"` (~3 seconds); enterprise wheel: `./bin/dev_manage_coreplus_client.sh --venv .venv install-wheel --wheel-file ops/artifacts/deephaven_coreplus_client-*-py3-none-any.whl`
+- **Reinstalling dependencies**: `uv pip install ".[dev]"` (~3 seconds). For enterprise (Core+) support, install the `enterprise` extra — `uv pip install ".[enterprise]"` or `pip install "deephaven-mcp[enterprise]"` — which pulls `deephaven-coreplus-client` from PyPI (see `pyproject.toml`'s `[project.optional-dependencies]` `enterprise` and `dev` entries).
