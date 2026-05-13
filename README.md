@@ -755,10 +755,10 @@ The community server (`dh-mcp-community-server`) uses a flat JSON or JSON5 confi
 
 ```json5
 {
-  // MCP-gate auth disabled — only safe on loopback binds.
+  // MCP-gate auth disabled - only safe on loopback binds.
   "auth": { "enabled": false },
   "sessions": {
-    // No worker authentication required — local development only.
+    // No worker authentication required - local development only.
     // When auth_type is omitted, defaults to "Anonymous".
     "my_local_server": {
       "host": "localhost",  // Deephaven server address

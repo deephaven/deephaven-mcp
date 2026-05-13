@@ -261,7 +261,7 @@ Mutually exclusive with the inline `auth_token` field.
 > validation at startup.
 
 ```json5
-// Current enterprise config — no secrets, just the allowed auth backends.
+// Current enterprise config - no secrets, just the allowed auth backends.
 {
   "system_name": "prod",
   "connection_json_url": "https://your-server.example.com/iris/connection.json",
