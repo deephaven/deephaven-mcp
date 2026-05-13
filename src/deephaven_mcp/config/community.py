@@ -267,7 +267,7 @@ def redact_community_config(config: dict[str, Any]) -> dict[str, Any]:
 
 
 def _validate_auth_config(auth_config: Any) -> None:
-    """Validate the optional top-level ``auth`` section.
+    """Validate the top-level ``auth`` section.
 
     Schema:
 
@@ -510,8 +510,24 @@ def validate_community_config(config: Any) -> dict[str, Any]:
         "community configuration", config, _ALLOWED_TOP_LEVEL_FIELDS
     )
 
-    if "auth" in config:
-        _validate_auth_config(config["auth"])
+    if "auth" not in config:
+        msg = (
+            "Required field 'auth' missing in community configuration. "
+            "Authentication is enabled by default and must be configured "
+            "explicitly. Provide one of:\n"
+            "\n"
+            '    "auth": { "psk_env_var": "DH_MCP_COMMUNITY_PSK" }   '
+            "(env-var indirection, recommended)\n"
+            "\n"
+            '    "auth": { "psk": "<your-secret-here>" }             '
+            "(secret stored directly in config)\n"
+            "\n"
+            '    "auth": { "enabled": false }                        '
+            "(no auth — only valid on loopback binds)"
+        )
+        _LOGGER.error(f"[config:validate_community_config] {msg}")
+        raise ConfigurationError(msg)
+    _validate_auth_config(config["auth"])
     if "security" in config:
         _validate_security_config(config["security"])
     if "sessions" in config:

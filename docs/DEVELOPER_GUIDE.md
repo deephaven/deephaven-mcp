@@ -627,15 +627,15 @@ For the complete list of environment variables (including timeout-tuning vars an
 
 ###### File Structure Overview
 
-The `deephaven_mcp.json` file (community config) is a flat JSON object — all keys live at the top level. The recognized optional top-level keys are:
+The `deephaven_mcp.json` file (community config) is a flat JSON object — all keys live at the top level. Recognized top-level keys:
 
-- `"auth"`: PSK gate that controls who may connect to the community MCP server itself. See `auth.psk_env_var` in [`docs/ENV.md`](ENV.md#community-mcp-server-gate-authpsk_env_var).
-- `"security"`: Security-related settings (e.g., `credential_retrieval_mode`). See [Security Configuration](#security-configuration).
-- `"sessions"`: Map of user-defined session names to per-session connection configs for Deephaven Community Core workers. Details below.
-- `"session_creation"`: Configuration for dynamic session creation via `session_community_create`. See [Community Session Creation Configuration](#community-session-creation-configuration).
-- `"mcp_session_idle_timeout_seconds"`: Per-MCP-client idle timeout (seconds, positive number; default `3600.0`).
+- `"auth"` (**required**): PSK gate that controls who may connect to the community MCP server itself. The validator refuses to start the server unless this block is present and configured: provide `auth.psk` or `auth.psk_env_var` to enable PSK, or `auth.enabled: false` to disable auth entirely (loopback binds only). See `auth.psk_env_var` in [`docs/ENV.md`](ENV.md#community-mcp-server-gate-authpsk_env_var).
+- `"security"` (optional): Security-related settings (e.g., `credential_retrieval_mode`). See [Security Configuration](#security-configuration).
+- `"sessions"` (optional): Map of user-defined session names to per-session connection configs for Deephaven Community Core workers. Details below.
+- `"session_creation"` (optional): Configuration for dynamic session creation via `session_community_create`. See [Community Session Creation Configuration](#community-session-creation-configuration).
+- `"mcp_session_idle_timeout_seconds"` (optional): Per-MCP-client idle timeout (seconds, positive number; default `3600.0`).
 
-Unknown top-level keys are rejected. If every key is absent (or the file is `{}`), no sessions are configured and all security settings use their secure defaults — a valid state.
+Unknown top-level keys are rejected. The smallest valid config is `{"auth": {"enabled": false}}` (loopback-only).
 
 > **Note**: Enterprise (Core+) systems are configured separately via the DHE server (`dh-mcp-enterprise-server`), which uses its own flat config format with `system_name` at the top level. See [Enterprise Server Configuration](#enterprise-server-configuration).
 
@@ -667,6 +667,7 @@ All fields within a session's configuration object are optional. If a field is o
 
 ```json
 {
+  "auth": { "psk_env_var": "DH_MCP_COMMUNITY_PSK" },
   "sessions": {
     "my_local_deephaven": {
       "host": "localhost",
@@ -700,6 +701,8 @@ All fields within a session's configuration object are optional. If a field is o
 
 ```json5
 {
+  // MCP-gate PSK sourced from env var. Set DH_MCP_COMMUNITY_PSK in your shell.
+  "auth": { "psk_env_var": "DH_MCP_COMMUNITY_PSK" },
   // Community Core session configurations
   "sessions": {
     // Local development environment - no authentication

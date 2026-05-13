@@ -66,9 +66,20 @@ INKEEP_API_KEY=your-key MCP_DOCS_HOST=0.0.0.0 MCP_DOCS_PORT=8001 dh-mcp-docs-ser
 
 ## Configuration
 
-**Community Server** config schema:
+**Community Server** config schema. The top-level `auth` block (**required**)
+configures the PSK gate that controls who may connect to the community MCP
+server itself, distinct from per-session `auth_type` / `auth_token` used to
+connect *out* to a Deephaven worker. The validator rejects configs that omit
+the `auth` block. Provide one of three forms:
+
+- `{"psk_env_var": "<NAME>"}` — env-var indirection (recommended for production).
+- `{"psk": "<secret>"}` — secret stored directly in the config file.
+- `{"enabled": false}` — disable auth entirely; only valid when the server
+  binds to loopback (the middleware refuses non-loopback binds in this case).
+
 ```json
 {
+  "auth": { "psk_env_var": "DH_MCP_COMMUNITY_PSK" },
   "sessions": {
     "session-name": {
       "host": "localhost",
@@ -79,6 +90,9 @@ INKEEP_API_KEY=your-key MCP_DOCS_HOST=0.0.0.0 MCP_DOCS_PORT=8001 dh-mcp-docs-ser
   }
 }
 ```
+
+For production, replace `auth` with `{"psk_env_var": "DH_MCP_COMMUNITY_PSK"}`
+(or inline `{"psk": "<secret>"}`); see `docs/ENV.md` for the full options.
 
 **Enterprise Server** config schema (all fields at top level, no nesting). The
 config file declares only *which* auth backends the server mounts; user

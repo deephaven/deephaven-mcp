@@ -726,7 +726,7 @@ dh-mcp-enterprise-server --config /path/to/dhe_staging.json --port 8004 >dh-mcp-
 
 ### Configuring DHC (Community) Server
 
-The community server (`dh-mcp-community-server`) uses a flat JSON or JSON5 config file. Valid top-level keys are `"auth"`, `"sessions"`, `"session_creation"`, `"security"`, and `"mcp_session_idle_timeout_seconds"` (all optional). The `"auth"` block configures the PSK gate that controls who may connect to the community MCP server itself; see [`docs/ENV.md`](docs/ENV.md#community-mcp-server-gate-authpsk_env_var) for `auth.psk_env_var` and related fields.
+The community server (`dh-mcp-community-server`) uses a flat JSON or JSON5 config file. Valid top-level keys are `"auth"` (**required**), `"sessions"`, `"session_creation"`, `"security"`, and `"mcp_session_idle_timeout_seconds"` (all others optional). The `"auth"` block configures the PSK gate that controls who may connect to the community MCP server itself; the validator refuses to start the server unless it is present and contains a PSK (`auth.psk` or `auth.psk_env_var`) or `auth.enabled: false` (loopback binds only). See [`docs/ENV.md`](docs/ENV.md#community-mcp-server-gate-authpsk_env_var) for `auth.psk_env_var` and related fields.
 
 **Config file location**: Pass via `--config` CLI flag or `DH_MCP_CONFIG_FILE` environment variable.
 
@@ -734,19 +734,29 @@ The community server (`dh-mcp-community-server`) uses a flat JSON or JSON5 confi
 
 #### Community Examples
 
-**Minimal configuration (no connections):**
+> **Note**: Every community config below includes a top-level `auth` block.
+> The community server's MCP-gate auth is on by default and the validator
+> refuses to start without either a PSK (`auth.psk` / `auth.psk_env_var`)
+> or an explicit `auth.enabled: false` (loopback binds only).
 
-```json
-{}
-```
-
-**Anonymous authentication (simplest):**
+**Minimal configuration (no static sessions, local-dev gate disabled):**
 
 ```json5
 {
+  // Loopback-only: server refuses non-loopback binds when auth is disabled.
+  "auth": { "enabled": false }
+}
+```
+
+**Anonymous worker auth (local development):**
+
+```json5
+{
+  // MCP-gate auth disabled — only safe on loopback binds.
+  "auth": { "enabled": false },
   "sessions": {
-    // No authentication required - use only for local development!
-    // When auth_type is omitted, defaults to "Anonymous"
+    // No worker authentication required — local development only.
+    // When auth_type is omitted, defaults to "Anonymous".
     "my_local_server": {
       "host": "localhost",  // Deephaven server address
       "port": 10000          // Default Deephaven port (gRPC)
@@ -759,13 +769,16 @@ The community server (`dh-mcp-community-server`) uses a flat JSON or JSON5 confi
 
 ```json5
 {
+  // MCP-gate PSK sourced from env var. Set DH_MCP_COMMUNITY_PSK in your shell.
+  "auth": { "psk_env_var": "DH_MCP_COMMUNITY_PSK" },
   "sessions": {
     "psk_server": {
       "host": "localhost",
       "port": 10000,
-      // Pre-Shared Key authentication (most common for production)
+      // Pre-Shared Key authentication for the worker
       // Can use "PSK" shorthand or full class name shown here
       "auth_type": "io.deephaven.authentication.psk.PskAuthenticationHandler",
+      // For production, prefer auth_token_env_var to keep the secret out of the file.
       "auth_token": "your-shared-secret-key"  // Token configured on server
     }
   }
@@ -776,6 +789,7 @@ The community server (`dh-mcp-community-server`) uses a flat JSON or JSON5 confi
 
 ```json5
 {
+  "auth": { "psk_env_var": "DH_MCP_COMMUNITY_PSK" },
   "sessions": {
     "prod_session": {
       "host": "deephaven-prod.example.com",  // Remote server
@@ -793,6 +807,7 @@ The community server (`dh-mcp-community-server`) uses a flat JSON or JSON5 confi
 
 ```json5
 {
+  "auth": { "psk_env_var": "DH_MCP_COMMUNITY_PSK" },
   "sessions": {
     "secure_tls_session": {
       "host": "secure.deephaven.example.com",
