@@ -549,6 +549,44 @@ def test_auth_enabled_wrong_type_rejected():
         _validate_auth_config({"psk": 1234})
 
 
+def test_auth_empty_psk_rejected():
+    # Regression: empty-string psk used to pass _validate_auth_config because
+    # has_secret was a key-presence check ("psk" in auth_config). At startup,
+    # resolve_secret_field returns None for empty strings (the truthy-string
+    # check at _validators.py:resolve_secret_field), so the server would
+    # silently fall into the auth-disabled middleware branch with only a
+    # WARNING banner, despite the operator config explicitly enabling auth.
+    # has_secret is now a truthy check, so this is rejected at validation.
+    with pytest.raises(ConfigurationError, match="enabled: true"):
+        _validate_auth_config({"psk": ""})
+
+
+def test_auth_empty_psk_env_var_rejected():
+    # Same defect class as test_auth_empty_psk_rejected, but for the env-var
+    # indirection field. Templating tools (sed, envsubst, helm) commonly drop
+    # unset placeholders to "", which previously slipped past the validator.
+    with pytest.raises(ConfigurationError, match="enabled: true"):
+        _validate_auth_config({"psk_env_var": ""})
+
+
+def test_auth_empty_psk_with_enabled_false_rejected():
+    # The "enabled: false but PSK provided" rule uses key-presence (not
+    # truthiness), so even an empty string trips it. This is intentional:
+    # a config with both `enabled: false` and a `psk` field — empty or
+    # otherwise — is confused and should be flagged so the operator picks
+    # one consistent intent. (The earlier truthy-only fix accidentally
+    # weakened this; the validator now keeps two separate variables for
+    # the two distinct checks.)
+    with pytest.raises(ConfigurationError, match="enabled: false"):
+        _validate_auth_config({"enabled": False, "psk": ""})
+
+
+def test_auth_enabled_false_clean_ok():
+    # Negative control: `enabled: false` with no PSK fields at all is
+    # accepted (loopback-only deployments).
+    _validate_auth_config({"enabled": False})
+
+
 # Note: tests for community PSK resolution moved out of this file.
 # - The underlying env-var resolution mechanics are tested in
 #   tests/config/test__validators.py against resolve_secret_field /
