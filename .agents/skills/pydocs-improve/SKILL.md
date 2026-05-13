@@ -35,7 +35,7 @@ All MCP tools in `src/deephaven_mcp/mcp_systems_server/` must include a **"Termi
 - 'DHC' is shorthand for Deephaven Community (also called 'Core')
 - 'DHE' is shorthand for Deephaven Enterprise (also called 'Core+')
 
-All MCP tools in `src/deephaven_mcp/mcp_systems_server/` that return tabular data with a `format` parameter must include a **"Format Accuracy for AI Agents" (based on empirical research)** section immediately after the main tool description and before the "Terminology Note" section, with this exact wording:
+All MCP tools in `src/deephaven_mcp/mcp_systems_server/` that return tabular data with a `format` parameter must include a **Format Accuracy for AI Agents** (based on empirical research): section immediately after the main tool description and before the "Terminology Note" section, with this exact wording:
 - markdown-kv: 61% accuracy (highest comprehension, more tokens)
 - markdown-table: 55% accuracy (good balance)
 - json-row/json-column: 50% accuracy
