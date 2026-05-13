@@ -785,6 +785,7 @@ Controls which community session credentials can be retrieved via the MCP tool. 
 
 ```json5
 {
+  "auth": { "psk_env_var": "DH_MCP_COMMUNITY_PSK" },
   "security": {
     "credential_retrieval_mode": "dynamic_only"
   },
@@ -910,6 +911,7 @@ This is similar to how Jupyter displays tokens when starting a notebook server.
 
 ```json
 {
+  "auth": { "psk_env_var": "DH_MCP_COMMUNITY_PSK" },
   "security": {
     "credential_retrieval_mode": "dynamic_only"
   },

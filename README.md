@@ -127,6 +127,9 @@ For the Community server, create a file (e.g., `dhc.json`) anywhere on your syst
 
 ```json5
 {
+  // MCP-gate PSK that controls who may connect to the MCP server itself.
+  // Sourced from an env var; set DH_MCP_COMMUNITY_PSK in your shell.
+  "auth": { "psk_env_var": "DH_MCP_COMMUNITY_PSK" },
   // Community Core session configurations
   "sessions": {
     // "local" is a custom name - use any name you want for your sessions
