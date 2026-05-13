@@ -8,7 +8,7 @@ description: Reference guide for this project — architecture, server commands 
 ## Architecture and Key Files
 
 - `src/deephaven_mcp/mcp_systems_server/server.py` — Community and Enterprise MCP server entry points (`community()` and `enterprise()`)
-- `src/deephaven_mcp/mcp_systems_server/_tools/` — Shared MCP tools (session, table, script, catalog, pq, etc.)
+- `src/deephaven_mcp/mcp_systems_server/_tools/` — MCP tool modules. Shared on both servers: `session`, `table`, `script`. Community-exclusive: `session_community`. Enterprise-exclusive: `session_enterprise`, `catalog`, `pq`. Per-server `reload` variant. Registration is wired in `server.py` (`_SHARED_TOOLS`, `_register_community_tools`, `_register_enterprise_tools`).
 - `src/deephaven_mcp/mcp_docs_server/` — Docs MCP server for documentation Q&A
 - `src/deephaven_mcp/config/` — Config loading/validation (`community.py`, `enterprise.py`, `__init__.py`)
 - `scripts/` — Test clients and utilities
