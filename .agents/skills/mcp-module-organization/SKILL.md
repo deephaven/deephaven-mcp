@@ -1,5 +1,6 @@
 ---
-trigger: always_on
+name: mcp-module-organization
+description: Module organization and design patterns for MCP tool development in this project — invoke when creating or modifying MCP tool modules
 ---
 
 # MCP Tools Module Organization Guidelines
@@ -28,8 +29,8 @@ trigger: always_on
    - This function calls `server.tool()(tool_fn)` for each tool in the module
    - After creating a new module, explicitly add it to `server.py`:
      - If the tool is shared between community and enterprise servers, add it to the `_SHARED_TOOLS` tuple
-     - If the tool is enterprise-only, call `module.register_tools(server)` in the `enterprise()` function
-     - If the tool is community-only, call `module.register_tools(server)` in the `community()` function
+     - If the tool is enterprise-only, call `module.register_tools(server)` in the `_register_enterprise_tools()` function
+     - If the tool is community-only, call `module.register_tools(server)` in the `_register_community_tools()` function
 
 ## Required Pattern for MCP Tool Modules
 
@@ -51,11 +52,19 @@ Common shared utilities (import only what you need):
 
 ```python
 from deephaven_mcp.mcp_systems_server._tools.shared import (
-    _get_session_from_context,        # Get session from MCP context
-    _get_enterprise_session,          # Get + validate Enterprise session
-    _check_response_size,             # Validate response size limits
-    _format_meta_table_result,        # Format metadata tables
-    _format_initialization_status,    # Format registry initialization phase/errors
+    error_response,                   # Build a standard error response dict
+    format_initialization_status,     # Format registry initialization phase/errors
+    get_config_manager,               # Get ConfigManager from MCP context
+    get_mcp_session_id,               # Get MCP session ID from context (errors if missing)
+    get_registry_from_context,        # Get BaseRegistry from context
+    get_community_registry,           # Get CommunitySessionRegistry from context
+    get_enterprise_registry,          # Get EnterpriseSessionRegistry from context
+    get_session_from_context,         # Get session from MCP context
+    get_enterprise_session,           # Get + validate Enterprise session
+    check_response_size,              # Validate response size limits
+    format_meta_table_result,         # Format metadata tables
+    build_table_data_response,        # Build a table data response dict
+    redact_json_sensitive_fields,     # Redact sensitive fields from JSON strings
 )
 ```
 
