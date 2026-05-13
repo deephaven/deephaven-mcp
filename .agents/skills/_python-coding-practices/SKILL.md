@@ -9,7 +9,7 @@ description: Python coding conventions and style guide for this project — invo
 2. All MCP tools (async functions registered via `server.tool()(fn)` inside `register_tools(server: FastMCP)` in a `_tools/` module) have specific docstring requirements — apply the `pydocs-improve` skill for the full rules, including required "Terminology Note" and "Format Accuracy for AI Agents" sections.
 3. f-strings are preferred over `%` and `.format()` in format statements.
 4. When moving or removing files, use the git version of the command when appropriate to maintain history.
-5. A python file named <file>.py should have a single test file named test_<file>.py.  An exception is made for integration tests which are named test_<file>_integration.py.
+5. A python file named `<file>.py` should have a single test file named `test_<file>.py`.  An exception is made for integration tests which are named `test_<file>_integration.py`.
 6. `Any` is generally a bad type hint.  If you need to use it, please justify why it is necessary.  Specific type hints should be used when possible.
 7. `hasattr` and `getattr` are generally bad practice.  If you need to use them, please justify why.  They mask bugs.
 8. Use American English spelling throughout all code, comments, docstrings, and documentation.  For example: "initialized" not "initialised", "recognized" not "recognised", "color" not "colour".
