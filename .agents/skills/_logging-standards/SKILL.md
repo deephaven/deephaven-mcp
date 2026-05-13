@@ -13,7 +13,7 @@ _LOGGER = logging.getLogger(__name__)
 
 ## Message Format
 
-```
+```text
 [server_or_module:function_name] Action: details
 ```
 
