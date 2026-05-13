@@ -23,8 +23,9 @@ Two Config Formats, Two Manager Classes:
 This module supports two distinct configuration file formats, one per server type:
 
   1. **Community server** (``dh-mcp-community-server``): Use :class:`CommunityServerConfigManager`.
-     The config file is a *flat* dict with ``sessions``, ``session_creation``, and ``security``
-     as optional top-level keys. No enterprise-related keys are allowed.
+     The config file is a *flat* dict. ``auth`` is the only required top-level key;
+     ``sessions``, ``session_creation``, ``security``, and
+     ``mcp_session_idle_timeout_seconds`` are optional. No enterprise-related keys are allowed.
 
   2. **Enterprise server** (``dh-mcp-enterprise-server``): Use :class:`EnterpriseServerConfigManager`.
      The config file is a *flat* dict with all enterprise system fields at the top level — there are
@@ -40,13 +41,17 @@ Features:
 Community Server Configuration Schema:
 ---------------------------------------
 The community config file must be a JSON or JSON5 object. JSON5 allows single-line (//) and multi-line (/* */) comments, trailing commas, and other JSON5 features.
-It may contain the following top-level keys (all optional):
+It must contain the top-level `auth` key and may contain the other top-level
+keys listed below (all others are optional):
 
-  - `auth` (dict, optional):
+  - `auth` (dict, **required**):
       Governs how HTTP clients authenticate to the MCP server itself using a
       Jupyter-style pre-shared key. Distinct from the per-worker `auth_token`
       values inside `sessions[*]` / `session_creation.defaults`, which control
       how the MCP server authenticates to individual community workers.
+      The validator rejects configs that omit this key; configs without an
+      explicit `auth` block (e.g. `{}` or sessions-only) fail with
+      :class:`~deephaven_mcp._exceptions.ConfigurationError` at startup.
       The `auth` dict may contain:
 
         - `enabled` (bool, optional, default: true): Whether MCP-server PSK auth is required.
@@ -57,7 +62,9 @@ It may contain the following top-level keys (all optional):
 
       Rules:
         - When `enabled` is true, exactly one of `psk` or `psk_env_var` must be provided.
-        - When `enabled` is false, neither may be provided.
+        - When `enabled` is false, neither may be provided. Disabling auth is
+          only safe on a loopback bind; the systems server refuses to start
+          on a non-loopback host with `enabled: false`.
 
   - `security` (dict, optional):
       Security settings for community sessions.
@@ -102,6 +109,10 @@ It may contain the following top-level keys (all optional):
       If this key is absent, dynamic session creation is not configured.
 
 Community Config Validation rules:
+  - The top-level `auth` key is **required**; configs that omit it (including
+    `{}` and sessions-only configs) are rejected at validation time. Provide
+    `auth.psk` / `auth.psk_env_var`, or set `auth.enabled: false` (loopback
+    binds only).
   - Only `auth`, `sessions`, `session_creation`, `security`, and
     `mcp_session_idle_timeout_seconds` are valid top-level keys; any other key
     will cause validation to fail.
