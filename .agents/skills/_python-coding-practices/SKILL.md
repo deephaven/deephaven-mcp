@@ -1,5 +1,5 @@
 ---
-name: python-coding-practices
+name: _python-coding-practices
 description: Python coding conventions and style guide for this project — invoke when writing or reviewing Python code
 ---
 

@@ -1,5 +1,5 @@
 ---
-name: markdown-documentation-standards
+name: _markdown-documentation-standards
 description: Documentation format standards for markdown files — JSON/JSON5 code block requirements, placeholder formatting, copy-paste readiness — invoke when editing or creating markdown documentation
 ---
 

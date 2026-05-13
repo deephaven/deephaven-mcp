@@ -12,7 +12,7 @@ Create a plan for improving this markdown file, then execute it.
 5. Make sure that all referenced files and paths have hyperlinks.
 6. Check all of the links in the document to make sure they are correct.
 7. Are there any products, websites, or services that are being used that should be linked?
-8. Apply the `markdown-documentation-standards` skill for formatting compliance.
+8. Apply the `_markdown-documentation-standards` skill for formatting compliance.
 9. How else can this document be improved?
 
 When making documentation changes, only do major rewrites if they are necessary. Do not make massive changes without a compelling reason.

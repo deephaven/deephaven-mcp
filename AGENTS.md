@@ -18,6 +18,15 @@ These operations are slow by nature, not hung — set generous timeouts:
 
 - When moving or renaming files, use `git mv` rather than delete + create. When removing files, use `git rm`. Preserving history matters.
 
+## Agent Skills
+
+Skills in `.agents/skills/` fall into two categories:
+
+- **User-invokable** (no prefix): intended to be triggered directly via slash commands (e.g., `review-changes`, `tests-run`).
+- **AI-internal** (`_` prefix): reference/standards documents loaded as context by agents or other skills, not invoked directly by users (e.g., `_python-coding-practices`, `_logging-standards`). The `_` prefix suppresses them from slash command autocomplete.
+
+When adding a new skill, prefix it with `_` if it is a reference document or standard that other skills invoke rather than something a user would trigger directly.
+
 ## MCP Server Configuration
 
 - **Transport**: All three servers support only `streamable-http`. They do not support `stdio` or `sse`.

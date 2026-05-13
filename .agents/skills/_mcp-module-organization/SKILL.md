@@ -1,5 +1,5 @@
 ---
-name: mcp-module-organization
+name: _mcp-module-organization
 description: Module organization and design patterns for MCP tool development in this project — invoke when creating or modifying MCP tool modules
 ---
 

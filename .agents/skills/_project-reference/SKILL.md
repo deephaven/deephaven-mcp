@@ -1,5 +1,5 @@
 ---
-name: project-reference
+name: _project-reference
 description: Reference guide for this project — architecture, server commands and ports, config file formats, code quality check commands, test clients — invoke when working with server configuration, running checks, or navigating the codebase
 ---
 
