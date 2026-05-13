@@ -1,6 +1,6 @@
 ---
 name: review-changes
-description: Perform a deep review of a set of code changes — all file types covered: Python files reviewed in full, documentation files checked for accuracy
+description: "Perform a deep review of a set of code changes — all file types covered: Python files reviewed in full, documentation files checked for accuracy"
 ---
 
 Review the changeset described in the prompt. Common forms:
