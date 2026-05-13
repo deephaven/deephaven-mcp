@@ -10,6 +10,7 @@
 
 - [Using `uv` in deephaven-mcp](#using-uv-in-deephaven-mcp)
   - [Table of Contents](#table-of-contents)
+  - [End-User Install (`uv tool install`)](#end-user-install-uv-tool-install)
   - [Why use `uv`?](#why-use-uv)
   - [Installing `uv`](#installing-uv)
     - [Creating a Virtual Environment with `uv`](#creating-a-virtual-environment-with-uv)
@@ -27,6 +28,28 @@
   - [Troubleshooting](#troubleshooting)
   - [Tips \& Troubleshooting](#tips--troubleshooting)
   - [Further Reading](#further-reading)
+
+---
+
+## End-User Install (`uv tool install`)
+
+For end users (not contributors), the recommended installation method is `uv tool install`. This places `dh-mcp-community-server`, `dh-mcp-enterprise-server`, and `dh-mcp-docs-server` on your PATH in an isolated managed environment — no venv to create or activate.
+
+```sh
+uv tool install --python-preference managed "deephaven-mcp[community,enterprise]"
+```
+
+- `--python-preference managed` tells uv to download and use its own Python (stored in `~/.local/share/uv/python/`) rather than any system Python. The tool environment is unaffected if your system Python is upgraded, moved, or removed. uv picks the latest compatible version per `requires-python` in the package.
+- Scripts land in `~/.local/bin/` (macOS/Linux) or `%LOCALAPPDATA%\uv\bin\` (Windows).
+- The tool environment lives under `~/.local/share/uv/tools/deephaven-mcp/`. Run `uv tool dir` to find the root.
+
+**To upgrade:**
+
+```sh
+uv tool upgrade deephaven-mcp
+```
+
+The rest of this document covers developer and contributor workflows that use a local venv.
 
 ---
 
@@ -94,16 +117,22 @@ This will install all dependencies to exactly match your lock file(s) for reprod
 
 ### 3. Running Servers and Scripts
 
-**Systems Server (SSE):**
+**Community Server:**
 
 ```sh
-DH_MCP_CONFIG_FILE=deephaven_mcp.json uv run dh-mcp-systems --transport sse
+DH_MCP_CONFIG_FILE=dhc.json uv run dh-mcp-community-server --port 8003
 ```
 
-**Docs Server (SSE):**
+**Enterprise Server:**
 
 ```sh
-INKEEP_API_KEY=your-inkeep-api-key uv run dh-mcp-docs --transport sse
+DH_MCP_CONFIG_FILE=dhe.json uv run dh-mcp-enterprise-server --port 8002
+```
+
+**Docs Server:**
+
+```sh
+uv run dh-mcp-docs-server
 ```
 
 **Run a test server:**

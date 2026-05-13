@@ -6,10 +6,12 @@
         "deephaven",
         "ENOENT",
         "Inkeep",
+        "LOCALAPPDATA",
         "pyproject",
         "PYTHONLOGLEVEL",
         "streamable",
         "streamablehttp",
+        "uvx",
         "venv"
     ]
 }

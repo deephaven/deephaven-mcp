@@ -74,54 +74,29 @@ Choose the quickstart for your Deephaven deployment type:
 
 **Get up and running in 5 minutes!** This quickstart assumes you have a local Deephaven Community Core instance running on `localhost:10000`. If you don't have one, [download and start Deephaven Community Core](https://deephaven.io/core/docs/getting-started/quickstart/) first.
 
-#### 1. Create Virtual Environment
+#### 1. Install Deephaven MCP
 
-**Using `uv` (recommended):**
-
-Pick a suitable project directory for your venv.
+Install with [`uv`](https://docs.astral.sh/uv/) (see [Prerequisites](#prerequisites) if you don't have it yet):
 
 ```bash
-name_of_your_venv=".venv"
-uv venv $name_of_your_venv -p 3.11
+uv tool install --python-preference managed "deephaven-mcp[community,enterprise]"
 ```
 
-**Using standard `venv`:**
+This places three commands on your PATH — `dh-mcp-community-server`, `dh-mcp-enterprise-server`, and `dh-mcp-docs-server` — with no venv to manage.
 
-```bash
-python3.11 -m venv .venv
-```
+> **What `--python-preference managed` does**: tells uv to download and use its own Python (stored in `~/.local/share/uv/python/`) rather than any Python on your system. The tool environment is unaffected if your system Python is upgraded, moved, or removed. uv picks the latest Python version compatible with `requires-python` in the package.
+>
+> **Where tools are installed**: Scripts land in `~/.local/bin/` (macOS/Linux) or `%LOCALAPPDATA%\uv\bin\` (Windows). The tool environment itself lives under `~/.local/share/uv/tools/deephaven-mcp/` — run `uv tool dir` to find the root.
+>
+> **Optional extras**: `[community]` adds Python-based session creation; `[enterprise]` adds DHE connectivity. Both together is the recommended default. For more details, see [Installation & Initial Setup](#installation--initial-setup).
+>
+> **For stdio-only AI tools** (e.g. Claude Desktop): also install `mcp-proxy`, which bridges stdio transport to the HTTP servers:
+>
+> ```bash
+> uv tool install --python-preference managed mcp-proxy
+> ```
 
-> Replace `3.11` / `python3.11` with any supported Python version (3.11 or higher).
-
-#### 2. Install Deephaven MCP
-
-For most users, installing with both Community + Enterprise support is the best default. The Deephaven MCP docs server is hosted by Deephaven and requires no installation.
-
-**Using `uv` (recommended):**
-
-```bash
-uv pip install "deephaven-mcp[community,enterprise]"
-```
-
-**Using standard `pip`:**
-
-```bash
-.venv/bin/pip install "deephaven-mcp[community,enterprise]"
-```
-
-**Optional extras:**
-
-| Extra | Use when |
-|-------|----------|
-| `[community]` | You want to create Community Core sessions using the Python launch method (no Docker required) |
-| `[enterprise]` | You need to connect to Deephaven Enterprise (Core+) systems |
-| `[test]` | You want to run the test suite |
-| `[lint]` | You only need code quality tools (linting, formatting, type checking) |
-| `[dev]` | You're developing/contributing to this project (includes everything) |
-
-> For more details and additional installation methods, see [Installation & Initial Setup](#installation--initial-setup).
-
-#### 3. Create Configuration File
+#### 2. Create Configuration File
 
 For the Community server, create a file (e.g., `dhc.json`) anywhere on your system:
 
@@ -159,7 +134,7 @@ For the Community server, create a file (e.g., `dhc.json`) anywhere on your syst
 
 > **Dynamic Sessions**: The `session_creation` section enables on-demand [Community Core](https://deephaven.io/community/) session creation. Requirements: `deephaven-server` (installed in any Python venv) for the python method, or [Docker](https://www.docker.com/get-started/) for the docker method. See [Community Session Creation Configuration](#community-session-creation-configuration) for details.
 
-#### 4. Start the Community Server and Configure Your AI Tool
+#### 3. Start the Community Server and Configure Your AI Tool
 
 Start the Community MCP server in the background (logs go to `dh-mcp-community.log`):
 
@@ -177,20 +152,22 @@ To stop the server: `pkill -f dh-mcp-community-server`
 {
   "mcpServers": {
     "deephaven-community": {
-      "command": "/full/path/to/your/.venv/bin/mcp-proxy",
+      "command": "mcp-proxy",
       "args": ["--transport=streamablehttp", "http://127.0.0.1:8003/mcp"]
     },
     "deephaven-docs": {
-      "command": "/full/path/to/your/.venv/bin/mcp-proxy",
+      "command": "mcp-proxy",
       "args": ["--transport=streamablehttp", "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"]
     }
   }
 }
 ```
 
+> If your AI tool reports that `mcp-proxy` is not found, run `which mcp-proxy` in your terminal and use the full path as the `command` value.
+
 **For other tools**, see the [detailed setup instructions](#setup-instructions-by-tool) below.
 
-#### 5. Try It Out
+#### 4. Try It Out
 
 Restart your AI tool (or IDE) after starting the servers.
 
@@ -210,42 +187,27 @@ Confirm the setup is working by asking:
 
 **Get up and running in 5 minutes!** This quickstart assumes you have a Deephaven Enterprise system accessible at a known URL. Contact your Deephaven administrator for the `connection.json` URL and your credentials.
 
-#### 1. Create Virtual Environment
+#### 1. Install Deephaven MCP
 
-**Using `uv` (recommended):**
-
-Pick a suitable project directory for your venv.
+Install with [`uv`](https://docs.astral.sh/uv/) (see [Prerequisites](#prerequisites) if you don't have it yet):
 
 ```bash
-name_of_your_venv=".venv"
-uv venv $name_of_your_venv -p 3.11
+uv tool install --python-preference managed "deephaven-mcp[enterprise]"
 ```
 
-**Using standard `venv`:**
+This places `dh-mcp-enterprise-server` (and `dh-mcp-community-server`, `dh-mcp-docs-server`) on your PATH with no venv to manage.
 
-```bash
-python3.11 -m venv .venv
-```
+> **Installing both server types?** Use `"deephaven-mcp[community,enterprise]"` instead.
+>
+> **Where tools are installed**: Scripts land in `~/.local/bin/` (macOS/Linux) or `%LOCALAPPDATA%\uv\bin\` (Windows). The tool environment lives under `~/.local/share/uv/tools/deephaven-mcp/` — run `uv tool dir` to find the root.
+>
+> **For stdio-only AI tools** (e.g. Claude Desktop): also install `mcp-proxy`, which bridges stdio transport to the HTTP servers:
+>
+> ```bash
+> uv tool install --python-preference managed mcp-proxy
+> ```
 
-> Replace `3.11` / `python3.11` with any supported Python version (3.11 or higher).
-
-#### 2. Install Deephaven MCP
-
-**Using `uv` (recommended):**
-
-```bash
-uv pip install "deephaven-mcp[enterprise]"
-```
-
-**Using standard `pip`:**
-
-```bash
-.venv/bin/pip install "deephaven-mcp[enterprise]"
-```
-
-> Installing `[community,enterprise]` is also fine if you need both server types.
-
-#### 3. Create Configuration File
+#### 2. Create Configuration File
 
 Create a config file (e.g., `dhe.json`) for your enterprise system. Each enterprise server instance manages **one** DHE system.
 
@@ -310,7 +272,7 @@ The enterprise server must be deployed behind TLS — the headers above
 carry secrets in cleartext on the wire. Consult your MCP client's
 documentation for how to inject custom HTTP headers on every request.
 
-#### 4. Start the Enterprise Server and Configure Your AI Tool
+#### 3. Start the Enterprise Server and Configure Your AI Tool
 
 Start the Enterprise MCP server in the background (logs go to `dh-mcp-enterprise-prod.log`):
 
@@ -330,20 +292,22 @@ To stop the server: `pkill -f dh-mcp-enterprise-server`
 {
   "mcpServers": {
     "deephaven-enterprise": {
-      "command": "/full/path/to/your/.venv/bin/mcp-proxy",
+      "command": "mcp-proxy",
       "args": ["--transport=streamablehttp", "http://127.0.0.1:8002/mcp"]
     },
     "deephaven-docs": {
-      "command": "/full/path/to/your/.venv/bin/mcp-proxy",
+      "command": "mcp-proxy",
       "args": ["--transport=streamablehttp", "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"]
     }
   }
 }
 ```
 
+> If your AI tool reports that `mcp-proxy` is not found, run `which mcp-proxy` in your terminal and use the full path as the `command` value.
+
 **For other tools**, see the [detailed setup instructions](#setup-instructions-by-tool) below.
 
-#### 5. Try It Out
+#### 4. Try It Out
 
 Restart your AI tool (or IDE) after starting the server.
 
@@ -363,25 +327,21 @@ Confirm the setup is working by asking:
 
 **Already have `deephaven-mcp` installed?** Here's how to upgrade:
 
-**Using `uv`:**
+**Using `uv tool` (recommended):**
 
 ```bash
-uv pip install --upgrade deephaven-mcp
+uv tool upgrade deephaven-mcp
 ```
 
-**Using standard `pip`:**
+**Using `uv pip` (venv-based install):**
 
 ```bash
-.venv/bin/pip install --upgrade deephaven-mcp
-```
-
-**To upgrade with optional dependencies:**
-
-```bash
-# uv
 uv pip install --upgrade "deephaven-mcp[community,enterprise]"
+```
 
-# pip
+**Using standard `pip` (venv-based install):**
+
+```bash
 .venv/bin/pip install --upgrade "deephaven-mcp[community,enterprise]"
 ```
 
@@ -540,14 +500,12 @@ graph TD
 
 ## Prerequisites
 
-- **Python**: Version 3.11 or higher. ([Download Python](https://www.python.org/downloads/))
+- **[`uv`](https://docs.astral.sh/uv/) (Recommended)**: Used for `uv tool install`, which puts the server commands on your PATH with no venv to manage. Install it via `pip install uv` or the [uv installation guide](https://docs.astral.sh/uv/getting-started/installation/). Once installed, `uv` places its bin directory on your PATH automatically.
+- **Python**: Version 3.12 or higher. uv downloads its own managed Python automatically via `--python-preference managed` — no separate Python installation required. ([Download Python](https://www.python.org/downloads/) only needed for non-uv workflows)
 - **Docker (Optional)**: Required for Docker-based community session creation. ([Download Docker](https://www.docker.com/get-started/))
 - **Access to Deephaven systems:** To use the MCP servers, you will need one or more of the following:
   - **[Deephaven Community Core](https://deephaven.io/community/) instance(s):** For development and personal use.
   - **[Deephaven Enterprise](https://deephaven.io/enterprise/) system(s):** For enterprise-level features and capabilities.
-- **Choose your Python environment setup method:**
-  - **Option A: [`uv`](https://docs.astral.sh/uv/) (Recommended)**: A very fast Python package installer and resolver. If you don't have it, you can install it via `pip install uv` or see the [uv installation guide](https://github.com/astral-sh/uv#installation).
-  - **Option B: Standard Python `venv` and `pip`**: Uses Python's built-in [virtual environment (`venv`)](https://docs.python.org/3/library/venv.html) tools and [`pip`](https://pip.pypa.io/en/stable/getting-started/).
 - **Configuration Files**: Each integration requires proper configuration files (specific locations detailed in each integration section)
 
 ---
@@ -560,54 +518,68 @@ The recommended way to install `deephaven-mcp` is from [PyPI](https://pypi.org/p
 
 ### Installation Methods
 
-#### Using `uv` (Fast, Recommended)
+#### Using `uv tool install` (Recommended)
 
-[`uv`](https://github.com/astral-sh/uv) is a high-performance Python package manager. For detailed [`uv`](https://github.com/astral-sh/uv) workflows and project-specific setup, see the [`uv` documentation](docs/UV.md).
+[`uv`](https://github.com/astral-sh/uv) is a high-performance Python package manager. `uv tool install` places the server commands directly on your PATH in an isolated, managed environment — no venv to create or activate.
 
-**Install uv:**
+**Install uv** (if you don't have it):
 
 ```sh
 pip install uv
 ```
 
-**Create environment and install:**
+Or see the [uv installation guide](https://docs.astral.sh/uv/getting-started/installation/) for other options.
+
+**Install deephaven-mcp as a tool:**
 
 ```sh
-# Create virtual environment with Python 3.11+, in a chosen project directory
-name_of_your_venv=".venv"
-uv venv $name_of_your_venv -p 3.11
-
-# Install deephaven-mcp (choose your extras)
-uv pip install deephaven-mcp                           # Basic
-uv pip install "deephaven-mcp[community]"              # + Python session creation
-uv pip install "deephaven-mcp[enterprise]"             # + Enterprise support
-uv pip install "deephaven-mcp[community,enterprise]"   # Both
+uv tool install --python-preference managed "deephaven-mcp[community,enterprise]"
 ```
 
-#### Using Standard `pip` and `venv`
+After this command, `dh-mcp-community-server`, `dh-mcp-enterprise-server`, and `dh-mcp-docs-server` are available on your PATH.
 
-**Create environment and install:**
+**Where tools are installed:**
 
-```sh
-# Create virtual environment
-python3.11 -m venv .venv
+| Platform | Scripts (on PATH) | Tool environment |
+|----------|-------------------|-----------------|
+| macOS/Linux | `~/.local/bin/` | `~/.local/share/uv/tools/deephaven-mcp/` |
+| Windows | `%LOCALAPPDATA%\uv\bin\` | `%APPDATA%\uv\tools\deephaven-mcp\` |
 
-# Install deephaven-mcp (choose your extras)
-.venv/bin/pip install deephaven-mcp                           # Basic
-.venv/bin/pip install "deephaven-mcp[community]"              # + Python session creation
-.venv/bin/pip install "deephaven-mcp[enterprise]"             # + Enterprise support
-.venv/bin/pip install "deephaven-mcp[community,enterprise]"   # Both
-```
+Run `uv tool dir` to find the tool environment root on your system.
 
-**Optional Dependency Reference:**
+**Choose your extras:**
 
 | Extra | Provides |
 |-------|----------|
 | `[community]` | Python-based Community Core session creation (no Docker) |
 | `[enterprise]` | Deephaven Enterprise (Core+) system connectivity |
+| `[community,enterprise]` | Both (recommended default) |
 | `[test]` | Testing framework and utilities |
 | `[lint]` | Code quality tools (linting, formatting, type checking) |
 | `[dev]` | Full development environment (all of the above) |
+
+For detailed [`uv`](https://github.com/astral-sh/uv) workflows and project-specific setup, see the [`uv` documentation](docs/UV.md).
+
+#### Alternative: Using `uv pip` or standard `pip` with a venv
+
+If you prefer a manual venv (for example, when developing or testing):
+
+```sh
+# Create virtual environment with Python 3.12+
+uv venv .venv -p 3.12
+
+# Install deephaven-mcp
+uv pip install "deephaven-mcp[community,enterprise]"
+```
+
+Or with standard pip:
+
+```sh
+python3.12 -m venv .venv
+.venv/bin/pip install "deephaven-mcp[community,enterprise]"
+```
+
+When using a venv, use the full path to executables (e.g., `.venv/bin/dh-mcp-community-server`).
 
 ---
 
@@ -1180,22 +1152,26 @@ tail -f dh-mcp-enterprise-prod.log
 
 #### Claude Desktop
 
-Claude Desktop only supports stdio transport. Use `mcp-proxy` (included in your venv) as a bridge to the HTTP servers. Open **Claude Desktop** → **Settings** → **Developer** → **Edit Config**:
+Claude Desktop uses stdio transport and requires `mcp-proxy` as a bridge to the HTTP servers. Make sure you have run `uv tool install --python-preference managed mcp-proxy` first (see the install step in [Quick Start](#quick-start)).
+
+Open **Claude Desktop** → **Settings** → **Developer** → **Edit Config** and add:
 
 ```json
 {
   "mcpServers": {
     "deephaven-community": {
-      "command": "/full/path/to/your/.venv/bin/mcp-proxy",
+      "command": "mcp-proxy",
       "args": ["--transport=streamablehttp", "http://127.0.0.1:8003/mcp"]
     },
     "deephaven-docs": {
-      "command": "/full/path/to/your/.venv/bin/mcp-proxy",
+      "command": "mcp-proxy",
       "args": ["--transport=streamablehttp", "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"]
     }
   }
 }
 ```
+
+> If your AI tool reports that `mcp-proxy` is not found, run `which mcp-proxy` in your terminal and use the full path as the `command` value.
 
 **Additional Resources:**
 
@@ -1299,13 +1275,13 @@ Before diving into detailed troubleshooting, try these common solutions:
 
 | Error | Where You'll See This | Solution |
 |-------|----------------------|----------|
-| `spawn uv ENOENT` | IDE/AI assistant logs | Use full path to [`uv`](docs/UV.md) |
+| `spawn mcp-proxy ENOENT` | AI tool logs | Run `uv tool install --python-preference managed mcp-proxy` first; if the tool still can't find it, run `which mcp-proxy` and use the full path as the `command` |
 | `Connection failed` | MCP server logs | Check internet connection and server URLs |
 | `Config not found` | MCP server startup | Verify full path to config file passed via `--config` or `DH_MCP_CONFIG_FILE` |
-| `Permission denied` | Command execution | Ensure [`uv`](docs/UV.md) executable has proper permissions |
-| `Python version error` | Virtual environment | Verify supported Python version is installed and accessible |
+| `Permission denied` | Command execution | Ensure executable has proper permissions; run `chmod +x` on the `mcp-proxy` path |
+| `Python version error` | uv tool install | Deephaven MCP requires Python 3.12+; use `uv tool install --python-preference managed ...` |
 | `JSON parse error` | IDE/AI assistant logs | Fix JSON syntax errors in configuration files |
-| `Module not found: deephaven_mcp` | MCP server logs | Ensure virtual environment is activated and dependencies installed |
+| `Module not found: deephaven_mcp` | MCP server logs | Re-run `uv tool install --python-preference managed "deephaven-mcp[community,enterprise]"` |
 | `Invalid session_id format` | MCP tool responses | Community: `community:config:{name}` or `community:dynamic:{name}`; Enterprise: `enterprise:{system_name}:{name}` |
 
 ### JSON Configuration Issues
