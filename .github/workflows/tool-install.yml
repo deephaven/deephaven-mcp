@@ -53,6 +53,12 @@ jobs:
         # all other dependencies are still resolved from PyPI normally.
         run: uv tool install --python-preference managed "deephaven-mcp[community,enterprise]" --find-links dist/
 
+      - name: Add uv tool bin directory to PATH
+        # `uv tool install` places executables in a per-user bin directory that is
+        # not on PATH by default in GitHub Actions runners. Add it explicitly so
+        # subsequent steps can invoke the installed entry points.
+        run: echo "$(uv tool dir --bin)" >> "$GITHUB_PATH"
+
       - name: Verify entry points are on PATH
         # Confirms all three documented server commands land in ~/.local/bin (or platform equivalent)
         run: |
