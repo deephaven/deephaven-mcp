@@ -55,16 +55,26 @@ INKEEP_API_KEY=your-key MCP_DOCS_HOST=0.0.0.0 MCP_DOCS_PORT=8001 dh-mcp-docs-ser
 }
 ```
 
-**Enterprise Server** config schema (all fields at top level, no nesting):
+**Enterprise Server** config schema (all fields at top level, no nesting). The
+config file declares only *which* auth backends the server mounts; user
+credentials are supplied per request via `X-Deephaven-*` HTTP headers and are
+never stored in this file:
 ```json
 {
   "system_name": "prod",
   "connection_json_url": "https://dhe.example.com/iris/connection.json",
-  "auth_type": "password",
-  "username": "user",
-  "password_env_var": "DHE_PASSWORD"
+  "auth": {
+    "backends": ["password", "private_key"],
+    "allow_effective_user": false
+  }
 }
 ```
+
+The legacy top-level credential fields (`auth_type`, `username`, `password`,
+`password_env_var`, `private_key_path`) have been removed from the schema and
+will fail validation at startup. See
+`docs/DEVELOPER_GUIDE.md#enterprise-auth-model` for the full per-request auth
+model and supported `X-Deephaven-*` headers.
 
 **Docs Server**: requires `INKEEP_API_KEY` env var. `MCP_DOCS_HOST` (default `127.0.0.1`), `MCP_DOCS_PORT` / `PORT` (default 8001).
 
