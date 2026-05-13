@@ -22,15 +22,40 @@ Entry points: `dh-mcp-community-server` (port 8003), `dh-mcp-enterprise-server` 
 **Community Server** — manages one or more DHC / Deephaven Community Core workers:
 ```bash
 DH_MCP_CONFIG_FILE=/path/to/config.json dh-mcp-community-server
-dh-mcp-community-server --config /path/to/config.json --host 0.0.0.0 --port 8003
+dh-mcp-community-server --config /path/to/config.json --host 127.0.0.1 --port 8003
 # Host/port also via MCP_HOST / MCP_PORT env vars
 ```
 
 **Enterprise Server** — manages a single DHE / Deephaven Enterprise system:
 ```bash
 DH_MCP_CONFIG_FILE=/path/to/enterprise.json dh-mcp-enterprise-server
-dh-mcp-enterprise-server --config /path/to/enterprise.json --host 0.0.0.0 --port 8002
+dh-mcp-enterprise-server --config /path/to/enterprise.json --host 127.0.0.1 --port 8002
 ```
+
+> **Non-loopback binds require a transport-security opt-in.** The systems
+> server (`dh-mcp-community-server` / `dh-mcp-enterprise-server`) refuses to
+> start with a non-loopback `--host` (e.g. `0.0.0.0`) unless one of the
+> following is configured: native TLS via `--ssl-keyfile` + `--ssl-certfile`
+> (or `MCP_SSL_KEYFILE` / `MCP_SSL_CERTFILE`); a fronting TLS-terminating
+> proxy via `--trust-forwarded-proto` (paired with `--forwarded-allow-ips`,
+> default `127.0.0.1`); or the explicit cleartext opt-out
+> `--allow-cleartext` (`MCP_ALLOW_CLEARTEXT=1`). Auth headers
+> (`X-Deephaven-Password`, `X-Deephaven-Private-Key`, `X-Deephaven-PSK`)
+> travel in cleartext on the wire, so a non-loopback bind without any of
+> these is treated as a hard startup error. Examples:
+>
+> ```bash
+> # Native TLS
+> dh-mcp-community-server --host 0.0.0.0 --port 8003 \
+>     --ssl-keyfile /path/key.pem --ssl-certfile /path/cert.pem
+>
+> # Behind a TLS-terminating reverse proxy on the same host
+> dh-mcp-enterprise-server --host 0.0.0.0 --port 8002 \
+>     --trust-forwarded-proto --forwarded-allow-ips 127.0.0.1
+>
+> # Emergency cleartext opt-out (logs a loud warning each startup)
+> dh-mcp-community-server --host 0.0.0.0 --port 8003 --allow-cleartext
+> ```
 
 **Docs Server** — documentation Q&A:
 ```bash
