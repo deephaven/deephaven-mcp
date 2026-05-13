@@ -1,6 +1,6 @@
 ---
 name: _logging-standards
-description: Python logging conventions — module-level _LOGGER instantiation, message format ([module:function] Action: details), log levels, and coverage rules
+description: "Python logging conventions — module-level _LOGGER instantiation, message format ([module:function] Action: details), log levels, and coverage rules"
 ---
 
 ## Logger Instantiation
