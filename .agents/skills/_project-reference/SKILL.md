@@ -91,13 +91,10 @@ the `auth` block. Provide one of three forms:
 }
 ```
 
-For production, replace `auth` with `{"psk_env_var": "DH_MCP_COMMUNITY_PSK"}`
-(or inline `{"psk": "<secret>"}`); see `docs/ENV.md` for the full options.
-
-**Enterprise Server** config schema (all fields at top level, no nesting). The
-config file declares only *which* auth backends the server mounts; user
-credentials are supplied per request via `X-Deephaven-*` HTTP headers and are
-never stored in this file:
+**Enterprise Server** config schema. Required fields: `system_name`,
+`connection_json_url`, and `auth`. The config file declares only *which*
+auth backends the server mounts; user credentials are supplied per request
+via `X-Deephaven-*` HTTP headers and are never stored in this file:
 ```json
 {
   "system_name": "prod",
