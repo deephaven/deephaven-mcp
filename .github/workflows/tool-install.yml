@@ -55,19 +55,19 @@ jobs:
 
       - name: Add uv tool bin directory to PATH
         # `uv tool install` places executables in a per-user bin directory that is
-        # The docs server does not implement `--help` safely: invoking it can start the
-        # server and/or fail at import time if INKEEP_API_KEY is unset, so only verify
-        # that its installed script is discoverable on PATH.
         # not on PATH by default in GitHub Actions runners. Add it explicitly so
         # subsequent steps can invoke the installed entry points.
         run: echo "$(uv tool dir --bin)" >> "$GITHUB_PATH"
-          command -v dh-mcp-docs-server
+
       - name: Verify entry points are on PATH
-        # Confirms all three documented server commands land in ~/.local/bin (or platform equivalent)
+        # Confirms all three documented server commands land in ~/.local/bin (or platform equivalent).
+        # The docs server does not implement `--help` safely: invoking it can start the
+        # server and/or fail at import time if INKEEP_API_KEY is unset, so only verify
+        # that its installed script is discoverable on PATH.
         run: |
           dh-mcp-community-server --help
           dh-mcp-enterprise-server --help
-          dh-mcp-docs-server --help
+          command -v dh-mcp-docs-server
 
       - name: Install mcp-proxy as a separate tool
         # mcp-proxy is the Claude Desktop stdio↔HTTP bridge. It is not a deephaven-mcp
