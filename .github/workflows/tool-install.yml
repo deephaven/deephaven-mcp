@@ -1,0 +1,95 @@
+# Validates the end-user installation path documented in README.md.
+#
+# The README tells users to install via `uv tool install`, which places server
+# scripts directly on PATH in an isolated environment (no venv to manage).
+# mcp-proxy is intentionally NOT a deephaven-mcp dependency; it is a standalone
+# Claude Desktop bridge that users install separately with `uv tool install --python-preference managed mcp-proxy`.
+#
+# This workflow verifies both installs work correctly on the supported OS/Python
+# matrix so that README instructions stay accurate as dependencies evolve.
+
+name: Tool Install
+
+on:
+  push:
+    branches: [ "main", "mcp2" ]
+  pull_request:
+    branches: [ "main", "mcp2" ]
+  workflow_dispatch:
+
+jobs:
+  tool-install:
+    name: uv tool install (${{ matrix.os }}, py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python-version: ["3.12", "3.13"]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          # Full history needed for setuptools_scm version detection
+          fetch-depth: 0
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Build wheel
+        # Build from source so we test the current branch, not a PyPI release
+        run: |
+          pip install build wheel
+          python -m build --wheel
+
+      - name: Install as uv tool
+        # Install the locally-built wheel by file path so we are guaranteed to test
+        # the current branch's code, not whatever happens to be on PyPI. Using
+        # `--find-links dist/` is not sufficient: it only adds the directory as a
+        # candidate source, and setuptools_scm produces a `.devN` version on
+        # non-tag commits, which uv's default prerelease policy will skip in
+        # favor of a matching stable PyPI release. Passing the wheel path
+        # explicitly bypasses the resolver entirely for the deephaven-mcp
+        # distribution; transitive dependencies are still resolved from PyPI.
+        # `--python` ensures uv installs the tool against the matrix's Python
+        # version. Without it, `--python-preference managed` would silently pick
+        # the latest managed interpreter satisfying requires-python on every
+        # leg, collapsing the matrix to a single effective interpreter.
+        run: |
+          WHEEL=$(ls dist/deephaven_mcp-*.whl)
+          uv tool install \
+            --python-preference managed \
+            --python ${{ matrix.python-version }} \
+            "${WHEEL}[community,enterprise]"
+
+      - name: Add uv tool bin directory to PATH
+        # `uv tool install` places executables in a per-user bin directory that is
+        # not on PATH by default in GitHub Actions runners. Add it explicitly so
+        # subsequent steps can invoke the installed entry points.
+        run: echo "$(uv tool dir --bin)" >> "$GITHUB_PATH"
+
+      - name: Verify entry points are on PATH
+        # Confirms all three documented server commands land in ~/.local/bin (or platform equivalent).
+        # The docs server does not implement `--help` safely: invoking it can start the
+        # server and/or fail at import time if INKEEP_API_KEY is unset, so only verify
+        # that its installed script is discoverable on PATH.
+        run: |
+          dh-mcp-community-server --help
+          dh-mcp-enterprise-server --help
+          command -v dh-mcp-docs-server
+
+      - name: Install mcp-proxy as a separate tool
+        # mcp-proxy is the Claude Desktop stdio↔HTTP bridge. It is not a deephaven-mcp
+        # dependency; users install it independently via `uv tool install --python-preference managed mcp-proxy`.
+        # `--python` pins the tool environment to the matrix interpreter for the
+        # same reason as the deephaven-mcp install above.
+        run: uv tool install --python-preference managed --python ${{ matrix.python-version }} mcp-proxy
+
+      - name: Verify mcp-proxy is on PATH
+        run: command -v mcp-proxy
