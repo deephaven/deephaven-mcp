@@ -31,7 +31,7 @@ permissions:
 
 jobs:
   freshness:
-    name: Fresh resolve + mypy + pytest
+    name: Fresh resolve + mypy + pytest + tsc + vitest
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -56,6 +56,23 @@ jobs:
 
       - name: Run unit tests
         run: uv run pytest -q --no-cov
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install pnpm
+        run: npm install -g pnpm
+
+      - name: Sync TypeScript dependencies (force fresh resolve)
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Run tsc
+        run: pnpm exec tsc --noEmit
+
+      - name: Run TypeScript unit tests
+        run: pnpm vitest run
 
       - name: Open or update tracking issue on failure
         if: failure()
@@ -108,7 +125,7 @@ jobs:
                 body: [
                   'The scheduled freshness check failed against a freshly-resolved dependency tree on `main`.',
                   '',
-                  'This typically means an upstream release (most often `pydeephaven`, `deephaven-server`, or `deephaven-coreplus-client`) introduced a breaking change.',
+                  'This typically means an upstream release introduced a breaking change. Common culprits: `pydeephaven`, `deephaven-server`, or `deephaven-coreplus-client` (Python); `@modelcontextprotocol/sdk`, `pino`, or `zod` (TypeScript).',
                   '',
                   `Run details: ${runUrl}`,
                   '',

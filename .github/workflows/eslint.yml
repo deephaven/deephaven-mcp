@@ -1,0 +1,43 @@
+name: eslint
+
+# Lints TypeScript source with ESLint.
+# Runs only when TypeScript-related files change (src-ts/, package.json,
+# eslint config). On failure, run `pnpm exec eslint src-ts/ --fix` locally
+# to auto-fix where possible, then address any remaining errors manually.
+
+on:
+  push:
+    branches: [main, mcp2]
+    paths:
+      - 'src-ts/**'
+      - 'package.json'
+      - 'eslint.config.mjs'
+      - '.eslintrc*'
+  pull_request:
+    branches: [main, mcp2]
+    paths:
+      - 'src-ts/**'
+      - 'package.json'
+      - 'eslint.config.mjs'
+      - '.eslintrc*'
+
+jobs:
+  eslint-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install pnpm
+        run: npm install -g pnpm
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Run ESLint
+        run: pnpm exec eslint src-ts/

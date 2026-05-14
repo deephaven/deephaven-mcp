@@ -1,6 +1,6 @@
 ---
-name: _mcp-module-organization
-description: Module organization and design patterns for MCP tool development in this project — invoke when creating or modifying MCP tool modules
+name: _python-mcp-module-organization
+description: Module organization and design patterns for MCP tool development in Python — invoke when creating or modifying Python MCP tool modules
 ---
 
 # MCP Tools Module Organization Guidelines

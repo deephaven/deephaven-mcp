@@ -1,5 +1,5 @@
 ---
-name: _logging-standards
+name: _python-logging-standards
 description: "Python logging conventions — module-level _LOGGER instantiation, message format ([module:function] Action: details), log levels, and coverage rules"
 ---
 

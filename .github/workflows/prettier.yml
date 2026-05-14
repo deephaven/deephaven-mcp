@@ -1,0 +1,45 @@
+name: prettier
+
+# Checks TypeScript source formatting with Prettier.
+# Runs only when TypeScript-related files change (src-ts/, package.json,
+# prettier config). On failure, run `pnpm exec prettier --write src-ts/`
+# locally and commit the result.
+
+on:
+  push:
+    branches: [main, mcp2]
+    paths:
+      - 'src-ts/**'
+      - 'package.json'
+      - '.prettierrc'
+      - '.prettierignore'
+      - '.prettierrc.*'
+  pull_request:
+    branches: [main, mcp2]
+    paths:
+      - 'src-ts/**'
+      - 'package.json'
+      - '.prettierrc'
+      - '.prettierignore'
+      - '.prettierrc.*'
+
+jobs:
+  prettier-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install pnpm
+        run: npm install -g pnpm
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Run Prettier (check only)
+        run: pnpm exec prettier --check src-ts/

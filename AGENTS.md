@@ -2,7 +2,8 @@
 
 ## Testing
 
-- Always use `uv run pytest` instead of `pytest` directly. This ensures the correct virtual environment and dependencies are used.
+- **Python**: Always use `uv run pytest` instead of `pytest` directly. This ensures the correct virtual environment and dependencies are used.
+- **TypeScript**: Always use `pnpm vitest run` instead of bare `vitest` or `npx vitest`. This uses the project-local Vitest installation.
 - Unit tests should target 100% coverage.
 
 ## Timeouts
@@ -13,6 +14,9 @@ These operations are slow by nature, not hung — set generous timeouts:
 - `./bin/precommit.sh`: allow at least 60 seconds (~22 seconds typical).
 - `uv run pytest` (full suite): allow at least 120 seconds.
 - `uv run mypy src/`: allow at least 30 seconds (~15 seconds typical).
+- `pnpm install`: allow at least 60 seconds.
+- `pnpm vitest run` (full suite): allow at least 120 seconds.
+- `pnpm exec tsc --noEmit`: allow at least 30 seconds.
 
 ## Version Control
 
@@ -23,7 +27,7 @@ These operations are slow by nature, not hung — set generous timeouts:
 Skills in `.agents/skills/` fall into two categories:
 
 - **User-invokable** (no prefix): intended to be triggered directly via slash commands (e.g., `review-changes`, `tests-run`).
-- **AI-internal** (`_` prefix): reference/standards documents loaded as context by agents or other skills, not invoked directly by users (e.g., `_python-coding-practices`, `_logging-standards`). The `_` prefix suppresses them from slash command autocomplete.
+- **AI-internal** (`_` prefix): reference/standards documents loaded as context by agents or other skills, not invoked directly by users (e.g., `_python-coding-practices`, `_python-logging-standards`). The `_` prefix suppresses them from slash command autocomplete.
 
 When adding a new skill, prefix it with `_` if it is a reference document or standard that other skills invoke rather than something a user would trigger directly.
 

@@ -144,6 +144,24 @@ INKEEP_API_KEY=your-key python scripts/mcp_docs_test_client.py \
   --url http://127.0.0.1:8001/mcp --prompt "What is Deephaven?"
 ```
 
+## TypeScript
+
+TypeScript source lives in `src-ts/`. Tests are colocated as `<file>.test.ts` in the same directory as the source file.
+
+**Package manager**: pnpm
+
+**Config files**: `tsconfig.json`, `package.json`, `vitest.config.ts`, `eslint.config.mjs`, `.prettierrc`
+
+**Key commands**:
+```bash
+pnpm install                          # install dependencies
+pnpm vitest run                       # run tests with coverage
+pnpm exec tsc --noEmit               # type checking
+pnpm exec eslint src-ts/             # linting
+pnpm exec prettier --check src-ts/  # formatting check
+./bin/precommit.sh                  # all checks in sequence (Python + TypeScript)
+```
+
 ## Common Issues
 
 - **Port conflicts**: Community defaults to 8003, enterprise to 8002, docs to 8001. Override with `--port` or `MCP_PORT` (`MCP_DOCS_PORT` for docs).

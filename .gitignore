@@ -185,3 +185,9 @@ cython_debug/
 
 # Stress test results
 stress_test_results.json
+
+# Node.js / TypeScript
+node_modules/
+coverage/
+.tsbuildinfo
+pnpm-lock.yaml

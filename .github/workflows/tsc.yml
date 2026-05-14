@@ -1,0 +1,43 @@
+name: tsc
+
+# Type-checks TypeScript source with the TypeScript compiler.
+# Runs only when TypeScript-related files change (src-ts/, package.json,
+# tsconfig.json). Equivalent to mypy for the TypeScript codebase — enforces
+# strict mode type checking with no emitted output (--noEmit).
+
+on:
+  push:
+    branches: [main, mcp2]
+    paths:
+      - 'src-ts/**'
+      - 'package.json'
+      - 'tsconfig.json'
+      - 'tsconfig.*.json'
+  pull_request:
+    branches: [main, mcp2]
+    paths:
+      - 'src-ts/**'
+      - 'package.json'
+      - 'tsconfig.json'
+      - 'tsconfig.*.json'
+
+jobs:
+  tsc-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install pnpm
+        run: npm install -g pnpm
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Run TypeScript type check
+        run: pnpm exec tsc --noEmit

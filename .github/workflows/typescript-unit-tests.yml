@@ -1,0 +1,53 @@
+name: TypeScript Unit Tests
+
+# Runs the TypeScript unit test suite with coverage using Vitest.
+# Runs only when TypeScript-related files change (src-ts/, package.json,
+# tsconfig.json, vitest config). Uploads a coverage artifact on completion.
+# Equivalent to the python-unit-tests workflow for the TypeScript codebase.
+
+on:
+  push:
+    branches: [main, mcp2]
+    paths:
+      - 'src-ts/**'
+      - 'package.json'
+      - 'tsconfig.json'
+      - 'vitest.config.ts'
+      - 'vitest.config.mts'
+  pull_request:
+    branches: [main, mcp2]
+    paths:
+      - 'src-ts/**'
+      - 'package.json'
+      - 'tsconfig.json'
+      - 'vitest.config.ts'
+      - 'vitest.config.mts'
+  workflow_dispatch:
+
+jobs:
+  test-typescript:
+    name: Test TypeScript
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install pnpm
+        run: npm install -g pnpm
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Run tests with coverage
+        run: pnpm vitest run
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-typescript
+          path: coverage/

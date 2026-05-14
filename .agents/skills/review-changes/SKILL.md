@@ -1,6 +1,6 @@
 ---
 name: review-changes
-description: "Perform a deep review of a set of code changes — all file types covered: Python files reviewed in full, documentation files checked for accuracy"
+description: "Perform a deep review of a set of code changes — all file types covered: Python and TypeScript files reviewed in full, documentation files checked for accuracy"
 ---
 
 Review the changeset described in the prompt. Common forms:
@@ -24,6 +24,7 @@ If no changeset is specified, default to uncommitted changes.
    | File type | Skill to apply |
    |---|---|
    | `.py` | `review-python-file` |
+   | `.ts`, `.tsx` | `review-typescript-file` |
    | `.md`, `.rst` | `docs-accuracy` |
    | Other (config, scripts, etc.) | Review for correctness and appropriateness |
 

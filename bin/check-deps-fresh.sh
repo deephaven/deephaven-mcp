@@ -36,4 +36,16 @@ echo "==> Running unit tests..."
 uv run pytest -q --no-cov
 
 echo
+echo "==> Installing TypeScript dependencies (fresh)..."
+pnpm install
+
+echo
+echo "==> Running TypeScript type check..."
+pnpm exec tsc --noEmit
+
+echo
+echo "==> Running TypeScript unit tests..."
+pnpm vitest run
+
+echo
 echo "==> Freshness check passed."

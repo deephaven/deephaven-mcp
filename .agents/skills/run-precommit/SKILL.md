@@ -1,14 +1,16 @@
 ---
 name: run-precommit
-description: Run precommit.sh — applies isort, black, ruff, mypy, and markdownlint in sequence; modifies files in place; run before committing
+description: Run precommit.sh — applies all code quality checks for Python and TypeScript in sequence; modifies files in place; run before committing
 ---
 
 ```bash
 ./bin/precommit.sh
 ```
 
-Runs in order: isort → black → ruff → mypy → markdownlint. **It modifies files** — isort, black, ruff, and markdownlint all apply fixes in place. After a successful run, check for modified files and include them in the commit.
+Runs in order: isort → black → ruff → mypy → markdownlint → prettier → eslint → tsc
 
-It does not run tests. Use the `tests-run` skill for that.
+**It modifies files** — isort, black, ruff (with `--fix`), markdownlint, prettier, and eslint (with `--fix`) all apply fixes in place. After a successful run, check for modified files and include them in the commit.
 
-The script stops at the first failure (`set -euo pipefail`), so a failure in ruff means mypy and markdownlint have not yet run. isort, black, and markdownlint are unlikely to fail since they auto-fix. Ruff may report unfixable lint errors; mypy reports type errors — both require manual fixes before re-running.
+It does not run tests. Use the `tests-run` skill (Python) or `tests-run-ts` skill (TypeScript) for that.
+
+The script stops at the first failure (`set -euo pipefail`). isort, black, prettier, and markdownlint are unlikely to fail since they auto-fix. Ruff and eslint may report unfixable lint errors; mypy and tsc report type errors — all require manual fixes before re-running.
