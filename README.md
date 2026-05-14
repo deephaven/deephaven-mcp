@@ -500,7 +500,7 @@ graph TD
 
 ## Prerequisites
 
-- **[`uv`](https://docs.astral.sh/uv/) (Recommended)**: Used for `uv tool install`, which puts the server commands on your PATH with no venv to manage. Install it via `pip install uv` or the [uv installation guide](https://docs.astral.sh/uv/getting-started/installation/). Once installed, `uv` places its bin directory on your PATH automatically.
+- **[`uv`](https://docs.astral.sh/uv/) (Recommended)**: Used for `uv tool install`, which puts the server commands on your PATH with no venv to manage. Install it via `pip install uv` or the [uv installation guide](https://docs.astral.sh/uv/getting-started/installation/). After installing tools, you may need to run `uv tool update-shell` and open a new terminal so the uv tool bin directory is on your `PATH` (this directory — typically `~/.local/bin` on macOS/Linux or `%LOCALAPPDATA%\uv\bin\` on Windows — is not on the default shell `PATH` everywhere).
 - **Python**: Version 3.12 or higher. uv downloads its own managed Python automatically via `--python-preference managed` — no separate Python installation required. ([Download Python](https://www.python.org/downloads/) only needed for non-uv workflows)
 - **Docker (Optional)**: Required for Docker-based community session creation. ([Download Docker](https://www.docker.com/get-started/))
 - **Access to Deephaven systems:** To use the MCP servers, you will need one or more of the following:
