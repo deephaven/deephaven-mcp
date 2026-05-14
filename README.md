@@ -163,7 +163,7 @@ To stop the server: `pkill -f dh-mcp-community-server`
 }
 ```
 
-> If your AI tool reports that `mcp-proxy` is not found, run `which mcp-proxy` in your terminal and use the full path as the `command` value.
+> If your AI tool reports that `mcp-proxy` is not found, locate it with `which mcp-proxy` (macOS/Linux) or `where mcp-proxy` / `Get-Command mcp-proxy` (Windows cmd.exe / PowerShell), and use the full path as the `command` value.
 
 **For other tools**, see the [detailed setup instructions](#setup-instructions-by-tool) below.
 
@@ -303,7 +303,7 @@ To stop the server: `pkill -f dh-mcp-enterprise-server`
 }
 ```
 
-> If your AI tool reports that `mcp-proxy` is not found, run `which mcp-proxy` in your terminal and use the full path as the `command` value.
+> If your AI tool reports that `mcp-proxy` is not found, locate it with `which mcp-proxy` (macOS/Linux) or `where mcp-proxy` / `Get-Command mcp-proxy` (Windows cmd.exe / PowerShell), and use the full path as the `command` value.
 
 **For other tools**, see the [detailed setup instructions](#setup-instructions-by-tool) below.
 
@@ -1171,7 +1171,7 @@ Open **Claude Desktop** → **Settings** → **Developer** → **Edit Config** a
 }
 ```
 
-> If your AI tool reports that `mcp-proxy` is not found, run `which mcp-proxy` in your terminal and use the full path as the `command` value.
+> If your AI tool reports that `mcp-proxy` is not found, locate it with `which mcp-proxy` (macOS/Linux) or `where mcp-proxy` / `Get-Command mcp-proxy` (Windows cmd.exe / PowerShell), and use the full path as the `command` value.
 
 **Additional Resources:**
 
@@ -1275,7 +1275,7 @@ Before diving into detailed troubleshooting, try these common solutions:
 
 | Error | Where You'll See This | Solution |
 |-------|----------------------|----------|
-| `spawn mcp-proxy ENOENT` | AI tool logs | Run `uv tool install --python-preference managed mcp-proxy` first; if the tool still can't find it, run `which mcp-proxy` and use the full path as the `command` |
+| `spawn mcp-proxy ENOENT` | AI tool logs | Run `uv tool install --python-preference managed mcp-proxy` first; if the tool still can't find it, locate it with `which mcp-proxy` (macOS/Linux) or `where mcp-proxy` / `Get-Command mcp-proxy` (Windows) and use the full path as the `command` |
 | `Connection failed` | MCP server logs | Check internet connection and server URLs |
 | `Config not found` | MCP server startup | Verify full path to config file passed via `--config` or `DH_MCP_CONFIG_FILE` |
 | `Permission denied` | Command execution | Ensure executable has proper permissions; run `chmod +x` on the `mcp-proxy` path |
@@ -1343,7 +1343,7 @@ Before diving into detailed troubleshooting, try these common solutions:
   - **Platform-Specific Issues:** Some packages may require platform-specific compilation
 
 - **Python Version Compatibility:**
-  - Deephaven MCP requires Python 3.11 or higher
+  - Deephaven MCP requires Python 3.12 or higher
   - Check your Python version: `python --version`
   - Ensure your virtual environment uses the correct Python version
 

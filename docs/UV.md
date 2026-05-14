@@ -77,13 +77,13 @@ Once [`uv`](https://github.com/astral-sh/uv) is installed, it's highly recommend
 
 1. **Create a virtual environment (e.g., named `.venv`) with a specific Python version:**
 
-    Use the `-p` option to specify your desired Python interpreter (e.g., Python 3.11, 3.12, 3.13, or a full path to an executable):
+    Use the `-p` option to specify your desired Python interpreter (e.g., Python 3.12, 3.13, or a full path to an executable). Deephaven MCP requires Python 3.12 or higher:
 
     ```sh
-    uv venv .venv -p 3.11
+    uv venv .venv -p 3.12
     ```
 
-    Replace `3.11` with your target Python version or path.
+    Replace `3.12` with your target Python version (3.12+) or path.
 
 2. **Activate the virtual environment (optional):**
 
@@ -132,7 +132,7 @@ DH_MCP_CONFIG_FILE=dhe.json uv run dh-mcp-enterprise-server --port 8002
 **Docs Server:**
 
 ```sh
-uv run dh-mcp-docs-server
+INKEEP_API_KEY=your-inkeep-api-key uv run dh-mcp-docs-server
 ```
 
 **Run a test server:**

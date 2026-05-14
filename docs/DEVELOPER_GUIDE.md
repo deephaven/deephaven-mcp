@@ -2842,18 +2842,18 @@ Claude Desktop is very useful for debugging and interactively exploring MCP serv
 2. **Navigate to `Settings > Developer > Edit Config`.**
 3. **Edit the `claude_desktop_config.json` file.**
 4. **Add your MCP server under the `mcpServers` section.**
-   - All three servers (Community, Enterprise, Docs) are HTTP-only. Start them first, then configure Claude Desktop using `mcp-proxy` (included in your venv) as a stdio bridge (Claude Desktop does not support HTTP transport natively).
+   - All three servers (Community, Enterprise, Docs) are HTTP-only. Start them first, then configure Claude Desktop using `mcp-proxy` as a stdio bridge (Claude Desktop does not support HTTP transport natively). `mcp-proxy` is **not** a dependency of this project; install it separately with `uv tool install --python-preference managed mcp-proxy`.
    - Example configuration:
 
      ```json
      {
        "mcpServers": {
          "mcp-community": {
-           "command": "/full/path/to/your/.venv/bin/mcp-proxy",
+           "command": "mcp-proxy",
            "args": ["--transport=streamablehttp", "http://127.0.0.1:8003/mcp"]
          },
          "mcp-docs": {
-           "command": "/full/path/to/your/.venv/bin/mcp-proxy",
+           "command": "mcp-proxy",
            "args": ["--transport=streamablehttp", "http://127.0.0.1:8001/mcp"]
          }
        }
@@ -2886,7 +2886,7 @@ For troubleshooting Claude Desktop MCP integration, log files are located at:
 
 ### mcp-proxy
 
-[mcp-proxy](https://github.com/modelcontextprotocol/mcp-proxy) enables MCP clients that only support stdio to connect to servers using HTTP-based transports (streamable-http or SSE). This is useful for clients that do not natively support streamable-http. The `mcp-proxy` utility is included as a dependency in this project.
+[mcp-proxy](https://github.com/modelcontextprotocol/mcp-proxy) enables MCP clients that only support stdio to connect to servers using HTTP-based transports (streamable-http or SSE). This is useful for clients that do not natively support streamable-http. `mcp-proxy` is **not** a dependency of this project; install it separately with `uv tool install --python-preference managed mcp-proxy` (this places `mcp-proxy` on your PATH).
 
 **Use Cases:**
 
@@ -2907,7 +2907,7 @@ For troubleshooting Claude Desktop MCP integration, log files are located at:
    {
      "mcpServers": {
        "deephaven-community": {
-         "command": "/full/path/to/your/.venv/bin/mcp-proxy",
+         "command": "mcp-proxy",
          "args": ["--transport=streamablehttp", "http://127.0.0.1:8003/mcp"]
        }
      }
@@ -2930,7 +2930,7 @@ For troubleshooting Claude Desktop MCP integration, log files are located at:
    {
      "mcpServers": {
        "deephaven-docs": {
-         "command": "/full/path/to/your/.venv/bin/mcp-proxy",
+         "command": "mcp-proxy",
          "args": ["--transport=streamablehttp", "http://127.0.0.1:8001/mcp"]
        }
      }
