@@ -11,7 +11,7 @@ This repository houses the Python-based [Model Context Protocol (MCP)](https://m
 1. **Deephaven MCP Servers**: Provide tools for interacting with Deephaven Community Core and Enterprise instances via separate server processes.
 2. **Deephaven MCP Docs Server**: Provides conversational Q&A about Deephaven documentation.
 
-> **Requirements**: [Python](https://www.python.org/) 3.11 or later is required to run these servers.
+> **Requirements**: [Python](https://www.python.org/) 3.12 or later is required to run these servers.
 
 ---
 
@@ -253,11 +253,11 @@ Before using the Deephaven MCP servers, ensure you have the following prerequisi
 
 ### Required for All Users
 
-**Python 3.11 or Later**
+**Python 3.12 or Later**
 
-- **Requirement**: [Python](https://www.python.org/) 3.11+ is required to run both MCP servers
+- **Requirement**: [Python](https://www.python.org/) 3.12+ is required to run both MCP servers
 - **Installation**: Download from [python.org](https://www.python.org/downloads/) or use your system's package manager
-- **Verification**: Run `python --version` to confirm Python 3.11 or later is installed
+- **Verification**: Run `python --version` to confirm Python 3.12 or later is installed
 
 **Configuration File**
 
@@ -311,7 +311,7 @@ Choose **one** of the following launch methods for dynamically creating Deephave
 
 **Development Tools**
 
-- **Required**: Git, Python 3.11+, virtual environment tool (`venv` or `uv`)
+- **Required**: Git, Python 3.12+, virtual environment tool (`venv` or `uv`)
 - **Recommended**: [`uv`](https://github.com/astral-sh/uv) for faster package management
 - **Installation**: See [UV.md](UV.md) for project-specific uv setup and workflows, or the [uv installation guide](https://github.com/astral-sh/uv#installation) for general installation
 
@@ -358,7 +358,7 @@ pip install -e ".[dev]"
 
 Before proceeding with the Quick Start Guide, verify your setup:
 
-- ✅ Python 3.11+ installed: `python --version`
+- ✅ Python 3.12+ installed: `python --version`
 - ✅ Configuration file created (for Systems Server): `deephaven_mcp.json`
 - ✅ Environment variable set (for Systems Server): `export DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json`
 - ✅ Inkeep API key set (for Docs Server): `export INKEEP_API_KEY=your-key`
@@ -3009,7 +3009,7 @@ Both servers expose their tools through FastMCP, following the Model Context Pro
 2. **Create a virtual environment**:
 
    ```sh
-   uv venv .venv -p 3.11 # Or your desired Python version e.g., 3.12, 3.13
+   uv venv .venv -p 3.12 # Or a later Python version, e.g. 3.13
    ```
 
 3. **Install dependencies with uv (editable mode for development)**:

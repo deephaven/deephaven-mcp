@@ -1326,26 +1326,27 @@ Before diving into detailed troubleshooting, try these common solutions:
 
 - **`command not found` for [`uv`](docs/UV.md) (in LLM tool logs):**
   - Ensure [`uv`](docs/UV.md) is installed and its installation directory is in your system's `PATH` environment variable, accessible by the LLM tool.
-- **`command not found` for `dh-mcp-enterprise-server` or `dh-mcp-community-server`:**
-  - Ensure the package is installed in your virtual environment with `uv pip install "deephaven-mcp[community,enterprise]"`
-  - If running directly, verify the venv is activated or use the full path to the executable.
+- **`command not found` for `dh-mcp-enterprise-server`, `dh-mcp-community-server`, or `dh-mcp-docs-server`:**
+  - **If you used `uv tool install` (recommended):** Reinstall (or upgrade) with `uv tool install --python-preference managed "deephaven-mcp[community,enterprise]"` (or `uv tool upgrade deephaven-mcp`). Then make sure the uv tool bin directory is on your `PATH` — run `uv tool update-shell` and open a new shell, or locate the binary with `which dh-mcp-community-server` (macOS/Linux) or `where dh-mcp-community-server` / `Get-Command dh-mcp-community-server` (Windows).
+  - **If you used a virtual environment (alternative install):** Ensure the package is installed in the venv with `uv pip install "deephaven-mcp[community,enterprise]"`, and either activate the venv or use the full path to the executable (e.g. `.venv/bin/dh-mcp-community-server`).
 
-### Virtual Environment and Dependency Issues
+### Installation and Dependency Issues
 
-- **Virtual Environment Not Activated:**
-  - Symptoms: `Module not found` errors, `command not found` for installed packages
-  - Solution: Activate your virtual environment before running commands
-  - Verify: Check that your prompt shows the environment name in parentheses
+- **`Module not found: deephaven_mcp` / commands missing after install:**
+  - **`uv tool install` users:** Reinstall with `uv tool install --python-preference managed "deephaven-mcp[community,enterprise]"`. The tool install is self-contained — there is no user-managed venv to activate.
+  - **Virtual environment users:** Make sure the venv is activated (your shell prompt should show its name) before running commands, or invoke commands via `uv run ...` / the full `.venv/bin/...` path.
 
 - **Dependency Installation Problems:**
-  - **Missing Dependencies:** Reinstall with the correct extras: `uv pip install "deephaven-mcp[community,enterprise]"`
-  - **Version Conflicts:** Check for conflicting package versions in your environment
-  - **Platform-Specific Issues:** Some packages may require platform-specific compilation
+  - **Missing Dependencies (`uv tool install` users):** Re-run `uv tool install --python-preference managed "deephaven-mcp[community,enterprise]"` to refresh the isolated tool environment, or `uv tool upgrade deephaven-mcp` to pick up a newer release.
+  - **Missing Dependencies (venv users):** Reinstall with the correct extras: `uv pip install "deephaven-mcp[community,enterprise]"`.
+  - **Version Conflicts:** `uv tool install` runs in an isolated environment, so cross-package conflicts are rare; for venv installs, check for conflicting package versions in your environment.
+  - **Platform-Specific Issues:** Some packages may require platform-specific compilation.
 
 - **Python Version Compatibility:**
-  - Deephaven MCP requires Python 3.12 or higher
-  - Check your Python version: `python --version`
-  - Ensure your virtual environment uses the correct Python version
+  - Deephaven MCP requires Python 3.12 or higher.
+  - Check your Python version: `python --version`.
+  - **`uv tool install` users:** Pass `--python-preference managed` (as the documented commands do) to let uv manage a compatible interpreter automatically; if you previously installed with a different Python, reinstall the tool.
+  - **Virtual environment users:** Ensure your venv uses Python 3.12+ (e.g. `uv venv .venv -p 3.12`).
 
 ### Server and Environment Issues
 
