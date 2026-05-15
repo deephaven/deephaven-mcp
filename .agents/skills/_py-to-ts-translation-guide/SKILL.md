@@ -137,6 +137,30 @@ export interface AsyncClosable {
 
 **`*args: T`**: `...args: T[]`. **`**kwargs: V`**: `{ ...opts }: Opts`.
 
+## Access Modifiers and Quality Annotations
+
+Python uses decorator-style quality annotations that have direct TypeScript equivalents. Apply these mappings whenever the Python source uses the annotation:
+
+| Python | TypeScript | Notes |
+|--------|-----------|-------|
+| `@abstractmethod` on a method | `abstract methodName(): ReturnType` | No body; class must also be `abstract class` |
+| Class with ≥1 `@abstractmethod` or inheriting from `ABC` | `export abstract class Name` | |
+| `@override` on a method | `override` keyword | Order: `protected override async _foo()` |
+| `_single_underscore` method (convention: subclasses override) | `protected` modifier + keep `_` prefix: `protected _foo()` | Exception: module-level `_helpers` stay `export`ed for test access |
+| `__double_underscore` method (name-mangling, truly private) | `private` modifier | |
+| `ClassVar[T]` class variable | `static` property | `static readonly FOO: T = value` for constants |
+| `Final[T]` on a field or variable | `readonly` modifier | |
+| `@dataclass(frozen=True)` all fields | All fields `readonly` in the TypeScript class | |
+| `@property` with no setter defined | `get foo(): T { ... }` with no `set` accessor | |
+
+**`readonly` beyond `Final[T]`** — apply `readonly` to any class field that is set only in the constructor and never reassigned thereafter, even if Python does not annotate it `Final`. This is idiomatic TypeScript and catches accidental mutation.
+
+**`ReadonlyArray` / `ReadonlySet` / `ReadonlyMap`** — if a Python attribute is typed `list[T]`, `set[T]`, or `dict[K,V]` and is never mutated after construction, use `readonly T[]` (or `ReadonlyArray<T>`), `ReadonlySet<T>`, or `ReadonlyMap<K,V>`.
+
+**`as const`** — module-level literal objects or arrays that are never mutated should use `as const` for precise literal type inference.
+
+**Module-level vs. class-level privacy** — the `export _private` rule in Critical Invariants applies only to *module-level* helper functions (so tests can import them directly). Class *methods* follow the `protected`/`private` modifier rules above.
+
 ## Multiple Inheritance (TypeScript limitation)
 
 Python sometimes inherits from two classes for dual catchability, e.g.:
@@ -229,6 +253,7 @@ If no test file exists at the computed path, record "Python tests: 0 (no test fi
   - **Preserve**: multi-line `#` comment blocks (2+ consecutive lines); any single-line comment containing `NOTE`, `WARNING`, `IMPORTANT`, `because`, `workaround`, `subtle`, `semantic`, `invariant`, or any other phrase explaining a non-obvious design decision, external reference, or production-correctness constraint.
   - **Discard**: comments that merely restate what the adjacent code already says in plain English (e.g., `# Call the function`, `# Return the result`); tool annotations (`# type: ignore`, `# noqa`, `# pylint:`, `# fmt:`).
 - **Property docstrings**: a `@property` method with a docstring → `/** ... */` immediately above the `get` accessor in TypeScript. If both getter and setter exist, the TSDoc goes on the getter only.
+- **Named section preservation in class/function docstrings**: Python docstrings use colon-terminated section headers on their own line (`Values:`, `Status Categories:`, `Usage Context:`, `Deployment Characteristics:`, `Args:`, `Returns:`, `Raises:`, `Example:`, `Notes:`, `See Also:`, etc.). Every named section must appear in the TypeScript TSDoc — never preserve only the intro summary and drop the sections. When translating an enum class docstring: put the intro paragraph and all non-"Values:" sections in the class-level TSDoc above `export enum`; translate each member entry in the "Values:" or "Members:" section to a per-member `/** */` comment. Include the full text of multi-line entries — a primary description line followed by indented continuation lines must all appear in the TSDoc comment.
 - **Enum member docstrings**: a Python enum member followed by a trailing `"""..."""` on the next line → `/** ... */` immediately before that member in the TypeScript enum:
   ```python
   class InitializationPhase(enum.Enum):
@@ -251,6 +276,7 @@ If no test file exists at the computed path, record "Python tests: 0 (no test fi
   - Never copy `:class:`, `:meth:`, `:func:`, `:py:` raw into TSDoc — they are reST-specific and unreadable in TypeScript
 - **Preserve ALL documentation verbatim** — translation of language is the only allowed change; never abbreviate, omit, or paraphrase
 - MCP tools: apply `tsdocs-improve` standards (Terminology Note and Format Accuracy sections with exact wording)
+- **No blank lines between TSDoc and declaration**: A `/** ... */` comment must be followed on the very next line by the item it documents — no blank lines between the closing `*/` and the `export`, `class`, `abstract class`, `function`, `const`, `enum`, `interface`, `import`, or other declaration. This applies to all comment types: module docstrings before the first `import`, class docstrings before `export class`, method docstrings before the method signature, constant docstrings before `export const`. Correct: `/** Description */\nexport function foo() {`. Wrong: `/** Description */\n\nexport function foo() {`.
 
 ## Anti-Patterns — Mistakes from the Prior Failed Translation
 

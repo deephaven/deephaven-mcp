@@ -23,6 +23,14 @@ Build a list of every **Python public symbol**: functions, classes, class method
 
 Verify the expected TypeScript name exists in the TypeScript file as an export (or as a public class member). For enum types, each member name (e.g., `COMMUNITY`, `ENTERPRISE`) must exist as a member of the corresponding TypeScript enum — missing enum members are a FAIL. Collect any missing symbols.
 
+**Modifier completeness check**: for each Python symbol, verify the TypeScript counterpart uses the correct modifier:
+- Class with `@abstractmethod` methods or inheriting from `ABC`: TypeScript class must be `abstract class`. If not, report FAIL.
+- Method with `@abstractmethod`: TypeScript method must have `abstract` keyword. If not, report FAIL.
+- Method with `@override`: TypeScript method must have `override` keyword. If not, report FAIL.
+- `ClassVar[T]` annotation: TypeScript property must have `static` modifier. If not, report FAIL.
+- `Final[T]` annotation on a field: TypeScript field must have `readonly` modifier. If not, report FAIL.
+- `_single_underscore` class method (not a module-level helper): TypeScript method should have `protected` modifier. Report NEEDS_WORK if absent.
+
 ## Step 3 — Export completeness
 
 If the Python file has `__all__`, verify every name in it is exported from the TypeScript file. A name present in `__all__` with no corresponding `export` in the TypeScript file is a FAIL.
@@ -31,7 +39,10 @@ If the Python file has `__all__`, verify every name in it is exported from the T
 
 For every Python docstring in the source file (module-level, class-level, method/function-level), check whether the corresponding TypeScript item has a `/** ... */` TSDoc block that covers the same content.
 
-**Fix policy**: If a TSDoc block is missing entirely, or is clearly abbreviated (fewer than half the sentences of the Python original), **write or expand the TSDoc block now** — do not just report the gap.
+**Fix policy**: If a TSDoc block is **missing entirely**, **write it now**. If a TSDoc block is **present but abbreviated**, **expand it now**. A TSDoc block is considered abbreviated if ANY of the following is true:
+- It contains fewer than half the sentences of the Python original.
+- The Python docstring has named sections (any colon-terminated heading on its own line such as `Values:`, `Status Categories:`, `Usage Context:`, `Deployment Characteristics:`, `Attributes:`, `Args:`, `Returns:`, `Raises:`, `Example:`, `Notes:`, `See Also:`) and the TypeScript TSDoc is missing one or more of those sections.
+- The Python docstring is longer than 5 lines and the TypeScript TSDoc has only 1–2 sentences.
 
 Translation rules:
 - Python module docstring → `/** ... */` block at the very top of the `.ts` file, before all imports
@@ -46,9 +57,28 @@ Translation rules:
 
 If the `@remarks` is missing, add it.
 
+**Named section preservation**: Python docstrings frequently use colon-terminated section headers on their own line (e.g., `Values:`, `Status Categories:`, `Usage Context:`, `Deployment Characteristics:`, `Args:`, `Returns:`, `Raises:`, `Example:`, `Notes:`, `See Also:`). The complete Python docstring — introductory paragraph AND all named sections — must be preserved in the TypeScript TSDoc.
+
+Exception for enum "Values:" / "Members:" sections: translate each member entry to a per-member `/** */` comment rather than repeating it in the class-level TSDoc. Other named sections (intro paragraph, "Status Categories:", "Usage Context:", "Example:", etc.) go in the class-level TSDoc above the `export enum`.
+
+If the class-level TSDoc is present but missing named sections that exist in the Python, add those sections now.
+
 **Property docstrings**: For every `@property` method in the Python source that has a docstring, verify the TypeScript `get` accessor has a `/** ... */` TSDoc block covering the same content. If missing, add it. TSDoc goes on the getter only (standard convention when both getter and setter exist).
 
 **Enum member docstrings**: Scan the Python enum class for per-member docstrings (trailing `"""..."""` on the line after the member assignment, or entries in the class-level "Values:" or "Members:" section). For each documented member, verify the TypeScript enum has a `/** ... */` comment immediately before that member declaration. If missing, add it.
+
+Multi-line entries in the "Values:" section include a primary line and indented continuation lines. Include the full text (primary + continuation) in the per-member TSDoc comment. For a continuation-indented entry like:
+```
+ONLINE: Resource is healthy, responsive, and ready for operational use.
+    Indicates successful connectivity and passing health checks.
+```
+The per-member TSDoc becomes:
+```typescript
+/** Resource is healthy, responsive, and ready for operational use.
+ *  Indicates successful connectivity and passing health checks. */
+ONLINE = 1,
+```
+Do not truncate continuation lines.
 
 **TypedDict and dataclass field documentation**: If the Python class docstring includes an `Attributes:` section documenting fields, verify each TypeScript interface/class field has a `/** ... */` comment. If absent, add the field comments drawn from the Attributes section.
 
@@ -57,6 +87,8 @@ If the `@remarks` is missing, add it.
 **Constant and class variable docstrings**: scan the Python file for trailing `"""..."""` patterns — a bare string literal on the line immediately following a module-level assignment or class variable declaration is a docstring for that item. For each one found, verify the TypeScript file has a `/** ... */` comment immediately *before* the corresponding declaration. If missing, add it.
 
 **Inline rationale comments**: scan the Python file for multi-line `#` comment blocks (2+ consecutive `#` lines). For each block, verify a corresponding `//` comment block exists at the same logical location in the TypeScript file. If missing, add it. Also scan for single-line `#` comments containing rationale keywords (`NOTE`, `WARNING`, `IMPORTANT`, `because`, `workaround`, `subtle`, `semantic`, `invariant`) and verify TypeScript `//` equivalents are present.
+
+**Blank lines between TSDoc and declarations**: scan the TypeScript file for the pattern `*/` followed by one or more blank lines before a non-comment declaration (`export`, `class`, `function`, `const`, `enum`, `interface`, `import`, or a bare method/property signature). For each occurrence found, remove the blank lines so the closing `*/` is on the line immediately before the declaration. Blank lines between two consecutive `/** ... */` blocks or between `*/` and a `//` comment are acceptable and must not be removed.
 
 After writing all documentation, record: N/M **function/method** docstrings present, N/M **property** docstrings present, N/M **enum member** docstrings present, N constant docstrings present out of M found in Python, N inline comment blocks present out of M found in Python.
 
