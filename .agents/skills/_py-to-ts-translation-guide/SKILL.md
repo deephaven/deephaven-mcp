@@ -168,7 +168,23 @@ If no test file exists at the computed path, record "Python tests: 0 (no test fi
 ## Documentation Translation
 
 - Python module docstring → file-level `/** ... */` block, preserving all architectural context and examples
-- Python function docstring → TSDoc `/** ... */` with `@param`, `@returns`, `@throws`, `@example` as applicable
+- Python class docstring → `/** ... */` immediately above `export class` (or `abstract class`)
+- Python function/method docstring → TSDoc `/** ... */` with `@param`, `@returns`, `@throws`, `@example` as applicable
+- **Python constant/variable docstrings** — a bare `"""..."""` string on the line immediately after a module-level assignment or class variable declaration is a docstring for that item. Translate to a `/** ... */` comment placed *before* the declaration in TypeScript:
+  ```python
+  # Python
+  _KNOWN_AUTH_TYPES: set[str] = {"PSK", "Anonymous"}
+  """Commonly known auth_type values. Custom authenticators trigger a warning."""
+  ```
+  becomes:
+  ```typescript
+  /** Commonly known auth_type values. Custom authenticators trigger a warning. */
+  const _KNOWN_AUTH_TYPES: ReadonlySet<string> = new Set(["PSK", "Anonymous"]);
+  ```
+  This applies to module-level constants, class variables, and instance variables.
+- **Inline `#` comments — preserve rationale, discard noise.** Translate `#` → `//`. Do not convert inline rationale comments into TSDoc blocks; they belong next to the code they explain.
+  - **Preserve**: multi-line `#` comment blocks (2+ consecutive lines); any single-line comment containing `NOTE`, `WARNING`, `IMPORTANT`, `because`, `workaround`, `subtle`, `semantic`, `invariant`, or any other phrase explaining a non-obvious design decision, external reference, or production-correctness constraint.
+  - **Discard**: comments that merely restate what the adjacent code already says in plain English (e.g., `# Call the function`, `# Return the result`); tool annotations (`# type: ignore`, `# noqa`, `# pylint:`, `# fmt:`).
 - **Preserve ALL documentation verbatim** — translation of language is the only allowed change; never abbreviate, omit, or paraphrase
 - MCP tools: apply `tsdocs-improve` standards (Terminology Note and Format Accuracy sections with exact wording)
 
@@ -188,3 +204,5 @@ These specific errors occurred in the prior attempt and must not be repeated:
 10. **Changing error message text** instead of preserving the Python originals exactly
 11. **Omitting signal handlers** (`SIGABRT`, `SIGQUIT`, `SIGBREAK`) that Python registers
 12. **Skipping `setup_global_exception_logging`** — Node.js equivalents (`uncaughtException`, `unhandledRejection`) must be implemented
+13. **Dropping constant/variable docstrings** — a trailing `"""..."""` after an assignment is a docstring; it must appear as a `/** */` comment before the TypeScript declaration
+14. **Silently discarding inline rationale comments** — multi-line `#` blocks and any comment explaining WHY must be preserved as `//` comments; only noise comments (code restatements, tool annotations) may be omitted

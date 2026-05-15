@@ -46,9 +46,13 @@ Translation rules:
 
 If the `@remarks` is missing, add it.
 
-After writing all TSDoc blocks, record: N symbols documented out of M total.
+**Constant and class variable docstrings**: scan the Python file for trailing `"""..."""` patterns — a bare string literal on the line immediately following a module-level assignment or class variable declaration is a docstring for that item. For each one found, verify the TypeScript file has a `/** ... */` comment immediately *before* the corresponding declaration. If missing, add it.
 
-**Sanity check**: Run `grep -c '/\*\*' <ts-file>` and `grep -c '"""' <py-file>`. If the TypeScript `/**` count is less than half the Python `"""` count, documentation is likely still incomplete — review and complete before continuing.
+**Inline rationale comments**: scan the Python file for multi-line `#` comment blocks (2+ consecutive `#` lines). For each block, verify a corresponding `//` comment block exists at the same logical location in the TypeScript file. If missing, add it. Also scan for single-line `#` comments containing rationale keywords (`NOTE`, `WARNING`, `IMPORTANT`, `because`, `workaround`, `subtle`, `semantic`, `invariant`) and verify TypeScript `//` equivalents are present.
+
+After writing all documentation, record: N symbols documented out of M total, N constant docstrings present out of M found in Python, N inline comment blocks present out of M found in Python.
+
+**Sanity check**: Run `grep -c '/\*\*' <ts-file>` and `grep -c '"""' <py-file>`. If the TypeScript `/**` count is less than two-thirds the Python `"""` count, documentation is likely still incomplete — review and complete before continuing. (Two-thirds because constant docstrings appear in both counts.)
 
 ## Step 5 — Test coverage: count and one-to-one mapping
 
@@ -98,6 +102,8 @@ Append the following subsection to the per-file section of `TRANSLATION_REPORT.m
 - **Export completeness**: COMPLETE | PARTIAL: [list each missing export]
 - **Documentation**: FULL | PARTIAL (N/M symbols documented) | MISSING
   - Multiple inheritance `@remarks`: N/M required notes present
+  - Constant/variable docs: N/M present
+  - Inline comment blocks: N/M present
 - **Test file**: PRESENT (`<ts-test-path>`) | MISSING (`<ts-test-path>`)
 - **Test count**: Python N → TypeScript M (PASS | FAIL delta=-K)
 - **Test mapping**: COMPLETE | GAPS: [list each unmapped Python test]
