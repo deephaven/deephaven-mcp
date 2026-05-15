@@ -19,9 +19,9 @@ If the TypeScript file does **not** exist:
 
 Read both the Python source file and the TypeScript file in full.
 
-Build a list of every **Python public symbol**: functions, classes, class methods, class variables, module-level constants, and every name in `__all__` if present. For each Python symbol, apply the naming rules from `_py-to-ts-translation-guide` to compute the expected TypeScript name (`snake_case` → `camelCase`, `UpperCamelCase` unchanged, `UPPER_SNAKE_CASE` unchanged, `_prefix` preserved).
+Build a list of every **Python public symbol**: functions, classes, class methods, class variables, module-level constants, enum types and their named member values, TypedDict types and their fields, Protocol types and their methods, dataclass types and their fields, property accessors, and every name in `__all__` if present. For each Python symbol, apply the naming rules from `_py-to-ts-translation-guide` to compute the expected TypeScript name (`snake_case` → `camelCase`, `UpperCamelCase` unchanged, `UPPER_SNAKE_CASE` unchanged, `_prefix` preserved).
 
-Verify the expected TypeScript name exists in the TypeScript file as an export (or as a public class member). Collect any missing symbols.
+Verify the expected TypeScript name exists in the TypeScript file as an export (or as a public class member). For enum types, each member name (e.g., `COMMUNITY`, `ENTERPRISE`) must exist as a member of the corresponding TypeScript enum — missing enum members are a FAIL. Collect any missing symbols.
 
 ## Step 3 — Export completeness
 
@@ -46,11 +46,19 @@ Translation rules:
 
 If the `@remarks` is missing, add it.
 
+**Property docstrings**: For every `@property` method in the Python source that has a docstring, verify the TypeScript `get` accessor has a `/** ... */` TSDoc block covering the same content. If missing, add it. TSDoc goes on the getter only (standard convention when both getter and setter exist).
+
+**Enum member docstrings**: Scan the Python enum class for per-member docstrings (trailing `"""..."""` on the line after the member assignment, or entries in the class-level "Values:" or "Members:" section). For each documented member, verify the TypeScript enum has a `/** ... */` comment immediately before that member declaration. If missing, add it.
+
+**TypedDict and dataclass field documentation**: If the Python class docstring includes an `Attributes:` section documenting fields, verify each TypeScript interface/class field has a `/** ... */` comment. If absent, add the field comments drawn from the Attributes section.
+
+**reST cross-reference conversion**: Scan the TypeScript file for raw `:class:`, `:meth:`, `:func:`, `:py:`, `:attr:` patterns (reStructuredText role syntax copied verbatim from Python). For each occurrence, convert it: `:class:Foo` or `:py:class:Foo` → `{@link Foo}` if Foo is a type in scope, otherwise plain `Foo`; `:meth:bar` → `{@link bar}` or plain `bar()`; `:func:baz` → `{@link baz}` or plain `baz()`; `:attr:x` → plain `x`. Never leave raw reST syntax in TSDoc.
+
 **Constant and class variable docstrings**: scan the Python file for trailing `"""..."""` patterns — a bare string literal on the line immediately following a module-level assignment or class variable declaration is a docstring for that item. For each one found, verify the TypeScript file has a `/** ... */` comment immediately *before* the corresponding declaration. If missing, add it.
 
 **Inline rationale comments**: scan the Python file for multi-line `#` comment blocks (2+ consecutive `#` lines). For each block, verify a corresponding `//` comment block exists at the same logical location in the TypeScript file. If missing, add it. Also scan for single-line `#` comments containing rationale keywords (`NOTE`, `WARNING`, `IMPORTANT`, `because`, `workaround`, `subtle`, `semantic`, `invariant`) and verify TypeScript `//` equivalents are present.
 
-After writing all documentation, record: N symbols documented out of M total, N constant docstrings present out of M found in Python, N inline comment blocks present out of M found in Python.
+After writing all documentation, record: N/M **function/method** docstrings present, N/M **property** docstrings present, N/M **enum member** docstrings present, N constant docstrings present out of M found in Python, N inline comment blocks present out of M found in Python.
 
 **Sanity check**: Run `grep -c '/\*\*' <ts-file>` and `grep -c '"""' <py-file>`. If the TypeScript `/**` count is less than two-thirds the Python `"""` count, documentation is likely still incomplete — review and complete before continuing. (Two-thirds because constant docstrings appear in both counts.)
 
@@ -100,7 +108,10 @@ Append the following subsection to the per-file section of `TRANSLATION_REPORT.m
 - **Existence**: PRESENT | MISSING
 - **Symbol completeness**: COMPLETE | MISSING: [list each missing symbol]
 - **Export completeness**: COMPLETE | PARTIAL: [list each missing export]
-- **Documentation**: FULL | PARTIAL (N/M symbols documented) | MISSING
+- **Documentation**: FULL | PARTIAL | MISSING
+  - Function/method docs: N/M present
+  - Property docs: N/M present
+  - Enum member docs: N/M present
   - Multiple inheritance `@remarks`: N/M required notes present
   - Constant/variable docs: N/M present
   - Inline comment blocks: N/M present
