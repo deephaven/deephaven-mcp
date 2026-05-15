@@ -126,6 +126,27 @@ TypeScript does not support multiple class inheritance. Strategy:
 | `psutil.pid_exists(pid)` | `process.kill(pid, 0)` in a try/catch (throws if PID does not exist) |
 | `resource.getrlimit` | Not available in Node.js — document the gap in TSDoc |
 
+## Test File Discovery
+
+The naming rule for Python test files is **deterministic** — apply it directly; do not search.
+
+| Python source file | Test file |
+|---|---|
+| `_foo.py` (leading underscore) | `test__foo.py` (double underscore) |
+| `__init__.py` | `test_init.py` |
+| `foo.py` (no leading underscore) | `test_foo.py` |
+
+The test file mirrors the source path under `tests/`:
+- `src/deephaven_mcp/_env.py` → `tests/test__env.py`
+- `src/deephaven_mcp/_exceptions.py` → `tests/test__exceptions.py`
+- `src/deephaven_mcp/auth/backends/_base.py` → `tests/auth/backends/test__base.py`
+- `src/deephaven_mcp/config/__init__.py` → `tests/config/test_init.py`
+- `src/deephaven_mcp/config/community.py` → `tests/config/test_community.py`
+
+Integration test files (`test__*_integration.py`, `test_server_integration.py`, `test_launcher_integration.py`) are separate supplemental tests — do not count them as the primary Python test file and do not include them in the Python `def test_` count.
+
+If no test file exists at the computed path, record "Python tests: 0 (no test file found at `<expected-path>`)" in TRANSLATION_REPORT.md. Never write `0` without noting the path checked.
+
 ## Testing Pattern Translations
 
 | Python (pytest) | TypeScript (vitest) |

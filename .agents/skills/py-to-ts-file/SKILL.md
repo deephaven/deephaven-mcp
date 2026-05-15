@@ -9,7 +9,7 @@ Consult `_py-to-ts-translation-guide` for all language mappings, naming rules, l
 
 ## Phase 1 — Inventory
 
-1. Read the specified Python source file and its test file in full.
+1. Read the specified Python source file in full. Then locate and read its Python test file using the **Test File Discovery** rules in `_py-to-ts-translation-guide`: if the source filename starts with `_` (e.g., `_env.py`) the test file is `test__env.py` (double underscore); if the source is `__init__.py` the test file is `test_init.py`; otherwise `test_<stem>.py`. The test file lives at `tests/<mirror-path>/`. Record the Python test count: `grep -c "def test_" <test-file>`. If no test file exists at the expected path, record "Python tests: 0 (no test file found at `<expected-path>`)".
 
 2. Determine the target TypeScript paths using the file mapping rules in `_py-to-ts-translation-guide`.
 
@@ -25,11 +25,14 @@ Open `TRANSLATION_REPORT.md` (create it with the header below if it does not exi
 ```markdown
 ### `<python-source-path>` → `<ts-path>`
 - **Status**: In progress
-- **Python tests**: (counted below)
-- **Coverage**: (measured below)
+- **Python tests**: (counted in Phase 1)
+- **TypeScript tests**: (counted in Phase 4)
 - **Notable deviations**: (recorded below)
 - **Translation gaps**: (recorded below — items that could not be translated)
 - **Problems**: (recorded below)
+
+#### Review
+(filled in by py-to-ts-review in Phase 4)
 ```
 
 If creating the file fresh, prepend this header first:
@@ -65,7 +68,7 @@ Generated: <YYYY-MM-DD>
 
 6. Write `<path>.test.ts` as a faithful port of the Python test file:
    - **Test case count**: count `def test_` occurrences in the Python test file — the TypeScript file must have at least that many `it()` calls
-   - **One-to-one mapping**: for each Python test, write a corresponding TypeScript test with the same scenario name, setup, and assertion intent
+   - **One-to-one mapping**: for each `def test_<name>` in the Python test file, write a corresponding TypeScript `it(...)` for that exact scenario — a count match alone is not sufficient; every Python test scenario must be explicitly accounted for
    - **Grouping**: use `describe` blocks matching Python's test class names (`class TestFoo`) or comment-group headings
    - **Parametrized tests**: translate `@pytest.mark.parametrize` to `it.each([values])(...)` — never manually unroll into separate `it()` calls
    - **Mocks**: `MagicMock()` → `vi.fn().mockReturnValue(...)`; `AsyncMock()` → `vi.fn().mockResolvedValue(...)`; `side_effect=Err()` → `vi.fn().mockRejectedValue(new Err())`
@@ -92,6 +95,14 @@ Generated: <YYYY-MM-DD>
    - Deep copies: use `structuredClone()`, not `JSON.parse(JSON.stringify())`
    - Error messages: match Python originals exactly
 
+8a. **Translate documentation** — for every Python module docstring, class docstring, and function/method docstring in the source file, write the corresponding TSDoc block in the TypeScript file:
+   - Python module docstring → `/** ... */` block at the top of the `.ts` file, before all imports
+   - Python class docstring → `/** ... */` immediately above `export class` (or `abstract class`)
+   - Python method/function docstring → `/** ... */` immediately above the signature, using `@param name - description`, `@returns`, `@throws {ErrorType} when condition`, `@example` tags
+   - **Preserve ALL content verbatim** — translate language only; never abbreviate, omit examples, or paraphrase
+   - For classes with multiple Python parents: add `@remarks` naming the dropped secondary parent (see Multiple Inheritance rules in `_py-to-ts-translation-guide`)
+   - Sanity check: `grep -c '"""' <py-file>` vs `grep -c '/\*\*' <ts-file>` — if TypeScript count is less than half the Python count, documentation is likely incomplete
+
 9. Run the test file and **confirm all tests PASS**:
    ```bash
    pnpm vitest run <test-file>
@@ -104,15 +115,15 @@ Update the per-file section in `TRANSLATION_REPORT.md`: fill in the Python `def 
 
 10. Re-check the completeness manifest: every item must now be `complete`. No stubs, no empty bodies.
 
-11. Apply `tsdocs-improve` on the TypeScript file — documentation depth must approximate the Python original. Python docstrings with 60-line architecture sections require equivalent TSDoc.
+11. Apply `py-to-ts-review` on the Python source file. This fixes missing TSDoc and reports structural issues. Fix every FAIL or NEEDS_WORK issue before continuing. Do not proceed until all verdicts are resolved.
 
-12. Apply `review-typescript-file` on the TypeScript file.
+12. Apply `review-typescript-file` on the TypeScript file for general TypeScript quality (type safety, logging, DRY, etc.).
 
 13. Run `tests-improve-ts` on the file to verify 100% per-file coverage:
     ```bash
     pnpm vitest run <test-file>
     ```
 
-Finalize the per-file section in `TRANSLATION_REPORT.md`: set **Status** to `Complete` (or `Incomplete` if gaps remain), fill in the coverage percentage. Then update the two global sections:
+Finalize the per-file section in `TRANSLATION_REPORT.md`: set **Status** to `Complete` (or `Incomplete` if gaps remain), fill in the Python test count (from Phase 1 Step 1) and TypeScript `it()` count. The `#### Review` subsection is appended automatically by `py-to-ts-review` in Step 11. Then update the two global sections:
 - **Translation Gaps** — any symbol, function, or behavior that could not be translated due to a missing Node.js equivalent, an unexposed DHE JS API feature, or a platform-specific Python dependency; include the symbol name and a one-line reason
 - **Items Requiring Human Review** — completed translations that need verification: DHE API call signatures that differ from Python, behavioral equivalence assumptions, multiple inheritance deviations; include the file path and a one-line description

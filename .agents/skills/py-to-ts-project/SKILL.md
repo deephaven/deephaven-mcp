@@ -15,10 +15,13 @@ Create (or overwrite) `TRANSLATION_REPORT.md` with this skeleton — individual 
 Generated: <YYYY-MM-DD>
 
 ## Overall Summary
+- Python source files: (from Step 1 inventory)
 - Files attempted: (filled in after full suite)
 - Files completed: (filled in after full suite)
 - Files with problems: (filled in after full suite)
-- Total Python tests: (filled in after full suite)  →  TypeScript tests: (filled in after full suite)
+- Total Python tests: (filled in, grep result) → TypeScript tests: (filled in, grep result)
+- Documentation coverage: N FULL / M PARTIAL / K MISSING
+- Translation review: N PASS / M NEEDS_WORK / K FAIL
 - Full suite: (PASS or FAIL — filled in after full suite)
 
 ## File-by-File Results
@@ -32,9 +35,20 @@ Generated: <YYYY-MM-DD>
 ## DHE Implementation Notes
 ```
 
-## Step 1 — Inventory
+## Step 1 — Inventory and gap check
 
-Inventory all Python source files in `src/deephaven_mcp/`. Exclude `__pycache__` and `.pyc` files.
+1. Find all Python source files:
+   ```bash
+   find src/deephaven_mcp -name "*.py" | grep -v __pycache__ | grep -v _version | sort
+   ```
+2. For each file, compute the expected TypeScript path using the file mapping rules in `_py-to-ts-translation-guide`.
+3. Check which TypeScript files already exist:
+   ```bash
+   find src-ts -name "*.ts" | grep -v "\.test\." | sort
+   ```
+4. Report any Python files with no TypeScript equivalent — these must be translated before the project can be considered complete.
+
+Record the total Python source file count in the Overall Summary's "Python source files" field.
 
 ## Step 2 — Build the Dependency Graph
 
@@ -63,6 +77,27 @@ Translate files level by level. Within a level, files are independent and can be
 
 For each Python source file in dependency order, apply the full `py-to-ts-file` procedure. Each file must pass its own tests before moving on to the next.
 
+## Step 3b — Exhaustive test-file audit
+
+Before reviewing individual files, verify that every Python test file has a corresponding TypeScript test file on disk:
+
+1. List every Python test file (excluding integration tests and `__pycache__`):
+   ```bash
+   find tests/ -name "test_*.py" | grep -v integration | grep -v __pycache__ | sort
+   ```
+2. For each Python test file, compute the expected TypeScript test file path using the file mapping in `_py-to-ts-translation-guide` (e.g., `tests/auth/backends/test__base.py` → `src-ts/auth/backends/base.test.ts`).
+3. List every TypeScript test file that actually exists:
+   ```bash
+   find src-ts -name "*.test.ts" | sort
+   ```
+4. Report every Python test file whose expected TypeScript counterpart is absent. Each gap is a FAIL that must be resolved before Step 4 — translate the missing test file via `py-to-ts-file` if needed.
+
+This step catches misnaming, skipped files, and any discrepancy between the deterministic naming rule and what was actually written to disk.
+
+## Step 3c — Review All Translated Files
+
+After the test-file audit passes (Step 3b), apply `py-to-ts-review` to every translated file pair. Collect all verdicts. Fix every FAIL verdict before proceeding to Step 4. NEEDS_WORK items that are minor documentation gaps may remain — record them in the Overall Summary.
+
 ## Step 4 — Full Test Suite
 
 After all files are translated, run the complete test suite with coverage:
@@ -71,7 +106,18 @@ pnpm vitest run --coverage
 ```
 All tests must pass. If any fail, fix the implementations — never the tests. Do not proceed to step 5 until the full suite is green.
 
-Update the **Overall Summary** section of `TRANSLATION_REPORT.md` with final counts: files attempted, files completed, files with problems, total Python `def test_` count across all translated files, total TypeScript `it()` count, and full suite result (PASS or FAIL).
+Update the **Overall Summary** section of `TRANSLATION_REPORT.md` with final counts. Use these exact commands for test counts:
+
+```bash
+# Python test count (excluding integration tests)
+grep -r "^def test_\|^    def test_\|^async def test_\|^    async def test_" tests/ \
+  | grep -v integration | wc -l
+
+# TypeScript test count
+grep -r "^\s*it(" src-ts/ --include="*.test.ts" | wc -l
+```
+
+Fill in: Python source file count (Step 1), files attempted, files completed, files with problems, Python test count, TypeScript test count, documentation coverage (count FULL/PARTIAL/MISSING from review verdicts), translation review results (count PASS/NEEDS_WORK/FAIL), and full suite result.
 
 ## Step 5 — Precommit
 
