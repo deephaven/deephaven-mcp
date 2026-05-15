@@ -86,6 +86,49 @@ static fromConfig(config: FooConfig): Foo { ... }
 
 **`@property` / `@foo.setter`**: Translate to `get`/`set` accessors.
 
+**Python `Enum` / `StrEnum` / `IntEnum`** → TypeScript `enum`:
+```python
+class SystemType(StrEnum):
+    COMMUNITY = "community"
+    ENTERPRISE = "enterprise"
+```
+```typescript
+export enum SystemType {
+    COMMUNITY = "community",
+    ENTERPRISE = "enterprise",
+}
+```
+- Member names stay `UPPER_SNAKE_CASE` (unchanged from Python)
+- `StrEnum` → string-valued TypeScript enum; `IntEnum` → number-valued TypeScript enum; plain `Enum` → use value type matching the Python value literals
+- Custom `__str__` or `__repr__` on the enum class: translate to a standalone helper function if needed
+
+**`TypedDict`** → TypeScript `interface` (preferred over Zod for structural type-only shapes):
+```python
+class FooContext(TypedDict):
+    bar: str
+    baz: int
+```
+```typescript
+export interface FooContext {
+    bar: string;
+    baz: number;
+}
+```
+- Generic TypedDict (parameterized with `Generic[T]`) → TypeScript generic interface `interface FooContext<T>`
+- Optional fields (`total=False` or `Required`/`NotRequired`) → `field?: Type` in the interface
+
+**`Protocol`** → TypeScript `interface`:
+```python
+class AsyncClosable(Protocol):
+    async def close(self) -> None: ...
+```
+```typescript
+export interface AsyncClosable {
+    close(): Promise<void>;
+}
+```
+- `@runtime_checkable` is not expressible in TypeScript — add a `@remarks` TSDoc note if present in Python
+
 **`async with`**: Translate to explicit `.open()`/`.close()` calls, or implement `Symbol.asyncDispose`.
 
 **`copy.deepcopy()`**: Use `structuredClone()`. Do NOT use `JSON.parse(JSON.stringify())` — it fails silently on `Uint8Array`, `Date`, `Map`, `Set`, circular references, and `undefined` values.
@@ -185,6 +228,27 @@ If no test file exists at the computed path, record "Python tests: 0 (no test fi
 - **Inline `#` comments — preserve rationale, discard noise.** Translate `#` → `//`. Do not convert inline rationale comments into TSDoc blocks; they belong next to the code they explain.
   - **Preserve**: multi-line `#` comment blocks (2+ consecutive lines); any single-line comment containing `NOTE`, `WARNING`, `IMPORTANT`, `because`, `workaround`, `subtle`, `semantic`, `invariant`, or any other phrase explaining a non-obvious design decision, external reference, or production-correctness constraint.
   - **Discard**: comments that merely restate what the adjacent code already says in plain English (e.g., `# Call the function`, `# Return the result`); tool annotations (`# type: ignore`, `# noqa`, `# pylint:`, `# fmt:`).
+- **Property docstrings**: a `@property` method with a docstring → `/** ... */` immediately above the `get` accessor in TypeScript. If both getter and setter exist, the TSDoc goes on the getter only.
+- **Enum member docstrings**: a Python enum member followed by a trailing `"""..."""` on the next line → `/** ... */` immediately before that member in the TypeScript enum:
+  ```python
+  class InitializationPhase(enum.Enum):
+      NOT_STARTED = "not_started"
+      """The resource has not begun initializing."""
+  ```
+  ```typescript
+  export enum InitializationPhase {
+      /** The resource has not begun initializing. */
+      NOT_STARTED = "not_started",
+  }
+  ```
+  If the enum documents all members in the class-level docstring ("Values:" or "Members:" section) rather than per-member trailing strings, translate each entry to a per-member `/** */` comment in TypeScript.
+- **TypedDict and dataclass field documentation**: if the Python class docstring includes an `Attributes:` section, translate each field description to a `/** ... */` comment immediately before the corresponding field in the TypeScript `interface` or class.
+- **reST cross-references**: Python docstrings use `:class:Foo`, `:meth:bar`, `:func:baz`, `:py:func:baz`, `:attr:x` (reStructuredText role syntax). When translating to TSDoc, convert:
+  - `:class:Foo` or `:py:class:Foo` → `{@link Foo}` if Foo is in scope; otherwise plain `Foo`
+  - `:meth:bar` or `:py:meth:bar` → `{@link bar}` or plain `bar()`
+  - `:func:baz` → `{@link baz}` or plain `baz()`
+  - `:attr:x` → plain `x`
+  - Never copy `:class:`, `:meth:`, `:func:`, `:py:` raw into TSDoc — they are reST-specific and unreadable in TypeScript
 - **Preserve ALL documentation verbatim** — translation of language is the only allowed change; never abbreviate, omit, or paraphrase
 - MCP tools: apply `tsdocs-improve` standards (Terminology Note and Format Accuracy sections with exact wording)
 
@@ -206,3 +270,5 @@ These specific errors occurred in the prior attempt and must not be repeated:
 12. **Skipping `setup_global_exception_logging`** — Node.js equivalents (`uncaughtException`, `unhandledRejection`) must be implemented
 13. **Dropping constant/variable docstrings** — a trailing `"""..."""` after an assignment is a docstring; it must appear as a `/** */` comment before the TypeScript declaration
 14. **Silently discarding inline rationale comments** — multi-line `#` blocks and any comment explaining WHY must be preserved as `//` comments; only noise comments (code restatements, tool annotations) may be omitted
+15. **Dropping enum member docstrings** — each Python enum member with a docstring (trailing `"""..."""` or documented in the class-level "Values" section) must have a `/** */` comment before it in the TypeScript enum; silently omitting them is a FAIL
+16. **Leaving reST cross-references raw** — `:class:Foo`, `:meth:bar`, `:func:baz`, `:py:` prefixes must be converted to `{@link}` or plain text; copying them verbatim into TSDoc produces unreadable documentation
