@@ -50,19 +50,17 @@ file format.
 
 ---
 
-#### `PYTHONLOGLEVEL`
+#### Log Level
 
-Controls the verbosity of log output from the MCP servers.
+Controls the verbosity of log output from the MCP servers. The variable name differs by implementation:
 
-| | |
-|---|---|
-| Required | No |
-| Default | `INFO` |
-| Values | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
-| Example | `DEBUG` |
+| Implementation | Variable | Values | Default |
+|---|---|---|---|
+| Python | `PYTHONLOGLEVEL` | `DEBUG`, `INFO`, `WARNING`, `ERROR` | `INFO` |
+| TypeScript | `LOG_LEVEL` | `trace`, `debug`, `info`, `warn`, `error` | `info` |
 
-Set to `DEBUG` to get detailed per-request logs when troubleshooting connection
-or authentication problems. Set to `WARNING` or `ERROR` to reduce noise in
+Set to `DEBUG` / `debug` for detailed per-request logs when troubleshooting connection
+or authentication problems. Set to `WARNING` / `warn` or higher to reduce noise in
 production.
 
 ---
