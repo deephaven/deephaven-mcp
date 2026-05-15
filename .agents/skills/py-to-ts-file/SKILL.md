@@ -13,7 +13,7 @@ Consult `_py-to-ts-translation-guide` for all language mappings, naming rules, l
 
 2. Determine the target TypeScript paths using the file mapping rules in `_py-to-ts-translation-guide`.
 
-3. Build a **completeness manifest**: list every public function, private function, class, class method, property, module-level constant, and exported name. Each item starts with status `needed`.
+3. Build a **completeness manifest**: list every public function, private function, class (including `@dataclass`, `TypedDict`, `Protocol`, and `Enum` subclasses), class method, enum member, property, TypedDict field, dataclass field, module-level constant, and exported name. Each item starts with status `needed`.
 
 4. If a TypeScript file already exists at the target path, compare it against the manifest:
    - Mark each item `complete`, `stub` (throws without real logic), or `missing`
@@ -100,7 +100,11 @@ Generated: <YYYY-MM-DD>
    - Python class docstring → `/** ... */` immediately above `export class` (or `abstract class`)
    - Python method/function docstring → `/** ... */` immediately above the signature, using `@param name - description`, `@returns`, `@throws {ErrorType} when condition`, `@example` tags
    - **Constant/variable docstrings**: a bare `"""..."""` on the line immediately after a module-level constant or class variable declaration is a docstring for that item — place a `/** ... */` comment *before* the TypeScript declaration
+   - **Property docstrings**: for every `@property` method with a docstring, add a `/** ... */` comment above the TypeScript `get` accessor (getter only when both getter and setter exist)
+   - **Enum member docstrings**: for every Python enum member documented by a trailing `"""..."""` or by an entry in the class-level "Values:" or "Members:" section, add a `/** ... */` comment before that member in the TypeScript enum
+   - **TypedDict and dataclass field documentation**: if a Python class docstring includes an `Attributes:` section, translate each field description to a `/** ... */` comment immediately before the corresponding field in the TypeScript interface or class
    - **Inline rationale comments**: for every multi-line `#` comment block (2+ consecutive `#` lines) and every single-line `#` comment that explains WHY (contains `NOTE`, `WARNING`, `IMPORTANT`, `because`, `workaround`, `subtle`, `semantic`, `invariant`, or any other rationale language), translate to a `//` comment at the same location in the TypeScript file. Do not convert these to TSDoc blocks. Discard only noise comments that restate what the adjacent code already says clearly.
+   - **reST cross-references**: scan all translated TSDoc blocks for raw `:class:`, `:meth:`, `:func:`, `:py:`, `:attr:` patterns copied from Python. Convert each to `{@link Name}` (if the symbol is in scope) or plain text (otherwise). Never leave raw reST syntax in the TypeScript file.
    - **Preserve ALL content verbatim** — translate language only; never abbreviate, omit examples, or paraphrase
    - For classes with multiple Python parents: add `@remarks` naming the dropped secondary parent (see Multiple Inheritance rules in `_py-to-ts-translation-guide`)
    - Sanity check: `grep -c '"""' <py-file>` vs `grep -c '/\*\*' <ts-file>` — if TypeScript count is less than two-thirds the Python count, documentation is likely incomplete (the threshold is two-thirds because constant docstrings count once each in both)
