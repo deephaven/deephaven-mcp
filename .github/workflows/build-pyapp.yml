@@ -1,0 +1,128 @@
+# Build standalone PyApp binaries for every deephaven-mcp console script
+# across the supported native platforms.
+#
+# Each matrix entry runs on a native runner for its target architecture so
+# that pip can install platform-specific wheels (numba, deephaven-server,
+# deephaven-coreplus-client, ...) into the bundled python-build-standalone
+# distribution. Cross-compilation is not supported by `scripts/build_pyapp.py`.
+#
+# Produced artifacts (per target):
+#   dist/pyapp/<target>/dh-mcp-community-server[.exe]
+#   dist/pyapp/<target>/dh-mcp-enterprise-server[.exe]
+#   dist/pyapp/<target>/dh-mcp-docs-server[.exe]
+#   dist/pyapp/<target>/manifest.json
+#   dist/pyapp/deephaven-mcp-pyapp-<version>-<target>.{tar.gz,zip}
+#
+# Binary filenames are identical across architectures; the target alias is
+# encoded only in the directory and archive names so documentation can refer
+# to them by a single canonical name.
+#
+# When the workflow runs in response to a tag push that matches `v*`, every
+# built binary is attached to the corresponding GitHub Release.
+
+name: Build PyApp Binaries
+
+on:
+  workflow_dispatch:
+    inputs:
+      python-version:
+        description: "CPython version to embed (e.g. 3.12.13)"
+        required: false
+        default: "3.12.13"
+      pbs-release:
+        description: "python-build-standalone release tag (e.g. 20260510)"
+        required: false
+        default: "20260510"
+      extras:
+        description: "Comma-separated optional dependency groups to bundle"
+        required: false
+        default: "community,enterprise"
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write # required for uploading release assets on tag pushes
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x86_64
+            runner: ubuntu-latest
+          - target: linux-aarch64
+            runner: ubuntu-24.04-arm
+          - target: macos-x86_64
+            runner: macos-13
+          - target: macos-aarch64
+            runner: macos-14
+          - target: windows-x86_64
+            runner: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          # setuptools_scm needs full history + tags to derive the version.
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python-version || '3.12' }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-${{ matrix.target }}-${{ hashFiles('.github/workflows/build-pyapp.yml') }}
+          restore-keys: cargo-${{ matrix.target }}-
+
+      - name: Install Python build dependencies
+        run: python -m pip install --upgrade pip build
+
+      - name: Build PyApp binaries
+        shell: bash
+        env:
+          PYTHON_VERSION: ${{ inputs.python-version || '3.12.13' }}
+          PBS_RELEASE: ${{ inputs.pbs-release || '20260510' }}
+          EXTRAS: ${{ inputs.extras || 'community,enterprise' }}
+        run: |
+          python scripts/build_pyapp.py \
+            --target "${{ matrix.target }}" \
+            --python-version "${PYTHON_VERSION}" \
+            --pbs-release "${PBS_RELEASE}" \
+            --extras "${EXTRAS}"
+
+      - name: Upload per-target directory
+        uses: actions/upload-artifact@v4
+        with:
+          name: pyapp-${{ matrix.target }}
+          path: dist/pyapp/${{ matrix.target }}/**
+          if-no-files-found: error
+
+      - name: Upload distribution archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: pyapp-archive-${{ matrix.target }}
+          path: |
+            dist/pyapp/deephaven-mcp-pyapp-*-${{ matrix.target }}.tar.gz
+            dist/pyapp/deephaven-mcp-pyapp-*-${{ matrix.target }}.zip
+          if-no-files-found: ignore
+
+      - name: Attach archive to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/pyapp/deephaven-mcp-pyapp-*-${{ matrix.target }}.tar.gz
+            dist/pyapp/deephaven-mcp-pyapp-*-${{ matrix.target }}.zip

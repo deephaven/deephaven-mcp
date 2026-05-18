@@ -471,6 +471,56 @@ This package registers the following console entry points for easy command-line 
 
 These commands are automatically available in your PATH after installing the package.
 
+### Standalone Binaries (PyApp)
+
+For distribution to users who cannot install Python or pull from PyPI, each
+entry point above can also be packaged as a fully self-contained native
+binary using [PyApp](https://ofek.dev/pyapp/). The resulting binaries embed
+a relocatable CPython distribution **and** the `deephaven-mcp` wheel together
+with every transitive runtime dependency, so they require no network access
+at runtime.
+
+Build all three binaries for the current host:
+
+```bash
+uv run scripts/build_pyapp.py
+```
+
+Build a subset, or for a specific platform / Python version:
+
+```bash
+uv run scripts/build_pyapp.py --binaries docs
+uv run scripts/build_pyapp.py --target linux-aarch64 --python-version 3.12.6
+uv run scripts/build_pyapp.py --extras community           # omit enterprise
+```
+
+Outputs are organized per target so filenames stay identical across
+architectures:
+
+```text
+dist/pyapp/
+  macos-aarch64/
+    dh-mcp-community-server
+    dh-mcp-enterprise-server
+    dh-mcp-docs-server
+    manifest.json
+  deephaven-mcp-pyapp-<version>-macos-aarch64.tar.gz   # distributable archive
+```
+
+The archive contains the binaries flat (no leading directory) so users can
+extract directly into a `bin/` folder. On Windows the archive is a `.zip`
+and the binaries carry the `.exe` suffix. Run
+`uv run scripts/build_pyapp.py --help` for the full option list. Requires
+the Rust toolchain (`cargo`) on `PATH`; install it from <https://rustup.rs>
+if needed.
+
+The GitHub Actions workflow
+[`.github/workflows/build-pyapp.yml`](../.github/workflows/build-pyapp.yml)
+runs the same script across a native matrix (Linux x86_64/aarch64, macOS
+x86_64/aarch64, Windows x86_64). It triggers on `workflow_dispatch` and on
+`v*` tag pushes; on a tag push the produced binaries are also attached to
+the corresponding GitHub Release.
+
 ## Transport Security (TLS)
 
 > **See also: [`docs/SECURITY.md`](SECURITY.md)** for the project's security
