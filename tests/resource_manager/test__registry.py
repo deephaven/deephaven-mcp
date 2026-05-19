@@ -394,14 +394,14 @@ async def test_mutable_registry_add_session_not_initialized_raises():
 
 
 @pytest.mark.asyncio
-async def test_mutable_registry_remove_session_success():
-    """remove_session() removes and returns the manager, discards tracking id."""
+async def test_mutable_registry_remove_success():
+    """remove() removes and returns the manager, discards tracking id."""
     registry = _make_initialized_mutable_registry()
     mgr = _make_mock_manager("community:default:tosremove")
     registry._items["community:default:tosremove"] = mgr
     registry._added_session_ids.add("community:default:tosremove")
 
-    result = await registry.remove_session("community:default:tosremove")
+    result = await registry.remove("community:default:tosremove")
 
     assert result is mgr
     assert "community:default:tosremove" not in registry._items
@@ -409,21 +409,21 @@ async def test_mutable_registry_remove_session_success():
 
 
 @pytest.mark.asyncio
-async def test_mutable_registry_remove_session_not_found_returns_none():
-    """remove_session() returns None for a non-existent session (idempotent)."""
+async def test_mutable_registry_remove_not_found_returns_none():
+    """remove() returns None for a non-existent session (idempotent)."""
     registry = _make_initialized_mutable_registry()
 
-    result = await registry.remove_session("community:default:ghost")
+    result = await registry.remove("community:default:ghost")
     assert result is None
 
 
 @pytest.mark.asyncio
-async def test_mutable_registry_remove_session_not_initialized_raises():
-    """remove_session() raises InternalError if registry not initialized."""
+async def test_mutable_registry_remove_not_initialized_raises():
+    """remove() raises InternalError if registry not initialized."""
     registry = _MutableRegistryImpl()
 
     with pytest.raises(InternalError):
-        await registry.remove_session("community:default:s")
+        await registry.remove("community:default:s")
 
 
 @pytest.mark.asyncio

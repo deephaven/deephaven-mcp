@@ -8,9 +8,11 @@ Provides lifespan context managers for the DHE and DHC FastMCP servers:
   yielded by both lifespans.
 
 Both factories yield the same context keys
-(``config_manager``, ``session_registry_manager``, ``refresh_lock``,
+(``config_manager``, ``registry``, ``evictor``, ``refresh_lock``,
 ``instance_tracker``) so all shared tools work without modification in
-either server context.
+either server context.  The ``registry`` is a single process-wide
+instance shared across all MCP clients; the ``evictor`` is its idle
+eviction coordinator.
 """
 
 import asyncio
@@ -26,11 +28,11 @@ from deephaven_mcp.config import (
     ConfigManager,
     EnterpriseServerConfigManager,
 )
-from deephaven_mcp.mcp_systems_server._session_registry_manager import (
-    SessionRegistryManager,
-)
 from deephaven_mcp.resource_manager import (
     BaseRegistry,
+    CommunitySessionRegistry,
+    EnterpriseSessionRegistry,
+    Evictor,
     InstanceTracker,
     cleanup_orphaned_resources,
 )
@@ -44,21 +46,20 @@ __all__ = [
 ]
 
 
-class LifespanContext[R: BaseRegistry](TypedDict):
+class LifespanContext(TypedDict):
     """Typed dictionary yielded by the MCP server lifespan context managers.
-
-    Parameterized by the registry type ``R`` so that consumers know whether
-    ``session_registry_manager`` produces
-    :class:`~deephaven_mcp.resource_manager.CommunitySessionRegistry` or
-    :class:`~deephaven_mcp.resource_manager.EnterpriseSessionRegistry`
-    instances per MCP session.
 
     Attributes:
         config_manager (ConfigManager): The server-wide configuration manager
             (``CommunityServerConfigManager`` for DHC, ``EnterpriseServerConfigManager``
             for DHE).
-        session_registry_manager (SessionRegistryManager[R]): Manages per-MCP-session
-            registries of type ``R``.
+        registry (BaseRegistry): The single process-wide Deephaven registry
+            shared across all MCP clients.  Tools narrow this to
+            ``CommunitySessionRegistry`` or ``EnterpriseSessionRegistry``
+            with ``isinstance``.
+        evictor (Evictor): The idle-eviction coordinator for ``registry``.
+            Internal to the systems server — only :mod:`mcp_reload` uses
+            it (to stop/start the sweep loop around a config reload).
         refresh_lock (asyncio.Lock): Lock acquired by the ``mcp_reload`` tools
             to serialize concurrent config-reload requests against each other.
             Other tools do not acquire this lock and run concurrently with
@@ -68,19 +69,20 @@ class LifespanContext[R: BaseRegistry](TypedDict):
     """
 
     config_manager: ConfigManager
-    session_registry_manager: SessionRegistryManager[R]
+    registry: BaseRegistry
+    evictor: Evictor
     refresh_lock: asyncio.Lock
     instance_tracker: InstanceTracker
 
 
-def _make_lifespan[R: BaseRegistry](
+def _make_lifespan(
     config_manager_class: type[ConfigManager],
-    session_registry_manager: SessionRegistryManager[R],
+    registry_class: type[BaseRegistry],
+    idle_timeout_seconds: float | None,
+    sweep_interval_seconds: float | None,
     label: str,
     config_path: str | None,
-) -> Callable[
-    [FastMCP[LifespanContext[R]]], AbstractAsyncContextManager[LifespanContext[R]]
-]:
+) -> Callable[[FastMCP[LifespanContext]], AbstractAsyncContextManager[LifespanContext]]:
     """Create a lifespan context manager shared by community and enterprise servers.
 
     Lifecycle of the returned context manager:
@@ -93,26 +95,37 @@ def _make_lifespan[R: BaseRegistry](
        c. Instantiate ``config_manager_class(config_path=config_path)`` and
           eagerly load the configuration (so config errors surface during
           startup rather than on first tool call).
-       d. Start ``session_registry_manager`` (launches its TTL sweeper).
-       e. Create a fresh ``refresh_lock`` for the ``mcp_reload`` tools.
-       f. Yield a :class:`LifespanContext` containing the four objects
+       d. Construct the single process-wide registry of type
+          ``registry_class`` and call ``initialize()`` on it.
+       e. Construct an :class:`Evictor` for the registry with the
+          configured ``idle_timeout_seconds`` and ``sweep_interval_seconds``
+          and start its sweeper loop.
+       f. Create a fresh ``refresh_lock`` for the ``mcp_reload`` tools.
+       g. Yield a :class:`LifespanContext` containing the five objects
           above.
 
     2. **Shutdown** (in ``finally``, runs on both clean shutdown and
        startup failure):
 
-       a. ``await session_registry_manager.stop()``; errors are logged
-          and swallowed so that step (b) still runs.
-       b. ``await instance_tracker.unregister()`` if the tracker was
+       a. ``await evictor.stop()`` if the evictor was constructed;
+          errors are logged and swallowed so the next step runs.
+       b. ``await registry.close()`` if the registry was initialized;
+          errors are logged and swallowed so step (c) still runs.
+       c. ``await instance_tracker.unregister()`` if the tracker was
           successfully created in step 1a; errors are logged and
           swallowed.
 
     Args:
         config_manager_class (type[ConfigManager]): The config manager class
             to instantiate during startup step 1c.
-        session_registry_manager (SessionRegistryManager[R]): The per-session
-            registry manager to start (1d) and stop (2a) with the server
-            lifespan.
+        registry_class (type[BaseRegistry]): The concrete ``BaseRegistry``
+            subclass to instantiate as the single process-wide registry.
+        idle_timeout_seconds (float | None): Per-Deephaven-session idle
+            timeout passed into the :class:`Evictor`.  ``None`` disables
+            the sweeper entirely.
+        sweep_interval_seconds (float | None): Sweeper cadence passed
+            into the :class:`Evictor`.  ``None`` disables the sweeper
+            entirely (same effect as ``idle_timeout_seconds=None``).
         label (str): Server label used in log messages (``"community"`` or
             ``"enterprise"``).
         config_path (str | None): Explicit path to the config file, or
@@ -120,19 +133,21 @@ def _make_lifespan[R: BaseRegistry](
             variable (resolution is performed by ``config_manager_class``).
 
     Returns:
-        Callable[[FastMCP[LifespanContext[R]]], AbstractAsyncContextManager[LifespanContext[R]]]:
+        Callable[[FastMCP[LifespanContext]], AbstractAsyncContextManager[LifespanContext]]:
         An async context manager suitable for passing to
         ``FastMCP(..., lifespan=...)``.
     """
 
     @asynccontextmanager
     async def _lifespan(
-        server: FastMCP[LifespanContext[R]],
-    ) -> AsyncIterator[LifespanContext[R]]:
+        server: FastMCP[LifespanContext],
+    ) -> AsyncIterator[LifespanContext]:
         _LOGGER.info(
             f"[{label}_lifespan] Starting {label.upper()} MCP server '{server.name}'"
         )
         instance_tracker = None
+        registry: BaseRegistry | None = None
+        evictor: Evictor | None = None
         try:
             instance_tracker = await InstanceTracker.create_and_register()
             _LOGGER.info(
@@ -147,7 +162,15 @@ def _make_lifespan[R: BaseRegistry](
                 f"[{label}_lifespan] {label.capitalize()} configuration loaded."
             )
 
-            await session_registry_manager.start()
+            registry = registry_class()
+            await registry.initialize(config_manager)
+
+            evictor = Evictor(
+                registry,
+                idle_timeout_seconds=idle_timeout_seconds,
+                sweep_interval_seconds=sweep_interval_seconds,
+            )
+            await evictor.start()
 
             refresh_lock = asyncio.Lock()
 
@@ -156,7 +179,8 @@ def _make_lifespan[R: BaseRegistry](
             )
             yield LifespanContext(
                 config_manager=config_manager,
-                session_registry_manager=session_registry_manager,
+                registry=registry,
+                evictor=evictor,
                 refresh_lock=refresh_lock,
                 instance_tracker=instance_tracker,
             )
@@ -164,12 +188,16 @@ def _make_lifespan[R: BaseRegistry](
             _LOGGER.info(
                 f"[{label}_lifespan] Shutting down {label.upper()} MCP server '{server.name}'"
             )
-            try:
-                await session_registry_manager.stop()
-            except Exception:
-                _LOGGER.exception(
-                    f"[{label}_lifespan] Error stopping session_registry_manager"
-                )
+            if evictor is not None:
+                try:
+                    await evictor.stop()
+                except Exception:
+                    _LOGGER.exception(f"[{label}_lifespan] Error stopping evictor")
+            if registry is not None:
+                try:
+                    await registry.close()
+                except Exception:
+                    _LOGGER.exception(f"[{label}_lifespan] Error closing registry")
             if instance_tracker is not None:
                 try:
                     await instance_tracker.unregister()
@@ -184,58 +212,73 @@ def _make_lifespan[R: BaseRegistry](
     return _lifespan
 
 
-def make_enterprise_lifespan[R: BaseRegistry](
-    session_registry_manager: SessionRegistryManager[R],
+def make_enterprise_lifespan(
+    idle_timeout_seconds: float | None = None,
+    sweep_interval_seconds: float | None = None,
     config_path: str | None = None,
-) -> Callable[
-    [FastMCP[LifespanContext[R]]], AbstractAsyncContextManager[LifespanContext[R]]
-]:
+) -> Callable[[FastMCP[LifespanContext]], AbstractAsyncContextManager[LifespanContext]]:
     """Create a FastMCP lifespan for the DHE MCP server.
 
-    The returned lifespan initializes an :class:`EnterpriseServerConfigManager` that reads
-    the DHE config file and starts the given :class:`SessionRegistryManager` for per-session
-    registry management.
+    The returned lifespan initializes an :class:`EnterpriseServerConfigManager`
+    that reads the DHE config file, constructs a single shared
+    :class:`EnterpriseSessionRegistry` for the server process, and an
+    :class:`Evictor` that runs idle eviction for it.
 
     Args:
-        session_registry_manager (SessionRegistryManager[R]): The per-session registry manager to start
-            and stop with the server lifespan.
+        idle_timeout_seconds (float | None): Per-Deephaven-session idle
+            timeout for the Evictor's sweeper.  ``None`` disables the
+            sweeper entirely.
+        sweep_interval_seconds (float | None): Sweeper cadence for the
+            Evictor.  ``None`` disables the sweeper entirely.
         config_path (str | None): Explicit path to the DHE config file.
-            If ``None``, the ``DH_MCP_CONFIG_FILE`` environment variable is used.
+            If ``None``, the ``DH_MCP_CONFIG_FILE`` environment variable is
+            used.
 
     Returns:
-        Callable[[FastMCP[LifespanContext[R]]], AbstractAsyncContextManager[LifespanContext[R]]]: An async
+        Callable[[FastMCP[LifespanContext]], AbstractAsyncContextManager[LifespanContext]]: An async
         context manager suitable for passing to ``FastMCP(..., lifespan=...)``.
     """
     return _make_lifespan(
         EnterpriseServerConfigManager,
-        session_registry_manager,
+        EnterpriseSessionRegistry,
+        idle_timeout_seconds,
+        sweep_interval_seconds,
         "enterprise",
         config_path,
     )
 
 
-def make_community_lifespan[R: BaseRegistry](
-    session_registry_manager: SessionRegistryManager[R],
+def make_community_lifespan(
+    idle_timeout_seconds: float | None = None,
+    sweep_interval_seconds: float | None = None,
     config_path: str | None = None,
-) -> Callable[
-    [FastMCP[LifespanContext[R]]], AbstractAsyncContextManager[LifespanContext[R]]
-]:
+) -> Callable[[FastMCP[LifespanContext]], AbstractAsyncContextManager[LifespanContext]]:
     """Create a FastMCP lifespan for the DHC MCP server.
 
-    The returned lifespan initializes a :class:`CommunityServerConfigManager` that reads
-    the DHC config file and starts the given :class:`SessionRegistryManager` for per-session
-    registry management.
+    The returned lifespan initializes a :class:`CommunityServerConfigManager`
+    that reads the DHC config file, constructs a single shared
+    :class:`CommunitySessionRegistry` for the server process, and an
+    :class:`Evictor` that runs idle eviction for it.
 
     Args:
-        session_registry_manager (SessionRegistryManager[R]): The per-session registry manager to start
-            and stop with the server lifespan.
+        idle_timeout_seconds (float | None): Per-Deephaven-session idle
+            timeout for the Evictor's sweeper.  ``None`` disables the
+            sweeper entirely.
+        sweep_interval_seconds (float | None): Sweeper cadence for the
+            Evictor.  ``None`` disables the sweeper entirely.
         config_path (str | None): Explicit path to the DHC config file.
-            If ``None``, the ``DH_MCP_CONFIG_FILE`` environment variable is used.
+            If ``None``, the ``DH_MCP_CONFIG_FILE`` environment variable is
+            used.
 
     Returns:
-        Callable[[FastMCP[LifespanContext[R]]], AbstractAsyncContextManager[LifespanContext[R]]]: An async
+        Callable[[FastMCP[LifespanContext]], AbstractAsyncContextManager[LifespanContext]]: An async
         context manager suitable for passing to ``FastMCP(..., lifespan=...)``.
     """
     return _make_lifespan(
-        CommunityServerConfigManager, session_registry_manager, "community", config_path
+        CommunityServerConfigManager,
+        CommunitySessionRegistry,
+        idle_timeout_seconds,
+        sweep_interval_seconds,
+        "community",
+        config_path,
     )

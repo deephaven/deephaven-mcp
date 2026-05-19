@@ -6,7 +6,8 @@ of async-closable objects in a coroutine-safe environment.
 Key Classes:
     BaseRegistry: Abstract, generic, coroutine-safe registry base class.
     MutableSessionRegistry: Extends BaseRegistry with tracked mutation support
-        (add/remove/count of dynamically created sessions).
+        (add/count of dynamically created sessions).  Removal is exposed on
+        :class:`BaseRegistry` itself via :meth:`remove`.
 
 Features:
     - Abstract interface for all registry implementations (subclass and implement `_load_items`).
@@ -14,9 +15,17 @@ Features:
     - Generic: Can be subclassed to manage any object type, not just sessions.
     - Lifecycle management: Robust `initialize` and `close` methods for resource control.
 
+Eviction:
+    Idle eviction is the responsibility of a separate
+    :class:`~deephaven_mcp.resource_manager.Evictor`, not the registry.  The
+    Evictor uses the registry's existing public collection API
+    (:meth:`get_all` for iteration and :meth:`remove` for identity-checked
+    removal); the registry itself has no sweep loop, no timing state, and
+    no eviction-specific methods.
+
 Usage:
     Subclass `BaseRegistry` and implement `_load_items` to define how items are loaded.
-    Subclass `MutableSessionRegistry` when callers also need to add and remove items
+    Subclass `MutableSessionRegistry` when callers also need to add items
     dynamically after initialization.
 """
 
@@ -149,10 +158,16 @@ class BaseRegistry[T: AsyncClosable](abc.ABC):
 
     Manages a ``dict[str, T]`` of async-closable items.  Subclasses implement
     ``_load_items`` to populate the dict at initialization time; this class
-    handles locking, idempotent initialization, retrieval, and shutdown.
+    handles locking, idempotent initialization, retrieval, removal, and
+    shutdown.
 
-    Subclasses that need to add or remove items after initialization should
-    extend ``MutableSessionRegistry`` instead.
+    Subclasses that need to track dynamically-added items separately from
+    those loaded by ``_load_items`` should extend ``MutableSessionRegistry``.
+
+    Idle eviction is handled by an external
+    :class:`~deephaven_mcp.resource_manager.Evictor` that uses only public
+    methods on the registry (:meth:`get_all` for iteration,
+    :meth:`remove` for identity-checked removal).
     """
 
     def __init__(self) -> None:
@@ -161,7 +176,8 @@ class BaseRegistry[T: AsyncClosable](abc.ABC):
         self._lock = asyncio.Lock()
         self._initialized = False
         _LOGGER.info(
-            f"[{self.__class__.__name__}] created (must call and await initialize() after construction)"
+            f"[{self.__class__.__name__}] created "
+            f"(must call and await initialize() after construction)"
         )
 
     def _check_initialized(self) -> None:
@@ -251,6 +267,58 @@ class BaseRegistry[T: AsyncClosable](abc.ABC):
             # Return a copy to avoid external modification
             return RegistrySnapshot.simple(items=self._items.copy())
 
+    async def remove(self, name: str, *, expected: T | None = None) -> T | None:
+        """Remove and return the item registered under ``name``.
+
+        Symmetric public verb to :meth:`get`.  Used by both routine
+        callers (e.g. ``session_*_delete`` tools) and the
+        :class:`~deephaven_mcp.resource_manager.Evictor` sweep loop.
+
+        When ``expected`` is provided, the removal is **identity-checked**:
+        the item is dropped only when ``self._items[name] is expected``.
+        When ``expected`` is ``None``, the removal is unconditional (the
+        existing item under ``name``, whatever it is, is dropped).
+
+        Subclasses extend the post-removal behavior via :meth:`_on_removed`,
+        which is invoked under ``self._lock`` immediately after the pop.
+
+        Args:
+            name (str): Key of the item to remove.
+            expected (T | None): If non-``None``, only remove when the
+                current entry is exactly this identity.
+
+        Returns:
+            T | None: The removed item, or ``None`` when no item is
+                registered under ``name`` (or when ``expected`` was
+                provided and the current entry did not match).
+
+        Raises:
+            InternalError: If the registry has not been initialized.
+        """
+        async with self._lock:
+            self._check_initialized()
+            current = self._items.get(name)
+            if current is None:
+                return None
+            if expected is not None and current is not expected:
+                return None
+            removed = self._items.pop(name, None)
+            self._on_removed(name)
+            _LOGGER.debug(f"[{self.__class__.__name__}] removed item '{name}'")
+            return removed
+
+    def _on_removed(self, _name: str) -> None:
+        """Subclass hook invoked under ``self._lock`` after :meth:`remove` pops an item.
+
+        Default is a no-op.  Subclasses that maintain additional tracking
+        structures (e.g.
+        :attr:`MutableSessionRegistry._added_session_ids`) override this
+        to keep them atomically consistent with ``_items``.  The parameter
+        is prefixed with ``_`` here because the base body does not use
+        it; overrides typically rename it to ``name``.
+        """
+        return None
+
     async def _close_items(self, items: list[T]) -> None:
         """Close a list of managed items, logging any errors.
 
@@ -302,10 +370,13 @@ class BaseRegistry[T: AsyncClosable](abc.ABC):
 class MutableSessionRegistry(BaseRegistry[BaseItemManager]):
     """Abstract registry that supports dynamic mutation after initialization.
 
-    Extends ``BaseRegistry`` with ``_added_session_ids`` and three mutation
-    methods (``add_session``, ``remove_session``, ``count_added_sessions``) that
-    track items added after the initial ``_load_items`` call.  ``_load_items``
-    is still abstract — subclasses define how items are loaded from config.
+    Extends ``BaseRegistry`` with ``_added_session_ids`` and two mutation
+    methods (``add_session``, ``count_added_sessions``) that track items
+    added after the initial ``_load_items`` call.  ``_load_items`` is
+    still abstract — subclasses define how items are loaded from config.
+    Removal uses the inherited :meth:`BaseRegistry.remove`; the
+    :meth:`_on_removed` override below keeps ``_added_session_ids`` in
+    sync with ``_items``.
 
     See Also:
         - `CommunitySessionRegistry`: Concrete subclass for community sessions.
@@ -316,6 +387,17 @@ class MutableSessionRegistry(BaseRegistry[BaseItemManager]):
         """Initialize the registry.  Call ``await initialize()`` before use."""
         super().__init__()
         self._added_session_ids: set[str] = set()
+
+    @override
+    def _on_removed(self, name: str) -> None:
+        """Discard the removed key from the added-session tracking set.
+
+        Frees the corresponding ``max_concurrent_sessions`` slot — see
+        :meth:`count_added_sessions`.  Called under ``self._lock`` from
+        :meth:`BaseRegistry.remove`, so the pop from ``_items`` and the
+        discard from ``_added_session_ids`` are observed atomically.
+        """
+        self._added_session_ids.discard(name)
 
     @override
     async def close(self) -> None:
@@ -352,30 +434,6 @@ class MutableSessionRegistry(BaseRegistry[BaseItemManager]):
             self._items[session_id] = manager
             self._added_session_ids.add(session_id)
             _LOGGER.debug(f"[{self.__class__.__name__}] added session '{session_id}'")
-
-    async def remove_session(self, session_id: str) -> BaseItemManager | None:
-        """Remove a session manager from the registry.
-
-        Idempotent — returns ``None`` if the session does not exist.
-
-        Args:
-            session_id (str): Fully qualified session identifier.
-
-        Returns:
-            The removed manager, or ``None`` if not found.
-
-        Raises:
-            InternalError: If the registry has not been initialized.
-        """
-        async with self._lock:
-            self._check_initialized()
-            manager = self._items.pop(session_id, None)
-            if manager is not None:
-                self._added_session_ids.discard(session_id)
-                _LOGGER.debug(
-                    f"[{self.__class__.__name__}] removed session '{session_id}'"
-                )
-            return manager
 
     async def count_added_sessions(
         self, system_type: SystemType, system_name: str

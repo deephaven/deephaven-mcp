@@ -1063,7 +1063,7 @@ async def _delete_session_resources(
     2. **Close** the session (stops the Docker container or Python process).
        Close failure is non-fatal: it is logged as a warning and cleanup
        continues so that the registry entry is always removed.
-    3. **Remove** the session from the registry.  If ``remove_session`` raises,
+    3. **Remove** the session from the registry.  If ``remove`` raises,
        the exception propagates to the caller.
 
     Args:
@@ -1075,7 +1075,7 @@ async def _delete_session_resources(
         instance_tracker (InstanceTracker): Tracker used to unregister Python processes.
 
     Raises:
-        Exception: Propagates any exception raised by ``session_registry.remove_session``.
+        Exception: Propagates any exception raised by ``session_registry.remove``.
             Close failure is swallowed and logged; removal failure is fatal.
     """
     if isinstance(session_manager, DynamicCommunitySessionManager):
@@ -1096,7 +1096,7 @@ async def _delete_session_resources(
         )
         # Continue with removal even if close failed
 
-    removed_manager = await session_registry.remove_session(session_id)
+    removed_manager = await session_registry.remove(session_id)
     if removed_manager is None:
         _LOGGER.warning(
             f"[mcp_systems_server:session_community_delete] Session '{session_id}' was not found in registry during removal"

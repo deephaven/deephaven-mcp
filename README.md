@@ -666,7 +666,8 @@ The enterprise server (`dh-mcp-enterprise-server`) uses a **flat** JSON or JSON5
 | `auth.backends` | array of string | Yes | Non-empty subset of `["password", "private_key"]`. Each entry enables one HTTP auth backend. |
 | `auth.allow_effective_user` | boolean | No | Default `false`. When `true`, the `"password"` backend honors the optional `X-Deephaven-Effective-User` header so privileged callers can act as another user. |
 | `connection_timeout` | int or float | No | Timeout in seconds for connecting to the system (default: 10.0) |
-| `mcp_session_idle_timeout_seconds` | int or float | No | Seconds of MCP client inactivity after which the per-session Deephaven registry is closed and resources are reclaimed (default: 3600.0 — 1 hr). Must be positive. |
+| `session_idle_timeout_seconds` | int or float | No | Seconds of Deephaven-session inactivity after which idle sessions in the shared registry are closed; static sessions are kept and lazily reconnected, dynamic sessions are removed (default: 3600.0 — 1 hr). Must be positive. |
+| `session_idle_sweep_interval_seconds` | int or float | No | Cadence in seconds for the per-registry idle sweeper loop that checks for idle sessions (default: 60.0). Must be positive. |
 | `session_creation` | object | No | Optional section that enables `session_enterprise_create`. If absent, the tool returns a "not configured" error. When present, `defaults` and `defaults.heap_size_gb` are required. |
 | `session_creation.max_concurrent_sessions` | integer | No | Max concurrent sessions (default: 5). Set to 0 to disable `session_enterprise_create` |
 | `session_creation.defaults` | object | Yes (when section present) | Default parameters applied to `session_enterprise_create` when the caller does not specify them |
@@ -701,7 +702,7 @@ dh-mcp-enterprise-server --config /path/to/dhe_staging.json --port 8004 >dh-mcp-
 
 ### Configuring DHC (Community) Server
 
-The community server (`dh-mcp-community-server`) uses a flat JSON or JSON5 config file. Valid top-level keys are `"auth"` (**required**), `"sessions"`, `"session_creation"`, `"security"`, and `"mcp_session_idle_timeout_seconds"` (all others optional). The `"auth"` block configures the PSK gate that controls who may connect to the community MCP server itself; the validator refuses to start the server unless it is present and contains a PSK (`auth.psk` or `auth.psk_env_var`) or `auth.enabled: false` (loopback binds only). See [`docs/ENV.md`](docs/ENV.md#community-mcp-server-gate-authpsk_env_var) for `auth.psk_env_var` and related fields.
+The community server (`dh-mcp-community-server`) uses a flat JSON or JSON5 config file. Valid top-level keys are `"auth"` (**required**), `"sessions"`, `"session_creation"`, `"security"`, `"session_idle_timeout_seconds"`, and `"session_idle_sweep_interval_seconds"` (all others optional). The `"auth"` block configures the PSK gate that controls who may connect to the community MCP server itself; the validator refuses to start the server unless it is present and contains a PSK (`auth.psk` or `auth.psk_env_var`) or `auth.enabled: false` (loopback binds only). See [`docs/ENV.md`](docs/ENV.md#community-mcp-server-gate-authpsk_env_var) for `auth.psk_env_var` and related fields.
 
 **Config file location**: Pass via `--config` CLI flag or `DH_MCP_CONFIG_FILE` environment variable.
 
@@ -824,7 +825,8 @@ Top-level fields that apply to the server as a whole (not per-session):
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `mcp_session_idle_timeout_seconds` | int or float | No | Seconds of MCP client inactivity after which the per-session Deephaven registry is closed and resources are reclaimed (default: 3600.0 — 1 hr). Must be positive. |
+| `session_idle_timeout_seconds` | int or float | No | Seconds of Deephaven-session inactivity after which idle sessions in the shared registry are closed; static sessions are kept and lazily reconnected, dynamic sessions are removed (default: 3600.0 — 1 hr). Must be positive. |
+| `session_idle_sweep_interval_seconds` | int or float | No | Cadence in seconds for the per-registry idle sweeper loop that checks for idle sessions (default: 60.0). Must be positive. |
 
 #### Community Session Creation Configuration
 

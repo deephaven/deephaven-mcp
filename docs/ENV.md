@@ -295,7 +295,7 @@ values raise a `ValueError` at startup.
 | `DH_MCP_SAML_AUTH_TIMEOUT_SECONDS` | `120.0` | Timeout for SAML authentication. Longer than standard auth to accommodate the browser redirect roundtrip. |
 | `DH_MCP_PQ_MANAGEMENT_TIMEOUT_SECONDS` | `60.0` | Timeout for PQ management operations (add, delete, modify, stop). Does not cover waiting for a worker to reach a target state — see `DH_MCP_PQ_STATE_CHANGE_TIMEOUT_SECONDS`. |
 | `DH_MCP_QUICK_OPERATION_TIMEOUT_SECONDS` | `5.0` | Timeout for lightweight network round-trips (ping, key management). A timeout here typically indicates a connectivity problem. |
-| `DH_MCP_PQ_STATE_CHANGE_TIMEOUT_SECONDS` | `120.0` | Timeout for waiting on a PQ to reach a target state after a start or restart. Increase for PQs with large heaps or slow initialization scripts. |
+| `DH_MCP_PQ_STATE_CHANGE_TIMEOUT_SECONDS` | `120` *(int)* | Timeout for waiting on a PQ to reach a target state after a start or restart. Increase for PQs with large heaps or slow initialization scripts. |
 | `DH_MCP_NO_WAIT_SECONDS` | `0.0` | Sentinel value passed to controller methods to mean "return immediately without waiting". Overriding this is rarely useful. |
 | `DH_MCP_TIMEOUT_WARNING_THRESHOLD` | `60` *(int)* | MCP tool operations exceeding this many seconds generate a warning, because MCP clients may time out before the operation completes. |
 | `DH_MCP_DEFAULT_PQ_TIMEOUT` | `30` *(int)* | Default timeout (seconds) used by PQ lifecycle MCP tools (start, stop, restart) when the caller does not supply an explicit value. |
@@ -341,7 +341,7 @@ Port the Docs Server HTTP server listens on.
 | | |
 |---|---|
 | Required | No |
-| Default | `8001` (falls back to `PORT` for [Cloud Run](https://cloud.google.com/run) compatibility) |
+| Default | `PORT` env var if set, otherwise `8001` (the `PORT` fallback exists for [Cloud Run](https://cloud.google.com/run) compatibility) |
 | Example | `9000` |
 
 The server checks `MCP_DOCS_PORT` first, then `PORT` (the standard Cloud Run

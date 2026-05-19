@@ -12,7 +12,6 @@ import pytest
 from conftest import (
     MockContext,
     create_mock_instance_tracker,
-    create_mock_session_registry_manager,
 )
 
 from deephaven_mcp import config
@@ -59,9 +58,7 @@ async def test_session_tables_schema_empty_table_names():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=session_registry
-            ),
+            "registry": session_registry,
         }
     )
     res = await session_tables_schema(context, session_id="worker", table_names=[])
@@ -100,9 +97,7 @@ async def test_session_tables_schema_interface_contract():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=session_registry
-            ),
+            "registry": session_registry,
         }
     )
 
@@ -167,9 +162,7 @@ async def test_session_tables_schema_no_tables():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=session_registry
-            ),
+            "registry": session_registry,
         }
     )
     res = await session_tables_schema(context, session_id="worker", table_names=None)
@@ -214,9 +207,7 @@ async def test_session_tables_schema_success():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=session_registry
-            ),
+            "registry": session_registry,
         }
     )
 
@@ -287,9 +278,7 @@ async def test_session_tables_schema_all_tables():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=session_registry
-            ),
+            "registry": session_registry,
         }
     )
 
@@ -353,9 +342,7 @@ async def test_session_tables_schema_schema_key_error():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=session_registry
-            ),
+            "registry": session_registry,
         }
     )
 
@@ -396,9 +383,7 @@ async def test_session_tables_schema_session_error():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=session_registry
-            ),
+            "registry": session_registry,
         }
     )
     res = await session_tables_schema(context, session_id="worker", table_names=["t1"])
@@ -427,9 +412,7 @@ async def test_session_tables_list_success_multiple_tables():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=session_registry
-            ),
+            "registry": session_registry,
         }
     )
 
@@ -467,9 +450,7 @@ async def test_session_tables_list_success_empty_session():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=session_registry
-            ),
+            "registry": session_registry,
         }
     )
 
@@ -496,9 +477,7 @@ async def test_session_tables_list_invalid_session_id():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=session_registry
-            ),
+            "registry": session_registry,
         }
     )
 
@@ -525,9 +504,7 @@ async def test_session_tables_list_session_connection_failure():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=session_registry
-            ),
+            "registry": session_registry,
         }
     )
 
@@ -560,9 +537,7 @@ async def test_session_tables_list_session_tables_method_failure():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=session_registry
-            ),
+            "registry": session_registry,
         }
     )
 
@@ -595,9 +570,7 @@ async def test_session_tables_list_community_session():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=session_registry
-            ),
+            "registry": session_registry,
         }
     )
 
@@ -626,9 +599,7 @@ async def test_session_table_data_success_default_params():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
@@ -691,9 +662,7 @@ async def test_session_table_data_success_custom_params():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
@@ -737,9 +706,7 @@ async def test_session_table_data_success_full_table():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
@@ -792,9 +759,7 @@ async def test_session_table_data_invalid_format():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
@@ -833,9 +798,7 @@ async def test_session_table_data_size_limit_exceeded():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
@@ -869,9 +832,7 @@ async def test_session_table_data_session_not_found():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
@@ -895,9 +856,7 @@ async def test_session_table_data_table_not_found():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 

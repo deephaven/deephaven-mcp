@@ -23,7 +23,8 @@ And one internal helper used only within this module:
 __all__ = [
     "ConfigManager",
     "CONFIG_ENV_VAR",
-    "DEFAULT_MCP_SESSION_IDLE_TIMEOUT_SECONDS",
+    "DEFAULT_SESSION_IDLE_TIMEOUT_SECONDS",
+    "DEFAULT_SESSION_IDLE_SWEEP_INTERVAL_SECONDS",
 ]
 
 import abc
@@ -43,13 +44,11 @@ _LOGGER = logging.getLogger(__name__)
 CONFIG_ENV_VAR = "DH_MCP_CONFIG_FILE"
 """Name of the environment variable specifying the path to the Deephaven MCP config file."""
 
-DEFAULT_MCP_SESSION_IDLE_TIMEOUT_SECONDS: float = 3600.0
-"""Default MCP session idle timeout in seconds (1 hour).
+DEFAULT_SESSION_IDLE_TIMEOUT_SECONDS: float = 3600.0
+"""Default idle timeout in seconds for a Deephaven session (1 hour)."""
 
-After this many seconds of inactivity from an MCP client, its per-session
-Deephaven registry is closed by the TTL sweeper.  Overridable per-server via the
-``mcp_session_idle_timeout_seconds`` config file key.
-"""
+DEFAULT_SESSION_IDLE_SWEEP_INTERVAL_SECONDS: float = 60.0
+"""Default cadence in seconds for the per-registry idle sweeper loop."""
 
 
 class ConfigManager(abc.ABC):
@@ -122,30 +121,55 @@ class ConfigManager(abc.ABC):
         """
         ...
 
-    async def get_mcp_session_idle_timeout_seconds(self) -> float:
-        """Return the MCP session idle timeout in seconds.
+    async def get_session_idle_timeout_seconds(self) -> float:
+        """Return the configured Deephaven session idle timeout in seconds.
 
-        Reads the optional ``mcp_session_idle_timeout_seconds`` key from the
-        loaded configuration and returns it as a float.  If the key is absent,
-        :data:`DEFAULT_MCP_SESSION_IDLE_TIMEOUT_SECONDS` is returned.
-
-        The value is guaranteed to be positive because the concrete config
-        validators reject non-positive values during :meth:`get_config`.
+        Reads the optional ``session_idle_timeout_seconds`` key from the
+        loaded configuration; falls back to
+        :data:`DEFAULT_SESSION_IDLE_TIMEOUT_SECONDS` when absent. Concrete
+        config validators reject non-positive values, so the result is
+        always positive.
 
         Returns:
-            float: Idle timeout in seconds. Always positive.
+            float: Idle timeout in seconds.
 
         Raises:
-            RuntimeError: Propagated from :meth:`get_config` when the config
-                path is unresolvable.
-            ConfigurationError: Propagated from :meth:`get_config` when the
-                file cannot be read, parsed, or validated.
+            RuntimeError: From :meth:`get_config` when the config path is
+                unresolvable.
+            ConfigurationError: From :meth:`get_config` when the file
+                cannot be read, parsed, or validated.
         """
         config = await self.get_config()
         return float(
             config.get(
-                "mcp_session_idle_timeout_seconds",
-                DEFAULT_MCP_SESSION_IDLE_TIMEOUT_SECONDS,
+                "session_idle_timeout_seconds",
+                DEFAULT_SESSION_IDLE_TIMEOUT_SECONDS,
+            )
+        )
+
+    async def get_session_idle_sweep_interval_seconds(self) -> float:
+        """Return the configured Deephaven session idle sweep interval in seconds.
+
+        Reads the optional ``session_idle_sweep_interval_seconds`` key
+        from the loaded configuration; falls back to
+        :data:`DEFAULT_SESSION_IDLE_SWEEP_INTERVAL_SECONDS` when absent.
+        Concrete config validators reject non-positive values, so the
+        result is always positive.
+
+        Returns:
+            float: Sweep interval in seconds.
+
+        Raises:
+            RuntimeError: From :meth:`get_config` when the config path is
+                unresolvable.
+            ConfigurationError: From :meth:`get_config` when the file
+                cannot be read, parsed, or validated.
+        """
+        config = await self.get_config()
+        return float(
+            config.get(
+                "session_idle_sweep_interval_seconds",
+                DEFAULT_SESSION_IDLE_SWEEP_INTERVAL_SECONDS,
             )
         )
 

@@ -24,8 +24,9 @@ This module supports two distinct configuration file formats, one per server typ
 
   1. **Community server** (``dh-mcp-community-server``): Use :class:`CommunityServerConfigManager`.
      The config file is a *flat* dict. ``auth`` is the only required top-level key;
-     ``sessions``, ``session_creation``, ``security``, and
-     ``mcp_session_idle_timeout_seconds`` are optional. No enterprise-related keys are allowed.
+     ``sessions``, ``session_creation``, ``security``,
+     ``session_idle_timeout_seconds``, and
+     ``session_idle_sweep_interval_seconds`` are optional. No enterprise-related keys are allowed.
 
   2. **Enterprise server** (``dh-mcp-enterprise-server``): Use :class:`EnterpriseServerConfigManager`.
      The config file is a *flat* dict with all enterprise system fields at the top level — there are
@@ -113,9 +114,10 @@ Community Config Validation rules:
     `{}` and sessions-only configs) are rejected at validation time. Provide
     `auth.psk` / `auth.psk_env_var`, or set `auth.enabled: false` (loopback
     binds only).
-  - Only `auth`, `sessions`, `session_creation`, `security`, and
-    `mcp_session_idle_timeout_seconds` are valid top-level keys; any other key
-    will cause validation to fail.
+  - Only `auth`, `sessions`, `session_creation`, `security`,
+    `session_idle_timeout_seconds`, and
+    `session_idle_sweep_interval_seconds` are valid top-level keys; any
+    other key will cause validation to fail.
   - If `sessions` is present, each session's fields must have the correct type.
   - No unknown fields are permitted at any level of the configuration.
   - Sensitive values are redacted from logs for security:
@@ -162,7 +164,10 @@ Optional fields:
   - `connection_timeout` (int | float, > 0): Connection timeout in seconds.
       Default: ``10.0``. Booleans are not accepted even though bool is a subclass of int.
 
-  - `mcp_session_idle_timeout_seconds` (int | float, > 0): Idle timeout for MCP sessions.
+  - `session_idle_timeout_seconds` (int | float, > 0): Idle timeout for individual Deephaven sessions.
+
+  - `session_idle_sweep_interval_seconds` (int | float, > 0): Cadence of the
+      per-registry idle sweeper that closes idle sessions. Default: ``60``.
 
   - `session_creation` (dict, optional): Session lifecycle configuration.
       When present, ``defaults`` is required and ``defaults.heap_size_gb`` is required.
@@ -172,8 +177,9 @@ Enterprise Config Validation rules:
   - ``auth.backends`` must be a non-empty list of unique strings, each drawn from
     ``{"password", "private_key"}``.
   - ``auth.allow_effective_user`` may only be ``true`` when ``"password"`` is in ``auth.backends``.
-  - ``connection_timeout`` and ``mcp_session_idle_timeout_seconds`` must be positive
-    numbers if present; booleans are rejected.
+  - ``connection_timeout``, ``session_idle_timeout_seconds``, and
+    ``session_idle_sweep_interval_seconds`` must be positive numbers if present;
+    booleans are rejected.
   - ``session_creation.max_concurrent_sessions`` must be a non-negative integer if present.
   - When ``session_creation`` is present, ``defaults`` is required and
     ``defaults.heap_size_gb`` is required.
@@ -205,7 +211,8 @@ __all__ = [
     "EnterpriseServerConfigManager",
     # Constants
     "CONFIG_ENV_VAR",
-    "DEFAULT_MCP_SESSION_IDLE_TIMEOUT_SECONDS",
+    "DEFAULT_SESSION_IDLE_TIMEOUT_SECONDS",
+    "DEFAULT_SESSION_IDLE_SWEEP_INTERVAL_SECONDS",
     # Validators used by external callers
     "validate_community_config",
     "validate_community_session_config",
@@ -227,7 +234,8 @@ from deephaven_mcp._exceptions import ConfigurationError
 
 from ._base import (
     CONFIG_ENV_VAR,
-    DEFAULT_MCP_SESSION_IDLE_TIMEOUT_SECONDS,
+    DEFAULT_SESSION_IDLE_SWEEP_INTERVAL_SECONDS,
+    DEFAULT_SESSION_IDLE_TIMEOUT_SECONDS,
     ConfigManager,
 )
 from ._validators import (

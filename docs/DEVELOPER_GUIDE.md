@@ -399,7 +399,7 @@ Before proceeding with the Quick Start Guide, verify your setup:
    >
    > - **Python:** Faster startup, no Docker needed. Install `deephaven-server` in your Python environment.
    >
-   >   ```json
+   >   ```json5
    >   "session_creation": {
    >     "max_concurrent_sessions": 5,
    >     "defaults": {
@@ -633,7 +633,8 @@ The `deephaven_mcp.json` file (community config) is a flat JSON object — all k
 - `"security"` (optional): Security-related settings (e.g., `credential_retrieval_mode`). See [Security Configuration](#security-configuration).
 - `"sessions"` (optional): Map of user-defined session names to per-session connection configs for Deephaven Community Core workers. Details below.
 - `"session_creation"` (optional): Configuration for dynamic session creation via `session_community_create`. See [Community Session Creation Configuration](#community-session-creation-configuration).
-- `"mcp_session_idle_timeout_seconds"` (optional): Per-MCP-client idle timeout (seconds, positive number; default `3600.0`).
+- `"session_idle_timeout_seconds"` (optional): Per-Deephaven-session idle timeout (seconds, positive number; default `3600.0`).
+- `"session_idle_sweep_interval_seconds"` (optional): How often the per-registry idle sweeper wakes to close idle sessions (seconds, positive number; default `60.0`).
 
 Unknown top-level keys are rejected. The smallest valid config is `{"auth": {"enabled": false}}` (loopback-only).
 
@@ -791,13 +792,13 @@ Controls which community session credentials can be retrieved via the MCP tool. 
   },
   "sessions": { /* static sessions */ },
   "session_creation": { /* dynamic session config */ },
-  "mcp_session_idle_timeout_seconds": 3600.0  // optional; see below
+  "session_idle_timeout_seconds": 3600.0  // optional; see below
 }
 ```
 
 **Top-Level Server Settings:**
 
-- `mcp_session_idle_timeout_seconds` (integer | float, **optional, default: 3600.0**): Seconds of MCP client inactivity after which the per-session Deephaven registry is closed and resources are reclaimed. Must be positive.
+- `session_idle_timeout_seconds` (integer | float, **optional, default: 3600.0**): Seconds of Deephaven-session inactivity after which idle sessions in the shared registry are closed; static sessions are kept and lazily reconnected, dynamic sessions are removed. Must be positive.
 
 #### Community Session Creation Configuration
 
@@ -951,7 +952,8 @@ The configuration file supports the following fields:
 
 - Optional Connection Settings:
   - `connection_timeout` (integer | float, **optional, default: 10.0**): Timeout in seconds for establishing connection to the Enterprise system.
-  - `mcp_session_idle_timeout_seconds` (integer | float, **optional, default: 3600.0**): Seconds of MCP client inactivity after which the per-session Deephaven registry is closed and resources are reclaimed. Must be positive.
+  - `session_idle_timeout_seconds` (integer | float, **optional, default: 3600.0**): Seconds of Deephaven-session inactivity after which idle sessions in the shared registry are closed; static sessions are kept and lazily reconnected, dynamic sessions are removed. Must be positive.
+  - `session_idle_sweep_interval_seconds` (integer | float, **optional, default: 60.0**): How often the per-registry idle sweeper wakes to close idle sessions. Must be positive.
 
 - Optional Worker Creation Configuration:
   - `session_creation` (object, **optional**): Configuration for creating enterprise workers on this system. If omitted, `session_enterprise_create` returns a "not configured" error.
@@ -1026,17 +1028,20 @@ call's HTTP headers.
 
 **Credential lifecycle:**
 
-- Credentials flow from HTTP headers → auth middleware → per-MCP-session
-  `EnterpriseSessionRegistry`. The first tool call binds the credentials
-  to the registry, which then lazily builds a
+- Credentials flow from HTTP headers → auth middleware → the single
+  process-wide `EnterpriseSessionRegistry`. The **first authenticated
+  request** after startup (or after `mcp_reload`) applies the
+  credentials to the shared registry, which then lazily builds a
   `CorePlusSessionFactoryManager` authenticated with those credentials.
-- Credential binding is idempotent for the lifetime of a single MCP
-  session: subsequent requests with the same credentials reuse the
-  existing factory; a request whose credentials fingerprint differs from
-  the bound one is rejected (the client must open a new MCP session).
+- Credential binding is idempotent for the lifetime of the server
+  process: subsequent requests whose credentials compare equal to the
+  bound `Credentials` dataclass reuse the existing factory; a request
+  presenting a different identity is rejected with `AuthenticationError`.
+  The single-tenant server accepts exactly one credential set per
+  process — use `mcp_reload` or restart the server to rebind.
 - The server never writes credentials to disk; in-memory copies live only
-  inside the factory manager and are cleared when the MCP session is
-  closed or times out (`mcp_session_idle_timeout_seconds`).
+  inside the factory manager and are cleared when the server shuts down
+  or `mcp_reload` is invoked.
 
 **Security Considerations:**
 
@@ -1268,7 +1273,7 @@ On error:
 }
 ```
 
-**Description**: This tool reloads the Deephaven session configuration from the file specified in `DH_MCP_CONFIG_FILE` and clears the calling MCP client's session registry. It uses dependency injection via the Context to access the config manager, `McpSessionManager`, and a coroutine-safe reload lock. The operation is protected by the provided lock to prevent concurrent reloads. Only the calling client's Deephaven connections are reset; other MCP client sessions are unaffected. The registry is lazily recreated with the new configuration on the next tool call.
+**Description**: This tool reloads the Deephaven session configuration from the file specified in `DH_MCP_CONFIG_FILE` and resets the shared session registry. It uses dependency injection via the Context to access the config manager, the process-wide `BaseRegistry`, the `Evictor`, and a coroutine-safe reload lock. The operation is protected by the provided lock to prevent concurrent reloads. The reset affects the shared registry and is visible to every connected MCP client. Community: dynamic sessions created via `session_community_create` are permanently destroyed; static (config-defined) sessions are lazily reconnected on next use. Enterprise: local session handles are closed and the session list is rebuilt by querying the controller after the next authenticated request applies credentials again.
 
 #### `enterprise_systems_status`
 
@@ -1362,11 +1367,11 @@ On error:
 }
 ```
 
-**Description**: This tool creates a new enterprise session on the configured enterprise system and registers it in the calling MCP client's per-session registry for future use. The session is configured with either provided parameters or defaults from the enterprise system configuration. Parameter resolution follows the priority: tool parameter → config default → API default.
+**Description**: This tool creates a new enterprise session on the configured enterprise system and registers it in the shared registry for future use. The session is configured with either provided parameters or defaults from the enterprise system configuration. Parameter resolution follows the priority: tool parameter → config default → API default.
 
 ##### `session_enterprise_delete`
 
-**Purpose**: Delete an enterprise session by terminating it and removing it from the calling MCP client's session registry.
+**Purpose**: Delete an enterprise session by terminating it and removing it from the shared session registry.
 
 **Parameters**:
 
@@ -1403,7 +1408,7 @@ Cross-server error:
 }
 ```
 
-**Description**: This tool permanently terminates an enterprise session and removes it from the calling MCP client's session registry. The session cannot be recovered after deletion. Use with caution as any unsaved work in the session will be lost.
+**Description**: This tool permanently terminates an enterprise session and removes it from the shared session registry (visible to every connected MCP client). The session cannot be recovered after deletion. Use with caution as any unsaved work in the session will be lost.
 
 #### Persistent Query (PQ) Management Tools
 
@@ -2548,8 +2553,9 @@ uv run scripts/mcp_community_test_client.py --transport {sse|stdio|streamable-ht
 
 - `--transport`: Choose `streamable-http` (default), `sse`, or `stdio`
 - `--env`: Pass environment variables as `KEY=VALUE` (e.g., `DH_MCP_CONFIG_FILE=/path/to/config.json`). Can be repeated for multiple variables
-- `--url`: URL for HTTP server (default: `http://127.0.0.1:8003/mcp`)
+- `--url`: URL for HTTP server. If omitted, auto-detected from `--transport` (`http://localhost:8000/mcp` for streamable-http, `http://localhost:8000/sse` for SSE). Override to match your community server (default port `8003`), e.g. `--url http://127.0.0.1:8003/mcp`
 - `--stdio-cmd`: Command to launch a server as a subprocess (note: `dh-mcp-community-server` is HTTP-only and does not support stdio; this option is for custom stdio-capable servers)
+- `--token`: Optional Bearer token sent in the `Authorization` header (HTTP transports only)
 
 **Example Usage:**
 
@@ -2735,7 +2741,7 @@ curl http://localhost:8001/health
 - **Availability**: Available when the server is running (streamable-http only)
 - **Authentication**: No authentication or parameters required
 - **Deployment**: Intended for use as a liveness or readiness probe in Kubernetes, Cloud Run, or similar environments
-- **Note**: This endpoint is only available in the Docs Server, not in the Systems Server
+- **Note**: This endpoint is available on all MCP servers in this repo (Community, Enterprise, and Docs). On the Community and Enterprise servers it bypasses both the TLS-enforcement and authentication middleware (see [Transport Security → Health-check endpoint](#health-check-endpoint))
 
 #### Docs Server Test Components
 
@@ -2747,12 +2753,10 @@ A Python script is provided for testing the MCP Docs tool and validating server 
 
 **Arguments:**
 
-- `--transport`: Choose `streamable-http` or `stdio` (default: `streamable-http`)
-- `--env`: Pass environment variables as `KEY=VALUE` (can be repeated; for stdio mode)
-- `--url`: URL for HTTP server (default: `http://localhost:8001/mcp`)
-- `--stdio-cmd`: Command to launch stdio server (for testing only — the production `dh-mcp-docs-server` is HTTP-only)
-- `--prompt`: Prompt/question to send to the docs_chat tool (required)
+- `--url`: streamable-http server URL (default: `http://localhost:8001/mcp`)
+- `--prompt`: Prompt/question to send to the docs_chat tool (default: `"How do I use Deephaven tables?"`)
 - `--history`: Optional chat history (JSON string) for multi-turn conversations
+- `--token`: Optional Bearer token sent in the `Authorization` header
 
 **Example Usage:**
 
@@ -3148,6 +3152,7 @@ The codebase is organized as follows:
 deephaven-mcp/
 ├── src/
 │   └── deephaven_mcp/      # Main Python package
+│       ├── auth/                # Per-request auth framework (backends, credentials, ASGI middleware)
 │       ├── client/             # Core+ client components
 │       ├── config/             # Configuration models and validators
 │       ├── formatters/         # Data formatting utilities
@@ -3157,6 +3162,7 @@ deephaven-mcp/
 │       ├── __init__.py
 │       ├── _env.py             # Typed env-var helpers (env_str/int/float/bool/required)
 │       ├── _exceptions.py      # Custom exception classes
+│       ├── _health.py          # Canonical /health probe path constant
 │       ├── _logging.py         # Logging configuration
 │       ├── _monkeypatch.py     # Runtime patches
 │       ├── _redaction.py       # Sensitive-value redaction utilities
@@ -3239,13 +3245,23 @@ deephaven-mcp/
 - Protocol buffer integration and session factory management
 - TLS/SSL support with custom certificate handling
 
+**Auth (`auth/`):**
+
+- Per-request authentication framework for the MCP HTTP servers
+- `backends/`: pluggable backends (`PSKBackend`, `PasswordBackend`, `PrivateKeyBackend`) and `HEADER_*` wire constants
+- `credentials/`: pure data types (`Principal`, `PSKCredentials`, `PasswordCredentials`, `PrivateKeyCredentials`)
+- `middleware/`: Starlette/ASGI integration — `AuthenticationMiddleware` runs the backend chain; `TlsEnforcementMiddleware` rejects cleartext non-loopback traffic with `426 Upgrade Required`
+
 **Core Utilities**:
 
 - **`openai.py`**: OpenAI client integration with async support and rate limiting
 - **`queries.py`**: Query management and execution framework
 - **`io.py`**: I/O utilities for file operations and data handling
+- **`_env.py`**: Typed environment-variable helpers (`env_str`, `env_int`, `env_float`, `env_bool`, `env_required`)
 - **`_exceptions.py`**: Custom exception classes for MCP-specific errors
+- **`_health.py`**: Single source of truth for the `/health` probe path
 - **`_logging.py`**: Centralized logging configuration with sensitive data redaction
+- **`_redaction.py`**: Constants and helpers for redacting sensitive values in logs
 
 #### Script References
 

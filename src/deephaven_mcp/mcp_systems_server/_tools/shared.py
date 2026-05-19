@@ -99,82 +99,56 @@ def get_config_manager(context: Context) -> ConfigManager:
     Returns:
         ConfigManager: The server's config manager instance.
     """
-    lifespan_context: LifespanContext[BaseRegistry] = (
-        context.request_context.lifespan_context
-    )
+    lifespan_context: LifespanContext = context.request_context.lifespan_context
     return lifespan_context["config_manager"]
 
 
-def get_mcp_session_id(ctx: Context) -> str:
-    """Extract the MCP session ID from the request headers.
-
-    Args:
-        ctx (Context): The MCP context object containing the HTTP
-            request whose headers include ``mcp-session-id``.
-
-    Returns:
-        str: The value of the ``mcp-session-id`` header, used as the
-            per-MCP-session key by the lifespan's session-registry
-            manager.
-
-    Raises:
-        InternalError: If the mcp-session-id header is absent. Every MCP request over
-            streamable-HTTP carries an mcp-session-id; absence indicates a misconfigured
-            transport or unauthorized caller. There is no fallback — a default would
-            collapse per-session isolation and is a security risk.
-    """
-    request = ctx.request_context.request
-    if request is not None:
-        session_id = request.headers.get("mcp-session-id")
-        if session_id:
-            return str(session_id)
-    raise InternalError(
-        "No mcp-session-id found in request headers. "
-        "All MCP tool calls must originate from an authenticated session."
-    )
-
-
 async def get_registry_from_context(context: Context) -> BaseRegistry:
-    """Get the per-MCP-session Deephaven registry, creating it on first access.
+    """Get the single process-wide Deephaven registry from the lifespan context.
 
-    Extracts the mcp-session-id from the request headers, then returns the
-    per-session registry from the lifespan context, creating one if this is the
-    session's first tool call.
+    For enterprise servers, this is also the chokepoint that applies the
+    request's credentials to the shared factory on first authenticated
+    request (lazy, idempotent on equal credentials, rejecting on different
+    credentials).  Routing every read through this helper means a tool
+    cannot accidentally bypass credential application.
 
     Args:
         context (Context): The MCP context object.
 
     Returns:
-        BaseRegistry: The per-session registry for the current MCP session.
+        BaseRegistry: The shared registry for this server process.
 
     Raises:
-        InternalError: If the mcp-session-id header is absent.
+        InternalError: If the lifespan context is missing the ``registry``
+            key (server is misconfigured) or, for enterprise, if the
+            request does not carry credentials via auth middleware.
+        AuthenticationError: For enterprise, if the request's credentials
+            differ from the identity already bound to the shared
+            registry.
     """
-    mcp_session_id = get_mcp_session_id(context)
-    lifespan_context: LifespanContext[BaseRegistry] = (
-        context.request_context.lifespan_context
-    )
-    session_registry_manager = lifespan_context["session_registry_manager"]
-    return await session_registry_manager.get_or_create_registry(
-        mcp_session_id, get_config_manager(context)
-    )
+    lifespan_context: LifespanContext = context.request_context.lifespan_context
+    registry = lifespan_context["registry"]
+    if isinstance(registry, EnterpriseSessionRegistry):
+        creds = _get_request_credentials(context)
+        await registry.apply_credentials(creds)
+    return registry
 
 
 async def get_community_registry(context: Context) -> CommunitySessionRegistry:
-    """Get the per-MCP-session community registry, creating it on first access.
+    """Get the shared community registry from the lifespan context.
 
-    Delegates to :func:`get_registry_from_context` and validates that the result is a
-    :class:`~deephaven_mcp.resource_manager.CommunitySessionRegistry`.
+    Delegates to :func:`get_registry_from_context` and validates that the
+    result is a :class:`~deephaven_mcp.resource_manager.CommunitySessionRegistry`.
 
     Args:
         context (Context): The MCP context object.
 
     Returns:
-        CommunitySessionRegistry: The per-session community registry.
+        CommunitySessionRegistry: The shared community registry.
 
     Raises:
-        InternalError: If the mcp-session-id header is absent or the registry is not a
-            CommunitySessionRegistry (indicates a server misconfiguration).
+        InternalError: If the registry is not a CommunitySessionRegistry
+            (indicates a server misconfiguration).
     """
     registry = await get_registry_from_context(context)
     if not isinstance(registry, CommunitySessionRegistry):
@@ -231,35 +205,26 @@ def _get_request_credentials(context: Context) -> Credentials:
 
 
 async def get_enterprise_registry(context: Context) -> EnterpriseSessionRegistry:
-    """Get the per-MCP-session enterprise registry, ready for use by tools.
+    """Get the shared enterprise registry, ready for use by tools.
 
-    On first access for an MCP session, the registry is created from the
-    server config (no credentials yet). Every call to this helper then
-    binds the per-request credentials to the registry via
-    :meth:`~deephaven_mcp.resource_manager.EnterpriseSessionRegistry.bind_credentials`,
-    which is idempotent for the lifetime of the MCP session: the first
-    bind creates the
-    :class:`~deephaven_mcp.resource_manager._manager.CorePlusSessionFactoryManager`
-    and starts background discovery; subsequent calls with the same
-    credentials are no-ops; calls with different credentials raise.
+    Credentials are applied to the shared registry inside
+    :func:`get_registry_from_context`; this helper just narrows the type.
 
     Args:
         context (Context): The MCP context object.
 
     Returns:
-        EnterpriseSessionRegistry: The per-session enterprise registry,
-            with credentials bound.
+        EnterpriseSessionRegistry: The shared enterprise registry, with
+            credentials applied.
 
     Raises:
-        InternalError: If the mcp-session-id header is absent, the
-            registry is not an :class:`EnterpriseSessionRegistry`
-            (server misconfiguration), or the request has no
-            scope-attached credentials.
+        InternalError: If the registry is not an
+            :class:`EnterpriseSessionRegistry` (server misconfiguration)
+            or the request has no scope-attached credentials.
         AuthenticationError: If the request's credentials differ from
-            an already-bound identity for this MCP session
-            (:meth:`bind_credentials` enforces stable per-session
-            identity). Note that rejection of credential *types*
-            unsupported by enterprise (e.g.
+            the identity already bound to the shared registry. Note
+            that rejection of credential *types* unsupported by
+            enterprise (e.g.
             :class:`~deephaven_mcp.auth.credentials.PSKCredentials`)
             happens later, inside the background discovery task via
             :meth:`CorePlusSessionFactory.from_credentials`, and surfaces
@@ -271,14 +236,6 @@ async def get_enterprise_registry(context: Context) -> EnterpriseSessionRegistry
         raise InternalError(
             f"Expected EnterpriseSessionRegistry, got {type(registry).__name__}."
         )
-    creds = _get_request_credentials(context)
-    # bind_credentials enforces stable per-MCP-session identity: it raises
-    # AuthenticationError if a different credential was previously bound.
-    # It does NOT validate credential type — rejection of unsupported
-    # subclasses (e.g. PSKCredentials for enterprise) happens later inside
-    # CorePlusSessionFactory.from_credentials in the background discovery
-    # task, surfacing on registry._error rather than raised from here.
-    await registry.bind_credentials(creds)
     return registry
 
 
@@ -289,7 +246,8 @@ async def get_session_from_context(
 
     This helper eliminates duplication of the common pattern for accessing
     sessions from the MCP context. It handles the standard flow of:
-    1. Extracting the per-MCP-session registry via session_registry_manager
+    1. Pulling the shared Deephaven registry from the lifespan context
+       (applying credentials on the enterprise path)
     2. Getting the session_manager for the session_id
     3. Establishing the session connection
 
@@ -302,7 +260,8 @@ async def get_session_from_context(
         BaseSession: The active session connection
 
     Raises:
-        InternalError: If the mcp-session-id header is absent
+        InternalError: If the registry is missing or, on enterprise, the
+            request has no scope-attached credentials
         RegistryItemNotFoundError: If session_id not found in registry
         Exception: If session cannot be established or context is invalid
     """

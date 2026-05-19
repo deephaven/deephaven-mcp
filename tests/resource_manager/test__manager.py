@@ -3,6 +3,8 @@ Unit tests for Session Manager classes.
 """
 
 import asyncio
+import time
+from typing import ClassVar, override
 from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
 
 import pytest
@@ -138,20 +140,28 @@ async def test_close():
 
 
 @pytest.mark.asyncio
-async def test_close_not_alive():
-    """Test that close handles an item that is not alive."""
+async def test_close_calls_item_close_unconditionally():
+    """close() unconditionally closes the cached item (no liveness pre-check).
+
+    The two-phase close path captures the item ref under the lock, clears
+    the cache, then closes outside the lock via ``_close_captured_item``.
+    Any exceptions from item.close() are swallowed with a WARNING log;
+    a previously-dead item is closed redundantly and the failure (if any)
+    is silently ignored.
+    """
     manager = ConcreteItemManager(SystemType.COMMUNITY, "test-source", "test")
     item = await manager.get()
 
-    # Mark the item as not alive
+    # Mark the item as not alive — close() no longer pre-checks this.
     item.is_alive.return_value = False
 
     await manager.close()
 
-    # close() should not be called on the item
-    item.close.assert_not_called()
-    # Cache should be cleared
+    # close() is called on the item regardless of liveness state.
+    item.close.assert_called_once()
+    # Cache is cleared.
     assert manager._item_cache is None
+    assert manager._last_accessed is None
 
 
 @pytest.mark.asyncio
@@ -310,31 +320,38 @@ async def test_liveness_status_logs_and_modes(caplog):
 
 
 @pytest.mark.asyncio
-async def test_close_logs_on_liveness_failure(monkeypatch, caplog):
-    """Covers line 1319: Info log after successful close following liveness check failure."""
+async def test_close_swallows_item_close_exception(caplog):
+    """close() swallows exceptions from item.close() with a WARNING log.
+
+    The new close() path delegates the actual close to
+    ``_close_captured_item``, which catches any exception from
+    ``item.close()`` and logs at WARNING.  ``close()`` itself never
+    raises.
+    """
 
     class DummyManager(BaseItemManager[MockItem]):
         async def _create_item(self):
             return MockItem()
 
         async def _check_liveness(self, item):
-            raise Exception("liveness fail!")
+            return (ResourceLivenessStatus.ONLINE, None)
 
     manager = DummyManager(SystemType.COMMUNITY, "src", "nm")
     item = MockItem()
     manager._item_cache = item
-    item.close = AsyncMock()
-    # Patch _is_alive_unlocked to raise so that close takes the liveness failure path
-    monkeypatch.setattr(
-        manager,
-        "_is_alive_unlocked",
-        AsyncMock(side_effect=Exception("liveness fail!")),
-    )
-    with caplog.at_level("INFO"):
-        await manager.close()
-    expected = "[DummyManager] Successfully closed item for 'community:src:nm' despite earlier liveness failure"
+    item.close = AsyncMock(side_effect=Exception("close failed"))
+
+    with caplog.at_level("WARNING"):
+        await manager.close()  # must not raise
+
+    item.close.assert_called_once()
+    assert manager._item_cache is None
+    # The warning from _close_captured_item should be present.
     assert any(
-        r.levelname == "INFO" and r.getMessage() == expected for r in caplog.records
+        r.levelname == "WARNING"
+        and "Error closing item" in r.getMessage()
+        and "community:src:nm" in r.getMessage()
+        for r in caplog.records
     )
 
 
@@ -1075,6 +1092,46 @@ class TestDynamicCommunitySessionManager:
         assert manager.container_id is None
         assert manager.process_id == 12345
 
+    @pytest.mark.asyncio
+    async def test_create_item_refuses_after_close(self):
+        """After ``close()``, a cache-miss ``get()`` must raise instead of recreating."""
+        launched_session = DockerLaunchedSession(
+            host="localhost",
+            port=10000,
+            auth_type="anonymous",
+            auth_token=None,
+            container_id="test_container",
+        )
+        config = {"host": "localhost", "port": 10000}
+
+        manager = DynamicCommunitySessionManager(
+            name="stopped",
+            config=config,
+            launched_session=launched_session,
+        )
+
+        # Patch the parent _create_item to a fast no-op so the first
+        # get() succeeds without a real network call.
+        with patch.object(
+            CommunitySessionManager,
+            "_create_item",
+            new_callable=AsyncMock,
+            return_value=MagicMock(),
+        ):
+            await manager.get()
+            assert manager._item_cache is not None
+
+            with patch.object(launched_session, "stop", new_callable=AsyncMock):
+                await manager.close()
+
+            assert manager._is_stopped is True
+            assert manager._item_cache is None
+
+            # Cache miss after close must NOT call parent _create_item;
+            # the subclass override raises before delegating.
+            with pytest.raises(SessionCreationError, match="has been stopped"):
+                await manager.get()
+
     def test_process_id_none_when_no_process(self):
         """Test process_id returns None when there's no process."""
         launched_session = DockerLaunchedSession(
@@ -1093,3 +1150,148 @@ class TestDynamicCommunitySessionManager:
         )
 
         assert manager.process_id is None
+
+
+# ---------------------------------------------------------------------------
+# Per-manager idle-close path
+#
+# The manager owns the per-item idle check + close
+# (:meth:`BaseItemManager.maybe_close_if_idle`); the registry-level sweep
+# loop lives on :class:`~deephaven_mcp.resource_manager.Evictor` and is
+# tested separately in ``test__evictor.py``.
+# ---------------------------------------------------------------------------
+
+
+class _StubItem:
+    """Trivial AsyncClosable used as the cached item type."""
+
+    def __init__(self):
+        self.closed = False
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+class _StubStaticManager(BaseItemManager[_StubItem]):
+    """In-memory manager that creates a fresh _StubItem on each cache miss.
+
+    ``evicts_on_idle = False`` (the default).  Used to verify that
+    non-evicting managers reconnect lazily after an idle close.
+    """
+
+    def __init__(self, name: str):
+        super().__init__(SystemType.COMMUNITY, "test", name)
+        self.create_count = 0
+        self.extra_close_count = 0
+
+    @override
+    async def _create_item(self) -> _StubItem:
+        self.create_count += 1
+        return _StubItem()
+
+    @override
+    async def _check_liveness(self, item: _StubItem):
+        return (ResourceLivenessStatus.ONLINE, None)
+
+
+class _StubDynamicManager(_StubStaticManager):
+    """Like ``_StubStaticManager`` but with ``evicts_on_idle = True``.
+
+    Overrides :meth:`close` to count subclass-specific teardown calls so
+    tests can assert that the polymorphic close path (not just the base
+    cache clear) runs during idle eviction.
+    """
+
+    evicts_on_idle: ClassVar[bool] = True
+
+    @override
+    async def close(self) -> None:
+        await super().close()
+        self.extra_close_count += 1
+
+
+# --- last_accessed tracking ---
+
+
+@pytest.mark.asyncio
+async def test_last_accessed_set_on_first_get():
+    mgr = _StubStaticManager("a")
+    assert mgr._last_accessed is None
+    await mgr.get()
+    assert mgr._last_accessed is not None
+    assert mgr.create_count == 1
+
+
+@pytest.mark.asyncio
+async def test_last_accessed_refreshed_on_subsequent_get():
+    mgr = _StubStaticManager("a")
+    await mgr.get()
+    first = mgr._last_accessed
+    await asyncio.sleep(0.01)
+    await mgr.get()
+    assert mgr._last_accessed is not None
+    assert mgr._last_accessed > first
+
+
+# --- maybe_close_if_idle ---
+
+
+@pytest.mark.asyncio
+async def test_maybe_close_if_idle_never_accessed_returns_false():
+    mgr = _StubStaticManager("a")
+    closed = await mgr.maybe_close_if_idle(0.0, time.monotonic())
+    assert closed is False
+
+
+@pytest.mark.asyncio
+async def test_maybe_close_if_idle_within_timeout_returns_false():
+    mgr = _StubStaticManager("a")
+    await mgr.get()
+    closed = await mgr.maybe_close_if_idle(3600.0, time.monotonic())
+    assert closed is False
+    assert mgr._item_cache is not None
+
+
+@pytest.mark.asyncio
+async def test_maybe_close_if_idle_closes_after_timeout():
+    mgr = _StubStaticManager("a")
+    await mgr.get()
+    cached = mgr._item_cache
+    closed = await mgr.maybe_close_if_idle(0.1, mgr._last_accessed + 1000.0)
+    assert closed is True
+    assert mgr._item_cache is None
+    assert mgr._last_accessed is None
+    assert cached is not None
+    assert cached.closed is True
+
+
+@pytest.mark.asyncio
+async def test_maybe_close_if_idle_with_no_cache_resets_timer():
+    mgr = _StubStaticManager("a")
+    mgr._last_accessed = time.monotonic() - 1000.0
+    mgr._item_cache = None
+    closed = await mgr.maybe_close_if_idle(0.1, time.monotonic())
+    assert closed is False
+    assert mgr._last_accessed is None
+
+
+@pytest.mark.asyncio
+async def test_maybe_close_if_idle_invokes_polymorphic_close_on_dynamic():
+    """``evicts_on_idle=True`` managers' polymorphic close path runs."""
+    mgr = _StubDynamicManager("dyn")
+    await mgr.get()
+    closed = await mgr.maybe_close_if_idle(0.1, mgr._last_accessed + 1000.0)
+    assert closed is True
+    assert mgr.extra_close_count == 1
+    assert mgr._item_cache is None
+
+
+@pytest.mark.asyncio
+async def test_get_after_idle_close_recreates_item():
+    """After idle eviction, the next ``get()`` lazily reconnects."""
+    mgr = _StubStaticManager("a")
+    await mgr.get()
+    await mgr.maybe_close_if_idle(0.1, mgr._last_accessed + 1000.0)
+    await mgr.get()
+    assert mgr.create_count == 2
+    assert mgr._item_cache is not None

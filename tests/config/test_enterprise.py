@@ -305,9 +305,20 @@ def test_enterprise_config_bad_connection_timeout():
 
 
 def test_enterprise_config_bad_idle_timeout():
-    cfg = _minimal_config(mcp_session_idle_timeout_seconds=0)
-    with pytest.raises(ConfigurationError, match="mcp_session_idle_timeout_seconds"):
+    cfg = _minimal_config(session_idle_timeout_seconds=0)
+    with pytest.raises(ConfigurationError, match="session_idle_timeout_seconds"):
         validate_enterprise_config(cfg)
+
+
+def test_enterprise_config_bad_sweep_interval():
+    cfg = _minimal_config(session_idle_sweep_interval_seconds=0)
+    with pytest.raises(ConfigurationError, match="session_idle_sweep_interval_seconds"):
+        validate_enterprise_config(cfg)
+
+
+def test_enterprise_config_sweep_interval_accepted():
+    cfg = _minimal_config(session_idle_sweep_interval_seconds=15)
+    assert validate_enterprise_config(cfg) is cfg
 
 
 def test_enterprise_config_with_session_creation_ok():

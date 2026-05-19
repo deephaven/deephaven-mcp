@@ -13,13 +13,8 @@ import logging
 
 from mcp.server.fastmcp import Context, FastMCP
 
-from deephaven_mcp.mcp_systems_server._session_registry_manager import (
-    SessionRegistryManager,
-)
-from deephaven_mcp.mcp_systems_server._tools.shared import (
-    get_config_manager,
-    get_mcp_session_id,
-)
+from deephaven_mcp.mcp_systems_server._tools.shared import get_config_manager
+from deephaven_mcp.resource_manager import BaseRegistry, Evictor
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -29,17 +24,21 @@ async def _do_reload(context: Context) -> dict:
         "[mcp_systems_server:mcp_reload] Invoked: refreshing session configuration and session cache."
     )
     try:
-        mcp_session_id = get_mcp_session_id(context)
         refresh_lock: asyncio.Lock = context.request_context.lifespan_context[
             "refresh_lock"
         ]
-        session_registry_manager: SessionRegistryManager = (
-            context.request_context.lifespan_context["session_registry_manager"]
-        )
+        registry: BaseRegistry = context.request_context.lifespan_context["registry"]
+        evictor: Evictor = context.request_context.lifespan_context["evictor"]
+        config_manager = get_config_manager(context)
 
         async with refresh_lock:
-            await get_config_manager(context).clear_config_cache()
-            await session_registry_manager.close_session(mcp_session_id)
+            # Stop the sweeper first so it can't observe the registry
+            # mid-rebuild.  Restart it after the new state is loaded.
+            await evictor.stop()
+            await config_manager.clear_config_cache()
+            await registry.close()
+            await registry.initialize(config_manager)
+            await evictor.start()
         _LOGGER.info(
             "[mcp_systems_server:mcp_reload] Success: Session configuration and session cache have been reloaded."
         )
@@ -55,9 +54,9 @@ async def _do_reload(context: Context) -> dict:
 async def mcp_reload_community(context: Context) -> dict:
     """MCP Tool: Reload configuration and reset all Community sessions.
 
-    Reloads the Deephaven Community session configuration from disk and resets the session
-    registry for the current MCP session. Configuration changes (adding, removing, or
-    updating systems) are applied immediately.
+    Reloads the Deephaven Community session configuration from disk and resets the shared
+    session registry for the server. Configuration changes (adding, removing, or updating
+    sessions) are applied immediately.
 
     Terminology Note:
     - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
@@ -72,7 +71,7 @@ async def mcp_reload_community(context: Context) -> dict:
     - After reload, only sessions defined in the configuration file are available.
     - Any work in progress in dynamic sessions will be lost.
     - Config-defined static sessions will be lazily reconnected on next use.
-    - Other MCP client sessions are unaffected by this reload.
+    - The reload affects the shared registry and is visible to every connected MCP client.
 
     AI Agent Usage:
     - Use this tool after making configuration file changes
@@ -98,9 +97,9 @@ async def mcp_reload_community(context: Context) -> dict:
         {'success': False, 'error': '<exception message>', 'isError': True}
 
     Error Scenarios:
-        - Context access errors: Returns error if required context objects (refresh_lock, config_manager, session_registry_manager) are not available
+        - Context access errors: Returns error if required context objects (refresh_lock, config_manager, registry) are not available
         - Configuration reload errors: Returns error if config_manager.clear_config_cache() fails
-        - Session registry errors: Returns error if session_registry_manager.close_session() fails
+        - Registry errors: Returns error if registry.close() or registry.initialize() fails
     """
     return await _do_reload(context)
 
@@ -108,10 +107,11 @@ async def mcp_reload_community(context: Context) -> dict:
 async def mcp_reload_enterprise(context: Context) -> dict:
     """MCP Tool: Reload configuration and refresh the Enterprise session list from the controller.
 
-    Reloads the Deephaven Enterprise configuration from disk and closes the current MCP
-    session's registry. On the next tool call, the registry is lazily rebuilt by re-querying
-    the DHE controller. Configuration changes (updating connection details, credentials, etc.)
-    are applied immediately. Other MCP client sessions are unaffected.
+    Reloads the Deephaven Enterprise configuration from disk and resets the shared session
+    registry. On the next authenticated tool call, credentials are re-applied and the registry
+    is rebuilt by re-querying the DHE controller. Configuration changes (updating connection
+    details, credentials, etc.) are applied immediately. The reload affects the shared registry
+    and is visible to every connected MCP client.
 
     Terminology Note:
     - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
@@ -125,7 +125,8 @@ async def mcp_reload_enterprise(context: Context) -> dict:
     - Enterprise sessions are views into controller-owned Persistent Queries (PQs). The DHE
       controller owns the PQ lifecycle — MCP does not create or destroy PQs during reload.
     - On reload, local session handles are closed and the session list is rebuilt by querying
-      the controller. All currently running PQs reappear automatically after re-discovery.
+      the controller after the next authenticated request applies credentials again. All
+      currently running PQs reappear automatically after re-discovery.
     - Sessions created with session_enterprise_create correspond to PQs that keep running on
       the controller; they will reappear in the session list after reload completes.
     - This tool provides a config refresh and controller re-sync, NOT a clean-slate wipe of
@@ -157,9 +158,9 @@ async def mcp_reload_enterprise(context: Context) -> dict:
         {'success': False, 'error': '<exception message>', 'isError': True}
 
     Error Scenarios:
-        - Context access errors: Returns error if required context objects (refresh_lock, config_manager, session_registry_manager) are not available
+        - Context access errors: Returns error if required context objects (refresh_lock, config_manager, registry) are not available
         - Configuration reload errors: Returns error if config_manager.clear_config_cache() fails
-        - Session registry errors: Returns error if session_registry_manager.close_session() fails
+        - Registry errors: Returns error if registry.close() or registry.initialize() fails
     """
     return await _do_reload(context)
 

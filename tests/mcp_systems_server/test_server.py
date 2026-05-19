@@ -389,7 +389,7 @@ def test_enterprise_defaults(monkeypatch):
         patch("deephaven_mcp._monkeypatch.monkeypatch_uvicorn_exception_handling"),
         patch(
             "deephaven_mcp.mcp_systems_server.server._run_startup_validation_or_exit",
-            return_value=(1800.0, (["password"], False)),
+            return_value=(1800.0, 60.0, (["password"], False)),
         ),
         patch(
             "deephaven_mcp.mcp_systems_server.server._build_enterprise_middleware",
@@ -398,7 +398,6 @@ def test_enterprise_defaults(monkeypatch):
         patch(
             "deephaven_mcp.mcp_systems_server.server._run_with_middleware"
         ) as mock_run,
-        patch("deephaven_mcp.mcp_systems_server.server.SessionRegistryManager"),
         patch(
             "deephaven_mcp.mcp_systems_server.server.FastMCP", return_value=mock_server
         ) as mock_fastmcp_cls,
@@ -426,7 +425,7 @@ def test_enterprise_defaults(monkeypatch):
     assert kwargs == {"ssl_keyfile": None, "ssl_certfile": None}
     middleware_list = args[1]
     assert middleware_list[-1].cls is TlsEnforcementMiddleware
-    mock_lifespan.assert_called_once_with(ANY, None)
+    mock_lifespan.assert_called_once_with(ANY, ANY, None)
 
 
 def test_enterprise_cli_args(monkeypatch):
@@ -461,7 +460,7 @@ def test_enterprise_cli_args(monkeypatch):
         patch("deephaven_mcp._monkeypatch.monkeypatch_uvicorn_exception_handling"),
         patch(
             "deephaven_mcp.mcp_systems_server.server._run_startup_validation_or_exit",
-            return_value=(1800.0, (["password"], False)),
+            return_value=(1800.0, 60.0, (["password"], False)),
         ),
         patch(
             "deephaven_mcp.mcp_systems_server.server._build_enterprise_middleware",
@@ -470,7 +469,6 @@ def test_enterprise_cli_args(monkeypatch):
         patch(
             "deephaven_mcp.mcp_systems_server.server._run_with_middleware"
         ) as mock_run,
-        patch("deephaven_mcp.mcp_systems_server.server.SessionRegistryManager"),
         patch(
             "deephaven_mcp.mcp_systems_server.server.FastMCP", return_value=mock_server
         ) as mock_fastmcp_cls,
@@ -493,7 +491,7 @@ def test_enterprise_cli_args(monkeypatch):
     assert args[0] is mock_server
     assert args[2:] == ("0.0.0.0", 9001)
     assert kwargs == {"ssl_keyfile": None, "ssl_certfile": None}
-    mock_lifespan.assert_called_once_with(ANY, "/my/dhe.json")
+    mock_lifespan.assert_called_once_with(ANY, ANY, "/my/dhe.json")
 
 
 def test_enterprise_env_var_fallback(monkeypatch):
@@ -515,7 +513,7 @@ def test_enterprise_env_var_fallback(monkeypatch):
         patch("deephaven_mcp._monkeypatch.monkeypatch_uvicorn_exception_handling"),
         patch(
             "deephaven_mcp.mcp_systems_server.server._run_startup_validation_or_exit",
-            return_value=(1800.0, (["password"], False)),
+            return_value=(1800.0, 60.0, (["password"], False)),
         ),
         patch(
             "deephaven_mcp.mcp_systems_server.server._build_enterprise_middleware",
@@ -524,7 +522,6 @@ def test_enterprise_env_var_fallback(monkeypatch):
         patch(
             "deephaven_mcp.mcp_systems_server.server._run_with_middleware"
         ) as mock_run,
-        patch("deephaven_mcp.mcp_systems_server.server.SessionRegistryManager"),
         patch(
             "deephaven_mcp.mcp_systems_server.server.FastMCP", return_value=mock_server
         ) as mock_fastmcp_cls,
@@ -547,7 +544,7 @@ def test_enterprise_env_var_fallback(monkeypatch):
     assert args[0] is mock_server
     assert args[2:] == ("10.0.0.1", 7777)
     assert kwargs == {"ssl_keyfile": None, "ssl_certfile": None}
-    mock_lifespan.assert_called_once_with(ANY, "/env/dhe.json")
+    mock_lifespan.assert_called_once_with(ANY, ANY, "/env/dhe.json")
 
 
 def test_enterprise_registers_shared_and_exclusive_tools(monkeypatch):
@@ -572,14 +569,13 @@ def test_enterprise_registers_shared_and_exclusive_tools(monkeypatch):
         patch("deephaven_mcp._monkeypatch.monkeypatch_uvicorn_exception_handling"),
         patch(
             "deephaven_mcp.mcp_systems_server.server._run_startup_validation_or_exit",
-            return_value=(1800.0, (["password"], False)),
+            return_value=(1800.0, 60.0, (["password"], False)),
         ),
         patch(
             "deephaven_mcp.mcp_systems_server.server._build_enterprise_middleware",
             return_value=[],
         ),
         patch("deephaven_mcp.mcp_systems_server.server._run_with_middleware"),
-        patch("deephaven_mcp.mcp_systems_server.server.SessionRegistryManager"),
         patch(
             "deephaven_mcp.mcp_systems_server.server.FastMCP", return_value=mock_server
         ),
@@ -626,7 +622,7 @@ def test_enterprise_logs_stopped_onserver_exit(monkeypatch):
         patch("deephaven_mcp._monkeypatch.monkeypatch_uvicorn_exception_handling"),
         patch(
             "deephaven_mcp.mcp_systems_server.server._run_startup_validation_or_exit",
-            return_value=(1800.0, (["password"], False)),
+            return_value=(1800.0, 60.0, (["password"], False)),
         ),
         patch(
             "deephaven_mcp.mcp_systems_server.server._build_enterprise_middleware",
@@ -636,7 +632,6 @@ def test_enterprise_logs_stopped_onserver_exit(monkeypatch):
             "deephaven_mcp.mcp_systems_server.server._run_with_middleware",
             side_effect=RuntimeError("server crashed"),
         ),
-        patch("deephaven_mcp.mcp_systems_server.server.SessionRegistryManager"),
         patch(
             "deephaven_mcp.mcp_systems_server.server.FastMCP", return_value=mock_server
         ),
@@ -681,9 +676,8 @@ def test_community_defaults(monkeypatch):
         patch("deephaven_mcp._monkeypatch.monkeypatch_uvicorn_exception_handling"),
         patch(
             "deephaven_mcp.mcp_systems_server.server._run_startup_validation_or_exit",
-            return_value=(1800.0, "tok"),
+            return_value=(1800.0, 60.0, "tok"),
         ),
-        patch("deephaven_mcp.mcp_systems_server.server.SessionRegistryManager"),
         patch(
             "deephaven_mcp.mcp_systems_server.server.FastMCP", return_value=mock_server
         ) as mock_fastmcp_cls,
@@ -704,7 +698,7 @@ def test_community_defaults(monkeypatch):
         "deephaven-mcp-community", lifespan=ANY, host="127.0.0.1", port=8003
     )
     mock_run.assert_called_once()
-    mock_lifespan.assert_called_once_with(ANY, None)
+    mock_lifespan.assert_called_once_with(ANY, ANY, None)
 
 
 def test_community_cli_args(monkeypatch):
@@ -736,9 +730,8 @@ def test_community_cli_args(monkeypatch):
         patch("deephaven_mcp._monkeypatch.monkeypatch_uvicorn_exception_handling"),
         patch(
             "deephaven_mcp.mcp_systems_server.server._run_startup_validation_or_exit",
-            return_value=(1800.0, "tok"),
+            return_value=(1800.0, 60.0, "tok"),
         ),
-        patch("deephaven_mcp.mcp_systems_server.server.SessionRegistryManager"),
         patch(
             "deephaven_mcp.mcp_systems_server.server.FastMCP", return_value=mock_server
         ) as mock_fastmcp_cls,
@@ -755,7 +748,7 @@ def test_community_cli_args(monkeypatch):
     mock_fastmcp_cls.assert_called_once_with(
         "deephaven-mcp-community", lifespan=ANY, host="0.0.0.0", port=9002
     )
-    mock_lifespan.assert_called_once_with(ANY, "/my/dhc.json")
+    mock_lifespan.assert_called_once_with(ANY, ANY, "/my/dhc.json")
 
 
 def test_community_env_var_fallback(monkeypatch):
@@ -776,9 +769,8 @@ def test_community_env_var_fallback(monkeypatch):
         patch("deephaven_mcp._monkeypatch.monkeypatch_uvicorn_exception_handling"),
         patch(
             "deephaven_mcp.mcp_systems_server.server._run_startup_validation_or_exit",
-            return_value=(1800.0, "tok"),
+            return_value=(1800.0, 60.0, "tok"),
         ),
-        patch("deephaven_mcp.mcp_systems_server.server.SessionRegistryManager"),
         patch(
             "deephaven_mcp.mcp_systems_server.server.FastMCP", return_value=mock_server
         ) as mock_fastmcp_cls,
@@ -795,7 +787,7 @@ def test_community_env_var_fallback(monkeypatch):
     mock_fastmcp_cls.assert_called_once_with(
         "deephaven-mcp-community", lifespan=ANY, host="192.168.1.1", port=6666
     )
-    mock_lifespan.assert_called_once_with(ANY, "/env/dhc.json")
+    mock_lifespan.assert_called_once_with(ANY, ANY, "/env/dhc.json")
 
 
 def test_community_registers_shared_and_exclusive_tools(monkeypatch):
@@ -818,9 +810,8 @@ def test_community_registers_shared_and_exclusive_tools(monkeypatch):
         patch("deephaven_mcp._monkeypatch.monkeypatch_uvicorn_exception_handling"),
         patch(
             "deephaven_mcp.mcp_systems_server.server._run_startup_validation_or_exit",
-            return_value=(1800.0, "tok"),
+            return_value=(1800.0, 60.0, "tok"),
         ),
-        patch("deephaven_mcp.mcp_systems_server.server.SessionRegistryManager"),
         patch(
             "deephaven_mcp.mcp_systems_server.server.FastMCP", return_value=mock_server
         ),
@@ -864,9 +855,8 @@ def test_community_logs_stopped_onserver_exit(monkeypatch):
         patch("deephaven_mcp._monkeypatch.monkeypatch_uvicorn_exception_handling"),
         patch(
             "deephaven_mcp.mcp_systems_server.server._run_startup_validation_or_exit",
-            return_value=(1800.0, "tok"),
+            return_value=(1800.0, 60.0, "tok"),
         ),
-        patch("deephaven_mcp.mcp_systems_server.server.SessionRegistryManager"),
         patch(
             "deephaven_mcp.mcp_systems_server.server.FastMCP", return_value=mock_server
         ),
@@ -903,7 +893,7 @@ def test_enterprise_validates_config_before_start(monkeypatch):
 
     mock_server = MagicMock()
     mock_server.name = "deephaven-mcp-enterprise"
-    mock_validate = MagicMock(return_value=(1800.0, (["password"], False)))
+    mock_validate = MagicMock(return_value=(1800.0, 60.0, (["password"], False)))
 
     with (
         patch("sys.argv", ["dh-mcp-enterprise-server", "--config", "/my/dhe.json"]),
@@ -920,7 +910,6 @@ def test_enterprise_validates_config_before_start(monkeypatch):
             return_value=[],
         ),
         patch("deephaven_mcp.mcp_systems_server.server._run_with_middleware"),
-        patch("deephaven_mcp.mcp_systems_server.server.SessionRegistryManager"),
         patch(
             "deephaven_mcp.mcp_systems_server.server.FastMCP", return_value=mock_server
         ),
@@ -951,7 +940,7 @@ def test_community_validates_config_before_start(monkeypatch):
 
     mock_server = MagicMock()
     mock_server.name = "deephaven-mcp-community"
-    mock_validate = MagicMock(return_value=(1800.0, "tok"))
+    mock_validate = MagicMock(return_value=(1800.0, 60.0, "tok"))
 
     with (
         patch("sys.argv", ["dh-mcp-community-server", "--config", "/my/dhc.json"]),
@@ -963,7 +952,6 @@ def test_community_validates_config_before_start(monkeypatch):
             "deephaven_mcp.mcp_systems_server.server._run_startup_validation_or_exit",
             mock_validate,
         ),
-        patch("deephaven_mcp.mcp_systems_server.server.SessionRegistryManager"),
         patch(
             "deephaven_mcp.mcp_systems_server.server.FastMCP", return_value=mock_server
         ),
@@ -994,9 +982,11 @@ def test_community_validates_config_before_start(monkeypatch):
 async def test_load_community_startup_state_returns_timeout_and_psk():
     mock_manager = MagicMock()
     mock_manager.get_config = AsyncMock(return_value={"auth": {"psk": "s3cret"}})
-    mock_manager.get_mcp_session_idle_timeout_seconds = AsyncMock(return_value=900.0)
-    idle, psk = await server._load_community_startup_state(mock_manager)
+    mock_manager.get_session_idle_timeout_seconds = AsyncMock(return_value=900.0)
+    mock_manager.get_session_idle_sweep_interval_seconds = AsyncMock(return_value=30.0)
+    idle, sweep, psk = await server._load_community_startup_state(mock_manager)
     assert idle == 900.0
+    assert sweep == 30.0
     assert psk == "s3cret"
 
 
@@ -1005,9 +995,11 @@ async def test_load_community_startup_state_enabled_false_returns_none_psk():
     """auth.enabled = false collapses to a None PSK (loopback-only deployment)."""
     mock_manager = MagicMock()
     mock_manager.get_config = AsyncMock(return_value={"auth": {"enabled": False}})
-    mock_manager.get_mcp_session_idle_timeout_seconds = AsyncMock(return_value=900.0)
-    idle, psk = await server._load_community_startup_state(mock_manager)
+    mock_manager.get_session_idle_timeout_seconds = AsyncMock(return_value=900.0)
+    mock_manager.get_session_idle_sweep_interval_seconds = AsyncMock(return_value=30.0)
+    idle, sweep, psk = await server._load_community_startup_state(mock_manager)
     assert idle == 900.0
+    assert sweep == 30.0
     assert psk is None
 
 
@@ -1019,9 +1011,11 @@ async def test_load_community_startup_state_resolves_psk_from_env(monkeypatch):
     mock_manager.get_config = AsyncMock(
         return_value={"auth": {"psk_env_var": "DH_TEST_STARTUP_PSK"}}
     )
-    mock_manager.get_mcp_session_idle_timeout_seconds = AsyncMock(return_value=900.0)
-    idle, psk = await server._load_community_startup_state(mock_manager)
+    mock_manager.get_session_idle_timeout_seconds = AsyncMock(return_value=900.0)
+    mock_manager.get_session_idle_sweep_interval_seconds = AsyncMock(return_value=30.0)
+    idle, sweep, psk = await server._load_community_startup_state(mock_manager)
     assert idle == 900.0
+    assert sweep == 30.0
     assert psk == "env-secret"
 
 
@@ -1033,7 +1027,8 @@ async def test_load_community_startup_state_psk_env_var_unset_raises(monkeypatch
     mock_manager.get_config = AsyncMock(
         return_value={"auth": {"psk_env_var": "DH_TEST_STARTUP_PSK"}}
     )
-    mock_manager.get_mcp_session_idle_timeout_seconds = AsyncMock(return_value=900.0)
+    mock_manager.get_session_idle_timeout_seconds = AsyncMock(return_value=900.0)
+    mock_manager.get_session_idle_sweep_interval_seconds = AsyncMock(return_value=30.0)
     with pytest.raises(ConfigurationError, match="DH_TEST_STARTUP_PSK"):
         await server._load_community_startup_state(mock_manager)
 
@@ -1246,9 +1241,13 @@ async def test_load_enterprise_startup_state_returns_idle_backends_and_flag():
             "auth": {"backends": ["password"], "allow_effective_user": True},
         }
     )
-    mock_manager.get_mcp_session_idle_timeout_seconds = AsyncMock(return_value=900.0)
-    idle, (backends, allow) = await server._load_enterprise_startup_state(mock_manager)
+    mock_manager.get_session_idle_timeout_seconds = AsyncMock(return_value=900.0)
+    mock_manager.get_session_idle_sweep_interval_seconds = AsyncMock(return_value=30.0)
+    idle, sweep, (backends, allow) = await server._load_enterprise_startup_state(
+        mock_manager
+    )
     assert idle == 900.0
+    assert sweep == 30.0
     assert backends == ["password"]
     assert allow is True
 
@@ -1453,7 +1452,7 @@ def test_run_server_drives_full_startup_in_order(monkeypatch):
     mock_server.name = "my-test-server"
 
     mock_manager_class = MagicMock()
-    mock_loader = AsyncMock(return_value=(1234.0, ("some-mw-state",)))
+    mock_loader = AsyncMock(return_value=(1234.0, 45.0, ("some-mw-state",)))
     mock_lifespan_factory = MagicMock(return_value=MagicMock())
     mock_build_middleware = MagicMock(return_value=[])
     mock_register_tools = MagicMock()
@@ -1466,11 +1465,8 @@ def test_run_server_drives_full_startup_in_order(monkeypatch):
         patch("deephaven_mcp._monkeypatch.monkeypatch_uvicorn_exception_handling"),
         patch(
             "deephaven_mcp.mcp_systems_server.server._run_startup_validation_or_exit",
-            return_value=(1234.0, ("some-mw-state",)),
+            return_value=(1234.0, 45.0, ("some-mw-state",)),
         ) as mock_validate,
-        patch(
-            "deephaven_mcp.mcp_systems_server.server.SessionRegistryManager"
-        ) as mock_srm_cls,
         patch(
             "deephaven_mcp.mcp_systems_server.server.FastMCP", return_value=mock_server
         ) as mock_fastmcp_cls,
@@ -1485,7 +1481,6 @@ def test_run_server_drives_full_startup_in_order(monkeypatch):
             server_name="my-test-server",
             manager_class=mock_manager_class,
             async_loader=mock_loader,
-            registry_class=MagicMock(),
             lifespan_factory=mock_lifespan_factory,
             build_middleware=mock_build_middleware,
             register_tools=mock_register_tools,
@@ -1497,9 +1492,8 @@ def test_run_server_drives_full_startup_in_order(monkeypatch):
     )
     # Middleware builder receives the loader's mw-state tuple + host.
     mock_build_middleware.assert_called_once_with(("some-mw-state",), "127.0.0.1")
-    # Registry manager is constructed with the idle timeout from the loader.
-    mock_srm_cls.assert_called_once()
-    assert mock_srm_cls.call_args.kwargs["idle_timeout_seconds"] == 1234.0
+    # The lifespan factory is called with (idle_timeout, sweep_interval, config_path).
+    mock_lifespan_factory.assert_called_once_with(1234.0, 45.0, "/cfg.json")
     # FastMCP is named with server_name and bound to parsed host/port.
     mock_fastmcp_cls.assert_called_once()
     assert mock_fastmcp_cls.call_args.args[0] == "my-test-server"
@@ -1537,9 +1531,8 @@ def test_run_server_logs_stopped_even_when_runner_raises(monkeypatch):
         patch("deephaven_mcp._monkeypatch.monkeypatch_uvicorn_exception_handling"),
         patch(
             "deephaven_mcp.mcp_systems_server.server._run_startup_validation_or_exit",
-            return_value=(1.0, None),
+            return_value=(1.0, 45.0, None),
         ),
-        patch("deephaven_mcp.mcp_systems_server.server.SessionRegistryManager"),
         patch(
             "deephaven_mcp.mcp_systems_server.server.FastMCP", return_value=mock_server
         ),
@@ -1556,8 +1549,7 @@ def test_run_server_logs_stopped_even_when_runner_raises(monkeypatch):
                 default_port=1234,
                 server_name="my-test-server",
                 manager_class=MagicMock(),
-                async_loader=AsyncMock(return_value=(1.0, None)),
-                registry_class=MagicMock(),
+                async_loader=AsyncMock(return_value=(1.0, 45.0, None)),
                 lifespan_factory=MagicMock(return_value=MagicMock()),
                 build_middleware=MagicMock(return_value=[]),
                 register_tools=MagicMock(),

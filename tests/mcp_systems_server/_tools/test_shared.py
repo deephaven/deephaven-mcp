@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pyarrow
 import pytest
-from conftest import MockContext, create_mock_session_registry_manager
+from conftest import MockContext
 
 from deephaven_mcp._exceptions import InternalError, RegistryItemNotFoundError
 from deephaven_mcp.client import BaseSession, CorePlusSession
@@ -21,7 +21,6 @@ from deephaven_mcp.mcp_systems_server._tools.shared import (
     get_config_manager,
     get_enterprise_registry,
     get_enterprise_session,
-    get_mcp_session_id,
     get_registry_from_context,
     get_session_from_context,
     redact_json_sensitive_fields,
@@ -103,49 +102,6 @@ def test_format_initialization_status_loading_with_errors():
 
 
 # ===========================================================================
-# get_mcp_session_id tests
-# ===========================================================================
-
-
-def test_get_mcp_session_id_returns_correct_id():
-    """get_mcp_session_id returns the session ID from the request header."""
-    context = MockContext({}, mcp_session_id="my-session-123")
-    result = get_mcp_session_id(context)
-    assert result == "my-session-123"
-
-
-def test_get_mcp_session_id_raises_when_header_absent():
-    """get_mcp_session_id raises InternalError when mcp-session-id header is absent."""
-
-    class MockRequestNoHeader:
-        headers = {}
-
-    class MockRequestContextNoHeader:
-        request = MockRequestNoHeader()
-        lifespan_context = {}
-
-    class MockContextNoHeader:
-        request_context = MockRequestContextNoHeader()
-
-    with pytest.raises(InternalError):
-        get_mcp_session_id(MockContextNoHeader())
-
-
-def test_get_mcp_session_id_raises_when_request_is_none():
-    """get_mcp_session_id raises InternalError when request is None."""
-
-    class MockRequestContextNullRequest:
-        request = None
-        lifespan_context = {}
-
-    class MockContextNullRequest:
-        request_context = MockRequestContextNullRequest()
-
-    with pytest.raises(InternalError):
-        get_mcp_session_id(MockContextNullRequest())
-
-
-# ===========================================================================
 # get_config_manager tests
 # ===========================================================================
 
@@ -168,9 +124,7 @@ async def test_get_community_registry_returns_registry():
     mock_registry = MagicMock(spec=CommunitySessionRegistry)
     context = MockContext(
         {
-            "session_registry_manager": create_mock_session_registry_manager(
-                mock_registry
-            ),
+            "registry": mock_registry,
             "config_manager": MagicMock(),
         }
     )
@@ -184,9 +138,7 @@ async def test_get_community_registry_raises_on_wrong_type():
     mock_registry = MagicMock(spec=EnterpriseSessionRegistry)
     context = MockContext(
         {
-            "session_registry_manager": create_mock_session_registry_manager(
-                mock_registry
-            ),
+            "registry": mock_registry,
             "config_manager": MagicMock(),
         }
     )
@@ -200,62 +152,50 @@ async def test_get_community_registry_raises_on_wrong_type():
 
 
 @pytest.mark.asyncio
-async def test_get_enterprise_registry_returns_registry_and_binds_creds():
-    """get_enterprise_registry returns the registry and binds the request creds."""
+async def test_get_enterprise_registry_returns_registry_and_applies_creds():
+    """get_enterprise_registry returns the registry and applies the request creds."""
     from deephaven_mcp.auth.credentials import PasswordCredentials
 
     mock_registry = MagicMock(spec=EnterpriseSessionRegistry)
-    mock_registry.bind_credentials = AsyncMock()
+    mock_registry.apply_credentials = AsyncMock()
     creds = PasswordCredentials(username="alice", password="pw")
     context = MockContext(
         {
-            "session_registry_manager": create_mock_session_registry_manager(
-                mock_registry
-            ),
+            "registry": mock_registry,
             "config_manager": MagicMock(),
         },
         creds=creds,
     )
     result = await get_enterprise_registry(context)
     assert result is mock_registry
-    mock_registry.bind_credentials.assert_awaited_once_with(creds)
+    mock_registry.apply_credentials.assert_awaited_once_with(creds)
 
 
 @pytest.mark.asyncio
-async def test_get_enterprise_registry_propagates_bind_credentials_rejection():
-    """``shared.get_enterprise_registry`` propagates errors from ``bind_credentials``.
+async def test_get_enterprise_registry_propagates_apply_credentials_rejection():
+    """``shared.get_enterprise_registry`` propagates errors from ``apply_credentials``.
 
     The helper forwards the per-request credentials to the registry's
-    :meth:`bind_credentials` and must propagate whatever exception that
-    call raises, without re-implementing the rejection logic itself.
-    Note that decisions about which credential *types* are supported by
-    enterprise are not made here: type acceptance is handled by the auth
-    middleware and the downstream
-    :meth:`CorePlusSessionFactory.from_credentials` call inside the
-    background discovery task. ``bind_credentials`` itself primarily
-    enforces stable per-MCP-session identity. This test uses
-    :class:`PSKCredentials` purely as a convenient stand-in object and
-    asserts only that the error raised by ``bind_credentials`` is
-    surfaced unchanged.
+    :meth:`apply_credentials` via :func:`get_registry_from_context` and must
+    propagate whatever exception that call raises, without re-implementing
+    the rejection logic itself.
     """
     from deephaven_mcp.auth.credentials import PSKCredentials
 
     rejection = InternalError("Unsupported credentials type 'PSKCredentials'")
     mock_registry = MagicMock(spec=EnterpriseSessionRegistry)
-    mock_registry.bind_credentials = AsyncMock(side_effect=rejection)
+    mock_registry.apply_credentials = AsyncMock(side_effect=rejection)
     creds = PSKCredentials(psk="x")
     context = MockContext(
         {
-            "session_registry_manager": create_mock_session_registry_manager(
-                mock_registry
-            ),
+            "registry": mock_registry,
             "config_manager": MagicMock(),
         },
         creds=creds,
     )
     with pytest.raises(InternalError, match="Unsupported credentials type"):
         await get_enterprise_registry(context)
-    mock_registry.bind_credentials.assert_awaited_once_with(creds)
+    mock_registry.apply_credentials.assert_awaited_once_with(creds)
 
 
 @pytest.mark.asyncio
@@ -264,9 +204,7 @@ async def test_get_enterprise_registry_missing_creds_raises():
     mock_registry = MagicMock(spec=EnterpriseSessionRegistry)
     context = MockContext(
         {
-            "session_registry_manager": create_mock_session_registry_manager(
-                mock_registry
-            ),
+            "registry": mock_registry,
             "config_manager": MagicMock(),
         },
         creds=None,
@@ -311,24 +249,23 @@ def test_get_request_credentials_no_request_raises():
 
 
 @pytest.mark.asyncio
-async def test_get_enterprise_registry_idempotent_re_bind():
-    """Re-binding the same creds in subsequent calls is fine (idempotent)."""
+async def test_get_enterprise_registry_idempotent_re_apply():
+    """Re-applying the same creds in subsequent calls is fine (idempotent)."""
     from deephaven_mcp.auth.credentials import PasswordCredentials
 
     mock_registry = MagicMock(spec=EnterpriseSessionRegistry)
-    mock_registry.bind_credentials = AsyncMock()
+    mock_registry.apply_credentials = AsyncMock()
     creds = PasswordCredentials(username="alice", password="pw")
-    mock_session_manager = create_mock_session_registry_manager(mock_registry)
     context = MockContext(
         {
-            "session_registry_manager": mock_session_manager,
+            "registry": mock_registry,
             "config_manager": MagicMock(),
         },
         creds=creds,
     )
     await get_enterprise_registry(context)
     await get_enterprise_registry(context)
-    assert mock_registry.bind_credentials.await_count == 2
+    assert mock_registry.apply_credentials.await_count == 2
 
 
 @pytest.mark.asyncio
@@ -337,9 +274,7 @@ async def test_get_enterprise_registry_raises_on_wrong_type():
     mock_registry = MagicMock(spec=CommunitySessionRegistry)
     context = MockContext(
         {
-            "session_registry_manager": create_mock_session_registry_manager(
-                mock_registry
-            ),
+            "registry": mock_registry,
             "config_manager": MagicMock(),
         }
     )
@@ -354,39 +289,36 @@ async def test_get_enterprise_registry_raises_on_wrong_type():
 
 @pytest.mark.asyncio
 async def test_get_registry_from_context_returns_registry():
-    """get_registry_from_context returns the registry from session_registry_manager."""
+    """get_registry_from_context returns the registry from the lifespan context."""
     mock_registry = MagicMock()
-    mock_session_manager = create_mock_session_registry_manager(mock_registry)
     context = MockContext(
         {
-            "session_registry_manager": mock_session_manager,
+            "registry": mock_registry,
             "config_manager": MagicMock(),
         }
     )
     result = await get_registry_from_context(context)
     assert result is mock_registry
-    mock_session_manager.get_or_create_registry.assert_awaited_once_with(
-        "test-mcp-session-id",
-        context.request_context.lifespan_context["config_manager"],
-    )
 
 
 @pytest.mark.asyncio
-async def test_get_registry_from_context_raises_when_no_session_id():
-    """get_registry_from_context raises InternalError when mcp-session-id header absent."""
+async def test_get_registry_from_context_enterprise_applies_credentials():
+    """For enterprise registries, get_registry_from_context applies credentials."""
+    from deephaven_mcp.auth.credentials import PasswordCredentials
 
-    class MockRequestContextNoHeader:
-        request = None
-        lifespan_context = {
-            "session_registry_manager": create_mock_session_registry_manager(),
+    mock_registry = MagicMock(spec=EnterpriseSessionRegistry)
+    mock_registry.apply_credentials = AsyncMock()
+    creds = PasswordCredentials(username="alice", password="pw")
+    context = MockContext(
+        {
+            "registry": mock_registry,
             "config_manager": MagicMock(),
-        }
-
-    class MockContextNoHeader:
-        request_context = MockRequestContextNoHeader()
-
-    with pytest.raises(InternalError):
-        await get_registry_from_context(MockContextNoHeader())
+        },
+        creds=creds,
+    )
+    result = await get_registry_from_context(context)
+    assert result is mock_registry
+    mock_registry.apply_credentials.assert_awaited_once_with(creds)
 
 
 # ===========================================================================
@@ -405,9 +337,7 @@ async def test_get_session_from_context_success():
 
     context = MockContext(
         {
-            "session_registry_manager": create_mock_session_registry_manager(
-                mock_registry
-            ),
+            "registry": mock_registry,
             "config_manager": MagicMock(),
         }
     )
@@ -431,9 +361,7 @@ async def test_get_session_from_context_session_not_found():
 
     context = MockContext(
         {
-            "session_registry_manager": create_mock_session_registry_manager(
-                mock_registry
-            ),
+            "registry": mock_registry,
             "config_manager": MagicMock(),
         }
     )
@@ -452,9 +380,7 @@ async def test_get_session_from_context_keyerror_still_propagates():
 
     context = MockContext(
         {
-            "session_registry_manager": create_mock_session_registry_manager(
-                mock_registry
-            ),
+            "registry": mock_registry,
             "config_manager": MagicMock(),
         }
     )
@@ -475,9 +401,7 @@ async def test_get_session_from_context_session_connection_fails():
 
     context = MockContext(
         {
-            "session_registry_manager": create_mock_session_registry_manager(
-                mock_registry
-            ),
+            "registry": mock_registry,
             "config_manager": MagicMock(),
         }
     )
@@ -569,9 +493,7 @@ async def test_get_enterprise_session_success():
 
     context = MockContext(
         {
-            "session_registry_manager": create_mock_session_registry_manager(
-                mock_registry
-            ),
+            "registry": mock_registry,
             "config_manager": MagicMock(),
         }
     )
@@ -595,9 +517,7 @@ async def test_get_enterprise_session_not_enterprise():
 
     context = MockContext(
         {
-            "session_registry_manager": create_mock_session_registry_manager(
-                mock_registry
-            ),
+            "registry": mock_registry,
             "config_manager": MagicMock(),
         }
     )
@@ -622,9 +542,7 @@ async def test_get_enterprise_session_exception():
 
     context = MockContext(
         {
-            "session_registry_manager": create_mock_session_registry_manager(
-                mock_registry
-            ),
+            "registry": mock_registry,
             "config_manager": MagicMock(),
         }
     )

@@ -3,6 +3,17 @@
 This module provides ``EnterpriseSessionRegistry``, a purpose-built registry for the
 DHE server that manages exactly one enterprise system (factory) per instance.
 
+Single-tenant credential binding
+--------------------------------
+The registry is a single process-wide instance shared by every MCP client of
+the server. Credentials arrive on each request via the auth middleware; the
+**first** authenticated request after startup/reload binds those credentials
+to the shared factory (creates ``_factory_manager`` and starts background
+discovery). Subsequent requests reuse the bound factory when credentials
+match; requests presenting a different identity are rejected with
+``AuthenticationError``.  Rebinding requires ``mcp_reload`` or a server
+restart.
+
 Architecture
 ------------
 ``EnterpriseSessionRegistry`` inherits the ``_items`` dict, ``_lock``, and
@@ -57,7 +68,11 @@ from ._manager import (
     EnterpriseSessionManager,
     SystemType,
 )
-from ._registry import InitializationPhase, MutableSessionRegistry, RegistrySnapshot
+from ._registry import (
+    InitializationPhase,
+    MutableSessionRegistry,
+    RegistrySnapshot,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -207,7 +222,7 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
 
         registry = EnterpriseSessionRegistry()
         await registry.initialize(config_manager)  # config_manager returns the DHE system config
-        await registry.bind_credentials(creds)     # required before any read
+        await registry.apply_credentials(creds)    # required before any read
         session_mgr = await registry.get("enterprise:system:my-pq")
         factory = registry.factory_manager
         await registry.close()
@@ -285,25 +300,18 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
 
         Raises:
             InternalError: If the registry has not been initialized, or
-                if :meth:`bind_credentials` has not been called for this
-                MCP session. Reaching the latter case indicates an MCP
-                tool ran without first binding the request's credentials
-                — a wiring bug in the middleware/tool layer, not a
+                if no request has yet bound credentials via
+                :meth:`apply_credentials`. Reaching the latter case
+                indicates an MCP tool ran before any authenticated
+                request applied credentials to the shared registry — a
+                wiring bug in the middleware/tool layer, not a
                 client-side error.
         """
         self._check_initialized()
-        self._check_bound()
-        # Defensive field-level check, separate from _check_bound().
-        # _check_bound() guards the public contract ("the caller must
-        # have invoked bind_credentials"). This check guards the
-        # internal invariant that _factory_manager is actually
-        # populated. The two answer different questions and protect
-        # against different failure modes (e.g. close() clears
-        # _factory_manager before _creds, and a future refactor could
-        # split the set-together pair).
         if self._factory_manager is None:
             raise InternalError(
-                f"{self.__class__.__name__} factory manager is not available"
+                f"{self.__class__.__name__} factory manager is not available; "
+                "no authenticated request has applied credentials yet."
             )
         return self._factory_manager
 
@@ -313,12 +321,12 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
 
     @override
     async def _load_items(self, config_manager: ConfigManager) -> None:
-        """Stash the enterprise system config so :meth:`bind_credentials` can use it.
+        """Stash the enterprise system config so :meth:`apply_credentials` can use it.
 
         Called by ``super().initialize()`` while holding ``self._lock``. The
         factory manager is **not** created here — credentials are not yet
         known. Phase remains :attr:`InitializationPhase.NOT_STARTED` until
-        :meth:`bind_credentials` runs.
+        :meth:`apply_credentials` runs.
 
         Args:
             config_manager (ConfigManager): Must be an
@@ -329,7 +337,7 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
         self._system_name = self._config["system_name"]
         _LOGGER.info(
             f"[{self.__class__.__name__}] config loaded for '{self._system_name}'; "
-            f"awaiting bind_credentials"
+            f"awaiting apply_credentials"
         )
 
     @override
@@ -337,10 +345,11 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
         """Initialize the registry from config (no factory creation).
 
         Calls ``super().initialize()`` which calls :meth:`_load_items` to
-        store the config. Discovery is **not** started here — the
-        per-MCP-session factory cannot be built without credentials. Tools
-        must call :meth:`bind_credentials` (typically at the top of every
-        handler) before using :meth:`get` / :meth:`get_all`.
+        store the config. Discovery is **not** started here — the shared
+        factory cannot be built without credentials. The first authenticated
+        request applies credentials via :meth:`apply_credentials`, which
+        creates the factory and starts background discovery for the lifetime
+        of the server process.
 
         Idempotent — subsequent calls are a no-op.
 
@@ -349,30 +358,28 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
         """
         await super().initialize(config_manager)
 
-    async def bind_credentials(self, creds: Credentials) -> None:
-        """Attach the request's credentials to this MCP-session registry.
+    async def apply_credentials(self, creds: Credentials) -> None:
+        """Apply request credentials to the single shared factory.
 
-        Called by enterprise MCP tools at the top of every handler with the
-        :class:`~deephaven_mcp.auth.credentials.Credentials` derived by the auth
-        middleware from the request's ``X-Deephaven-*`` headers.
+        Called from the enterprise request entry path with the
+        :class:`~deephaven_mcp.auth.credentials.Credentials` derived by the
+        auth middleware from the request's ``X-Deephaven-*`` headers.
 
         Behaviour:
 
-        - First call: creates the per-credentials
-          :class:`CorePlusSessionFactoryManager`, transitions ``_phase`` to
-          :attr:`InitializationPhase.PARTIAL`, and launches the background
-          discovery task. (The task is created here — not in
-          :meth:`initialize` — because the factory manager requires
-          credentials.)
-        - Subsequent calls with the *same* credentials (identified by
+        - **First authenticated request after startup/reload**: creates the
+          :class:`CorePlusSessionFactoryManager` bound to these credentials,
+          transitions ``_phase`` to :attr:`InitializationPhase.PARTIAL`, and
+          launches the background discovery task.
+        - **Subsequent requests with the same credentials** (identified by
           frozen-dataclass equality): no-op.
-        - Subsequent calls with *different* credentials: raises
-          :class:`AuthenticationError`. An MCP session is bound to one
-          user; changing identity within a session is a client-side
-          auth violation, not a code bug.
+        - **Subsequent requests with different credentials**: raises
+          :class:`AuthenticationError`. The single-tenant server binds to
+          one identity at a time; rebinding requires ``mcp_reload`` or a
+          server restart.
 
         Args:
-            creds (Credentials): The credentials to bind. Whether the
+            creds (Credentials): The credentials to apply. Whether the
                 concrete subclass is actually usable for enterprise
                 auth is decided by the downstream factory
                 (:meth:`CorePlusSessionFactory.from_credentials`) when
@@ -386,10 +393,9 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
                 bug rather than a client error.
 
         Raises:
-            AuthenticationError: If a different credential was
-                previously bound on this same registry instance. This
-                signals a client-side identity change within a single
-                MCP session, which is not supported.
+            AuthenticationError: If the server is already bound to a
+                different identity.  Use ``mcp_reload`` or restart the
+                server to rebind.
             InternalError: If the registry is not yet initialized, or
                 if the registry somehow has no config loaded despite
                 being marked initialized. Both indicate broken
@@ -403,8 +409,9 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
                     return
                 raise AuthenticationError(
                     f"{self.__class__.__name__} is already bound to a "
-                    f"different set of credentials; an MCP session must "
-                    f"present a stable identity for its lifetime."
+                    f"different identity; the single-tenant server accepts "
+                    f"one credential set per process. Use mcp_reload or "
+                    f"restart the server to rebind."
                 )
             if self._config is None:
                 raise InternalError(
@@ -420,7 +427,7 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
                 self._discover_enterprise_sessions()
             )
             _LOGGER.info(
-                f"[{self.__class__.__name__}] credentials bound for "
+                f"[{self.__class__.__name__}] credentials applied for "
                 f"'{self._system_name}'; discovery started"
             )
 
@@ -489,11 +496,9 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
             self._items.clear()
 
         # Step 6: close items outside the lock via the inherited hook.
-        # NOTE: super().close() is NOT called here. The _refresh_lock barrier
-        # (step 2) must be acquired after _initialized is set to False (step 1)
-        # and before _items is cleared (step 5). That ordering cannot be
-        # preserved if super().close() controls both the lock acquisition and
-        # the _check_initialized() gate.
+        # Inlines the steps from super().close() so the discovery-task
+        # cancel and factory-manager close can run between the
+        # _initialized=False flip and _items.clear().
         await self._close_items(items_to_close)
 
         _LOGGER.info(f"[{self.__class__.__name__}] closed")
@@ -502,40 +507,20 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
     # BaseRegistry overrides — read interface
     # ------------------------------------------------------------------
 
-    def _check_bound(self) -> None:
-        """Raise if :meth:`bind_credentials` has not been called.
-
-        Intended as a guard at the top of public read methods that need a
-        bound, per-MCP-session identity (``get``, ``get_all``,
-        ``factory_manager``). Reaching this branch means an MCP tool ran
-        without binding the request's credentials, which is a wiring bug
-        in the middleware/tool layer — not a client-side condition.
-
-        Distinct from :meth:`_check_initialized`, which guards against
-        use before/after :meth:`initialize` / :meth:`close`. The two
-        guards address different lifecycle errors and are both expected
-        to be called at the top of public reads.
-
-        Raises:
-            InternalError: If ``self._creds`` is ``None``.
-        """
-        if self._creds is None:
-            raise InternalError(
-                f"{self.__class__.__name__}.bind_credentials was not "
-                f"called before this read; every MCP tool handler must "
-                f"bind the request's credentials before accessing the "
-                f"registry."
-            )
-
     async def _check_and_sync(self) -> None:
-        """Verify initialized + bound and trigger a sync if in COMPLETED phase.
+        """Verify initialized and trigger a sync if in COMPLETED phase.
 
         Shared preamble for :meth:`get` and :meth:`get_all`.  Callers must
         re-check ``_check_initialized()`` under ``self._lock`` after this returns,
         since a concurrent ``close()`` could have run during the sync.
+
+        Credentials must have been applied by an earlier
+        :meth:`apply_credentials` call from the request entry path;
+        otherwise the factory manager is missing and read operations
+        surface that via the ``factory_manager`` guard or via
+        ``RegistryItemNotFoundError`` from an empty ``_items``.
         """
         self._check_initialized()
-        self._check_bound()
         async with self._lock:
             phase = self._phase
         if phase == InitializationPhase.COMPLETED:
@@ -714,6 +699,12 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
         - Removes sessions we have that the controller no longer reports.
         - Clears any previous error.
 
+        Invariant: a session key reappearing after removal is installed
+        with a freshly constructed manager instance — never by mutating
+        an existing manager in place.  The Evictor's identity-checked
+        :meth:`BaseRegistry.remove` relies on this to safely race with
+        controller-driven re-adds.
+
         Args:
             result (_FactoryQueryResult): Successful query result.
             factory_manager (CorePlusSessionFactoryManager): Factory manager for
@@ -735,6 +726,8 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
 
         for full_key in keys_to_add:
             _, _, session_name = BaseItemManager.parse_full_name(full_key)
+            # Always a new manager instance — never reuse an existing one
+            # (see method docstring invariant).
             mgr = self._make_enterprise_session_manager(
                 factory_manager, session_name, self._system_name
             )

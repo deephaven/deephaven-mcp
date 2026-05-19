@@ -22,7 +22,8 @@ Top-level schema:
 
 - **Required**: ``system_name``, ``connection_json_url``, ``auth``.
 - **Optional**: ``session_creation``, ``connection_timeout``,
-  ``mcp_session_idle_timeout_seconds``.
+  ``session_idle_timeout_seconds``,
+  ``session_idle_sweep_interval_seconds``.
 
 The ``auth`` block (required):
 
@@ -107,7 +108,8 @@ _REQUIRED_TOP_LEVEL_FIELDS: dict[str, type | tuple[type, ...]] = {
 _OPTIONAL_TOP_LEVEL_FIELDS: dict[str, type | tuple[type, ...]] = {
     "session_creation": dict,
     "connection_timeout": (int, float),
-    "mcp_session_idle_timeout_seconds": (int, float),
+    "session_idle_timeout_seconds": (int, float),
+    "session_idle_sweep_interval_seconds": (int, float),
 }
 """Optional top-level fields and their expected types."""
 
@@ -366,7 +368,8 @@ def validate_enterprise_config(config: Any) -> dict[str, Any]:
 
     Optional fields:
         - ``connection_timeout`` (int|float > 0)
-        - ``mcp_session_idle_timeout_seconds`` (int|float > 0)
+        - ``session_idle_timeout_seconds`` (int|float > 0)
+        - ``session_idle_sweep_interval_seconds`` (int|float > 0)
         - ``session_creation`` (dict): when present,
           ``defaults.heap_size_gb`` is required.
 
@@ -407,7 +410,8 @@ def validate_enterprise_config(config: Any) -> dict[str, Any]:
     _validate_auth_block(system_name, config["auth"])
 
     validate_optional_positive_number(config, "connection_timeout")
-    validate_optional_positive_number(config, "mcp_session_idle_timeout_seconds")
+    validate_optional_positive_number(config, "session_idle_timeout_seconds")
+    validate_optional_positive_number(config, "session_idle_sweep_interval_seconds")
 
     _validate_session_creation(system_name, config)
 

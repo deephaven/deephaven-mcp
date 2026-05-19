@@ -13,7 +13,6 @@ import pytest
 from conftest import (
     MockContext,
     create_mock_instance_tracker,
-    create_mock_session_registry_manager,
 )
 
 
@@ -197,9 +196,7 @@ async def test_pq_name_to_id_success():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -233,9 +230,7 @@ async def test_pq_name_to_id_not_found():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -259,9 +254,7 @@ async def test_pq_name_to_id_connection_failed():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -284,9 +277,7 @@ async def test_pq_name_to_id_exception():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -682,9 +673,7 @@ async def test_pq_restart_multiple():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -736,9 +725,7 @@ async def test_pq_restart_partial_failure():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -799,9 +786,7 @@ async def test_pq_delete_partial_failure():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -858,9 +843,7 @@ async def test_pq_start_partial_failure():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -912,9 +895,7 @@ async def test_pq_stop_partial_failure():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -1806,9 +1787,7 @@ async def test_pq_list_success():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -1874,9 +1853,7 @@ async def test_pq_list_connection_failed():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -1899,9 +1876,7 @@ async def test_pq_list_exception():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -1943,9 +1918,7 @@ async def test_pq_details_success_by_name(mock_exported_enum, mock_restart_enum)
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -2063,9 +2036,7 @@ async def test_pq_details_success_by_serial():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -2100,9 +2071,7 @@ async def test_pq_details_not_found():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -2121,9 +2090,7 @@ async def test_pq_details_invalid_pq_id():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -2147,9 +2114,7 @@ async def test_pq_details_connection_failed():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -2172,9 +2137,7 @@ async def test_pq_details_exception():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -2205,9 +2168,7 @@ async def test_pq_details_not_found_by_serial():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -2240,9 +2201,7 @@ async def test_pq_create_success():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -2283,9 +2242,7 @@ async def test_pq_create_success_groovy():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -2320,9 +2277,7 @@ async def test_pq_create_invalid_language():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -2351,9 +2306,7 @@ async def test_pq_create_connection_failed():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -2376,9 +2329,7 @@ async def test_pq_create_exception():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -2462,9 +2413,7 @@ async def test_pq_delete_success_by_name():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -2508,9 +2457,7 @@ async def test_pq_delete_success_custom_timeout():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -2537,9 +2484,7 @@ async def test_pq_delete_invalid_pq_id():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -2563,9 +2508,7 @@ async def test_pq_delete_connection_failed():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -2588,9 +2531,7 @@ async def test_pq_delete_exception():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -2625,9 +2566,7 @@ async def test_pq_delete_multiple():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -2667,9 +2606,7 @@ async def test_pq_delete_different_systems_error():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -2692,9 +2629,7 @@ async def test_pq_delete_empty_list():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -2714,9 +2649,7 @@ async def test_pq_delete_negative_timeout():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -2736,9 +2669,7 @@ async def test_pq_delete_zero_max_concurrent():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -2775,9 +2706,7 @@ async def test_pq_modify_success():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -2833,9 +2762,7 @@ async def test_pq_modify_with_restart():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -2883,9 +2810,7 @@ async def test_pq_modify_script_body_running_no_restart_warns():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -2923,9 +2848,7 @@ async def test_pq_modify_stopped_pq_no_warning():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -2961,9 +2884,7 @@ async def test_pq_modify_metadata_only_no_warning():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -2999,9 +2920,7 @@ async def test_pq_modify_running_with_restart_no_warning():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -3039,9 +2958,7 @@ async def test_pq_modify_script_path():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -3196,9 +3113,7 @@ async def test_pq_modify_mutually_exclusive_scripts():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -3224,9 +3139,7 @@ async def test_pq_modify_invalid_pq_id():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -3254,9 +3167,7 @@ async def test_pq_modify_connection_failed():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -3291,9 +3202,7 @@ async def test_pq_modify_pq_not_found():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -3330,9 +3239,7 @@ async def test_pq_modify_invalid_language():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -3368,9 +3275,7 @@ async def test_pq_modify_no_changes():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -3415,9 +3320,7 @@ async def test_pq_modify_all_parameters(mock_restart_enum):
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -3500,9 +3403,7 @@ async def test_pq_modify_clear_auto_delete_timeout():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -3548,9 +3449,7 @@ async def test_pq_modify_restart_users_enum_not_available():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -3596,9 +3495,7 @@ async def test_pq_modify_invalid_restart_users_value(mock_restart_enum):
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -3627,9 +3524,7 @@ async def test_pq_modify_exception():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -3670,9 +3565,7 @@ async def test_pq_start_success():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -3717,9 +3610,7 @@ async def test_pq_start_already_running():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -3744,9 +3635,7 @@ async def test_pq_start_invalid_pq_id():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -3770,9 +3659,7 @@ async def test_pq_start_connection_failed():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -3795,9 +3682,7 @@ async def test_pq_start_exception():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -3839,9 +3724,7 @@ async def test_pq_start_multiple():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -3881,9 +3764,7 @@ async def test_pq_start_different_systems_error():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -3906,9 +3787,7 @@ async def test_pq_start_empty_list():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -3942,9 +3821,7 @@ async def test_pq_stop_success():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -3989,9 +3866,7 @@ async def test_pq_stop_success_custom_timeout():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -4023,9 +3898,7 @@ async def test_pq_stop_empty_list():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -4045,9 +3918,7 @@ async def test_pq_stop_invalid_pq_id_in_list():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -4071,9 +3942,7 @@ async def test_pq_stop_connection_failed():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -4096,9 +3965,7 @@ async def test_pq_stop_exception():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -4131,9 +3998,7 @@ async def test_pq_restart_success():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -4165,9 +4030,7 @@ async def test_pq_restart_empty_list():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -4187,9 +4050,7 @@ async def test_pq_restart_invalid_pq_id_in_list():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -4215,9 +4076,7 @@ async def test_pq_restart_connection_failed():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -4240,9 +4099,7 @@ async def test_pq_restart_exception():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -4276,9 +4133,7 @@ async def test_pq_stop_multiple():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -4334,9 +4189,7 @@ async def test_pq_restart_multiple():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -4378,9 +4231,7 @@ async def test_pq_stop_different_systems_error():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -4403,9 +4254,7 @@ async def test_pq_restart_different_systems_error():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -4539,9 +4388,7 @@ async def test_pq_delete_parallel_execution_with_semaphore():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -4619,9 +4466,7 @@ async def test_pq_delete_handles_unexpected_exception():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -4695,9 +4540,7 @@ async def test_pq_start_parallel_execution():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -4748,9 +4591,7 @@ async def test_pq_stop_parallel_with_mixed_results():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -4803,9 +4644,7 @@ async def test_pq_restart_parallel_execution():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -4850,9 +4689,7 @@ async def test_pq_delete_exception_escapes_to_gather(monkeypatch):
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -4910,9 +4747,7 @@ async def test_pq_start_exception_escapes_to_gather(monkeypatch):
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -4967,9 +4802,7 @@ async def test_pq_stop_exception_escapes_to_gather(monkeypatch):
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -5024,9 +4857,7 @@ async def test_pq_restart_exception_escapes_to_gather(monkeypatch):
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -5066,9 +4897,7 @@ async def test_pq_create_script_body_and_path_mutually_exclusive():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 

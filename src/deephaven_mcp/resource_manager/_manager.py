@@ -81,9 +81,10 @@ Thread Safety:
 import asyncio
 import enum
 import logging
+import time
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
-from typing import Any, Protocol, override
+from typing import Any, ClassVar, Protocol, override
 
 from deephaven_mcp._exceptions import (
     AuthenticationError,
@@ -375,6 +376,22 @@ class BaseItemManager[T: AsyncClosable](ABC):
         CorePlusSessionFactoryManager: Concrete implementation for Enterprise factories
     """
 
+    evicts_on_idle: ClassVar[bool] = False
+    """Whether the registry should also remove this manager from ``_items`` on idle eviction.
+
+    Default ``False`` — for managers that hold only a cached client (no
+    external process), the idle sweeper just calls :meth:`close` to drop
+    the cached item; the manager stays in the registry so a subsequent
+    :meth:`get` lazily reconnects.
+
+    Subclasses that own an external resource which cannot be transparently
+    reopened (e.g. a launched Docker container or Python subprocess) should
+    override this to ``True``.  The sweeper will then remove the entry
+    from the registry (and from any added-session tracking) after closing
+    it, since the underlying resource is gone and a later :meth:`get`
+    would fail.
+    """
+
     @staticmethod
     def make_full_name(system_type: "SystemType", source: str, name: str) -> str:
         """Construct the canonical full name identifier for managed resources.
@@ -487,9 +504,30 @@ class BaseItemManager[T: AsyncClosable](ABC):
                 Must be unique within the same system_type and source combination.
                 Used for identification, logging, and resource tracking.
 
+        State invariants:
+            All three mutable state slots below are read and written only
+            under ``self._lock``.
+
+            - ``_item_cache`` (``T | None``): the lazily created resource,
+              or ``None`` when not yet created / after :meth:`close` /
+              after idle eviction. Set to non-``None`` only by
+              :meth:`_get_unlocked` (cache miss path).
+            - ``_last_accessed`` (``float | None``): monotonic timestamp
+              of the most recent :meth:`get`. ``None`` means "never
+              accessed since construction or last close / idle-eviction"
+              and is therefore not eligible for idle eviction. Whenever
+              ``_item_cache`` is non-``None``, ``_last_accessed`` is also
+              non-``None`` (set together in :meth:`_get_unlocked`).
+            - ``_lock`` (``asyncio.Lock``): serializes reads and writes
+              of the two slots above.
+
+            After :meth:`close` or idle eviction, the next :meth:`get`
+            repopulates the cache via :meth:`_create_item`.
+
         Post-Initialization State:
             After construction, the manager has:
             - Empty resource cache (_item_cache = None)
+            - No last-accessed timestamp (_last_accessed = None)
             - Initialized asyncio.Lock for thread safety
             - Logged creation message for operational visibility
             - Ready to handle get(), liveness_status(), and close() operations
@@ -512,12 +550,97 @@ class BaseItemManager[T: AsyncClosable](ABC):
         self._source = source
         self._name = name
         self._item_cache: T | None = None
+        self._last_accessed: float | None = None
         self._lock = asyncio.Lock()
 
         full_name = self.make_full_name(system_type, source, name)
         _LOGGER.info(
             f"[{self.__class__.__name__}] Initialized manager for '{full_name}'"
         )
+
+    async def maybe_close_if_idle(self, timeout_seconds: float, now: float) -> bool:
+        """Close the cached item if it has been idle past ``timeout_seconds``.
+
+        Called by :class:`~deephaven_mcp.resource_manager.Evictor`.  A
+        manager whose :attr:`_last_accessed` is ``None`` (never accessed
+        since construction or last close) is not eligible for eviction.
+
+        Two-phase pattern:
+
+        1. Under ``self._lock``: re-check idleness.  Return ``False``
+           early when the manager is within the timeout, has never been
+           accessed, or has no cached item.
+        2. Outside the lock: ``await self.close()`` — polymorphic close,
+           which clears the cache (and, for subclasses that own external
+           resources, releases them; e.g.
+           :class:`DynamicCommunitySessionManager.close` stops the
+           launched process).
+
+        Intentional non-atomicity: the manager's lock is released
+        between the idleness re-check and the ``await self.close()``
+        call.  A concurrent :meth:`get` racing in during that window
+        may observe the still-cached item and hand it to a caller
+        immediately before close runs.  The caller's next use will then
+        surface a clear closed-resource error from the underlying
+        client.
+
+        Args:
+            timeout_seconds (float): Idle threshold.  An item is eligible
+                for closure if ``now - self._last_accessed > timeout_seconds``.
+            now (float): A ``time.monotonic()`` reading taken by the
+                sweeper, used to keep the eligibility check consistent
+                across all managers in a sweep pass.
+
+        Returns:
+            bool: ``True`` if :meth:`close` was issued for this manager.
+                The caller (the Evictor) reads
+                :attr:`evicts_on_idle` to decide whether to remove the
+                manager from the registry.
+                ``False`` if the manager was within the timeout, had
+                never been accessed, or had no cached item to close.
+        """
+        async with self._lock:
+            last = self._last_accessed
+            if last is None or (now - last) <= timeout_seconds:
+                return False
+            if self._item_cache is None:
+                # Nothing cached; just reset the timer so we don't
+                # repeatedly log "eviction" for the same idle slot.
+                self._last_accessed = None
+                return False
+            idle_for = now - last
+
+        _LOGGER.info(
+            f"[{self.__class__.__name__}] Closing idle item for "
+            f"'{self.full_name}' (idle for {idle_for:.1f}s)"
+        )
+        await self.close()
+        return True
+
+    async def _close_captured_item(self, item: T) -> None:
+        """Close ``item`` and swallow exceptions, logging at WARNING.
+
+        Caller must **not** hold ``self._lock`` — this method runs the
+        ``await item.close()`` outside the manager's critical section so
+        that network/IPC I/O during cleanup does not block other
+        operations on this manager.  Used by :meth:`close` after it has
+        captured the cached item ref under the lock and reset the cache
+        state.
+
+        Never raises.
+
+        Args:
+            item: The previously-cached item to close.  Must be a stable
+                local reference captured under ``self._lock`` before
+                ``self._item_cache`` was reset to ``None``.
+        """
+        try:
+            await item.close()
+        except Exception as e:
+            _LOGGER.warning(
+                f"[{self.__class__.__name__}] Error closing item for "
+                f"'{self.full_name}': {e}"
+            )
 
     @abstractmethod
     async def _create_item(self) -> T:
@@ -866,8 +989,12 @@ class BaseItemManager[T: AsyncClosable](ABC):
                 - NetworkError: Connectivity or communication issues
 
         Thread Safety:
-            This method is NOT thread-safe by itself. The caller MUST hold self._lock
-            before calling this method to ensure proper synchronization.
+            This method is NOT thread-safe by itself. The caller MUST hold ``self._lock``
+            before calling this method. Both ``self._item_cache`` and
+            ``self._last_accessed`` are read and written here; future refactors must
+            keep the timestamp update inside the same critical section as the cache
+            mutation, since :meth:`maybe_close_if_idle` reads
+            ``self._last_accessed`` under the same lock.
 
         See Also:
             get(): The public, thread-safe method that acquires the lock and calls this
@@ -877,12 +1004,14 @@ class BaseItemManager[T: AsyncClosable](ABC):
             _LOGGER.debug(
                 f"[{self.__class__.__name__}] Cache hit for '{self.full_name}'"
             )
+            self._last_accessed = time.monotonic()
             return self._item_cache
 
         _LOGGER.info(
             f"[{self.__class__.__name__}] Cache miss - creating new item for '{self.full_name}'..."
         )
         self._item_cache = await self._create_item()
+        self._last_accessed = time.monotonic()
         _LOGGER.info(
             f"[{self.__class__.__name__}] Successfully created and cached new item for '{self.full_name}'"
         )
@@ -1327,146 +1456,44 @@ class BaseItemManager[T: AsyncClosable](ABC):
             return await self._is_alive_unlocked()
 
     async def close(self) -> None:
-        """Clean up and release the managed resource with comprehensive error handling.
+        """Close the cached resource and reset the manager for reuse.
 
-        This method performs graceful shutdown of the managed resource by attempting
-        to close the cached resource (if it exists and is responsive) and clearing
-        the internal cache. It implements robust error handling to ensure cleanup
-        proceeds even when individual operations fail.
+        Two-phase pattern (matches :meth:`maybe_close_if_idle`):
 
-        Cleanup Process:
-            The method follows a multi-step cleanup process:
-            1. **Liveness Check**: Verify if the cached resource is still responsive
-            2. **Conditional Close**: Close the resource only if it's alive and responsive
-            3. **Fallback Close**: If liveness check fails, attempt close anyway
-            4. **Cache Clearing**: Always clear the cache regardless of close results
-            5. **Comprehensive Logging**: Log all steps for debugging and monitoring
+        1. Under ``self._lock``: capture the cached item ref and clear
+           ``_item_cache`` / ``_last_accessed`` atomically.  Any concurrent
+           :meth:`get` after this point sees a fresh slot and lazily
+           re-creates.
+        2. Outside the lock: hand the captured item to
+           :meth:`_close_captured_item`, which performs the actual close
+           with full error suppression.
 
-        Error Handling Strategy:
-            This method uses a layered error handling approach:
-            - **Liveness Failures**: Log warning, attempt close anyway
-            - **Close Failures**: Log warning, continue with cache clearing
-            - **Always Complete**: Cache is always cleared regardless of errors
-            - **No Exception Propagation**: All exceptions are caught and logged
+        Subclasses that own external resources (e.g. a launched process)
+        extend ``close()`` with their own teardown — that logic runs in
+        the subclass after this base call returns.
 
-        Resource State Management:
-            After this method completes:
-            - The internal cache is guaranteed to be cleared (set to None)
-            - Future get() calls will create a new resource instance
-            - The manager returns to its initial uninitialized state
-            - Any existing resource references become independent of the manager
-
-        Liveness-Based Closing:
-            The method performs a liveness check before attempting to close:
-            - **Alive Resources**: Closed normally with proper AsyncClosable protocol
-            - **Unresponsive Resources**: Close attempted but may be unreliable
-            - **No Cached Resource**: No action needed, cache cleared immediately
-
-        Idempotent Operation:
-            This method is safe to call multiple times:
-            - First call: Performs actual cleanup if resource exists
-            - Subsequent calls: No-op with debug logging, no errors
-            - Always safe: No side effects or state corruption
-
-        Usage Patterns:
-            ```python
-            # Explicit cleanup in application shutdown
-            async def shutdown():
-                for manager in all_managers:
-                    await manager.close()
-
-            # Context manager pattern (if implemented)
-            async with manager:
-                resource = await manager.get()
-                # Use resource...
-            # manager.close() called automatically
-
-            # Error recovery - reset manager state
-            try:
-                resource = await manager.get()
-                # Resource operation fails...
-            except Exception:
-                await manager.close()  # Reset for retry
-            ```
-
-        Performance Considerations:
-            - **Fast Path**: No cached resource results in immediate return
-            - **Network Operations**: Closing remote resources may be slow
-            - **Error Resilience**: Failed operations don't block overall cleanup
-            - **Lock Contention**: Full synchronization ensures clean state transitions
-
-        Logging Behavior:
-            This method provides comprehensive logging at multiple levels:
-            - **Debug**: Entry/exit, cache state, liveness results
-            - **Info**: Successful close operations and completion
-            - **Warning**: Liveness failures, close failures with context
-            - **All logs**: Include manager class name and full_name for context
-
-        Thread Safety:
-            This method is fully thread-safe and coroutine-safe. The entire cleanup
-            process is performed within a single critical section to ensure atomic
-            state transitions and prevent race conditions with other operations.
-
-        Exception Safety:
-            This method never propagates exceptions to the caller. All errors are
-            caught, logged with appropriate detail, and cleanup continues. This makes
-            it safe to use in shutdown code, error handlers, and cleanup routines.
-
-        See Also:
-            get(): Method to retrieve resources (will create new after close)
-            is_alive(): Method to check resource health before closing
-            AsyncClosable: Protocol that managed resources must implement
+        Idempotent: safe to call multiple times.  Never raises.
         """
         _LOGGER.debug(
             f"[{self.__class__.__name__}] Starting close operation for '{self.full_name}'"
         )
 
         async with self._lock:
-            if self._item_cache:
-                _LOGGER.debug(
-                    f"[{self.__class__.__name__}] Found cached item for '{self.full_name}', checking liveness before close"
-                )
-                try:
-                    # Check liveness using the unlocked method since we already hold the lock
-                    if await self._is_alive_unlocked():
-                        _LOGGER.info(
-                            f"[{self.__class__.__name__}] Closing live item for '{self.full_name}'"
-                        )
-                        await self._item_cache.close()
-                        _LOGGER.info(
-                            f"[{self.__class__.__name__}] Successfully closed item for '{self.full_name}'"
-                        )
-                    else:
-                        _LOGGER.debug(
-                            f"[{self.__class__.__name__}] Item for '{self.full_name}' is not alive, skipping close"
-                        )
-                except Exception as e:
-                    # If liveness check fails, still try to close the item
-                    _LOGGER.warning(
-                        f"[{self.__class__.__name__}] Liveness check failed during close for {self.full_name}: {e}"
-                    )
-                    try:
-                        _LOGGER.info(
-                            f"[{self.__class__.__name__}] Attempting to close item despite liveness check failure for '{self.full_name}'"
-                        )
-                        await self._item_cache.close()
-                        _LOGGER.info(
-                            f"[{self.__class__.__name__}] Successfully closed item for '{self.full_name}' despite earlier liveness failure"
-                        )
-                    except Exception as close_e:
-                        # Log close failures but continue cleanup
-                        _LOGGER.warning(
-                            f"[{self.__class__.__name__}] Failed to close item for {self.full_name}: {close_e}"
-                        )
-            else:
-                _LOGGER.debug(
-                    f"[{self.__class__.__name__}] No cached item to close for '{self.full_name}'"
-                )
-
+            item_to_close = self._item_cache
             self._item_cache = None
+            self._last_accessed = None
+
+        if item_to_close is None:
             _LOGGER.debug(
-                f"[{self.__class__.__name__}] Cleared cache for '{self.full_name}', close operation complete"
+                f"[{self.__class__.__name__}] No cached item to close for '{self.full_name}'"
             )
+            return
+
+        _LOGGER.info(f"[{self.__class__.__name__}] Closing item for '{self.full_name}'")
+        await self._close_captured_item(item_to_close)
+        _LOGGER.debug(
+            f"[{self.__class__.__name__}] Close operation complete for '{self.full_name}'"
+        )
 
 
 class CommunitySessionManager(BaseItemManager[CoreSession]):
@@ -1953,6 +1980,18 @@ class DynamicCommunitySessionManager(CommunitySessionManager):
         launch_session: Factory function that creates launched sessions
     """
 
+    evicts_on_idle: ClassVar[bool] = True
+    """Dynamic sessions are removed from the registry on idle eviction.
+
+    The launched Docker container / Python subprocess is stopped by this
+    class's :meth:`close` override (called from the manager's
+    :meth:`maybe_close_if_idle` during a sweep), so a subsequent
+    :meth:`get` could not transparently reconnect; keeping the manager
+    in the registry would leave a stale entry that errors on access and
+    consumes a ``max_concurrent_sessions`` slot. The Evictor therefore
+    drops the entry entirely after closing.
+    """
+
     @override
     def __init__(
         self,
@@ -1978,11 +2017,40 @@ class DynamicCommunitySessionManager(CommunitySessionManager):
         # Call parent with source="dynamic" to distinguish from static config sessions
         super().__init__(name, config, source="dynamic")
         self.launched_session = launched_session
+        self._is_stopped: bool = False
 
         _LOGGER.debug(
             f"[DynamicCommunitySessionManager] Created manager for '{name}' "
             f"(port: {launched_session.port}, method: {launched_session.launch_method})"
         )
+
+    @override
+    async def _create_item(self) -> CoreSession:
+        """Create a new CoreSession, refusing once the manager has been stopped.
+
+        Called under ``self._lock`` from
+        :meth:`BaseItemManager._get_unlocked` on a cache miss.  Reading
+        :attr:`_is_stopped` here is lock-protected because
+        :meth:`close` sets the flag under the same lock before clearing
+        the cache.
+
+        Returns:
+            CoreSession: A new session connected to the launched process.
+
+        Raises:
+            SessionCreationError: When :meth:`close` has stopped the
+                launched process.  Recreating would connect to a port
+                that is no longer listening.
+            SessionCreationError: When the underlying ``CoreSession``
+                creation fails for any other reason (re-raised by
+                :meth:`CommunitySessionManager._create_item`).
+        """
+        if self._is_stopped:
+            raise SessionCreationError(
+                f"Cannot create session for '{self.full_name}': "
+                f"the dynamic session has been stopped."
+            )
+        return await super()._create_item()
 
     @property
     def connection_url(self) -> str:
@@ -2048,15 +2116,25 @@ class DynamicCommunitySessionManager(CommunitySessionManager):
         """Close the session and stop the underlying process/container.
 
         This method:
-        1. Closes the CoreSession connection (if established)
-        2. Stops the launched process/container
-        3. Cleans up all resources
+        1. Sets ``_is_stopped`` under ``self._lock`` so that any
+           subsequent cache-miss in :meth:`_get_unlocked` will see the
+           flag and refuse to recreate against the tearing-down process.
+        2. Closes the CoreSession connection (if established) via
+           ``super().close()``.
+        3. Stops the launched process/container.
+        4. Cleans up all resources.
 
         Errors during cleanup are logged but don't prevent the cleanup from completing.
         """
         _LOGGER.info(
             f"[DynamicCommunitySessionManager] Closing dynamic session '{self.full_name}'"
         )
+
+        # Mark the manager stopped before clearing the cache so a
+        # concurrent get() that races into _create_item raises instead
+        # of building a session against a process about to be stopped.
+        async with self._lock:
+            self._is_stopped = True
 
         # First, close the session connection if it exists
         try:

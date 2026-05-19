@@ -144,14 +144,15 @@ uv run scripts/run_deephaven_test_server.py --table-group simple
 **Run a test client:**
 
 ```sh
-uv run scripts/mcp_community_test_client.py --transport sse --url http://localhost:8000/sse
-uv run scripts/mcp_docs_test_client.py --prompt "What is Deephaven?"
+uv run scripts/mcp_community_test_client.py --transport streamable-http --url http://localhost:8003/mcp
+uv run scripts/mcp_docs_test_client.py --url http://localhost:8001/mcp --prompt "What is Deephaven?"
 ```
 
 **Run a stress test:**
 
 ```sh
-uv run scripts/mcp_docs_stress_sse.py --sse-url "http://localhost:8000/sse"
+uv run scripts/mcp_docs_stress_sse_user_queries.py --url "http://localhost:8001/mcp"
+uv run scripts/mcp_docs_stress_sse_cancel_queries.py --url "http://localhost:8001/mcp"
 ```
 
 ---
@@ -181,9 +182,24 @@ uv run scripts/mcp_docs_stress_sse.py --sse-url "http://localhost:8000/sse"
 
 ## Environment Variables with uv
 
-- `DH_MCP_CONFIG_FILE`: Path to worker config JSON file (required for Systems Server)
+Systems Server (community/enterprise):
+
+- `DH_MCP_CONFIG_FILE`: Path to the config JSON/JSON5 file (fallback when `--config` is not passed)
+- `MCP_HOST`: Bind host (fallback when `--host` is not passed; default `127.0.0.1`)
+- `MCP_PORT`: Bind port (fallback when `--port` is not passed; defaults to 8002 enterprise / 8003 community)
+- `MCP_SSL_KEYFILE` / `MCP_SSL_CERTFILE`: Native TLS key/cert paths (fallback for `--ssl-keyfile` / `--ssl-certfile`)
+- `MCP_TRUST_FORWARDED_PROTO`: Trust `X-Forwarded-Proto` from a fronting proxy (fallback for `--trust-forwarded-proto`)
+- `MCP_FORWARDED_ALLOW_IPS`: Peer-IP allowlist for `--trust-forwarded-proto` (default `127.0.0.1`)
+- `MCP_ALLOW_CLEARTEXT`: Emergency opt-out allowing cleartext non-loopback traffic (fallback for `--allow-cleartext`)
+
+Docs Server:
+
 - `INKEEP_API_KEY`: Required for Docs Server
-- `OPENAI_API_KEY`: Optional fallback for Docs Server
+- `MCP_DOCS_HOST`: Bind host (default `127.0.0.1`)
+- `MCP_DOCS_PORT`: Bind port (default `8001`; falls back to `PORT` for Cloud Run compatibility)
+
+All servers:
+
 - `PYTHONLOGLEVEL`: Set log verbosity (e.g., DEBUG, INFO)
 
 > You can also use a `.env` file with [python-dotenv](https://github.com/theskumar/python-dotenv) to manage environment variables.
@@ -198,7 +214,6 @@ Create a `.env` file in your project root for local development:
 # .env example
 DH_MCP_CONFIG_FILE=/absolute/path/to/deephaven_mcp.json
 INKEEP_API_KEY=your-inkeep-api-key
-OPENAI_API_KEY=your-optional-openai-key
 PYTHONLOGLEVEL=DEBUG
 ```
 
@@ -291,8 +306,8 @@ A: Yes! See the example above.
 |--------------------------------------|--------------------------------------------------------------------------|
 | Command not found: uv                | Run `pip install uv`                                                     |
 | Missing env var error                | Check your shell or `.env` file                                          |
-| Port already in use                  | Change with `--port` or set `PORT` env var                               |
-| API key errors                       | Verify `INKEEP_API_KEY` or `OPENAI_API_KEY` is set and valid             |
+| Port already in use                  | Systems server: change with `--port` or `MCP_PORT`. Docs server: set `MCP_DOCS_PORT` |
+| API key errors                       | Verify `INKEEP_API_KEY` is set and valid                                 |
 | Dependency mismatch                  | Run `uv sync`                                                            |
 | Lock file out of date                | Run `uv lock` or `uv pip install ".[dev]" --upgrade`                     |
 | Permission denied for .env file      | Ensure correct file permissions                                          |
@@ -303,7 +318,6 @@ A: Yes! See the example above.
 
 - `uv` can be used as a drop-in replacement for most pip and python commands.
 - If you encounter issues with environment variables, check your `.env` file or shell configuration.
-- For port conflicts, change the server port using the `--port` argument or `PORT` environment variable.
 - For missing API keys, ensure they are set in your environment or `.env` file.
 - For more detailed logs, set `PYTHONLOGLEVEL=DEBUG`.
 

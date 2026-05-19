@@ -19,7 +19,7 @@ Covers:
 - _build_not_found_message
 - _make_enterprise_session_manager (static)
 
-Note: add_session / remove_session / count_added_sessions are inherited from
+Note: add_session / remove / count_added_sessions are inherited from
 MutableSessionRegistry and tested via test__registry.py.
 """
 
@@ -61,7 +61,7 @@ _TEST_SYSTEM_NAME = "system"
 def _make_initialized_registry() -> EnterpriseSessionRegistry:
     """Return a fully-bound EnterpriseSessionRegistry with a mock factory manager.
 
-    Mirrors the post-``bind_credentials`` state: ``_factory_manager`` and
+    Mirrors the post-``apply_credentials`` state: ``_factory_manager`` and
     ``_creds`` are both set, since the production code sets them together.
     """
     registry = EnterpriseSessionRegistry()
@@ -372,29 +372,13 @@ def test_factory_manager_not_initialized_raises():
 
 
 def test_factory_manager_initialized_but_unbound_raises():
-    """factory_manager raises InternalError when initialized but bind_credentials was not called."""
+    """factory_manager raises InternalError when initialized but apply_credentials was not called."""
     registry = EnterpriseSessionRegistry()
     registry._initialized = True
     registry._factory_manager = None
     registry._creds = None
 
-    with pytest.raises(InternalError, match="bind_credentials was not called"):
-        _ = registry.factory_manager
-
-
-def test_factory_manager_bound_but_factory_none_raises():
-    """factory_manager raises InternalError when bound but _factory_manager is None.
-
-    Guards against the divergent state that exists transiently inside
-    close() (factory cleared before creds) and against any future
-    refactor that splits the bind_credentials set-together pair.
-    """
-    registry = EnterpriseSessionRegistry()
-    registry._initialized = True
-    registry._creds = _password_creds()
-    registry._factory_manager = None
-
-    with pytest.raises(InternalError, match="factory manager is not available"):
+    with pytest.raises(InternalError, match="no authenticated request"):
         _ = registry.factory_manager
 
 
@@ -407,7 +391,7 @@ def test_factory_manager_returns_factory():
 
 
 # ---------------------------------------------------------------------------
-# 5. _load_items / initialize / bind_credentials
+# 5. _load_items / initialize / apply_credentials
 # ---------------------------------------------------------------------------
 
 
@@ -468,13 +452,13 @@ async def test_initialize_does_not_start_discovery():
 
 
 # ---------------------------------------------------------------------------
-# 6. bind_credentials
+# 6. apply_credentials
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_bind_credentials_first_call_creates_factory_and_starts_discovery():
-    """First bind_credentials call creates the factory and launches discovery."""
+async def test_apply_credentials_first_call_creates_factory_and_starts_discovery():
+    """First apply_credentials call creates the factory and launches discovery."""
     registry = EnterpriseSessionRegistry()
     config_manager = AsyncMock()
     config = {"host": "myhost", "system_name": _TEST_SYSTEM_NAME}
@@ -492,7 +476,7 @@ async def test_bind_credentials_first_call_creates_factory_and_starts_discovery(
         ) as mock_cls,
     ):
         await registry.initialize(config_manager)
-        await registry.bind_credentials(creds)
+        await registry.apply_credentials(creds)
         await asyncio.sleep(0)  # let the discovery task start
 
     mock_cls.assert_called_once_with(_TEST_SYSTEM_NAME, config, creds)
@@ -503,7 +487,7 @@ async def test_bind_credentials_first_call_creates_factory_and_starts_discovery(
 
 
 @pytest.mark.asyncio
-async def test_bind_credentials_idempotent_for_same_creds():
+async def test_apply_credentials_idempotent_for_same_creds():
     """Re-binding the same credentials is a no-op (single factory + task)."""
     registry = EnterpriseSessionRegistry()
     config_manager = AsyncMock()
@@ -522,9 +506,9 @@ async def test_bind_credentials_idempotent_for_same_creds():
         ) as mock_cls,
     ):
         await registry.initialize(config_manager)
-        await registry.bind_credentials(_password_creds())
+        await registry.apply_credentials(_password_creds())
         first_task = registry._discovery_task
-        await registry.bind_credentials(_password_creds())  # equal value
+        await registry.apply_credentials(_password_creds())  # equal value
         second_task = registry._discovery_task
 
     assert mock_cls.call_count == 1
@@ -532,7 +516,7 @@ async def test_bind_credentials_idempotent_for_same_creds():
 
 
 @pytest.mark.asyncio
-async def test_bind_credentials_different_creds_raises():
+async def test_apply_credentials_different_creds_raises():
     """Binding different credentials on the same registry instance is rejected."""
     registry = EnterpriseSessionRegistry()
     config_manager = AsyncMock()
@@ -550,13 +534,13 @@ async def test_bind_credentials_different_creds_raises():
         ),
     ):
         await registry.initialize(config_manager)
-        await registry.bind_credentials(_password_creds(username="alice"))
-        with pytest.raises(AuthenticationError, match="different set of credentials"):
-            await registry.bind_credentials(_password_creds(username="bob"))
+        await registry.apply_credentials(_password_creds(username="alice"))
+        with pytest.raises(AuthenticationError, match="different identity"):
+            await registry.apply_credentials(_password_creds(username="bob"))
 
 
 @pytest.mark.asyncio
-async def test_bind_credentials_different_type_distinguished():
+async def test_apply_credentials_different_type_distinguished():
     """Password vs private-key with same-looking text are different fingerprints."""
     registry = EnterpriseSessionRegistry()
     config_manager = AsyncMock()
@@ -574,12 +558,12 @@ async def test_bind_credentials_different_type_distinguished():
         ),
     ):
         await registry.initialize(config_manager)
-        await registry.bind_credentials(_password_creds())
-        with pytest.raises(AuthenticationError, match="different set of credentials"):
-            await registry.bind_credentials(_private_key_creds())
+        await registry.apply_credentials(_password_creds())
+        with pytest.raises(AuthenticationError, match="different identity"):
+            await registry.apply_credentials(_private_key_creds())
 
 
-# Note: there is no longer a ``test_bind_credentials_rejects_unsupported_type``
+# Note: there is no longer a ``test_apply_credentials_rejects_unsupported_type``
 # at this layer. The registry no longer maintains a local list of supported
 # credential types; rejection of unsupported types is the sole responsibility
 # of :meth:`CorePlusSessionFactory.from_credentials`, and is exercised by
@@ -590,22 +574,22 @@ async def test_bind_credentials_different_type_distinguished():
 
 
 @pytest.mark.asyncio
-async def test_bind_credentials_not_initialized_raises():
-    """bind_credentials before initialize() is rejected."""
+async def test_apply_credentials_not_initialized_raises():
+    """apply_credentials before initialize() is rejected."""
     registry = EnterpriseSessionRegistry()
     with pytest.raises(InternalError):
-        await registry.bind_credentials(_password_creds())
+        await registry.apply_credentials(_password_creds())
 
 
 @pytest.mark.asyncio
-async def test_bind_credentials_missing_config_raises():
+async def test_apply_credentials_missing_config_raises():
     """Defensive: if _config is somehow None after initialized, raise."""
     registry = EnterpriseSessionRegistry()
     registry._initialized = True
     registry._config = None
     registry._system_name = _TEST_SYSTEM_NAME
     with pytest.raises(InternalError, match="no config loaded"):
-        await registry.bind_credentials(_password_creds())
+        await registry.apply_credentials(_password_creds())
 
 
 # ---------------------------------------------------------------------------
@@ -704,30 +688,6 @@ async def test_close_clears_controller_client_and_errors():
 # ---------------------------------------------------------------------------
 # 8. get
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_get_unbound_raises():
-    """get() raises InternalError when bind_credentials was not called."""
-    registry = EnterpriseSessionRegistry()
-    registry._initialized = True
-    registry._phase = InitializationPhase.COMPLETED
-    registry._creds = None
-
-    with pytest.raises(InternalError, match="bind_credentials was not called"):
-        await registry.get("enterprise:system:any-pq")
-
-
-@pytest.mark.asyncio
-async def test_get_all_unbound_raises():
-    """get_all() raises InternalError when bind_credentials was not called."""
-    registry = EnterpriseSessionRegistry()
-    registry._initialized = True
-    registry._phase = InitializationPhase.COMPLETED
-    registry._creds = None
-
-    with pytest.raises(InternalError, match="bind_credentials was not called"):
-        await registry.get_all()
 
 
 @pytest.mark.asyncio

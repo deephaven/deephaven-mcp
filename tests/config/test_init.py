@@ -80,10 +80,16 @@ def test_default_connection_timeout_importable():
     assert DEFAULT_CONNECTION_TIMEOUT_SECONDS == 10.0
 
 
-def test_default_mcp_session_idle_timeout_importable():
-    from deephaven_mcp.config import DEFAULT_MCP_SESSION_IDLE_TIMEOUT_SECONDS
+def test_default_session_idle_timeout_importable():
+    from deephaven_mcp.config import DEFAULT_SESSION_IDLE_TIMEOUT_SECONDS
 
-    assert DEFAULT_MCP_SESSION_IDLE_TIMEOUT_SECONDS == 3600.0
+    assert DEFAULT_SESSION_IDLE_TIMEOUT_SECONDS == 3600.0
+
+
+def test_default_session_idle_sweep_interval_importable():
+    from deephaven_mcp.config import DEFAULT_SESSION_IDLE_SWEEP_INTERVAL_SECONDS
+
+    assert DEFAULT_SESSION_IDLE_SWEEP_INTERVAL_SECONDS == 60.0
 
 
 def test_exception_types_importable():

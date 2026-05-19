@@ -21,6 +21,7 @@ def test_imports_and_all():
         "BaseItemManager",
         "BaseRegistry",
         "EnterpriseSessionRegistry",
+        "Evictor",
         "InitializationPhase",
         "RegistrySnapshot",
         "CommunitySessionManager",

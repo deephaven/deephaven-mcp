@@ -64,9 +64,6 @@ from deephaven_mcp.mcp_systems_server._lifespan import (
     make_community_lifespan,
     make_enterprise_lifespan,
 )
-from deephaven_mcp.mcp_systems_server._session_registry_manager import (
-    SessionRegistryManager,
-)
 from deephaven_mcp.mcp_systems_server._tools import (
     catalog,
     pq,
@@ -76,11 +73,6 @@ from deephaven_mcp.mcp_systems_server._tools import (
     session_community,
     session_enterprise,
     table,
-)
-from deephaven_mcp.resource_manager import (
-    BaseRegistry,
-    CommunitySessionRegistry,
-    EnterpriseSessionRegistry,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -291,26 +283,24 @@ def _setup_env() -> None:
 
 async def _load_community_startup_state(
     manager: CommunityServerConfigManager,
-) -> tuple[float, str | None]:
-    """Load the community config and return (idle_timeout, resolved_psk).
+) -> tuple[float, float, str | None]:
+    """Load the community config and return the startup-state tuple.
 
-    Single entry point for startup-time config reads: validates the config
-    (via ``get_config()``) and resolves the community PSK from the same
-    cached dict. The PSK is ``None`` when ``auth.enabled`` is explicitly
-    ``False``, which is only valid on loopback binds.
+    Reads the config exactly once and resolves the community PSK from
+    the same cached dict.
 
     Args:
-        manager (CommunityServerConfigManager): The community config
-            manager bound to the resolved config path.
+        manager (CommunityServerConfigManager): Community config manager
+            bound to the resolved config path.
 
     Returns:
-        tuple[float, str | None]: ``(idle_timeout, resolved_psk)``.
-            ``resolved_psk`` is ``None`` when ``auth.enabled`` is
-            ``false`` (loopback-only), otherwise the resolved PSK
-            string.
+        tuple[float, float, str | None]: ``(idle_timeout, sweep_interval,
+            resolved_psk)``.  ``resolved_psk`` is ``None`` when
+            ``auth.enabled`` is ``false`` (loopback-only).
     """
     config = await manager.get_config()
-    idle_timeout = await manager.get_mcp_session_idle_timeout_seconds()
+    idle_timeout = await manager.get_session_idle_timeout_seconds()
+    sweep_interval = await manager.get_session_idle_sweep_interval_seconds()
     auth = config["auth"]
     # auth.enabled = false means the server runs without PSK auth
     # (loopback binds only). Otherwise, exactly one of psk / psk_env_var
@@ -325,34 +315,33 @@ async def _load_community_startup_state(
             context="community 'auth' section",
         )
     )
-    return idle_timeout, resolved_psk
+    return idle_timeout, sweep_interval, resolved_psk
 
 
 async def _load_enterprise_startup_state(
     manager: EnterpriseServerConfigManager,
-) -> tuple[float, tuple[list[str], bool]]:
-    """Load the enterprise config and return startup-relevant fields.
+) -> tuple[float, float, tuple[list[str], bool]]:
+    """Load the enterprise config and return the startup-state tuple.
 
-    Single entry point for startup-time enterprise config reads:
-    validates via ``get_config()`` and pulls the auth-related fields
-    from the same cached dict so the file is read exactly once.
+    Reads the config exactly once and pulls the auth-related fields
+    from the same cached dict.
 
     Args:
-        manager (EnterpriseServerConfigManager): The enterprise config
+        manager (EnterpriseServerConfigManager): Enterprise config
             manager bound to the resolved config path.
 
     Returns:
-        tuple[float, tuple[list[str], bool]]: ``(idle_timeout, (backends,
-            allow_effective_user))``. The auth fields are nested as a
-            tuple so that the whole loader result matches the ``(float,
-            U)`` shape consumed by :func:`_run_server`, with ``U`` being
-            the middleware-builder's input.
+        tuple[float, float, tuple[list[str], bool]]: ``(idle_timeout,
+            sweep_interval, (backends, allow_effective_user))``.  The auth
+            fields are nested so the whole result matches the
+            ``(float, float, U)`` shape consumed by :func:`_run_server`.
     """
     config = await manager.get_config()
-    idle_timeout = await manager.get_mcp_session_idle_timeout_seconds()
+    idle_timeout = await manager.get_session_idle_timeout_seconds()
+    sweep_interval = await manager.get_session_idle_sweep_interval_seconds()
     backends = get_enterprise_auth_backends(config)
     allow_effective_user = get_enterprise_allow_effective_user(config)
-    return idle_timeout, (backends, allow_effective_user)
+    return idle_timeout, sweep_interval, (backends, allow_effective_user)
 
 
 def _run_startup_validation_or_exit[M: ConfigManager, T](
@@ -867,20 +856,19 @@ def _register_enterprise_tools(server: FastMCP) -> None:
     pq.register_tools(server)
 
 
-def _run_server[M: ConfigManager, R: BaseRegistry, U](
+def _run_server[M: ConfigManager, U](
     *,
     label: str,
     description: str,
     default_port: int,
     server_name: str,
     manager_class: type[M],
-    async_loader: Callable[[M], Coroutine[Any, Any, tuple[float, U]]],
-    registry_class: type[R],
+    async_loader: Callable[[M], Coroutine[Any, Any, tuple[float, float, U]]],
     lifespan_factory: Callable[
-        [SessionRegistryManager[R], str | None],
+        [float | None, float | None, str | None],
         Callable[
-            [FastMCP[LifespanContext[R]]],
-            AbstractAsyncContextManager[LifespanContext[R]],
+            [FastMCP[LifespanContext]],
+            AbstractAsyncContextManager[LifespanContext],
         ],
     ],
     build_middleware: Callable[[U, str], list[Middleware]],
@@ -890,8 +878,11 @@ def _run_server[M: ConfigManager, R: BaseRegistry, U](
 
     Captures the common lifecycle shared by :func:`community` and
     :func:`enterprise`. Each per-server difference (manager class, loader,
-    registry class, lifespan factory, middleware builder, tool registration)
-    is a parameter — the entry points are pure parameter dispatch.
+    lifespan factory, middleware builder, tool registration) is a
+    parameter — the entry points are pure parameter dispatch. The
+    lifespan factory already encodes which concrete registry class is
+    instantiated for the server, so there is no separate ``registry_class``
+    argument here.
 
     Args:
         label (str): Short server label (``"community"`` / ``"enterprise"``)
@@ -903,11 +894,9 @@ def _run_server[M: ConfigManager, R: BaseRegistry, U](
         manager_class (type[ConfigManager]): Concrete ``ConfigManager`` subclass
             to instantiate for pre-flight validation.
         async_loader (Callable): Coroutine that validates the config and returns
-            ``(idle_timeout, middleware_state)``.
-        registry_class (type[BaseRegistry]): Concrete ``BaseRegistry`` subclass
-            used by ``SessionRegistryManager``.
+            ``(idle_timeout, sweep_interval, middleware_state)``.
         lifespan_factory (Callable): Factory that builds the FastMCP lifespan
-            from a ``SessionRegistryManager`` and config path.
+            from the idle timeout, sweep interval, and config path.
         build_middleware (Callable): Builds the Starlette middleware stack
             from the loader's middleware-state value and the bind host.
             (Community's value is the resolved PSK or ``None``; enterprise's
@@ -926,7 +915,7 @@ def _run_server[M: ConfigManager, R: BaseRegistry, U](
     policy, ssl_keyfile, ssl_certfile = _validate_transport_security_or_exit(
         label=label, args=parsed
     )
-    idle_timeout, mw_state = _run_startup_validation_or_exit(
+    idle_timeout, sweep_interval, mw_state = _run_startup_validation_or_exit(
         parsed.config_path, manager_class, async_loader, label
     )
     auth_middleware = build_middleware(mw_state, parsed.host)
@@ -936,13 +925,9 @@ def _run_server[M: ConfigManager, R: BaseRegistry, U](
     middleware = auth_middleware + [
         Middleware(TlsEnforcementMiddleware, policy=policy),
     ]
-    session_registry_manager: SessionRegistryManager[R] = SessionRegistryManager(
-        registry_class=registry_class,
-        idle_timeout_seconds=idle_timeout,
-    )
-    server: FastMCP[LifespanContext[R]] = FastMCP(
+    server: FastMCP[LifespanContext] = FastMCP(
         server_name,
-        lifespan=lifespan_factory(session_registry_manager, parsed.config_path),
+        lifespan=lifespan_factory(idle_timeout, sweep_interval, parsed.config_path),
         host=parsed.host,
         port=parsed.port,
     )
@@ -970,7 +955,6 @@ def community() -> None:
         server_name="deephaven-mcp-community",
         manager_class=CommunityServerConfigManager,
         async_loader=_load_community_startup_state,
-        registry_class=CommunitySessionRegistry,
         lifespan_factory=make_community_lifespan,
         build_middleware=_build_community_middleware,
         register_tools=_register_community_tools,
@@ -986,7 +970,6 @@ def enterprise() -> None:
         server_name="deephaven-mcp-enterprise",
         manager_class=EnterpriseServerConfigManager,
         async_loader=_load_enterprise_startup_state,
-        registry_class=EnterpriseSessionRegistry,
         lifespan_factory=make_enterprise_lifespan,
         build_middleware=_build_enterprise_middleware,
         register_tools=_register_enterprise_tools,

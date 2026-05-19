@@ -823,7 +823,7 @@ async def session_enterprise_delete(
 
         # Remove from session registry
         try:
-            removed_manager = await session_registry.remove_session(session_id)
+            removed_manager = await session_registry.remove(session_id)
             if removed_manager is None:
                 error_msg = (
                     f"Session '{session_id}' was not found in registry during removal"

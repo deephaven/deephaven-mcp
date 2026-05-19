@@ -20,9 +20,9 @@ class CommunitySessionRegistry(MutableSessionRegistry):
     """Registry for community sessions — both static (from config) and dynamically created.
 
     Loads static sessions from the ``sessions`` section of the MCP config
-    at initialization.  Inherits ``add_session``, ``remove_session``, and
-    ``count_added_sessions`` from ``MutableSessionRegistry`` for sessions created
-    after initialization.
+    at initialization.  Inherits ``add_session`` and ``count_added_sessions``
+    from ``MutableSessionRegistry`` (and ``remove`` from ``BaseRegistry``)
+    for sessions created after initialization.
     """
 
     @override

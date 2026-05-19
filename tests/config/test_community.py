@@ -392,22 +392,37 @@ def test_community_config_all_sections():
         "security": {"credential_retrieval_mode": "none"},
         "sessions": {"a": {"host": "h"}},
         "session_creation": {"defaults": {"launch_method": "python"}},
-        "mcp_session_idle_timeout_seconds": 60,
+        "session_idle_timeout_seconds": 60,
+        "session_idle_sweep_interval_seconds": 10,
     }
     assert validate_community_config(cfg) is cfg
 
 
 def test_community_config_bad_idle_timeout():
-    with pytest.raises(ConfigurationError, match="mcp_session_idle_timeout_seconds"):
+    with pytest.raises(ConfigurationError, match="session_idle_timeout_seconds"):
         validate_community_config(
-            {"auth": {"enabled": False}, "mcp_session_idle_timeout_seconds": 0}
+            {"auth": {"enabled": False}, "session_idle_timeout_seconds": 0}
         )
 
 
 def test_community_config_idle_timeout_wrong_type():
-    with pytest.raises(ConfigurationError, match="mcp_session_idle_timeout_seconds"):
+    with pytest.raises(ConfigurationError, match="session_idle_timeout_seconds"):
         validate_community_config(
-            {"auth": {"enabled": False}, "mcp_session_idle_timeout_seconds": "x"}
+            {"auth": {"enabled": False}, "session_idle_timeout_seconds": "x"}
+        )
+
+
+def test_community_config_bad_sweep_interval():
+    with pytest.raises(ConfigurationError, match="session_idle_sweep_interval_seconds"):
+        validate_community_config(
+            {"auth": {"enabled": False}, "session_idle_sweep_interval_seconds": 0}
+        )
+
+
+def test_community_config_sweep_interval_wrong_type():
+    with pytest.raises(ConfigurationError, match="session_idle_sweep_interval_seconds"):
+        validate_community_config(
+            {"auth": {"enabled": False}, "session_idle_sweep_interval_seconds": "x"}
         )
 
 

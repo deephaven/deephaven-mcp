@@ -67,8 +67,10 @@ loopback. Each is enforced or recommended by the server itself.
   at startup and per-request).
 - Header spoofing from untrusted peers behind a TLS-terminating proxy
   (`--forwarded-allow-ips` allowlist).
-- Accidental credential leaks via logs (auth tokens are redacted when
-  truthy; binary TLS material is redacted).
+- Accidental credential leaks via logs (configured `auth.psk` and
+  per-session `auth_token` are redacted from config dumps; binary TLS
+  material is redacted; per-request `Credentials` objects redact their
+  secret fields in `__repr__`).
 
 **What this software does NOT protect against:**
 
@@ -134,12 +136,29 @@ and [`ENV.md#transport-security-variables`](ENV.md#transport-security-variables)
 
 - **Env-var indirection.** Use `auth.psk_env_var` (community gate),
   `sessions[*].auth_token_env_var` (per-worker token), or any of the
-  documented `*_env_var` fields instead of inlining secrets.
-- **Log redaction.** `auth_token` values are redacted when truthy.
-  Binary TLS key material (`tls_root_certs`, `client_cert_chain`,
-  `client_private_key`) is redacted when stored as `bytes` /
-  `bytearray`; string paths are not redacted (they're filesystem
-  references, not secrets).
+  documented `*_env_var` fields instead of inlining secrets. Env-var
+  *names* (the `*_env_var` fields themselves) are not secrets and pass
+  through unredacted.
+- **Per-request credentials.** Credentials delivered in
+  `X-Deephaven-*` headers (enterprise: username/password/private-key;
+  community: PSK) are bearer material handled in process memory only.
+  They are never persisted to disk by the server, never logged, and
+  are dropped as soon as the consumer (session factory) has exchanged
+  them for a long-lived handle. Each concrete `Credentials` subclass
+  overrides `__repr__` to redact secret fields, so accidental
+  `f"{creds}"` / `logger.info("%s", creds)` cannot leak them.
+- **Log redaction.**
+  - **Community config:** `auth.psk` is replaced with `[REDACTED]`
+    whenever the key is present. Per-session `auth_token` values are
+    redacted when truthy. `session_creation.defaults.auth_token` is
+    redacted whenever the key is present.
+  - **Binary TLS material** (`tls_root_certs`, `client_cert_chain`,
+    `client_private_key`) is redacted only when stored as `bytes` /
+    `bytearray`; string paths are not redacted (they're filesystem
+    references, not secrets).
+  - **Enterprise config** carries no credentials, so the redactor is a
+    pass-through; if you put secrets in a future enterprise field,
+    redaction is the place that needs updating.
 - **Docs server.** `INKEEP_API_KEY` is required and read once at startup;
   the value never appears in MCP tool responses.
 

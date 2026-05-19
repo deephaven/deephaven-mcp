@@ -15,12 +15,14 @@ Community config file format (flat — all keys at top level)::
             "local": {"host": "localhost", "port": 10000, "auth_type": "PSK", "auth_token": "..."}
         },
         "session_creation": {"defaults": {"launch_method": "python"}},
-        "mcp_session_idle_timeout_seconds": 3600
+        "session_idle_timeout_seconds": 3600,
+        "session_idle_sweep_interval_seconds": 60
     }
 
 Valid top-level keys: ``auth``, ``security``, ``sessions``,
-``session_creation``, ``mcp_session_idle_timeout_seconds``. Unknown keys
-at any level are rejected.
+``session_creation``, ``session_idle_timeout_seconds``,
+``session_idle_sweep_interval_seconds``. Unknown keys at any level
+are rejected.
 
 The ``auth`` block governs how HTTP clients authenticate to the MCP server
 itself, using a Jupyter-style pre-shared key. It is distinct from the
@@ -152,7 +154,8 @@ _ALLOWED_TOP_LEVEL_FIELDS: dict[str, type | tuple[type, ...]] = {
     "security": dict,
     "sessions": dict,
     "session_creation": dict,
-    "mcp_session_idle_timeout_seconds": (int, float),
+    "session_idle_timeout_seconds": (int, float),
+    "session_idle_sweep_interval_seconds": (int, float),
 }
 """Allowed top-level keys in a community config file."""
 
@@ -235,7 +238,7 @@ def redact_community_config(config: dict[str, Any]) -> dict[str, Any]:
     - ``session_creation.defaults.auth_token``, if present, is replaced with
       ``"[REDACTED]"``.
 
-    All other sections (e.g., ``security``, ``mcp_session_idle_timeout_seconds``)
+    All other sections (e.g., ``security``, ``session_idle_timeout_seconds``)
     are passed through unchanged. The input ``config`` is never mutated.
 
     Args:
@@ -550,10 +553,15 @@ def validate_community_config(config: Any) -> dict[str, Any]:
         _validate_sessions_config(config["sessions"])
     if "session_creation" in config:
         _validate_session_creation_config(config["session_creation"])
-    if "mcp_session_idle_timeout_seconds" in config:
+    if "session_idle_timeout_seconds" in config:
         validate_positive_number(
-            "mcp_session_idle_timeout_seconds",
-            config["mcp_session_idle_timeout_seconds"],
+            "session_idle_timeout_seconds",
+            config["session_idle_timeout_seconds"],
+        )
+    if "session_idle_sweep_interval_seconds" in config:
+        validate_positive_number(
+            "session_idle_sweep_interval_seconds",
+            config["session_idle_sweep_interval_seconds"],
         )
 
     _LOGGER.info("[config:validate_community_config] Configuration validation passed.")
@@ -578,8 +586,9 @@ class CommunityServerConfigManager(ConfigManager):
     """ConfigManager for the DHC MCP server (``dh-mcp-community-server``).
 
     Reads a community config file. The format uses ``sessions``,
-    ``session_creation``, ``security``, and ``mcp_session_idle_timeout_seconds``
-    as optional top-level keys; validation enforces the community schema.
+    ``session_creation``, ``security``, ``session_idle_timeout_seconds``,
+    and ``session_idle_sweep_interval_seconds`` as optional top-level keys;
+    validation enforces the community schema.
     """
 
     async def get_config(self) -> dict[str, Any]:

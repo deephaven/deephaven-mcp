@@ -5,6 +5,10 @@ from unittest.mock import AsyncMock, MagicMock
 from deephaven_mcp.auth.credentials import PasswordCredentials
 from deephaven_mcp.auth.middleware import SCOPE_KEY_CREDENTIALS
 
+# Tests put the test's registry mock directly under the ``registry`` key of
+# the lifespan context dict (the same shape the production lifespan yields).
+
+
 # Default per-request credentials injected into every MockRequest.scope so
 # that helpers like get_enterprise_registry, which read
 # scope[SCOPE_KEY_CREDENTIALS], succeed in tests without each test having to
@@ -16,14 +20,13 @@ _DEFAULT_TEST_CREDENTIALS = PasswordCredentials(
 
 
 class MockRequest:
-    """Mock Starlette request with MCP session headers and ASGI scope."""
+    """Mock Starlette request with an ASGI scope carrying credentials."""
 
     def __init__(
         self,
-        mcp_session_id: str = "test-mcp-session-id",
         creds: object = _DEFAULT_TEST_CREDENTIALS,
     ):
-        self.headers = {"mcp-session-id": mcp_session_id}
+        self.headers: dict[str, str] = {}
         # Mirror the keys the real AuthenticationMiddleware writes into the
         # ASGI scope. ``creds`` is intentionally typed as ``object`` so tests
         # can also exercise the "wrong creds type" rejection path.
@@ -36,11 +39,10 @@ class MockRequestContext:
     def __init__(
         self,
         lifespan_context,
-        mcp_session_id: str = "test-mcp-session-id",
         creds: object = _DEFAULT_TEST_CREDENTIALS,
     ):
         self.lifespan_context = lifespan_context
-        self.request = MockRequest(mcp_session_id, creds)
+        self.request = MockRequest(creds)
 
 
 class MockContext:
@@ -49,22 +51,9 @@ class MockContext:
     def __init__(
         self,
         lifespan_context,
-        mcp_session_id: str = "test-mcp-session-id",
         creds: object = _DEFAULT_TEST_CREDENTIALS,
     ):
-        self.request_context = MockRequestContext(
-            lifespan_context, mcp_session_id, creds
-        )
-
-
-def create_mock_session_registry_manager(registry=None):
-    """Create a mock SessionRegistryManager that returns the given registry from get_or_create_registry."""
-    mock = AsyncMock()
-    mock.get_or_create_registry = AsyncMock(return_value=registry)
-    mock.close_session = AsyncMock()
-    mock.start = AsyncMock()
-    mock.stop = AsyncMock()
-    return mock
+        self.request_context = MockRequestContext(lifespan_context, creds)
 
 
 def create_mock_instance_tracker():

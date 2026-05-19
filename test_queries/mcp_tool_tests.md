@@ -319,13 +319,13 @@ Pre-cleanup (idempotent): Call pq_list. If any PQ named "mcp-test-pq-lifecycle" 
 
 2. Call pq_details with the pq_id from step 1. Verify success==true. Note the current state in the response.
 
-3. Call pq_modify with the pq_id from step 1, setting script_body="t = 42". Verify success==true. Call pq_details again to confirm script_body changed to "t = 42".
+3. Call pq_modify with the pq_id from step 1, setting script_body="t = 42". Verify success==true. Call pq_details again and confirm the config.script_code field changed to "t = 42" (pq_details exposes the script as config.script_code, not script_body).
 
 4. Call pq_start with pq_id set to the pq_id from step 1 (a single ID, not a list). Because the continuous scheduler auto-started this PQ in step 2, pq_start must reject the request. Verify outer success==true AND the single per-item result has success==false with an error mentioning "already RUNNING". If the per-item result has success==true, report FAIL — that indicates the pq_start already-RUNNING guard is broken.
 
 5. Call pq_stop with pq_id set to the pq_id from step 1. Verify success==true. Note that pq_stop returns as soon as the stop request is accepted; the PQ will transition through STOPPING before reaching a terminal stopped state.
 
-6. Poll for the stop to complete: repeatedly call pq_details with the pq_id from step 1 until the returned state is a terminal stopped state (STOPPED, COMPLETED, or DISCONNECTED — i.e., not STOPPING or any running/initializing state). Use up to 30 attempts with a ~2 second pause between attempts. Verify a terminal stopped state is reached within the polling window; if not, report FAIL with the last observed state and skip step 7.
+6. Poll for the stop to complete: repeatedly call pq_details with the pq_id from step 1 until the returned state is a terminal state (STOPPED, FAILED, KILLED, COMPLETED, or ERROR — i.e., not STOPPING, DISCONNECTED, or any running/initializing state). Use up to 30 attempts with a ~2 second pause between attempts. Verify a terminal state is reached within the polling window; if not, report FAIL with the last observed state and skip step 7.
 
 7. Call pq_restart with pq_id set to the pq_id from step 1. Verify success==true. (Running the poll in step 6 first ensures restart is not racing with an in-flight stop, which can otherwise leave the PQ in STOPPED rather than transitioning back to RUNNING within the tool's default timeout.)
 
