@@ -805,21 +805,25 @@ class CorePlusSessionFactory(
             _LOGGER.debug(
                 "[CorePlusSessionFactory:connect_to_new_worker] Creating new worker and connecting to it"
             )
-            # SDK handles timeout internally via timeout_seconds parameter
-            session = await asyncio.to_thread(
-                self.wrapped.connect_to_new_worker,
-                name=name,
-                heap_size_gb=heap_size_gb,
-                server=server,
-                extra_jvm_args=extra_jvm_args,
-                extra_environment_vars=extra_environment_vars,
-                engine=engine,
-                auto_delete_timeout=auto_delete_timeout,
-                admin_groups=admin_groups,
-                viewer_groups=viewer_groups,
-                timeout_seconds=timeout_seconds,
-                configuration_transformer=configuration_transformer,
-                session_arguments=session_arguments,
+            # Python-side timeout in addition to the SDK's own timeout_seconds
+            # argument (belt-and-suspenders).
+            session = await asyncio.wait_for(
+                asyncio.to_thread(
+                    self.wrapped.connect_to_new_worker,
+                    name=name,
+                    heap_size_gb=heap_size_gb,
+                    server=server,
+                    extra_jvm_args=extra_jvm_args,
+                    extra_environment_vars=extra_environment_vars,
+                    engine=engine,
+                    auto_delete_timeout=auto_delete_timeout,
+                    admin_groups=admin_groups,
+                    viewer_groups=viewer_groups,
+                    timeout_seconds=timeout_seconds,
+                    configuration_transformer=configuration_transformer,
+                    session_arguments=session_arguments,
+                ),
+                timeout=timeout_seconds,
             )
             _LOGGER.debug(
                 "[CorePlusSessionFactory:connect_to_new_worker] Successfully connected to new worker"

@@ -1039,6 +1039,32 @@ async def test_subscribe_idempotent(
 
 
 @pytest.mark.asyncio
+async def test_subscribe_concurrent_callers_subscribe_once(
+    coreplus_controller_client, dummy_controller_client
+):
+    """Concurrent ``subscribe()`` callers are serialised by the lock.
+
+    Without the ``_subscribe_lock`` two tasks could both pass the
+    ``self._subscribed`` check before either sets it to ``True`` and cause a
+    duplicate subscription on the wrapped client.
+    """
+    import time
+
+    def slow_subscribe():
+        time.sleep(0.05)
+
+    dummy_controller_client.subscribe.side_effect = slow_subscribe
+
+    tasks = [
+        asyncio.create_task(coreplus_controller_client.subscribe()) for _ in range(5)
+    ]
+    await asyncio.gather(*tasks)
+
+    assert dummy_controller_client.subscribe.call_count == 1
+    assert coreplus_controller_client._subscribed is True
+
+
+@pytest.mark.asyncio
 async def test_map_without_subscribe_raises_internal_error(
     coreplus_controller_client, dummy_controller_client
 ):

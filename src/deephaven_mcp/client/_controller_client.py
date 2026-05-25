@@ -158,6 +158,7 @@ class CorePlusControllerClient(
         """
         super().__init__(controller_client, is_enterprise=True)
         self._subscribed = False
+        self._subscribe_lock: asyncio.Lock = asyncio.Lock()
         self._timeouts = timeouts
         _LOGGER.debug("[CorePlusControllerClient] Initialized")
 
@@ -257,50 +258,52 @@ class CorePlusControllerClient(
             is called automatically during factory initialization. Manual subscription
             is only needed if you construct the CorePlusControllerClient directly.
         """
-        timeout_seconds = self._timeouts.subscribe_timeout_seconds
-        # If already subscribed, return early (idempotent behavior)
-        if self._subscribed:
-            _LOGGER.debug(
-                "[CorePlusControllerClient:subscribe] Already subscribed, skipping"
-            )
-            return
+        async with self._subscribe_lock:
+            timeout_seconds = self._timeouts.subscribe_timeout_seconds
+            # Double-check the flag now that we hold the lock; a previous
+            # caller may have completed the subscription while we were queued.
+            if self._subscribed:
+                _LOGGER.debug(
+                    "[CorePlusControllerClient:subscribe] Already subscribed, skipping"
+                )
+                return
 
-        _LOGGER.debug(
-            f"[CorePlusControllerClient:subscribe] Subscribing to query state (timeout_seconds={timeout_seconds})"
-        )
-        try:
-            await asyncio.wait_for(
-                asyncio.to_thread(self.wrapped.subscribe),
-                timeout=timeout_seconds,
-            )
-            self._subscribed = True
             _LOGGER.debug(
-                "[CorePlusControllerClient:subscribe] Successfully subscribed to query state"
+                f"[CorePlusControllerClient:subscribe] Subscribing to query state (timeout_seconds={timeout_seconds})"
             )
-        except TimeoutError:
-            _LOGGER.error(
-                f"[CorePlusControllerClient:subscribe] Subscription timed out after {timeout_seconds}s. "
-                f"Increase enterprise/settings.json: timeouts.client.subscribe_timeout_seconds."
-            )
-            raise DeephavenConnectionError(
-                f"Controller subscription timed out after {timeout_seconds} seconds. "
-                f"To allow more time, increase enterprise/settings.json: "
-                f"timeouts.client.subscribe_timeout_seconds in the operator config."
-            ) from None
-        except ConnectionError as e:
-            _LOGGER.error(
-                f"[CorePlusControllerClient:subscribe] Connection error during subscription: {e}"
-            )
-            raise DeephavenConnectionError(
-                f"Unable to connect to controller service: {e}"
-            ) from e
-        except Exception as e:
-            _LOGGER.error(
-                f"[CorePlusControllerClient:subscribe] Failed to subscribe to query state: {e}"
-            )
-            raise QueryError(
-                f"Failed to subscribe to persistent query state: {e}"
-            ) from e
+            try:
+                await asyncio.wait_for(
+                    asyncio.to_thread(self.wrapped.subscribe),
+                    timeout=timeout_seconds,
+                )
+                self._subscribed = True
+                _LOGGER.debug(
+                    "[CorePlusControllerClient:subscribe] Successfully subscribed to query state"
+                )
+            except TimeoutError:
+                _LOGGER.error(
+                    f"[CorePlusControllerClient:subscribe] Subscription timed out after {timeout_seconds}s. "
+                    f"Increase enterprise/settings.json: timeouts.client.subscribe_timeout_seconds."
+                )
+                raise DeephavenConnectionError(
+                    f"Controller subscription timed out after {timeout_seconds} seconds. "
+                    f"To allow more time, increase enterprise/settings.json: "
+                    f"timeouts.client.subscribe_timeout_seconds in the operator config."
+                ) from None
+            except ConnectionError as e:
+                _LOGGER.error(
+                    f"[CorePlusControllerClient:subscribe] Connection error during subscription: {e}"
+                )
+                raise DeephavenConnectionError(
+                    f"Unable to connect to controller service: {e}"
+                ) from e
+            except Exception as e:
+                _LOGGER.error(
+                    f"[CorePlusControllerClient:subscribe] Failed to subscribe to query state: {e}"
+                )
+                raise QueryError(
+                    f"Failed to subscribe to persistent query state: {e}"
+                ) from e
 
     # ===========================================================================
     # Query State Management
@@ -1102,7 +1105,7 @@ class CorePlusControllerClient(
             DeephavenConnectionError: If not authenticated or unable to connect to the controller
                                     due to network issues, if the controller is unavailable, or if
                                     the operation does not complete within the operator-configured
-                                    ``EnterpriseTimeouts.pq_management_timeout_seconds``.
+                                    ``EnterpriseClientTimeouts.pq_management_timeout_seconds``.
             QueryError: If the query modification fails for any other reason such as permission
                        issues, configuration conflicts, a non-existent serial number, or internal
                        controller errors.
@@ -1246,7 +1249,7 @@ class CorePlusControllerClient(
         A successful call to authenticate should have happened before this call.
 
         When ``wait=True`` (default), the wait duration is sourced from
-        ``EnterpriseTimeouts.pq_state_change_timeout_seconds``. When
+        ``EnterpriseClientTimeouts.pq_state_change_timeout_seconds``. When
         ``wait=False``, the call returns immediately (fire-and-forget).
 
         Args:
@@ -1284,7 +1287,7 @@ class CorePlusControllerClient(
         this method will raise an exception with the appropriate error information.
 
         When ``wait=True`` (default), the wait duration is sourced from
-        ``EnterpriseTimeouts.pq_state_change_timeout_seconds``. When
+        ``EnterpriseClientTimeouts.pq_state_change_timeout_seconds``. When
         ``wait=False``, the call returns immediately after submitting the
         start request (fire-and-forget).
 
@@ -1334,7 +1337,7 @@ class CorePlusControllerClient(
         A successful call to authenticate should have happened before this call.
 
         When ``wait=True`` (default), the wait duration is sourced from
-        ``EnterpriseTimeouts.pq_state_change_timeout_seconds``. When
+        ``EnterpriseClientTimeouts.pq_state_change_timeout_seconds``. When
         ``wait=False``, the call returns immediately (fire-and-forget).
 
         Args:
@@ -1374,7 +1377,7 @@ class CorePlusControllerClient(
         restart_query without needing to recreate it.
 
         When ``wait=True`` (default), the wait duration is sourced from
-        ``EnterpriseTimeouts.pq_state_change_timeout_seconds``. When
+        ``EnterpriseClientTimeouts.pq_state_change_timeout_seconds``. When
         ``wait=False``, the call returns immediately (fire-and-forget).
 
         Args:

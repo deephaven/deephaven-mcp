@@ -351,6 +351,37 @@ async def test_connect_to_new_worker_other_error(
 
 
 @pytest.mark.asyncio
+async def test_connect_to_new_worker_python_side_timeout(
+    coreplus_session_manager, dummy_session_manager
+):
+    """Python-side ``asyncio.wait_for`` raises ``DeephavenConnectionError`` when the
+    SDK does not honour its own ``timeout_seconds`` argument.
+
+    The wrapped call is replaced with a slow synchronous function so the
+    underlying ``asyncio.to_thread`` would block past ``timeout_seconds``; the
+    new ``asyncio.wait_for`` wrap is what raises.
+    """
+    import time
+
+    def slow_connect_to_new_worker(**kwargs):
+        time.sleep(0.05)
+
+    dummy_session_manager.connect_to_new_worker.side_effect = slow_connect_to_new_worker
+    coreplus_session_manager._timeouts = coreplus_session_manager._timeouts.model_copy(
+        update={"worker_creation_timeout_seconds": 0.01}
+    )
+
+    with pytest.raises(exc.DeephavenConnectionError) as exc_info:
+        await coreplus_session_manager.connect_to_new_worker(
+            heap_size_gb=4,
+            name="worker",
+            session_arguments={"programming_language": "python"},
+        )
+    assert "Worker creation timed out" in str(exc_info.value)
+    assert "worker_creation_timeout_seconds" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
 async def test_connect_to_persistent_query_success(
     coreplus_session_manager, dummy_session_manager
 ):

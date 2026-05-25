@@ -280,7 +280,7 @@ Choose **one** of the following launch methods for dynamically creating Deephave
   - **Installation**: `pip install deephaven-server` (in MCP venv or a custom venv)
   - **Verification**: Run `deephaven server --help` to confirm the command is available
   - **Best For**: Development environments, faster startup, no Docker dependency
-  - **Custom Venv**: Use `python_venv_path` config parameter to specify a different Python environment
+  - **Custom Venv**: Use the `python.venv_path` config setting to specify a different Python environment
 
 **For Enterprise Systems (Optional)**
 
@@ -403,7 +403,7 @@ Before proceeding with the Quick Start Guide, verify your setup:
    >       "max_concurrent_sessions": 5,
    >       "defaults": {
    >         "launch_method": "python",
-   >         "python_venv_path": null  // null uses MCP venv, or specify "/path/to/custom/venv"
+   >         "python": { "venv_path": null }  // null uses MCP venv, or specify "/path/to/custom/venv"
    >       }
    >     }
    >   }
@@ -758,7 +758,7 @@ new dynamic sessions start.
 
 - **`"python"`**:
   - Requires the `deephaven-server` Python package: `pip install deephaven-server`.
-  - Use the optional `python_venv_path` field to point at a different venv; `null` (default) reuses the MCP server's own venv.
+  - Use the optional `python.venv_path` field to point at a different venv; `null` (default) reuses the MCP server's own venv.
   - Verify with `deephaven server --help`.
 
 > **💡 Tip**: For development environments, the python method is often faster and simpler. For production or isolated environments, the docker method provides better consistency and isolation.

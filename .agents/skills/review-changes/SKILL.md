@@ -1,7 +1,9 @@
 ---
 name: review-changes
-description: "Perform a deep review of a set of code changes — all file types covered: Python files reviewed in full, documentation files checked for accuracy"
+description: "Perform a deep review of a set of code changes — all file types covered"
 ---
+
+**Review like a senior engineer.** Every finding must answer three questions in concrete terms: *what is wrong*, *what is better*, *why the change is worth its cost*. All topics are fair game — correctness, security, design, duplication, clarity, naming, structure, tests.  Be conscious of suggestions that do not serve a purpose.
 
 Review the changeset described in the prompt. Common forms:
 
