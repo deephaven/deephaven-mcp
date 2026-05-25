@@ -297,7 +297,7 @@ class InvalidSessionNameError(SessionError, ValueError):
     Usage:
         ```python
         try:
-            system_type, source, name = BaseItemManager.parse_full_name(session_id)
+            system_type, system, name = BaseItemManager.parse_full_name(session_id)
         except InvalidSessionNameError as e:
             logger.warning(f"Invalid session name format: {e}")
             # Handle malformed session name gracefully

@@ -1563,7 +1563,7 @@ async def test_catalog_table_sample_response_too_large():
         )
 
     assert result["success"] is False
-    assert "max 50MB" in result["error"]
+    assert "max 52MB" in result["error"]
     assert "reduce max_rows" in result["error"]
     assert result["isError"] is True
 

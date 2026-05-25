@@ -18,6 +18,7 @@ description: Module organization and design patterns for MCP tool development in
    - Module-specific constants → keep in that module after imports
    - Shared constants → place in `_tools/shared.py` or the most relevant module
    - Always include a docstring explaining the constant's purpose
+   - Operator-tunable values (timeouts, defaults, thresholds) are **not** module constants — see the `_configuration-conventions` skill for where they live and how to read them.
 
 4. **New MCP Tool Placement**:
    - Before creating a new file, check if the tool fits an existing domain
@@ -27,10 +28,7 @@ description: Module organization and design patterns for MCP tool development in
 5. **Registering New Tool Modules**:
    - **CRITICAL**: Every tool module must define a `register_tools(server: FastMCP) -> None` function
    - This function calls `server.tool()(tool_fn)` for each tool in the module
-   - After creating a new module, explicitly add it to `server.py`:
-     - If the tool is shared between community and enterprise servers, add it to the `_SHARED_TOOLS` tuple
-     - If the tool is enterprise-only, call `module.register_tools(server)` in the `_register_enterprise_tools()` function
-     - If the tool is community-only, call `module.register_tools(server)` in the `_register_community_tools()` function
+   - After creating a new module, add a `module.register_tools(server)` call to `_register_tools()` in `src/deephaven_mcp/mcp_systems_server/server.py`. The systems server is multiplexed in one binary, but tool *registration* is section-gated: cross-cutting modules (`session`, `table`, `script` — anything that operates on either side) register unconditionally; section-specific modules register only when the corresponding configuration section is present (`session_community` when `multi_config.community is not None`; `session_enterprise`, `catalog`, `pq` when `multi_config.enterprise is not None`). See `_register_tools` in `mcp_systems_server/server.py`.
 
 ## Required Pattern for MCP Tool Modules
 

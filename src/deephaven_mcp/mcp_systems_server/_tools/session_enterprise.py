@@ -15,39 +15,74 @@ from typing import Any
 from mcp.server.fastmcp import Context, FastMCP
 
 from deephaven_mcp._exceptions import InvalidSessionNameError, RegistryItemNotFoundError
+from deephaven_mcp.auth.credentials import PasswordCredentials
 from deephaven_mcp.client import CorePlusQueryConfig, CorePlusSession
-from deephaven_mcp.config import redact_enterprise_config
-from deephaven_mcp.mcp_systems_server._tools.session import (
-    DEFAULT_MAX_CONCURRENT_SESSIONS,
-    DEFAULT_PROGRAMMING_LANGUAGE,
-)
 from deephaven_mcp.mcp_systems_server._tools.shared import (
+    check_session_limit,
     error_response,
     format_initialization_status,
-    get_config_manager,
     get_enterprise_registry,
+    get_multi_config,
+    parse_session_id,
 )
 from deephaven_mcp.resource_manager import (
     BaseItemManager,
     EnterpriseSessionManager,
     EnterpriseSessionRegistry,
+    InitializationPhase,
     SystemType,
+)
+from deephaven_mcp.sessions import (
+    EnterpriseSessionCreationDefaults,
+    EnterpriseSystemConfig,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
 
-# Enterprise session creation defaults
-DEFAULT_ENGINE = "DeephavenCommunity"
-"""Default engine type for enterprise sessions when not specified in config."""
+async def _collect_one_enterprise_system_status(
+    context: Context, system: str, attempt_to_connect: bool
+) -> tuple[dict[str, object], dict[str, str], InitializationPhase]:
+    """Build the per-system status dict + per-system init state.
 
+    Returns a 3-tuple ``(system_info, init_errors, init_phase)``. The
+    caller (:func:`enterprise_systems_status`) merges these across all
+    requested systems.
+    """
+    session_registry = get_enterprise_registry(context, system)
+    multi_config = get_multi_config(context)
+    snapshot = await session_registry.get_all()
+    factory_manager = session_registry.factory_manager
+    status_enum, liveness_detail = await factory_manager.liveness_status(
+        ensure_item=attempt_to_connect
+    )
+    is_alive = await factory_manager.is_alive()
 
-DEFAULT_TIMEOUT_SECONDS = 60
-"""Default timeout for enterprise session operations when not specified in config."""
+    if (
+        multi_config.enterprise is None or system not in multi_config.enterprise.systems
+    ):  # pragma: no cover - defensive; get_enterprise_registry would have raised first
+        raise InvalidSessionNameError(
+            f"Enterprise system {system!r} is not configured."
+        )
+    redacted_config = multi_config.enterprise.systems[system].model_dump(
+        mode="json", context={"redact": True}
+    )
+
+    system_info: dict[str, object] = {
+        "name": session_registry.system_name,
+        "liveness_status": status_enum.name,
+        "is_alive": is_alive,
+        "config": redacted_config,
+    }
+    if liveness_detail is not None:
+        system_info["liveness_detail"] = liveness_detail
+    return system_info, snapshot.initialization_errors, snapshot.initialization_phase
 
 
 async def enterprise_systems_status(
-    context: Context, attempt_to_connect: bool = False
+    context: Context,
+    system: str | None = None,
+    attempt_to_connect: bool = False,
 ) -> dict:
     """MCP Tool: Get the status and configuration details of this enterprise system.
 
@@ -93,6 +128,9 @@ async def enterprise_systems_status(
 
     Args:
         context (Context): The MCP context object.
+        system (str | None, optional): Single enterprise system name to
+            report on. ``None`` (default) aggregates every configured
+            enterprise system.
         attempt_to_connect (bool, optional): If True, actively attempts to connect to each system
             to verify its status. This provides more accurate results but increases latency.
             Default is False (only checks existing connections for faster response).
@@ -136,48 +174,58 @@ async def enterprise_systems_status(
         - With attempt_to_connect=False: Typically completes in milliseconds
         - With attempt_to_connect=True: May take seconds due to connection operations
     """
-    _LOGGER.info("[mcp_systems_server:enterprise_systems_status] Invoked.")
+    _LOGGER.info(
+        f"[mcp_systems_server:enterprise_systems_status] Invoked: system={system!r}"
+    )
     try:
-        session_registry = await get_enterprise_registry(context)
-        config_manager = get_config_manager(context)
-        # Get atomic snapshot for initialization state
-        snapshot = await session_registry.get_all()
+        if system is None:
+            # Aggregate every configured enterprise system.
+            multi_config = get_multi_config(context)
+            if multi_config.enterprise is None:
+                return {"success": True, "systems": []}
+            target_systems = list(multi_config.enterprise.systems.keys())
+        else:
+            target_systems = [system]
 
-        # Get the single factory manager directly
-        factory_manager = session_registry.factory_manager
-
-        # Use liveness_status() for detailed health information
-        status_enum, liveness_detail = await factory_manager.liveness_status(
-            ensure_item=attempt_to_connect
-        )
-        liveness_status = status_enum.name
-
-        # Also get simple is_alive boolean
-        is_alive = await factory_manager.is_alive()
-
-        # Flat config is the system config directly
-        raw_config = await config_manager.get_config()
-        redacted_config = redact_enterprise_config(raw_config)
-
-        system_info: dict[str, object] = {
-            "name": session_registry.system_name,
-            "liveness_status": liveness_status,
-            "is_alive": is_alive,
-            "config": redacted_config,
+        systems_info: list[dict[str, object]] = []
+        merged_errors: dict[str, str] = {}
+        # The merged phase is the *least advanced* across the surveyed
+        # systems so an aggregated call surfaces in-flight or failed
+        # discovery rather than masking it behind a completed sibling.
+        # ``InitializationPhase`` ordering matches the enum order:
+        # NOT_STARTED < PARTIAL < LOADING < FAILED < COMPLETED.
+        phase_order = {
+            InitializationPhase.NOT_STARTED: 0,
+            InitializationPhase.PARTIAL: 1,
+            InitializationPhase.LOADING: 2,
+            InitializationPhase.FAILED: 3,
+            InitializationPhase.COMPLETED: 4,
         }
+        merged_phase = InitializationPhase.COMPLETED
+        for sys_name in target_systems:
+            (
+                system_info,
+                init_errors,
+                init_phase,
+            ) = await _collect_one_enterprise_system_status(
+                context, sys_name, attempt_to_connect
+            )
+            systems_info.append(system_info)
+            # Single-system queries preserve the legacy un-namespaced
+            # error keys; aggregated calls namespace with the system
+            # name so duplicate source tags don't collide.
+            if len(target_systems) == 1:
+                merged_errors.update(init_errors)
+            else:
+                for source, err in init_errors.items():
+                    merged_errors[f"{sys_name}:{source}"] = err
+            if phase_order[init_phase] < phase_order[merged_phase]:
+                merged_phase = init_phase
 
-        if liveness_detail is not None:
-            system_info["liveness_detail"] = liveness_detail
-
-        response: dict[str, object] = {"success": True, "systems": [system_info]}
-
-        # Surface initialization status from the registry snapshot
-        init_info = format_initialization_status(
-            snapshot.initialization_phase, snapshot.initialization_errors
-        )
+        response: dict[str, object] = {"success": True, "systems": systems_info}
+        init_info = format_initialization_status(merged_phase, merged_errors)
         if init_info:
             response["initialization"] = init_info
-
         return response
     except Exception as e:
         _LOGGER.error(
@@ -187,45 +235,64 @@ async def enterprise_systems_status(
         return error_response(str(e))
 
 
-async def _check_session_limit(
-    session_registry: EnterpriseSessionRegistry, max_sessions: int
-) -> dict | None:
-    """Check if session creation is allowed and within limits.
+def _env_vars_to_list(env_vars: dict[str, str] | None) -> list[str] | None:
+    """Convert an ``environment_vars`` mapping to the controller wire format.
+
+    The Deephaven Enterprise controller accepts environment variables
+    as a list of ``"NAME=value"`` strings; the MCP-side schema and
+    tool surface use a more idiomatic ``dict[str, str]``. This helper
+    is the call-site adapter at the controller boundary.
 
     Args:
-        session_registry (EnterpriseSessionRegistry): The session registry
-        max_sessions (int): Maximum concurrent sessions allowed
+        env_vars (dict[str, str] | None): Environment variables keyed
+            by name. ``None`` is propagated through unchanged.
 
     Returns:
-        dict | None: Error response dict if not allowed, None if allowed
+        list[str] | None: ``["NAME=value", ...]`` or ``None``.
+    """
+    if env_vars is None:
+        return None
+    return [f"{name}={value}" for name, value in env_vars.items()]
+
+
+async def _check_session_limit(
+    session_registry: EnterpriseSessionRegistry, max_sessions: int | None
+) -> dict | None:
+    """Check if enterprise session creation is within the configured cap.
+
+    Args:
+        session_registry (EnterpriseSessionRegistry): The enterprise child
+            registry whose dynamically added sessions are being counted.
+        max_sessions (int | None): Maximum concurrent dynamically added
+            enterprise sessions allowed for this system. ``None``
+            disables the cap (unbounded).
+
+    Returns:
+        dict | None: ``None`` if the cap is disabled or not yet reached;
+            otherwise a structured error dict produced by
+            :func:`error_response`.
     """
     system_name = session_registry.system_name
-
-    # Check if session creation is disabled
-    if max_sessions == 0:
-        error_msg = f"Session creation is disabled for system '{system_name}' (max_concurrent_sessions = 0)"
-        _LOGGER.error(f"[mcp_systems_server:_check_session_limit] {error_msg}")
-        return error_response(error_msg)
-
-    # Check if current session count would exceed the limit
-    current_session_count = await session_registry.count_added_sessions(
-        SystemType.ENTERPRISE, system_name
+    return await check_session_limit(
+        session_registry,
+        SystemType.ENTERPRISE,
+        system_name,
+        max_sessions,
+        "_check_session_limit",
+        f"Max concurrent sessions ({{max}}) reached for system '{system_name}'",
     )
-    if current_session_count >= max_sessions:
-        error_msg = f"Max concurrent sessions ({max_sessions}) reached for system '{system_name}'"
-        _LOGGER.error(f"[mcp_systems_server:_check_session_limit] {error_msg}")
-        return error_response(error_msg)
-
-    return None
 
 
 def _generate_session_name_if_none(
-    system_config: dict, session_name: str | None
+    system_config: EnterpriseSystemConfig, session_name: str | None
 ) -> str:
     """Generate a session name if none provided.
 
     Args:
-        system_config (dict): Enterprise system configuration dict
+        system_config (EnterpriseSystemConfig): The validated enterprise
+            system declaration. When the configured credentials carry a
+            ``username`` (i.e. password auth) it is embedded into the
+            generated name to make logs easier to attribute.
         session_name (str | None): Provided session name or None
 
     Returns:
@@ -235,7 +302,8 @@ def _generate_session_name_if_none(
         return session_name
 
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    username = system_config.get("username")
+    creds = system_config.credentials
+    username = creds.username if isinstance(creds, PasswordCredentials) else None
     if username:
         generated = f"mcp-{username}-{timestamp}"
     else:
@@ -274,6 +342,7 @@ async def _check_session_id_available(
 
 async def session_enterprise_create(
     context: Context,
+    system: str,
     session_name: str | None = None,
     heap_size_gb: float | int | None = None,
     programming_language: str | None = None,
@@ -281,10 +350,9 @@ async def session_enterprise_create(
     server: str | None = None,
     engine: str | None = None,
     extra_jvm_args: list[str] | None = None,
-    extra_environment_vars: list[str] | None = None,
+    environment_vars: dict[str, str] | None = None,
     admin_groups: list[str] | None = None,
     viewer_groups: list[str] | None = None,
-    timeout_seconds: float | None = None,
     session_arguments: dict[str, Any] | None = None,
 ) -> dict:
     """MCP Tool: Create a new enterprise session with configurable parameters.
@@ -315,6 +383,8 @@ async def session_enterprise_create(
 
     Args:
         context (Context): The MCP context object.
+        system (str): Enterprise system name as listed by ``list_systems``
+            on which to create the session.
         session_name (str | None): Name for the new session. If None, auto-generates
             a timestamp-based name like "mcp-{username}-20241126-1130".
         heap_size_gb (float | int | None): JVM heap size in gigabytes (e.g., 8 or 2.5 for -Xmx8g or -Xmx2.5g). If None, uses
@@ -329,14 +399,12 @@ async def session_enterprise_create(
             If None, uses config default or "DeephavenCommunity".
         extra_jvm_args (list[str] | None): Additional JVM arguments for the session.
             If None, uses config default or standard JVM settings.
-        extra_environment_vars (list[str] | None): Environment variables for the session in format
-            ["NAME=value", ...]. If None, uses config default environment.
+        environment_vars (dict[str, str] | None): Environment variables for the session,
+            keyed by variable name. If None, uses config default environment.
         admin_groups (list[str] | None): User groups with administrative permissions on the session.
             If None, uses config default or creator-only access.
         viewer_groups (list[str] | None): User groups with read-only access to session.
             If None, uses config default or creator-only access.
-        timeout_seconds (float | None): Maximum time in seconds to wait for session startup.
-            If None, uses config default or 60 seconds.
         session_arguments (dict[str, Any] | None): Additional arguments for pydeephaven.Session constructor.
             If None, uses config default or standard session settings.
 
@@ -415,7 +483,7 @@ async def session_enterprise_create(
         # Create session with environment variables
         Tool: session_enterprise_create
         Parameters: {
-            "extra_environment_vars": ["VAR1=/mnt/data", "VAR2=DEBUG"]
+            "environment_vars": {"VAR1": "/mnt/data", "VAR2": "DEBUG"}
         }
 
         # Create session with specific server and permissions
@@ -427,34 +495,41 @@ async def session_enterprise_create(
         }
     """
     result: dict[str, object] = {"success": False}
+    system_name = system  # alias used in legacy log/error strings below
 
     try:
         # Get config and session registry
-        config_manager = get_config_manager(context)
-        session_registry = await get_enterprise_registry(context)
-        system_name = session_registry.system_name
+        multi_config = get_multi_config(context)
+        session_registry = get_enterprise_registry(context, system)
         _LOGGER.info(
             f"[mcp_systems_server:session_enterprise_create] Invoked: "
             f"system_name={system_name!r}, session_name={session_name!r}, "
             f"heap_size_gb={heap_size_gb}, auto_delete_timeout={auto_delete_timeout}, "
             f"server={server!r}, engine={engine!r}, "
-            f"extra_jvm_args={extra_jvm_args}, extra_environment_vars={extra_environment_vars}, "
+            f"extra_jvm_args={extra_jvm_args}, environment_vars={environment_vars}, "
             f"admin_groups={admin_groups}, viewer_groups={viewer_groups}, "
-            f"timeout_seconds={timeout_seconds}, session_arguments={session_arguments}, "
+            f"session_arguments={session_arguments}, "
             f"programming_language={programming_language}"
         )
 
-        # Get enterprise system configuration (flat config returned directly)
-        system_config = await config_manager.get_config()
-        session_creation_config = system_config.get("session_creation")
+        # Get enterprise system configuration from the lifespan-loaded multi-config.
+        if (  # pragma: no cover - defensive; get_enterprise_registry would have raised first
+            multi_config.enterprise is None
+            or system_name not in multi_config.enterprise.systems
+        ):
+            error_msg = f"Enterprise system {system_name!r} is not configured."
+            _LOGGER.error(f"[mcp_systems_server:session_enterprise_create] {error_msg}")
+            result.update(error_response(error_msg))
+            return result
+        # Read the typed enterprise system declaration directly.
+        system_config = multi_config.enterprise.systems[system_name]
+        session_creation_config = system_config.session_creation
         if session_creation_config is None:
             error_msg = f"Enterprise session creation not configured for system '{system_name}'. Add a 'session_creation' section to the configuration."
             _LOGGER.error(f"[mcp_systems_server:session_enterprise_create] {error_msg}")
             result.update(error_response(error_msg))
             return result
-        max_sessions = session_creation_config.get(
-            "max_concurrent_sessions", DEFAULT_MAX_CONCURRENT_SESSIONS
-        )
+        max_sessions = session_creation_config.max_concurrent_sessions
 
         # Check session limits (both enabled and count)
         limit_err = await _check_session_limit(session_registry, max_sessions)
@@ -475,17 +550,16 @@ async def session_enterprise_create(
             return result
 
         # Resolve configuration parameters (defaults guaranteed by config validation)
-        defaults = session_creation_config["defaults"]
+        defaults = session_creation_config.defaults
         resolved_config = _resolve_session_parameters(
             heap_size_gb,
             auto_delete_timeout,
             server,
             engine,
             extra_jvm_args,
-            extra_environment_vars,
+            environment_vars,
             admin_groups,
             viewer_groups,
-            timeout_seconds,
             session_arguments,
             programming_language,
             defaults,
@@ -528,10 +602,11 @@ async def session_enterprise_create(
             server=resolved_config["server"],
             engine=resolved_config["engine"],
             extra_jvm_args=resolved_config["extra_jvm_args"],
-            extra_environment_vars=resolved_config["extra_environment_vars"],
+            extra_environment_vars=resolved_config[
+                "extra_environment_vars"
+            ],  # controller wire format: ["NAME=value", ...]
             admin_groups=resolved_config["admin_groups"],
             viewer_groups=resolved_config["viewer_groups"],
-            timeout_seconds=resolved_config["timeout_seconds"],
             configuration_transformer=configuration_transformer,
             session_arguments=resolved_config["session_arguments"],
         )
@@ -541,7 +616,7 @@ async def session_enterprise_create(
             return session
 
         enterprise_session_manager = EnterpriseSessionManager(
-            source=system_name,
+            system=system_name,
             name=session_name,
             creation_function=creation_function,
         )
@@ -590,15 +665,14 @@ def _resolve_session_parameters(
     server: str | None,
     engine: str | None,
     extra_jvm_args: list[str] | None,
-    extra_environment_vars: list[str] | None,
+    environment_vars: dict[str, str] | None,
     admin_groups: list[str] | None,
     viewer_groups: list[str] | None,
-    timeout_seconds: float | None,
     session_arguments: dict[str, Any] | None,
     programming_language: str | None,
-    defaults: dict,
+    defaults: EnterpriseSessionCreationDefaults,
 ) -> dict:
-    """Resolve session parameters with priority: tool param -> config default -> API default.
+    """Resolve session parameters with priority: tool param -> typed config default.
 
     Args:
         heap_size_gb (float | int | None): Tool parameter value for JVM heap size in GB (e.g., 8 or 2.5).
@@ -606,39 +680,36 @@ def _resolve_session_parameters(
         server (str | None): Tool parameter value for target server.
         engine (str | None): Tool parameter value for engine type.
         extra_jvm_args (list[str] | None): Tool parameter value for additional JVM arguments.
-        extra_environment_vars (list[str] | None): Tool parameter value for environment variables.
+        environment_vars (dict[str, str] | None): Tool parameter value for environment
+            variables (mapping form; the controller adapter converts to ``["NAME=value", ...]``).
         admin_groups (list[str] | None): Tool parameter value for admin user groups.
         viewer_groups (list[str] | None): Tool parameter value for viewer user groups.
-        timeout_seconds (float | None): Tool parameter value for session startup timeout.
         session_arguments (dict[str, Any] | None): Tool parameter value for pydeephaven.Session constructor.
         programming_language (str | None): Tool parameter value for session language ("Python" or "Groovy").
-        defaults (dict): Configuration defaults dictionary from session_creation config.
+        defaults (EnterpriseSessionCreationDefaults): Typed defaults
+            block from the enterprise system's ``session_creation``
+            config; every field carries its schema-level default.
 
     Returns:
         dict: Resolved configuration with all parameters using priority order.
     """
     return {
-        "heap_size_gb": heap_size_gb or defaults.get("heap_size_gb"),
+        "heap_size_gb": heap_size_gb or defaults.heap_size_gb,
         "auto_delete_timeout": (
             auto_delete_timeout
             if auto_delete_timeout is not None
-            else defaults.get("auto_delete_timeout")
+            else defaults.auto_delete_timeout
         ),
-        "server": server or defaults.get("server"),
-        "engine": engine or defaults.get("engine", DEFAULT_ENGINE),
-        "extra_jvm_args": extra_jvm_args or defaults.get("extra_jvm_args"),
-        "extra_environment_vars": extra_environment_vars
-        or defaults.get("extra_environment_vars"),
-        "admin_groups": admin_groups or defaults.get("admin_groups"),
-        "viewer_groups": viewer_groups or defaults.get("viewer_groups"),
-        "timeout_seconds": (
-            timeout_seconds
-            if timeout_seconds is not None
-            else defaults.get("timeout_seconds", DEFAULT_TIMEOUT_SECONDS)
+        "server": server or defaults.server,
+        "engine": engine or defaults.engine,
+        "extra_jvm_args": extra_jvm_args or defaults.extra_jvm_args,
+        "extra_environment_vars": _env_vars_to_list(
+            environment_vars or defaults.environment_vars
         ),
-        "session_arguments": session_arguments or defaults.get("session_arguments"),
-        "programming_language": programming_language
-        or defaults.get("programming_language", DEFAULT_PROGRAMMING_LANGUAGE),
+        "admin_groups": admin_groups or defaults.admin_groups,
+        "viewer_groups": viewer_groups or defaults.viewer_groups,
+        "session_arguments": session_arguments or defaults.session_arguments,
+        "programming_language": programming_language or defaults.programming_language,
     }
 
 
@@ -743,19 +814,9 @@ async def session_enterprise_delete(
     )
 
     try:
-        # Get session registry
-        session_registry = await get_enterprise_registry(context)
-        system_name = session_registry.system_name
-        _LOGGER.info(
-            f"[mcp_systems_server:session_enterprise_delete] Invoked: "
-            f"system_name={system_name!r}, session_id={session_id!r}"
-        )
-
-        # Parse and validate the session_id
+        # Parse session_id to determine which enterprise system it belongs to.
         try:
-            system_type_str, source, session_name = BaseItemManager.parse_full_name(
-                session_id
-            )
+            system_type, source, session_name = parse_session_id(session_id)
         except InvalidSessionNameError as e:
             error_msg = f"Invalid session_id format: {e}"
             _LOGGER.error(f"[mcp_systems_server:session_enterprise_delete] {error_msg}")
@@ -763,22 +824,30 @@ async def session_enterprise_delete(
             result["isError"] = True
             return result
 
-        if system_type_str != SystemType.ENTERPRISE.value:
-            error_msg = f"Session '{session_id}' is not an enterprise session (type: '{system_type_str}')"
-            _LOGGER.error(f"[mcp_systems_server:session_enterprise_delete] {error_msg}")
-            result["error"] = error_msg
-            result["isError"] = True
-            return result
-
-        if source != system_name:
+        if system_type != SystemType.ENTERPRISE:
             error_msg = (
-                f"Session '{session_id}' belongs to system '{source}', "
-                f"but this server manages '{system_name}'"
+                f"Session '{session_id}' is not an enterprise session "
+                f"(type: '{system_type.value}')"
             )
             _LOGGER.error(f"[mcp_systems_server:session_enterprise_delete] {error_msg}")
             result["error"] = error_msg
             result["isError"] = True
             return result
+
+        # Get session registry for the system named in the id.
+        try:
+            session_registry = get_enterprise_registry(context, source)
+        except InvalidSessionNameError as e:
+            error_msg = str(e)
+            _LOGGER.error(f"[mcp_systems_server:session_enterprise_delete] {error_msg}")
+            result["error"] = error_msg
+            result["isError"] = True
+            return result
+        system_name = source
+        _LOGGER.info(
+            f"[mcp_systems_server:session_enterprise_delete] Invoked: "
+            f"system_name={system_name!r}, session_id={session_id!r}"
+        )
 
         _LOGGER.debug(
             f"[mcp_systems_server:session_enterprise_delete] Looking for session '{session_id}'"

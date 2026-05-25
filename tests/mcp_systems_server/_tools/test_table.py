@@ -629,7 +629,9 @@ async def test_session_table_data_success_default_params():
     ) as mock_get_table:
         mock_get_table.return_value = (mock_arrow_table, True)
 
-        result = await session_table_data(context, "session1", "table1")
+        result = await session_table_data(
+            context, "community:community:session1", "table1"
+        )
 
         assert result["success"] is True
         assert result["table_name"] == "table1"
@@ -681,7 +683,12 @@ async def test_session_table_data_success_custom_params():
         mock_get_table.return_value = (mock_arrow_table, False)
 
         result = await session_table_data(
-            context, "session1", "table1", max_rows=50, head=False, format="json-row"
+            context,
+            "community:community:session1",
+            "table1",
+            max_rows=50,
+            head=False,
+            format="json-row",
         )
 
         assert result["success"] is True
@@ -733,7 +740,9 @@ async def test_session_table_data_success_full_table():
 
         mock_get_table.return_value = (mock_arrow_table, True)
 
-        result = await session_table_data(context, "session1", "table1", max_rows=None)
+        result = await session_table_data(
+            context, "community:community:session1", "table1", max_rows=None
+        )
 
         assert result["success"] is True
         assert (
@@ -777,7 +786,7 @@ async def test_session_table_data_invalid_format():
         mock_get_table.return_value = (mock_arrow_table, True)
 
         result = await session_table_data(
-            context, "session1", "table1", format="invalid"
+            context, "community:community:session1", "table1", format="invalid"
         )
 
         assert result["success"] is False
@@ -816,10 +825,12 @@ async def test_session_table_data_size_limit_exceeded():
     ) as mock_get_table:
         mock_get_table.return_value = (mock_arrow_table, True)
 
-        result = await session_table_data(context, "session1", "table1")
+        result = await session_table_data(
+            context, "community:community:session1", "table1"
+        )
 
         assert result["success"] is False
-        assert "max 50MB" in result["error"]
+        assert "max 52MB" in result["error"]
         assert result["isError"] is True
 
 

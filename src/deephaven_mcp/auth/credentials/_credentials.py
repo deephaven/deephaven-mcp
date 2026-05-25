@@ -1,87 +1,75 @@
-"""Mechanism-only credential dataclasses: the secret-bearing "what" of authentication.
+"""Outbound bearer credentials for Deephaven workers.
 
-Each concrete subclass represents a single kind of bearer material (a
-shared token, a username/password pair, a private key). The types are
-defined purely by the *shape* of the material they carry; this module
-is intentionally agnostic about which consumer accepts which kind.
-Deciding whether a given credential can authenticate against a given
-system is the responsibility of whichever consumer takes one as input
-(for example a session factory's ``match`` statement or a registry's
-acceptance check).
+Defines the typed credential models the MCP server uses to authenticate
+*to* a Deephaven Community or Enterprise worker. Each concrete model
+represents one bearer mechanism. Transport-layer TLS material lives in
+:mod:`deephaven_mcp.auth.tls`.
 
 Class hierarchy
 ---------------
 
-:class:`Credentials` is an :class:`abc.ABC` and the single type used in
-function signatures throughout the codebase. The three concrete
-subclasses inherit from it:
+:class:`Credentials` is the abstract base; concrete kinds:
 
-- :class:`PSKCredentials` — a single pre-shared key string verified by
-  the authenticator.
-- :class:`PasswordCredentials` — username/password (and optional
-  identity to operate as).
-- :class:`PrivateKeyCredentials` — UTF-8 text of a private-key file.
-
-Consumers branch on concrete type via ``match`` or ``isinstance`` checks
-local to the consuming module; this package exposes no helpers for
-such branching.
+- :class:`AnonymousCredentials` — no bearer material.
+- :class:`PSKCredentials` — Deephaven Community pre-shared key.
+- :class:`PasswordCredentials` — username/password, with optional
+  ``effective_user`` operate-as identity.
+- :class:`PrivateKeyCredentials` — UTF-8 text of a PEM private-key
+  file (Enterprise private-key auth).
+- :class:`CustomTokenCredentials` — escape hatch for arbitrary Java
+  auth-handler class names.
 
 Sensitivity
 -----------
-These dataclasses carry secret material (passwords, PSKs, decoded key
-bytes). They must never be logged, serialised, or persisted. Call sites
-should drop the secret as soon as it has been exchanged for a
-long-lived handle (e.g. a session object).
 
-As a defence-in-depth measure, every concrete subclass overrides
-``__repr__`` to redact its secret fields. ``repr(creds)``,
-``f"{creds}"``, ``logger.info("%s", creds)``, and any other route that
-goes through ``__repr__``/``__str__`` therefore produce
-``"PSKCredentials(psk=[REDACTED])"`` rather than the plaintext secret.
-Call sites that genuinely need the secret must read the typed attribute
-(``creds.psk``, ``creds.password``, ``creds.key_text``) explicitly.
+Every secret-bearing field is typed :class:`pydantic.SecretStr`:
 
-Identity and hashing
---------------------
-The concrete subclasses are frozen dataclasses, so Python synthesises
-``__eq__`` and ``__hash__`` from their fields, including the secret
-fields. Consumers may therefore use a credential object directly as a
-cache key: two structurally equal credentials hash and compare equal
-and share a cached resource. Hash and equality never produce strings,
-so this does not leak secrets.
+- ``PSKCredentials.token``
+- ``PasswordCredentials.password``
+- ``PrivateKeyCredentials.key_text``
+- ``CustomTokenCredentials.auth_token``
+
+``repr(creds)`` and ``str(creds)`` mask the secret value as
+``SecretStr('**********')``; ``model.model_dump(mode="json",
+context={"redact": True})`` produces the project's canonical
+:data:`~deephaven_mcp._redaction.REDACTED` sentinel. Consumers that
+need the secret text call ``.get_secret_value()`` explicitly.
+
+Subclasses are ``frozen=True`` Pydantic models; equality and hashing
+derive from the field values.
 """
 
 from __future__ import annotations
 
-from abc import ABC
-from dataclasses import dataclass
-
-from deephaven_mcp._redaction import REDACTED
-
 __all__ = [
+    "AnonymousCredentials",
     "Credentials",
+    "CredentialsUnion",
+    "CustomTokenCredentials",
+    "PSKCredentials",
     "PasswordCredentials",
     "PrivateKeyCredentials",
-    "PSKCredentials",
 ]
 
+from typing import Annotated, Literal
 
-class Credentials(ABC):  # noqa: B024 - abstract via __new__ (see below)
-    """Abstract base class for mechanism-only credentials.
+from pydantic import Field, SecretStr
 
-    Every concrete credential kind is a subclass of
-    :class:`Credentials`. The base class carries no fields and no
-    behaviour because credentials are pure data — dispatching on the
-    concrete type is the responsibility of whichever consumer takes a
-    :class:`Credentials` as input.
+from deephaven_mcp._pydantic import RedactableSchema
 
-    Direct instantiation is forbidden at runtime via :meth:`__new__`:
-    attempting ``Credentials()`` raises :class:`TypeError`. The empty
-    :attr:`__slots__` makes the base compatible with subclasses that
-    use ``@dataclass(slots=True)``.
+
+class Credentials(RedactableSchema):
+    """Abstract base class for outbound bearer credentials.
+
+    Concrete kinds inherit from :class:`Credentials`. The base itself
+    declares no fields and cannot be instantiated directly —
+    attempting :class:`Credentials` raises :class:`TypeError` at
+    ``__new__`` time.
+
+    Each concrete subclass declares a ``type`` field as a
+    ``Literal[<name>]`` so the :data:`CredentialsUnion` discriminator
+    can dispatch on it during JSON parsing.
     """
-
-    __slots__ = ()
 
     def __new__(cls, *args: object, **kwargs: object) -> Credentials:
         """Forbid direct instantiation of the abstract base class."""
@@ -93,101 +81,88 @@ class Credentials(ABC):  # noqa: B024 - abstract via __new__ (see below)
         return super().__new__(cls)
 
 
-@dataclass(frozen=True, slots=True, repr=False)
+class AnonymousCredentials(Credentials):
+    """No bearer material; suitable for anonymous-auth Community workers.
+
+    Carries no fields beyond the discriminator.
+    """
+
+    type: Literal["anonymous"] = "anonymous"
+    """Discriminator tag for the :data:`CredentialsUnion`; marks this
+    object as anonymous (no bearer material)."""
+
+
 class PSKCredentials(Credentials):
-    """Pre-shared key bearer material.
+    """Pre-shared-key bearer material for Deephaven Community PSK auth."""
 
-    Carries the PSK string the caller presented and the authenticator
-    verified (typically by constant-time comparison against a configured
-    value). Consumers that need to forward the key to an upstream
-    service can read :attr:`psk` directly; consumers that only need to
-    know "the caller is authenticated" can ignore the field.
+    type: Literal["psk"] = "psk"
+    """Discriminator tag for the :data:`CredentialsUnion`; marks this
+    object as Community pre-shared-key credentials."""
 
-    The auto-generated dataclass ``__repr__`` is disabled
-    (``repr=False``) and replaced with a secret-redacting implementation
-    so that accidental ``f"{creds}"`` or ``logger.info("%s", creds)``
-    cannot leak the PSK.
-
-    Attributes:
-        psk (str): The verified pre-shared key.
-    """
-
-    psk: str
-
-    def __repr__(self) -> str:
-        """Return a redacted representation that never reveals the PSK."""
-        return f"PSKCredentials(psk={REDACTED})"
+    token: SecretStr
+    """The pre-shared key."""
 
 
-@dataclass(frozen=True, slots=True, repr=False)
 class PasswordCredentials(Credentials):
-    """Username/password bearer material, with optional operate-as identity.
+    """Username/password bearer material with optional operate-as identity."""
 
-    Carries the fields needed for classic password authentication plus
-    an optional "operate as" identity for consumers that support
-    sudo-style delegation. Whether a given consumer honours
-    :attr:`effective_user` is a property of that consumer; this
-    dataclass is only responsible for carrying the value.
-
-    The auto-generated dataclass ``__repr__`` is disabled
-    (``repr=False``) and replaced with a secret-redacting implementation
-    so that accidental ``f"{creds}"`` or ``logger.info("%s", creds)``
-    cannot leak the password. ``username`` and ``effective_user`` are
-    not secrets and remain visible for debugging.
-
-    Attributes:
-        username (str): The authenticating username.
-        password (str): The user's password.
-        effective_user (str | None): Optional identity to operate as
-            after authenticating. When ``None``, the authenticated user
-            is also the effective user.
-    """
+    type: Literal["password"] = "password"
+    """Discriminator tag for the :data:`CredentialsUnion`; marks this
+    object as username/password credentials."""
 
     username: str
-    password: str
+    """The authenticating username."""
+
+    password: SecretStr
+    """The user's password."""
+
     effective_user: str | None = None
-
-    def __repr__(self) -> str:
-        """Return a representation that redacts the password field only."""
-        return (
-            f"PasswordCredentials(username={self.username!r}, "
-            f"password={REDACTED}, effective_user={self.effective_user!r})"
-        )
+    """Optional identity to operate as after authenticating. ``None``
+    means the authenticated user is also the effective user."""
 
 
-@dataclass(frozen=True, slots=True, repr=False)
 class PrivateKeyCredentials(Credentials):
-    """Private-key bearer material.
+    """Private-key bearer material for Deephaven Enterprise private-key auth."""
 
-    Carries the decoded contents of a private-key file as UTF-8 text.
-    Keeping the payload in memory (rather than as a file path) lets
-    consumers present the key to the underlying auth API without
-    requiring filesystem access on the server side; how the text is
-    consumed (e.g. wrapped in a text stream, parsed as PEM) is the
-    consumer's concern.
+    type: Literal["private_key"] = "private_key"
+    """Discriminator tag for the :data:`CredentialsUnion`; marks this
+    object as Enterprise private-key credentials."""
 
-    The auto-generated dataclass ``__repr__`` is disabled
-    (``repr=False``) and replaced with a secret-redacting implementation
-    so that accidental ``f"{creds}"`` or ``logger.info("%s", creds)``
-    cannot leak the key material. The key length in characters is
-    shown because it is useful for debugging and does not reveal key
-    content.
+    key_text: SecretStr
+    """The PEM contents as UTF-8 text."""
 
-    Attributes:
-        key_text (str): Decoded keyfile contents — the raw text of the
-            private-key file. Always valid UTF-8: the producing backend
-            (:class:`~deephaven_mcp.auth.backends.PrivateKeyBackend`)
-            validates the bytes it receives on the wire and raises
-            :class:`~deephaven_mcp.auth.backends.AuthenticationError` on
-            invalid UTF-8, so downstream consumers can rely on the
-            ``str`` type without re-validating.
+
+class CustomTokenCredentials(Credentials):
+    """Escape-hatch credential for arbitrary Java auth-handler class names.
+
+    The full ``auth_type`` and resolved ``auth_token`` are forwarded
+    verbatim to ``pydeephaven.Session``.
     """
 
-    key_text: str
+    type: Literal["custom"] = "custom"
+    """Discriminator tag for the :data:`CredentialsUnion`; marks this
+    object as the escape-hatch credential for a custom Java auth
+    handler."""
 
-    def __repr__(self) -> str:
-        """Return a representation that shows key length but redacts contents."""
-        return (
-            f"PrivateKeyCredentials(key_text={REDACTED}, "
-            f"{len(self.key_text)} chars)"
-        )
+    auth_type: str
+    """Fully-qualified Java class name of the auth handler (e.g.
+    ``"com.example.MyHandler"``)."""
+
+    auth_token: SecretStr
+    """Opaque token whose format is dictated by the custom handler."""
+
+
+CredentialsUnion = Annotated[
+    AnonymousCredentials
+    | PSKCredentials
+    | PasswordCredentials
+    | PrivateKeyCredentials
+    | CustomTokenCredentials,
+    Field(discriminator="type"),
+]
+"""Discriminated-union annotation for outbound credentials.
+
+Pydantic dispatches on the ``type`` field at validation time, so
+parsing ``{"type": "psk", "token": "x"}`` directly produces a
+:class:`PSKCredentials` instance.
+"""

@@ -12,3 +12,5 @@ Runs in order: isort → black → ruff → mypy → markdownlint. **It modifies
 It does not run tests. Use the `tests-run` skill for that.
 
 The script stops at the first failure (`set -euo pipefail`), so a failure in ruff means mypy and markdownlint have not yet run. isort, black, and markdownlint are unlikely to fail since they auto-fix. Ruff may report unfixable lint errors; mypy reports type errors — both require manual fixes before re-running.
+
+Ruff/mypy failures usually need code edits — apply the `review-python-file` skill (which loads `_python-coding-practices`, `_logging-standards`, and `_mcp-module-organization`) before fixing, so the fix matches project standards rather than just silencing the linter.

@@ -1,0 +1,23 @@
+{
+  "security": {
+    "credential_retrieval_mode": "none"
+  },
+  "session_creation": {
+    "max_concurrent_sessions": 1,
+    "defaults": {
+      "launch_method": "python",
+      "auth": {
+        "credentials": {
+          "type": "psk",
+          "token": "${env:DH_DYNAMIC_SESSION_TOKEN}"
+        }
+      },
+      "heap_size_gb": 4,
+      "extra_jvm_args": [],
+      "environment_vars": {},
+      "startup_timeout_seconds": 120,
+      "startup_check_interval_seconds": 2,
+      "startup_retries": 3
+    }
+  }
+}

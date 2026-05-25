@@ -13,7 +13,7 @@ Test the Deephaven MCP session discovery tools. Do the following steps in order 
 
 2. For each session returned (up to 10), call session_details with attempt_to_connect=false. Verify success==true for each. Record the session type and source.
 
-3. Call session_details with session_id="community:dynamic:nonexistent-xyz" and attempt_to_connect=false. Verify success==false (this is expected — it is a negative test).
+3. Call session_details with session_id="community:community:nonexistent-xyz" and attempt_to_connect=false. Verify success==false (this is expected — it is a negative test).
 
 Report: PASS/FAIL for each step with a one-line explanation.
 ```
@@ -25,17 +25,17 @@ Report: PASS/FAIL for each step with a one-line explanation.
 ```text
 Test creating and deleting a dynamic Deephaven Community session. Do the following steps in order and report results.
 
-Pre-cleanup (idempotent): Call session_community_delete with session_id="community:dynamic:mcp-test-create-delete". Ignore any error — this just ensures a clean starting state.
+Pre-cleanup (idempotent): Call session_community_delete with session_id="community:community:mcp-test-create-delete". Ignore any error — this just ensures a clean starting state.
 
 1. Call session_community_create with session_name="mcp-test-create-delete", launch_method="python", auth_type="anonymous". Verify success==true. Record the session_id.
 
-2. Call sessions_list. Verify success==true. Verify "community:dynamic:mcp-test-create-delete" appears in the list.
+2. Call sessions_list. Verify success==true. Verify "community:community:mcp-test-create-delete" appears in the list.
 
-3. Call session_details with session_id="community:dynamic:mcp-test-create-delete" and attempt_to_connect=true. Verify success==true.
+3. Call session_details with session_id="community:community:mcp-test-create-delete" and attempt_to_connect=true. Verify success==true.
 
-4. CLEANUP: Call session_community_delete with session_id="community:dynamic:mcp-test-create-delete". Verify success==true.
+4. CLEANUP: Call session_community_delete with session_id="community:community:mcp-test-create-delete". Verify success==true.
 
-5. Call sessions_list again. Verify "community:dynamic:mcp-test-create-delete" is no longer present.
+5. Call sessions_list again. Verify "community:community:mcp-test-create-delete" is no longer present.
 
 Report: PASS/FAIL for each numbered step with a one-line explanation.
 ```
@@ -47,21 +47,21 @@ Report: PASS/FAIL for each numbered step with a one-line explanation.
 ```text
 Test script execution on a Deephaven Community session. Do the following steps in order and report results.
 
-Pre-cleanup (idempotent): Call session_community_delete with session_id="community:dynamic:mcp-test-script". Ignore any error — this just ensures a clean starting state.
+Pre-cleanup (idempotent): Call session_community_delete with session_id="community:community:mcp-test-script". Ignore any error — this just ensures a clean starting state.
 
 Setup: Call session_community_create with session_name="mcp-test-script", launch_method="python", auth_type="anonymous". Verify success==true before proceeding.
 
-1. Call session_script_run with session_id="community:dynamic:mcp-test-script" and this script:
+1. Call session_script_run with session_id="community:community:mcp-test-script" and this script:
    from deephaven import new_table
    from deephaven.column import int_col, string_col
    hello_table = new_table([int_col("ID", [1, 2, 3]), string_col("Msg", ["hello", "world", "test"])])
    Verify success==true.
 
-2. Call session_script_run with session_id="community:dynamic:mcp-test-script" and script="this is not valid python !!!". Verify success==false (expected error).
+2. Call session_script_run with session_id="community:community:mcp-test-script" and script="this is not valid python !!!". Verify success==false (expected error).
 
-3. Call session_script_run with session_id="community:dynamic:mcp-test-script" with neither script nor script_path provided. Verify success==false and error mentions "Must provide either script or script_path".
+3. Call session_script_run with session_id="community:community:mcp-test-script" with neither script nor script_path provided. Verify success==false and error mentions "Must provide either script or script_path".
 
-CLEANUP: Call session_community_delete with session_id="community:dynamic:mcp-test-script". Verify success==true.
+CLEANUP: Call session_community_delete with session_id="community:community:mcp-test-script". Verify success==true.
 
 Report: PASS/FAIL for each numbered step with a one-line explanation.
 ```
@@ -73,26 +73,26 @@ Report: PASS/FAIL for each numbered step with a one-line explanation.
 ```text
 Test table listing and schema retrieval on a Deephaven Community session. Do the following steps in order and report results.
 
-Pre-cleanup (idempotent): Call session_community_delete with session_id="community:dynamic:mcp-test-tables". Ignore any error — this just ensures a clean starting state.
+Pre-cleanup (idempotent): Call session_community_delete with session_id="community:community:mcp-test-tables". Ignore any error — this just ensures a clean starting state.
 
 Setup: 
 - Call session_community_create with session_name="mcp-test-tables", launch_method="python", auth_type="anonymous". Verify success==true.
-- Call session_script_run with session_id="community:dynamic:mcp-test-tables" and this script:
+- Call session_script_run with session_id="community:community:mcp-test-tables" and this script:
   from deephaven import new_table
   from deephaven.column import int_col, string_col, double_col
   trades = new_table([int_col("TradeID", [1, 2, 3]), string_col("Symbol", ["AAPL", "GOOG", "MSFT"]), double_col("Price", [150.0, 2800.0, 300.0])])
   orders = new_table([int_col("OrderID", [10, 20]), string_col("Side", ["BUY", "SELL"])])
   Verify success==true before proceeding.
 
-1. Call session_tables_list with session_id="community:dynamic:mcp-test-tables". Verify success==true. Verify both "trades" and "orders" appear in table_names.
+1. Call session_tables_list with session_id="community:community:mcp-test-tables". Verify success==true. Verify both "trades" and "orders" appear in table_names.
 
-2. Call session_tables_schema with session_id="community:dynamic:mcp-test-tables" and no table_names (fetch all). Verify success==true. Verify schemas for "trades" and "orders" are present. For "trades", verify columns TradeID (int), Symbol (string), Price (double) appear.
+2. Call session_tables_schema with session_id="community:community:mcp-test-tables" and no table_names (fetch all). Verify success==true. Verify schemas for "trades" and "orders" are present. For "trades", verify columns TradeID (int), Symbol (string), Price (double) appear.
 
-3. Call session_tables_schema with session_id="community:dynamic:mcp-test-tables" and table_names=["trades"]. Verify success==true and only the "trades" schema is returned.
+3. Call session_tables_schema with session_id="community:community:mcp-test-tables" and table_names=["trades"]. Verify success==true and only the "trades" schema is returned.
 
-4. Call session_tables_schema with session_id="community:dynamic:mcp-test-tables" and table_names=["does_not_exist_xyz"]. Note whether the overall success is true or false and whether the individual table entry shows an error.
+4. Call session_tables_schema with session_id="community:community:mcp-test-tables" and table_names=["does_not_exist_xyz"]. Note whether the overall success is true or false and whether the individual table entry shows an error.
 
-CLEANUP: Call session_community_delete with session_id="community:dynamic:mcp-test-tables". Verify success==true.
+CLEANUP: Call session_community_delete with session_id="community:community:mcp-test-tables". Verify success==true.
 
 Report: PASS/FAIL for each numbered step with a one-line explanation.
 ```
@@ -104,23 +104,23 @@ Report: PASS/FAIL for each numbered step with a one-line explanation.
 ```text
 Test reading table data from a Deephaven Community session. Do the following steps in order and report results.
 
-Pre-cleanup (idempotent): Call session_community_delete with session_id="community:dynamic:mcp-test-data". Ignore any error — this just ensures a clean starting state.
+Pre-cleanup (idempotent): Call session_community_delete with session_id="community:community:mcp-test-data". Ignore any error — this just ensures a clean starting state.
 
 Setup:
 - Call session_community_create with session_name="mcp-test-data", launch_method="python", auth_type="anonymous". Verify success==true.
-- Call session_script_run with session_id="community:dynamic:mcp-test-data" and this script:
+- Call session_script_run with session_id="community:community:mcp-test-data" and this script:
   from deephaven import new_table
   from deephaven.column import int_col, string_col, double_col
   results = new_table([int_col("ID", [1, 2, 3, 4, 5]), string_col("Name", ["Alice", "Bob", "Charlie", "Diana", "Eve"]), double_col("Score", [95.5, 87.3, 92.1, 78.9, 88.0])])
   Verify success==true before proceeding.
 
-1. Call session_table_data with session_id="community:dynamic:mcp-test-data" and table_name="results". Verify success==true. Verify 5 rows are returned with correct ID, Name, and Score values.
+1. Call session_table_data with session_id="community:community:mcp-test-data" and table_name="results". Verify success==true. Verify 5 rows are returned with correct ID, Name, and Score values.
 
-2. Call session_table_data with session_id="community:dynamic:mcp-test-data", table_name="results", and max_rows=2. Verify success==true. Verify only 2 rows are returned.
+2. Call session_table_data with session_id="community:community:mcp-test-data", table_name="results", and max_rows=2. Verify success==true. Verify only 2 rows are returned.
 
-3. Call session_table_data with session_id="community:dynamic:mcp-test-data" and table_name="no_such_table_xyz". Verify success==false (expected error).
+3. Call session_table_data with session_id="community:community:mcp-test-data" and table_name="no_such_table_xyz". Verify success==false (expected error).
 
-CLEANUP: Call session_community_delete with session_id="community:dynamic:mcp-test-data". Verify success==true.
+CLEANUP: Call session_community_delete with session_id="community:community:mcp-test-data". Verify success==true.
 
 Report: PASS/FAIL for each numbered step with a one-line explanation.
 ```
@@ -132,59 +132,39 @@ Report: PASS/FAIL for each numbered step with a one-line explanation.
 ```text
 Test pip package listing on a Deephaven Community session. Do the following steps in order and report results.
 
-Pre-cleanup (idempotent): Call session_community_delete with session_id="community:dynamic:mcp-test-pip". Ignore any error — this just ensures a clean starting state.
+Pre-cleanup (idempotent): Call session_community_delete with session_id="community:community:mcp-test-pip". Ignore any error — this just ensures a clean starting state.
 
 Setup: Call session_community_create with session_name="mcp-test-pip", launch_method="python", auth_type="anonymous". Verify success==true before proceeding.
 
-1. Call session_pip_list with session_id="community:dynamic:mcp-test-pip". Verify success==true. Verify the result list is non-empty. Check whether "deephaven-server" or "deephaven" appears in the package list. Record the total number of packages returned.
+1. Call session_pip_list with session_id="community:community:mcp-test-pip". Verify success==true. Verify the result list is non-empty. Check whether "deephaven-server" or "deephaven" appears in the package list. Record the total number of packages returned.
 
-2. Call session_pip_list with session_id="community:dynamic:nonexistent-pip-xyz". Verify success==false (expected error).
+2. Call session_pip_list with session_id="community:community:nonexistent-pip-xyz". Verify success==false (expected error).
 
-CLEANUP: Call session_community_delete with session_id="community:dynamic:mcp-test-pip". Verify success==true.
-
-Report: PASS/FAIL for each numbered step with a one-line explanation.
-```
-
----
-
-## Prompt 7: Configuration Reload
-
-```text
-Test the mcp_reload tool. Do the following steps in order and report results.
-
-Pre-cleanup (idempotent): Call session_community_delete with session_id="community:dynamic:mcp-test-reload". Ignore any error — this just ensures a clean starting state.
-
-Setup: Call session_community_create with session_name="mcp-test-reload", launch_method="python", auth_type="anonymous". Verify success==true. Call sessions_list and confirm "community:dynamic:mcp-test-reload" is present.
-
-1. Call mcp_reload. Verify success==true.
-
-2. Call sessions_list. Verify success==true. Verify "community:dynamic:mcp-test-reload" is NO LONGER in the list (mcp_reload clears all dynamic sessions — this is expected behavior).
-
-Note: mcp_reload serves as the cleanup for this test since it removes all dynamic sessions.
+CLEANUP: Call session_community_delete with session_id="community:community:mcp-test-pip". Verify success==true.
 
 Report: PASS/FAIL for each numbered step with a one-line explanation.
 ```
 
 ---
 
-## Prompt 8: Community Session Credentials
+## Prompt 7: Community Session Credentials
 
 ```text
 Test the session_community_credentials tool. Do the following steps in order and report results.
 
-Pre-cleanup (idempotent): Call session_community_delete with session_id="community:dynamic:mcp-test-credentials". Ignore any error — this just ensures a clean starting state.
+Pre-cleanup (idempotent): Call session_community_delete with session_id="community:community:mcp-test-credentials". Ignore any error — this just ensures a clean starting state.
 
 Setup: Call session_community_create with session_name="mcp-test-credentials", launch_method="python", auth_type="anonymous". Verify success==true before proceeding.
 
-1. Call session_community_credentials with session_id="community:dynamic:mcp-test-credentials".
+1. Call session_community_credentials with session_id="community:community:mcp-test-credentials".
    - If success==false and the error mentions "disabled" or "mode='none'": this is the EXPECTED result when credential retrieval is disabled (the default). Record as PASS and note that testing the success path requires enabling credential_retrieval_mode in the server config.
    - If success==true: verify auth_type is "ANONYMOUS", auth_token is empty string "", and connection_url_with_auth equals connection_url (no auth appended). Record as PASS.
 
-2. Call session_community_credentials with session_id="community:dynamic:nonexistent-xyz". Verify success==false (negative test — session does not exist).
+2. Call session_community_credentials with session_id="community:community:nonexistent-xyz". Verify success==false (negative test — session does not exist).
 
 3. Call session_community_credentials with session_id="enterprise:prod:some-session". Verify success==false and error mentions this tool only works for community sessions (negative test — wrong session type).
 
-CLEANUP: Call session_community_delete with session_id="community:dynamic:mcp-test-credentials". Verify success==true.
+CLEANUP: Call session_community_delete with session_id="community:community:mcp-test-credentials". Verify success==true.
 
 Report: PASS/FAIL for each numbered step with a one-line explanation.
 ```
@@ -193,11 +173,11 @@ Report: PASS/FAIL for each numbered step with a one-line explanation.
 
 ## Enterprise Server Tests
 
-> **Prerequisites**: Prompts 9–16 require the enterprise MCP server (`dh-mcp-enterprise-server`) to be running and configured with a valid DHE connection. Prompts 11, 12, 14, and 15 additionally require the enterprise server to be connected to a live DHE system (liveness_status == "ONLINE"). Run Prompt 9 first to verify system status before proceeding.
+> **Prerequisites**: Prompts 8–14 require the systems server to be configured with a valid DHE connection. Prompts 10, 11, 13, and 14 additionally require the enterprise system to be connected and live (liveness_status == "ONLINE"). Run Prompt 8 first to verify system status before proceeding.
 
 ---
 
-## Prompt 9: Enterprise System Status
+## Prompt 8: Enterprise System Status
 
 ```text
 Test the enterprise_systems_status tool on the enterprise MCP server. Do the following steps in order and report results.
@@ -213,7 +193,7 @@ Report: PASS/FAIL for each numbered step with a one-line explanation. Include th
 
 ---
 
-## Prompt 10: Enterprise Session Discovery
+## Prompt 9: Enterprise Session Discovery
 
 ```text
 Test session discovery tools on the enterprise MCP server. Do the following steps in order and report results.
@@ -229,10 +209,10 @@ Report: PASS/FAIL for each numbered step with a one-line explanation. Include th
 
 ---
 
-## Prompt 11: Enterprise Session Create and Delete
+## Prompt 10: Enterprise Session Create and Delete
 
 ```text
-Test creating and deleting enterprise sessions. Requires the enterprise system to be ONLINE (verify with Prompt 9 first). Do the following steps in order and report results.
+Test creating and deleting enterprise sessions. Requires the enterprise system to be ONLINE (verify with Prompt 8 first). Do the following steps in order and report results.
 
 Pre-cleanup (idempotent): Call sessions_list. If a session named "mcp-test-ent-create-delete" appears in the list, note its session_id and call session_enterprise_delete with that session_id. Ignore any error.
 
@@ -255,10 +235,10 @@ Report: PASS/FAIL for each numbered step with a one-line explanation. Include th
 
 ---
 
-## Prompt 12: Enterprise Shared Tools (Script, Tables, Data, Pip)
+## Prompt 11: Enterprise Shared Tools (Script, Tables, Data, Pip)
 
 ```text
-Test session_script_run, session_tables_list, session_tables_schema, session_table_data, and session_pip_list via an enterprise session. Requires the enterprise system to be ONLINE (verify with Prompt 9 first). Do the following steps in order and report results.
+Test session_script_run, session_tables_list, session_tables_schema, session_table_data, and session_pip_list via an enterprise session. Requires the enterprise system to be ONLINE (verify with Prompt 8 first). Do the following steps in order and report results.
 
 Pre-cleanup (idempotent): Call sessions_list. If a session named "mcp-test-ent-shared" is present, note its session_id and call session_enterprise_delete with it. Ignore any error.
 
@@ -289,7 +269,7 @@ Report: PASS/FAIL for each numbered step with a one-line explanation.
 
 ---
 
-## Prompt 13: PQ Discovery (Read-Only)
+## Prompt 12: PQ Discovery (Read-Only)
 
 ```text
 Test read-only PQ discovery tools on the enterprise MCP server. These are non-destructive operations safe to run on any enterprise system. Do the following steps in order and report results.
@@ -307,10 +287,10 @@ Report: PASS/FAIL for each numbered step (or SKIPPED with reason). Include the t
 
 ---
 
-## Prompt 14: PQ Lifecycle (Create, Modify, Start, Stop, Restart, Delete)
+## Prompt 13: PQ Lifecycle (Create, Modify, Start, Stop, Restart, Delete)
 
 ```text
-Test the full PQ lifecycle. Requires the enterprise system to be ONLINE (verify with Prompt 9 first).
+Test the full PQ lifecycle. Requires the enterprise system to be ONLINE (verify with Prompt 8 first).
 WARNING: This creates and starts a real worker process on your DHE system. Do the following steps in order and report results.
 
 Pre-cleanup (idempotent): Call pq_list. If any PQ named "mcp-test-pq-lifecycle" is found, record its pq_id and call pq_delete with that pq_id. Ignore any error.
@@ -338,7 +318,7 @@ Report: PASS/FAIL for each numbered step with a one-line explanation. Include th
 
 ---
 
-## Prompt 15: Enterprise Catalog Tools
+## Prompt 14: Enterprise Catalog Tools
 
 ```text
 Test the enterprise catalog tools. These are read-only operations. The catalog may be empty on development systems — steps that require catalog data are conditional. Requires the enterprise system to be ONLINE and an enterprise session to be available. Do the following steps in order and report results.
@@ -360,22 +340,4 @@ Setup:
 CLEANUP: If you created a new session in Setup, call session_enterprise_delete with that session_id. Verify success==true.
 
 Report: PASS/FAIL for each numbered step (or SKIPPED with reason). Include namespace count and table count from steps 1 and 2.
-```
-
----
-
-## Prompt 16: Enterprise mcp_reload
-
-```text
-Test the mcp_reload tool on the enterprise MCP server. Do the following steps in order and report results.
-
-Setup: Call sessions_list. Record the session IDs of any enterprise sessions currently listed.
-
-1. Call mcp_reload. Verify success==true.
-
-2. Call enterprise_systems_status with attempt_to_connect=false. Verify success==true. Record the liveness_status — the enterprise system should still be visible after a reload.
-
-3. Call sessions_list. Verify success==true. Compare the session list to Setup. Note any changes. (Unlike the community server, mcp_reload on the enterprise server does not necessarily clear sessions — record what changed, if anything.)
-
-Report: PASS/FAIL for each numbered step with a one-line explanation. Note any session list changes between Setup and step 3.
 ```

@@ -13,6 +13,8 @@ Features:
 
 Exported Classes and Attributes:
     ClientObjectWrapper           -- Base class for client wrappers
+    CommunityClientTimeouts       -- Client-layer timeouts (community outbound RPCs)
+    EnterpriseClientTimeouts      -- Client-layer timeouts (enterprise outbound RPCs)
     CoreSession                   -- Async wrapper for standard Deephaven sessions
     CorePlusSession               -- Async wrapper for enterprise Deephaven sessions
     CorePlusAuthClient            -- Async authentication client
@@ -48,8 +50,11 @@ from ._protobuf import (
 )
 from ._session import BaseSession, CorePlusSession, CoreSession
 from ._session_factory import CorePlusSessionFactory
+from ._timeouts import CommunityClientTimeouts, EnterpriseClientTimeouts
 
 __all__ = [
+    "CommunityClientTimeouts",
+    "EnterpriseClientTimeouts",
     "CorePlusAuthClient",
     "ClientObjectWrapper",
     "is_enterprise_available",

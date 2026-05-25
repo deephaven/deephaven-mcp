@@ -1,0 +1,17 @@
+{
+  "system_name": "staging",
+  "connection_json_url": "https://deephaven-staging.example.com:8123/iris/connection.json",
+  "auth": {
+    "credentials": {
+      "type": "private_key",
+      "key_text": "${file:/etc/deephaven/staging-key.pem}"
+    }
+  },
+  "session_creation": {
+    "max_concurrent_sessions": 3,
+    "defaults": {
+      "heap_size_gb": 8,
+      "programming_language": "Python"
+    }
+  }
+}

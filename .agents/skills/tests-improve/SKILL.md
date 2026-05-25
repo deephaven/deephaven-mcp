@@ -12,8 +12,9 @@ For every file in src/deephaven_mcp except _version.py:
 6. Restructure tests where appropriate.
 7. Run the individual test file. Test files must be run one-by-one to accurately assess per-file coverage.
 8. Target 100% coverage. If coverage is below 100%, add tests until it reaches 100%.
-9. Run the `tests-run` skill to verify the full suite passes with no regressions.
 
 pytest is pre-configured for coverage — no extra flags needed. To run a single file: `uv run pytest <file>`. Do not add `--cov=` or `--cov-report=`; these are already configured.
 
-Per-file runs are required because running the full suite together does not show whether a source file's own test file covers it completely.
+Per-file runs are required because running the full suite together does not show whether a source file's own test file covers it completely. See the `tests-run-file` skill for the per-file invocation rules.
+
+After per-file runs pass, run the `tests-run` skill to verify the full suite. For integration tests (`test_<file>_integration.py`), use the `integration-tests-run` skill — they have separate invocation rules (`-m integration -s`).

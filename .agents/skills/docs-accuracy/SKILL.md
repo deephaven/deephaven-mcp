@@ -3,6 +3,8 @@ name: docs-accuracy
 description: Verify a markdown documentation file is factually accurate — checks commands, file paths, config keys, API names, code examples, and URLs against source code; fixes inaccuracies in place
 ---
 
+**When to use this vs. `docs-improve`**: use `docs-accuracy` for surgical correctness-only fixes against a single document. Use `docs-improve` for a full review that may also reorganize sections, fix link rot, or add missing content.
+
 For the specified document, verify every factual claim against the source code. Check:
 
 - **Commands and flags**: run the command or read `--help` output; confirm flags exist and do what the doc says

@@ -15,7 +15,8 @@ Manager Types:
     CommunitySessionManager: Base class managing CoreSession instances for Community
         deployments; in practice one of the two concrete subclasses below is used.
     StaticCommunitySessionManager: Manages CoreSession instances connecting to
-        pre-configured Community servers declared in ``deephaven_mcp.json``.
+        pre-configured Community servers declared in per-session files under
+        ``$DH_MCP_CONFIG_DIR/community/sessions/``.
     DynamicCommunitySessionManager: Manages CoreSession instances for on-demand
         servers launched by the MCP server itself (Docker / Python).
     EnterpriseSessionManager: Manages CorePlusSession instances for Enterprise deployments
@@ -93,15 +94,16 @@ from deephaven_mcp._exceptions import (
     InvalidSessionNameError,
     SessionCreationError,
 )
+from deephaven_mcp._taxonomy import SessionOrigin, SystemType
 from deephaven_mcp.auth.credentials import Credentials
 from deephaven_mcp.client import (
+    CommunityClientTimeouts,
     CorePlusSession,
     CorePlusSessionFactory,
     CoreSession,
+    EnterpriseClientTimeouts,
 )
-from deephaven_mcp.config import (
-    DEFAULT_CONNECTION_TIMEOUT_SECONDS,
-)
+from deephaven_mcp.sessions import CommunitySessionConfig, EnterpriseSystemConfig
 
 from ._launcher import (
     DockerLaunchedSession,
@@ -244,62 +246,6 @@ class ResourceLivenessStatus(enum.Enum):
         return self.name
 
 
-class SystemType(enum.StrEnum):
-    """Enum representing different types of Deephaven backend deployment architectures.
-
-    This enum categorizes the distinct Deephaven deployment models that require
-    different management approaches, authentication mechanisms, and client libraries.
-    It enables resource managers to adapt their behavior based on the target
-    deployment type.
-
-    Deployment Characteristics:
-        Each system type has unique operational characteristics that affect how
-        sessions are created, authenticated, and managed. The enum enables
-        polymorphic behavior across different deployment architectures.
-
-    String Inheritance:
-        This enum inherits from StrEnum, making instances directly usable as string
-        values in configuration, logging, and serialization contexts without
-        explicit conversion.
-
-    Values:
-        COMMUNITY: Open-source Deephaven Community Edition deployments.
-            - Simplified authentication (typically no auth or basic auth)
-            - Uses CoreSession and related community client libraries
-            - Suitable for development, testing, and simple production use
-            - Typically deployed locally, in containers, or simple cloud setups
-            - Configuration-based session creation
-
-        ENTERPRISE: Commercial Deephaven Enterprise Edition deployments.
-            - Advanced authentication (SSO, LDAP, OAuth, etc.)
-            - Uses CorePlusSession and Enterprise client libraries
-            - Enhanced security, scalability, and enterprise integrations
-            - Multi-tenant capabilities and advanced resource management
-            - Factory-based session creation with sophisticated provisioning
-
-    Usage in Resource Managers:
-        The system type determines which client libraries and authentication
-        mechanisms are used during resource creation and management.
-
-    Example:
-        ```python
-        if manager.system_type == SystemType.COMMUNITY:
-            # Use community-specific configuration and libraries
-            session = await CoreSession.from_config(config)
-        elif manager.system_type == SystemType.ENTERPRISE:
-            # Use enterprise-specific factories and authentication
-            session = await factory.create_session(source, name)
-        ```
-    """
-
-    COMMUNITY = "community"
-    ENTERPRISE = "enterprise"
-
-    def __str__(self) -> str:
-        """Return the uppercase name of the system type."""
-        return self.name
-
-
 class BaseItemManager[T: AsyncClosable](ABC):
     """Generic async resource manager providing lazy initialization and lifecycle management.
 
@@ -356,7 +302,7 @@ class BaseItemManager[T: AsyncClosable](ABC):
         ```python
         class MyResourceManager(BaseItemManager[MyResource]):
             async def _create_item(self) -> MyResource:
-                return await MyResource.create(self._config)
+                return await MyResource.create(self._session_config)
 
             async def _check_liveness(self, item: MyResource) -> tuple[ResourceLivenessStatus, str | None]:
                 if await item.is_alive():
@@ -393,7 +339,7 @@ class BaseItemManager[T: AsyncClosable](ABC):
     """
 
     @staticmethod
-    def make_full_name(system_type: "SystemType", source: str, name: str) -> str:
+    def make_full_name(system_type: "SystemType", system: str, name: str) -> str:
         """Construct the canonical full name identifier for managed resources.
 
         This utility method creates standardized, unique identifiers for managed resources
@@ -440,7 +386,7 @@ class BaseItemManager[T: AsyncClosable](ABC):
             # Result: "enterprise:prod-env:factory-east-1"
             ```
         """
-        return f"{system_type.value}:{source}:{name}"
+        return f"{system_type.value}:{system}:{name}"
 
     @staticmethod
     def parse_full_name(full_name: str) -> tuple[str, str, str]:
@@ -474,7 +420,12 @@ class BaseItemManager[T: AsyncClosable](ABC):
             )
         return parts[0], parts[1], parts[2]
 
-    def __init__(self, system_type: SystemType, source: str, name: str):
+    def __init__(
+        self,
+        system_type: SystemType,
+        system: str,
+        name: str,
+    ):
         """Initialize the resource manager with identification metadata and internal state.
 
         Creates a new manager instance with the specified identification parameters and
@@ -497,12 +448,23 @@ class BaseItemManager[T: AsyncClosable](ABC):
             system_type: The Deephaven deployment type (COMMUNITY or ENTERPRISE).
                 This determines which client libraries, authentication mechanisms,
                 and management approaches will be used by concrete implementations.
-            source: The configuration source identifier used for grouping and organization.
-                Examples: "config.yaml", "production.env", "https://config-api/v1"
-                This helps organize related resources and provides context for debugging.
-            name: The unique name of this specific manager within its source context.
-                Must be unique within the same system_type and source combination.
-                Used for identification, logging, and resource tracking.
+            system: The system identifier this manager belongs to. ``"community"``
+                for the community umbrella; an enterprise ``system_name`` for
+                enterprise managers. Matches the ``name`` field returned by the
+                ``list_systems`` MCP tool.
+            name: The unique name of this manager within its ``system_type`` +
+                ``system`` namespace. Used for identification, logging, and
+                resource tracking.
+
+        Classification metadata that is not common to every manager kind
+        lives on the relevant subclass instead of this base:
+
+        - ``origin`` (``SessionOrigin.STATIC`` vs ``SessionOrigin.DYNAMIC``) is a
+          community-session-only concept and lives on
+          :class:`CommunitySessionManager`.
+        - Session-vs-factory disambiguation is expressed by the class
+          hierarchy itself (see :class:`CorePlusSessionFactoryManager`);
+          callers that need to filter factories use ``isinstance``.
 
         State invariants:
             All three mutable state slots below are read and written only
@@ -547,13 +509,13 @@ class BaseItemManager[T: AsyncClosable](ABC):
             ```
         """
         self._system_type = system_type
-        self._source = source
+        self._system = system
         self._name = name
         self._item_cache: T | None = None
         self._last_accessed: float | None = None
         self._lock = asyncio.Lock()
 
-        full_name = self.make_full_name(system_type, source, name)
+        full_name = self.make_full_name(system_type, system, name)
         _LOGGER.info(
             f"[{self.__class__.__name__}] Initialized manager for '{full_name}'"
         )
@@ -693,7 +655,9 @@ class BaseItemManager[T: AsyncClosable](ABC):
             ```python
             async def _create_item(self) -> CoreSession:
                 try:
-                    session = await CoreSession.from_config(self._config)
+                    session = await CoreSession.from_session_config(
+                        self._session_config
+                    )
                     # Validate the session is working
                     await session.is_alive()
                     return session
@@ -806,30 +770,19 @@ class BaseItemManager[T: AsyncClosable](ABC):
         return self._system_type
 
     @property
-    def source(self) -> str:
-        """The configuration source identifier for this manager.
+    def system(self) -> str:
+        """The system identifier this manager belongs to.
 
-        This property provides the source identifier that groups related managers
-        and traces back to their configuration origin. It's used for organization,
-        debugging, and identifying which configuration provided the manager's settings.
+        Matches the ``name`` field returned by the ``list_systems`` MCP tool:
 
-        Common Source Types:
-            - File paths: "config.yaml", "/etc/deephaven/production.conf"
-            - Environment names: "production", "staging", "development"
-            - URLs: "https://config-api.example.com/v1/deephaven"
-            - Configuration keys: "kubernetes-configmap", "vault-secrets"
-
-        Usage:
-            Sources are used to:
-            - Group related managers in registries
-            - Provide context in logging and debugging
-            - Support configuration reloading and updates
-            - Enable hierarchical configuration management
+        - ``"community"`` for any community manager (the umbrella system).
+        - The enterprise ``system_name`` for any enterprise manager (sessions
+          and factories alike).
 
         Returns:
-            str: The source identifier string as provided during manager creation.
+            str: The system identifier string.
         """
-        return self._source
+        return self._system
 
     @property
     def name(self) -> str:
@@ -872,7 +825,7 @@ class BaseItemManager[T: AsyncClosable](ABC):
         Identifier Format:
             The format follows the standard pattern: "system_type:source:name"
             Examples:
-            - "community:config.yaml:worker-1"
+            - "community:community:worker-1"
             - "enterprise:production-env:api-server"
             - "community:local-dev:analytics-session"
 
@@ -902,13 +855,13 @@ class BaseItemManager[T: AsyncClosable](ABC):
             manager = CommunitySessionManager(
                 SystemType.COMMUNITY, "config.yaml", "worker-1"
             )
-            print(manager.full_name)  # "community:config.yaml:worker-1"
+            print(manager.full_name)  # "community:community:worker-1"
             ```
 
         See Also:
             make_full_name(): The static method that implements the identifier format
         """
-        return self.make_full_name(self.system_type, self.source, self.name)
+        return self.make_full_name(self.system_type, self.system, self.name)
 
     @property
     def split_name(self) -> tuple[str, str, str]:
@@ -918,7 +871,7 @@ class BaseItemManager[T: AsyncClosable](ABC):
         that make up this manager's full_name identifier.
 
         Returns:
-            tuple[str, str, str]: (system_type, source, name) components
+            tuple[str, str, str]: (system_type, system, name) components
 
         Example:
             ```python
@@ -939,7 +892,7 @@ class BaseItemManager[T: AsyncClosable](ABC):
             full_name: The combined identifier string
             parse_full_name(): Static method for parsing arbitrary full names
         """
-        return self.system_type.value, self.source, self.name
+        return self.system_type.value, self.system, self.name
 
     async def _get_unlocked(self) -> T:
         """Get the managed resource without acquiring the synchronization lock.
@@ -1539,35 +1492,39 @@ class CommunitySessionManager(BaseItemManager[CoreSession]):
         5. **Graceful Shutdown**: close() properly disposes of session resources
 
     Configuration Requirements:
-        The configuration dictionary must contain parameters suitable for CoreSession.from_config():
-        - **server**: Deephaven Community server URL (required)
-        - **auth_type**: Authentication method (basic, anonymous, etc.)
-        - **username/password**: Credentials if using basic auth
-        - **session_type**: Session configuration type
-        - **extra**: Additional session-specific parameters
+        The manager takes a fully-validated
+        :class:`~deephaven_mcp.sessions.CommunitySessionConfig`
+        declaration. Its required and optional fields are documented
+        on that class; the manager itself simply forwards the
+        declaration to :meth:`CoreSession.from_session_config`.
 
-        Example configuration:
+        Example construction:
         ```python
-        config = {
-            "server": "http://localhost:10000",
-            "auth_type": "anonymous",
-            "session_type": "python"
-        }
+        from deephaven_mcp.sessions import CommunitySessionConfig
+
+        session_config = CommunitySessionConfig.model_validate(
+            {
+                "name": "worker-1",
+                "host": "localhost",
+                "port": 10000,
+                "auth": {"credentials": {"type": "anonymous"}},
+            }
+        )
+        manager = StaticCommunitySessionManager("worker-1", session_config)
         ```
 
     Integration Patterns:
         **Registry Integration**:
         Typically used within CommunitySessionRegistry for managing multiple sessions:
         ```python
-        registry = CommunitySessionRegistry()
-        manager = CommunitySessionManager("worker-1", config)
-        registry.add_manager(manager)
+        registry = CommunitySessionRegistry({"worker-1": session_config})
+        await registry.initialize()
         ```
 
         **Standalone Usage**:
         Can be used independently for single-session applications:
         ```python
-        manager = CommunitySessionManager("main-session", config)
+        manager = StaticCommunitySessionManager("main-session", session_config)
         session = await manager.get()
         # Use session for Deephaven operations...
         await manager.close()
@@ -1611,7 +1568,13 @@ class CommunitySessionManager(BaseItemManager[CoreSession]):
         SystemType.COMMUNITY: The system type constant for Community deployments
     """
 
-    def __init__(self, name: str, config: dict[str, Any], source: str):
+    def __init__(
+        self,
+        name: str,
+        session_config: CommunitySessionConfig,
+        origin: SessionOrigin,
+        timeouts: CommunityClientTimeouts,
+    ):
         """Initialize a new Community session manager with configuration.
 
         Creates a new manager instance for handling a Deephaven Community session
@@ -1622,81 +1585,104 @@ class CommunitySessionManager(BaseItemManager[CoreSession]):
         Manager Identity:
             The manager is configured with:
             - **system_type**: Set to SystemType.COMMUNITY for Community deployments
-            - **source**: Identifies where this session came from (e.g., "config" for static, "dynamic" for runtime)
+            - **system**: Always ``"community"`` (the umbrella system name); the static-vs-dynamic distinction lives in :attr:`origin`, not in the id
             - **name**: The unique identifier for this specific manager instance
-            - **full_name**: Computed as "community:{source}:{name}" for global uniqueness
+            - **full_name**: Computed as ``"community:community:{name}"`` for global uniqueness
 
         Configuration Storage:
-            The provided configuration dictionary is stored internally and used
-            later during lazy session creation. The configuration is not validated
-            at construction time - validation occurs during the first get() call
-            when CoreSession.from_config() is invoked.
+            The provided session declaration is stored internally and used
+            later during lazy session creation. The declaration is already
+            validated by :class:`CommunitySessionConfig.model_validate`;
+            the manager performs no additional validation at construction
+            time.
 
         Configuration Requirements:
-            The config dictionary should contain parameters suitable for CoreSession.from_config():
-            - **server** (required): Deephaven Community server URL
-            - **auth_type**: Authentication method ("anonymous", "basic", etc.)
-            - **username**: Username for basic authentication (if applicable)
-            - **password**: Password for basic authentication (if applicable)
-            - **session_type**: Type of session to create ("python", "groovy", etc.)
-            - **extra**: Additional session-specific parameters
-            - **use_tls**: Whether to use TLS/SSL for connections
-            - **tls_root_certs**: Custom TLS certificates (if needed)
+            The ``session_config`` argument is a validated
+            :class:`~deephaven_mcp.sessions.CommunitySessionConfig` that
+            carries the connection target (``host`` / ``port``), the
+            optional TLS block, and the pre-resolved
+            :class:`~deephaven_mcp.auth.credentials.Credentials`. All
+            fields are validated up front; no additional checks happen
+            here.
 
         Usage Examples:
             ```python
-            # Anonymous Community session
-            config = {
-                "server": "http://localhost:10000",
-                "auth_type": "anonymous",
-                "session_type": "python"
-            }
-            manager = CommunitySessionManager("worker-1", config)
+            from deephaven_mcp.sessions import CommunitySessionConfig
 
-            # Authenticated Community session
-            config = {
-                "server": "https://deephaven.example.com:10000",
-                "auth_type": "basic",
-                "username": "user",
-                "password": "pass",
-                "session_type": "python",
-                "use_tls": True
-            }
-            manager = CommunitySessionManager("secure-session", config)
+            # Anonymous community session
+            anon = CommunitySessionConfig.model_validate(
+                {
+                    "name": "worker-1",
+                    "host": "localhost",
+                    "port": 10000,
+                    "programming_language": "Python",
+                    "auth": {"credentials": {"type": "anonymous"}},
+                }
+            )
+            manager = StaticCommunitySessionManager("worker-1", anon)
+
+            # PSK-authenticated community session
+            psk = CommunitySessionConfig.model_validate(
+                {
+                    "name": "secure-session",
+                    "host": "deephaven.example.com",
+                    "port": 10000,
+                    "programming_language": "Python",
+                    "tls": {},
+                    "auth": {
+                        "credentials": {"type": "psk", "token": "..."},
+                    },
+                }
+            )
+            manager = StaticCommunitySessionManager("secure-session", psk)
             ```
 
         Manager State After Construction:
             - **Ready for use**: Manager is fully initialized and ready for get() calls
             - **No session created**: Actual CoreSession creation is deferred until needed
-            - **Configuration stored**: Parameters are cached for later session creation
+            - **Declaration stored**: Typed config is cached for later session creation
             - **Thread-safe**: Manager can be safely used from multiple asyncio tasks
 
         Args:
             name: Unique identifier for this manager instance within its registry.
                 Used for logging, debugging, and creating the full_name identifier.
                 Should be a descriptive name like "worker-1", "main-session", etc.
-            config: Configuration dictionary containing all parameters needed for
-                CoreSession creation. Must include at minimum a "server" parameter.
-                Additional parameters depend on authentication and session requirements.
-            source: Source identifier indicating where this session came from (required).
-                Use "config" for static sessions from configuration files.
-                Use "dynamic" for sessions created at runtime via MCP tools.
+            session_config: Validated
+                :class:`~deephaven_mcp.sessions.CommunitySessionConfig`
+                describing how to connect to the session.
+            origin: Where this session came from. ``SessionOrigin.STATIC`` for
+                sessions declared in ``community/sessions/*.json``;
+                ``SessionOrigin.DYNAMIC`` for sessions created at runtime by
+                MCP tools.
 
         Thread Safety:
             This constructor is thread-safe and can be called from any asyncio task.
             All initialization is synchronous and does not involve network operations.
 
         See Also:
-            CoreSession.from_config(): The method used to create sessions from configuration
+            CoreSession.from_session_config(): The method used to create sessions
+                from a typed :class:`CommunitySessionConfig`.
             SystemType.COMMUNITY: The system type constant used for Community deployments
             BaseItemManager.__init__(): The parent constructor that handles common initialization
         """
         super().__init__(
             system_type=SystemType.COMMUNITY,
-            source=source,
+            system=SystemType.COMMUNITY.value,
             name=name,
         )
-        self._config = config
+        self._origin = origin
+        self._session_config = session_config
+        self._timeouts = timeouts
+
+    @property
+    def origin(self) -> SessionOrigin:
+        """How this community session was created.
+
+        ``SessionOrigin.STATIC`` for community sessions declared in
+        ``community/sessions/*.json``; ``SessionOrigin.DYNAMIC`` for community
+        sessions created at runtime via ``session_community_create``.
+        """
+        return self._origin
 
     @override
     async def _create_item(self) -> CoreSession:
@@ -1709,7 +1695,7 @@ class CommunitySessionManager(BaseItemManager[CoreSession]):
 
         Session Creation Process:
             The method performs these steps:
-            1. **Delegate to CoreSession**: Uses CoreSession.from_config() for actual creation
+            1. **Delegate to CoreSession**: Uses CoreSession.from_session_config() for actual creation
             2. **Network Handshake**: Establishes connection to the Deephaven Community server
             3. **Authentication**: Performs authentication if credentials are provided
             4. **Session Initialization**: Completes session setup and readiness checks
@@ -1766,7 +1752,7 @@ class CommunitySessionManager(BaseItemManager[CoreSession]):
             instead to ensure proper caching and error handling.
 
         See Also:
-            CoreSession.from_config(): The underlying method used for session creation
+            CoreSession.from_session_config(): The underlying method used for session creation
             BaseItemManager.get(): The public method that triggers lazy initialization
             SessionCreationError: The exception type raised on creation failures
         """
@@ -1774,7 +1760,9 @@ class CommunitySessionManager(BaseItemManager[CoreSession]):
             _LOGGER.info(
                 f"[{self.__class__.__name__}] Creating community session for {self.full_name}"
             )
-            return await CoreSession.from_config(self._config)
+            return await CoreSession.from_session_config(
+                self._session_config, self._timeouts
+            )
         except Exception as e:
             _LOGGER.error(
                 f"[{self.__class__.__name__}] Failed to create community session for {self.full_name}: {e}"
@@ -1883,10 +1871,10 @@ class StaticCommunitySessionManager(CommunitySessionManager):
     (e.g., servers started manually or by other processes).
 
     Key Characteristics:
-        - **Source**: Automatically set to "config" to identify configuration-based sessions
+        - **Origin**: Automatically set to ``SessionOrigin.STATIC`` to distinguish from dynamic sessions
         - **Server Lifecycle**: Does NOT manage server startup/shutdown (server must exist)
-        - **Configuration**: Loaded from deephaven_mcp.json or similar config files
-        - **Full Name Format**: "community:config:{name}"
+        - **Configuration**: Loaded from per-session files under ``$DH_MCP_CONFIG_DIR/community/sessions/``
+        - **Full Name Format**: ``"community:community:{name}"`` (the middle segment is the umbrella system name; the static/dynamic distinction lives in :attr:`origin`, not in the id)
 
     Usage:
         Typically created by CommunitySessionRegistry when loading configuration:
@@ -1904,21 +1892,32 @@ class StaticCommunitySessionManager(CommunitySessionManager):
     """
 
     @override
-    def __init__(self, name: str, config: dict[str, Any]):
+    def __init__(
+        self,
+        name: str,
+        session_config: CommunitySessionConfig,
+        timeouts: CommunityClientTimeouts,
+    ):
         """Initialize a StaticCommunitySessionManager for a configuration-based session.
 
         Args:
             name (str): Unique identifier for this manager instance within the registry.
-                Used to construct full_name as "community:config:{name}".
-            config (dict[str, Any]): Configuration dictionary for CoreSession creation.
-                Must contain server connection details (host, port, auth, etc.).
+                Used to construct full_name as ``"community:community:{name}"``.
+                The static-vs-dynamic distinction lives in :attr:`origin`, not in the id.
+            session_config (CommunitySessionConfig): Validated session
+                declaration (host, port, credentials, etc.).
+            timeouts (CommunityClientTimeouts): Community client-layer timeout
+                configuration forwarded to
+                :meth:`CoreSession.from_session_config` when the
+                underlying session is lazily created.
 
         Note:
-            The source parameter is automatically set to "config" - callers do not need
-            to specify it. This distinguishes static sessions from dynamic ones.
+            The origin parameter is automatically set to ``SessionOrigin.STATIC``
+            - callers do not need to specify it. This distinguishes static
+            sessions from dynamic ones.
         """
-        # Call parent with source="config" to identify as configuration-based
-        super().__init__(name, config, source="config")
+        # Static community session: declared in community/sessions/*.json.
+        super().__init__(name, session_config, SessionOrigin.STATIC, timeouts)
 
 
 class DynamicCommunitySessionManager(CommunitySessionManager):
@@ -1929,10 +1928,10 @@ class DynamicCommunitySessionManager(CommunitySessionManager):
     Unlike static sessions, this manager controls server startup, monitoring, and shutdown.
 
     Key Characteristics:
-        - **Source**: Automatically set to "dynamic" to identify runtime-created sessions
+        - **Origin**: Automatically set to ``SessionOrigin.DYNAMIC`` to distinguish from static sessions
         - **Server Lifecycle**: DOES manage server startup/shutdown (via LaunchedSession)
         - **Launch Methods**: Supports Docker containers or Python-based deephaven-server
-        - **Full Name Format**: "community:dynamic:{name}"
+        - **Full Name Format**: ``"community:community:{name}"`` (the middle segment is the umbrella system name; the static/dynamic distinction lives in :attr:`origin`, not in the id)
         - **Created By**: MCP tools like session_community_create
 
     Additional Properties:
@@ -1996,26 +1995,31 @@ class DynamicCommunitySessionManager(CommunitySessionManager):
     def __init__(
         self,
         name: str,
-        config: dict[str, Any],
+        session_config: CommunitySessionConfig,
         launched_session: DockerLaunchedSession | PythonLaunchedSession,
+        timeouts: CommunityClientTimeouts,
     ):
         """Initialize a DynamicCommunitySessionManager for a runtime-created session.
 
         Args:
             name (str): Unique identifier for this manager instance within the registry.
-                Used to construct full_name as "community:dynamic:{name}".
-            config (dict[str, Any]): Configuration dictionary for CoreSession creation.
-                Must contain connection details matching the launched session (host, port, auth).
+                Used to construct full_name as ``"community:community:{name}"``.
+                The static-vs-dynamic distinction lives in :attr:`origin`, not in the id.
+            session_config (CommunitySessionConfig): Validated session
+                declaration whose ``host`` / ``port`` / ``credentials``
+                match the launched session.
             launched_session (DockerLaunchedSession | PythonLaunchedSession): The launched
                 session that provides server lifecycle management.
 
         Note:
-            The source parameter is automatically set to "dynamic" - callers do not need
-            to specify it. This distinguishes dynamic sessions from static ones and enables
-            proper cleanup and validation in deletion operations.
+            The origin parameter is automatically set to ``SessionOrigin.DYNAMIC``
+            - callers do not need to specify it. This distinguishes dynamic
+            sessions from static ones and enables proper cleanup and
+            validation in deletion operations.
         """
-        # Call parent with source="dynamic" to distinguish from static config sessions
-        super().__init__(name, config, source="dynamic")
+        # Dynamic community session: created at runtime via
+        # session_community_create.
+        super().__init__(name, session_config, SessionOrigin.DYNAMIC, timeouts)
         self.launched_session = launched_session
         self._is_stopped: bool = False
 
@@ -2031,8 +2035,8 @@ class DynamicCommunitySessionManager(CommunitySessionManager):
         Called under ``self._lock`` from
         :meth:`BaseItemManager._get_unlocked` on a cache miss.  Reading
         :attr:`_is_stopped` here is lock-protected because
-        :meth:`close` sets the flag under the same lock before clearing
-        the cache.
+        :meth:`close` sets the flag under the same lock that captures
+        and clears the cache.
 
         Returns:
             CoreSession: A new session connected to the launched process.
@@ -2051,6 +2055,36 @@ class DynamicCommunitySessionManager(CommunitySessionManager):
                 f"the dynamic session has been stopped."
             )
         return await super()._create_item()
+
+    @override
+    async def _get_unlocked(self) -> CoreSession:
+        """Return the cached session, refusing once the manager has been stopped.
+
+        Overrides :meth:`BaseItemManager._get_unlocked` to consult
+        :attr:`_is_stopped` **before** returning a cached item.  Without
+        this gate, a caller racing :meth:`close` could acquire
+        ``self._lock`` between the close's cache-clear and the underlying
+        process teardown and receive a session reference that is about
+        to become unusable.
+
+        Must be called while holding ``self._lock``; see
+        :meth:`BaseItemManager._get_unlocked` for the contract.
+
+        Returns:
+            CoreSession: A live cached session, or a freshly created
+                session on cache miss.
+
+        Raises:
+            SessionCreationError: When :meth:`close` has stopped the
+                manager.  Raised regardless of whether the cache slot
+                is populated.
+        """
+        if self._is_stopped:
+            raise SessionCreationError(
+                f"Cannot return session for '{self.full_name}': "
+                f"the dynamic session has been stopped."
+            )
+        return await super()._get_unlocked()
 
     @property
     def connection_url(self) -> str:
@@ -2116,13 +2150,15 @@ class DynamicCommunitySessionManager(CommunitySessionManager):
         """Close the session and stop the underlying process/container.
 
         This method:
-        1. Sets ``_is_stopped`` under ``self._lock`` so that any
-           subsequent cache-miss in :meth:`_get_unlocked` will see the
-           flag and refuse to recreate against the tearing-down process.
-        2. Closes the CoreSession connection (if established) via
-           ``super().close()``.
-        3. Stops the launched process/container.
-        4. Cleans up all resources.
+        1. Under ``self._lock``: capture the cached ``CoreSession`` ref,
+           clear ``_item_cache`` / ``_last_accessed``, and set
+           ``_is_stopped=True`` in one critical section.  Combining all
+           three mutations under a single lock acquisition prevents a
+           concurrent :meth:`get` from observing a cleared cache yet
+           still passing the ``_is_stopped`` check, or from returning
+           a still-cached session that is about to be torn down.
+        2. Outside the lock: close the captured CoreSession (if any).
+        3. Outside the lock: stop the launched process/container.
 
         Errors during cleanup are logged but don't prevent the cleanup from completing.
         """
@@ -2130,19 +2166,21 @@ class DynamicCommunitySessionManager(CommunitySessionManager):
             f"[DynamicCommunitySessionManager] Closing dynamic session '{self.full_name}'"
         )
 
-        # Mark the manager stopped before clearing the cache so a
-        # concurrent get() that races into _create_item raises instead
-        # of building a session against a process about to be stopped.
+        # Single critical section: capture, clear, flip together.  Any
+        # concurrent get() that wins self._lock after this block sees
+        # _is_stopped=True (raises) or, if it won the lock before this
+        # block, returns a cached session that is closed promptly below.
         async with self._lock:
+            session_to_close = self._item_cache
+            self._item_cache = None
+            self._last_accessed = None
             self._is_stopped = True
 
-        # First, close the session connection if it exists
-        try:
-            await super().close()
-        except Exception as e:
-            _LOGGER.warning(
-                f"[DynamicCommunitySessionManager] Error closing session connection for '{self.full_name}': {e}"
-            )
+        # Close the captured session outside the lock.
+        # ``_close_captured_item`` swallows and logs its own exceptions
+        # (see its docstring "Never raises."), so no outer try/except.
+        if session_to_close is not None:
+            await self._close_captured_item(session_to_close)
 
         # Then, stop the launched session
         try:
@@ -2326,7 +2364,7 @@ class EnterpriseSessionManager(BaseItemManager[CorePlusSession]):
 
     def __init__(
         self,
-        source: str,
+        system: str,
         name: str,
         creation_function: Callable[[str, str], Awaitable["CorePlusSession"]],
     ):
@@ -2428,7 +2466,11 @@ class EnterpriseSessionManager(BaseItemManager[CorePlusSession]):
             SystemType.ENTERPRISE: The system type constant used for Enterprise deployments
             BaseItemManager.__init__(): The parent constructor that handles common initialization
         """
-        super().__init__(system_type=SystemType.ENTERPRISE, source=source, name=name)
+        super().__init__(
+            system_type=SystemType.ENTERPRISE,
+            system=system,
+            name=name,
+        )
         self._creation_function = creation_function
 
     @override
@@ -2474,7 +2516,7 @@ class EnterpriseSessionManager(BaseItemManager[CorePlusSession]):
             _LOGGER.info(
                 f"[{self.__class__.__name__}] Creating enterprise session for {self.full_name} using creation function"
             )
-            return await self._creation_function(self._source, self._name)
+            return await self._creation_function(self._system, self._name)
         except Exception as e:
             _LOGGER.error(
                 f"[{self.__class__.__name__}] Failed to create enterprise session for {self.full_name}: {e}"
@@ -2648,11 +2690,11 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
     Configuration and Credentials Architecture:
         The manager takes two separate constructor inputs:
 
-        - **config** (``dict``): Server and factory parameters that define WHERE
-          and HOW to connect. Typical keys include: ``connection_json_url``,
-          ``connection_timeout``, and any other fields consumed by
-          :meth:`CorePlusSessionFactory.from_credentials`. Auth material is
-          NOT stored in ``config``.
+        - **system_config** (:class:`~deephaven_mcp.sessions.EnterpriseSystemConfig`):
+          Typed declaration carrying the ``connection_json_url`` and
+          other non-secret connection parameters consumed by
+          :meth:`CorePlusSessionFactory.from_credentials`. Auth material
+          is NOT stored here — see ``creds`` instead.
         - **creds** (:class:`~deephaven_mcp.auth.credentials.Credentials`):
           Authentication material separated from ``config`` so that (a) a
           single config can be reused with different identities and
@@ -2748,8 +2790,9 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
     def __init__(
         self,
         name: str,
-        config: dict[str, Any],
+        system_config: EnterpriseSystemConfig,
         creds: Credentials,
+        timeouts: EnterpriseClientTimeouts,
     ):
         """Initialize a new Enterprise session factory manager with configuration-driven creation.
 
@@ -2764,32 +2807,19 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
             - **source**: Set to "factory" to indicate this manages factory instances
             - **name**: The unique identifier for this specific factory manager instance
             - **full_name**: Computed as "enterprise:factory:{name}" for global uniqueness
-            - **config**: Server/factory parameters (connection URL, timeouts, etc.)
-            - **creds**: Authentication material, passed separately from ``config``
+            - **system_config**: Typed :class:`EnterpriseSystemConfig` declaration
+              (connection URL, timeouts, etc.).
+            - **creds**: Authentication material, passed separately from
+              ``system_config``.
 
         Separation of Config and Credentials:
             Unlike EnterpriseSessionManager's function-based approach, this manager
-            takes a configuration dictionary plus a
+            takes a typed system declaration plus a
             :class:`~deephaven_mcp.auth.credentials.Credentials` object. Keeping
-            the two inputs separate means a single ``config`` can be reused with
-            different identities (password, private key, etc.) and prevents
-            secrets from ending up in config dicts that may be logged, serialised,
+            the two inputs separate means a single ``system_config`` can be reused
+            with different identities (password, private key, etc.) and prevents
+            secrets from ending up in dicts that may be logged, serialised,
             or persisted.
-
-        Configuration Dictionary Structure:
-            ``config`` carries server and factory parameters only -- never auth
-            material. Keys are those consumed by
-            :meth:`CorePlusSessionFactory.from_credentials`:
-            ```python
-            config = {
-                "connection_json_url": "https://enterprise.example.com/iris/connection.json",
-                "connection_timeout": 30.0,
-                # ... any other fields the factory accepts
-            }
-            ```
-            Authentication material is supplied via the separate ``creds``
-            parameter (see :class:`PasswordCredentials`,
-            :class:`PrivateKeyCredentials`).
 
         Deferred Factory Creation:
             The factory creation is deferred until actual use:
@@ -2802,25 +2832,29 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
         Factory Manager Patterns:
             **Single Factory Management**:
             ```python
-            config = load_enterprise_config("production")
+            system_config = multi_config.enterprise.systems["production"]
             creds = PasswordCredentials(username="alice", password="...")
-            manager = CorePlusSessionFactoryManager("prod-factory", config, creds)
+            manager = CorePlusSessionFactoryManager(
+                "prod-factory", system_config, creds
+            )
             factory = await manager.get()  # Creates factory on first access
             session = await factory.create_session("app", "worker-1")
             ```
 
             **Multi-Environment Support**:
             ```python
-            environments = {"prod": prod_config, "dev": dev_config, "test": test_config}
+            environments = multi_config.enterprise.systems
             managers = {
-                env: CorePlusSessionFactoryManager(f"{env}-factory", config, creds)
-                for env, config in environments.items()
+                env: CorePlusSessionFactoryManager(f"{env}-factory", sys_cfg, creds)
+                for env, sys_cfg in environments.items()
             }
             ```
 
             **Health Monitoring Setup**:
             ```python
-            manager = CorePlusSessionFactoryManager("enterprise", config, creds)
+            manager = CorePlusSessionFactoryManager(
+                "enterprise", system_config, creds
+            )
 
             async def monitor_factory():
                 status, detail = await manager.liveness_status(ensure_item=True)
@@ -2839,7 +2873,7 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
         Manager State After Construction:
             - **Ready for use**: Manager is fully initialized and ready for get() calls
             - **No factory created**: Actual CorePlusSessionFactory creation is deferred
-            - **Configuration stored**: Config dictionary is cached for factory creation
+            - **Typed declaration stored**: ``EnterpriseSystemConfig`` is cached for factory creation
             - **Thread-safe**: Manager can be safely used from multiple asyncio tasks
             - **Registry-ready**: Manager can be immediately added to registries
 
@@ -2848,11 +2882,13 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
                 debugging, registry management, and creating the full_name identifier.
                 Should be descriptive and unique within its registry context
                 (e.g., "prod-factory", "dev-east-factory", "test-factory").
-            config: Server/factory configuration dictionary passed to
-                :meth:`CorePlusSessionFactory.from_credentials`. Contains
-                ``connection_json_url``, ``connection_timeout``, and related
-                non-secret connection parameters. Does NOT carry authentication
-                material -- that is supplied via ``creds``.
+            system_config: Validated
+                :class:`~deephaven_mcp.sessions.EnterpriseSystemConfig`
+                declaration passed to
+                :meth:`CorePlusSessionFactory.from_credentials`. Carries
+                ``connection_json_url`` and timeout settings; does NOT
+                carry authentication material -- that is supplied via
+                ``creds``.
             creds: Authentication material
                 (:class:`~deephaven_mcp.auth.credentials.Credentials`) forwarded
                 to :meth:`CorePlusSessionFactory.from_credentials` when the
@@ -2871,13 +2907,19 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
             SystemType.ENTERPRISE: The system type constant used for Enterprise deployments
             BaseItemManager.__init__(): The parent constructor that handles common initialization
         """
+        # The factory belongs to the enterprise system identified by ``name``
+        # (the system_name); we record that as ``system`` and use a sentinel
+        # ``"factory"`` as the manager's own ``name``. Factories are not
+        # listed alongside sessions; the listing filter uses ``isinstance``
+        # against :class:`CorePlusSessionFactoryManager` to drop them.
         super().__init__(
             system_type=SystemType.ENTERPRISE,
-            source="factory",
-            name=name,
+            system=name,
+            name="factory",
         )
-        self._config = config
+        self._system_config = system_config
         self._creds = creds
+        self._timeouts = timeouts
 
     @override
     async def _create_item(self) -> CorePlusSessionFactory:
@@ -2888,10 +2930,13 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
         lazy initialization when get() is first invoked.
 
         Implementation:
-            1. Extracts `connection_timeout` from config (defaults to DEFAULT_CONNECTION_TIMEOUT_SECONDS)
-            2. Calls CorePlusSessionFactory.from_credentials(config, creds) with timeout wrapper
-            3. Logs creation progress (DEBUG) and completion (INFO)
-            4. Handles timeout errors with appropriate logging and exception
+            1. Reads the effective ``session_connect_timeout_seconds`` from
+               :class:`EnterpriseClientTimeouts` (its field already carries the
+               package-wide default when ``enterprise/settings.json`` omits
+               the value).
+            2. Calls ``CorePlusSessionFactory.from_credentials(system_config, creds)`` with a timeout wrapper.
+            3. Logs creation progress (DEBUG) and completion (INFO).
+            4. Handles timeout errors with appropriate logging and exception.
 
         Timeout Behavior:
             The configurable timeout prevents indefinite hanging when connecting to
@@ -2899,7 +2944,7 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
             DeephavenConnectionError is raised with a descriptive message.
 
         Args:
-            None (uses self._config stored configuration dictionary)
+            None (uses ``self._system_config`` stored declaration)
 
         Returns:
             CorePlusSessionFactory: Initialized Core+ session factory ready to create
@@ -2914,20 +2959,23 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
             Exception: Other errors from CorePlusSessionFactory.from_credentials().
 
         Notes:
-            - This method is marked @override to implement BaseItemManager abstract method
-            - Do not call directly - use get() for proper caching and error handling
-            - Timeout can be configured via 'connection_timeout' in config (int or float)
-            - Default timeout is DEFAULT_CONNECTION_TIMEOUT_SECONDS
+            - This method is marked @override to implement BaseItemManager abstract method.
+            - Do not call directly - use get() for proper caching and error handling.
+            - Timeout can be configured via
+              ``enterprise/settings.json: timeouts.client.session_connect_timeout_seconds``;
+              the field carries the schema default declared on
+              :class:`~deephaven_mcp.client._timeouts.EnterpriseClientTimeouts`
+              when omitted from the JSON.
 
         See Also:
             BaseItemManager.get(): Public method triggering lazy initialization
             CorePlusSessionFactory.from_credentials(): Underlying factory creation method
             EnterpriseSessionManager._create_item(): Session-level creation counterpart
         """
-        # Extract timeout from config (uses DEFAULT_CONNECTION_TIMEOUT_SECONDS if not specified)
-        timeout = self._config.get(
-            "connection_timeout", DEFAULT_CONNECTION_TIMEOUT_SECONDS
-        )
+        # Effective connection timeout (project-wide default is filled
+        # in at validation time when ``enterprise/settings.json`` omits
+        # the field).
+        timeout = self._timeouts.session_connect_timeout_seconds
 
         _LOGGER.debug(
             f"[{self.__class__.__name__}] Creating enterprise factory for '{self.full_name}' (timeout: {timeout}s)"
@@ -2936,7 +2984,9 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
         # Wrap factory creation with timeout to prevent hanging on unreachable systems
         try:
             factory = await asyncio.wait_for(
-                CorePlusSessionFactory.from_credentials(self._config, self._creds),
+                CorePlusSessionFactory.from_credentials(
+                    self._system_config, self._creds, self._timeouts
+                ),
                 timeout=timeout,
             )
             _LOGGER.info(
@@ -2945,11 +2995,13 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
             return factory
         except TimeoutError as e:
             _LOGGER.error(
-                f"[{self.__class__.__name__}] Connection to enterprise system '{self.full_name}' timed out after {timeout} seconds"
+                f"[{self.__class__.__name__}] Connection to enterprise system '{self.full_name}' timed out after {timeout} seconds. "
+                f"Increase enterprise/settings.json: timeouts.client.session_connect_timeout_seconds."
             )
             raise DeephavenConnectionError(
                 f"Connection to enterprise system timed out after {timeout} seconds. "
-                f"Check connection_json_url and network connectivity."
+                f"Check connection_json_url and network connectivity. To allow more time, "
+                f"increase enterprise/settings.json: timeouts.client.session_connect_timeout_seconds."
             ) from e
 
     @override

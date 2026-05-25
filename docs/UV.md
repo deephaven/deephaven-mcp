@@ -33,10 +33,10 @@
 
 ## End-User Install (`uv tool install`)
 
-For end users (not contributors), the recommended installation method is `uv tool install`. This places `dh-mcp-community-server`, `dh-mcp-enterprise-server`, and `dh-mcp-docs-server` on your PATH in an isolated managed environment — no venv to create or activate.
+For end users (not contributors), the recommended installation method is `uv tool install`. This places `dh-mcp-systems-server` (multiplexed community + enterprise) and `dh-mcp-docs-server` on your PATH in an isolated managed environment — no venv to create or activate.
 
 ```sh
-uv tool install --python-preference managed "deephaven-mcp[community,enterprise]"
+uv tool install --python-preference managed "deephaven-mcp[enterprise]"
 ```
 
 - `--python-preference managed` tells uv to download and use its own Python (stored in `~/.local/share/uv/python/`) rather than any system Python. The tool environment is unaffected if your system Python is upgraded, moved, or removed. uv picks the latest compatible version per `requires-python` in the package.
@@ -117,16 +117,17 @@ This will install all dependencies to exactly match your lock file(s) for reprod
 
 ### 3. Running Servers and Scripts
 
-**Community Server:**
+**Systems Server (stdio, no auth):**
 
 ```sh
-DH_MCP_CONFIG_FILE=dhc.json uv run dh-mcp-community-server --port 8003
+DH_MCP_CONFIG_DIR=~/.deephaven/ai/config uv run dh-mcp-systems-server --transport stdio
 ```
 
-**Enterprise Server:**
+**Systems Server (HTTP with PSK, loopback only):**
 
 ```sh
-DH_MCP_CONFIG_FILE=dhe.json uv run dh-mcp-enterprise-server --port 8002
+DH_MCP_CONFIG_DIR=~/.deephaven/ai/config DH_MCP_PSK=$(openssl rand -hex 32) \
+  uv run dh-mcp-systems-server --transport http --port 8000
 ```
 
 **Docs Server:**
@@ -144,15 +145,15 @@ uv run scripts/run_deephaven_test_server.py --table-group simple
 **Run a test client:**
 
 ```sh
-uv run scripts/mcp_community_test_client.py --transport streamable-http --url http://localhost:8003/mcp
-uv run scripts/mcp_docs_test_client.py --url http://localhost:8001/mcp --prompt "What is Deephaven?"
+uv run scripts/mcp_community_test_client.py --transport streamable-http --url http://127.0.0.1:8000/mcp
+uv run scripts/mcp_docs_test_client.py --url http://127.0.0.1:8001/mcp --prompt "What is Deephaven?"
 ```
 
 **Run a stress test:**
 
 ```sh
-uv run scripts/mcp_docs_stress_sse_user_queries.py --url "http://localhost:8001/mcp"
-uv run scripts/mcp_docs_stress_sse_cancel_queries.py --url "http://localhost:8001/mcp"
+uv run scripts/mcp_docs_stress_sse_user_queries.py --url "http://127.0.0.1:8001/mcp"
+uv run scripts/mcp_docs_stress_sse_cancel_queries.py --url "http://127.0.0.1:8001/mcp"
 ```
 
 ---
@@ -182,15 +183,11 @@ uv run scripts/mcp_docs_stress_sse_cancel_queries.py --url "http://localhost:800
 
 ## Environment Variables with uv
 
-Systems Server (community/enterprise):
+Systems Server (multiplexed community + enterprise):
 
-- `DH_MCP_CONFIG_FILE`: Path to the config JSON/JSON5 file (fallback when `--config` is not passed)
-- `MCP_HOST`: Bind host (fallback when `--host` is not passed; default `127.0.0.1`)
-- `MCP_PORT`: Bind port (fallback when `--port` is not passed; defaults to 8002 enterprise / 8003 community)
-- `MCP_SSL_KEYFILE` / `MCP_SSL_CERTFILE`: Native TLS key/cert paths (fallback for `--ssl-keyfile` / `--ssl-certfile`)
-- `MCP_TRUST_FORWARDED_PROTO`: Trust `X-Forwarded-Proto` from a fronting proxy (fallback for `--trust-forwarded-proto`)
-- `MCP_FORWARDED_ALLOW_IPS`: Peer-IP allowlist for `--trust-forwarded-proto` (default `127.0.0.1`)
-- `MCP_ALLOW_CLEARTEXT`: Emergency opt-out allowing cleartext non-loopback traffic (fallback for `--allow-cleartext`)
+- `DH_MCP_CONFIG_DIR`: Path to the configuration directory tree (fallback when `--config-dir` is not passed). Defaults to `~/.deephaven/ai/config` on POSIX and `%APPDATA%\Deephaven\ai\config` on Windows.
+
+Every other tunable (transport, host, port, PSK, server name, client timeouts, PQ-tool defaults) lives in `server.json`. Use `${env:NAME}` inside any JSON value to source the value from an environment variable at config-load time — e.g. `"psk": "${env:DH_MCP_PSK}"`. See [`docs/CONFIGURATION.md`](CONFIGURATION.md).
 
 Docs Server:
 
@@ -212,7 +209,8 @@ Create a `.env` file in your project root for local development:
 
 ```env
 # .env example
-DH_MCP_CONFIG_FILE=/absolute/path/to/deephaven_mcp.json
+DH_MCP_CONFIG_DIR=/absolute/path/to/config-dir
+DH_MCP_PSK=replace-with-a-strong-shared-secret
 INKEEP_API_KEY=your-inkeep-api-key
 PYTHONLOGLEVEL=DEBUG
 ```
@@ -306,7 +304,7 @@ A: Yes! See the example above.
 |--------------------------------------|--------------------------------------------------------------------------|
 | Command not found: uv                | Run `pip install uv`                                                     |
 | Missing env var error                | Check your shell or `.env` file                                          |
-| Port already in use                  | Systems server: change with `--port` or `MCP_PORT`. Docs server: set `MCP_DOCS_PORT` |
+| Port already in use                  | Systems server: change with `--port` or the `port` field in `server.json` (HTTP transport only). Docs server: set `MCP_DOCS_PORT` |
 | API key errors                       | Verify `INKEEP_API_KEY` is set and valid                                 |
 | Dependency mismatch                  | Run `uv sync`                                                            |
 | Lock file out of date                | Run `uv lock` or `uv pip install ".[dev]" --upgrade`                     |

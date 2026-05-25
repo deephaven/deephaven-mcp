@@ -1,18 +1,20 @@
-"""Enterprise session registry for the DHE MCP server.
+"""Enterprise session registry for one Deephaven Enterprise system.
 
-This module provides ``EnterpriseSessionRegistry``, a purpose-built registry for the
-DHE server that manages exactly one enterprise system (factory) per instance.
+This module provides :class:`EnterpriseSessionRegistry`, a purpose-built
+registry that manages exactly one enterprise system (factory) per
+instance. Configuration and credentials are pre-resolved by the
+multi-system config manager and supplied to the registry at construction
+time; the registry no longer participates in any per-request credential
+flow.
 
-Single-tenant credential binding
---------------------------------
-The registry is a single process-wide instance shared by every MCP client of
-the server. Credentials arrive on each request via the auth middleware; the
-**first** authenticated request after startup/reload binds those credentials
-to the shared factory (creates ``_factory_manager`` and starts background
-discovery). Subsequent requests reuse the bound factory when credentials
-match; requests presenting a different identity are rejected with
-``AuthenticationError``.  Rebinding requires ``mcp_reload`` or a server
-restart.
+Lifecycle
+---------
+The registry is created with an :class:`~deephaven_mcp.sessions.EnterpriseSystemConfig`
+that already carries the resolved :class:`~deephaven_mcp.auth.credentials.Credentials`.
+:meth:`initialize` builds the :class:`CorePlusSessionFactoryManager`,
+transitions to :attr:`InitializationPhase.PARTIAL`, and launches the
+background discovery task that populates the registry from the
+controller client.
 
 Architecture
 ------------
@@ -51,16 +53,18 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass
-from typing import Any, override
+from typing import override
 
 from deephaven_mcp._exceptions import (
-    AuthenticationError,
     InternalError,
     RegistryItemNotFoundError,
 )
-from deephaven_mcp.auth.credentials import Credentials
-from deephaven_mcp.client import CorePlusControllerClient, CorePlusSession
-from deephaven_mcp.config import ConfigManager
+from deephaven_mcp.client import (
+    CorePlusControllerClient,
+    CorePlusSession,
+    EnterpriseClientTimeouts,
+)
+from deephaven_mcp.sessions import EnterpriseSystemConfig
 
 from ._manager import (
     BaseItemManager,
@@ -220,10 +224,9 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
 
     Usage::
 
-        registry = EnterpriseSessionRegistry()
-        await registry.initialize(config_manager)  # config_manager returns the DHE system config
-        await registry.apply_credentials(creds)    # required before any read
-        session_mgr = await registry.get("enterprise:system:my-pq")
+        registry = EnterpriseSessionRegistry(system_config)
+        await registry.initialize()
+        session_mgr = await registry.get("enterprise:my-system:my-pq")
         factory = registry.factory_manager
         await registry.close()
     """
@@ -252,17 +255,38 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
             return await factory_instance.connect_to_persistent_query(name)
 
         return EnterpriseSessionManager(
-            source=system_name,
+            system=system_name,
             name=session_name,
             creation_function=creation_function,
         )
 
-    def __init__(self) -> None:
-        """Initialize the registry.  Call ``await initialize()`` before use."""
+    def __init__(
+        self,
+        system_config: EnterpriseSystemConfig,
+        timeouts: EnterpriseClientTimeouts,
+    ) -> None:
+        """Capture the validated, credential-bound enterprise configuration.
+
+        Args:
+            system_config (EnterpriseSystemConfig): A validated enterprise
+                system declaration. The registry stores three fields
+                directly: the system name (used as the source segment
+                in session IDs), the typed system config (forwarded to
+                :class:`CorePlusSessionFactoryManager`), and the
+                pre-resolved credentials (also forwarded to the factory
+                manager). The config carries no per-request state, so
+                the registry never re-reads credentials at run time.
+            timeouts (EnterpriseClientTimeouts): Enterprise client-layer
+                timeout configuration forwarded to the
+                :class:`CorePlusSessionFactoryManager` this registry
+                constructs (and from there to the underlying
+                :class:`CorePlusSessionFactory`).
+        """
         super().__init__()
-        self._system_name: str = ""
-        self._config: dict[str, Any] | None = None
-        self._creds: Credentials | None = None
+        self._system_name: str = system_config.name
+        self._system_config: EnterpriseSystemConfig = system_config
+        self._creds = system_config.credentials
+        self._timeouts = timeouts
         self._factory_manager: CorePlusSessionFactoryManager | None = None
         self._controller_client: CorePlusControllerClient | None = None
         self._phase: InitializationPhase = InitializationPhase.NOT_STARTED
@@ -296,22 +320,18 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
         """Return the enterprise factory manager.
 
         Returns:
-            CorePlusSessionFactoryManager: The single factory manager for this DHE server.
+            CorePlusSessionFactoryManager: The single factory manager
+                for this enterprise system, created during
+                :meth:`initialize`.
 
         Raises:
-            InternalError: If the registry has not been initialized, or
-                if no request has yet bound credentials via
-                :meth:`apply_credentials`. Reaching the latter case
-                indicates an MCP tool ran before any authenticated
-                request applied credentials to the shared registry — a
-                wiring bug in the middleware/tool layer, not a
-                client-side error.
+            InternalError: If the registry has not been initialized.
         """
         self._check_initialized()
-        if self._factory_manager is None:
+        if self._factory_manager is None:  # pragma: no cover - defensive
             raise InternalError(
                 f"{self.__class__.__name__} factory manager is not available; "
-                "no authenticated request has applied credentials yet."
+                "initialize() did not run to completion."
             )
         return self._factory_manager
 
@@ -320,116 +340,29 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
     # ------------------------------------------------------------------
 
     @override
-    async def _load_items(self, config_manager: ConfigManager) -> None:
-        """Stash the enterprise system config so :meth:`apply_credentials` can use it.
+    async def _load_items(self) -> None:
+        """Build the factory manager and launch background discovery.
 
-        Called by ``super().initialize()`` while holding ``self._lock``. The
-        factory manager is **not** created here — credentials are not yet
-        known. Phase remains :attr:`InitializationPhase.NOT_STARTED` until
-        :meth:`apply_credentials` runs.
-
-        Args:
-            config_manager (ConfigManager): Must be an
-                ``EnterpriseServerConfigManager``; its ``get_config()``
-                returns the enterprise system config dict.
+        Called by ``super().initialize()`` while holding ``self._lock``.
+        The pre-resolved configuration and credentials captured in
+        :meth:`__init__` are forwarded directly to a
+        :class:`CorePlusSessionFactoryManager`; the registry then
+        transitions to :attr:`InitializationPhase.PARTIAL` and starts
+        a background task to populate ``_items`` from the controller
+        client.
         """
-        self._config = await config_manager.get_config()
-        self._system_name = self._config["system_name"]
-        _LOGGER.info(
-            f"[{self.__class__.__name__}] config loaded for '{self._system_name}'; "
-            f"awaiting apply_credentials"
+        self._factory_manager = CorePlusSessionFactoryManager(
+            self._system_name,
+            self._system_config,
+            self._creds,
+            timeouts=self._timeouts,
         )
-
-    @override
-    async def initialize(self, config_manager: ConfigManager) -> None:
-        """Initialize the registry from config (no factory creation).
-
-        Calls ``super().initialize()`` which calls :meth:`_load_items` to
-        store the config. Discovery is **not** started here — the shared
-        factory cannot be built without credentials. The first authenticated
-        request applies credentials via :meth:`apply_credentials`, which
-        creates the factory and starts background discovery for the lifetime
-        of the server process.
-
-        Idempotent — subsequent calls are a no-op.
-
-        Args:
-            config_manager (ConfigManager): Configuration source.
-        """
-        await super().initialize(config_manager)
-
-    async def apply_credentials(self, creds: Credentials) -> None:
-        """Apply request credentials to the single shared factory.
-
-        Called from the enterprise request entry path with the
-        :class:`~deephaven_mcp.auth.credentials.Credentials` derived by the
-        auth middleware from the request's ``X-Deephaven-*`` headers.
-
-        Behaviour:
-
-        - **First authenticated request after startup/reload**: creates the
-          :class:`CorePlusSessionFactoryManager` bound to these credentials,
-          transitions ``_phase`` to :attr:`InitializationPhase.PARTIAL`, and
-          launches the background discovery task.
-        - **Subsequent requests with the same credentials** (identified by
-          frozen-dataclass equality): no-op.
-        - **Subsequent requests with different credentials**: raises
-          :class:`AuthenticationError`. The single-tenant server binds to
-          one identity at a time; rebinding requires ``mcp_reload`` or a
-          server restart.
-
-        Args:
-            creds (Credentials): The credentials to apply. Whether the
-                concrete subclass is actually usable for enterprise
-                auth is decided by the downstream factory
-                (:meth:`CorePlusSessionFactory.from_credentials`) when
-                the background discovery task runs; unsupported types
-                surface there as an
-                :class:`~deephaven_mcp._exceptions.AuthenticationError`
-                stored on ``self._error`` and visible to later
-                :meth:`get` callers. The middleware is expected to
-                reject unsupported types at request entry, so reaching
-                the factory's rejection branch indicates a middleware
-                bug rather than a client error.
-
-        Raises:
-            AuthenticationError: If the server is already bound to a
-                different identity.  Use ``mcp_reload`` or restart the
-                server to rebind.
-            InternalError: If the registry is not yet initialized, or
-                if the registry somehow has no config loaded despite
-                being marked initialized. Both indicate broken
-                internal invariants rather than client-side auth
-                problems.
-        """
-        async with self._lock:
-            self._check_initialized()
-            if self._creds is not None:
-                if self._creds == creds:
-                    return
-                raise AuthenticationError(
-                    f"{self.__class__.__name__} is already bound to a "
-                    f"different identity; the single-tenant server accepts "
-                    f"one credential set per process. Use mcp_reload or "
-                    f"restart the server to rebind."
-                )
-            if self._config is None:
-                raise InternalError(
-                    f"{self.__class__.__name__} has no config loaded; "
-                    f"_load_items did not run."
-                )
-            self._creds = creds
-            self._factory_manager = CorePlusSessionFactoryManager(
-                self._system_name, self._config, creds
-            )
-            self._phase = InitializationPhase.PARTIAL
-            self._discovery_task = asyncio.create_task(
-                self._discover_enterprise_sessions()
-            )
-            _LOGGER.info(
-                f"[{self.__class__.__name__}] credentials applied for "
-                f"'{self._system_name}'; discovery started"
-            )
+        self._phase = InitializationPhase.PARTIAL
+        self._discovery_task = asyncio.create_task(self._discover_enterprise_sessions())
+        _LOGGER.info(
+            f"[{self.__class__.__name__}] factory bound for "
+            f"'{self._system_name}'; discovery started"
+        )
 
     @override
     async def close(self) -> None:
@@ -484,14 +417,15 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
                     f"[{self.__class__.__name__}] error closing factory manager: {e}"
                 )
 
-        # Step 5: clear remaining state and collect items to close.
+        # Step 5: clear remaining state and collect items to close. The
+        # _config / _creds / _system_name fields are kept so that the
+        # registry can be re-initialized in place via initialize() if
+        # needed; only the per-run discovery state is reset.
         async with self._lock:
             self._controller_client = None
             self._added_session_ids.clear()
             self._phase = InitializationPhase.NOT_STARTED
             self._error = None
-            self._config = None
-            self._creds = None
             items_to_close = list(self._items.values())
             self._items.clear()
 
@@ -510,15 +444,10 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
     async def _check_and_sync(self) -> None:
         """Verify initialized and trigger a sync if in COMPLETED phase.
 
-        Shared preamble for :meth:`get` and :meth:`get_all`.  Callers must
-        re-check ``_check_initialized()`` under ``self._lock`` after this returns,
-        since a concurrent ``close()`` could have run during the sync.
-
-        Credentials must have been applied by an earlier
-        :meth:`apply_credentials` call from the request entry path;
-        otherwise the factory manager is missing and read operations
-        surface that via the ``factory_manager`` guard or via
-        ``RegistryItemNotFoundError`` from an empty ``_items``.
+        Shared preamble for :meth:`get` and :meth:`get_all`. Callers must
+        re-check ``_check_initialized()`` under ``self._lock`` after this
+        returns, since a concurrent ``close()`` could have run during the
+        sync.
         """
         self._check_initialized()
         async with self._lock:
@@ -651,19 +580,33 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
 
         Synchronous — no ``await``.  Must be called under ``self._lock``.
 
+        On success, reconciles ``_items`` to match the controller's
+        report (delegated to :meth:`_apply_factory_success`).  On error,
+        records the failure and replaces ``_controller_client`` but
+        leaves ``_items`` untouched — the controller gave us no
+        information about which sessions are still alive, so the safest
+        move is to keep the last known state until the next successful
+        refresh reconciles. Wiping on every transient blip would be
+        too disruptive to in-flight tool calls.
+
         Args:
             result (_FactoryQueryResult | _FactoryQueryError): Query result from ``_fetch_factory_pqs``.
             factory_manager (CorePlusSessionFactoryManager): Factory manager for creating new session managers.
 
         Returns:
-            Managers that should be closed by the caller (outside the lock).
+            Managers that should be closed by the caller (outside the
+                lock). Empty on the error path (nothing was removed).
         """
         if isinstance(result, _FactoryQueryResult):
             return self._apply_factory_success(result, factory_manager)
-        elif isinstance(result, _FactoryQueryError):
-            return self._apply_factory_error(result)
-        else:
-            raise InternalError(f"Unexpected result type {type(result).__name__!r}")
+        if isinstance(result, _FactoryQueryError):
+            self._controller_client = result.new_client
+            self._error = result.error
+            _LOGGER.warning(
+                f"[{self.__class__.__name__}] factory query failed: {result.error}"
+            )
+            return []
+        raise InternalError(f"Unexpected result type {type(result).__name__!r}")
 
     def _remove_sessions_by_keys(self, keys: set[str]) -> list[BaseItemManager]:
         """Remove a specific set of session keys from ``_items``.
@@ -690,14 +633,25 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
         result: _FactoryQueryResult,
         factory_manager: CorePlusSessionFactoryManager,
     ) -> list[BaseItemManager]:
-        """Reconcile ``_items`` with a successful controller query.
+        """Reconcile ``_items`` to match the controller's report.
 
         Synchronous — no ``await``.  Must be called under ``self._lock``.
+
+        The controller is the source of truth for what PQs exist; this
+        method makes ``_items`` mirror the controller's reported set:
 
         - Caches the live client returned by the query.
         - Adds PQ sessions the controller reports that we do not yet have.
         - Removes sessions we have that the controller no longer reports.
         - Clears any previous error.
+
+        ``add_session`` is a cache-warming optimization, not a protection
+        contract: a session added between this method's snapshot and the
+        controller's response can be wiped here. That is acceptable —
+        the session itself still exists on the controller (the create
+        call returned), and the next refresh re-discovers it. Recovery
+        is bounded by one refresh interval and requires no manual
+        intervention.
 
         Invariant: a session key reappearing after removal is installed
         with a freshly constructed manager instance — never by mutating
@@ -745,39 +699,6 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
             _LOGGER.debug(
                 f"[{self.__class__.__name__}] removed {len(keys_to_remove)} stale sessions"
             )
-
-        return managers_to_close
-
-    def _apply_factory_error(
-        self,
-        result: _FactoryQueryError,
-    ) -> list[BaseItemManager]:
-        """Record a failed controller query and remove all enterprise sessions.
-
-        Synchronous — no ``await``.  Must be called under ``self._lock``.
-
-        - Updates ``_controller_client``.
-        - Records the error in ``_error``.
-        - Removes all enterprise sessions from ``_items``.
-
-        Args:
-            result (_FactoryQueryError): Failed query result.
-
-        Returns:
-            list[BaseItemManager]: Removed managers; caller must close them.
-        """
-        if result.new_client is not None:
-            self._controller_client = result.new_client
-        else:
-            self._controller_client = None
-
-        self._error = result.error
-
-        managers_to_close = self._remove_sessions_by_keys(set(self._items.keys()))
-
-        _LOGGER.warning(
-            f"[{self.__class__.__name__}] factory query failed: {result.error}"
-        )
 
         return managers_to_close
 

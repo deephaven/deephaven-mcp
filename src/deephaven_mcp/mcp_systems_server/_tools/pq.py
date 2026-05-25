@@ -16,12 +16,14 @@ These tools require Deephaven Enterprise (Core+) and are not available in Commun
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Annotated, cast
 
 from mcp.server.fastmcp import Context, FastMCP
+from pydantic import Field
 
-from deephaven_mcp._env import env_int
 from deephaven_mcp._exceptions import (
+    InternalError,
+    InvalidSessionNameError,
     MissingEnterprisePackageError,
 )
 from deephaven_mcp.client import (
@@ -34,7 +36,10 @@ from deephaven_mcp.client import (
 )
 from deephaven_mcp.mcp_systems_server._tools.shared import (
     get_enterprise_registry,
+    get_enterprise_settings,
+    parse_pq_id,
     redact_json_sensitive_fields,
+    resolve_pq_ids_to_single_system,
 )
 from deephaven_mcp.resource_manager import (
     BaseItemManager,
@@ -69,7 +74,9 @@ try:
         ExportedObjectTypeEnum,
         RestartUsersEnum,
     )
-except ImportError:
+except (
+    ImportError
+):  # pragma: no cover - only reached when the enterprise package is absent
     ExportedObjectTypeEnum = None  # type: ignore[misc,assignment]
     RestartUsersEnum = None  # type: ignore[misc,assignment]
 
@@ -86,101 +93,47 @@ _NULL_LONG = -9223372036854775808
 # =============================================================================
 
 
-def _parse_pq_id(pq_id: str, system_name: str) -> CorePlusQuerySerial:
-    """Parse a pq_id and return the serial number.
+def _parse_pq_id(pq_id: str) -> tuple[str, CorePlusQuerySerial]:
+    """Parse a pq_id and return its (system_name, serial) tuple.
 
-    Validates that the pq_id belongs to the expected enterprise system, guarding
-    against cross-server mistakes (e.g. an AI agent sending an ID from a different
-    DHE instance).
+    The multiplexed systems server hosts multiple enterprise systems
+    in a single process, so ``pq_id`` carries the system name as its
+    first segment. The previous ``enterprise:`` prefix has been
+    dropped because the type segment is redundant for an identifier
+    that is always enterprise-scoped.
 
     Args:
-        pq_id (str): PQ identifier in format 'enterprise:{system_name}:{serial}'
-        system_name (str): Expected enterprise system name (from the registry).
+        pq_id (str): PQ identifier in format ``'<system_name>:<serial>'``.
 
     Returns:
-        CorePlusQuerySerial: The serial number extracted from pq_id
+        tuple[str, CorePlusQuerySerial]: ``(system_name, serial)``.
 
     Raises:
-        ValueError: If pq_id format is invalid, system name doesn't match, or serial is not an integer
+        ValueError: If ``pq_id`` is not exactly two non-empty
+            colon-separated segments or if the serial is not a
+            non-negative integer. Raised as ``ValueError`` for
+            backwards compatibility with existing ``except ValueError``
+            sites in this module; callers should re-wrap into the
+            tool error response.
     """
-    parts = pq_id.split(":")
-    if len(parts) != 3 or parts[0] != "enterprise" or parts[1] != system_name:
-        raise ValueError(
-            f"Invalid pq_id format: '{pq_id}'. "
-            f"Expected format: 'enterprise:{system_name}:{{serial}}'"
-        )
     try:
-        serial_int = int(parts[2])
-    except ValueError:
-        raise ValueError(
-            f"Invalid pq_id format: '{pq_id}'. "
-            f"Serial must be an integer, got: '{parts[2]}'"
-        ) from None
-    return CorePlusQuerySerial(serial_int)
+        system_name, serial_int = parse_pq_id(pq_id)
+    except InvalidSessionNameError as exc:
+        raise ValueError(str(exc)) from None
+    return system_name, CorePlusQuerySerial(serial_int)
 
 
 def _make_pq_id(serial: CorePlusQuerySerial, system_name: str) -> str:
     """Construct a pq_id from serial number.
 
     Args:
-        serial (CorePlusQuerySerial): PQ serial number
+        serial (CorePlusQuerySerial): PQ serial number.
         system_name (str): Enterprise system name.
 
     Returns:
-        str: PQ identifier in format 'enterprise:{system_name}:{serial}'
+        str: PQ identifier in format ``'<system_name>:<serial>'``.
     """
-    return f"enterprise:{system_name}:{serial}"
-
-
-MCP_TIMEOUT_WARNING_THRESHOLD: int = env_int("DH_MCP_TIMEOUT_WARNING_THRESHOLD", 60)
-"""Timeout (seconds) above which MCP tool operations generate a warning.
-
-MCP clients typically have their own connection timeouts; operations exceeding
-this threshold may be cut off by the client before they complete.
-Environment variable override: DH_MCP_TIMEOUT_WARNING_THRESHOLD
-"""
-
-DEFAULT_PQ_TIMEOUT: int = env_int("DH_MCP_DEFAULT_PQ_TIMEOUT", 30)
-"""Default timeout (seconds) for PQ lifecycle operations (start, stop, restart)
-when the caller does not supply an explicit value.
-Environment variable override: DH_MCP_DEFAULT_PQ_TIMEOUT
-"""
-
-DEFAULT_MAX_CONCURRENT: int = env_int("DH_MCP_DEFAULT_MAX_CONCURRENT", 20)
-"""Default cap on the number of PQ operations that may run in parallel within a
-single batch tool call.
-Environment variable override: DH_MCP_DEFAULT_MAX_CONCURRENT
-"""
-
-
-def _validate_timeout(timeout_seconds: int, function_name: str) -> int:
-    """Validate timeout is reasonable for MCP operations.
-
-    Args:
-        timeout_seconds (int): Requested timeout in seconds (must be >= 0).
-                              timeout_seconds=0 means fire-and-forget (no wait).
-        function_name (str): Name of calling function for logging
-
-    Returns:
-        int: The validated timeout value
-
-    Raises:
-        ValueError: If timeout_seconds is negative
-    """
-    # TODO: Verify that timeout=0 fire-and-forget behavior is properly supported
-    # by all controller methods (start_and_wait, stop_query, restart_query)
-    if timeout_seconds < 0:
-        raise ValueError(
-            f"timeout_seconds must be non-negative, got {timeout_seconds}. "
-            f"Use timeout_seconds=0 for fire-and-forget (no wait) behavior."
-        )
-
-    if timeout_seconds > MCP_TIMEOUT_WARNING_THRESHOLD:
-        _LOGGER.warning(
-            f"[mcp_systems_server:{function_name}] Timeout {timeout_seconds}s exceeds "
-            f"recommended MCP limit of {MCP_TIMEOUT_WARNING_THRESHOLD}s - may cause client timeouts"
-        )
-    return timeout_seconds
+    return f"{system_name}:{serial}"
 
 
 def _validate_max_concurrent(max_concurrent: int, function_name: str) -> int:
@@ -690,12 +643,10 @@ async def _setup_batch_pq_operation(
     context: Context,
     pq_id: str | list[str],
     function_name: str,
-    timeout_seconds: int,
     max_concurrent: int,
 ) -> tuple[
     list[tuple[str, CorePlusQuerySerial]] | None,
     CorePlusControllerClient | None,
-    int | None,
     int | None,
     str,
     dict[str, object] | None,
@@ -709,28 +660,23 @@ async def _setup_batch_pq_operation(
         context (Context): MCP context object
         pq_id (str | list[str]): Single pq_id string or list of pq_id strings
         function_name (str): Name of calling function, used in log messages and error strings
-        timeout_seconds (int): Timeout in seconds for operations (must be >= 0)
         max_concurrent (int): Maximum concurrent operations (must be >= 1)
 
     Returns:
-        tuple: (parsed_pqs, controller, validated_timeout, validated_max_concurrent, system_name, error_response)
-               On success: (parsed_list, controller_client, timeout_int, max_concurrent_int, system_name, None)
-               On failure: (None, None, None, None, system_name, {"success": False, "error": "...", "isError": True})
+        tuple: (parsed_pqs, controller, validated_max_concurrent, system_name, error_response)
+               On success: (parsed_list, controller_client, max_concurrent_int, system_name, None)
+               On failure: (None, None, None, system_name, {"success": False, "error": "...", "isError": True})
 
     Example::
 
-        parsed_pqs, controller, timeout, max_conc, system_name, error = await _setup_batch_pq_operation(...)
+        parsed_pqs, controller, max_conc, system_name, error = await _setup_batch_pq_operation(...)
         if error:
             return error
         # Type narrowing: all returned values except error are non-None here
     """
-    # Get session registry and system name first (needed for pq_id validation)
-    session_registry = await get_enterprise_registry(context)
-    system_name = session_registry.system_name
-
-    # Validate parameters
+    # Validate max_concurrent before touching the registry so a bad value
+    # surfaces a clean error even when the pq_ids are also malformed.
     try:
-        validated_timeout = _validate_timeout(timeout_seconds, function_name)
         validated_max_concurrent = _validate_max_concurrent(
             max_concurrent, function_name
         )
@@ -739,21 +685,37 @@ async def _setup_batch_pq_operation(
             None,
             None,
             None,
-            None,
-            system_name,
+            "",
             {"success": False, "error": str(e), "isError": True},
         )
 
-    # Validate and parse pq_ids
-    parsed_pqs, parse_error = _validate_and_parse_pq_ids(pq_id, system_name)
+    # Parse pq_ids; system_name is derived from them.
+    parsed_pqs, system_name, parse_error = _validate_and_parse_pq_ids(pq_id)
     if parse_error:
         return (
             None,
             None,
             None,
+            "",
+            {"success": False, "error": parse_error, "isError": True},
+        )
+    # parse_error is None implies system_name is set
+    if system_name is None:  # pragma: no cover - defensive
+        raise InternalError(
+            "Internal invariant violated: _validate_and_parse_pq_ids returned "
+            "system_name=None without an error."
+        )
+
+    # Resolve registry for the system named in the pq_ids.
+    try:
+        session_registry = get_enterprise_registry(context, system_name)
+    except InvalidSessionNameError as e:
+        return (
+            None,
+            None,
             None,
             system_name,
-            {"success": False, "error": parse_error, "isError": True},
+            {"success": False, "error": str(e), "isError": True},
         )
 
     # Type narrowing: when parse_error is None, parsed_pqs is guaranteed non-None
@@ -774,7 +736,6 @@ async def _setup_batch_pq_operation(
     return (
         parsed_pqs,
         controller,
-        validated_timeout,
         validated_max_concurrent,
         system_name,
         None,
@@ -783,37 +744,47 @@ async def _setup_batch_pq_operation(
 
 def _validate_and_parse_pq_ids(
     pq_id: str | list[str],
-    system_name: str,
-) -> tuple[list[tuple[str, CorePlusQuerySerial]] | None, str | None]:
+) -> tuple[
+    list[tuple[str, CorePlusQuerySerial]] | None,
+    str | None,
+    str | None,
+]:
     """Validate and parse pq_id(s) for batch operations.
 
+    Thin adapter over
+    :func:`deephaven_mcp.mcp_systems_server._tools.shared.resolve_pq_ids_to_single_system`
+    that preserves the batch-tool return convention (parsed list,
+    system name, optional error string). The shared helper guarantees
+    every id parses cleanly and all of them name the same enterprise
+    system; mixed-system batches are rejected up front so the caller
+    cannot accidentally fan a batch out across systems.
+
     Args:
-        pq_id (str | list[str]): Single pq_id string or list of pq_id strings in
-            format 'enterprise:{system_name}:{serial}'.
-        system_name (str): Expected enterprise system name (from the registry).
+        pq_id (str | list[str]): Single pq_id string or list of pq_id
+            strings in format ``'<system_name>:<serial>'``.
 
     Returns:
-        tuple[list[tuple[str, CorePlusQuerySerial]] | None, str | None]:
-            (parsed_pqs, error_message)
-            - On success: ([(pq_id, serial), ...], None)
-            - On failure: (None, error_string)
+        tuple[list[tuple[str, CorePlusQuerySerial]] | None, str | None, str | None]:
+            ``(parsed_pqs, system_name, error_message)``.
+
+            - On success: ``([(pq_id, serial), ...], system_name, None)``.
+            - On failure: ``(None, None, error_string)``.
     """
-    # Normalize to list
-    pq_ids = [pq_id] if isinstance(pq_id, str) else pq_id
+    pq_ids = [pq_id] if isinstance(pq_id, str) else list(pq_id)
 
     if not pq_ids:
-        return (None, "At least one pq_id must be provided")
+        return (None, None, "At least one pq_id must be provided")
 
-    # Parse all pq_ids
-    parsed_pqs = []
-    for pid in pq_ids:
-        try:
-            serial = _parse_pq_id(pid, system_name)
-            parsed_pqs.append((pid, serial))
-        except ValueError as e:
-            return (None, f"Invalid pq_id '{pid}': {e}")
+    try:
+        system_name, serials = resolve_pq_ids_to_single_system(pq_ids)
+    except InvalidSessionNameError as exc:
+        return (None, None, str(exc))
 
-    return (parsed_pqs, None)
+    parsed_pqs: list[tuple[str, CorePlusQuerySerial]] = [
+        (pid, CorePlusQuerySerial(serial))
+        for pid, serial in zip(pq_ids, serials, strict=True)
+    ]
+    return (parsed_pqs, system_name, None)
 
 
 def _convert_restart_users_to_enum(
@@ -896,6 +867,7 @@ def _add_session_id_if_running(
 
 async def pq_name_to_id(
     context: Context,
+    system: str,
     pq_name: str,
 ) -> dict:
     """MCP Tool: Convert PQ name to pq_id format.
@@ -908,7 +880,7 @@ async def pq_name_to_id(
     - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
     - 'PQ' is shorthand for Persistent Query
     - Serial numbers are system-assigned unique integer identifiers
-    - pq_id is the canonical string format: 'enterprise:{system_name}:{serial}'
+    - pq_id is the canonical string format: '<system_name>:<serial>'
     - 'Deephaven Community' and 'Deephaven Core' are interchangeable names for the same product
     - 'Deephaven Enterprise', 'Deephaven Core+', and 'Deephaven CorePlus' are interchangeable names for the same product
     - In Deephaven, "schema" and "meta table" refer to the same concept - the table's column definitions including names, types, and properties.
@@ -924,13 +896,14 @@ async def pq_name_to_id(
 
     Args:
         context (Context): MCP context object
+        system (str): Enterprise system name as listed by ``list_systems``
         pq_name (str): Human-readable name of the persistent query
 
     Returns:
         dict: Success response:
         {
             "success": True,
-            "pq_id": "enterprise:prod:12345",
+            "pq_id": "prod:12345",
             "serial": 12345,
             "name": "analytics_worker",
             "system_name": "prod"
@@ -944,12 +917,10 @@ async def pq_name_to_id(
         }
     """
     result: dict[str, object] = {"success": False}
-    system_name = "<unknown>"
+    system_name = system
 
     try:
-        # Get session registry, system name, and factory
-        session_registry = await get_enterprise_registry(context)
-        system_name = session_registry.system_name
+        session_registry = get_enterprise_registry(context, system)
         _LOGGER.info(
             f"[mcp_systems_server:pq_name_to_id] Invoked: system_name={system_name!r}, pq_name={pq_name!r}"
         )
@@ -973,7 +944,7 @@ async def pq_name_to_id(
             serial = await controller.get_serial_for_name(pq_name)
         except Exception as e:
             error_msg = f"PQ '{pq_name}' not found on system '{system_name}': {e}"
-            _LOGGER.error(f"[mcp_systems_server:pq_name_to_id] {error_msg}")
+            _LOGGER.warning(f"[mcp_systems_server:pq_name_to_id] {error_msg}")
             result["error"] = error_msg
             result["isError"] = True
             return result
@@ -1007,6 +978,7 @@ async def pq_name_to_id(
 
 async def pq_list(
     context: Context,
+    system: str,
 ) -> dict:
     """MCP Tool: List all persistent queries (PQs) on an enterprise system.
 
@@ -1045,6 +1017,7 @@ async def pq_list(
 
     Args:
         context (Context): MCP context object
+        system (str): Enterprise system name as listed by ``list_systems``
 
     Returns:
         dict: Success response:
@@ -1053,7 +1026,7 @@ async def pq_list(
             "system_name": "prod_cluster",
             "pqs": [
                 {
-                    "pq_id": "enterprise:prod_cluster:12345",
+                    "pq_id": "prod_cluster:12345",
                     "serial": 12345,
                     "name": "analytics_worker",
                     "status": "RUNNING",
@@ -1082,12 +1055,10 @@ async def pq_list(
         }
     """
     result: dict[str, object] = {"success": False}
-    system_name = "<unknown>"
+    system_name = system
 
     try:
-        # Get session registry, system name, and factory
-        session_registry = await get_enterprise_registry(context)
-        system_name = session_registry.system_name
+        session_registry = get_enterprise_registry(context, system)
         _LOGGER.info(
             f"[mcp_systems_server:pq_list] Invoked: system_name={system_name!r}"
         )
@@ -1209,13 +1180,13 @@ async def pq_details(
 
     Args:
         context (Context): MCP context object
-        pq_id (str): PQ identifier in format 'enterprise:{system_name}:{serial}'
+        pq_id (str): PQ identifier in format '<system_name>:<serial>'
 
     Returns:
         dict: Success response with comprehensive PQ information:
         {
             "success": True,
-            "pq_id": "enterprise:prod:12345",
+            "pq_id": "prod:12345",
             "serial": 12345,
             "name": "analytics_worker",
             "state": "RUNNING",
@@ -1368,14 +1339,17 @@ async def pq_details(
     result: dict[str, object] = {"success": False}
 
     try:
-        # Get session registry and system name first (needed for pq_id validation)
-        session_registry = await get_enterprise_registry(context)
-        system_name = session_registry.system_name
-
         # Early validation: parse pq_id to fail fast on invalid format
         try:
-            serial = _parse_pq_id(pq_id, system_name)
+            system_name, serial = _parse_pq_id(pq_id)
         except ValueError as e:
+            result["error"] = str(e)
+            result["isError"] = True
+            return result
+
+        try:
+            session_registry = get_enterprise_registry(context, system_name)
+        except InvalidSessionNameError as e:
             result["error"] = str(e)
             result["isError"] = True
             return result
@@ -1400,7 +1374,7 @@ async def pq_details(
 
         if serial not in pq_map:
             error_msg = f"PQ with serial {serial} not found"
-            _LOGGER.error(f"[mcp_systems_server:pq_details] {error_msg}")
+            _LOGGER.warning(f"[mcp_systems_server:pq_details] {error_msg}")
             result["error"] = error_msg
             result["isError"] = True
             return result
@@ -1450,6 +1424,7 @@ async def pq_details(
 
 async def pq_create(
     context: Context,
+    system: str,
     pq_name: str,
     heap_size_gb: float | int,
     script_body: str | None = None,
@@ -1573,6 +1548,7 @@ async def pq_create(
 
     Args:
         context (Context): MCP context object
+        system (str): Enterprise system name as listed by ``list_systems``
         pq_name (str): Human-readable name for the PQ
         heap_size_gb (float | int): JVM heap size in GB (e.g., 8.0 or 16)
         script_body (str | None): Inline script code to execute (mutually exclusive with script_path)
@@ -1606,7 +1582,7 @@ async def pq_create(
 
         {
             "success": True,
-            "pq_id": "enterprise:prod:12345",
+            "pq_id": "prod:12345",
             "serial": 12345,
             "name": "analytics_worker",
             "state": "UNINITIALIZED",
@@ -1633,9 +1609,8 @@ async def pq_create(
             result["isError"] = True
             return result
 
-        # Get session registry, system name, and factory
-        session_registry = await get_enterprise_registry(context)
-        system_name = session_registry.system_name
+        session_registry = get_enterprise_registry(context, system)
+        system_name = system
         _LOGGER.info(
             f"[mcp_systems_server:pq_create] Invoked: system_name={system_name!r}, "
             f"pq_name={pq_name!r}, heap_size_gb={heap_size_gb}"
@@ -1720,8 +1695,7 @@ async def pq_create(
 async def pq_delete(
     context: Context,
     pq_id: str | list[str],
-    timeout_seconds: int = 10,
-    max_concurrent: int = DEFAULT_MAX_CONCURRENT,
+    max_concurrent: Annotated[int | None, Field(gt=0)] = None,
 ) -> dict:
     """MCP Tool: Delete one or more persistent queries.
 
@@ -1764,9 +1738,9 @@ async def pq_delete(
 
     Args:
         context (Context): MCP context object
-        pq_id (str | list[str]): PQ identifier or list of identifiers in format 'enterprise:{system_name}:{serial}'
-        timeout_seconds (int): Max seconds per delete operation (default: 10)
-        max_concurrent (int): Maximum concurrent delete operations (default: 20)
+        pq_id (str | list[str]): PQ identifier or list of identifiers in format '<system_name>:<serial>'
+        max_concurrent (int): Maximum concurrent delete operations (default: 20).
+                              Must be a positive integer (> 0).
 
     Returns:
         dict: Response with per-item results:
@@ -1774,14 +1748,14 @@ async def pq_delete(
             "success": True,
             "results": [
                 {
-                    "pq_id": "enterprise:prod:12345",
+                    "pq_id": "prod:12345",
                     "serial": 12345,
                     "success": True,
                     "name": "analytics_worker",
                     "error": None
                 },
                 {
-                    "pq_id": "enterprise:prod:67890",
+                    "pq_id": "prod:67890",
                     "serial": 67890,
                     "success": False,
                     "name": None,
@@ -1799,9 +1773,11 @@ async def pq_delete(
             "isError": True
         }
     """
-    _LOGGER.info(
-        f"[mcp_systems_server:pq_delete] Invoked: pq_id={pq_id!r}, timeout_seconds={timeout_seconds}"
-    )
+    if max_concurrent is None:
+        max_concurrent = get_enterprise_settings(
+            context
+        ).pq_tools.default_max_concurrent
+    _LOGGER.info(f"[mcp_systems_server:pq_delete] Invoked: pq_id={pq_id!r}")
 
     result: dict[str, object] = {"success": False}
 
@@ -1810,20 +1786,16 @@ async def pq_delete(
         (
             parsed_pqs,
             controller,
-            validated_timeout,
             validated_max_concurrent,
-            system_name,
+            _system_name,
             setup_error,
-        ) = await _setup_batch_pq_operation(
-            context, pq_id, "pq_delete", timeout_seconds, max_concurrent
-        )
+        ) = await _setup_batch_pq_operation(context, pq_id, "pq_delete", max_concurrent)
         if setup_error:
             return setup_error
 
         # Type narrowing: when setup_error is None, all values are guaranteed non-None
         parsed_pqs = cast(list[tuple[str, CorePlusQuerySerial]], parsed_pqs)
         controller = cast(CorePlusControllerClient, controller)
-        validated_timeout = cast(int, validated_timeout)
         validated_max_concurrent = cast(int, validated_max_concurrent)
 
         # Process each PQ with controlled parallelism (best-effort)
@@ -1832,7 +1804,7 @@ async def pq_delete(
         # for AI agents while maintaining performance
         _LOGGER.info(
             f"[mcp_systems_server:pq_delete] Processing {len(parsed_pqs)} PQ(s) "
-            f"with max_concurrent={validated_max_concurrent}, timeout={validated_timeout}s"
+            f"with max_concurrent={validated_max_concurrent}"
         )
 
         async def delete_single_pq(
@@ -1849,9 +1821,7 @@ async def pq_delete(
 
             try:
                 # Get name before deletion
-                pq_info = await controller.get(
-                    serial, timeout_seconds=validated_timeout
-                )
+                pq_info = await controller.get(serial)
                 pq_name = pq_info.config.pb.name
 
                 # Delete the PQ
@@ -2287,7 +2257,7 @@ async def pq_modify(
 
     Args:
         context (Context): MCP context object
-        pq_id (str): PQ identifier in format 'enterprise:{system_name}:{serial}'
+        pq_id (str): PQ identifier in format '<system_name>:<serial>'
         restart (bool): Restart PQ to apply changes immediately (default: False)
         pq_name (str | None): New name for the PQ
         heap_size_gb (float | int | None): JVM heap size in GB (e.g., 8.0 or 16)
@@ -2318,7 +2288,7 @@ async def pq_modify(
 
         {
             "success": True,
-            "pq_id": "enterprise:prod:12345",
+            "pq_id": "prod:12345",
             "serial": 12345,
             "name": "analytics_worker",
             "restarted": False,
@@ -2350,15 +2320,18 @@ async def pq_modify(
             result["isError"] = True
             return result
 
-        # Get session registry and system name first (needed for pq_id validation)
-        session_registry = await get_enterprise_registry(context)
-        system_name = session_registry.system_name
-
-        # Parse pq_id to get serial
+        # Parse pq_id to get serial and the enterprise system it belongs to.
         try:
-            serial = _parse_pq_id(pq_id, system_name)
+            system_name, serial = _parse_pq_id(pq_id)
         except ValueError as e:
             result["error"] = f"Invalid pq_id '{pq_id}': {type(e).__name__}: {e}"
+            result["isError"] = True
+            return result
+
+        try:
+            session_registry = get_enterprise_registry(context, system_name)
+        except InvalidSessionNameError as e:
+            result["error"] = str(e)
             result["isError"] = True
             return result
 
@@ -2380,7 +2353,7 @@ async def pq_modify(
 
         if serial not in pq_map:
             error_msg = f"PQ with serial {serial} not found"
-            _LOGGER.error(f"[mcp_systems_server:pq_modify] {error_msg}")
+            _LOGGER.warning(f"[mcp_systems_server:pq_modify] {error_msg}")
             result["error"] = error_msg
             result["isError"] = True
             return result
@@ -2480,11 +2453,80 @@ async def pq_modify(
     return result
 
 
+async def _pq_start_single(
+    controller: CorePlusControllerClient,
+    system_name: str,
+    pid: str,
+    serial: CorePlusQuerySerial,
+    wait: bool,
+) -> dict[str, object]:
+    """Start a single PQ and return the per-item result dict.
+
+    Extracted from :func:`pq_start` to keep the outer function below
+    the project's cyclomatic-complexity ceiling.
+    """
+    item_result: dict[str, object] = {
+        "pq_id": pid,
+        "serial": serial,
+        "success": False,
+        "name": None,
+        "state": None,
+        "state_category": None,
+        "session_id": None,
+        "error": None,
+    }
+
+    try:
+        # Check current state before attempting start
+        current_info = await controller.get(serial)
+        if current_info.state and current_info.state.status.is_running:
+            item_result["error"] = "Cannot start a PQ that is already RUNNING"
+            _LOGGER.warning(
+                f"[mcp_systems_server:pq_start] PQ {pid} is already RUNNING, skipping start"
+            )
+            return item_result
+
+        # Start the PQ
+        _LOGGER.debug(
+            f"[mcp_systems_server:pq_start] Calling start_and_wait for PQ {pid} (wait={wait})"
+        )
+        await controller.start_and_wait(serial, wait=wait)
+        _LOGGER.debug(
+            f"[mcp_systems_server:pq_start] start_and_wait completed for PQ {pid}"
+        )
+
+        # Get updated info
+        pq_info = await controller.get(serial)
+        pq_name = pq_info.config.pb.name
+        status_obj = pq_info.state.status if pq_info.state else None
+        state_name = status_obj.name if status_obj is not None else "UNKNOWN"
+
+        # Success
+        item_result["success"] = True
+        item_result["name"] = pq_name
+        item_result["state"] = state_name
+        item_result["state_category"] = _pq_state_category(state_name)
+
+        # Add session_id if running (session_id uses name, not serial)
+        _add_session_id_if_running(item_result, status_obj, pq_name, system_name)
+
+        _LOGGER.debug(f"[mcp_systems_server:pq_start] Successfully started PQ {pid}")
+
+    except Exception as e:
+        # Failure - record error
+        item_result["error"] = f"{type(e).__name__}: {str(e) if str(e) else repr(e)}"
+        _LOGGER.warning(
+            f"[mcp_systems_server:pq_start] Failed to start PQ {pid}: {item_result['error']}"
+        )
+
+    return item_result
+
+
 async def pq_start(
     context: Context,
     pq_id: str | list[str],
-    timeout_seconds: int = DEFAULT_PQ_TIMEOUT,
-    max_concurrent: int = DEFAULT_MAX_CONCURRENT,
+    wait: bool = True,
+    max_concurrent: Annotated[int | None, Field(gt=0)] = None,
 ) -> dict:
     """MCP Tool: Start one or more persistent queries.
 
@@ -2500,10 +2542,12 @@ async def pq_start(
     **Important**: All pq_ids must be from the same enterprise system - mixing systems returns error.
 
     **Critical for AI Agents**:
-    - If timeout is reached for a PQ, it's marked as failed BUT continues starting in background
-    - After failures, use pq_details to check if PQs eventually reached RUNNING state
-    - Initialization time varies: simple sessions ~5-15s, large heap/complex scripts ~30-60s
-    - Timeout does NOT cancel the start operation - it only stops waiting
+    - When ``wait=True`` (default), the timeout duration is operator-controlled via
+      ``enterprise/settings.json: timeouts.client.pq_state_change_timeout_seconds``.
+    - If the timeout is reached, the call returns failure BUT the PQ keeps starting in background.
+    - After failures, use pq_details to check if PQs eventually reached RUNNING state.
+    - Initialization time varies: simple sessions ~5-15s, large heap/complex scripts ~30-60s.
+    - Set ``wait=False`` to fire-and-forget (submit start request and return immediately).
 
     Terminology Note:
     - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
@@ -2527,21 +2571,24 @@ async def pq_start(
     - If success=True: name, state, and state_category have values; session_id is populated
       when state is RUNNING, EXECUTING, or INITIALIZING and omitted otherwise; error is None
     - If success=False: name/state/state_category/session_id are None, error has message
-    - Recommended timeout: 30s for typical PQs, 60s for large heap (>32GB) or complex initialization
     - Cannot start a PQ that is already RUNNING - will be marked as failed
     - Can start a STOPPED or FAILED PQ - this is a normal operation
     - state_category == "TRANSITIONAL" (e.g. state CONNECTING or INITIALIZING) is a valid
-      success outcome when the timeout is short — success=True means the start was accepted
-      and the PQ was last seen in a non-failed state, NOT that it is fully RUNNING;
-      use pq_details to confirm RUNNING if the caller requires it
+      success outcome when ``wait=False`` or when the operator-configured wait was short —
+      success=True means the start was accepted and the PQ was last seen in a non-failed
+      state, NOT that it is fully RUNNING; use pq_details to confirm RUNNING if needed.
     - Branch on `state_category == "ACTIVE"` rather than `state == "RUNNING"`
 
     Args:
         context (Context): MCP context object
-        pq_id (str | list[str]): PQ identifier or list of identifiers in format 'enterprise:{system_name}:{serial}'
-        timeout_seconds (int): Max seconds to wait for start (default: 30, max recommended: 60).
-                        Set to 0 for fire-and-forget (starts PQ without waiting for RUNNING state).
-        max_concurrent (int): Maximum concurrent start operations (default: 20)
+        pq_id (str | list[str]): PQ identifier or list of identifiers in format '<system_name>:<serial>'
+        wait (bool): When True (default), wait for the PQ to reach RUNNING (or another
+                     terminal state) using the operator-configured wait duration
+                     (``enterprise/settings.json: timeouts.client.pq_state_change_timeout_seconds``).
+                     When False, fire-and-forget: submit the start request and return
+                     immediately without waiting.
+        max_concurrent (int): Maximum concurrent start operations (default: 20).
+                              Must be a positive integer (> 0).
 
     Returns:
         dict: Response with per-item results:
@@ -2549,7 +2596,7 @@ async def pq_start(
             "success": True,
             "results": [
                 {
-                    "pq_id": "enterprise:prod:12345",
+                    "pq_id": "prod:12345",
                     "serial": 12345,
                     "success": True,
                     "name": "analytics_worker",
@@ -2559,7 +2606,7 @@ async def pq_start(
                     "error": None
                 },
                 {
-                    "pq_id": "enterprise:prod:67890",
+                    "pq_id": "prod:67890",
                     "serial": 67890,
                     "success": False,
                     "name": None,
@@ -2580,9 +2627,11 @@ async def pq_start(
             "isError": True
         }
     """
-    _LOGGER.info(
-        f"[mcp_systems_server:pq_start] Invoked: pq_id={pq_id!r}, timeout_seconds={timeout_seconds}"
-    )
+    if max_concurrent is None:
+        max_concurrent = get_enterprise_settings(
+            context
+        ).pq_tools.default_max_concurrent
+    _LOGGER.info(f"[mcp_systems_server:pq_start] Invoked: pq_id={pq_id!r}, wait={wait}")
 
     result: dict[str, object] = {"success": False}
 
@@ -2591,20 +2640,16 @@ async def pq_start(
         (
             parsed_pqs,
             controller,
-            validated_timeout,
             validated_max_concurrent,
             system_name,
             setup_error,
-        ) = await _setup_batch_pq_operation(
-            context, pq_id, "pq_start", timeout_seconds, max_concurrent
-        )
+        ) = await _setup_batch_pq_operation(context, pq_id, "pq_start", max_concurrent)
         if setup_error:
             return setup_error
 
         # Type narrowing: when setup_error is None, all values are guaranteed non-None
         parsed_pqs = cast(list[tuple[str, CorePlusQuerySerial]], parsed_pqs)
         controller = cast(CorePlusControllerClient, controller)
-        validated_timeout = cast(int, validated_timeout)
         validated_max_concurrent = cast(int, validated_max_concurrent)
 
         # Process each PQ with controlled parallelism (best-effort)
@@ -2613,78 +2658,8 @@ async def pq_start(
         # success/failure reporting for AI agents while maintaining performance
         _LOGGER.info(
             f"[mcp_systems_server:pq_start] Processing {len(parsed_pqs)} PQ(s) "
-            f"with max_concurrent={validated_max_concurrent}, timeout={validated_timeout}s"
+            f"with max_concurrent={validated_max_concurrent}, wait={wait}"
         )
-
-        async def start_single_pq(
-            pid: str, serial: CorePlusQuerySerial
-        ) -> dict[str, object]:
-            """Start a single PQ and return result dict."""
-            item_result: dict[str, object] = {
-                "pq_id": pid,
-                "serial": serial,
-                "success": False,
-                "name": None,
-                "state": None,
-                "state_category": None,
-                "session_id": None,
-                "error": None,
-            }
-
-            try:
-                # Check current state before attempting start
-                current_info = await controller.get(
-                    serial, timeout_seconds=validated_timeout
-                )
-                if current_info.state and current_info.state.status.is_running:
-                    item_result["error"] = "Cannot start a PQ that is already RUNNING"
-                    _LOGGER.warning(
-                        f"[mcp_systems_server:pq_start] PQ {pid} is already RUNNING, skipping start"
-                    )
-                    return item_result
-
-                # Start the PQ and wait
-                _LOGGER.debug(
-                    f"[mcp_systems_server:pq_start] Calling start_and_wait for PQ {pid} (timeout={validated_timeout}s)"
-                )
-                await controller.start_and_wait(serial, validated_timeout)
-                _LOGGER.debug(
-                    f"[mcp_systems_server:pq_start] start_and_wait completed for PQ {pid}"
-                )
-
-                # Get updated info
-                pq_info = await controller.get(
-                    serial, timeout_seconds=validated_timeout
-                )
-                pq_name = pq_info.config.pb.name
-                status_obj = pq_info.state.status if pq_info.state else None
-                state_name = status_obj.name if status_obj is not None else "UNKNOWN"
-
-                # Success
-                item_result["success"] = True
-                item_result["name"] = pq_name
-                item_result["state"] = state_name
-                item_result["state_category"] = _pq_state_category(state_name)
-
-                # Add session_id if running (session_id uses name, not serial)
-                _add_session_id_if_running(
-                    item_result, status_obj, pq_name, system_name
-                )
-
-                _LOGGER.debug(
-                    f"[mcp_systems_server:pq_start] Successfully started PQ {pid}"
-                )
-
-            except Exception as e:
-                # Failure - record error
-                item_result["error"] = (
-                    f"{type(e).__name__}: {str(e) if str(e) else repr(e)}"
-                )
-                _LOGGER.warning(
-                    f"[mcp_systems_server:pq_start] Failed to start PQ {pid}: {item_result['error']}"
-                )
-
-            return item_result
 
         # Use semaphore to limit concurrent operations
         semaphore = asyncio.Semaphore(validated_max_concurrent)
@@ -2694,7 +2669,9 @@ async def pq_start(
         ) -> dict[str, object]:
             """Start with concurrency limit."""
             async with semaphore:
-                return await start_single_pq(pid, serial)
+                return await _pq_start_single(
+                    controller, system_name, pid, serial, wait
+                )
 
         # Execute all starts in parallel with concurrency control
         # return_exceptions=True ensures one failure doesn't cancel other operations
@@ -2769,8 +2746,8 @@ async def pq_start(
 async def pq_stop(
     context: Context,
     pq_id: str | list[str],
-    timeout_seconds: int = DEFAULT_PQ_TIMEOUT,
-    max_concurrent: int = DEFAULT_MAX_CONCURRENT,
+    wait: bool = True,
+    max_concurrent: Annotated[int | None, Field(gt=0)] = None,
 ) -> dict:
     """MCP Tool: Stop one or more running persistent queries.
 
@@ -2785,8 +2762,10 @@ async def pq_stop(
 
     **Important**: All pq_ids must be from the same enterprise system - mixing systems returns error.
 
-    **Important**: If timeout is reached for a PQ, it's marked as failed BUT continues
-    stopping in background. Use pq_details to check current state after failures.
+    **Important**: When ``wait=True`` (default), the timeout duration is operator-controlled
+    via ``enterprise/settings.json: timeouts.client.pq_state_change_timeout_seconds``. If reached,
+    the call returns failure BUT the PQ keeps stopping in background. Use pq_details to
+    check current state after failures. Set ``wait=False`` for fire-and-forget.
 
     Terminology Note:
     - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
@@ -2810,17 +2789,20 @@ async def pq_stop(
     - If success=True: name, state have values, error is None
     - If success=False: name/state are None, error has message
     - Note: Results do NOT include session_id field (PQ is stopped and has no active session)
-    - Typical stop time: 5-15 seconds; increase timeout_seconds for slow shutdowns
     - Cannot stop a PQ that is already STOPPED - will be marked as failed
     - Stopping preserves PQ configuration - use pq_start to run again
     - Stopping is graceful - allows scripts to finish current operations
 
     Args:
         context (Context): MCP context object
-        pq_id (str | list[str]): PQ identifier or list of identifiers in format 'enterprise:{system_name}:{serial}'
-        timeout_seconds (int): Max seconds to wait for stop (default: 30, max recommended: 60).
-                        Set to 0 for fire-and-forget (stops PQ without waiting for STOPPED state).
-        max_concurrent (int): Maximum concurrent stop operations (default: 20)
+        pq_id (str | list[str]): PQ identifier or list of identifiers in format '<system_name>:<serial>'
+        wait (bool): When True (default), wait for the PQ to reach a terminal state using
+                     the operator-configured wait duration
+                     (``enterprise/settings.json: timeouts.client.pq_state_change_timeout_seconds``).
+                     When False, fire-and-forget: submit the stop request and return
+                     immediately without waiting.
+        max_concurrent (int): Maximum concurrent stop operations (default: 20).
+                              Must be a positive integer (> 0).
 
     Returns:
         dict: Response with per-item results:
@@ -2828,7 +2810,7 @@ async def pq_stop(
             "success": True,
             "results": [
                 {
-                    "pq_id": "enterprise:prod:12345",
+                    "pq_id": "prod:12345",
                     "serial": 12345,
                     "success": True,
                     "name": "analytics_worker",
@@ -2836,7 +2818,7 @@ async def pq_stop(
                     "error": None
                 },
                 {
-                    "pq_id": "enterprise:prod:67890",
+                    "pq_id": "prod:67890",
                     "serial": 67890,
                     "success": False,
                     "name": None,
@@ -2855,9 +2837,11 @@ async def pq_stop(
             "isError": True
         }
     """
-    _LOGGER.info(
-        f"[mcp_systems_server:pq_stop] Invoked: pq_id={pq_id!r}, timeout_seconds={timeout_seconds}"
-    )
+    if max_concurrent is None:
+        max_concurrent = get_enterprise_settings(
+            context
+        ).pq_tools.default_max_concurrent
+    _LOGGER.info(f"[mcp_systems_server:pq_stop] Invoked: pq_id={pq_id!r}, wait={wait}")
 
     result: dict[str, object] = {"success": False}
 
@@ -2866,20 +2850,16 @@ async def pq_stop(
         (
             parsed_pqs,
             controller,
-            validated_timeout,
             validated_max_concurrent,
-            system_name,
+            _system_name,
             setup_error,
-        ) = await _setup_batch_pq_operation(
-            context, pq_id, "pq_stop", timeout_seconds, max_concurrent
-        )
+        ) = await _setup_batch_pq_operation(context, pq_id, "pq_stop", max_concurrent)
         if setup_error:
             return setup_error
 
         # Type narrowing: when setup_error is None, all values are guaranteed non-None
         parsed_pqs = cast(list[tuple[str, CorePlusQuerySerial]], parsed_pqs)
         controller = cast(CorePlusControllerClient, controller)
-        validated_timeout = cast(int, validated_timeout)
         validated_max_concurrent = cast(int, validated_max_concurrent)
 
         # Process each PQ with controlled parallelism (best-effort)
@@ -2888,7 +2868,7 @@ async def pq_stop(
         # for AI agents while maintaining performance
         _LOGGER.info(
             f"[mcp_systems_server:pq_stop] Processing {len(parsed_pqs)} PQ(s) "
-            f"with max_concurrent={validated_max_concurrent}, timeout={validated_timeout}s"
+            f"with max_concurrent={validated_max_concurrent}, wait={wait}"
         )
 
         async def stop_single_pq(
@@ -2905,19 +2885,17 @@ async def pq_stop(
             }
 
             try:
-                # Stop the PQ and wait
+                # Stop the PQ
                 _LOGGER.debug(
-                    f"[mcp_systems_server:pq_stop] Calling stop_query for PQ {pid} (timeout={validated_timeout}s)"
+                    f"[mcp_systems_server:pq_stop] Calling stop_query for PQ {pid} (wait={wait})"
                 )
-                await controller.stop_query([serial], validated_timeout)
+                await controller.stop_query([serial], wait=wait)
                 _LOGGER.debug(
                     f"[mcp_systems_server:pq_stop] stop_query completed for PQ {pid}"
                 )
 
                 # Get updated info
-                pq_info = await controller.get(
-                    serial, timeout_seconds=validated_timeout
-                )
+                pq_info = await controller.get(serial)
                 pq_name = pq_info.config.pb.name
                 state_name = pq_info.state.status.name if pq_info.state else "UNKNOWN"
 
@@ -3022,8 +3000,8 @@ async def pq_stop(
 async def pq_restart(
     context: Context,
     pq_id: str | list[str],
-    timeout_seconds: int = DEFAULT_PQ_TIMEOUT,
-    max_concurrent: int = DEFAULT_MAX_CONCURRENT,
+    wait: bool = True,
+    max_concurrent: Annotated[int | None, Field(gt=0)] = None,
 ) -> dict:
     """MCP Tool: Restart one or more persistent queries.
 
@@ -3039,8 +3017,10 @@ async def pq_restart(
 
     **Important**: All pq_ids must be from the same enterprise system - mixing systems returns error.
 
-    **Important**: If timeout is reached for a PQ, it's marked as failed BUT continues
-    restarting in background. Use pq_details to check current state after failures.
+    **Important**: When ``wait=True`` (default), the timeout duration is operator-controlled
+    via ``enterprise/settings.json: timeouts.client.pq_state_change_timeout_seconds``. If reached,
+    the call returns failure BUT the PQ keeps restarting in background. Use pq_details to
+    check current state after failures. Set ``wait=False`` for fire-and-forget.
 
     Terminology Note:
     - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
@@ -3065,19 +3045,22 @@ async def pq_restart(
     - Works for stopped, failed, or completed PQs
     - Preserves PQ serial numbers and configurations
     - More efficient than deleting and recreating
-    - Increase timeout_seconds for PQs that take longer to restart
     - state_category == "TRANSITIONAL" (e.g. state CONNECTING or INITIALIZING) is a valid
-      success outcome when the timeout is short — success=True means the restart was accepted
-      and the PQ was last seen in a non-failed state, NOT that it is fully RUNNING;
-      use pq_details to confirm RUNNING if the caller requires it
+      success outcome when ``wait=False`` or when the operator-configured wait was short —
+      success=True means the restart was accepted and the PQ was last seen in a non-failed
+      state, NOT that it is fully RUNNING; use pq_details to confirm RUNNING if needed.
     - Branch on `state_category == "ACTIVE"` rather than `state == "RUNNING"`
 
     Args:
         context (Context): MCP context object
-        pq_id (str | list[str]): PQ identifier or list of identifiers in format 'enterprise:{system_name}:{serial}'
-        timeout_seconds (int): Max seconds to wait for restart (default: 30, max recommended: 60).
-                        Set to 0 for fire-and-forget (restarts PQ without waiting for RUNNING state).
-        max_concurrent (int): Maximum concurrent restart operations (default: 20)
+        pq_id (str | list[str]): PQ identifier or list of identifiers in format '<system_name>:<serial>'
+        wait (bool): When True (default), wait for the PQ to reach RUNNING using the
+                     operator-configured wait duration
+                     (``enterprise/settings.json: timeouts.client.pq_state_change_timeout_seconds``).
+                     When False, fire-and-forget: submit the restart request and return
+                     immediately without waiting.
+        max_concurrent (int): Maximum concurrent restart operations (default: 20).
+                              Must be a positive integer (> 0).
 
     Returns:
         dict: Response with per-item results:
@@ -3085,7 +3068,7 @@ async def pq_restart(
             "success": True,
             "results": [
                 {
-                    "pq_id": "enterprise:prod:12345",
+                    "pq_id": "prod:12345",
                     "serial": 12345,
                     "success": True,
                     "name": "analytics_worker",
@@ -3095,7 +3078,7 @@ async def pq_restart(
                     "error": None
                 },
                 {
-                    "pq_id": "enterprise:prod:67890",
+                    "pq_id": "prod:67890",
                     "serial": 67890,
                     "success": False,
                     "name": None,
@@ -3116,8 +3099,12 @@ async def pq_restart(
             "isError": True
         }
     """
+    if max_concurrent is None:
+        max_concurrent = get_enterprise_settings(
+            context
+        ).pq_tools.default_max_concurrent
     _LOGGER.info(
-        f"[mcp_systems_server:pq_restart] Invoked: pq_id={pq_id!r}, timeout_seconds={timeout_seconds}"
+        f"[mcp_systems_server:pq_restart] Invoked: pq_id={pq_id!r}, wait={wait}"
     )
 
     result: dict[str, object] = {"success": False}
@@ -3127,12 +3114,11 @@ async def pq_restart(
         (
             parsed_pqs,
             controller,
-            validated_timeout,
             validated_max_concurrent,
             system_name,
             setup_error,
         ) = await _setup_batch_pq_operation(
-            context, pq_id, "pq_restart", timeout_seconds, max_concurrent
+            context, pq_id, "pq_restart", max_concurrent
         )
         if setup_error:
             return setup_error
@@ -3140,7 +3126,6 @@ async def pq_restart(
         # Type narrowing: when setup_error is None, all values are guaranteed non-None
         parsed_pqs = cast(list[tuple[str, CorePlusQuerySerial]], parsed_pqs)
         controller = cast(CorePlusControllerClient, controller)
-        validated_timeout = cast(int, validated_timeout)
         validated_max_concurrent = cast(int, validated_max_concurrent)
 
         # Process each PQ with controlled parallelism (best-effort)
@@ -3149,7 +3134,7 @@ async def pq_restart(
         # for AI agents while maintaining performance
         _LOGGER.info(
             f"[mcp_systems_server:pq_restart] Processing {len(parsed_pqs)} PQ(s) "
-            f"with max_concurrent={validated_max_concurrent}, timeout={validated_timeout}s"
+            f"with max_concurrent={validated_max_concurrent}, wait={wait}"
         )
 
         async def restart_single_pq(
@@ -3170,17 +3155,15 @@ async def pq_restart(
             try:
                 # Restart the PQ (and wait if requested)
                 _LOGGER.debug(
-                    f"[mcp_systems_server:pq_restart] Calling restart_query for PQ {pid} (timeout={validated_timeout}s)"
+                    f"[mcp_systems_server:pq_restart] Calling restart_query for PQ {pid} (wait={wait})"
                 )
-                await controller.restart_query([serial], validated_timeout)
+                await controller.restart_query([serial], wait=wait)
                 _LOGGER.debug(
                     f"[mcp_systems_server:pq_restart] restart_query completed for PQ {pid}"
                 )
 
                 # Get updated info
-                pq_info = await controller.get(
-                    serial, timeout_seconds=validated_timeout
-                )
+                pq_info = await controller.get(serial)
                 pq_name = pq_info.config.pb.name
                 status_obj = pq_info.state.status if pq_info.state else None
                 state_name = status_obj.name if status_obj is not None else "UNKNOWN"

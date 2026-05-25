@@ -1,59 +1,41 @@
-"""Smoke tests for deephaven_mcp.auth.middleware public re-export surface.
+"""Tests for ``deephaven_mcp.auth.middleware`` package surface.
 
-Verifies that all symbols declared in ``__all__`` are importable from the
-package and have the expected identity (i.e. re-exports are the canonical
-objects, not shadows). Behavior is tested in test__middleware.py.
+These tests pin the public re-exports of the package so that a refactor of
+the underlying ``_psk`` module cannot silently change what
+``from deephaven_mcp.auth.middleware import ...`` resolves to.
 """
 
+from __future__ import annotations
+
 import deephaven_mcp.auth.middleware as middleware_pkg
-from deephaven_mcp.auth.middleware import (
-    SCOPE_KEY_CREDENTIALS,
-    SCOPE_KEY_PRINCIPAL,
-    AuthenticationMiddleware,
+from deephaven_mcp.auth.middleware import PSK_HEADER_NAME, PSKMiddleware
+from deephaven_mcp.auth.middleware._psk import (
+    PSK_HEADER_NAME as PSK_HEADER_NAME_INTERNAL,
 )
-from deephaven_mcp.auth.middleware._middleware import (
-    SCOPE_KEY_CREDENTIALS as _CANONICAL_SCOPE_KEY_CREDENTIALS,
-)
-from deephaven_mcp.auth.middleware._middleware import (
-    SCOPE_KEY_PRINCIPAL as _CANONICAL_SCOPE_KEY_PRINCIPAL,
-)
-from deephaven_mcp.auth.middleware._middleware import (
-    AuthenticationMiddleware as _CanonicalAuthenticationMiddleware,
-)
+from deephaven_mcp.auth.middleware._psk import PSKMiddleware as PSKMiddleware_INTERNAL
 
 
-def test_authentication_middleware_is_canonical():
-    assert AuthenticationMiddleware is _CanonicalAuthenticationMiddleware
+def test_all_lists_documented_public_names() -> None:
+    """``__all__`` must list exactly the package's public surface."""
+    assert set(middleware_pkg.__all__) == {"PSK_HEADER_NAME", "PSKMiddleware"}
 
 
-def test_scope_key_principal_is_canonical():
-    assert SCOPE_KEY_PRINCIPAL is _CANONICAL_SCOPE_KEY_PRINCIPAL
+def test_psk_header_name_is_reexport_of_internal_constant() -> None:
+    """The package re-export must be the same object as the internal symbol."""
+    assert PSK_HEADER_NAME is PSK_HEADER_NAME_INTERNAL
 
 
-def test_scope_key_credentials_is_canonical():
-    assert SCOPE_KEY_CREDENTIALS is _CANONICAL_SCOPE_KEY_CREDENTIALS
+def test_psk_middleware_is_reexport_of_internal_class() -> None:
+    """The package re-export must be the same class as the internal symbol."""
+    assert PSKMiddleware is PSKMiddleware_INTERNAL
 
 
-def test_all_surface_importable():
-    """All symbols in ``__all__`` can be imported from the package."""
+def test_psk_header_name_value_is_x_deephaven_psk() -> None:
+    """The PSK header name is part of the wire contract; pin its value."""
+    assert PSK_HEADER_NAME == "X-Deephaven-PSK"
+
+
+def test_all_names_in_all_are_resolvable_attributes() -> None:
+    """Every name in ``__all__`` must actually exist on the module."""
     for name in middleware_pkg.__all__:
-        assert hasattr(
-            middleware_pkg, name
-        ), f"{name!r} declared in __all__ but not found on package"
-
-
-def test_all_surface_complete():
-    """``__all__`` matches the documented re-export surface.
-
-    Regression guard: adding a new public symbol without updating
-    ``__all__`` (or vice-versa) fails this test loudly.
-    """
-    assert set(middleware_pkg.__all__) == {
-        "AuthenticationMiddleware",
-        "SCOPE_KEY_CREDENTIALS",
-        "SCOPE_KEY_PRINCIPAL",
-        # TLS enforcement (added with the transport-security work).
-        "TlsEnforcementMiddleware",
-        "TransportSecurityPolicy",
-        "parse_forwarded_allow_ips",
-    }
+        assert hasattr(middleware_pkg, name), name

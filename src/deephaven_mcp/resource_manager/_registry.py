@@ -37,7 +37,6 @@ import time
 from dataclasses import dataclass
 from typing import override
 
-from deephaven_mcp import config
 from deephaven_mcp._exceptions import (
     InternalError,
     InvalidSessionNameError,
@@ -195,31 +194,27 @@ class BaseRegistry[T: AsyncClosable](abc.ABC):
             )
 
     @abc.abstractmethod
-    async def _load_items(self, config_manager: config.ConfigManager) -> None:
-        """Populate ``_items`` from the given configuration.
+    async def _load_items(self) -> None:
+        """Populate ``_items`` from configuration the subclass already holds.
 
-        Called by ``initialize()`` under ``self._lock``.  Subclasses must
-        implement this to define how items are loaded.
-
-        Args:
-            config_manager (config.ConfigManager): Source of configuration data.
+        Called by ``initialize()`` under ``self._lock``. Subclasses receive
+        their configuration at construction time (a per-system config
+        dataclass) and use it directly here — the registry layer no
+        longer threads a ``ConfigManager`` through its lifecycle.
         """
         pass  # pragma: no cover
 
-    async def initialize(self, config_manager: config.ConfigManager) -> None:
-        """Initialize the registry by loading items from configuration.
+    async def initialize(self) -> None:
+        """Initialize the registry by loading items from its stored configuration.
 
         Idempotent — subsequent calls return immediately if already initialized.
-
-        Args:
-            config_manager (config.ConfigManager): Source of configuration data.
         """
         async with self._lock:
             if self._initialized:
                 return
 
             _LOGGER.info(f"[{self.__class__.__name__}] initializing...")
-            await self._load_items(config_manager)
+            await self._load_items()
             self._initialized = True
             _LOGGER.info(
                 f"[{self.__class__.__name__}] initialized with {len(self._items)} items"
@@ -251,6 +246,12 @@ class BaseRegistry[T: AsyncClosable](abc.ABC):
     async def get_all(self) -> RegistrySnapshot[T]:
         """Retrieve all items as an atomic snapshot.
 
+        Refresh-and-snapshot path: subclasses that maintain external
+        state (e.g. :class:`EnterpriseSessionRegistry`) override this to
+        trigger a refresh before returning the snapshot. Callers that
+        want a cheap, side-effect-free view of the current items should
+        use :meth:`snapshot_items` instead.
+
         Returns:
             RegistrySnapshot[T]: Snapshot with ``items``, ``initialization_phase``
             (always ``COMPLETED`` for this base implementation), and
@@ -266,6 +267,28 @@ class BaseRegistry[T: AsyncClosable](abc.ABC):
 
             # Return a copy to avoid external modification
             return RegistrySnapshot.simple(items=self._items.copy())
+
+    async def snapshot_items(self) -> dict[str, T]:
+        """Return a fresh copy of ``_items`` under ``self._lock`` with no side effects.
+
+        Cheap-snapshot path: never triggers a refresh, never performs
+        network I/O, and never observes initialization-phase or error
+        state. Use this when a caller only needs the current set of
+        managed items — for example, the eviction sweep that iterates
+        managers without forcing the registry to refetch from a remote
+        controller. See :meth:`get_all` for the refresh-and-snapshot
+        path.
+
+        Returns:
+            dict[str, T]: A new dict containing the current items.
+                Mutating the returned dict does not affect the registry.
+
+        Raises:
+            InternalError: If the registry has not been initialized.
+        """
+        async with self._lock:
+            self._check_initialized()
+            return dict(self._items)
 
     async def remove(self, name: str, *, expected: T | None = None) -> T | None:
         """Remove and return the item registered under ``name``.
@@ -353,7 +376,7 @@ class BaseRegistry[T: AsyncClosable](abc.ABC):
         """
         async with self._lock:
             self._check_initialized()
-            start_time = time.time()
+            start_time = time.monotonic()
             _LOGGER.info(f"[{self.__class__.__name__}] closing all items...")
             num_items = len(self._items)
             items_to_close = list(self._items.values())
@@ -363,7 +386,7 @@ class BaseRegistry[T: AsyncClosable](abc.ABC):
         await self._close_items(items_to_close)
         _LOGGER.info(
             f"[{self.__class__.__name__}] closed all items."
-            f" Processed {num_items} items in {time.time() - start_time:.2f}s"
+            f" Processed {num_items} items in {time.monotonic() - start_time:.2f}s"
         )
 
 
@@ -459,14 +482,14 @@ class MutableSessionRegistry(BaseRegistry[BaseItemManager]):
             count = 0
             for sid in self._added_session_ids:
                 try:
-                    s_type, s_source, _ = BaseItemManager.parse_full_name(sid)
+                    s_type, s_system, _ = BaseItemManager.parse_full_name(sid)
                 except InvalidSessionNameError as e:
                     raise InternalError(
                         f"Malformed session ID {sid!r} found in _added_session_ids: {e}"
                     ) from e
                 if (
                     s_type == system_type.value
-                    and s_source == system_name
+                    and s_system == system_name
                     and sid in self._items
                 ):
                     count += 1

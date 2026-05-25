@@ -1,838 +1,602 @@
-"""
-Tests for deephaven_mcp.mcp_systems_server._tools.shared.
+"""Tests for ``deephaven_mcp.mcp_systems_server._tools.shared``.
+
+Covers the helpers used by every tool:
+
+- Lifespan-context accessors (``get_lifespan_context``, ``get_registry``,
+  ``get_multi_config``, ``get_community_registry``, ``get_enterprise_registry``).
+- Identifier parsers (``parse_session_id``, ``parse_pq_id``).
+- Session retrieval (``get_session_from_context``, ``get_enterprise_session``).
+- Response shapers / size guards (``error_response``, ``check_response_size``,
+  ``format_meta_table_result``, ``build_table_data_response``).
+- ``format_initialization_status``, ``redact_json_sensitive_fields``.
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from __future__ import annotations
 
-import pyarrow
+from unittest.mock import AsyncMock, MagicMock
+
+import pyarrow as pa
 import pytest
 from conftest import MockContext
 
-from deephaven_mcp._exceptions import InternalError, RegistryItemNotFoundError
-from deephaven_mcp.client import BaseSession, CorePlusSession
-from deephaven_mcp.mcp_systems_server._tools.shared import (
-    _redact_recursive,
-    build_table_data_response,
-    check_response_size,
-    error_response,
-    format_initialization_status,
-    format_meta_table_result,
-    get_community_registry,
-    get_config_manager,
-    get_enterprise_registry,
-    get_enterprise_session,
-    get_registry_from_context,
-    get_session_from_context,
-    redact_json_sensitive_fields,
+from deephaven_mcp._exceptions import (
+    InternalError,
+    InvalidSessionNameError,
 )
+from deephaven_mcp.client import BaseSession, CorePlusSession
+from deephaven_mcp.mcp_systems_server._tools import shared
 from deephaven_mcp.resource_manager import (
-    CommunitySessionRegistry,
-    EnterpriseSessionRegistry,
     InitializationPhase,
+    SystemType,
 )
 
-# ===========================================================================
-# format_initialization_status tests
-# ===========================================================================
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _ctx(*, registry: object = None, multi_config: object = None) -> MockContext:
+    """Build a ``MockContext`` whose lifespan dict has the given keys.
+
+    Mirrors the production ``LifespanContext`` shape (a ``TypedDict`` with
+    ``registry`` and ``multi_config``). Tests pass in mocks so each helper
+    can be exercised without a live server.
+    """
+    lifespan: dict[str, object] = {}
+    if registry is not None:
+        lifespan["registry"] = registry
+    if multi_config is not None:
+        lifespan["multi_config"] = multi_config
+    return MockContext(lifespan)
+
+
+# ---------------------------------------------------------------------------
+# error_response / format_initialization_status
+# ---------------------------------------------------------------------------
+
+
+def test_error_response_shape():
+    assert shared.error_response("boom") == {
+        "success": False,
+        "error": "boom",
+        "isError": True,
+    }
 
 
 def test_format_initialization_status_completed_no_errors():
-    """COMPLETED phase with no errors returns None."""
-    assert format_initialization_status(InitializationPhase.COMPLETED, {}) is None
-
-
-def test_format_initialization_status_completed_with_errors():
-    """COMPLETED phase with errors reports connection issues."""
-    errors = {"prod": "timeout"}
-    result = format_initialization_status(InitializationPhase.COMPLETED, errors)
-    assert result is not None
-    assert "connection issues" in result["status"]
-    assert result["errors"] == errors
-
-
-def test_format_initialization_status_not_started():
-    """NOT_STARTED phase reports discovery has not yet started."""
-    result = format_initialization_status(InitializationPhase.NOT_STARTED, {})
-    assert result is not None
-    assert "not yet started" in result["status"]
-    assert "errors" not in result
-
-
-def test_format_initialization_status_partial():
-    """PARTIAL phase reports discovery has not yet started."""
-    result = format_initialization_status(InitializationPhase.PARTIAL, {})
-    assert result is not None
-    assert "not yet started" in result["status"]
-    assert "errors" not in result
-
-
-def test_format_initialization_status_loading():
-    """LOADING phase reports discovery is actively running."""
-    result = format_initialization_status(InitializationPhase.LOADING, {})
-    assert result is not None
-    assert "actively running" in result["status"]
-    assert "errors" not in result
-
-
-def test_format_initialization_status_failed():
-    """FAILED phase reports critical failure, not in-progress."""
-    result = format_initialization_status(InitializationPhase.FAILED, {})
-    assert result is not None
-    assert "failed critically" in result["status"]
-    assert "in progress" not in result["status"]
-    assert "errors" not in result
-
-
-def test_format_initialization_status_failed_with_errors():
-    """FAILED phase with errors includes both status and errors."""
-    errors = {"sys": "cancelled"}
-    result = format_initialization_status(InitializationPhase.FAILED, errors)
-    assert result is not None
-    assert "failed critically" in result["status"]
-    assert result["errors"] == errors
-
-
-def test_format_initialization_status_loading_with_errors():
-    """LOADING phase with errors includes both status and errors."""
-    errors = {"sys": "partial failure"}
-    result = format_initialization_status(InitializationPhase.LOADING, errors)
-    assert result is not None
-    assert "actively running" in result["status"]
-    assert result["errors"] == errors
-
-
-# ===========================================================================
-# get_config_manager tests
-# ===========================================================================
-
-
-def test_get_config_manager_returns_config_manager():
-    """get_config_manager returns the config_manager from the lifespan context."""
-    mock_config_manager = MagicMock()
-    context = MockContext({"config_manager": mock_config_manager})
-    assert get_config_manager(context) is mock_config_manager
-
-
-# ===========================================================================
-# get_community_registry tests
-# ===========================================================================
-
-
-@pytest.mark.asyncio
-async def test_get_community_registry_returns_registry():
-    """get_community_registry returns a CommunitySessionRegistry."""
-    mock_registry = MagicMock(spec=CommunitySessionRegistry)
-    context = MockContext(
-        {
-            "registry": mock_registry,
-            "config_manager": MagicMock(),
-        }
+    assert (
+        shared.format_initialization_status(InitializationPhase.COMPLETED, {}) is None
     )
-    result = await get_community_registry(context)
-    assert result is mock_registry
 
 
-@pytest.mark.asyncio
-async def test_get_community_registry_raises_on_wrong_type():
-    """get_community_registry raises InternalError when registry is not a CommunitySessionRegistry."""
-    mock_registry = MagicMock(spec=EnterpriseSessionRegistry)
-    context = MockContext(
-        {
-            "registry": mock_registry,
-            "config_manager": MagicMock(),
-        }
+def test_format_initialization_status_loading_phase_emits_status():
+    info = shared.format_initialization_status(InitializationPhase.LOADING, {})
+    assert info is not None
+    assert "actively running" in info["status"].lower()
+
+
+def test_format_initialization_status_partial_phase_emits_status():
+    info = shared.format_initialization_status(InitializationPhase.PARTIAL, {})
+    assert info is not None
+    assert "not yet" in info["status"].lower()
+
+
+def test_format_initialization_status_failed_phase_emits_status():
+    info = shared.format_initialization_status(InitializationPhase.FAILED, {})
+    assert info is not None
+    assert "failed" in info["status"].lower()
+
+
+def test_format_initialization_status_includes_errors():
+    info = shared.format_initialization_status(
+        InitializationPhase.COMPLETED, {"sys-a": "boom"}
     )
-    with pytest.raises(InternalError, match="CommunitySessionRegistry"):
-        await get_community_registry(context)
+    assert info is not None
+    assert info["errors"] == {"sys-a": "boom"}
 
 
-# ===========================================================================
-# get_enterprise_registry tests
-# ===========================================================================
+# ---------------------------------------------------------------------------
+# Lifespan-context accessors
+# ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_get_enterprise_registry_returns_registry_and_applies_creds():
-    """get_enterprise_registry returns the registry and applies the request creds."""
-    from deephaven_mcp.auth.credentials import PasswordCredentials
-
-    mock_registry = MagicMock(spec=EnterpriseSessionRegistry)
-    mock_registry.apply_credentials = AsyncMock()
-    creds = PasswordCredentials(username="alice", password="pw")
-    context = MockContext(
-        {
-            "registry": mock_registry,
-            "config_manager": MagicMock(),
-        },
-        creds=creds,
-    )
-    result = await get_enterprise_registry(context)
-    assert result is mock_registry
-    mock_registry.apply_credentials.assert_awaited_once_with(creds)
+def test_get_lifespan_context_returns_dict():
+    ctx = _ctx(registry="r", multi_config="c")
+    out = shared.get_lifespan_context(ctx)
+    assert out == {"registry": "r", "multi_config": "c"}
 
 
-@pytest.mark.asyncio
-async def test_get_enterprise_registry_propagates_apply_credentials_rejection():
-    """``shared.get_enterprise_registry`` propagates errors from ``apply_credentials``.
+def test_get_registry_returns_lifespan_registry():
+    sentinel = MagicMock()
+    ctx = _ctx(registry=sentinel)
+    assert shared.get_registry(ctx) is sentinel
 
-    The helper forwards the per-request credentials to the registry's
-    :meth:`apply_credentials` via :func:`get_registry_from_context` and must
-    propagate whatever exception that call raises, without re-implementing
-    the rejection logic itself.
+
+def test_get_multi_config_returns_lifespan_config():
+    sentinel = MagicMock()
+    ctx = _ctx(multi_config=sentinel)
+    assert shared.get_multi_config(ctx) is sentinel
+
+
+def test_get_enterprise_settings_returns_settings():
+    settings = MagicMock(name="enterprise_settings")
+    multi_config = MagicMock()
+    multi_config.enterprise = MagicMock()
+    multi_config.enterprise.settings = settings
+    ctx = _ctx(multi_config=multi_config)
+    assert shared.get_enterprise_settings(ctx) is settings
+
+
+def test_get_enterprise_settings_raises_when_enterprise_none():
+    """Defensive guard required by _python-coding-practices rule 11.
+
+    The registration-time gate in ``server._register_tools`` makes this
+    branch unreachable in normal operation, but the guard must still be
+    exercised by a unit test that constructs the bypass.
     """
-    from deephaven_mcp.auth.credentials import PSKCredentials
-
-    rejection = InternalError("Unsupported credentials type 'PSKCredentials'")
-    mock_registry = MagicMock(spec=EnterpriseSessionRegistry)
-    mock_registry.apply_credentials = AsyncMock(side_effect=rejection)
-    creds = PSKCredentials(psk="x")
-    context = MockContext(
-        {
-            "registry": mock_registry,
-            "config_manager": MagicMock(),
-        },
-        creds=creds,
-    )
-    with pytest.raises(InternalError, match="Unsupported credentials type"):
-        await get_enterprise_registry(context)
-    mock_registry.apply_credentials.assert_awaited_once_with(creds)
+    multi_config = MagicMock()
+    multi_config.enterprise = None
+    ctx = _ctx(multi_config=multi_config)
+    with pytest.raises(
+        InternalError, match="get_enterprise_settings called without enterprise"
+    ):
+        shared.get_enterprise_settings(ctx)
 
 
-@pytest.mark.asyncio
-async def test_get_enterprise_registry_missing_creds_raises():
-    """Missing scope[SCOPE_KEY_CREDENTIALS] raises InternalError."""
-    mock_registry = MagicMock(spec=EnterpriseSessionRegistry)
-    context = MockContext(
-        {
-            "registry": mock_registry,
-            "config_manager": MagicMock(),
-        },
-        creds=None,
-    )
-    with pytest.raises(InternalError, match="Authenticated credentials are missing"):
-        await get_enterprise_registry(context)
+def test_get_community_settings_returns_settings():
+    settings = MagicMock(name="community_settings")
+    multi_config = MagicMock()
+    multi_config.community = MagicMock()
+    multi_config.community.settings = settings
+    ctx = _ctx(multi_config=multi_config)
+    assert shared.get_community_settings(ctx) is settings
 
 
-def test_get_request_credentials_rejects_non_credentials_scope_value():
-    """Wrong type at scope[SCOPE_KEY_CREDENTIALS] raises InternalError.
-
-    If the auth middleware (or a misconfigured test fixture) attaches an
-    object that is not a :class:`Credentials` instance to the ASGI
-    scope, the helper must raise :class:`InternalError` with a clear
-    "wrong type" message rather than silently returning the bogus value
-    to downstream callers.
-    """
-    from deephaven_mcp.mcp_systems_server._tools.shared import (
-        _get_request_credentials,
-    )
-
-    # Pass a plain string in place of a Credentials instance.
-    context = MockContext({}, creds="not-a-credentials-instance")
-    with pytest.raises(InternalError, match="not a Credentials instance"):
-        _get_request_credentials(context)
+def test_get_community_settings_raises_when_community_none():
+    """Defensive guard required by _python-coding-practices rule 11."""
+    multi_config = MagicMock()
+    multi_config.community = None
+    ctx = _ctx(multi_config=multi_config)
+    with pytest.raises(
+        InternalError, match="get_community_settings called without community"
+    ):
+        shared.get_community_settings(ctx)
 
 
-def test_get_request_credentials_no_request_raises():
-    """The private credentials helper raises when context has no request."""
-    from deephaven_mcp.mcp_systems_server._tools.shared import (
-        _get_request_credentials,
-    )
-
-    class _NoReqRequestContext:
-        request = None
-
-    class _NoReqContext:
-        request_context = _NoReqRequestContext()
-
-    with pytest.raises(InternalError, match="no associated HTTP request"):
-        _get_request_credentials(_NoReqContext())
+def test_get_community_registry_returns_child():
+    community = MagicMock()
+    registry = MagicMock(community=community)
+    ctx = _ctx(registry=registry)
+    assert shared.get_community_registry(ctx) is community
 
 
-@pytest.mark.asyncio
-async def test_get_enterprise_registry_idempotent_re_apply():
-    """Re-applying the same creds in subsequent calls is fine (idempotent)."""
-    from deephaven_mcp.auth.credentials import PasswordCredentials
-
-    mock_registry = MagicMock(spec=EnterpriseSessionRegistry)
-    mock_registry.apply_credentials = AsyncMock()
-    creds = PasswordCredentials(username="alice", password="pw")
-    context = MockContext(
-        {
-            "registry": mock_registry,
-            "config_manager": MagicMock(),
-        },
-        creds=creds,
-    )
-    await get_enterprise_registry(context)
-    await get_enterprise_registry(context)
-    assert mock_registry.apply_credentials.await_count == 2
+def test_get_community_registry_raises_when_absent():
+    registry = MagicMock(community=None)
+    ctx = _ctx(registry=registry)
+    with pytest.raises(InternalError, match="No community sessions are configured"):
+        shared.get_community_registry(ctx)
 
 
-@pytest.mark.asyncio
-async def test_get_enterprise_registry_raises_on_wrong_type():
-    """get_enterprise_registry raises InternalError when registry is not an EnterpriseSessionRegistry."""
-    mock_registry = MagicMock(spec=CommunitySessionRegistry)
-    context = MockContext(
-        {
-            "registry": mock_registry,
-            "config_manager": MagicMock(),
-        }
-    )
-    with pytest.raises(InternalError, match="EnterpriseSessionRegistry"):
-        await get_enterprise_registry(context)
+def test_get_enterprise_registry_returns_child():
+    prod = MagicMock()
+    registry = MagicMock(enterprise_systems={"prod": prod})
+    ctx = _ctx(registry=registry)
+    assert shared.get_enterprise_registry(ctx, "prod") is prod
 
 
-# ===========================================================================
-# get_registry_from_context tests
-# ===========================================================================
+def test_get_enterprise_registry_unknown_system_raises():
+    registry = MagicMock(enterprise_systems={"prod": MagicMock()})
+    ctx = _ctx(registry=registry)
+    with pytest.raises(InvalidSessionNameError, match="not configured"):
+        shared.get_enterprise_registry(ctx, "stage")
 
 
-@pytest.mark.asyncio
-async def test_get_registry_from_context_returns_registry():
-    """get_registry_from_context returns the registry from the lifespan context."""
-    mock_registry = MagicMock()
-    context = MockContext(
-        {
-            "registry": mock_registry,
-            "config_manager": MagicMock(),
-        }
-    )
-    result = await get_registry_from_context(context)
-    assert result is mock_registry
+# ---------------------------------------------------------------------------
+# Identifier parsers
+# ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_get_registry_from_context_enterprise_applies_credentials():
-    """For enterprise registries, get_registry_from_context applies credentials."""
-    from deephaven_mcp.auth.credentials import PasswordCredentials
-
-    mock_registry = MagicMock(spec=EnterpriseSessionRegistry)
-    mock_registry.apply_credentials = AsyncMock()
-    creds = PasswordCredentials(username="alice", password="pw")
-    context = MockContext(
-        {
-            "registry": mock_registry,
-            "config_manager": MagicMock(),
-        },
-        creds=creds,
-    )
-    result = await get_registry_from_context(context)
-    assert result is mock_registry
-    mock_registry.apply_credentials.assert_awaited_once_with(creds)
+@pytest.mark.parametrize(
+    "session_id,expected",
+    [
+        ("community:community:local", (SystemType.COMMUNITY, "community", "local")),
+        (
+            "enterprise:prod:my-pq",
+            (SystemType.ENTERPRISE, "prod", "my-pq"),
+        ),
+    ],
+)
+def test_parse_session_id_valid(session_id, expected):
+    assert shared.parse_session_id(session_id) == expected
 
 
-# ===========================================================================
-# get_session_from_context tests
-# ===========================================================================
+def test_parse_session_id_unknown_type_raises():
+    with pytest.raises(InvalidSessionNameError, match="unsupported type"):
+        shared.parse_session_id("warp:source:name")
 
 
-@pytest.mark.asyncio
-async def test_get_session_from_context_success():
-    """Test get_session_from_context successfully retrieves a session."""
-    mock_session = MagicMock()
-    mock_session_manager = MagicMock()
-    mock_session_manager.get = AsyncMock(return_value=mock_session)
-    mock_registry = MagicMock()
-    mock_registry.get = AsyncMock(return_value=mock_session_manager)
-
-    context = MockContext(
-        {
-            "registry": mock_registry,
-            "config_manager": MagicMock(),
-        }
-    )
-
-    result = await get_session_from_context("test_function", context, "test:session:id")
-
-    assert result is mock_session
-    mock_registry.get.assert_called_once_with("test:session:id")
-    mock_session_manager.get.assert_called_once()
+def test_parse_session_id_malformed_raises():
+    with pytest.raises(InvalidSessionNameError):
+        shared.parse_session_id("not-a-real-id")
 
 
-@pytest.mark.asyncio
-async def test_get_session_from_context_session_not_found():
-    """Test get_session_from_context propagates RegistryItemNotFoundError from registry."""
-    mock_registry = MagicMock()
-    mock_registry.get = AsyncMock(
-        side_effect=RegistryItemNotFoundError(
-            "No item with name 'nonexistent:session' found"
-        )
-    )
+@pytest.mark.parametrize(
+    "pq_id,expected",
+    [
+        ("prod:0", ("prod", 0)),
+        ("prod:42", ("prod", 42)),
+        ("dev:9999", ("dev", 9999)),
+    ],
+)
+def test_parse_pq_id_valid(pq_id, expected):
+    assert shared.parse_pq_id(pq_id) == expected
 
-    context = MockContext(
-        {
-            "registry": mock_registry,
-            "config_manager": MagicMock(),
-        }
-    )
 
-    with pytest.raises(RegistryItemNotFoundError, match="No item with name"):
-        await get_session_from_context("test_function", context, "nonexistent:session")
+@pytest.mark.parametrize(
+    "pq_id",
+    [
+        "prod",
+        "prod:",
+        ":42",
+        "prod:42:extra",
+    ],
+)
+def test_parse_pq_id_bad_shape(pq_id):
+    with pytest.raises(InvalidSessionNameError, match="must be of the form"):
+        shared.parse_pq_id(pq_id)
 
-    mock_registry.get.assert_called_once_with("nonexistent:session")
+
+def test_parse_pq_id_non_integer_serial_raises():
+    with pytest.raises(InvalidSessionNameError, match="non-integer serial"):
+        shared.parse_pq_id("prod:abc")
+
+
+def test_parse_pq_id_negative_serial_raises():
+    with pytest.raises(InvalidSessionNameError, match="negative serial"):
+        shared.parse_pq_id("prod:-1")
+
+
+def test_parse_session_id_returns_named_tuple():
+    """Result also exposes attribute access and is a ParsedSessionId."""
+    parsed = shared.parse_session_id("community:community:foo")
+    assert isinstance(parsed, shared.ParsedSessionId)
+    assert parsed.system_name == "community"
+    assert parsed.name == "foo"
+    # Tuple unpacking still works.
+    a, b, c = parsed
+    assert (b, c) == ("community", "foo")
+
+
+def test_parse_pq_id_returns_named_tuple():
+    parsed = shared.parse_pq_id("prod:7")
+    assert isinstance(parsed, shared.ParsedPqId)
+    assert parsed.system_name == "prod"
+    assert parsed.serial == 7
+    # Tuple unpacking still works.
+    s, n = parsed
+    assert (s, n) == ("prod", 7)
+
+
+def test_resolve_pq_ids_to_single_system_happy_path():
+    sys_name, serials = shared.resolve_pq_ids_to_single_system(["prod:1", "prod:2"])
+    assert sys_name == "prod"
+    assert serials == [1, 2]
+
+
+def test_resolve_pq_ids_to_single_system_rejects_empty():
+    with pytest.raises(InvalidSessionNameError):
+        shared.resolve_pq_ids_to_single_system([])
+
+
+def test_resolve_pq_ids_to_single_system_rejects_mixed_systems():
+    with pytest.raises(InvalidSessionNameError, match="same"):
+        shared.resolve_pq_ids_to_single_system(["prod:1", "staging:2"])
+
+
+def test_resolve_pq_ids_to_single_system_propagates_parse_errors():
+    with pytest.raises(InvalidSessionNameError):
+        shared.resolve_pq_ids_to_single_system(["prod:abc"])
+
+
+# ---------------------------------------------------------------------------
+# Session retrieval
+# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_get_session_from_context_keyerror_still_propagates():
-    """Test get_session_from_context still propagates KeyError."""
-    mock_registry = MagicMock()
-    mock_registry.get = AsyncMock(side_effect=KeyError("Session not found"))
+async def test_get_session_from_context_returns_session():
+    expected_session = MagicMock(spec=BaseSession)
+    manager = MagicMock()
+    manager.get = AsyncMock(return_value=expected_session)
 
-    context = MockContext(
-        {
-            "registry": mock_registry,
-            "config_manager": MagicMock(),
-        }
+    registry = MagicMock()
+    registry.get = AsyncMock(return_value=manager)
+
+    ctx = _ctx(registry=registry)
+    out = await shared.get_session_from_context(
+        "toolname", ctx, "community:community:s"
     )
 
-    with pytest.raises(KeyError, match="Session not found"):
-        await get_session_from_context("test_function", context, "nonexistent:session")
-
-
-@pytest.mark.asyncio
-async def test_get_session_from_context_session_connection_fails():
-    """Test get_session_from_context propagates exception when session.get() fails."""
-    mock_session_manager = MagicMock()
-    mock_session_manager.get = AsyncMock(
-        side_effect=Exception("Failed to establish connection")
-    )
-    mock_registry = MagicMock()
-    mock_registry.get = AsyncMock(return_value=mock_session_manager)
-
-    context = MockContext(
-        {
-            "registry": mock_registry,
-            "config_manager": MagicMock(),
-        }
-    )
-
-    with pytest.raises(Exception, match="Failed to establish connection"):
-        await get_session_from_context("test_function", context, "test:session:id")
-
-    mock_registry.get.assert_called_once_with("test:session:id")
-    mock_session_manager.get.assert_called_once()
-
-
-# ===========================================================================
-# error_response tests
-# ===========================================================================
-
-
-def test_error_response_structure():
-    result = error_response("something went wrong")
-    assert result == {
-        "success": False,
-        "error": "something went wrong",
-        "isError": True,
-    }
-
-
-def test_error_response_success_is_false():
-    assert error_response("x")["success"] is False
-
-
-def test_error_response_is_error_is_true():
-    assert error_response("x")["isError"] is True
-
-
-def test_error_response_preserves_message():
-    msg = "Session 'foo' not found"
-    assert error_response(msg)["error"] == msg
-
-
-def test_error_response_empty_message():
-    result = error_response("")
-    assert result["error"] == ""
-    assert result["success"] is False
-    assert result["isError"] is True
-
-
-# ===========================================================================
-# check_response_size tests
-# ===========================================================================
-
-
-def test_check_response_size_acceptable():
-    """Test check_response_size with acceptable size."""
-    result = check_response_size("test_table", 1000000)  # 1MB
-    assert result is None
-
-
-def test_check_response_size_warning_threshold():
-    """Test check_response_size with size above warning threshold."""
-    with patch("deephaven_mcp.mcp_systems_server._tools.shared._LOGGER") as mock_logger:
-        result = check_response_size("test_table", 10000000)  # 10MB
-        assert result is None
-        mock_logger.warning.assert_called_once()
-        assert "Large response (~10.0MB)" in mock_logger.warning.call_args[0][0]
-
-
-def test_check_response_size_over_limit():
-    """Test check_response_size with size over maximum limit."""
-    result = check_response_size("test_table", 60000000)  # 60MB
-    assert result == {
-        "success": False,
-        "error": "Response would be ~60.0MB (max 50MB). Please reduce max_rows.",
-        "isError": True,
-    }
-
-
-# ===========================================================================
-# get_enterprise_session tests
-# ===========================================================================
+    assert out is expected_session
+    registry.get.assert_awaited_once_with("community:community:s")
 
 
 @pytest.mark.asyncio
 async def test_get_enterprise_session_success():
-    """Test get_enterprise_session with a valid CorePlusSession."""
-    mock_session = MagicMock(spec=CorePlusSession)
-    mock_session_manager = MagicMock()
-    mock_session_manager.get = AsyncMock(return_value=mock_session)
-    mock_registry = MagicMock()
-    mock_registry.get = AsyncMock(return_value=mock_session_manager)
+    enterprise_session = MagicMock(spec=CorePlusSession)
+    manager = MagicMock(get=AsyncMock(return_value=enterprise_session))
+    registry = MagicMock(get=AsyncMock(return_value=manager))
 
-    context = MockContext(
-        {
-            "registry": mock_registry,
-            "config_manager": MagicMock(),
-        }
-    )
-
-    session, error = await get_enterprise_session(
-        "test_function", context, "test-session-id"
-    )
-
-    assert session is mock_session
-    assert error is None
+    ctx = _ctx(registry=registry)
+    sess, err = await shared.get_enterprise_session("tool", ctx, "enterprise:prod:s")
+    assert sess is enterprise_session
+    assert err is None
 
 
 @pytest.mark.asyncio
-async def test_get_enterprise_session_not_enterprise():
-    """Test get_enterprise_session with a non-enterprise session."""
-    mock_session = MagicMock(spec=BaseSession)
-    mock_session_manager = MagicMock()
-    mock_session_manager.get = AsyncMock(return_value=mock_session)
-    mock_registry = MagicMock()
-    mock_registry.get = AsyncMock(return_value=mock_session_manager)
+async def test_get_enterprise_session_rejects_non_enterprise():
+    community_session = MagicMock(spec=BaseSession)  # not a CorePlusSession
+    manager = MagicMock(get=AsyncMock(return_value=community_session))
+    registry = MagicMock(get=AsyncMock(return_value=manager))
 
-    context = MockContext(
-        {
-            "registry": mock_registry,
-            "config_manager": MagicMock(),
-        }
+    ctx = _ctx(registry=registry)
+    sess, err = await shared.get_enterprise_session(
+        "tool", ctx, "community:community:s"
     )
-
-    session, error = await get_enterprise_session(
-        "test_function", context, "test-session-id"
-    )
-
-    assert session is None
-    assert error is not None
-    assert error["success"] is False
-    assert "test_function only works with enterprise (Core+) sessions" in error["error"]
-    assert "test-session-id" in error["error"]
-    assert error["isError"] is True
+    assert sess is None
+    assert err is not None
+    assert err["success"] is False
+    assert "enterprise" in err["error"].lower()
 
 
 @pytest.mark.asyncio
-async def test_get_enterprise_session_exception():
-    """Test get_enterprise_session returns error dict when session retrieval raises."""
-    mock_registry = MagicMock()
-    mock_registry.get = AsyncMock(side_effect=Exception("connection refused"))
+async def test_get_enterprise_session_propagates_lookup_error():
+    registry = MagicMock(get=AsyncMock(side_effect=RuntimeError("nope")))
+    ctx = _ctx(registry=registry)
 
-    context = MockContext(
-        {
-            "registry": mock_registry,
-            "config_manager": MagicMock(),
-        }
+    sess, err = await shared.get_enterprise_session(
+        "tool", ctx, "enterprise:prod:missing"
+    )
+    assert sess is None
+    assert err is not None
+    assert "Failed to get session" in err["error"]
+
+
+# ---------------------------------------------------------------------------
+# Response size guards
+# ---------------------------------------------------------------------------
+
+
+def _default_limits():
+    from deephaven_mcp.mcp_systems_server._tools._response_limits import ResponseLimits
+
+    return ResponseLimits()
+
+
+def test_check_response_size_under_warning_returns_none():
+    assert shared.check_response_size("t", 1_000, _default_limits()) is None
+
+
+def test_check_response_size_in_warning_band_returns_none(caplog):
+    caplog.set_level("WARNING")
+    limits = _default_limits()
+    assert (
+        shared.check_response_size("t", limits.warning_response_bytes + 1, limits)
+        is None
+    )
+    assert any("Large response" in rec.message for rec in caplog.records)
+
+
+def test_check_response_size_above_max_returns_error():
+    limits = _default_limits()
+    err = shared.check_response_size("t", limits.max_response_bytes + 1, limits)
+    assert err is not None
+    assert err["success"] is False
+
+
+def test_get_response_limits_routes_to_enterprise():
+    """An enterprise session id routes to enterprise.settings.response_limits."""
+    enterprise_limits = MagicMock(name="enterprise_response_limits")
+    community_limits = MagicMock(name="community_response_limits")
+    multi_config = MagicMock()
+    multi_config.enterprise = MagicMock()
+    multi_config.enterprise.settings.response_limits = enterprise_limits
+    multi_config.community = MagicMock()
+    multi_config.community.settings.response_limits = community_limits
+    ctx = _ctx(multi_config=multi_config)
+    assert (
+        shared.get_response_limits(ctx, "enterprise:prod:session1") is enterprise_limits
     )
 
-    session, error = await get_enterprise_session(
-        "test_function", context, "test-session-id"
-    )
 
-    assert session is None
-    assert error is not None
-    assert error["success"] is False
-    assert "connection refused" in error["error"]
-    assert error["isError"] is True
-
-
-# ===========================================================================
-# format_meta_table_result tests
-# ===========================================================================
-
-
-def _make_arrow_table():
-    """Build a small pyarrow table that mimics a Deephaven meta table."""
-    return pyarrow.table(
-        {
-            "Name": ["Date", "Price"],
-            "DataType": ["LocalDate", "double"],
-            "IsPartitioning": [False, False],
-        }
+def test_get_response_limits_routes_to_community():
+    """A community session id routes to community.settings.response_limits."""
+    enterprise_limits = MagicMock(name="enterprise_response_limits")
+    community_limits = MagicMock(name="community_response_limits")
+    multi_config = MagicMock()
+    multi_config.enterprise = MagicMock()
+    multi_config.enterprise.settings.response_limits = enterprise_limits
+    multi_config.community = MagicMock()
+    multi_config.community.settings.response_limits = community_limits
+    ctx = _ctx(multi_config=multi_config)
+    assert (
+        shared.get_response_limits(ctx, "community:community:session1")
+        is community_limits
     )
 
 
-def test_format_meta_table_result_without_namespace():
-    """Without namespace the result has no 'namespace' key."""
-    arrow_table = _make_arrow_table()
-    result = format_meta_table_result(arrow_table, "daily_prices")
+def test_get_response_limits_raises_on_unhandled_system_type(monkeypatch):
+    """If parsed.system_type is not a known SystemType member, the router raises InternalError.
 
-    assert result["success"] is True
-    assert result["table"] == "daily_prices"
-    assert result["format"] == "json-row"
-    assert result["row_count"] == 2
-    assert len(result["data"]) == 2
-    assert result["data"][0]["Name"] == "Date"
-    assert result["data"][1]["Name"] == "Price"
-    assert len(result["meta_columns"]) == 3
-    assert "namespace" not in result
+    Required by ``feedback_no_asserts_in_production``: every defensive
+    raise in production code must have a unit test that triggers it.
+    Future-proofs the router against ``SystemType`` gaining a new
+    member that the routing code hasn't been taught about.
+    """
+    from deephaven_mcp.mcp_systems_server._tools.shared import ParsedSessionId
+
+    sentinel_system_type = "unhandled-future-type"
+    fake_parsed = ParsedSessionId(
+        system_type=sentinel_system_type,  # type: ignore[arg-type]
+        system_name="x",
+        name="y",
+    )
+    monkeypatch.setattr(shared, "parse_session_id", lambda _sid: fake_parsed)
+
+    ctx = _ctx(multi_config=MagicMock())
+    with pytest.raises(InternalError, match="Unhandled SystemType"):
+        shared.get_response_limits(ctx, "ignored:by:fake-parser")
+
+
+# ---------------------------------------------------------------------------
+# Table formatters
+# ---------------------------------------------------------------------------
+
+
+def _arrow_table() -> pa.Table:
+    return pa.table({"a": [1, 2, 3], "b": ["x", "y", "z"]})
+
+
+def test_format_meta_table_result_no_namespace():
+    out = shared.format_meta_table_result(_arrow_table(), "T")
+    assert out["success"] is True
+    assert out["table"] == "T"
+    assert out["row_count"] == 3
+    assert "namespace" not in out
 
 
 def test_format_meta_table_result_with_namespace():
-    """With namespace the result includes the 'namespace' key."""
-    arrow_table = _make_arrow_table()
-    result = format_meta_table_result(
-        arrow_table, "daily_prices", namespace="market_data"
+    out = shared.format_meta_table_result(_arrow_table(), "T", namespace="ns")
+    assert out["namespace"] == "ns"
+
+
+def test_build_table_data_response_minimal():
+    out = shared.build_table_data_response(
+        _arrow_table(), is_complete=True, format="json-row"
     )
-
-    assert result["success"] is True
-    assert result["namespace"] == "market_data"
-    assert result["table"] == "daily_prices"
-
-
-def test_format_meta_table_result_meta_columns_schema():
-    """meta_columns reflects the schema of the arrow table itself."""
-    arrow_table = _make_arrow_table()
-    result = format_meta_table_result(arrow_table, "t")
-
-    col_names = [c["name"] for c in result["meta_columns"]]
-    assert col_names == ["Name", "DataType", "IsPartitioning"]
+    assert out["success"] is True
+    assert out["row_count"] == 3
+    assert out["is_complete"] is True
+    assert "namespace" not in out and "table_name" not in out
 
 
-# ===========================================================================
-# build_table_data_response tests
-# ===========================================================================
+def test_build_table_data_response_with_namespace_and_name():
+    out = shared.build_table_data_response(
+        _arrow_table(),
+        is_complete=False,
+        format="json-row",
+        table_name="T",
+        namespace="ns",
+    )
+    assert out["table_name"] == "T"
+    assert out["namespace"] == "ns"
+    assert out["is_complete"] is False
 
 
-def _make_data_arrow_table() -> pyarrow.Table:
-    """Small arrow table with two typed columns for data-response tests."""
-    return pyarrow.table(
+# ---------------------------------------------------------------------------
+# JSON redaction
+# ---------------------------------------------------------------------------
+
+
+def test_redact_json_sensitive_fields_none_returns_none():
+    assert shared.redact_json_sensitive_fields(None) is None
+    assert shared.redact_json_sensitive_fields("") is None
+
+
+def test_redact_json_sensitive_fields_unparseable():
+    assert shared.redact_json_sensitive_fields("not json") == "[UNPARSEABLE]"
+
+
+def test_redact_json_sensitive_fields_redacts_known_keys():
+    import json
+
+    raw = json.dumps(
         {
-            "id": pyarrow.array([1, 2, 3], type=pyarrow.int64()),
-            "name": pyarrow.array(["a", "b", "c"], type=pyarrow.string()),
+            "password": "secret-pw",
+            "token": "abc",
+            "nested": {"api_key": "k", "ok": "keep-me"},
+            "items": [{"secret": "s", "x": 1}],
         }
     )
-
-
-def test_build_table_data_response_schema_and_rowcount():
-    """Response includes typed schema and accurate row_count."""
-    arrow_table = _make_data_arrow_table()
-    result = build_table_data_response(arrow_table, is_complete=True, format="json-row")
-
-    assert result["success"] is True
-    assert result["is_complete"] is True
-    assert result["row_count"] == 3
-    assert result["schema"] == [
-        {"name": "id", "type": "int64"},
-        {"name": "name", "type": "string"},
-    ]
-    # Actual format is resolved by format_table_data and echoed back.
-    assert isinstance(result["format"], str)
-    assert "data" in result
-
-
-def test_build_table_data_response_is_complete_false_preserved():
-    """is_complete=False flows through unchanged."""
-    arrow_table = _make_data_arrow_table()
-    result = build_table_data_response(
-        arrow_table, is_complete=False, format="json-row"
-    )
-    assert result["is_complete"] is False
-
-
-def test_build_table_data_response_omits_optional_fields_by_default():
-    """Without table_name/namespace, neither key appears in the response."""
-    arrow_table = _make_data_arrow_table()
-    result = build_table_data_response(arrow_table, is_complete=True, format="json-row")
-    assert "table_name" not in result
-    assert "namespace" not in result
-
-
-def test_build_table_data_response_includes_table_name_when_provided():
-    """table_name is echoed into the response when passed."""
-    arrow_table = _make_data_arrow_table()
-    result = build_table_data_response(
-        arrow_table, is_complete=True, format="json-row", table_name="prices"
-    )
-    assert result["table_name"] == "prices"
-    assert "namespace" not in result
-
-
-def test_build_table_data_response_includes_namespace_when_provided():
-    """namespace is echoed into the response (catalog-table path) when passed."""
-    arrow_table = _make_data_arrow_table()
-    result = build_table_data_response(
-        arrow_table,
-        is_complete=True,
-        format="json-row",
-        table_name="prices",
-        namespace="market_data",
-    )
-    assert result["namespace"] == "market_data"
-    assert result["table_name"] == "prices"
-
-
-def test_build_table_data_response_passes_format_to_formatter():
-    """The requested format is forwarded to format_table_data as format_type=."""
-    arrow_table = _make_data_arrow_table()
-    with patch(
-        "deephaven_mcp.mcp_systems_server._tools.shared.format_table_data",
-        return_value=("csv", "id,name\n1,a\n"),
-    ) as mock_fmt:
-        result = build_table_data_response(arrow_table, is_complete=True, format="csv")
-    mock_fmt.assert_called_once()
-    assert mock_fmt.call_args.kwargs == {"format_type": "csv"}
-    assert result["format"] == "csv"
-    assert result["data"] == "id,name\n1,a\n"
-
-
-def test_build_table_data_response_empty_table():
-    """Empty arrow table yields row_count=0 and an empty schema is still typed."""
-    empty = pyarrow.table({"x": pyarrow.array([], type=pyarrow.int32())})
-    result = build_table_data_response(empty, is_complete=True, format="json-row")
-    assert result["row_count"] == 0
-    assert result["schema"] == [{"name": "x", "type": "int32"}]
-
-
-# ===========================================================================
-# _redact_recursive tests (internal helper, keeps underscore)
-# ===========================================================================
-
-
-def test_redact_recursive_scalar_string():
-    assert _redact_recursive("plain") == "plain"
-
-
-def test_redact_recursive_scalar_int():
-    assert _redact_recursive(42) == 42
-
-
-def test_redact_recursive_scalar_none():
-    assert _redact_recursive(None) is None
-
-
-def test_redact_recursive_empty_dict():
-    assert _redact_recursive({}) == {}
-
-
-def test_redact_recursive_empty_list():
-    assert _redact_recursive([]) == []
-
-
-def test_redact_recursive_dict_sensitive_key():
-    result = _redact_recursive({"password": "hunter2", "host": "db.local"})
-    assert result == {"password": "[REDACTED]", "host": "db.local"}
-
-
-def test_redact_recursive_dict_non_sensitive_key():
-    data = {"host": "db.local", "port": 5432}
-    assert _redact_recursive(data) == data
-
-
-def test_redact_recursive_nested_dict():
-    data = {"jdbc": {"password": "secret", "driver": "com.mysql.Driver"}}
-    result = _redact_recursive(data)
-    assert result == {"jdbc": {"password": "[REDACTED]", "driver": "com.mysql.Driver"}}
-
-
-def test_redact_recursive_list_of_scalars():
-    data = ["a", 1, None]
-    assert _redact_recursive(data) == data
-
-
-def test_redact_recursive_list_of_dicts():
-    data = [{"token": "abc", "id": 1}, {"token": "xyz", "id": 2}]
-    result = _redact_recursive(data)
-    assert result == [
-        {"token": "[REDACTED]", "id": 1},
-        {"token": "[REDACTED]", "id": 2},
-    ]
-
-
-# ===========================================================================
-# redact_json_sensitive_fields tests
-# ===========================================================================
-
-
-def test_redact_json_sensitive_fields_none():
-    assert redact_json_sensitive_fields(None) is None
-
-
-def test_redact_json_sensitive_fields_empty_string():
-    assert redact_json_sensitive_fields("") is None
-
-
-def test_redact_json_sensitive_fields_no_sensitive_keys():
-    import json
-
-    data = {"host": "localhost", "port": 5432, "database": "testdb"}
-    result = redact_json_sensitive_fields(json.dumps(data))
-    assert json.loads(result) == data
-
-
-@pytest.mark.parametrize(
-    "key", ["password", "passwd", "token", "secret", "api_key", "apikey", "api_secret"]
-)
-def test_redact_json_sensitive_fields_each_key(key):
-    import json
-
-    data = {key: "supersensitive", "other": "keep"}
-    result = redact_json_sensitive_fields(json.dumps(data))
-    parsed = json.loads(result)
-    assert parsed[key] == "[REDACTED]"
-    assert parsed["other"] == "keep"
-
-
-def test_redact_json_sensitive_fields_nested():
-    import json
-
-    data = {"jdbcConfig": {"password": "secret123", "host": "db.example.com"}}
-    result = redact_json_sensitive_fields(json.dumps(data))
-    parsed = json.loads(result)
-    assert parsed["jdbcConfig"]["password"] == "[REDACTED]"
-    assert parsed["jdbcConfig"]["host"] == "db.example.com"
-
-
-def test_redact_json_sensitive_fields_array_of_dicts():
-    import json
-
-    data = [{"token": "abc123", "id": 1}, {"token": "xyz789", "id": 2}]
-    result = redact_json_sensitive_fields(json.dumps(data))
-    parsed = json.loads(result)
-    assert parsed[0]["token"] == "[REDACTED]"
-    assert parsed[0]["id"] == 1
-    assert parsed[1]["token"] == "[REDACTED]"
-    assert parsed[1]["id"] == 2
-
-
-def test_redact_json_sensitive_fields_invalid_json():
-    result = redact_json_sensitive_fields("not valid json {{")
-    assert result == "[UNPARSEABLE]"
-
-
-def test_redact_json_sensitive_fields_invalid_json_with_sensitive_content():
-    result = redact_json_sensitive_fields("not-json password=hunter2 token=abc123")
-    assert result == "[UNPARSEABLE]"
-
-
-def test_redact_json_sensitive_fields_mixed_keys():
-    import json
-
-    data = {"username": "admin", "password": "hunter2", "database": "prod"}
-    result = redact_json_sensitive_fields(json.dumps(data))
-    parsed = json.loads(result)
+    out = shared.redact_json_sensitive_fields(raw)
+    assert out is not None
+    parsed = json.loads(out)
     assert parsed["password"] == "[REDACTED]"
-    assert parsed["username"] == "admin"
-    assert parsed["database"] == "prod"
+    assert parsed["token"] == "[REDACTED]"
+    assert parsed["nested"]["api_key"] == "[REDACTED]"
+    assert parsed["nested"]["ok"] == "keep-me"
+    assert parsed["items"][0]["secret"] == "[REDACTED]"
+    assert parsed["items"][0]["x"] == 1
+
+
+# ---------------------------------------------------------------------------
+# check_session_limit
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_check_session_limit_returns_none_when_cap_disabled():
+    registry = MagicMock()
+    registry.count_added_sessions = AsyncMock(return_value=99)
+    result = await shared.check_session_limit(
+        registry,
+        SystemType.COMMUNITY,
+        "community",
+        None,
+        "session_community_create",
+        "Session limit reached: {current}/{max} sessions active",
+    )
+    assert result is None
+    registry.count_added_sessions.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_check_session_limit_returns_none_when_under_cap():
+    registry = MagicMock()
+    registry.count_added_sessions = AsyncMock(return_value=1)
+    result = await shared.check_session_limit(
+        registry,
+        SystemType.ENTERPRISE,
+        "prod",
+        5,
+        "_check_session_limit",
+        "Max concurrent sessions ({max}) reached for system 'prod'",
+    )
+    assert result is None
+    registry.count_added_sessions.assert_awaited_once_with(
+        SystemType.ENTERPRISE, "prod"
+    )
+
+
+@pytest.mark.asyncio
+async def test_check_session_limit_returns_error_when_at_cap():
+    registry = MagicMock()
+    registry.count_added_sessions = AsyncMock(return_value=5)
+    result = await shared.check_session_limit(
+        registry,
+        SystemType.ENTERPRISE,
+        "prod",
+        5,
+        "_check_session_limit",
+        "Max concurrent sessions ({max}) reached for system 'prod'",
+    )
+    assert result is not None
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "Max concurrent sessions (5) reached for system 'prod'" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_check_session_limit_formats_current_and_max():
+    registry = MagicMock()
+    registry.count_added_sessions = AsyncMock(return_value=7)
+    result = await shared.check_session_limit(
+        registry,
+        SystemType.COMMUNITY,
+        "community",
+        5,
+        "session_community_create",
+        "Session limit reached: {current}/{max} sessions active",
+    )
+    assert result is not None
+    assert "Session limit reached: 7/5 sessions active" in result["error"]

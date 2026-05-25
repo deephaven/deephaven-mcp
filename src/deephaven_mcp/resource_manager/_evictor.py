@@ -7,9 +7,10 @@ items whose :attr:`BaseItemManager.evicts_on_idle` is ``True`` from the
 registry after closure.
 
 The Evictor holds a reference to its registry and uses only the
-registry's existing public collection API (:meth:`BaseRegistry.get_all`
-for iteration and :meth:`BaseRegistry.remove` for identity-checked
-removal); no registry methods are exposed solely for the Evictor.
+registry's existing public collection API
+(:meth:`BaseRegistry.snapshot_items` for cheap iteration and
+:meth:`BaseRegistry.remove` for identity-checked removal); no registry
+methods are exposed solely for the Evictor.
 
 Lifecycle:
 
@@ -22,9 +23,12 @@ Concurrency:
 
 - ``_sweeper_task`` is read and written under ``self._lock``.
 - The sweep loop snapshots the registry's items under the registry's
-  own lock (via :meth:`BaseRegistry.get_all`), then iterates candidates
-  outside any lock; per-item idleness is checked under each manager's
-  lock inside :meth:`BaseItemManager.maybe_close_if_idle`.
+  own lock (via :meth:`BaseRegistry.snapshot_items`), then iterates
+  candidates outside any lock; per-item idleness is checked under each
+  manager's lock inside :meth:`BaseItemManager.maybe_close_if_idle`.
+  ``snapshot_items`` performs no network I/O or refresh, so the sweep
+  never forces enterprise registries to re-query their controller
+  purely for the sake of eviction.
 - Final drop happens via :meth:`BaseRegistry.remove(name, expected=manager)`
   — identity-checked, so a same-key re-add between the snapshot and the
   removal does not evict the new entry.
@@ -33,14 +37,40 @@ Concurrency:
 import asyncio
 import logging
 import time
+from typing import Annotated
+
+from pydantic import Field
 
 from .._exceptions import InternalError
+from .._pydantic import StrictSchema
 from ._manager import BaseItemManager
 from ._registry import BaseRegistry
 
 _LOGGER = logging.getLogger(__name__)
 
-__all__ = ["Evictor"]
+__all__ = ["Evictor", "EvictionTimeouts"]
+
+
+class EvictionTimeouts(StrictSchema):
+    """Durations the MCP-side idle-session eviction sweeper applies.
+
+    Drives the per-section eviction sweeper that removes MCP-cached
+    sessions which have been unused for ``session_idle_timeout_seconds``.
+    Independent of any worker-side timeout
+    (e.g. ``EnterpriseSessionCreationDefaults.auto_delete_timeout``).
+
+    Shared between community and enterprise — both sides have the same
+    eviction-sweeper contract.
+    """
+
+    session_idle_timeout_seconds: Annotated[float, Field(gt=0)] = 3600.0
+    """How long (seconds) an idle MCP-cached session is retained
+    before the eviction sweeper removes it."""
+
+    sweep_interval_seconds: Annotated[float, Field(gt=0)] = 60.0
+    """Cadence (seconds) at which the idle-eviction sweep runs.
+    Drives how quickly idle sessions are reclaimed once
+    ``session_idle_timeout_seconds`` is exceeded."""
 
 
 class Evictor:
@@ -54,49 +84,38 @@ class Evictor:
 
     Args:
         registry (BaseRegistry): The registry to sweep.
-        idle_timeout_seconds (float | None): Seconds of inactivity after
-            which a managed item is closed.  ``None`` disables the
-            sweeper entirely (useful for tests and opt-out configs).
-        sweep_interval_seconds (float | None): How often (in seconds) the
-            sweep loop wakes to check for idle items.  ``None`` (the
-            default) disables the sweeper entirely — same as
-            ``idle_timeout_seconds=None``.  Callers that want the sweeper
-            to run must pass non-``None`` values for both parameters.
+        timeouts (EvictionTimeouts | None): Sweep timing. ``None``
+            disables the sweeper entirely (useful for tests and opt-out
+            configs). When non-``None``, both fields are guaranteed
+            positive by :class:`EvictionTimeouts` validation.
     """
 
     def __init__(
         self,
         registry: BaseRegistry,
-        *,
-        idle_timeout_seconds: float | None = None,
-        sweep_interval_seconds: float | None = None,
+        timeouts: EvictionTimeouts | None = None,
     ) -> None:
         self._registry = registry
-        self._idle_timeout: float | None = idle_timeout_seconds
-        self._sweep_interval: float | None = sweep_interval_seconds
+        self._timeouts: EvictionTimeouts | None = timeouts
         self._sweeper_task: asyncio.Task[None] | None = None
         self._lock = asyncio.Lock()
         _LOGGER.debug(
             f"[Evictor] created for {registry.__class__.__name__} "
-            f"(idle_timeout={idle_timeout_seconds}, sweep_interval={sweep_interval_seconds})"
+            f"(timeouts={timeouts!r})"
         )
 
     async def start(self) -> None:
         """Launch the background sweep loop.
 
-        No-op when either ``idle_timeout_seconds`` or
-        ``sweep_interval_seconds`` is ``None`` (the sweeper requires both
-        to run), or when the sweeper task already exists and is still
-        running.
+        No-op when ``timeouts`` is ``None`` (the sweeper is disabled),
+        or when the sweeper task already exists and is still running.
         """
         async with self._lock:
-            if self._idle_timeout is None or self._sweep_interval is None:
+            if self._timeouts is None:
                 _LOGGER.info(
                     f"[Evictor] Sweeper disabled for "
                     f"{self._registry.__class__.__name__} "
-                    f"(idle_timeout={self._idle_timeout}, "
-                    f"sweep_interval={self._sweep_interval}); "
-                    f"both must be non-None to start"
+                    f"(timeouts=None)"
                 )
                 return
             if self._sweeper_task is not None and not self._sweeper_task.done():
@@ -108,7 +127,8 @@ class Evictor:
             _LOGGER.info(
                 f"[Evictor] Starting idle sweeper for "
                 f"{self._registry.__class__.__name__} "
-                f"(timeout={self._idle_timeout}s, interval={self._sweep_interval}s)"
+                f"(timeout={self._timeouts.session_idle_timeout_seconds}s, "
+                f"interval={self._timeouts.sweep_interval_seconds}s)"
             )
             self._sweeper_task = asyncio.create_task(self._sweep_loop())
 
@@ -166,22 +186,23 @@ class Evictor:
         continues.  ``asyncio.CancelledError`` is re-raised so the
         awaiter in :meth:`stop` observes the cancellation.
 
-        Raises :class:`InternalError` if invoked with
-        ``_sweep_interval`` set to ``None``.
+        Raises :class:`InternalError` if invoked with ``_timeouts`` set
+        to ``None`` (start() must gate this branch).
         """
-        if self._sweep_interval is None:
+        if self._timeouts is None:
             raise InternalError(
-                "[Evictor] _sweep_loop entered with _sweep_interval is None; "
+                "[Evictor] _sweep_loop entered with _timeouts is None; "
                 "start() must guarantee a non-None value before launching the "
                 "sweep task"
             )
+        sweep_interval = self._timeouts.sweep_interval_seconds
         _LOGGER.info(
             f"[Evictor] Sweep loop started for "
-            f"{self._registry.__class__.__name__} (interval={self._sweep_interval}s)"
+            f"{self._registry.__class__.__name__} (interval={sweep_interval}s)"
         )
         try:
             while True:
-                await asyncio.sleep(self._sweep_interval)
+                await asyncio.sleep(sweep_interval)
                 try:
                     await self._sweep_once()
                 except Exception:
@@ -197,8 +218,9 @@ class Evictor:
         """One eviction pass over the registry's items.
 
         1. Snapshot ``(name, manager)`` pairs via the registry's public
-           :meth:`BaseRegistry.get_all` (the registry takes its own lock
-           during the snapshot).
+           :meth:`BaseRegistry.snapshot_items` (the registry takes its
+           own lock during the snapshot, but performs no refresh or
+           network I/O).
         2. For each pair, call
            :meth:`BaseItemManager.maybe_close_if_idle` — the manager's
            own lock serializes idle-check + close against concurrent
@@ -209,22 +231,22 @@ class Evictor:
            — identity-checked, so a same-key re-add between the snapshot
            and the removal does not evict the new entry.
         """
-        if self._idle_timeout is None:
+        if self._timeouts is None:
             raise InternalError(
-                "[Evictor] _sweep_once invoked with _idle_timeout is None; "
+                "[Evictor] _sweep_once invoked with _timeouts is None; "
                 "start() must guarantee a non-None value before launching the "
                 "sweep task"
             )
-        timeout = self._idle_timeout
+        timeout = self._timeouts.session_idle_timeout_seconds
         now = time.monotonic()
 
-        snapshot = await self._registry.get_all()
-        total = len(snapshot.items)
+        items = await self._registry.snapshot_items()
+        total = len(items)
         closed_count = 0
         removed_count = 0
         skipped_count = 0
 
-        for name, manager in snapshot.items.items():
+        for name, manager in items.items():
             if not isinstance(manager, BaseItemManager):
                 # Defensive: the registry's generic type only constrains items
                 # to AsyncClosable.  Items that are not BaseItemManager don't

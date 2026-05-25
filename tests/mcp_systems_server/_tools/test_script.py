@@ -31,6 +31,7 @@ from deephaven_mcp.resource_manager import (
     EnterpriseSessionManager,
     PythonLaunchedSession,
     ResourceLivenessStatus,
+    SessionOrigin,
     SystemType,
 )
 
@@ -56,6 +57,10 @@ async def test_session_community_create_with_pip_and_process_id():
 
     full_config = community_config
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
+    # Stash for conftest's lifespan adapter — exposes the community
+    # settings dict to the multiplexed-server tool helpers without
+    # rewriting every test's MockContext call site.
+    mock_session_registry._community_settings = community_config
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
     mock_session_registry.add_session = AsyncMock()
     mock_session_registry.get = AsyncMock(
@@ -108,45 +113,13 @@ async def test_session_community_create_with_pip_and_process_id():
         assert result["process_id"] == 99999
 
 
-@pytest.mark.asyncio
-async def test_session_community_create_auth_token_env_var_not_found():
-    """Test that error is raised when auth_token_env_var is configured but env var not found."""
-    mock_config_manager = MagicMock()
-    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
-
-    community_config = {
-        "session_creation": {
-            "max_concurrent_sessions": 5,
-            "defaults": {
-                "auth_token_env_var": "NONEXISTENT_VAR",
-            },
-        }
-    }
-
-    full_config = community_config
-    mock_config_manager.get_config = AsyncMock(return_value=full_config)
-    mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
-    mock_session_registry.add_session = AsyncMock()
-    mock_session_registry.get = AsyncMock(
-        side_effect=RegistryItemNotFoundError("not found")
-    )
-
-    context = MockContext(
-        {
-            "config_manager": mock_config_manager,
-            "registry": mock_session_registry,
-            "instance_tracker": create_mock_instance_tracker(),
-        }
-    )
-
-    with patch.dict(os.environ, {}, clear=True):  # Empty environment
-        result = await session_community_create(context, session_name="test-session")
-
-        # Should fail because explicitly configured env var is not set
-        assert result["success"] is False
-        assert "NONEXISTENT_VAR" in result["error"]
-        assert "unset or empty" in result["error"]
-        assert result["isError"] is True
+# Note: ``test_session_community_create_auth_token_env_var_not_found`` was
+# removed. The legacy code resolved ``token_env_var`` lazily at session-
+# creation time and surfaced ``unset or empty`` errors through this tool.
+# After the Pydantic migration, env-var resolution happens eagerly at
+# config-load time in :class:`PSKCredentials._resolve`, so a missing
+# env var fails the loader before any tool runs. That code path is now
+# covered by ``tests/auth/credentials/test__credentials.py``.
 
 
 @pytest.mark.asyncio
@@ -164,6 +137,10 @@ async def test_session_community_create_cleanup_fails_on_timeout():
 
     full_config = community_config
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
+    # Stash for conftest's lifespan adapter — exposes the community
+    # settings dict to the multiplexed-server tool helpers without
+    # rewriting every test's MockContext call site.
+    mock_session_registry._community_settings = community_config
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
     mock_session_registry.get = AsyncMock(
         side_effect=RegistryItemNotFoundError("not found")
@@ -227,9 +204,10 @@ async def test_session_community_delete_removal_returns_none():
     mock_launched_session.launch_method = "docker"
 
     mock_manager = MagicMock(spec=DynamicCommunitySessionManager)
-    mock_manager.full_name = "community:dynamic:test-session"
+    mock_manager.full_name = "community:community:test-session"
     mock_manager._name = "test-session"
-    mock_manager.source = "dynamic"
+    mock_manager.system = "community"
+    mock_manager.origin = SessionOrigin.DYNAMIC
     mock_manager.system_type = SystemType.COMMUNITY
     mock_manager.launched_session = mock_launched_session
     mock_manager.close = AsyncMock()
@@ -246,13 +224,13 @@ async def test_session_community_delete_removal_returns_none():
     )
 
     result = await session_community_delete(
-        context, session_id="community:dynamic:test-session"
+        context, session_id="community:community:test-session"
     )
 
     # Should still succeed even though removal returned None
     assert result["success"] is True
     mock_session_registry.remove.assert_awaited_once_with(
-        "community:dynamic:test-session"
+        "community:community:test-session"
     )
 
 

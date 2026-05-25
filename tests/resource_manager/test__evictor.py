@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from deephaven_mcp._exceptions import InternalError
-from deephaven_mcp.resource_manager import Evictor
+from deephaven_mcp.resource_manager import EvictionTimeouts, Evictor
 from deephaven_mcp.resource_manager._manager import (
     BaseItemManager,
     ResourceLivenessStatus,
@@ -56,13 +56,13 @@ class _StubRegistry(BaseRegistry[_StubItem]):
     """BaseRegistry subclass that lets tests pre-populate ``_items``."""
 
     @override
-    async def _load_items(self, config_manager) -> None:
+    async def _load_items(self) -> None:
         return None
 
 
 class _StubMutableRegistry(MutableSessionRegistry):
     @override
-    async def _load_items(self, config_manager) -> None:
+    async def _load_items(self) -> None:
         return None
 
 
@@ -74,13 +74,13 @@ class _StubMutableRegistry(MutableSessionRegistry):
 @pytest.mark.asyncio
 async def test_sweep_once_skips_fresh_items():
     reg = _StubRegistry()
-    await reg.initialize(config_manager=AsyncMock())
+    await reg.initialize()
     try:
         mgr = _StubStaticManager("fresh")
         reg._items[mgr.full_name] = mgr
         await mgr.get()
 
-        evictor = Evictor(reg, idle_timeout_seconds=3600.0)
+        evictor = Evictor(reg, EvictionTimeouts(session_idle_timeout_seconds=3600.0))
         await evictor._sweep_once()
         assert mgr._item_cache is not None
         assert mgr.full_name in reg._items
@@ -91,14 +91,14 @@ async def test_sweep_once_skips_fresh_items():
 @pytest.mark.asyncio
 async def test_sweep_once_closes_idle_keep_in_registry():
     reg = _StubRegistry()
-    await reg.initialize(config_manager=AsyncMock())
+    await reg.initialize()
     try:
         mgr = _StubStaticManager("idle")
         reg._items[mgr.full_name] = mgr
         await mgr.get()
         mgr._last_accessed = time.monotonic() - 1000.0
 
-        evictor = Evictor(reg, idle_timeout_seconds=0.01)
+        evictor = Evictor(reg, EvictionTimeouts(session_idle_timeout_seconds=0.01))
         await evictor._sweep_once()
         assert mgr._item_cache is None
         # Non-evicting items stay in the registry for lazy reconnect.
@@ -110,7 +110,7 @@ async def test_sweep_once_closes_idle_keep_in_registry():
 @pytest.mark.asyncio
 async def test_sweep_once_removes_evicts_on_idle():
     reg = _StubMutableRegistry()
-    await reg.initialize(config_manager=AsyncMock())
+    await reg.initialize()
     try:
         mgr = _StubDynamicManager("dyn")
         reg._items[mgr.full_name] = mgr
@@ -118,7 +118,7 @@ async def test_sweep_once_removes_evicts_on_idle():
         await mgr.get()
         mgr._last_accessed = time.monotonic() - 1000.0
 
-        evictor = Evictor(reg, idle_timeout_seconds=0.01)
+        evictor = Evictor(reg, EvictionTimeouts(session_idle_timeout_seconds=0.01))
         await evictor._sweep_once()
         assert mgr.full_name not in reg._items
         # Added-session tracking is freed too (via _on_removed hook).
@@ -131,7 +131,7 @@ async def test_sweep_once_removes_evicts_on_idle():
 async def test_sweep_once_identity_checked_drop_protects_same_key_re_add():
     """A new manager added with the same key during the sweep survives."""
     reg = _StubMutableRegistry()
-    await reg.initialize(config_manager=AsyncMock())
+    await reg.initialize()
     try:
         old = _StubDynamicManager("dyn")
         reg._items[old.full_name] = old
@@ -169,7 +169,7 @@ async def test_sweep_once_identity_checked_drop_protects_same_key_re_add():
 @pytest.mark.asyncio
 async def test_sweep_once_logs_and_continues_on_per_item_error(caplog):
     reg = _StubRegistry()
-    await reg.initialize(config_manager=AsyncMock())
+    await reg.initialize()
     try:
         raising = _StubStaticManager("raises")
         ok = _StubStaticManager("ok")
@@ -185,7 +185,7 @@ async def test_sweep_once_logs_and_continues_on_per_item_error(caplog):
 
         raising.maybe_close_if_idle = _boom  # type: ignore[method-assign]
 
-        evictor = Evictor(reg, idle_timeout_seconds=0.01)
+        evictor = Evictor(reg, EvictionTimeouts(session_idle_timeout_seconds=0.01))
         with caplog.at_level(
             logging.ERROR, logger="deephaven_mcp.resource_manager._evictor"
         ):
@@ -215,13 +215,13 @@ async def test_sweep_once_skips_non_base_item_manager(caplog):
             self.closed = True
 
     reg = _StubRegistry()
-    await reg.initialize(config_manager=AsyncMock())
+    await reg.initialize()
     try:
         bare = _BareClosable()
         # Bypass typing — registry's generic only requires AsyncClosable.
         reg._items["bare:item"] = bare  # type: ignore[assignment]
 
-        evictor = Evictor(reg, idle_timeout_seconds=0.01)
+        evictor = Evictor(reg, EvictionTimeouts(session_idle_timeout_seconds=0.01))
         with caplog.at_level(
             logging.WARNING, logger="deephaven_mcp.resource_manager._evictor"
         ):
@@ -248,9 +248,14 @@ async def test_sweep_once_skips_non_base_item_manager(caplog):
 @pytest.mark.asyncio
 async def test_start_launches_task_when_timeout_set():
     reg = _StubRegistry()
-    await reg.initialize(config_manager=AsyncMock())
+    await reg.initialize()
     try:
-        evictor = Evictor(reg, idle_timeout_seconds=3600.0, sweep_interval_seconds=60.0)
+        evictor = Evictor(
+            reg,
+            EvictionTimeouts(
+                session_idle_timeout_seconds=3600.0, sweep_interval_seconds=60.0
+            ),
+        )
         await evictor.start()
         assert evictor._sweeper_task is not None
         assert not evictor._sweeper_task.done()
@@ -262,9 +267,9 @@ async def test_start_launches_task_when_timeout_set():
 @pytest.mark.asyncio
 async def test_start_skips_task_when_timeout_none():
     reg = _StubRegistry()
-    await reg.initialize(config_manager=AsyncMock())
+    await reg.initialize()
     try:
-        evictor = Evictor(reg, idle_timeout_seconds=None)
+        evictor = Evictor(reg, None)
         await evictor.start()
         assert evictor._sweeper_task is None
     finally:
@@ -272,25 +277,35 @@ async def test_start_skips_task_when_timeout_none():
 
 
 @pytest.mark.asyncio
-async def test_start_skips_task_when_sweep_interval_none():
-    """``sweep_interval_seconds=None`` disables the sweeper, same as the timeout."""
+async def test_start_uses_default_sweep_interval_when_only_idle_specified():
+    """Providing ``EvictionTimeouts`` always enables the sweeper.
+
+    Under the new typed API there is no "one knob set, the other not"
+    state — ``EvictionTimeouts`` validates both fields. The disabled
+    state is encoded as ``Evictor(reg, None)`` only (covered above).
+    """
     reg = _StubRegistry()
-    await reg.initialize(config_manager=AsyncMock())
+    await reg.initialize()
     try:
-        evictor = Evictor(reg, idle_timeout_seconds=3600.0)
-        # sweep_interval_seconds defaults to None — start() must return early.
+        evictor = Evictor(reg, EvictionTimeouts(session_idle_timeout_seconds=3600.0))
         await evictor.start()
-        assert evictor._sweeper_task is None
+        assert evictor._sweeper_task is not None
     finally:
+        await evictor.stop()
         await reg.close()
 
 
 @pytest.mark.asyncio
 async def test_stop_cancels_task():
     reg = _StubRegistry()
-    await reg.initialize(config_manager=AsyncMock())
+    await reg.initialize()
     try:
-        evictor = Evictor(reg, idle_timeout_seconds=3600.0, sweep_interval_seconds=60.0)
+        evictor = Evictor(
+            reg,
+            EvictionTimeouts(
+                session_idle_timeout_seconds=3600.0, sweep_interval_seconds=60.0
+            ),
+        )
         await evictor.start()
         task = evictor._sweeper_task
         assert task is not None
@@ -304,9 +319,9 @@ async def test_stop_cancels_task():
 @pytest.mark.asyncio
 async def test_stop_is_idempotent_without_prior_start():
     reg = _StubRegistry()
-    await reg.initialize(config_manager=AsyncMock())
+    await reg.initialize()
     try:
-        evictor = Evictor(reg, idle_timeout_seconds=3600.0)
+        evictor = Evictor(reg, EvictionTimeouts(session_idle_timeout_seconds=3600.0))
         # No start; stop should be a no-op.
         await evictor.stop()
         await evictor.stop()  # second call also fine
@@ -315,8 +330,8 @@ async def test_stop_is_idempotent_without_prior_start():
 
 
 @pytest.mark.asyncio
-async def test_sweep_once_raises_internal_error_when_idle_timeout_none():
-    """Direct invocation of _sweep_once with idle_timeout=None must raise.
+async def test_sweep_once_raises_internal_error_when_timeouts_none():
+    """Direct invocation of _sweep_once with timeouts=None must raise.
 
     Invariant: start() refuses to launch the sweep loop unless both timing
     params are non-None.  If a caller bypasses start() and invokes the
@@ -324,28 +339,27 @@ async def test_sweep_once_raises_internal_error_when_idle_timeout_none():
     bug — raise InternalError rather than silently no-op'ing or asserting.
     """
     reg = _StubRegistry()
-    await reg.initialize(config_manager=AsyncMock())
+    await reg.initialize()
     try:
-        evictor = Evictor(reg, idle_timeout_seconds=None)
-        with pytest.raises(InternalError, match="_idle_timeout is None"):
+        evictor = Evictor(reg, None)
+        with pytest.raises(InternalError, match="_timeouts is None"):
             await evictor._sweep_once()
     finally:
         await reg.close()
 
 
 @pytest.mark.asyncio
-async def test_sweep_loop_raises_internal_error_when_sweep_interval_none():
-    """Direct invocation of _sweep_loop with sweep_interval=None must raise.
+async def test_sweep_loop_raises_internal_error_when_timeouts_none():
+    """Direct invocation of _sweep_loop with timeouts=None must raise.
 
     Same rationale as the _sweep_once test: bypassing start() to invoke the
     sweep loop on a disabled Evictor is an internal bug.
     """
     reg = _StubRegistry()
-    await reg.initialize(config_manager=AsyncMock())
+    await reg.initialize()
     try:
-        evictor = Evictor(reg, idle_timeout_seconds=3600.0)
-        # sweep_interval_seconds defaults to None.
-        with pytest.raises(InternalError, match="_sweep_interval is None"):
+        evictor = Evictor(reg, None)
+        with pytest.raises(InternalError, match="_timeouts is None"):
             await evictor._sweep_loop()
     finally:
         await reg.close()
@@ -353,11 +367,16 @@ async def test_sweep_loop_raises_internal_error_when_sweep_interval_none():
 
 @pytest.mark.asyncio
 async def test_start_then_stop_then_start_again():
-    """A sweeper can be restarted after a stop (used by mcp_reload)."""
+    """A sweeper can be restarted after a stop."""
     reg = _StubRegistry()
-    await reg.initialize(config_manager=AsyncMock())
+    await reg.initialize()
     try:
-        evictor = Evictor(reg, idle_timeout_seconds=3600.0, sweep_interval_seconds=60.0)
+        evictor = Evictor(
+            reg,
+            EvictionTimeouts(
+                session_idle_timeout_seconds=3600.0, sweep_interval_seconds=60.0
+            ),
+        )
         await evictor.start()
         await evictor.stop()
         assert evictor._sweeper_task is None
@@ -373,9 +392,14 @@ async def test_start_then_stop_then_start_again():
 async def test_start_is_idempotent_while_running():
     """Calling ``start()`` again while a sweeper task is alive is a no-op."""
     reg = _StubRegistry()
-    await reg.initialize(config_manager=AsyncMock())
+    await reg.initialize()
     try:
-        evictor = Evictor(reg, idle_timeout_seconds=3600.0, sweep_interval_seconds=60.0)
+        evictor = Evictor(
+            reg,
+            EvictionTimeouts(
+                session_idle_timeout_seconds=3600.0, sweep_interval_seconds=60.0
+            ),
+        )
         await evictor.start()
         task = evictor._sweeper_task
         assert task is not None and not task.done()
@@ -391,9 +415,14 @@ async def test_start_is_idempotent_while_running():
 async def test_stop_with_already_finished_task():
     """``stop()`` is a no-op when the sweeper task has already finished."""
     reg = _StubRegistry()
-    await reg.initialize(config_manager=AsyncMock())
+    await reg.initialize()
     try:
-        evictor = Evictor(reg, idle_timeout_seconds=3600.0, sweep_interval_seconds=60.0)
+        evictor = Evictor(
+            reg,
+            EvictionTimeouts(
+                session_idle_timeout_seconds=3600.0, sweep_interval_seconds=60.0
+            ),
+        )
         # Install a pre-finished task directly so we hit the ``task.done()``
         # branch in stop() without racing the real sweep loop.
 
@@ -413,9 +442,14 @@ async def test_stop_with_already_finished_task():
 async def test_sweep_loop_continues_after_sweep_once_raises(caplog):
     """When ``_sweep_once`` raises, the loop swallows it and keeps sweeping."""
     reg = _StubRegistry()
-    await reg.initialize(config_manager=AsyncMock())
+    await reg.initialize()
     try:
-        evictor = Evictor(reg, idle_timeout_seconds=3600.0, sweep_interval_seconds=0.01)
+        evictor = Evictor(
+            reg,
+            EvictionTimeouts(
+                session_idle_timeout_seconds=3600.0, sweep_interval_seconds=0.01
+            ),
+        )
 
         call_count = 0
         success_event = asyncio.Event()
@@ -456,9 +490,14 @@ async def test_stop_logs_when_task_raises_non_cancelled_error(caplog):
     cancellation and re-raises something else).
     """
     reg = _StubRegistry()
-    await reg.initialize(config_manager=AsyncMock())
+    await reg.initialize()
     try:
-        evictor = Evictor(reg, idle_timeout_seconds=3600.0, sweep_interval_seconds=60.0)
+        evictor = Evictor(
+            reg,
+            EvictionTimeouts(
+                session_idle_timeout_seconds=3600.0, sweep_interval_seconds=60.0
+            ),
+        )
 
         async def _bad_sweeper() -> None:
             try:
@@ -488,7 +527,7 @@ async def test_stop_logs_when_task_raises_non_cancelled_error(caplog):
 async def test_sweep_once_logs_and_continues_on_registry_remove_error(caplog):
     """When ``registry.remove`` raises, the sweep logs and continues."""
     reg = _StubMutableRegistry()
-    await reg.initialize(config_manager=AsyncMock())
+    await reg.initialize()
     try:
         mgr = _StubDynamicManager("dyn-remove-raises")
         reg._items[mgr.full_name] = mgr
@@ -501,7 +540,7 @@ async def test_sweep_once_logs_and_continues_on_registry_remove_error(caplog):
 
         reg.remove = _boom  # type: ignore[method-assign]
 
-        evictor = Evictor(reg, idle_timeout_seconds=0.01)
+        evictor = Evictor(reg, EvictionTimeouts(session_idle_timeout_seconds=0.01))
         with caplog.at_level(
             logging.ERROR, logger="deephaven_mcp.resource_manager._evictor"
         ):
@@ -522,7 +561,7 @@ async def test_sweep_once_logs_and_continues_on_registry_remove_error(caplog):
 async def test_sweep_once_logs_at_debug_when_registry_remove_returns_none(caplog):
     """When ``registry.remove`` returns ``None`` (concurrent replace), DEBUG logs the race."""
     reg = _StubMutableRegistry()
-    await reg.initialize(config_manager=AsyncMock())
+    await reg.initialize()
     try:
         mgr = _StubDynamicManager("dyn-remove-none")
         reg._items[mgr.full_name] = mgr
@@ -535,7 +574,7 @@ async def test_sweep_once_logs_at_debug_when_registry_remove_returns_none(caplog
 
         reg.remove = _returns_none  # type: ignore[method-assign]
 
-        evictor = Evictor(reg, idle_timeout_seconds=0.01)
+        evictor = Evictor(reg, EvictionTimeouts(session_idle_timeout_seconds=0.01))
         with caplog.at_level(
             logging.DEBUG, logger="deephaven_mcp.resource_manager._evictor"
         ):
@@ -561,12 +600,91 @@ async def test_base_registry_on_removed_default_is_no_op():
     returns ``None``.
     """
     reg = _StubRegistry()
-    await reg.initialize(config_manager=AsyncMock())
+    await reg.initialize()
     try:
         mgr = _StubStaticManager("plain")
         reg._items[mgr.full_name] = mgr
         removed = await reg.remove(mgr.full_name)
         assert removed is mgr
         assert mgr.full_name not in reg._items
+    finally:
+        await reg.close()
+
+
+# ---------------------------------------------------------------------------
+# H2 regression: Evictor uses snapshot_items (cheap path), never get_all
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_sweep_once_uses_snapshot_items_not_get_all():
+    """The sweep loop must use :meth:`BaseRegistry.snapshot_items` so that
+    enterprise registries are not forced into a controller refresh on every
+    eviction cadence.
+    """
+    reg = _StubRegistry()
+    await reg.initialize()
+    try:
+        mgr = _StubStaticManager("idle-snap")
+        reg._items[mgr.full_name] = mgr
+        await mgr.get()
+        mgr._last_accessed = time.monotonic() - 1000.0
+
+        snapshot_calls = 0
+        get_all_calls = 0
+        original_snapshot = reg.snapshot_items
+        original_get_all = reg.get_all
+
+        async def _counting_snapshot():
+            nonlocal snapshot_calls
+            snapshot_calls += 1
+            return await original_snapshot()
+
+        async def _counting_get_all():
+            nonlocal get_all_calls
+            get_all_calls += 1
+            return await original_get_all()
+
+        reg.snapshot_items = _counting_snapshot  # type: ignore[method-assign]
+        reg.get_all = _counting_get_all  # type: ignore[method-assign]
+
+        evictor = Evictor(reg, EvictionTimeouts(session_idle_timeout_seconds=0.01))
+        await evictor._sweep_once()
+
+        assert snapshot_calls == 1
+        assert get_all_calls == 0
+    finally:
+        await reg.close()
+
+
+@pytest.mark.asyncio
+async def test_sweep_once_does_not_invoke_enterprise_refresh_path():
+    """A stub registry whose ``get_all`` triggers a side effect must not have
+    that side effect invoked during eviction sweeps.  Mimics the enterprise
+    behavior where ``get_all`` performs a network refresh.
+    """
+    reg = _StubRegistry()
+    await reg.initialize()
+    try:
+        mgr = _StubStaticManager("idle-sync")
+        reg._items[mgr.full_name] = mgr
+        await mgr.get()
+        mgr._last_accessed = time.monotonic() - 1000.0
+
+        side_effect_count = 0
+
+        async def _get_all_with_side_effect():
+            nonlocal side_effect_count
+            side_effect_count += 1
+            # Simulate the enterprise refresh side effect.
+            return await BaseRegistry.get_all(reg)
+
+        reg.get_all = _get_all_with_side_effect  # type: ignore[method-assign]
+
+        evictor = Evictor(reg, EvictionTimeouts(session_idle_timeout_seconds=0.01))
+        await evictor._sweep_once()
+
+        # The sweep must rely on snapshot_items, not get_all.
+        assert side_effect_count == 0
     finally:
         await reg.close()

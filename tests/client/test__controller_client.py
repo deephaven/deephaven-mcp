@@ -65,7 +65,11 @@ def dummy_controller_client():
 
 @pytest.fixture
 def coreplus_controller_client(dummy_controller_client, controller_client_mod):
-    return controller_client_mod.CorePlusControllerClient(dummy_controller_client)
+    from deephaven_mcp.client._timeouts import EnterpriseClientTimeouts
+
+    return controller_client_mod.CorePlusControllerClient(
+        dummy_controller_client, timeouts=EnterpriseClientTimeouts()
+    )
 
 
 @pytest.mark.asyncio
@@ -193,8 +197,14 @@ async def test_delete_query_timeout(
 
     dummy_controller_client.delete_query.side_effect = slow_delete
 
+    # Use a tiny config-driven default to force a timeout.
+    coreplus_controller_client._timeouts = (
+        coreplus_controller_client._timeouts.model_copy(
+            update={"pq_management_timeout_seconds": 0.01}
+        )
+    )
     with pytest.raises(DeephavenConnectionError) as exc_info:
-        await coreplus_controller_client.delete_query("serial", timeout_seconds=0.01)
+        await coreplus_controller_client.delete_query("serial")
     assert "timed out" in str(exc_info.value)
 
 
@@ -235,8 +245,13 @@ async def test_ping_timeout(coreplus_controller_client, dummy_controller_client)
 
     dummy_controller_client.ping.side_effect = slow_ping
 
+    coreplus_controller_client._timeouts = (
+        coreplus_controller_client._timeouts.model_copy(
+            update={"quick_operation_timeout_seconds": 0.01}
+        )
+    )
     with pytest.raises(DeephavenConnectionError) as exc_info:
-        await coreplus_controller_client.ping(timeout_seconds=0.01)
+        await coreplus_controller_client.ping()
     assert "timed out" in str(exc_info.value)
 
 
@@ -402,8 +417,13 @@ async def test_add_query_timeout(coreplus_controller_client, dummy_controller_cl
     query_config.pb = MagicMock()
     dummy_controller_client.add_query.side_effect = slow_add
 
+    coreplus_controller_client._timeouts = (
+        coreplus_controller_client._timeouts.model_copy(
+            update={"pq_management_timeout_seconds": 0.01}
+        )
+    )
     with pytest.raises(DeephavenConnectionError) as exc_info:
-        await coreplus_controller_client.add_query(query_config, timeout_seconds=0.01)
+        await coreplus_controller_client.add_query(query_config)
     assert "timed out" in str(exc_info.value)
 
 
@@ -987,9 +1007,14 @@ async def test_subscribe_timeout(coreplus_controller_client, dummy_controller_cl
 
     dummy_controller_client.subscribe.side_effect = slow_subscribe
 
-    # Use a very short timeout to trigger timeout quickly
+    # Use a very short configured timeout to trigger timeout quickly
+    coreplus_controller_client._timeouts = (
+        coreplus_controller_client._timeouts.model_copy(
+            update={"subscribe_timeout_seconds": 0.01}
+        )
+    )
     with pytest.raises(DeephavenConnectionError) as exc_info:
-        await coreplus_controller_client.subscribe(timeout_seconds=0.01)
+        await coreplus_controller_client.subscribe()
 
     assert "timed out" in str(exc_info.value)
 
@@ -1159,10 +1184,13 @@ async def test_modify_query_timeout(
 
     dummy_controller_client.modify_query = slow_modify
 
-    with pytest.raises(DeephavenConnectionError) as exc_info:
-        await coreplus_controller_client.modify_query(
-            mock_config, restart=False, timeout_seconds=0.01
+    coreplus_controller_client._timeouts = (
+        coreplus_controller_client._timeouts.model_copy(
+            update={"pq_management_timeout_seconds": 0.01}
         )
+    )
+    with pytest.raises(DeephavenConnectionError) as exc_info:
+        await coreplus_controller_client.modify_query(mock_config, restart=False)
     assert "timed out" in str(exc_info.value)
 
 
@@ -1294,88 +1322,61 @@ async def test_wait_for_change_from_version_invalid_timeout(
 
 
 # ---------------------------------------------------------------------------
-# _validate_timeout helper
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize("good", [None, 0, 1, 60, 120, 9999])
-def test_validate_timeout_accepts(controller_client_mod, good):
-    # Returns None on success; the assertion is "no exception raised".
-    assert controller_client_mod._validate_timeout(good) is None
-
-
-@pytest.mark.parametrize("bad", [-1, -60, -9999])
-def test_validate_timeout_rejects_negative(controller_client_mod, bad):
-    with pytest.raises(ValueError, match="timeout_seconds must be non-negative"):
-        controller_client_mod._validate_timeout(bad)
-
-
-# ---------------------------------------------------------------------------
-# int timeout_seconds passthrough + negative-value guard
+# wait=True/False forwarding to upstream ControllerClient
 # ---------------------------------------------------------------------------
 #
-# The wrappers' ``timeout_seconds`` parameter type matches the upstream
-# ``ControllerClient`` contract verbatim (``int`` for start_and_wait /
-# stop_and_wait, ``int | None`` for stop_query). The wrappers add nothing
-# but a one-line negative-value guard. These tests pin both behaviors so
-# any future regression that re-introduces conversion / truncation logic
-# gets caught.
+# The PQ-state-change wrappers expose a ``wait: bool = True`` parameter.
+# When ``wait=True`` the wrapper passes its configured
+# ``pq_state_change_timeout_seconds`` to upstream; when ``wait=False`` it
+# passes ``0`` (upstream's fire-and-forget convention).
 
 
 @pytest.mark.asyncio
-async def test_start_and_wait_passes_int_timeout_to_upstream(
+async def test_start_and_wait_passes_configured_timeout_when_waiting(
     coreplus_controller_client, dummy_controller_client
 ):
-    await coreplus_controller_client.start_and_wait(42, 60)
-    dummy_controller_client.start_and_wait.assert_called_once_with(42, 60)
+    await coreplus_controller_client.start_and_wait(42)
+    expected = coreplus_controller_client._timeouts.pq_state_change_timeout_seconds
+    dummy_controller_client.start_and_wait.assert_called_once_with(42, expected)
 
 
 @pytest.mark.asyncio
-async def test_start_and_wait_rejects_negative_timeout(
+async def test_start_and_wait_passes_zero_when_not_waiting(
     coreplus_controller_client, dummy_controller_client
 ):
-    with pytest.raises(ValueError, match="timeout_seconds must be non-negative"):
-        await coreplus_controller_client.start_and_wait(42, -1)
-    dummy_controller_client.start_and_wait.assert_not_called()
+    await coreplus_controller_client.start_and_wait(42, wait=False)
+    dummy_controller_client.start_and_wait.assert_called_once_with(42, 0)
 
 
 @pytest.mark.asyncio
-async def test_stop_query_passes_int_timeout_to_upstream(
+async def test_stop_query_passes_configured_timeout_when_waiting(
     coreplus_controller_client, dummy_controller_client
 ):
-    await coreplus_controller_client.stop_query([42], 30)
-    dummy_controller_client.stop_query.assert_called_once_with([42], 30)
+    await coreplus_controller_client.stop_query([42])
+    expected = coreplus_controller_client._timeouts.pq_state_change_timeout_seconds
+    dummy_controller_client.stop_query.assert_called_once_with([42], expected)
 
 
 @pytest.mark.asyncio
-async def test_stop_query_preserves_none_timeout(
+async def test_stop_query_passes_zero_when_not_waiting(
     coreplus_controller_client, dummy_controller_client
 ):
-    await coreplus_controller_client.stop_query([42], None)
-    dummy_controller_client.stop_query.assert_called_once_with([42], None)
+    await coreplus_controller_client.stop_query([42], wait=False)
+    dummy_controller_client.stop_query.assert_called_once_with([42], 0)
 
 
 @pytest.mark.asyncio
-async def test_stop_query_rejects_negative_timeout(
+async def test_stop_and_wait_passes_configured_timeout_when_waiting(
     coreplus_controller_client, dummy_controller_client
 ):
-    with pytest.raises(ValueError, match="timeout_seconds must be non-negative"):
-        await coreplus_controller_client.stop_query([42], -1)
-    dummy_controller_client.stop_query.assert_not_called()
+    await coreplus_controller_client.stop_and_wait(42)
+    expected = coreplus_controller_client._timeouts.pq_state_change_timeout_seconds
+    dummy_controller_client.stop_and_wait.assert_called_once_with(42, expected)
 
 
 @pytest.mark.asyncio
-async def test_stop_and_wait_passes_int_timeout_to_upstream(
+async def test_stop_and_wait_passes_zero_when_not_waiting(
     coreplus_controller_client, dummy_controller_client
 ):
-    await coreplus_controller_client.stop_and_wait(42, 30)
-    dummy_controller_client.stop_and_wait.assert_called_once_with(42, 30)
-
-
-@pytest.mark.asyncio
-async def test_stop_and_wait_rejects_negative_timeout(
-    coreplus_controller_client, dummy_controller_client
-):
-    with pytest.raises(ValueError, match="timeout_seconds must be non-negative"):
-        await coreplus_controller_client.stop_and_wait(42, -1)
-    dummy_controller_client.stop_and_wait.assert_not_called()
+    await coreplus_controller_client.stop_and_wait(42, wait=False)
+    dummy_controller_client.stop_and_wait.assert_called_once_with(42, 0)

@@ -15,6 +15,7 @@ import aiohttp
 import pytest
 
 from deephaven_mcp._exceptions import SessionLaunchError
+from deephaven_mcp.client import CommunityClientTimeouts
 from deephaven_mcp.resource_manager import (
     DockerLaunchedSession,
     LaunchedSession,
@@ -200,7 +201,7 @@ class TestPythonLaunchedSession:
         assert session._check_process_crashed() is True
 
     def test_check_process_crashed_false_for_docker_session(self):
-        """Test _check_process_crashed returns False for DockerLaunchedSession (no process attribute)."""
+        """DockerLaunchedSession inherits the base _check_process_crashed, which always returns False."""
         session = DockerLaunchedSession(
             host="localhost",
             port=10000,
@@ -514,6 +515,44 @@ class TestDockerLaunchedSessionLaunch:
             assert call_count[0] == 2
 
     @pytest.mark.asyncio
+    async def test_stop_raises_when_both_docker_stop_and_kill_fail(self):
+        """Docker stop fallback must surface a nonzero return code from 'docker kill'.
+
+        Previously the fallback awaited ``kill_process.communicate()`` but
+        ignored ``kill_process.returncode``, so a complete failure of both
+        commands would be logged as a "success". This regression test pins
+        the new behavior: a nonzero return code from ``docker kill`` raises
+        :class:`SessionLaunchError`.
+        """
+        session = DockerLaunchedSession(
+            host="localhost",
+            port=10000,
+            auth_type="anonymous",
+            auth_token=None,
+            container_id="test_container",
+        )
+
+        call_count = [0]
+
+        async def mock_subprocess_exec(*args, **kwargs):
+            call_count[0] += 1
+            mock_process = AsyncMock()
+            # Both 'docker stop' (call 1) and 'docker kill' (call 2) fail.
+            mock_process.returncode = 1
+            mock_process.communicate = AsyncMock(
+                return_value=(b"", b"underlying docker failure")
+            )
+            return mock_process
+
+        with patch("asyncio.create_subprocess_exec", side_effect=mock_subprocess_exec):
+            with pytest.raises(SessionLaunchError, match="docker kill") as exc_info:
+                await session.stop()
+
+        assert "underlying docker failure" in str(exc_info.value)
+        # Both commands were attempted.
+        assert call_count[0] == 2
+
+    @pytest.mark.asyncio
     async def test_init_validates_empty_container_id(self):
         """Test that empty container_id raises ValueError on init."""
         with pytest.raises(ValueError, match="container_id must be a non-empty string"):
@@ -668,6 +707,66 @@ class TestPythonLaunchedSessionLaunch:
             # Verify readline was called (drain tasks ran)
             assert mock_stdout.readline.called
             assert mock_stderr.readline.called
+
+    @pytest.mark.asyncio
+    @patch(
+        "deephaven_mcp.resource_manager._launcher._find_deephaven_executable",
+        return_value="/fake/bin/deephaven",
+    )
+    async def test_drain_tasks_are_strongly_referenced_on_session(self, _mock_find):
+        """Drain tasks must be held strongly so the event loop cannot GC them.
+
+        Previously the launch path called ``asyncio.create_task`` and
+        discarded the returned task. asyncio only weakly references running
+        tasks, so a stray garbage collection could silently kill the drain
+        loop and let the subprocess block on a full pipe. This regression
+        test pins that each drain task is retained on
+        ``session._background_tasks``.
+        """
+        with patch("asyncio.create_subprocess_exec") as mock_subprocess:
+            mock_process = AsyncMock()
+            mock_process.pid = 12345
+
+            # A readline that blocks forever so the task stays alive while
+            # we inspect the session.
+            never = asyncio.Event()
+
+            async def blocking_readline() -> bytes:
+                await never.wait()
+                return b""
+
+            mock_stdout = AsyncMock()
+            mock_stdout.readline = AsyncMock(side_effect=blocking_readline)
+            mock_stderr = AsyncMock()
+            mock_stderr.readline = AsyncMock(side_effect=blocking_readline)
+
+            mock_process.stdout = mock_stdout
+            mock_process.stderr = mock_stderr
+            mock_subprocess.return_value = mock_process
+
+            session = await PythonLaunchedSession.launch(
+                session_name="test",
+                port=10000,
+                auth_token="token",
+                heap_size_gb=4,
+                extra_jvm_args=[],
+                environment_vars={},
+            )
+
+            try:
+                # Both stdout and stderr drain tasks must be retained.
+                assert len(session._background_tasks) == 2
+                for task in session._background_tasks:
+                    assert not task.done()
+            finally:
+                # Unblock the drain tasks so they can finish cleanly.
+                never.set()
+                for task in list(session._background_tasks):
+                    task.cancel()
+                    try:
+                        await task
+                    except (asyncio.CancelledError, Exception):
+                        pass
 
     @pytest.mark.asyncio
     async def test_stop_terminates_process(self):
@@ -1280,12 +1379,22 @@ class TestDynamicManagerEdgeCases:
             auth_token="test_token",
             container_id="test_container",
         )
-        config = {"host": "localhost", "port": 10000}
+        from deephaven_mcp.sessions import CommunitySessionConfig
+
+        session_config = CommunitySessionConfig.model_validate(
+            {
+                "name": "test-session",
+                "host": "localhost",
+                "port": 10000,
+                "auth": {"credentials": {"type": "anonymous"}},
+            }
+        )
 
         manager = DynamicCommunitySessionManager(
             name="test-session",
-            config=config,
+            session_config=session_config,
             launched_session=launched_session,
+            timeouts=CommunityClientTimeouts(),
         )
 
         result = manager.to_dict()

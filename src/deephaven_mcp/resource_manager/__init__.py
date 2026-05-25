@@ -169,7 +169,7 @@ Usage Example - Dynamic Sessions:
     >>> await launched.stop()
 """
 
-from ._evictor import Evictor
+from ._evictor import EvictionTimeouts, Evictor
 from ._instance_tracker import InstanceTracker, cleanup_orphaned_resources
 from ._launcher import (
     DockerLaunchedSession,
@@ -184,6 +184,7 @@ from ._manager import (
     DynamicCommunitySessionManager,
     EnterpriseSessionManager,
     ResourceLivenessStatus,
+    SessionOrigin,
     StaticCommunitySessionManager,
     SystemType,
 )
@@ -194,10 +195,12 @@ from ._registry import (
 )
 from ._registry_community import CommunitySessionRegistry
 from ._registry_enterprise import EnterpriseSessionRegistry
+from ._registry_multi import MultiSystemRegistry
 from ._utils import find_available_port, generate_auth_token
 
 __all__ = [
     "SystemType",
+    "SessionOrigin",
     "ResourceLivenessStatus",
     "BaseItemManager",
     "CommunitySessionManager",
@@ -208,6 +211,8 @@ __all__ = [
     "BaseRegistry",
     "CommunitySessionRegistry",
     "EnterpriseSessionRegistry",
+    "MultiSystemRegistry",
+    "EvictionTimeouts",
     "Evictor",
     "InitializationPhase",
     "RegistrySnapshot",

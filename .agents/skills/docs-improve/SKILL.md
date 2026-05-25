@@ -3,6 +3,8 @@ name: docs-improve
 description: Comprehensively improve a markdown documentation file — fill missing content, fix inaccuracies, improve organization, fix broken links, and apply formatting standards
 ---
 
+**When to use this vs. `docs-accuracy`**: use `docs-improve` for a full review (accuracy + reorganization + missing content + formatting). Use `docs-accuracy` for surgical correctness-only fixes when the doc's structure is already sound.
+
 Create a plan for improving this markdown file, then execute it.
 
 1. Look for content that is missing from this file that needs to be added. Use the source code as a reference. If there is a conflict, the source code should be believed over the readme files.
