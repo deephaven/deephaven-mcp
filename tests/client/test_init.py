@@ -106,6 +106,8 @@ def test___all__():
 
     expected = {
         "ClientObjectWrapper",
+        "CommunityClientTimeouts",
+        "EnterpriseClientTimeouts",
         "BaseSession",
         "CoreSession",
         "CorePlusSession",
@@ -128,6 +130,8 @@ def test___all__():
 def test_import_star_behavior():
     expected = {
         "ClientObjectWrapper",
+        "CommunityClientTimeouts",
+        "EnterpriseClientTimeouts",
         "BaseSession",
         "CoreSession",
         "CorePlusSession",

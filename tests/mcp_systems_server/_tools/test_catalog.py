@@ -12,7 +12,6 @@ import pytest
 from conftest import (
     MockContext,
     create_mock_instance_tracker,
-    create_mock_session_registry_manager,
 )
 
 
@@ -116,9 +115,7 @@ async def test_catalog_tables_success_no_filters():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
@@ -175,9 +172,7 @@ async def test_catalog_tables_success_with_filters():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
@@ -227,9 +222,7 @@ async def test_catalog_tables_success_csv_format():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
@@ -276,9 +269,7 @@ async def test_catalog_tables_incomplete_results():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
@@ -325,9 +316,7 @@ async def test_catalog_tables_not_enterprise_session():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
@@ -354,9 +343,7 @@ async def test_catalog_tables_session_not_found():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
@@ -380,9 +367,7 @@ async def test_catalog_tables_invalid_filter():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
@@ -413,9 +398,7 @@ async def test_catalog_tables_invalid_format():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
@@ -456,9 +439,7 @@ async def test_catalog_tables_size_limit_exceeded():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
@@ -492,9 +473,7 @@ async def test_catalog_namespaces_success_no_filters():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
@@ -545,9 +524,7 @@ async def test_catalog_namespaces_success_with_filters():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
@@ -597,9 +574,7 @@ async def test_catalog_namespaces_success_csv_format():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
@@ -646,9 +621,7 @@ async def test_catalog_namespaces_incomplete_results():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
@@ -695,9 +668,7 @@ async def test_catalog_namespaces_not_enterprise_session():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
@@ -724,9 +695,7 @@ async def test_catalog_namespaces_session_not_found():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
@@ -750,9 +719,7 @@ async def test_catalog_namespaces_invalid_format():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
@@ -793,9 +760,7 @@ async def test_catalog_namespaces_size_limit_exceeded():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
@@ -856,9 +821,7 @@ async def test_catalog_tables_schema_success_with_namespace():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
@@ -928,9 +891,7 @@ async def test_catalog_tables_schema_success_with_table_names():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
@@ -990,9 +951,7 @@ async def test_catalog_tables_schema_max_tables_limit():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
@@ -1038,9 +997,7 @@ async def test_catalog_tables_schema_not_enterprise_session():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
@@ -1083,9 +1040,7 @@ async def test_catalog_tables_schema_mixed_success_failure():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
@@ -1136,9 +1091,7 @@ async def test_catalog_tables_schema_table_names_not_found():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
@@ -1183,9 +1136,7 @@ async def test_catalog_tables_schema_table_names_partial_not_found():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
@@ -1227,9 +1178,7 @@ async def test_catalog_tables_schema_session_not_found():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
@@ -1256,9 +1205,7 @@ async def test_catalog_tables_schema_catalog_retrieval_error():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
@@ -1303,9 +1250,7 @@ async def test_catalog_tables_schema_with_filters():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
@@ -1357,9 +1302,7 @@ async def test_catalog_tables_schema_empty_catalog():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
@@ -1437,9 +1380,7 @@ async def test_catalog_table_sample_success():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
@@ -1495,9 +1436,7 @@ async def test_catalog_table_sample_with_format():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
@@ -1543,9 +1482,7 @@ async def test_catalog_table_sample_not_enterprise_session():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
@@ -1573,9 +1510,7 @@ async def test_catalog_table_sample_exception():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
@@ -1608,9 +1543,7 @@ async def test_catalog_table_sample_response_too_large():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
@@ -1630,7 +1563,7 @@ async def test_catalog_table_sample_response_too_large():
         )
 
     assert result["success"] is False
-    assert "max 50MB" in result["error"]
+    assert "max 52MB" in result["error"]
     assert "reduce max_rows" in result["error"]
     assert result["isError"] is True
 
@@ -1648,9 +1581,7 @@ async def test_catalog_table_sample_with_explicit_filters():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
@@ -1693,9 +1624,7 @@ async def test_catalog_table_sample_empty_filters_skips_autodetect():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 

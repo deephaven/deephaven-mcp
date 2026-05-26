@@ -42,7 +42,11 @@ def dummy_auth_client():
 
 @pytest.fixture
 def coreplus_auth_client(dummy_auth_client):
-    return _auth_client.CorePlusAuthClient(dummy_auth_client)
+    from deephaven_mcp.client import EnterpriseClientTimeouts
+
+    return _auth_client.CorePlusAuthClient(
+        dummy_auth_client, EnterpriseClientTimeouts()
+    )
 
 
 @pytest.mark.asyncio
@@ -52,21 +56,9 @@ async def test_get_token_success(coreplus_auth_client, dummy_auth_client):
         "deephaven_mcp.client._auth_client.CorePlusToken",
         side_effect=lambda t: f"wrapped-{t}",
     ):
-        result = await coreplus_auth_client.get_token("svc", timeout_seconds=123)
-        assert result == "wrapped-tok3"
-        dummy_auth_client.get_token.assert_called_once_with("svc", 123)
-
-
-@pytest.mark.asyncio
-async def test_get_token_default_timeout(coreplus_auth_client, dummy_auth_client):
-    dummy_auth_client.get_token.return_value = "tok-default"
-    with patch(
-        "deephaven_mcp.client._auth_client.CorePlusToken",
-        side_effect=lambda t: f"wrapped-{t}",
-    ):
         result = await coreplus_auth_client.get_token("svc")
-        assert result == "wrapped-tok-default"
-        dummy_auth_client.get_token.assert_called_once_with("svc", None)
+        assert result == "wrapped-tok3"
+        dummy_auth_client.get_token.assert_called_once_with("svc")
 
 
 @pytest.mark.asyncio
@@ -81,3 +73,32 @@ async def test_get_token_other_error(coreplus_auth_client, dummy_auth_client):
     dummy_auth_client.get_token.side_effect = Exception("fail")
     with pytest.raises(AuthenticationError):
         await coreplus_auth_client.get_token("svc")
+
+
+@pytest.mark.asyncio
+async def test_get_token_timeout(dummy_auth_client):
+    """Slow upstream get_token must surface as DeephavenConnectionError ("timed out").
+
+    Regression test: an earlier refactor dropped the timeout entirely,
+    leaving the synchronous SDK call running in ``asyncio.to_thread`` with
+    no bound. The wrapper must enforce ``auth_timeout_seconds`` via
+    ``asyncio.wait_for``.
+    """
+    import time
+
+    from deephaven_mcp.client import EnterpriseClientTimeouts
+
+    def slow_get_token(service):
+        time.sleep(0.05)
+        return DummyToken()
+
+    dummy_auth_client.get_token.side_effect = slow_get_token
+
+    client = _auth_client.CorePlusAuthClient(
+        dummy_auth_client,
+        EnterpriseClientTimeouts(auth_timeout_seconds=0.01),
+    )
+    with pytest.raises(DeephavenConnectionError) as exc_info:
+        await client.get_token("svc")
+    assert "timed out" in str(exc_info.value)
+    assert "auth_timeout_seconds" in str(exc_info.value)

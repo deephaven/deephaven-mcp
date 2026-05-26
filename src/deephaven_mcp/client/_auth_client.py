@@ -48,6 +48,7 @@ from deephaven_mcp._exceptions import AuthenticationError, DeephavenConnectionEr
 
 from ._base import ClientObjectWrapper
 from ._protobuf import CorePlusToken
+from ._timeouts import EnterpriseClientTimeouts
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -91,25 +92,26 @@ class CorePlusAuthClient(
     """
 
     def __init__(
-        self, auth_client: "deephaven_enterprise.client.auth.AuthClient"  # noqa: F821
+        self,
+        auth_client: "deephaven_enterprise.client.auth.AuthClient",  # noqa: F821
+        timeouts: EnterpriseClientTimeouts,
     ) -> None:
         """Initialize CorePlusAuthClient with a synchronous AuthClient instance.
 
         Args:
             auth_client (deephaven_enterprise.client.auth.AuthClient): The synchronous Deephaven AuthClient instance to wrap.
+            timeouts: Operator-tuned timeout schema; ``get_token`` uses
+                ``timeouts.client.auth_timeout_seconds`` to bound the upstream RPC.
 
         Note:
             This constructor is intended for use by CorePlusSessionFactory. Users should not instantiate
             this class directly.
         """
         super().__init__(auth_client, is_enterprise=True)
+        self._timeouts = timeouts
         _LOGGER.debug("[CorePlusAuthClient] Initialized")
 
-    async def get_token(
-        self,
-        service: str,
-        timeout_seconds: float | None = None,
-    ) -> CorePlusToken:
+    async def get_token(self, service: str) -> CorePlusToken:
         """Get a service-specific authentication token asynchronously.
 
         This method obtains a single-use token for a specific Deephaven service (e.g.,
@@ -117,12 +119,14 @@ class CorePlusAuthClient(
         used for inter-service authentication and are consumed by the authentication server
         during the verification process.
 
+        The request is bounded by ``EnterpriseClientTimeouts.auth_timeout_seconds`` via
+        :func:`asyncio.wait_for`; if the upstream RPC does not return within that
+        budget the call is cancelled and a :class:`DeephavenConnectionError` is
+        raised with a hint to tune the operator JSON config.
+
         Args:
             service (str): Name of the target service. Must be recognized by the Deephaven authentication service.
                 Valid service types include: "PersistentQueryController", "JavaScriptClient", "Console", "ApiGateway".
-            timeout_seconds (float | None, optional): Timeout in seconds for the token request.
-                If None, uses the client's default timeout (``rpc_timeout_secs``). The timeout
-                applies to the entire operation including network communication.
 
         Returns:
             CorePlusToken: Token scoped to the requested service. This is a wrapper around the native
@@ -130,8 +134,10 @@ class CorePlusAuthClient(
                 for use with other Deephaven Enterprise clients.
 
         Raises:
-            DeephavenConnectionError: If a Python-level ``ConnectionError`` is raised while
-                dispatching the call (uncommon; most upstream gRPC failures are reported as
+            DeephavenConnectionError: If the call exceeds
+                ``timeouts.client.auth_timeout_seconds``, or if a Python-level
+                ``ConnectionError`` is raised while dispatching the call
+                (uncommon; most upstream gRPC failures are reported as
                 ``AuthenticationError`` instead, see below).
             AuthenticationError: If token retrieval fails for any other reason. This is the
                 catch-all for upstream ``grpc.RpcError`` (network issues, server unavailability,
@@ -140,7 +146,7 @@ class CorePlusAuthClient(
                 and internal auth server errors.
 
         Logging:
-            - Logs entry at DEBUG level with service name and timeout.
+            - Logs entry at DEBUG level with service name.
             - Logs success at DEBUG level with service name.
             - Logs errors at ERROR level with service name and error details.
             - Sensitive information (tokens, passwords) is never logged.
@@ -154,28 +160,49 @@ class CorePlusAuthClient(
             token = await auth_client.get_token(service="PersistentQueryController")
             # ``token`` is a CorePlusToken; pass it to APIs that accept Deephaven service tokens.
         """
+        timeout_seconds = self._timeouts.auth_timeout_seconds
         _LOGGER.debug(
-            f"[CorePlusAuthClient:get_token] Getting service token for service='{service}' (timeout_seconds={timeout_seconds})"
+            f"[CorePlusAuthClient:get_token] Getting service token for service='{service}'"
         )
         try:
-            result = await asyncio.to_thread(
-                self.wrapped.get_token,
-                service,
-                timeout_seconds,
+            result = await asyncio.wait_for(
+                asyncio.to_thread(self.wrapped.get_token, service),
+                timeout=timeout_seconds,
             )
             _LOGGER.debug(
                 f"[CorePlusAuthClient:get_token] Service token for '{service}' obtained successfully"
             )
             return CorePlusToken(result)
+        except TimeoutError:
+            _LOGGER.error(
+                f"[CorePlusAuthClient:get_token] Service token retrieval for '{service}' "
+                f"timed out after {timeout_seconds}s. "
+                f"Increase enterprise/settings.json: timeouts.client.auth_timeout_seconds."
+            )
+            raise DeephavenConnectionError(
+                f"Service token retrieval for '{service}' timed out after "
+                f"{timeout_seconds} seconds. The authentication server may be "
+                f"overloaded or unreachable. To allow more time, increase "
+                f"enterprise/settings.json: timeouts.client.auth_timeout_seconds "
+                f"in the operator config."
+            ) from None
         except ConnectionError as e:
             _LOGGER.error(
-                f"[CorePlusAuthClient:get_token] Failed to connect to authentication service for '{service}': {e}"
+                "[CorePlusAuthClient:get_token] Failed to connect to authentication "
+                "service for %r: %r",
+                service,
+                e,
+                exc_info=True,
             )
             raise DeephavenConnectionError(
                 f"Unable to connect to authentication service: {e}"
             ) from e
         except Exception as e:
             _LOGGER.error(
-                f"[CorePlusAuthClient:get_token] Service token retrieval failed for '{service}': {e}"
+                "[CorePlusAuthClient:get_token] Service token retrieval failed "
+                "for %r: %r",
+                service,
+                e,
+                exc_info=True,
             )
             raise AuthenticationError(f"Token retrieval failed: {e}") from e

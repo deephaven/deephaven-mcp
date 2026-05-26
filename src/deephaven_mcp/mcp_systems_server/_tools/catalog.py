@@ -19,12 +19,12 @@ from deephaven_mcp._exceptions import UnsupportedOperationError
 from deephaven_mcp.client import CorePlusSession
 from deephaven_mcp.formatters import format_table_data
 from deephaven_mcp.mcp_systems_server._tools.shared import (
-    ESTIMATED_BYTES_PER_CELL,
     build_table_data_response,
     check_response_size,
     error_response,
     format_meta_table_result,
     get_enterprise_session,
+    get_response_limits,
     get_session_from_context,
 )
 
@@ -91,7 +91,8 @@ async def _get_catalog_data(
 
         # Estimate response size for safety
         estimated_size = arrow_table.nbytes
-        size_check_result = check_response_size(tool_name, estimated_size)
+        limits = get_response_limits(context, session_id)
+        size_check_result = check_response_size(tool_name, estimated_size, limits)
         if size_check_result:
             return size_check_result
 
@@ -1103,8 +1104,11 @@ async def catalog_table_sample(
         # Check response size before formatting
         row_count = len(arrow_table)
         col_count = len(arrow_table.schema)
-        estimated_size = row_count * col_count * ESTIMATED_BYTES_PER_CELL
-        size_error = check_response_size(f"{namespace}.{table_name}", estimated_size)
+        limits = get_response_limits(context, session_id)
+        estimated_size = row_count * col_count * limits.estimated_bytes_per_cell
+        size_error = check_response_size(
+            f"{namespace}.{table_name}", estimated_size, limits
+        )
 
         if size_error:
             return size_error

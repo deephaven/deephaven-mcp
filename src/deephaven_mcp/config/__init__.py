@@ -1,249 +1,45 @@
-"""Async Deephaven MCP configuration management.
+"""General-purpose configuration primitives for Deephaven MCP servers.
 
-This module provides the public surface for loading, validating, and managing
-Deephaven MCP configuration from a JSON or JSON5 file. Specifically it exposes:
+This package owns the reusable plumbing that any MCP server in the
+project can use to load a JSON5-on-disk configuration directory:
 
-- Async configuration *manager classes* (:class:`CommunityServerConfigManager`,
-  :class:`EnterpriseServerConfigManager`) whose ``get_config()`` methods load and
-  cache the config file coroutine-safely.
-- Synchronous *validation helpers* (:func:`validate_enterprise_config`,
-  :func:`validate_community_session_config`) for programmatic validation
-  of already-parsed configuration dictionaries.
-- Synchronous *redaction helpers* (:func:`redact_community_session_config`,
-  :func:`redact_enterprise_config`) for producing log-safe copies of
-  configuration dictionaries.
+- :func:`verify_config_directory_permissions` — strict POSIX /
+  best-effort Windows permission audit of a configuration directory.
+- :func:`default_config_dir` — platform-default configuration
+  directory (``~/.deephaven/ai/config`` on POSIX,
+  ``%APPDATA%/Deephaven/ai/config`` on Windows).
+- :data:`CONFIG_DIR_ENV_VAR` — name of the environment variable that
+  overrides :func:`default_config_dir`.
+- :class:`~deephaven_mcp._exceptions.ConfigurationError` — re-export
+  so callers that handle config-loading failures can import the
+  exception without reaching into ``deephaven_mcp._exceptions``.
 
-Configuration is loaded from the path given by the ``DH_MCP_CONFIG_FILE``
-environment variable (or an explicit ``config_path`` passed to the manager's
-constructor, which takes precedence) using native async file I/O (``aiofiles``).
-The configuration file supports both standard JSON and JSON5 formats. JSON5 allows single-line (//) and multi-line (/* */) comments, trailing commas, and other JSON5 features.
+Two more module-level primitives live alongside but are not surfaced
+in ``__all__`` because their signatures are intentionally still
+project-private:
 
-Two Config Formats, Two Manager Classes:
------------------------------------------
-This module supports two distinct configuration file formats, one per server type:
+- :func:`deephaven_mcp.config._file_loader.load_config_from_file` —
+  async JSON5 reader + templating + ``ConfigurationError`` wrapping.
+- :mod:`deephaven_mcp.config._templating` — placeholder engine
+  resolving ``${env:VAR}`` / ``${env:VAR:-default}`` / ``${file:PATH}``
+  inside a parsed JSON tree.
 
-  1. **Community server** (``dh-mcp-community-server``): Use :class:`CommunityServerConfigManager`.
-     The config file is a *flat* dict. ``auth`` is the only required top-level key;
-     ``sessions``, ``session_creation``, ``security``, and
-     ``mcp_session_idle_timeout_seconds`` are optional. No enterprise-related keys are allowed.
-
-  2. **Enterprise server** (``dh-mcp-enterprise-server``): Use :class:`EnterpriseServerConfigManager`.
-     The config file is a *flat* dict with all enterprise system fields at the top level — there are
-     no ``community`` or ``security`` sections. The enterprise schema is documented fully in the
-     "Enterprise Server Configuration Schema" section below.
-
-Features:
-    - Coroutine-safe, cached loading of configuration using asyncio.Lock.
-    - Strict validation of configuration structure and values.
-    - Logging of configuration loading, environment variable value, and validation steps.
-    - Uses aiofiles for non-blocking, native async config file reads.
-
-Community Server Configuration Schema:
----------------------------------------
-The community config file must be a JSON or JSON5 object. JSON5 allows single-line (//) and multi-line (/* */) comments, trailing commas, and other JSON5 features.
-It must contain the top-level `auth` key and may contain the other top-level
-keys listed below (all others are optional):
-
-  - `auth` (dict, **required**):
-      Governs how HTTP clients authenticate to the MCP server itself using a
-      Jupyter-style pre-shared key. Distinct from the per-worker `auth_token`
-      values inside `sessions[*]` / `session_creation.defaults`, which control
-      how the MCP server authenticates to individual community workers.
-      The validator rejects configs that omit this key; configs without an
-      explicit `auth` block (e.g. `{}` or sessions-only) fail with
-      :class:`~deephaven_mcp._exceptions.ConfigurationError` at startup.
-      The `auth` dict may contain:
-
-        - `enabled` (bool, optional, default: true): Whether MCP-server PSK auth is required.
-        - `psk` (str, optional): The pre-shared key stored inline.
-          Mutually exclusive with `psk_env_var`.
-        - `psk_env_var` (str, optional): Name of an environment variable
-          holding the pre-shared key. Mutually exclusive with `psk`.
-
-      Rules:
-        - When `enabled` is true, exactly one of `psk` or `psk_env_var` must be provided.
-        - When `enabled` is false, neither may be provided. Disabling auth is
-          only safe on a loopback bind; the systems server refuses to start
-          on a non-loopback host with `enabled: false`.
-
-  - `security` (dict, optional):
-      Security settings for community sessions.
-      If this key is present, its value must be a dictionary (which can be empty, e.g., {}).
-      If this key is absent, all security settings use their secure defaults.
-      The security configuration dict may contain:
-
-        - `credential_retrieval_mode` (str, optional, default: "none"): Controls which community session credentials
-          can be retrieved programmatically via the session_community_credentials MCP tool. Valid values:
-            * "none": Credential retrieval disabled (secure default)
-            * "dynamic_only": Only allow retrieval for auto-generated tokens (dynamic sessions)
-            * "static_only": Only allow retrieval for pre-configured tokens (static sessions)
-            * "all": Allow retrieval for both dynamic and static session credentials
-
-  - `sessions` (dict, optional):
-      A dictionary mapping community session names (str) to client session configuration dicts.
-      If this key is present, its value must be a dictionary (which can be empty, e.g., {}).
-      If this key is absent, it implies no static community sessions are configured.
-      Each community session configuration dict may contain any of the following fields (all are optional):
-
-        - `host` (str): Hostname or IP address of the community server.
-        - `port` (int): Port number for the community server connection.
-        - `auth_type` (str): Authentication type. Common values include:
-            * "PSK" or "io.deephaven.authentication.psk.PskAuthenticationHandler": Pre-shared key authentication (shorthand and full class name).
-            * "Anonymous": Default, no authentication required.
-            * "Basic": HTTP Basic authentication (requires username:password format in auth_token).
-            * Custom authenticator strings are also valid.
-        - `auth_token` (str, optional): The direct authentication token or password. May be empty if `auth_type` is "Anonymous". Use this OR `auth_token_env_var`, but not both.
-        - `auth_token_env_var` (str, optional): The name of an environment variable from which to read the authentication token. Use this OR `auth_token`, but not both.
-        - `never_timeout` (bool): If True, sessions to this community server never time out.
-        - `session_type` (str): Programming language for the session. Common values include:
-            * "python": For Python-based Deephaven instances.
-            * "groovy": For Groovy-based Deephaven instances.
-        - `use_tls` (bool): Whether to use TLS/SSL for the connection.
-        - `tls_root_certs` (str | None, optional): Path to a PEM file containing root certificates to trust for TLS.
-        - `client_cert_chain` (str | None, optional): Path to a PEM file containing the client certificate chain for mutual TLS.
-        - `client_private_key` (str | None, optional): Path to a PEM file containing the client private key for mutual TLS.
-
-  - `session_creation` (dict, optional):
-      Configuration for dynamically creating community sessions on demand.
-      If this key is present, its value must be a dictionary (which can be empty, e.g., {}).
-      If this key is absent, dynamic session creation is not configured.
-
-Community Config Validation rules:
-  - The top-level `auth` key is **required**; configs that omit it (including
-    `{}` and sessions-only configs) are rejected at validation time. Provide
-    `auth.psk` / `auth.psk_env_var`, or set `auth.enabled: false` (loopback
-    binds only).
-  - Only `auth`, `sessions`, `session_creation`, `security`, and
-    `mcp_session_idle_timeout_seconds` are valid top-level keys; any other key
-    will cause validation to fail.
-  - If `sessions` is present, each session's fields must have the correct type.
-  - No unknown fields are permitted at any level of the configuration.
-  - Sensitive values are redacted from logs for security:
-      * `sessions.<name>.auth_token` is always redacted when truthy.
-      * `session_creation.defaults.auth_token` is always redacted when present.
-      * The TLS key-material fields `tls_root_certs`, `client_cert_chain`, and
-        `client_private_key` are redacted only when the stored value is binary
-        (`bytes` / `bytearray`); string values such as filesystem paths are
-        logged as-is.
-    (Note: the enterprise server uses a completely separate flat config format via EnterpriseServerConfigManager.)
-
-Enterprise Server Configuration Schema:
------------------------------------------
-The enterprise config file is a flat JSON or JSON5 object. All fields sit at the top level; there
-are no ``community`` or ``security`` sections. Each ``dh-mcp-enterprise-server`` instance is
-configured for exactly one enterprise system.
-
-The enterprise MCP server does **not** accept credentials in its config file. Every request
-must carry the caller's credentials in ``X-Deephaven-*`` HTTP headers; the auth middleware
-exchanges them for a :class:`~deephaven_mcp.auth.credentials.PasswordCredentials` or
-:class:`~deephaven_mcp.auth.credentials.PrivateKeyCredentials`, which is later exchanged for
-an authenticated ``CorePlusSessionFactory``.
-
-Required fields:
-
-  - `system_name` (str): Human-readable identifier for this enterprise system.
-      Used as the ``source`` component in all session identifiers (e.g. ``"enterprise:prod:my-pq"``).
-
-  - `connection_json_url` (str): Full URL to the Core+ ``connection.json`` endpoint
-      (e.g. ``"https://dhe.example.com/iris/connection.json"``).
-
-  - `auth` (dict): Authentication-middleware configuration. Required fields inside:
-
-      * `backends` (list[str], required, non-empty): a subset of
-        ``{"password", "private_key"}``. Identifies which authentication
-        backends the server will mount in front of its streamable-HTTP app.
-      * `allow_effective_user` (bool, optional, default ``False``): when
-        ``True``, the password backend honors the optional
-        ``X-Deephaven-Effective-User`` HTTP header. Only valid when
-        ``"password"`` is in ``backends``.
-
-Optional fields:
-
-  - `connection_timeout` (int | float, > 0): Connection timeout in seconds.
-      Default: ``10.0``. Booleans are not accepted even though bool is a subclass of int.
-
-  - `mcp_session_idle_timeout_seconds` (int | float, > 0): Idle timeout for MCP sessions.
-
-  - `session_creation` (dict, optional): Session lifecycle configuration.
-      When present, ``defaults`` is required and ``defaults.heap_size_gb`` is required.
-
-Enterprise Config Validation rules:
-  - ``system_name``, ``connection_json_url``, and ``auth`` are always required.
-  - ``auth.backends`` must be a non-empty list of unique strings, each drawn from
-    ``{"password", "private_key"}``.
-  - ``auth.allow_effective_user`` may only be ``true`` when ``"password"`` is in ``auth.backends``.
-  - ``connection_timeout`` and ``mcp_session_idle_timeout_seconds`` must be positive
-    numbers if present; booleans are rejected.
-  - ``session_creation.max_concurrent_sessions`` must be a non-negative integer if present.
-  - When ``session_creation`` is present, ``defaults`` is required and
-    ``defaults.heap_size_gb`` is required.
-  - Unknown fields are rejected at every level (top level, ``auth``, ``session_creation``,
-    and ``session_creation.defaults``).
-  - The current enterprise schema carries no secrets; :func:`redact_enterprise_config`
-    returns a plain shallow copy as a stable redaction surface for future schema changes.
-
-Environment Variables:
----------------------
-- `DH_MCP_CONFIG_FILE`: Path to the Deephaven MCP configuration JSON or JSON5 file.
-
-Security:
----------
-- Sensitive information (such as authentication tokens and passwords) is redacted in logs.
-- Environment variable values are logged for debugging.
-
-Async/Await & I/O:
-------------------
-- All configuration loading is async and coroutine-safe.
-- File I/O uses `aiofiles` for non-blocking reads.
-
+The systems-server-specific schema models (``ServerConfig``,
+``CommunitySettings``, ``EnterpriseSystemConfig`` umbrellas, the
+``MultiSystemConfigManager`` orchestrator, etc.) live in
+:mod:`deephaven_mcp.mcp_systems_server.config`; per-session and
+per-system declaration types live in :mod:`deephaven_mcp.sessions`.
 """
 
 __all__ = [
-    # Config manager base and concrete types
-    "ConfigManager",
-    "CommunityServerConfigManager",
-    "EnterpriseServerConfigManager",
-    # Constants
-    "CONFIG_ENV_VAR",
-    "DEFAULT_MCP_SESSION_IDLE_TIMEOUT_SECONDS",
-    # Validators used by external callers
-    "validate_community_config",
-    "validate_community_session_config",
-    "validate_enterprise_config",
-    # Resolution helpers used by external callers
-    "resolve_required_env_var",
-    "resolve_secret_field",
-    # Redaction used by external callers
-    "redact_community_config",
-    "redact_community_session_config",
-    "redact_enterprise_config",
-    # Constants used by external callers
-    "DEFAULT_CONNECTION_TIMEOUT_SECONDS",
-    # Exceptions
+    "CONFIG_DIR_ENV_VAR",
     "ConfigurationError",
+    "default_config_dir",
+    "resolve_config_dir",
+    "verify_config_directory_permissions",
 ]
 
 from deephaven_mcp._exceptions import ConfigurationError
 
-from ._base import (
-    CONFIG_ENV_VAR,
-    DEFAULT_MCP_SESSION_IDLE_TIMEOUT_SECONDS,
-    ConfigManager,
-)
-from ._validators import (
-    resolve_required_env_var,
-    resolve_secret_field,
-)
-from .community import (
-    CommunityServerConfigManager,
-    redact_community_config,
-    redact_community_session_config,
-    validate_community_config,
-    validate_community_session_config,
-)
-from .enterprise import (
-    DEFAULT_CONNECTION_TIMEOUT_SECONDS,
-    EnterpriseServerConfigManager,
-    redact_enterprise_config,
-    validate_enterprise_config,
-)
+from ._config_dir import CONFIG_DIR_ENV_VAR, default_config_dir, resolve_config_dir
+from ._dir_permissions import verify_config_directory_permissions

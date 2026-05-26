@@ -1,7 +1,9 @@
 ---
 name: review-changes
-description: "Perform a deep review of a set of code changes — all file types covered: Python files reviewed in full, documentation files checked for accuracy"
+description: "Perform a deep review of a set of code changes — all file types covered"
 ---
+
+**Review like a senior engineer.** Every finding must answer three questions in concrete terms: *what is wrong*, *what is better*, *why the change is worth its cost*. All topics are fair game — correctness, security, design, duplication, clarity, naming, structure, tests.  Be conscious of suggestions that do not serve a purpose.
 
 Review the changeset described in the prompt. Common forms:
 
@@ -25,7 +27,8 @@ If no changeset is specified, default to uncommitted changes.
    |---|---|
    | `.py` | `review-python-file` |
    | `.md`, `.rst` | `docs-accuracy` |
-   | Other (config, scripts, etc.) | Review for correctness and appropriateness |
+   | Pydantic config (`mcp_systems_server/config/*.py`, `_*_config.py`), `*.json5` examples under `config-samples/ai/config/`, `docs/CONFIGURATION.md` | `_configuration-conventions` |
+   | Other (scripts, CI, etc.) | Review for correctness and appropriateness |
 
 3. **Cross-cutting review** — assess the changeset as a whole:
    - **Design consistency**: Is the design coherent across all changed files?

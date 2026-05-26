@@ -12,11 +12,13 @@ import pytest
 from conftest import (
     MockContext,
     create_mock_instance_tracker,
-    create_mock_session_registry_manager,
+    stub_session_config,
 )
 
 from deephaven_mcp import config
 from deephaven_mcp._exceptions import RegistryItemNotFoundError
+from deephaven_mcp._taxonomy import SystemRef, SystemType
+from deephaven_mcp.client import CommunityClientTimeouts
 from deephaven_mcp.mcp_systems_server._tools.session import (
     session_details,
     sessions_list,
@@ -26,6 +28,7 @@ from deephaven_mcp.mcp_systems_server._tools.session_community import (
     session_community_delete,
 )
 from deephaven_mcp.resource_manager import (
+    CommunitySessionManager,
     CommunitySessionRegistry,
     DockerLaunchedSession,
     DynamicCommunitySessionManager,
@@ -34,8 +37,39 @@ from deephaven_mcp.resource_manager import (
     PythonLaunchedSession,
     RegistrySnapshot,
     ResourceLivenessStatus,
+    SessionOrigin,
     SystemType,
 )
+
+
+def _wire_mgr_mock(
+    mgr,
+    *,
+    type_value: str,
+    system: str,
+    name: str,
+    origin: SessionOrigin | None = None,
+) -> None:
+    """Set the attributes that ``sessions_list``/``session_details`` read.
+
+    ``origin`` lives on :class:`CommunitySessionManager` only. The mock
+    receives the attribute unconditionally so tests can opt into
+    community-style behavior by passing a value; the production listing
+    code reads ``origin`` only after an ``isinstance`` narrowing, so
+    enterprise-style tests should pass ``origin=None`` (the default)
+    and use a non-community ``spec`` for the mock.
+    """
+    mgr.system_type.value = type_value
+    mgr.system = system
+    mgr.name = name
+    mgr.origin = origin
+    # The production listing/detail code reads ``origin`` only after an
+    # ``isinstance(mgr, CommunitySessionManager)`` narrowing. Patch the
+    # mock's ``__class__`` so that check succeeds for community mocks
+    # without giving up the bare-``AsyncMock`` flexibility tests rely on.
+    if origin is not None:
+        mgr.__class__ = CommunitySessionManager
+
 
 # =============================================================================
 # session_community_create edge case tests
@@ -52,14 +86,22 @@ async def test_session_community_create_with_auth_token_parameter():
         "session_creation": {
             "max_concurrent_sessions": 5,
             "defaults": {
-                "auth_token": "default_token",
-                "auth_token_env_var": "SOME_VAR",
+                "auth": {
+                    "credentials": {
+                        "type": "psk",
+                        "token": "default_token",
+                    }
+                }
             },
         }
     }
 
     full_config = community_config
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
+    # Stash for conftest's lifespan adapter — exposes the community
+    # settings dict to the multiplexed-server tool helpers without
+    # rewriting every test's MockContext call site.
+    mock_session_registry._community_settings = community_config
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
     mock_session_registry.add_session = AsyncMock()
     mock_session_registry.get = AsyncMock(
@@ -97,9 +139,7 @@ async def test_session_community_create_with_auth_token_parameter():
         context = MockContext(
             {
                 "config_manager": mock_config_manager,
-                "session_registry_manager": create_mock_session_registry_manager(
-                    registry=mock_session_registry
-                ),
+                "registry": mock_session_registry,
                 "instance_tracker": create_mock_instance_tracker(),
             }
         )
@@ -122,17 +162,32 @@ async def test_session_community_create_with_auth_token_env_var_set():
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
+    # After the Pydantic migration, the env-var indirection is resolved
+    # at config-load time inside :class:`PSKCredentials`. The community
+    # settings dict the tool sees has already been dumped via
+    # ``model_dump(..., context={"reveal": True})``, so the env var is
+    # replaced by its literal value and the wire-format ``auth`` wrapper
+    # is collapsed to a top-level ``credentials`` key.
     community_config = {
         "session_creation": {
             "max_concurrent_sessions": 5,
             "defaults": {
-                "auth_token_env_var": "TEST_AUTH_TOKEN",
+                "auth": {
+                    "credentials": {
+                        "type": "psk",
+                        "token": "env_token_value",
+                    }
+                }
             },
         }
     }
 
     full_config = community_config
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
+    # Stash for conftest's lifespan adapter — exposes the community
+    # settings dict to the multiplexed-server tool helpers without
+    # rewriting every test's MockContext call site.
+    mock_session_registry._community_settings = community_config
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
     mock_session_registry.add_session = AsyncMock()
     mock_session_registry.get = AsyncMock(
@@ -163,7 +218,6 @@ async def test_session_community_create_with_auth_token_env_var_set():
             "wait_until_ready",
             new=AsyncMock(return_value=True),
         ),
-        patch.dict(os.environ, {"TEST_AUTH_TOKEN": "env_token_value"}),
     ):
 
         mock_launch_session.return_value = mock_launched_session
@@ -171,9 +225,7 @@ async def test_session_community_create_with_auth_token_env_var_set():
         context = MockContext(
             {
                 "config_manager": mock_config_manager,
-                "session_registry_manager": create_mock_session_registry_manager(
-                    registry=mock_session_registry
-                ),
+                "registry": mock_session_registry,
                 "instance_tracker": create_mock_instance_tracker(),
             }
         )
@@ -192,17 +244,28 @@ async def test_session_community_create_with_auth_token_from_defaults():
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
+    # Post-reveal shape: no ``auth`` wrapper; the credential block is
+    # already at the top level of ``defaults``.
     community_config = {
         "session_creation": {
             "max_concurrent_sessions": 5,
             "defaults": {
-                "auth_token": "default_token",
+                "auth": {
+                    "credentials": {
+                        "type": "psk",
+                        "token": "default_token",
+                    }
+                }
             },
         }
     }
 
     full_config = community_config
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
+    # Stash for conftest's lifespan adapter — exposes the community
+    # settings dict to the multiplexed-server tool helpers without
+    # rewriting every test's MockContext call site.
+    mock_session_registry._community_settings = community_config
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
     mock_session_registry.add_session = AsyncMock()
     mock_session_registry.get = AsyncMock(
@@ -240,9 +303,7 @@ async def test_session_community_create_with_auth_token_from_defaults():
         context = MockContext(
             {
                 "config_manager": mock_config_manager,
-                "session_registry_manager": create_mock_session_registry_manager(
-                    registry=mock_session_registry
-                ),
+                "registry": mock_session_registry,
                 "instance_tracker": create_mock_instance_tracker(),
             }
         )
@@ -270,6 +331,10 @@ async def test_session_community_create_session_already_exists():
 
     full_config = community_config
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
+    # Stash for conftest's lifespan adapter — exposes the community
+    # settings dict to the multiplexed-server tool helpers without
+    # rewriting every test's MockContext call site.
+    mock_session_registry._community_settings = community_config
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
     # Session already exists — get() returns successfully (no exception)
     mock_session_registry.get = AsyncMock(return_value=MagicMock())
@@ -277,9 +342,7 @@ async def test_session_community_create_session_already_exists():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
@@ -306,6 +369,10 @@ async def test_session_community_create_health_check_timeout_with_cleanup():
 
     full_config = community_config
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
+    # Stash for conftest's lifespan adapter — exposes the community
+    # settings dict to the multiplexed-server tool helpers without
+    # rewriting every test's MockContext call site.
+    mock_session_registry._community_settings = community_config
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
     mock_session_registry.get = AsyncMock(
         side_effect=RegistryItemNotFoundError("not found")
@@ -347,9 +414,7 @@ async def test_session_community_create_health_check_timeout_with_cleanup():
         context = MockContext(
             {
                 "config_manager": mock_config_manager,
-                "session_registry_manager": create_mock_session_registry_manager(
-                    registry=mock_session_registry
-                ),
+                "registry": mock_session_registry,
                 "instance_tracker": create_mock_instance_tracker(),
             }
         )
@@ -380,6 +445,10 @@ async def test_session_community_create_with_python_launch_method():
 
     full_config = community_config
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
+    # Stash for conftest's lifespan adapter — exposes the community
+    # settings dict to the multiplexed-server tool helpers without
+    # rewriting every test's MockContext call site.
+    mock_session_registry._community_settings = community_config
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
     mock_session_registry.add_session = AsyncMock()
     mock_session_registry.get = AsyncMock(
@@ -421,9 +490,7 @@ async def test_session_community_create_with_python_launch_method():
         context = MockContext(
             {
                 "config_manager": mock_config_manager,
-                "session_registry_manager": create_mock_session_registry_manager(
-                    registry=mock_session_registry
-                ),
+                "registry": mock_session_registry,
                 "instance_tracker": create_mock_instance_tracker(),
             }
         )
@@ -447,9 +514,7 @@ async def test_session_community_delete_non_community_session():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
@@ -475,34 +540,33 @@ async def test_session_community_delete_close_fails_but_continues():
     mock_launched_session.launch_method = "docker"
 
     mock_manager = MagicMock(spec=DynamicCommunitySessionManager)
-    mock_manager.full_name = "community:dynamic:test-session"
+    mock_manager.full_name = "community:community:test-session"
     mock_manager._name = "test-session"
-    mock_manager.source = "dynamic"
+    mock_manager.system = "community"
+    mock_manager.origin = SessionOrigin.DYNAMIC
     mock_manager.system_type = SystemType.COMMUNITY
     mock_manager.launched_session = mock_launched_session
     mock_manager.close = AsyncMock(side_effect=Exception("Close failed"))
 
     mock_session_registry.get = AsyncMock(return_value=mock_manager)
-    mock_session_registry.remove_session = AsyncMock(return_value=mock_manager)
+    mock_session_registry.remove = AsyncMock(return_value=mock_manager)
 
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
 
     result = await session_community_delete(
-        context, session_id="community:dynamic:test-session"
+        context, session_id="community:community:test-session"
     )
 
     # Should still succeed despite close failure
     assert result["success"] is True
     # Verify removal was still attempted
-    mock_session_registry.remove_session.assert_called_once()
+    mock_session_registry.remove.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -515,30 +579,27 @@ async def test_session_community_delete_removal_fails():
     mock_launched_session.launch_method = "docker"
 
     mock_manager = MagicMock(spec=DynamicCommunitySessionManager)
-    mock_manager.full_name = "community:dynamic:test-session"
+    mock_manager.full_name = "community:community:test-session"
     mock_manager._name = "test-session"
-    mock_manager.source = "dynamic"
+    mock_manager.system = "community"
+    mock_manager.origin = SessionOrigin.DYNAMIC
     mock_manager.system_type = SystemType.COMMUNITY
     mock_manager.launched_session = mock_launched_session
     mock_manager.close = AsyncMock()
 
     mock_session_registry.get = AsyncMock(return_value=mock_manager)
-    mock_session_registry.remove_session = AsyncMock(
-        side_effect=Exception("Removal failed")
-    )
+    mock_session_registry.remove = AsyncMock(side_effect=Exception("Removal failed"))
 
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
 
     result = await session_community_delete(
-        context, session_id="community:dynamic:test-session"
+        context, session_id="community:community:test-session"
     )
 
     assert result["success"] is False
@@ -558,15 +619,13 @@ async def test_session_community_delete_unexpected_exception():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
 
     result = await session_community_delete(
-        context, session_id="community:dynamic:test-session"
+        context, session_id="community:community:test-session"
     )
 
     assert result["success"] is False
@@ -606,8 +665,9 @@ async def test_session_details_dynamic_community_with_all_fields():
     # Create actual manager instance
     manager = DynamicCommunitySessionManager(
         name="test-session",
-        config=session_config,
+        session_config=stub_session_config(),
         launched_session=mock_launched_session,
+        timeouts=CommunityClientTimeouts(),
     )
 
     mock_session_registry.get = AsyncMock(return_value=manager)
@@ -615,14 +675,14 @@ async def test_session_details_dynamic_community_with_all_fields():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
 
-    result = await session_details(context, session_id="community:dynamic:test-session")
+    result = await session_details(
+        context, session_id="community:community:test-session"
+    )
 
     # Verify all dynamic fields were added
     assert result["success"] is True
@@ -663,8 +723,9 @@ async def test_session_details_dynamic_community_with_python_process_id():
     # Create actual manager instance
     manager = DynamicCommunitySessionManager(
         name="pip-session",
-        config=session_config,
+        session_config=stub_session_config(),
         launched_session=mock_launched_session,
+        timeouts=CommunityClientTimeouts(),
     )
 
     mock_session_registry.get = AsyncMock(return_value=manager)
@@ -672,14 +733,14 @@ async def test_session_details_dynamic_community_with_python_process_id():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
 
-    result = await session_details(context, session_id="community:dynamic:pip-session")
+    result = await session_details(
+        context, session_id="community:community:pip-session"
+    )
 
     # Verify process_id was added
     assert result["success"] is True
@@ -714,8 +775,9 @@ async def test_session_details_dynamic_community_with_partial_fields():
     # Create actual manager instance
     manager = DynamicCommunitySessionManager(
         name="minimal-session",
-        config=session_config,
+        session_config=stub_session_config(),
         launched_session=mock_launched_session,
+        timeouts=CommunityClientTimeouts(),
     )
 
     mock_session_registry.get = AsyncMock(return_value=manager)
@@ -723,15 +785,13 @@ async def test_session_details_dynamic_community_with_partial_fields():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
 
     result = await session_details(
-        context, session_id="community:dynamic:minimal-session"
+        context, session_id="community:community:minimal-session"
     )
 
     # Verify fields that should be present
@@ -765,8 +825,8 @@ async def test_session_details_logs_version_info():
     # Configure session manager with required properties
     mgr.is_alive = AsyncMock(return_value=True)
     mgr.system_type = MagicMock()
-    mgr.system_type.name = "COMMUNITY"
-    mgr.source = "test-source"
+    mgr.system_type.value = "community"
+    mgr.system = "test-source"
     mgr.name = "test"
 
     # Mock liveness status
@@ -787,9 +847,7 @@ async def test_session_details_logs_version_info():
     request_context = MagicMock()
     request_context.lifespan_context = {
         "config_manager": MagicMock(),
-        "session_registry_manager": create_mock_session_registry_manager(
-            registry=session_registry
-        ),
+        "registry": session_registry,
     }
     context.request_context = request_context
 
@@ -838,14 +896,21 @@ async def test_sessions_list_success():
 
     # Create mock session managers
     mock_session_mgr1 = AsyncMock()
-    mock_session_mgr1.system_type.name = "COMMUNITY"
-    mock_session_mgr1.source = "source1"
-    mock_session_mgr1.name = "session1"
+    _wire_mgr_mock(
+        mock_session_mgr1,
+        type_value="community",
+        system="source1",
+        name="session1",
+        origin=SessionOrigin.STATIC,
+    )
 
     mock_session_mgr2 = AsyncMock()
-    mock_session_mgr2.system_type.name = "ENTERPRISE"
-    mock_session_mgr2.source = "source2"
-    mock_session_mgr2.name = "session2"
+    _wire_mgr_mock(
+        mock_session_mgr2,
+        type_value="enterprise",
+        system="source2",
+        name="session2",
+    )
 
     mock_registry.get_all.return_value = RegistrySnapshot.simple(
         items={
@@ -858,9 +923,7 @@ async def test_sessions_list_success():
     mock_context = MagicMock()
     mock_context.request_context.lifespan_context = {
         "config_manager": MagicMock(),
-        "session_registry_manager": create_mock_session_registry_manager(
-            registry=mock_registry
-        ),
+        "registry": mock_registry,
     }
 
     # Call function
@@ -872,20 +935,104 @@ async def test_sessions_list_success():
 
     # Check first session
     session1 = next(s for s in result["sessions"] if s["session_id"] == "session1")
-    assert session1["type"] == "COMMUNITY"
-    assert session1["source"] == "source1"
+    assert session1["type"] == "community"
+    assert session1["system"] == "source1"
     assert session1["session_name"] == "session1"
     assert "available" not in session1  # Should not check availability
 
     # Check second session
     session2 = next(s for s in result["sessions"] if s["session_id"] == "session2")
-    assert session2["type"] == "ENTERPRISE"
-    assert session2["source"] == "source2"
+    assert session2["type"] == "enterprise"
+    assert session2["system"] == "source2"
     assert session2["session_name"] == "session2"
     assert "available" not in session2  # Should not check availability
 
     # COMPLETED with no errors should not include initialization info
     assert "initialization" not in result
+
+
+@pytest.mark.asyncio
+async def test_sessions_list_filters_by_system():
+    """``type``/``system``/``origin`` filters scope the returned sessions."""
+    mock_registry = AsyncMock()
+
+    mgr_a = AsyncMock()
+    _wire_mgr_mock(mgr_a, type_value="enterprise", system="prod", name="alpha")
+
+    mgr_b = AsyncMock()
+    _wire_mgr_mock(mgr_b, type_value="enterprise", system="staging", name="beta")
+
+    mgr_c = AsyncMock()
+    _wire_mgr_mock(
+        mgr_c,
+        type_value="community",
+        system="community",
+        name="gamma",
+        origin=SessionOrigin.STATIC,
+    )
+    mgr_d = AsyncMock()
+    _wire_mgr_mock(
+        mgr_d,
+        type_value="community",
+        system="community",
+        name="delta",
+        origin=SessionOrigin.DYNAMIC,
+    )
+
+    mock_registry.get_all.return_value = RegistrySnapshot.simple(
+        items={
+            "enterprise:prod:alpha": mgr_a,
+            "enterprise:staging:beta": mgr_b,
+            "community:community:gamma": mgr_c,
+            "community:community:delta": mgr_d,
+        },
+    )
+
+    mock_multi_config = MagicMock()
+    mock_multi_config.list_systems.return_value = [
+        SystemRef(name="community", type=SystemType.COMMUNITY),
+        SystemRef(name="prod", type=SystemType.ENTERPRISE),
+        SystemRef(name="staging", type=SystemType.ENTERPRISE),
+    ]
+    mock_context = MagicMock()
+    mock_context.request_context.lifespan_context = {
+        "config_manager": MagicMock(),
+        "multi_config": mock_multi_config,
+        "registry": mock_registry,
+    }
+
+    # system="prod" yields exactly the prod enterprise session.
+    result = await sessions_list(mock_context, system="prod")
+    assert result["success"] is True
+    assert [s["session_id"] for s in result["sessions"]] == ["enterprise:prod:alpha"]
+
+    # No filters: everything (4 sessions).
+    result_all = await sessions_list(mock_context)
+    assert {s["session_id"] for s in result_all["sessions"]} == {
+        "enterprise:prod:alpha",
+        "enterprise:staging:beta",
+        "community:community:gamma",
+        "community:community:delta",
+    }
+
+    # type="community" yields both community sessions.
+    result_community = await sessions_list(mock_context, type="community")
+    assert {s["session_id"] for s in result_community["sessions"]} == {
+        "community:community:gamma",
+        "community:community:delta",
+    }
+
+    # origin="dynamic" yields only delta.
+    result_dynamic = await sessions_list(mock_context, origin="dynamic")
+    assert [s["session_id"] for s in result_dynamic["sessions"]] == [
+        "community:community:delta"
+    ]
+
+    # An unknown system is rejected explicitly.
+    result_bad = await sessions_list(mock_context, system="does-not-exist")
+    assert result_bad["success"] is False
+    assert result_bad["isError"] is True
+    assert "does-not-exist" in result_bad["error"]
 
 
 @pytest.mark.asyncio
@@ -896,9 +1043,10 @@ async def test_sessions_list_with_unknown_type():
 
     # Create a mock session manager with no system_type
     mock_session_mgr = AsyncMock()
-    mock_session_mgr.system_type = None
-    mock_session_mgr.source = "source"
+    mock_session_mgr.system_type = None  # accessing .value will AttributeError
+    mock_session_mgr.system = "source"
     mock_session_mgr.name = "session"
+    mock_session_mgr.origin = None
 
     mock_registry.get_all.return_value = RegistrySnapshot.simple(
         items={"session": mock_session_mgr},
@@ -908,9 +1056,7 @@ async def test_sessions_list_with_unknown_type():
     mock_context = MagicMock()
     mock_context.request_context.lifespan_context = {
         "config_manager": MagicMock(),
-        "session_registry_manager": create_mock_session_registry_manager(
-            registry=mock_registry
-        ),
+        "registry": mock_registry,
     }
 
     # Call function
@@ -934,9 +1080,9 @@ async def test_sessions_list_with_processing_error():
 
     # Create a session manager that will cause an exception during processing
     mock_session_mgr = AsyncMock()
-    # Configure system_type.name to raise an exception when accessed
+    # Configure system_type.value to raise an exception when accessed
     mock_system_type = MagicMock()
-    type(mock_system_type).name = PropertyMock(
+    type(mock_system_type).value = PropertyMock(
         side_effect=Exception("Processing error")
     )
     mock_session_mgr.system_type = mock_system_type
@@ -949,9 +1095,7 @@ async def test_sessions_list_with_processing_error():
     mock_context = MagicMock()
     mock_context.request_context.lifespan_context = {
         "config_manager": MagicMock(),
-        "session_registry_manager": create_mock_session_registry_manager(
-            registry=mock_registry
-        ),
+        "registry": mock_registry,
     }
 
     # Call function
@@ -991,9 +1135,7 @@ async def test_session_details_session_not_found():
     mock_context = MagicMock()
     mock_context.request_context.lifespan_context = {
         "config_manager": MagicMock(),
-        "session_registry_manager": create_mock_session_registry_manager(
-            registry=mock_registry
-        ),
+        "registry": mock_registry,
     }
 
     result = await session_details(mock_context, "nonexistent")
@@ -1013,9 +1155,9 @@ async def test_session_details_with_session_error():
     # Create mock session manager that raises an exception when liveness_status is called
     mock_session_mgr = AsyncMock()
     mock_system_type = MagicMock()
-    mock_system_type.name = "COMMUNITY"
+    mock_system_type.value = "community"
     mock_session_mgr.system_type = mock_system_type
-    mock_session_mgr.source = "source1"
+    mock_session_mgr.system = "source1"
     mock_session_mgr.name = "session1"
     # Set is_alive to raise an exception
     mock_session_mgr.is_alive = AsyncMock(side_effect=Exception("Session error"))
@@ -1027,9 +1169,7 @@ async def test_session_details_with_session_error():
     mock_context = MagicMock()
     mock_context.request_context.lifespan_context = {
         "config_manager": MagicMock(),
-        "session_registry_manager": create_mock_session_registry_manager(
-            registry=mock_registry
-        ),
+        "registry": mock_registry,
     }
 
     # Call function
@@ -1049,9 +1189,9 @@ async def test_session_details_with_processing_error():
 
     # Create a session manager that will cause an exception during processing
     mock_session_mgr = AsyncMock()
-    # Configure system_type.name to raise an exception when accessed
+    # Configure system_type.value to raise an exception when accessed
     mock_system_type = MagicMock()
-    type(mock_system_type).name = PropertyMock(
+    type(mock_system_type).value = PropertyMock(
         side_effect=Exception("Processing error")
     )
     mock_session_mgr.system_type = mock_system_type
@@ -1070,9 +1210,7 @@ async def test_session_details_with_processing_error():
     mock_context = MagicMock()
     mock_context.request_context.lifespan_context = {
         "config_manager": MagicMock(),
-        "session_registry_manager": create_mock_session_registry_manager(
-            registry=mock_registry
-        ),
+        "registry": mock_registry,
     }
 
     # Call function
@@ -1116,9 +1254,9 @@ async def test_session_details_success_with_programming_language():
     # Create mock session manager
     mock_session_mgr = AsyncMock()
     mock_system_type = MagicMock()
-    mock_system_type.name = "COMMUNITY"
+    mock_system_type.value = "community"
     mock_session_mgr.system_type = mock_system_type
-    mock_session_mgr.source = "source1"
+    mock_session_mgr.system = "source1"
     mock_session_mgr.name = "session1"
     mock_session_mgr.is_alive = AsyncMock(return_value=True)
     mock_session_mgr.get = AsyncMock(return_value=mock_session)
@@ -1137,9 +1275,7 @@ async def test_session_details_success_with_programming_language():
     mock_context = MagicMock()
     mock_context.request_context.lifespan_context = {
         "config_manager": MagicMock(),
-        "session_registry_manager": create_mock_session_registry_manager(
-            registry=mock_registry
-        ),
+        "registry": mock_registry,
     }
 
     # Call function
@@ -1149,8 +1285,8 @@ async def test_session_details_success_with_programming_language():
     assert result["success"] is True
     assert "session" in result
     assert result["session"]["session_id"] == "session1"
-    assert result["session"]["type"] == "COMMUNITY"
-    assert result["session"]["source"] == "source1"
+    assert result["session"]["type"] == "community"
+    assert result["session"]["system"] == "source1"
     assert result["session"]["session_name"] == "session1"
     assert result["session"]["available"] is True
     assert result["session"]["liveness_status"] == "ONLINE"
@@ -1170,9 +1306,9 @@ async def test_session_details_success_without_programming_language():
     # Create mock session manager
     mock_session_mgr = AsyncMock()
     mock_system_type = MagicMock()
-    mock_system_type.name = "COMMUNITY"
+    mock_system_type.value = "community"
     mock_session_mgr.system_type = mock_system_type
-    mock_session_mgr.source = "source1"
+    mock_session_mgr.system = "source1"
     mock_session_mgr.name = "session1"
     mock_session_mgr.is_alive = AsyncMock(return_value=True)
     mock_session_mgr.get = AsyncMock(return_value=mock_session)
@@ -1191,9 +1327,7 @@ async def test_session_details_success_without_programming_language():
     mock_context = MagicMock()
     mock_context.request_context.lifespan_context = {
         "config_manager": MagicMock(),
-        "session_registry_manager": create_mock_session_registry_manager(
-            registry=mock_registry
-        ),
+        "registry": mock_registry,
     }
 
     # Call function
@@ -1203,8 +1337,8 @@ async def test_session_details_success_without_programming_language():
     assert result["success"] is True
     assert "session" in result
     assert result["session"]["session_id"] == "session1"
-    assert result["session"]["type"] == "COMMUNITY"
-    assert result["session"]["source"] == "source1"
+    assert result["session"]["type"] == "community"
+    assert result["session"]["system"] == "source1"
     assert result["session"]["session_name"] == "session1"
     assert result["session"]["available"] is True
     assert result["session"]["liveness_status"] == "ONLINE"
@@ -1213,13 +1347,14 @@ async def test_session_details_success_without_programming_language():
 
 
 @pytest.mark.asyncio
-async def test_dynamic_community_session_has_correct_source():
-    """Test that DynamicCommunitySessionManager has source='dynamic'."""
+async def test_dynamic_community_session_has_correct_origin():
+    """DynamicCommunitySessionManager exposes system='community', origin=DYNAMIC."""
     from unittest.mock import MagicMock
 
     from deephaven_mcp.resource_manager import (
         DockerLaunchedSession,
         DynamicCommunitySessionManager,
+        SessionOrigin,
         SystemType,
     )
 
@@ -1233,20 +1368,18 @@ async def test_dynamic_community_session_has_correct_source():
     # Create DynamicCommunitySessionManager
     manager = DynamicCommunitySessionManager(
         name="test-session",
-        config={"host": "localhost", "port": 10000},
+        session_config=stub_session_config(),
         launched_session=mock_launched_session,
+        timeouts=CommunityClientTimeouts(),
     )
 
-    # Verify source is "dynamic"
-    assert (
-        manager.source == "dynamic"
-    ), f"Expected source='dynamic', got source='{manager.source}'"
-
-    # Verify system_type is COMMUNITY
+    assert manager.system == "community"
+    assert manager.origin is SessionOrigin.DYNAMIC
     assert manager.system_type == SystemType.COMMUNITY
+    assert manager.full_name == "community:community:test-session"
 
     # Verify full_name format is correct
-    assert manager.full_name == "community:dynamic:test-session"
+    assert manager.full_name == "community:community:test-session"
 
     # Verify name
     assert manager.name == "test-session"
@@ -1270,8 +1403,9 @@ async def test_session_details_to_dict_exception():
 
     manager = DynamicCommunitySessionManager(
         name="test-session",
-        config={"host": "localhost", "port": 10000},
+        session_config=stub_session_config(),
         launched_session=mock_launched_session,
+        timeouts=CommunityClientTimeouts(),
     )
 
     # Mock to_dict() to raise an exception
@@ -1283,15 +1417,13 @@ async def test_session_details_to_dict_exception():
         context = MockContext(
             {
                 "config_manager": mock_config_manager,
-                "session_registry_manager": create_mock_session_registry_manager(
-                    registry=mock_session_registry
-                ),
+                "registry": mock_session_registry,
                 "instance_tracker": create_mock_instance_tracker(),
             }
         )
 
         result = await session_details(
-            context, session_id="community:dynamic:test-session"
+            context, session_id="community:community:test-session"
         )
 
         # Should still succeed despite to_dict() exception
@@ -1299,9 +1431,9 @@ async def test_session_details_to_dict_exception():
         session_info = result["session"]
 
         # Basic session info should be present
-        assert session_info["session_id"] == "community:dynamic:test-session"
-        assert session_info["type"] == "COMMUNITY"
-        assert session_info["source"] == "dynamic"
+        assert session_info["session_id"] == "community:community:test-session"
+        assert session_info["type"] == "community"
+        assert session_info["system"] == "community"
         assert session_info["session_name"] == "test-session"
 
         # Dynamic fields from to_dict() should NOT be present (because it failed)
@@ -1331,9 +1463,7 @@ async def test_sessions_list_discovery_in_progress():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
@@ -1360,9 +1490,7 @@ async def test_sessions_list_discovery_in_progress_with_errors():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
@@ -1391,9 +1519,7 @@ async def test_sessions_list_completed_with_errors():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
@@ -1420,9 +1546,7 @@ async def test_sessions_list_completed_no_errors():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
@@ -1440,7 +1564,7 @@ async def test_sessions_list_shows_errors_even_with_sessions():
     mock_mgr = MagicMock()
     mock_mgr.full_name = "enterprise:factory1:session1"
     mock_mgr.system_type = SystemType.ENTERPRISE
-    mock_mgr.source = "factory1"
+    mock_mgr.system = "factory1"
     mock_mgr.name = "session1"
 
     mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
@@ -1455,9 +1579,7 @@ async def test_sessions_list_shows_errors_even_with_sessions():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
             "instance_tracker": create_mock_instance_tracker(),
         }
     )

@@ -3,13 +3,19 @@ Unit tests for Session Manager classes.
 """
 
 import asyncio
+import time
+from typing import ClassVar, override
 from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
 
 import pytest
 
 from deephaven_mcp import client
 from deephaven_mcp._exceptions import InternalError, SessionCreationError
-from deephaven_mcp.client import CorePlusSession
+from deephaven_mcp.client import (
+    CommunityClientTimeouts,
+    CorePlusSession,
+    EnterpriseClientTimeouts,
+)
 from deephaven_mcp.resource_manager import (
     BaseItemManager,
     CommunitySessionManager,
@@ -21,6 +27,44 @@ from deephaven_mcp.resource_manager import (
     ResourceLivenessStatus,
     SystemType,
 )
+from deephaven_mcp.sessions import CommunitySessionConfig, EnterpriseSystemConfig
+
+
+def _stub_session_config(name: str = "test", **overrides) -> CommunitySessionConfig:
+    """Return a valid anonymous-auth CommunitySessionConfig for tests.
+
+    Construction with a fully-validated declaration is required by the
+    typed ``CommunitySessionManager`` API. Tests that previously passed
+    arbitrary dicts get this stub when the dict's contents are not
+    inspected by the assertions.
+    """
+    payload: dict = {
+        "name": name,
+        "auth": {"credentials": {"type": "anonymous"}},
+    }
+    payload.update(overrides)
+    return CommunitySessionConfig.model_validate(payload)
+
+
+def _stub_enterprise_config(
+    name: str = "enterprise-test", **overrides
+) -> EnterpriseSystemConfig:
+    """Return a valid EnterpriseSystemConfig stub for tests."""
+    payload: dict = {
+        "name": name,
+        "system_name": name,
+        "connection_json_url": "https://example.com/iris/connection.json",
+        "auth": {
+            "credentials": {
+                "type": "password",
+                "username": "u",
+                "password": "p",
+            }
+        },
+    }
+    payload.update(overrides)
+    return EnterpriseSystemConfig.model_validate(payload)
+
 
 # Base Item Manager Tests
 
@@ -44,8 +88,8 @@ class MockSyncItem:
 class ConcreteItemManager(BaseItemManager[MockItem]):
     """A concrete implementation of BaseItemManager for testing."""
 
-    def __init__(self, system_type: SystemType, source: str, name: str):
-        super().__init__(system_type, source, name)
+    def __init__(self, system_type: SystemType, system: str, name: str):
+        super().__init__(system_type, system, name)
         self._create_item_mock = AsyncMock(return_value=MockItem())
 
     async def _create_item(self) -> MockItem:
@@ -69,13 +113,16 @@ async def test_properties():
     """Test the basic properties of the manager."""
     manager = ConcreteItemManager(
         system_type=SystemType.COMMUNITY,
-        source="test_source",
+        system="test_source",
         name="test_manager",
     )
     assert manager.name == "test_manager"
     assert manager.system_type == SystemType.COMMUNITY
-    assert manager.source == "test_source"
+    assert manager.system == "test_source"
     assert manager.full_name == "community:test_source:test_manager"
+    # Base manager no longer carries origin/kind; those live on subclasses.
+    assert not hasattr(manager, "origin")
+    assert not hasattr(manager, "kind")
 
 
 @pytest.mark.asyncio
@@ -138,20 +185,28 @@ async def test_close():
 
 
 @pytest.mark.asyncio
-async def test_close_not_alive():
-    """Test that close handles an item that is not alive."""
+async def test_close_calls_item_close_unconditionally():
+    """close() unconditionally closes the cached item (no liveness pre-check).
+
+    The two-phase close path captures the item ref under the lock, clears
+    the cache, then closes outside the lock via ``_close_captured_item``.
+    Any exceptions from item.close() are swallowed with a WARNING log;
+    a previously-dead item is closed redundantly and the failure (if any)
+    is silently ignored.
+    """
     manager = ConcreteItemManager(SystemType.COMMUNITY, "test-source", "test")
     item = await manager.get()
 
-    # Mark the item as not alive
+    # Mark the item as not alive — close() no longer pre-checks this.
     item.is_alive.return_value = False
 
     await manager.close()
 
-    # close() should not be called on the item
-    item.close.assert_not_called()
-    # Cache should be cleared
+    # close() is called on the item regardless of liveness state.
+    item.close.assert_called_once()
+    # Cache is cleared.
     assert manager._item_cache is None
+    assert manager._last_accessed is None
 
 
 @pytest.mark.asyncio
@@ -177,8 +232,8 @@ async def test_close_handles_sync_method_gracefully():
     """Test that close handles synchronous close methods gracefully without raising errors."""
 
     class ConcreteSyncItemManager(BaseItemManager[MockSyncItem]):
-        def __init__(self, system_type: SystemType, source: str, name: str):
-            super().__init__(system_type, source, name)
+        def __init__(self, system_type: SystemType, system: str, name: str):
+            super().__init__(system_type, system, name)
             self._create_item_mock = AsyncMock(return_value=MockSyncItem())
 
         async def _create_item(self) -> MockSyncItem:
@@ -214,9 +269,9 @@ def test_resource_liveness_status_str():
 
 
 def test_system_type_str():
-    """Covers line 286: str(enum) returns the enum name."""
+    """``str(SystemType.X)`` returns the lowercase value."""
     for system_type in SystemType:
-        assert str(system_type) == system_type.name
+        assert str(system_type) == system_type.value
 
 
 from deephaven_mcp._exceptions import AuthenticationError, ConfigurationError
@@ -310,31 +365,38 @@ async def test_liveness_status_logs_and_modes(caplog):
 
 
 @pytest.mark.asyncio
-async def test_close_logs_on_liveness_failure(monkeypatch, caplog):
-    """Covers line 1319: Info log after successful close following liveness check failure."""
+async def test_close_swallows_item_close_exception(caplog):
+    """close() swallows exceptions from item.close() with a WARNING log.
+
+    The new close() path delegates the actual close to
+    ``_close_captured_item``, which catches any exception from
+    ``item.close()`` and logs at WARNING.  ``close()`` itself never
+    raises.
+    """
 
     class DummyManager(BaseItemManager[MockItem]):
         async def _create_item(self):
             return MockItem()
 
         async def _check_liveness(self, item):
-            raise Exception("liveness fail!")
+            return (ResourceLivenessStatus.ONLINE, None)
 
     manager = DummyManager(SystemType.COMMUNITY, "src", "nm")
     item = MockItem()
     manager._item_cache = item
-    item.close = AsyncMock()
-    # Patch _is_alive_unlocked to raise so that close takes the liveness failure path
-    monkeypatch.setattr(
-        manager,
-        "_is_alive_unlocked",
-        AsyncMock(side_effect=Exception("liveness fail!")),
-    )
-    with caplog.at_level("INFO"):
-        await manager.close()
-    expected = "[DummyManager] Successfully closed item for 'community:src:nm' despite earlier liveness failure"
+    item.close = AsyncMock(side_effect=Exception("close failed"))
+
+    with caplog.at_level("WARNING"):
+        await manager.close()  # must not raise
+
+    item.close.assert_called_once()
+    assert manager._item_cache is None
+    # The warning from _close_captured_item should be present.
     assert any(
-        r.levelname == "INFO" and r.getMessage() == expected for r in caplog.records
+        r.levelname == "WARNING"
+        and "Error closing item" in r.getMessage()
+        and "community:src:nm" in r.getMessage()
+        for r in caplog.records
     )
 
 
@@ -343,11 +405,16 @@ async def test_static_community_session_manager_has_correct_source():
     """Test that StaticCommunitySessionManager sets source to 'config'."""
     from deephaven_mcp.resource_manager import StaticCommunitySessionManager, SystemType
 
-    manager = StaticCommunitySessionManager("test-session", {"server": "localhost"})
+    manager = StaticCommunitySessionManager(
+        "test-session",
+        _stub_session_config(name="test-session"),
+        timeouts=CommunityClientTimeouts(),
+    )
 
-    assert manager.source == "config"
+    assert manager.system == "community"
+    assert manager.origin.value == "static"
     assert manager.system_type == SystemType.COMMUNITY
-    assert manager.full_name == "community:config:test-session"
+    assert manager.full_name == "community:community:test-session"
     assert manager.name == "test-session"
 
 
@@ -356,7 +423,9 @@ async def test_community_session_manager_check_liveness_offline(monkeypatch):
     """Covers line 1698: CommunitySessionManager._check_liveness returns OFFLINE if is_alive() is False."""
     from deephaven_mcp.resource_manager import StaticCommunitySessionManager
 
-    mgr = StaticCommunitySessionManager("test", {"server": "foo"})
+    mgr = StaticCommunitySessionManager(
+        "test", _stub_session_config(name="test"), timeouts=CommunityClientTimeouts()
+    )
     mock_session = Mock()
     mock_session.is_alive = AsyncMock(return_value=False)
     result = await mgr._check_liveness(mock_session)
@@ -398,30 +467,35 @@ class TestCommunitySessionManager:
     """Tests for the CommunitySessionManager class."""
 
     @pytest.mark.asyncio
-    @patch("deephaven_mcp.client.CoreSession.from_config")
-    async def test_create_item(self, mock_from_config):
-        """Test that _create_item correctly calls CoreSession.from_config."""
+    @patch("deephaven_mcp.client.CoreSession.from_session_config")
+    async def test_create_item(self, mock_from_session_config):
+        """Test that _create_item correctly calls CoreSession.from_session_config."""
         from deephaven_mcp.resource_manager import StaticCommunitySessionManager
 
-        mock_from_config.return_value = "mock_session"
+        mock_from_session_config.return_value = "mock_session"
+        session_config = _stub_session_config(name="test_community")
         manager = StaticCommunitySessionManager(
             name="test_community",
-            config={"host": "localhost"},
+            session_config=session_config,
+            timeouts=CommunityClientTimeouts(),
         )
         session = await manager._create_item()
-        mock_from_config.assert_awaited_once_with({"host": "localhost"})
+        mock_from_session_config.assert_awaited_once_with(
+            session_config, manager._timeouts
+        )
         assert session == "mock_session"
 
     @pytest.mark.asyncio
-    @patch("deephaven_mcp.client.CoreSession.from_config")
-    async def test_create_item_raises_exception(self, mock_from_config):
+    @patch("deephaven_mcp.client.CoreSession.from_session_config")
+    async def test_create_item_raises_exception(self, mock_from_session_config):
         """Test that _create_item raises SessionCreationError on failure."""
         from deephaven_mcp.resource_manager import StaticCommunitySessionManager
 
-        mock_from_config.side_effect = Exception("Connection failed")
+        mock_from_session_config.side_effect = Exception("Connection failed")
         manager = StaticCommunitySessionManager(
             name="test_community",
-            config={},
+            session_config=_stub_session_config(name="test_community"),
+            timeouts=CommunityClientTimeouts(),
         )
         with pytest.raises(SessionCreationError, match="Connection failed"):
             await manager._create_item()
@@ -433,7 +507,8 @@ class TestCommunitySessionManager:
 
         manager = StaticCommunitySessionManager(
             name="test_community",
-            config={},
+            session_config=_stub_session_config(name="test_community"),
+            timeouts=CommunityClientTimeouts(),
         )
         mock_session = AsyncMock()
         mock_session.is_alive.return_value = True
@@ -581,7 +656,9 @@ def test_enterprise_session_manager_constructor():
 
     mgr = EnterpriseSessionManager("src", "nm", dummy_creation)
     assert mgr._creation_function is dummy_creation
-    assert mgr.source == "src"
+    assert mgr.system == "src"
+    # Enterprise session managers never carry an ``origin``.
+    assert not hasattr(mgr, "origin")
     assert mgr.name == "nm"
     assert mgr.system_type.value == "enterprise"
 
@@ -743,16 +820,21 @@ class TestCorePlusSessionFactoryManager:
 
     def test_initialization(self):
         """Test that the manager initializes with the correct properties."""
-        config = {"host": "localhost"}
+        system_config = _stub_enterprise_config(name="test_factory")
         creds = self._make_creds()
         manager = CorePlusSessionFactoryManager(
-            name="test_factory", config=config, creds=creds
+            name="test_factory",
+            system_config=system_config,
+            creds=creds,
+            timeouts=EnterpriseClientTimeouts(),
         )
 
         assert manager.system_type == SystemType.ENTERPRISE
-        assert manager.source == "factory"
-        assert manager.name == "test_factory"
-        assert manager._config == config
+        assert manager.system == "test_factory"
+        assert manager.name == "factory"
+        # Factory managers are discriminated by class, not by an enum.
+        assert isinstance(manager, CorePlusSessionFactoryManager)
+        assert manager._system_config is system_config
         assert manager._creds is creds
 
     """Tests for the CorePlusSessionFactoryManager class."""
@@ -767,16 +849,21 @@ class TestCorePlusSessionFactoryManager:
         mock_factory = AsyncMock(spec=client.CorePlusSessionFactory)
         mock_from_credentials.return_value = mock_factory
 
-        config = {"host": "localhost"}
+        system_config = _stub_enterprise_config(name="test_factory")
         creds = self._make_creds()
         manager = CorePlusSessionFactoryManager(
-            name="test_factory", config=config, creds=creds
+            name="test_factory",
+            system_config=system_config,
+            creds=creds,
+            timeouts=EnterpriseClientTimeouts(),
         )
 
         created_factory = await manager._create_item()
 
         assert created_factory is mock_factory
-        mock_from_credentials.assert_awaited_once_with(config, creds)
+        mock_from_credentials.assert_awaited_once_with(
+            system_config, creds, manager._timeouts
+        )
 
     @pytest.mark.asyncio
     @patch(
@@ -788,15 +875,22 @@ class TestCorePlusSessionFactoryManager:
         from deephaven_mcp._exceptions import DeephavenConnectionError
 
         # Simulate a timeout by making from_credentials hang
-        async def slow_operation(config, creds):
+        async def slow_operation(system_config, creds, timeouts):
             await asyncio.sleep(20)  # Longer than default timeout
 
         mock_from_credentials.side_effect = slow_operation
 
-        config = {"host": "unreachable", "connection_timeout": 0.1}
+        system_config = _stub_enterprise_config(name="test_factory")
         creds = self._make_creds()
+        # The factory connect timeout is now sourced from
+        # ``EnterpriseClientTimeouts.session_connect_timeout_seconds``
+        # (per-system override was retired). Drive the test by
+        # constructing a tight-timeout EnterpriseClientTimeouts.
         manager = CorePlusSessionFactoryManager(
-            name="test_factory", config=config, creds=creds
+            name="test_factory",
+            system_config=system_config,
+            creds=creds,
+            timeouts=EnterpriseClientTimeouts(session_connect_timeout_seconds=0.1),
         )
 
         with pytest.raises(
@@ -804,14 +898,19 @@ class TestCorePlusSessionFactoryManager:
         ):
             await manager._create_item()
 
-        mock_from_credentials.assert_awaited_once_with(config, creds)
+        mock_from_credentials.assert_awaited_once_with(
+            system_config, creds, manager._timeouts
+        )
 
     @pytest.mark.asyncio
     async def test_check_liveness(self):
         """Test that _check_liveness correctly calls the item's ping method."""
         mock_factory = AsyncMock(spec=client.CorePlusSessionFactory)
         manager = CorePlusSessionFactoryManager(
-            name="test_factory", config={}, creds=self._make_creds()
+            name="test_factory",
+            system_config=_stub_enterprise_config(name="test_factory"),
+            creds=self._make_creds(),
+            timeouts=EnterpriseClientTimeouts(),
         )
 
         # Test when ping returns True
@@ -848,8 +947,9 @@ class TestDynamicCommunitySessionManager:
 
         manager = DynamicCommunitySessionManager(
             name="test-session",
-            config=config,
+            session_config=_stub_session_config(),
             launched_session=launched_session,
+            timeouts=CommunityClientTimeouts(),
         )
 
         assert manager.launched_session == launched_session
@@ -868,8 +968,9 @@ class TestDynamicCommunitySessionManager:
 
         manager = DynamicCommunitySessionManager(
             name="test-session",
-            config=config,
+            session_config=_stub_session_config(),
             launched_session=launched_session,
+            timeouts=CommunityClientTimeouts(),
         )
 
         result = manager.to_dict()
@@ -897,8 +998,9 @@ class TestDynamicCommunitySessionManager:
 
         manager = DynamicCommunitySessionManager(
             name="test-session",
-            config=config,
+            session_config=_stub_session_config(),
             launched_session=launched_session,
+            timeouts=CommunityClientTimeouts(),
         )
 
         result = manager.to_dict()
@@ -920,8 +1022,9 @@ class TestDynamicCommunitySessionManager:
 
         manager = DynamicCommunitySessionManager(
             name="test-session",
-            config=config,
+            session_config=_stub_session_config(),
             launched_session=launched_session,
+            timeouts=CommunityClientTimeouts(),
         )
 
         result = manager.to_dict()
@@ -942,8 +1045,9 @@ class TestDynamicCommunitySessionManager:
 
         manager = DynamicCommunitySessionManager(
             name="test-session",
-            config=config,
+            session_config=_stub_session_config(),
             launched_session=launched_session,
+            timeouts=CommunityClientTimeouts(),
         )
 
         result = manager.to_dict()
@@ -953,7 +1057,8 @@ class TestDynamicCommunitySessionManager:
 
     @pytest.mark.asyncio
     async def test_close_success(self):
-        """Test successful close."""
+        """close() captures and closes the cached session, stops the launcher,
+        and flips ``_is_stopped`` under a single critical section."""
         launched_session = DockerLaunchedSession(
             host="localhost",
             port=10000,
@@ -961,29 +1066,34 @@ class TestDynamicCommunitySessionManager:
             auth_token=None,
             container_id="test_container",
         )
-        config = {"host": "localhost", "port": 10000}
 
         manager = DynamicCommunitySessionManager(
             name="test-session",
-            config=config,
+            session_config=_stub_session_config(),
             launched_session=launched_session,
+            timeouts=CommunityClientTimeouts(),
         )
 
-        # Mock parent close and session stop
-        with patch.object(
-            manager.__class__.__bases__[0], "close", new_callable=AsyncMock
-        ) as mock_parent_close:
-            with patch.object(
-                launched_session, "stop", new_callable=AsyncMock
-            ) as mock_stop:
-                await manager.close()
+        cached_session = MagicMock()
+        cached_session.close = AsyncMock()
+        manager._item_cache = cached_session
+        manager._last_accessed = 0.0
 
-                mock_stop.assert_called_once()
-                mock_parent_close.assert_called_once()
+        with patch.object(
+            launched_session, "stop", new_callable=AsyncMock
+        ) as mock_stop:
+            await manager.close()
+
+        mock_stop.assert_awaited_once()
+        cached_session.close.assert_awaited_once()
+        assert manager._is_stopped is True
+        assert manager._item_cache is None
+        assert manager._last_accessed is None
 
     @pytest.mark.asyncio
-    async def test_close_handles_parent_close_error(self):
-        """Test close handles parent close errors."""
+    async def test_close_handles_cached_session_close_error(self):
+        """An error closing the cached session is swallowed so the launcher
+        still gets stopped."""
         launched_session = DockerLaunchedSession(
             host="localhost",
             port=10000,
@@ -991,31 +1101,37 @@ class TestDynamicCommunitySessionManager:
             auth_token=None,
             container_id="test_container",
         )
-        config = {"host": "localhost", "port": 10000}
 
         manager = DynamicCommunitySessionManager(
             name="test-session",
-            config=config,
+            session_config=_stub_session_config(),
             launched_session=launched_session,
+            timeouts=CommunityClientTimeouts(),
         )
 
-        # Mock parent close to raise error
-        with patch.object(
-            manager.__class__.__bases__[0], "close", new_callable=AsyncMock
-        ) as mock_parent_close:
-            mock_parent_close.side_effect = Exception("Parent close failed")
-            with patch.object(
-                launched_session, "stop", new_callable=AsyncMock
-            ) as mock_stop:
-                # Should not raise, just log warning
-                await manager.close()
+        cached_session = MagicMock()
+        cached_session.close = AsyncMock(side_effect=Exception("session close failed"))
+        manager._item_cache = cached_session
+        manager._last_accessed = 0.0
 
-                # Session stop should still be called
-                mock_stop.assert_called_once()
+        with patch.object(
+            launched_session, "stop", new_callable=AsyncMock
+        ) as mock_stop:
+            # Should not raise, just log warning
+            await manager.close()
+
+            # Launcher stop should still be called
+            mock_stop.assert_awaited_once()
+            cached_session.close.assert_awaited_once()
+            assert manager._is_stopped is True
+            assert manager._item_cache is None
 
     @pytest.mark.asyncio
     async def test_close_handles_session_stop_error(self):
-        """Test close handles session stop errors."""
+        """An error stopping the launcher is logged but does not raise.
+
+        The cached session close still runs first.
+        """
         launched_session = DockerLaunchedSession(
             host="localhost",
             port=10000,
@@ -1023,28 +1139,30 @@ class TestDynamicCommunitySessionManager:
             auth_token=None,
             container_id="test_container",
         )
-        config = {"host": "localhost", "port": 10000}
 
         manager = DynamicCommunitySessionManager(
             name="test-session",
-            config=config,
+            session_config=_stub_session_config(),
             launched_session=launched_session,
+            timeouts=CommunityClientTimeouts(),
         )
 
-        # Mock parent close and session stop
-        with patch.object(
-            manager.__class__.__bases__[0], "close", new_callable=AsyncMock
-        ) as mock_parent_close:
-            with patch.object(
-                launched_session, "stop", new_callable=AsyncMock
-            ) as mock_stop:
-                mock_stop.side_effect = Exception("Stop failed")
-                # Should not raise, just log error
-                await manager.close()
+        cached_session = MagicMock()
+        cached_session.close = AsyncMock()
+        manager._item_cache = cached_session
+        manager._last_accessed = 0.0
 
-                mock_stop.assert_called_once()
-                # Parent close should still be called
-                mock_parent_close.assert_called_once()
+        with patch.object(
+            launched_session, "stop", new_callable=AsyncMock
+        ) as mock_stop:
+            mock_stop.side_effect = Exception("Stop failed")
+            # Should not raise, just log error
+            await manager.close()
+
+            mock_stop.assert_awaited_once()
+            # Cached session close still happened
+            cached_session.close.assert_awaited_once()
+            assert manager._is_stopped is True
 
     def test_properties(self):
         """Test all property accessors."""
@@ -1062,8 +1180,9 @@ class TestDynamicCommunitySessionManager:
 
         manager = DynamicCommunitySessionManager(
             name="test-session",
-            config=config,
+            session_config=_stub_session_config(),
             launched_session=launched_session,
+            timeouts=CommunityClientTimeouts(),
         )
 
         assert manager.connection_url == "http://testhost:10000"
@@ -1074,6 +1193,184 @@ class TestDynamicCommunitySessionManager:
         assert manager.launch_method == "python"
         assert manager.container_id is None
         assert manager.process_id == 12345
+
+    @pytest.mark.asyncio
+    async def test_close_then_get_with_cached_item_raises(self):
+        """Cache-hit ``get()`` racing ``close()`` must raise once the close has
+        completed its single critical section.
+
+        Models the H3 race: a caller that wins ``self._lock`` *after* ``close()``
+        flipped ``_is_stopped`` and cleared the cache must see a clear error
+        rather than a stale cached session.
+        """
+        launched_session = DockerLaunchedSession(
+            host="localhost",
+            port=10000,
+            auth_type="anonymous",
+            auth_token=None,
+            container_id="test_container",
+        )
+
+        manager = DynamicCommunitySessionManager(
+            name="race-cached",
+            session_config=_stub_session_config(),
+            launched_session=launched_session,
+            timeouts=CommunityClientTimeouts(),
+        )
+
+        cached_session = MagicMock()
+        cached_session.close = AsyncMock()
+        manager._item_cache = cached_session
+        manager._last_accessed = 0.0
+
+        with patch.object(launched_session, "stop", new_callable=AsyncMock):
+            await manager.close()
+
+        assert manager._is_stopped is True
+        assert manager._item_cache is None
+        # Even though cache is now empty, _get_unlocked must check
+        # _is_stopped before any cache check to make the contract clear.
+        with pytest.raises(SessionCreationError, match="has been stopped"):
+            await manager.get()
+
+    @pytest.mark.asyncio
+    async def test_get_unlocked_refuses_when_stopped_with_populated_cache(self):
+        """If the cache slot is populated but ``_is_stopped`` is set, ``_get_unlocked``
+        raises before returning the cached item.
+
+        Tightens the H3 contract: the gate is on ``_is_stopped``, not on whether
+        ``_item_cache`` was cleared.
+        """
+        launched_session = DockerLaunchedSession(
+            host="localhost",
+            port=10000,
+            auth_type="anonymous",
+            auth_token=None,
+            container_id="test_container",
+        )
+
+        manager = DynamicCommunitySessionManager(
+            name="stopped-but-cached",
+            session_config=_stub_session_config(),
+            launched_session=launched_session,
+            timeouts=CommunityClientTimeouts(),
+        )
+
+        cached_session = MagicMock()
+        manager._item_cache = cached_session
+        manager._last_accessed = 0.0
+        manager._is_stopped = True
+
+        with pytest.raises(SessionCreationError, match="has been stopped"):
+            await manager.get()
+        # Cache slot is left untouched by _get_unlocked — only close() clears it.
+        assert manager._item_cache is cached_session
+
+    @pytest.mark.asyncio
+    async def test_get_in_flight_during_close_race(self):
+        """An in-flight ``get()`` that is mid ``_create_item`` when ``close()``
+        is called returns the just-created session; the close still tears it
+        down afterward. A *new* ``get()`` started after ``close()`` raises.
+        """
+        launched_session = DockerLaunchedSession(
+            host="localhost",
+            port=10000,
+            auth_type="anonymous",
+            auth_token=None,
+            container_id="test_container",
+        )
+
+        manager = DynamicCommunitySessionManager(
+            name="race-inflight",
+            session_config=_stub_session_config(),
+            launched_session=launched_session,
+            timeouts=CommunityClientTimeouts(),
+        )
+
+        gate = asyncio.Event()
+        created_session = MagicMock()
+        created_session.close = AsyncMock()
+
+        async def _slow_create():
+            await gate.wait()
+            return created_session
+
+        with patch.object(
+            CommunitySessionManager,
+            "_create_item",
+            new=AsyncMock(side_effect=_slow_create),
+        ):
+            with patch.object(launched_session, "stop", new_callable=AsyncMock):
+                # Start get() — it enters _get_unlocked, holds the manager
+                # lock, and awaits _create_item.
+                get_task = asyncio.create_task(manager.get())
+                # Give get_task a chance to acquire the lock and start awaiting.
+                await asyncio.sleep(0)
+                await asyncio.sleep(0)
+
+                # Now call close() — it should wait for the manager lock.
+                close_task = asyncio.create_task(manager.close())
+                await asyncio.sleep(0)
+
+                # Release _create_item so get_task can finish and release the lock.
+                gate.set()
+
+                # get_task returns the just-created session.
+                got = await get_task
+                assert got is created_session
+
+                # close_task then captures+closes that session.
+                await close_task
+
+        assert manager._is_stopped is True
+        assert manager._item_cache is None
+        # The session that get() returned has been closed by close().
+        created_session.close.assert_awaited_once()
+
+        # A subsequent get() must raise.
+        with pytest.raises(SessionCreationError, match="has been stopped"):
+            await manager.get()
+
+    @pytest.mark.asyncio
+    async def test_create_item_refuses_after_close(self):
+        """After ``close()``, a cache-miss ``get()`` must raise instead of recreating."""
+        launched_session = DockerLaunchedSession(
+            host="localhost",
+            port=10000,
+            auth_type="anonymous",
+            auth_token=None,
+            container_id="test_container",
+        )
+        config = {"host": "localhost", "port": 10000}
+
+        manager = DynamicCommunitySessionManager(
+            name="stopped",
+            session_config=_stub_session_config(),
+            launched_session=launched_session,
+            timeouts=CommunityClientTimeouts(),
+        )
+
+        # Patch the parent _create_item to a fast no-op so the first
+        # get() succeeds without a real network call.
+        with patch.object(
+            CommunitySessionManager,
+            "_create_item",
+            new_callable=AsyncMock,
+            return_value=MagicMock(),
+        ):
+            await manager.get()
+            assert manager._item_cache is not None
+
+            with patch.object(launched_session, "stop", new_callable=AsyncMock):
+                await manager.close()
+
+            assert manager._is_stopped is True
+            assert manager._item_cache is None
+
+            # Cache miss after close must NOT call parent _create_item;
+            # the subclass override raises before delegating.
+            with pytest.raises(SessionCreationError, match="has been stopped"):
+                await manager.get()
 
     def test_process_id_none_when_no_process(self):
         """Test process_id returns None when there's no process."""
@@ -1088,8 +1385,154 @@ class TestDynamicCommunitySessionManager:
 
         manager = DynamicCommunitySessionManager(
             name="test-session",
-            config=config,
+            session_config=_stub_session_config(),
             launched_session=launched_session,
+            timeouts=CommunityClientTimeouts(),
         )
 
         assert manager.process_id is None
+
+
+# ---------------------------------------------------------------------------
+# Per-manager idle-close path
+#
+# The manager owns the per-item idle check + close
+# (:meth:`BaseItemManager.maybe_close_if_idle`); the registry-level sweep
+# loop lives on :class:`~deephaven_mcp.resource_manager.Evictor` and is
+# tested separately in ``test__evictor.py``.
+# ---------------------------------------------------------------------------
+
+
+class _StubItem:
+    """Trivial AsyncClosable used as the cached item type."""
+
+    def __init__(self):
+        self.closed = False
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+class _StubStaticManager(BaseItemManager[_StubItem]):
+    """In-memory manager that creates a fresh _StubItem on each cache miss.
+
+    ``evicts_on_idle = False`` (the default).  Used to verify that
+    non-evicting managers reconnect lazily after an idle close.
+    """
+
+    def __init__(self, name: str):
+        super().__init__(SystemType.COMMUNITY, "test", name)
+        self.create_count = 0
+        self.extra_close_count = 0
+
+    @override
+    async def _create_item(self) -> _StubItem:
+        self.create_count += 1
+        return _StubItem()
+
+    @override
+    async def _check_liveness(self, item: _StubItem):
+        return (ResourceLivenessStatus.ONLINE, None)
+
+
+class _StubDynamicManager(_StubStaticManager):
+    """Like ``_StubStaticManager`` but with ``evicts_on_idle = True``.
+
+    Overrides :meth:`close` to count subclass-specific teardown calls so
+    tests can assert that the polymorphic close path (not just the base
+    cache clear) runs during idle eviction.
+    """
+
+    evicts_on_idle: ClassVar[bool] = True
+
+    @override
+    async def close(self) -> None:
+        await super().close()
+        self.extra_close_count += 1
+
+
+# --- last_accessed tracking ---
+
+
+@pytest.mark.asyncio
+async def test_last_accessed_set_on_first_get():
+    mgr = _StubStaticManager("a")
+    assert mgr._last_accessed is None
+    await mgr.get()
+    assert mgr._last_accessed is not None
+    assert mgr.create_count == 1
+
+
+@pytest.mark.asyncio
+async def test_last_accessed_refreshed_on_subsequent_get():
+    mgr = _StubStaticManager("a")
+    await mgr.get()
+    first = mgr._last_accessed
+    await asyncio.sleep(0.01)
+    await mgr.get()
+    assert mgr._last_accessed is not None
+    assert mgr._last_accessed > first
+
+
+# --- maybe_close_if_idle ---
+
+
+@pytest.mark.asyncio
+async def test_maybe_close_if_idle_never_accessed_returns_false():
+    mgr = _StubStaticManager("a")
+    closed = await mgr.maybe_close_if_idle(0.0, time.monotonic())
+    assert closed is False
+
+
+@pytest.mark.asyncio
+async def test_maybe_close_if_idle_within_timeout_returns_false():
+    mgr = _StubStaticManager("a")
+    await mgr.get()
+    closed = await mgr.maybe_close_if_idle(3600.0, time.monotonic())
+    assert closed is False
+    assert mgr._item_cache is not None
+
+
+@pytest.mark.asyncio
+async def test_maybe_close_if_idle_closes_after_timeout():
+    mgr = _StubStaticManager("a")
+    await mgr.get()
+    cached = mgr._item_cache
+    closed = await mgr.maybe_close_if_idle(0.1, mgr._last_accessed + 1000.0)
+    assert closed is True
+    assert mgr._item_cache is None
+    assert mgr._last_accessed is None
+    assert cached is not None
+    assert cached.closed is True
+
+
+@pytest.mark.asyncio
+async def test_maybe_close_if_idle_with_no_cache_resets_timer():
+    mgr = _StubStaticManager("a")
+    mgr._last_accessed = time.monotonic() - 1000.0
+    mgr._item_cache = None
+    closed = await mgr.maybe_close_if_idle(0.1, time.monotonic())
+    assert closed is False
+    assert mgr._last_accessed is None
+
+
+@pytest.mark.asyncio
+async def test_maybe_close_if_idle_invokes_polymorphic_close_on_dynamic():
+    """``evicts_on_idle=True`` managers' polymorphic close path runs."""
+    mgr = _StubDynamicManager("dyn")
+    await mgr.get()
+    closed = await mgr.maybe_close_if_idle(0.1, mgr._last_accessed + 1000.0)
+    assert closed is True
+    assert mgr.extra_close_count == 1
+    assert mgr._item_cache is None
+
+
+@pytest.mark.asyncio
+async def test_get_after_idle_close_recreates_item():
+    """After idle eviction, the next ``get()`` lazily reconnects."""
+    mgr = _StubStaticManager("a")
+    await mgr.get()
+    await mgr.maybe_close_if_idle(0.1, mgr._last_accessed + 1000.0)
+    await mgr.get()
+    assert mgr.create_count == 2
+    assert mgr._item_cache is not None

@@ -1,0 +1,18 @@
+{
+  "system_name": "prod",
+  "connection_json_url": "https://deephaven-prod.example.com:8123/iris/connection.json",
+  "auth": {
+    "credentials": {
+      "type": "password",
+      "username": "iris",
+      "password": "${env:DH_PROD_PASSWORD}"
+    }
+  },
+  "session_creation": {
+    "max_concurrent_sessions": 5,
+    "defaults": {
+      "heap_size_gb": 4,
+      "programming_language": "Python"
+    }
+  }
+}

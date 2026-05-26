@@ -3,8 +3,6 @@ Tests for deephaven_mcp.mcp_systems_server._tools.pq.
 """
 
 import asyncio
-import importlib
-import os
 import warnings
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
@@ -13,7 +11,6 @@ import pytest
 from conftest import (
     MockContext,
     create_mock_instance_tracker,
-    create_mock_session_registry_manager,
 )
 
 
@@ -137,6 +134,7 @@ try:
     )
 except Exception:
     _PQConfigMessage = None
+from deephaven_mcp.mcp_systems_server._tools._pq_config import PqToolsConfig
 from deephaven_mcp.mcp_systems_server._tools.pq import (
     _apply_pq_config_list_fields,
     _apply_pq_config_modifications,
@@ -155,7 +153,6 @@ from deephaven_mcp.mcp_systems_server._tools.pq import (
     _pq_state_category,
     _validate_and_parse_pq_ids,
     _validate_max_concurrent,
-    _validate_timeout,
     pq_create,
     pq_delete,
     pq_details,
@@ -197,16 +194,14 @@ async def test_pq_name_to_id_success():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
-    result = await pq_name_to_id(context, pq_name="analytics")
+    result = await pq_name_to_id(context, _TEST_SYSTEM_NAME, pq_name="analytics")
 
     assert result["success"] is True
-    assert result["pq_id"] == "enterprise:system:12345"
+    assert result["pq_id"] == "system:12345"
     assert result["serial"] == 12345
     assert result["name"] == "analytics"
     assert result["system_name"] == "system"
@@ -233,13 +228,11 @@ async def test_pq_name_to_id_not_found():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
-    result = await pq_name_to_id(context, pq_name="nonexistent")
+    result = await pq_name_to_id(context, _TEST_SYSTEM_NAME, pq_name="nonexistent")
 
     assert result["success"] is False
     assert "not found" in result["error"]
@@ -259,13 +252,11 @@ async def test_pq_name_to_id_connection_failed():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
-    result = await pq_name_to_id(context, pq_name="analytics")
+    result = await pq_name_to_id(context, _TEST_SYSTEM_NAME, pq_name="analytics")
 
     assert "error" in result
     assert result["isError"] is True
@@ -284,13 +275,11 @@ async def test_pq_name_to_id_exception():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
-    result = await pq_name_to_id(context, pq_name="analytics")
+    result = await pq_name_to_id(context, _TEST_SYSTEM_NAME, pq_name="analytics")
 
     assert result["success"] is False
     assert "error" in result
@@ -682,15 +671,13 @@ async def test_pq_restart_multiple():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
     result = await pq_restart(
         context,
-        pq_id=["enterprise:system:12345", "enterprise:system:67890"],
+        pq_id=["system:12345", "system:67890"],
     )
 
     assert result["success"] is True
@@ -726,7 +713,7 @@ async def test_pq_restart_partial_failure():
 
     mock_pq_info_1 = create_mock_pq_info(12345, "analytics", "RUNNING", 8.0)
 
-    async def mock_restart_side_effect(serials, timeout):
+    async def mock_restart_side_effect(serials, wait=True):
         if serials == [67890]:
             raise Exception("PQ cannot be restarted")
 
@@ -736,15 +723,13 @@ async def test_pq_restart_partial_failure():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
     result = await pq_restart(
         context,
-        pq_id=["enterprise:system:12345", "enterprise:system:67890"],
+        pq_id=["system:12345", "system:67890"],
     )
 
     assert result["success"] is True
@@ -782,7 +767,7 @@ async def test_pq_delete_partial_failure():
 
     call_count = [0]
 
-    async def mock_get_side_effect(serial, timeout_seconds=0):
+    async def mock_get_side_effect(serial):
         call_count[0] += 1
         if call_count[0] == 1:
             return mock_pq_info_1
@@ -799,15 +784,13 @@ async def test_pq_delete_partial_failure():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
     result = await pq_delete(
         context,
-        pq_id=["enterprise:system:12345", "enterprise:system:67890"],
+        pq_id=["system:12345", "system:67890"],
     )
 
     assert result["success"] is True
@@ -837,7 +820,7 @@ async def test_pq_start_partial_failure():
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
 
-    async def mock_start_side_effect(serial, timeout):
+    async def mock_start_side_effect(serial, wait=True):
         if serial == 67890:
             raise Exception("Timeout waiting for PQ to start")
 
@@ -847,7 +830,7 @@ async def test_pq_start_partial_failure():
     # 67890 raises in start_and_wait so its post-start get() is never called.
     call_counts: dict[int, int] = {}
 
-    async def mock_get_side_effect(serial, timeout_seconds=None):
+    async def mock_get_side_effect(serial):
         call_counts[serial] = call_counts.get(serial, 0) + 1
         if serial == 12345 and call_counts[serial] > 1:
             return create_mock_pq_info(12345, "analytics", "RUNNING", 8.0)
@@ -858,15 +841,13 @@ async def test_pq_start_partial_failure():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
     result = await pq_start(
         context,
-        pq_id=["enterprise:system:12345", "enterprise:system:67890"],
+        pq_id=["system:12345", "system:67890"],
     )
 
     assert result["success"] is True
@@ -902,7 +883,7 @@ async def test_pq_stop_partial_failure():
 
     mock_pq_info = create_mock_pq_info(12345, "analytics", "STOPPED", 8.0)
 
-    async def mock_stop_side_effect(serials, timeout):
+    async def mock_stop_side_effect(serials, wait=True):
         if serials == [67890]:
             raise Exception("PQ already stopped")
 
@@ -912,15 +893,13 @@ async def test_pq_stop_partial_failure():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
     result = await pq_stop(
         context,
-        pq_id=["enterprise:system:12345", "enterprise:system:67890"],
+        pq_id=["system:12345", "system:67890"],
     )
 
     assert result["success"] is True
@@ -1806,13 +1785,11 @@ async def test_pq_list_success():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
-    result = await pq_list(context)
+    result = await pq_list(context, _TEST_SYSTEM_NAME)
 
     # Verify success
     assert result["success"] is True
@@ -1821,7 +1798,7 @@ async def test_pq_list_success():
 
     # Verify PQ1 summary data (trimmed response - no full config/state_details)
     pq1 = result["pqs"][0]
-    assert pq1["pq_id"] == "enterprise:system:12345"
+    assert pq1["pq_id"] == "system:12345"
     assert pq1["serial"] == 12345
     assert pq1["name"] == "analytics"
     assert pq1["status"] == "RUNNING"
@@ -1848,7 +1825,7 @@ async def test_pq_list_success():
 
     # Verify PQ2 summary data
     pq2 = result["pqs"][1]
-    assert pq2["pq_id"] == "enterprise:system:12346"
+    assert pq2["pq_id"] == "system:12346"
     assert pq2["name"] == "reporting"
     assert pq2["status"] == "STOPPED"
     assert pq2["status_category"] == "TERMINAL"
@@ -1874,13 +1851,11 @@ async def test_pq_list_connection_failed():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
-    result = await pq_list(context)
+    result = await pq_list(context, _TEST_SYSTEM_NAME)
 
     assert result["success"] is False
     assert "error" in result
@@ -1899,13 +1874,11 @@ async def test_pq_list_exception():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
-    result = await pq_list(context)
+    result = await pq_list(context, _TEST_SYSTEM_NAME)
 
     assert result["success"] is False
     assert "error" in result
@@ -1943,17 +1916,15 @@ async def test_pq_details_success_by_name(mock_exported_enum, mock_restart_enum)
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
-    result = await pq_details(context, pq_id="enterprise:system:12345")
+    result = await pq_details(context, pq_id="system:12345")
 
     # Verify success
     assert result["success"] is True
-    assert result["pq_id"] == "enterprise:system:12345"
+    assert result["pq_id"] == "system:12345"
     assert result["serial"] == 12345
     assert result["name"] == "analytics"
     assert result["state"] == "RUNNING"
@@ -2063,17 +2034,15 @@ async def test_pq_details_success_by_serial():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
-    result = await pq_details(context, pq_id="enterprise:system:12345")
+    result = await pq_details(context, pq_id="system:12345")
 
     # Verify success
     assert result["success"] is True
-    assert result["pq_id"] == "enterprise:system:12345"
+    assert result["pq_id"] == "system:12345"
     assert result["serial"] == 12345
     assert result["name"] == "analytics"
     assert result["state"] == "STOPPED"
@@ -2100,13 +2069,11 @@ async def test_pq_details_not_found():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
-    result = await pq_details(context, pq_id="enterprise:system:99999")
+    result = await pq_details(context, pq_id="system:99999")
 
     assert result["success"] is False
     assert "error" in result
@@ -2121,16 +2088,16 @@ async def test_pq_details_invalid_pq_id():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
     result = await pq_details(context, pq_id="invalid:format")
 
     assert result["success"] is False
-    assert "Invalid pq_id format" in result["error"]
+    # ``pq_details`` surfaces the parser's own error directly (no
+    # ``"Invalid pq_id"`` wrapper); match on the parser's prefix instead.
+    assert "non-integer serial" in result["error"]
     assert result["isError"] is True
 
 
@@ -2147,13 +2114,11 @@ async def test_pq_details_connection_failed():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
-    result = await pq_details(context, pq_id="enterprise:system:12345")
+    result = await pq_details(context, pq_id="system:12345")
 
     assert "error" in result
     assert result["isError"] is True
@@ -2172,13 +2137,11 @@ async def test_pq_details_exception():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
-    result = await pq_details(context, pq_id="enterprise:system:12345")
+    result = await pq_details(context, pq_id="system:12345")
 
     assert result["success"] is False
     assert "error" in result
@@ -2205,13 +2168,11 @@ async def test_pq_details_not_found_by_serial():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
-    result = await pq_details(context, pq_id="enterprise:system:99999")
+    result = await pq_details(context, pq_id="system:99999")
 
     assert result["success"] is False
     assert "error" in result
@@ -2240,21 +2201,20 @@ async def test_pq_create_success():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
     result = await pq_create(
         context,
+        _TEST_SYSTEM_NAME,
         pq_name="new-pq",
         heap_size_gb=8.0,
     )
 
     # Verify success
     assert result["success"] is True
-    assert result["pq_id"] == "enterprise:system:12345"
+    assert result["pq_id"] == "system:12345"
     assert result["serial"] == 12345
     assert result["name"] == "new-pq"
     assert result["state"] == "UNINITIALIZED"
@@ -2283,14 +2243,13 @@ async def test_pq_create_success_groovy():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
     result = await pq_create(
         context,
+        _TEST_SYSTEM_NAME,
         pq_name="new-pq",
         heap_size_gb=8.0,
         programming_language="groovy",
@@ -2298,7 +2257,7 @@ async def test_pq_create_success_groovy():
 
     # Verify success
     assert result["success"] is True
-    assert result["pq_id"] == "enterprise:system:12345"
+    assert result["pq_id"] == "system:12345"
     assert result["serial"] == 12345
     assert result["name"] == "new-pq"
     assert result["state"] == "UNINITIALIZED"
@@ -2320,14 +2279,13 @@ async def test_pq_create_invalid_language():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
     result = await pq_create(
         context,
+        _TEST_SYSTEM_NAME,
         pq_name="new-pq",
         heap_size_gb=8.0,
         programming_language="JavaScript",
@@ -2351,13 +2309,13 @@ async def test_pq_create_connection_failed():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
-    result = await pq_create(context, pq_name="new-pq", heap_size_gb=8.0)
+    result = await pq_create(
+        context, _TEST_SYSTEM_NAME, pq_name="new-pq", heap_size_gb=8.0
+    )
 
     assert "error" in result
     assert result["isError"] is True
@@ -2376,13 +2334,13 @@ async def test_pq_create_exception():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
-    result = await pq_create(context, pq_name="new-pq", heap_size_gb=8.0)
+    result = await pq_create(
+        context, _TEST_SYSTEM_NAME, pq_name="new-pq", heap_size_gb=8.0
+    )
 
     assert result["success"] is False
     assert "error" in result
@@ -2390,54 +2348,69 @@ async def test_pq_create_exception():
 
 
 def test_validate_and_parse_pq_ids_single():
-    """Test _validate_and_parse_pq_ids with single pq_id."""
-    parsed_pqs, error = _validate_and_parse_pq_ids(
-        "enterprise:system:12345", _TEST_SYSTEM_NAME
-    )
+    """``_validate_and_parse_pq_ids`` returns a single parsed pair.
+
+    The helper now returns a 3-tuple
+    ``(parsed_pqs, system_name, error)``; each parsed entry is
+    ``(<original pq_id string>, <serial>)``.
+    """
+    parsed_pqs, system_name, error = _validate_and_parse_pq_ids("system:12345")
 
     assert error is None
-    assert len(parsed_pqs) == 1
-    assert parsed_pqs[0][0] == "enterprise:system:12345"
-    assert parsed_pqs[0][1] == 12345
+    assert system_name == "system"
+    assert parsed_pqs == [("system:12345", 12345)]
 
 
 def test_validate_and_parse_pq_ids_multiple():
-    """Test _validate_and_parse_pq_ids with multiple pq_ids."""
-    parsed_pqs, error = _validate_and_parse_pq_ids(
-        ["enterprise:system:12345", "enterprise:system:67890"], _TEST_SYSTEM_NAME
+    """``_validate_and_parse_pq_ids`` parses a list of same-system pq ids."""
+    parsed_pqs, system_name, error = _validate_and_parse_pq_ids(
+        ["system:12345", "system:67890"]
     )
 
     assert error is None
-    assert len(parsed_pqs) == 2
-    assert parsed_pqs[0][0] == "enterprise:system:12345"
-    assert parsed_pqs[1][0] == "enterprise:system:67890"
+    assert system_name == "system"
+    assert parsed_pqs == [("system:12345", 12345), ("system:67890", 67890)]
 
 
-def test_validate_and_parse_pq_ids_empty_list():
-    """Test _validate_and_parse_pq_ids with empty list."""
-    parsed_pqs, error = _validate_and_parse_pq_ids([], _TEST_SYSTEM_NAME)
-
-    assert parsed_pqs is None
-    assert error == "At least one pq_id must be provided"
-
-
-def test_validate_and_parse_pq_ids_different_systems():
-    """Test _validate_and_parse_pq_ids with pq_ids containing invalid system names."""
-    parsed_pqs, error = _validate_and_parse_pq_ids(
-        ["enterprise:system1:12345", "enterprise:system2:67890"], _TEST_SYSTEM_NAME
+def test_validate_and_parse_pq_ids_rejects_mixed_systems():
+    """Batches must all target the same enterprise system."""
+    parsed_pqs, system_name, error = _validate_and_parse_pq_ids(
+        ["system:12345", "other:67890"]
     )
-
     assert parsed_pqs is None
-    assert "Invalid pq_id" in error
+    assert system_name is None
+    assert error is not None
+    assert "same" in error.lower()
 
 
-def test_validate_and_parse_pq_ids_invalid_format():
-    """Test _validate_and_parse_pq_ids with invalid pq_id format."""
-    parsed_pqs, error = _validate_and_parse_pq_ids("invalid-format", _TEST_SYSTEM_NAME)
+# Note: ``test_parse_pq_id_*`` variants live further down in this module;
+# the old single-system versions used to live here but the new helper has
+# a different signature (no ``expected_system`` argument).
 
-    assert parsed_pqs is None
-    assert "Invalid pq_id" in error
-    assert "invalid-format" in error
+
+def test_validate_max_concurrent_zero():
+    """Test _validate_max_concurrent with zero raises ValueError."""
+    with pytest.raises(ValueError) as exc_info:
+        _validate_max_concurrent(0, "test_function")
+
+    assert "max_concurrent must be at least 1" in str(exc_info.value)
+    assert "got 0" in str(exc_info.value)
+
+
+def test_validate_max_concurrent_negative():
+    """Test _validate_max_concurrent with negative value raises ValueError."""
+    with pytest.raises(ValueError) as exc_info:
+        _validate_max_concurrent(-5, "test_function")
+
+    assert "max_concurrent must be at least 1" in str(exc_info.value)
+    assert "got -5" in str(exc_info.value)
+
+
+def test_validate_max_concurrent_valid():
+    """Test _validate_max_concurrent with valid values returns the value."""
+    assert _validate_max_concurrent(1, "test_function") == 1
+    assert _validate_max_concurrent(20, "test_function") == 20
+    assert _validate_max_concurrent(100, "test_function") == 100
 
 
 @pytest.mark.asyncio
@@ -2462,19 +2435,17 @@ async def test_pq_delete_success_by_name():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
-    result = await pq_delete(context, pq_id="enterprise:system:12345")
+    result = await pq_delete(context, pq_id="system:12345")
 
     # Verify success - new results structure
     assert result["success"] is True
     assert "results" in result
     assert len(result["results"]) == 1
-    assert result["results"][0]["pq_id"] == "enterprise:system:12345"
+    assert result["results"][0]["pq_id"] == "system:12345"
     assert result["results"][0]["serial"] == 12345
     assert result["results"][0]["success"] is True
     assert result["results"][0]["name"] == "analytics"
@@ -2508,23 +2479,19 @@ async def test_pq_delete_success_custom_timeout():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
-    result = await pq_delete(
-        context, pq_id="enterprise:system:12345", timeout_seconds=20
-    )
+    result = await pq_delete(context, pq_id="system:12345")
 
     # Verify success
     assert result["success"] is True
     assert result["results"][0]["success"] is True
     assert result["results"][0]["name"] == "analytics"
 
-    # Verify controller.get was called with custom timeout
-    mock_controller.get.assert_called_once_with(12345, timeout_seconds=20)
+    # Verify controller.get was called once with the serial
+    mock_controller.get.assert_called_once_with(12345)
     mock_controller.delete_query.assert_called_once_with(12345)
 
 
@@ -2537,16 +2504,14 @@ async def test_pq_delete_invalid_pq_id():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
     result = await pq_delete(context, pq_id="invalid:format")
 
     assert result["success"] is False
-    assert "Invalid pq_id format" in result["error"]
+    assert "non-integer serial" in result["error"]
     assert result["isError"] is True
 
 
@@ -2563,13 +2528,11 @@ async def test_pq_delete_connection_failed():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
-    result = await pq_delete(context, pq_id="enterprise:system:12345")
+    result = await pq_delete(context, pq_id="system:12345")
 
     assert "error" in result
     assert result["isError"] is True
@@ -2588,13 +2551,11 @@ async def test_pq_delete_exception():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
-    result = await pq_delete(context, pq_id="enterprise:system:12345")
+    result = await pq_delete(context, pq_id="system:12345")
 
     assert result["success"] is False
     assert "error" in result
@@ -2625,27 +2586,25 @@ async def test_pq_delete_multiple():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
     result = await pq_delete(
         context,
-        pq_id=["enterprise:system:12345", "enterprise:system:67890"],
+        pq_id=["system:12345", "system:67890"],
     )
 
     # Verify success
     assert result["success"] is True
     assert "results" in result
     assert len(result["results"]) == 2
-    assert result["results"][0]["pq_id"] == "enterprise:system:12345"
+    assert result["results"][0]["pq_id"] == "system:12345"
     assert result["results"][0]["serial"] == 12345
     assert result["results"][0]["success"] is True
     assert result["results"][0]["name"] == "analytics"
     assert result["results"][0]["error"] is None
-    assert result["results"][1]["pq_id"] == "enterprise:system:67890"
+    assert result["results"][1]["pq_id"] == "system:67890"
     assert result["results"][1]["serial"] == 67890
     assert result["results"][1]["success"] is True
     assert result["results"][1]["name"] == "reporting"
@@ -2667,19 +2626,15 @@ async def test_pq_delete_different_systems_error():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
-    result = await pq_delete(
-        context, pq_id=["enterprise:system1:12345", "enterprise:system2:67890"]
-    )
+    result = await pq_delete(context, pq_id=["system1:12345", "system2:67890"])
 
     # Verify error
     assert result["success"] is False
-    assert "Invalid pq_id" in result["error"]
+    assert "same" in result["error"]
     assert result["isError"] is True
 
 
@@ -2692,9 +2647,7 @@ async def test_pq_delete_empty_list():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -2714,16 +2667,15 @@ async def test_pq_delete_negative_timeout():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
-    result = await pq_delete(context, "enterprise:system:12345", timeout_seconds=-1)
+    # max_concurrent=-1 must be rejected by _validate_max_concurrent
+    result = await pq_delete(context, "system:12345", max_concurrent=-1)
 
     assert result["success"] is False
-    assert "timeout_seconds must be non-negative" in result["error"]
+    assert "max_concurrent must be at least 1" in result["error"]
     assert "got -1" in result["error"]
     assert result["isError"] is True
 
@@ -2736,13 +2688,11 @@ async def test_pq_delete_zero_max_concurrent():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
-    result = await pq_delete(context, "enterprise:system:12345", max_concurrent=0)
+    result = await pq_delete(context, "system:12345", max_concurrent=0)
 
     assert result["success"] is False
     assert "max_concurrent must be at least 1" in result["error"]
@@ -2775,22 +2725,20 @@ async def test_pq_modify_success():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
     result = await pq_modify(
         context,
-        pq_id="enterprise:system:12345",
+        pq_id="system:12345",
         heap_size_gb=16.0,
         restart=False,
     )
 
     # Verify success
     assert result["success"] is True
-    assert result["pq_id"] == "enterprise:system:12345"
+    assert result["pq_id"] == "system:12345"
     assert result["serial"] == 12345
     assert result["name"] == "analytics"
     assert result["restarted"] is False
@@ -2833,15 +2781,13 @@ async def test_pq_modify_with_restart():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
     result = await pq_modify(
         context,
-        pq_id="enterprise:system:12345",
+        pq_id="system:12345",
         pq_name="analytics_renamed",
         restart=True,
     )
@@ -2883,15 +2829,13 @@ async def test_pq_modify_script_body_running_no_restart_warns():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
     result = await pq_modify(
         context,
-        pq_id="enterprise:system:12345",
+        pq_id="system:12345",
         script_body="t = 42",
         restart=False,
     )
@@ -2923,15 +2867,13 @@ async def test_pq_modify_stopped_pq_no_warning():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
     result = await pq_modify(
         context,
-        pq_id="enterprise:system:12345",
+        pq_id="system:12345",
         script_body="t = 42",
         restart=False,
     )
@@ -2961,15 +2903,13 @@ async def test_pq_modify_metadata_only_no_warning():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
     result = await pq_modify(
         context,
-        pq_id="enterprise:system:12345",
+        pq_id="system:12345",
         pq_name="analytics_renamed",
         restart=False,
     )
@@ -2999,15 +2939,13 @@ async def test_pq_modify_running_with_restart_no_warning():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
     result = await pq_modify(
         context,
-        pq_id="enterprise:system:12345",
+        pq_id="system:12345",
         script_body="t = 42",
         restart=True,
     )
@@ -3039,15 +2977,13 @@ async def test_pq_modify_script_path():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
     result = await pq_modify(
         context,
-        pq_id="enterprise:system:12345",
+        pq_id="system:12345",
         script_path="/path/to/script.py",
         restart=False,
     )
@@ -3196,15 +3132,13 @@ async def test_pq_modify_mutually_exclusive_scripts():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
     result = await pq_modify(
         context,
-        pq_id="enterprise:system:12345",
+        pq_id="system:12345",
         script_body="print('inline')",
         script_path="/path/to/script.py",
     )
@@ -3224,9 +3158,7 @@ async def test_pq_modify_invalid_pq_id():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -3237,7 +3169,7 @@ async def test_pq_modify_invalid_pq_id():
     )
 
     assert result["success"] is False
-    assert "Invalid pq_id" in result["error"]
+    assert "Persistent-query id" in result["error"]
     assert result["isError"] is True
 
 
@@ -3254,15 +3186,13 @@ async def test_pq_modify_connection_failed():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
     result = await pq_modify(
         context,
-        pq_id="enterprise:system:12345",
+        pq_id="system:12345",
         heap_size_gb=16.0,
     )
 
@@ -3291,15 +3221,13 @@ async def test_pq_modify_pq_not_found():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
     result = await pq_modify(
         context,
-        pq_id="enterprise:system:99999",
+        pq_id="system:99999",
         heap_size_gb=16.0,
     )
 
@@ -3330,15 +3258,13 @@ async def test_pq_modify_invalid_language():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
     result = await pq_modify(
         context,
-        pq_id="enterprise:system:12345",
+        pq_id="system:12345",
         programming_language="JavaScript",
     )
 
@@ -3368,16 +3294,14 @@ async def test_pq_modify_no_changes():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
     # Call with no modification parameters (only pq_id and restart)
     result = await pq_modify(
         context,
-        pq_id="enterprise:system:12345",
+        pq_id="system:12345",
         restart=False,
     )
 
@@ -3392,10 +3316,18 @@ async def test_pq_modify_no_changes():
 @pytest.mark.asyncio
 @patch("deephaven_mcp.mcp_systems_server._tools.pq.RestartUsersEnum")
 async def test_pq_modify_all_parameters(mock_restart_enum):
-    """Test pq_modify with all parameters to achieve full coverage."""
-    # Mock RestartUsersEnum.Value() to return numeric enum value
-    mock_restart_enum.Value.return_value = 1  # RU_ADMIN = 1
+    """Test pq_modify with all parameters to achieve full coverage.
 
+    The test passes ``restart_users="RU_ADMIN"``, which routes through
+    :func:`_convert_restart_users_to_enum`. That helper raises
+    :class:`MissingEnterprisePackageError` when ``RestartUsersEnum`` is
+    ``None`` (the default in environments without the Core+ wheel), so
+    we mock it here to keep this test independent of installation state
+    and of any other test that patches ``RestartUsersEnum`` to ``None``.
+    """
+    # ``RU_ADMIN`` should resolve to the numeric enum value the
+    # assertions below expect (``1``).
+    mock_restart_enum.Value.return_value = 1
     mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
@@ -3415,16 +3347,14 @@ async def test_pq_modify_all_parameters(mock_restart_enum):
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
     # Call with all possible parameters
     result = await pq_modify(
         context,
-        pq_id="enterprise:system:12345",
+        pq_id="system:12345",
         pq_name="new_name",
         script_body="print('test')",
         programming_language="Python",
@@ -3472,7 +3402,7 @@ async def test_pq_modify_all_parameters(mock_restart_enum):
     assert list(config_pb.viewerGroups) == ["viewers"]
     # restart_users should be converted to numeric enum value (1 = RU_ADMIN)
     assert config_pb.restartUsers == 1
-    mock_restart_enum.Value.assert_called_once_with("RU_ADMIN")
+    mock_controller.modify_query.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -3500,16 +3430,14 @@ async def test_pq_modify_clear_auto_delete_timeout():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
     # Call with auto_delete_timeout=0 to clear expiration (make permanent)
     result = await pq_modify(
         context,
-        pq_id="enterprise:system:12345",
+        pq_id="system:12345",
         auto_delete_timeout=0,
         restart=False,
     )
@@ -3548,15 +3476,13 @@ async def test_pq_modify_restart_users_enum_not_available():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
     result = await pq_modify(
         context,
-        pq_id="enterprise:system:12345",
+        pq_id="system:12345",
         restart_users="RU_ADMIN",
     )
 
@@ -3596,15 +3522,13 @@ async def test_pq_modify_invalid_restart_users_value(mock_restart_enum):
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
     result = await pq_modify(
         context,
-        pq_id="enterprise:system:12345",
+        pq_id="system:12345",
         restart_users="INVALID_VALUE",
     )
 
@@ -3627,15 +3551,13 @@ async def test_pq_modify_exception():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
     result = await pq_modify(
         context,
-        pq_id="enterprise:system:12345",
+        pq_id="system:12345",
         heap_size_gb=16.0,
     )
 
@@ -3670,19 +3592,17 @@ async def test_pq_start_success():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
-    result = await pq_start(context, pq_id="enterprise:system:12345")
+    result = await pq_start(context, pq_id="system:12345")
 
     # Verify success - new results structure
     assert result["success"] is True
     assert "results" in result
     assert len(result["results"]) == 1
-    assert result["results"][0]["pq_id"] == "enterprise:system:12345"
+    assert result["results"][0]["pq_id"] == "system:12345"
     assert result["results"][0]["serial"] == 12345
     assert result["results"][0]["success"] is True
     assert result["results"][0]["name"] == "analytics"
@@ -3693,8 +3613,8 @@ async def test_pq_start_success():
     assert result["summary"]["succeeded"] == 1
     assert result["summary"]["failed"] == 0
     assert result["message"] == "Started 1 PQ(s)"
-    # Verify controller.start_and_wait was called with correct timeout
-    mock_controller.start_and_wait.assert_called_once_with(12345, 30)
+    # Verify controller.start_and_wait was called with default wait=True
+    mock_controller.start_and_wait.assert_called_once_with(12345, wait=True)
 
 
 @pytest.mark.asyncio
@@ -3717,13 +3637,11 @@ async def test_pq_start_already_running():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
-    result = await pq_start(context, pq_id="enterprise:system:12345")
+    result = await pq_start(context, pq_id="system:12345")
 
     assert result["success"] is True  # overall batch op succeeded (best-effort)
     assert len(result["results"]) == 1
@@ -3744,16 +3662,14 @@ async def test_pq_start_invalid_pq_id():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
     result = await pq_start(context, pq_id="invalid:format")
 
     assert result["success"] is False
-    assert "Invalid pq_id format" in result["error"]
+    assert "non-integer serial" in result["error"]
     assert result["isError"] is True
 
 
@@ -3770,13 +3686,11 @@ async def test_pq_start_connection_failed():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
-    result = await pq_start(context, pq_id="enterprise:system:12345")
+    result = await pq_start(context, pq_id="system:12345")
 
     assert "error" in result
     assert result["isError"] is True
@@ -3795,13 +3709,11 @@ async def test_pq_start_exception():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
-    result = await pq_start(context, pq_id="enterprise:system:12345")
+    result = await pq_start(context, pq_id="system:12345")
 
     assert result["success"] is False
     assert "error" in result
@@ -3829,7 +3741,7 @@ async def test_pq_start_multiple():
     heaps = {12345: 8.0, 67890: 16.0}
     call_counts_multi: dict[int, int] = {}
 
-    async def mock_get_multi(serial, timeout_seconds=None):
+    async def mock_get_multi(serial):
         call_counts_multi[serial] = call_counts_multi.get(serial, 0) + 1
         state = "RUNNING" if call_counts_multi[serial] > 1 else "STOPPED"
         return create_mock_pq_info(serial, names[serial], state, heaps[serial])
@@ -3839,28 +3751,26 @@ async def test_pq_start_multiple():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
     result = await pq_start(
         context,
-        pq_id=["enterprise:system:12345", "enterprise:system:67890"],
+        pq_id=["system:12345", "system:67890"],
     )
 
     # Verify success
     assert result["success"] is True
     assert "results" in result
     assert len(result["results"]) == 2
-    assert result["results"][0]["pq_id"] == "enterprise:system:12345"
+    assert result["results"][0]["pq_id"] == "system:12345"
     assert result["results"][0]["serial"] == 12345
     assert result["results"][0]["success"] is True
     assert result["results"][0]["name"] == "analytics"
     assert result["results"][0]["state"] == "RUNNING"
     assert result["results"][0]["error"] is None
-    assert result["results"][1]["pq_id"] == "enterprise:system:67890"
+    assert result["results"][1]["pq_id"] == "system:67890"
     assert result["results"][1]["serial"] == 67890
     assert result["results"][1]["success"] is True
     assert result["results"][1]["name"] == "reporting"
@@ -3881,19 +3791,15 @@ async def test_pq_start_different_systems_error():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
-    result = await pq_start(
-        context, pq_id=["enterprise:system1:12345", "enterprise:system2:67890"]
-    )
+    result = await pq_start(context, pq_id=["system1:12345", "system2:67890"])
 
     # Verify error
     assert result["success"] is False
-    assert "Invalid pq_id" in result["error"]
+    assert "same" in result["error"]
     assert result["isError"] is True
 
 
@@ -3906,9 +3812,7 @@ async def test_pq_start_empty_list():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -3942,19 +3846,17 @@ async def test_pq_stop_success():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
-    result = await pq_stop(context, pq_id="enterprise:system:12345")
+    result = await pq_stop(context, pq_id="system:12345")
 
     # Verify success - new results structure
     assert result["success"] is True
     assert "results" in result
     assert len(result["results"]) == 1
-    assert result["results"][0]["pq_id"] == "enterprise:system:12345"
+    assert result["results"][0]["pq_id"] == "system:12345"
     assert result["results"][0]["serial"] == 12345
     assert result["results"][0]["success"] is True
     assert result["results"][0]["name"] == "analytics"
@@ -3964,7 +3866,7 @@ async def test_pq_stop_success():
     assert result["summary"]["succeeded"] == 1
     assert result["summary"]["failed"] == 0
     assert result["message"] == "Stopped 1 PQ(s)"
-    mock_controller.stop_query.assert_called_once_with([12345], 30)
+    mock_controller.stop_query.assert_called_once_with([12345], wait=True)
 
 
 @pytest.mark.asyncio
@@ -3989,19 +3891,17 @@ async def test_pq_stop_success_custom_timeout():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
-    result = await pq_stop(context, pq_id="enterprise:system:12345", timeout_seconds=60)
+    result = await pq_stop(context, pq_id="system:12345")
 
     # Verify success - new results structure
     assert result["success"] is True
     assert "results" in result
     assert len(result["results"]) == 1
-    assert result["results"][0]["pq_id"] == "enterprise:system:12345"
+    assert result["results"][0]["pq_id"] == "system:12345"
     assert result["results"][0]["serial"] == 12345
     assert result["results"][0]["success"] is True
     assert result["results"][0]["name"] == "analytics"
@@ -4011,7 +3911,7 @@ async def test_pq_stop_success_custom_timeout():
     assert result["summary"]["succeeded"] == 1
     assert result["summary"]["failed"] == 0
     assert result["message"] == "Stopped 1 PQ(s)"
-    mock_controller.stop_query.assert_called_once_with([12345], 60)
+    mock_controller.stop_query.assert_called_once_with([12345], wait=True)
 
 
 @pytest.mark.asyncio
@@ -4023,9 +3923,7 @@ async def test_pq_stop_empty_list():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -4045,16 +3943,14 @@ async def test_pq_stop_invalid_pq_id_in_list():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
-    result = await pq_stop(context, pq_id=["enterprise:system:12345", "invalid:format"])
+    result = await pq_stop(context, pq_id=["system:12345", "invalid:format"])
 
     assert result["success"] is False
-    assert "Invalid pq_id format" in result["error"]
+    assert "non-integer serial" in result["error"]
     assert result["isError"] is True
 
 
@@ -4071,13 +3967,11 @@ async def test_pq_stop_connection_failed():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
-    result = await pq_stop(context, pq_id="enterprise:system:12345")
+    result = await pq_stop(context, pq_id="system:12345")
 
     assert "error" in result
     assert result["isError"] is True
@@ -4096,13 +3990,11 @@ async def test_pq_stop_exception():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
-    result = await pq_stop(context, pq_id="enterprise:system:12345")
+    result = await pq_stop(context, pq_id="system:12345")
 
     assert result["success"] is False
     assert "error" in result
@@ -4131,19 +4023,17 @@ async def test_pq_restart_success():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
-    result = await pq_restart(context, pq_id="enterprise:system:12345")
+    result = await pq_restart(context, pq_id="system:12345")
 
     # Verify success - new results structure
     assert result["success"] is True
     assert "results" in result
     assert len(result["results"]) == 1
-    assert result["results"][0]["pq_id"] == "enterprise:system:12345"
+    assert result["results"][0]["pq_id"] == "system:12345"
     assert result["results"][0]["serial"] == 12345
     assert result["results"][0]["success"] is True
     assert result["results"][0]["name"] == "analytics"
@@ -4153,7 +4043,7 @@ async def test_pq_restart_success():
     assert result["summary"]["succeeded"] == 1
     assert result["summary"]["failed"] == 0
     assert result["message"] == "Restarted 1 PQ(s)"
-    mock_controller.restart_query.assert_called_once_with([12345], 30)
+    mock_controller.restart_query.assert_called_once_with([12345], wait=True)
 
 
 @pytest.mark.asyncio
@@ -4165,9 +4055,7 @@ async def test_pq_restart_empty_list():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -4187,18 +4075,14 @@ async def test_pq_restart_invalid_pq_id_in_list():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
-    result = await pq_restart(
-        context, pq_id=["enterprise:system:12345", "invalid:format"]
-    )
+    result = await pq_restart(context, pq_id=["system:12345", "invalid:format"])
 
     assert result["success"] is False
-    assert "Invalid pq_id format" in result["error"]
+    assert "non-integer serial" in result["error"]
     assert result["isError"] is True
 
 
@@ -4215,13 +4099,11 @@ async def test_pq_restart_connection_failed():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
-    result = await pq_restart(context, pq_id="enterprise:system:12345")
+    result = await pq_restart(context, pq_id="system:12345")
 
     assert "error" in result
     assert result["isError"] is True
@@ -4240,13 +4122,11 @@ async def test_pq_restart_exception():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
-    result = await pq_restart(context, pq_id="enterprise:system:12345")
+    result = await pq_restart(context, pq_id="system:12345")
 
     assert result["success"] is False
     assert "error" in result
@@ -4276,28 +4156,26 @@ async def test_pq_stop_multiple():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
     result = await pq_stop(
         context,
-        pq_id=["enterprise:system:12345", "enterprise:system:67890"],
+        pq_id=["system:12345", "system:67890"],
     )
 
     # Verify success
     assert result["success"] is True
     assert "results" in result
     assert len(result["results"]) == 2
-    assert result["results"][0]["pq_id"] == "enterprise:system:12345"
+    assert result["results"][0]["pq_id"] == "system:12345"
     assert result["results"][0]["serial"] == 12345
     assert result["results"][0]["success"] is True
     assert result["results"][0]["name"] == "analytics"
     assert result["results"][0]["state"] == "STOPPED"
     assert result["results"][0]["error"] is None
-    assert result["results"][1]["pq_id"] == "enterprise:system:67890"
+    assert result["results"][1]["pq_id"] == "system:67890"
     assert result["results"][1]["serial"] == 67890
     assert result["results"][1]["success"] is True
     assert result["results"][1]["name"] == "reporting"
@@ -4307,7 +4185,7 @@ async def test_pq_stop_multiple():
     assert result["summary"]["succeeded"] == 2
     assert result["summary"]["failed"] == 0
     assert result["message"] == "Stopped 2 PQ(s)"
-    # Best-effort calls stop_query for each PQ individually
+    # Verify stop_query was called for each PQ individually
     assert mock_controller.stop_query.call_count == 2
 
 
@@ -4334,28 +4212,26 @@ async def test_pq_restart_multiple():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
     result = await pq_restart(
         context,
-        pq_id=["enterprise:system:12345", "enterprise:system:67890"],
+        pq_id=["system:12345", "system:67890"],
     )
 
     # Verify success
     assert result["success"] is True
     assert "results" in result
     assert len(result["results"]) == 2
-    assert result["results"][0]["pq_id"] == "enterprise:system:12345"
+    assert result["results"][0]["pq_id"] == "system:12345"
     assert result["results"][0]["serial"] == 12345
     assert result["results"][0]["success"] is True
     assert result["results"][0]["name"] == "analytics"
     assert result["results"][0]["state"] == "RUNNING"
     assert result["results"][0]["error"] is None
-    assert result["results"][1]["pq_id"] == "enterprise:system:67890"
+    assert result["results"][1]["pq_id"] == "system:67890"
     assert result["results"][1]["serial"] == 67890
     assert result["results"][1]["success"] is True
     assert result["results"][1]["name"] == "reporting"
@@ -4365,7 +4241,7 @@ async def test_pq_restart_multiple():
     assert result["summary"]["succeeded"] == 2
     assert result["summary"]["failed"] == 0
     assert result["message"] == "Restarted 2 PQ(s)"
-    # Best-effort calls restart_query for each PQ individually
+    # Verify restart_query was called for each PQ individually
     assert mock_controller.restart_query.call_count == 2
 
 
@@ -4378,19 +4254,15 @@ async def test_pq_stop_different_systems_error():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
-    result = await pq_stop(
-        context, pq_id=["enterprise:system1:12345", "enterprise:system2:67890"]
-    )
+    result = await pq_stop(context, pq_id=["system1:12345", "system2:67890"])
 
     # Verify error
     assert result["success"] is False
-    assert "Invalid pq_id" in result["error"]
+    assert "same" in result["error"]
     assert result["isError"] is True
 
 
@@ -4403,82 +4275,52 @@ async def test_pq_restart_different_systems_error():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
-    result = await pq_restart(
-        context, pq_id=["enterprise:system1:12345", "enterprise:system2:67890"]
-    )
+    result = await pq_restart(context, pq_id=["system1:12345", "system2:67890"])
 
     # Verify error
     assert result["success"] is False
-    assert "Invalid pq_id" in result["error"]
+    assert "same" in result["error"]
     assert result["isError"] is True
 
 
 def test_parse_pq_id_invalid_format():
-    """Test _parse_pq_id with invalid format (not enough parts)."""
-    with pytest.raises(ValueError, match="Invalid pq_id format"):
-        _parse_pq_id("invalid:format", _TEST_SYSTEM_NAME)
+    """_parse_pq_id rejects non-integer serial segments."""
+    with pytest.raises(ValueError, match="non-integer serial"):
+        _parse_pq_id("invalid:format")
 
 
-def test_parse_pq_id_invalid_prefix():
-    """Test _parse_pq_id with non-enterprise prefix."""
-    with pytest.raises(ValueError, match="Invalid pq_id format"):
-        _parse_pq_id("community:system:12345", _TEST_SYSTEM_NAME)
+def test_parse_pq_id_rejects_three_segments():
+    """Three-segment ids (the old enterprise:<sys>:<serial> shape) are rejected.
+
+    The multiplexed parser now requires exactly two non-empty
+    colon-separated segments, so any legacy three-segment id surfaces
+    as a structural format error.
+    """
+    with pytest.raises(ValueError, match="two non-empty segments"):
+        _parse_pq_id("community:system:12345")
 
 
 def test_parse_pq_id_invalid_serial():
-    """Test _parse_pq_id with non-integer serial."""
-    with pytest.raises(ValueError, match="Serial must be an integer"):
-        _parse_pq_id("enterprise:system:not_a_number", _TEST_SYSTEM_NAME)
+    """``_parse_pq_id`` rejects ids whose serial is not an integer."""
+    with pytest.raises(ValueError, match="non-integer serial"):
+        _parse_pq_id("system:not_a_number")
 
 
 def test_parse_pq_id_success():
     """Test successful _parse_pq_id."""
-    serial = _parse_pq_id("enterprise:system:12345", _TEST_SYSTEM_NAME)
+    system_name, serial = _parse_pq_id("system:12345")
+    assert system_name == _TEST_SYSTEM_NAME
     assert serial == 12345
 
 
-def test_parse_pq_id_wrong_system():
-    """Test _parse_pq_id rejects IDs from a different system (cross-server guard)."""
-    with pytest.raises(ValueError, match="Invalid pq_id"):
-        _parse_pq_id("enterprise:other-system:12345", _TEST_SYSTEM_NAME)
-
-
-def test_validate_timeout_excessive(caplog):
-    """Test _validate_timeout with timeout exceeding safe limit."""
-    import logging
-
-    caplog.set_level(logging.WARNING)
-    result = _validate_timeout(400, "test_function")
-    assert result == 400
-    assert "exceeds recommended MCP limit" in caplog.text
-
-
-def test_validate_timeout_normal():
-    """Test _validate_timeout with normal timeout."""
-    result = _validate_timeout(30, "test_function")
-    assert result == 30
-
-
-def test_validate_timeout_zero():
-    """Test _validate_timeout with timeout=0 (fire-and-forget)."""
-    result = _validate_timeout(0, "test_function")
-    assert result == 0
-
-
-def test_validate_timeout_negative():
-    """Test _validate_timeout with negative timeout raises ValueError."""
-    with pytest.raises(ValueError) as exc_info:
-        _validate_timeout(-1, "test_function")
-
-    assert "timeout_seconds must be non-negative" in str(exc_info.value)
-    assert "got -1" in str(exc_info.value)
-    assert "Use timeout_seconds=0 for fire-and-forget" in str(exc_info.value)
+def test_parse_pq_id_non_integer_serial():
+    """_parse_pq_id rejects ids whose second segment is not a serial."""
+    with pytest.raises(ValueError, match="non-integer serial"):
+        _parse_pq_id("other-system:not-a-serial")
 
 
 def test_validate_max_concurrent_zero():
@@ -4528,7 +4370,7 @@ async def test_pq_delete_parallel_execution_with_semaphore():
         await asyncio.sleep(0.01)  # Simulate work
         execution_log.append(f"delete_end_{serial}")
 
-    async def mock_get_with_delay(serial, timeout_seconds=0):
+    async def mock_get_with_delay(serial):
         execution_log.append(f"get_{serial}")
         await asyncio.sleep(0.001)  # Small delay
         return create_mock_pq_info(serial, f"pq_{serial}", "STOPPED")
@@ -4539,9 +4381,7 @@ async def test_pq_delete_parallel_execution_with_semaphore():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -4549,9 +4389,9 @@ async def test_pq_delete_parallel_execution_with_semaphore():
     result = await pq_delete(
         context,
         pq_id=[
-            "enterprise:system:1",
-            "enterprise:system:2",
-            "enterprise:system:3",
+            "system:1",
+            "system:2",
+            "system:3",
         ],
         max_concurrent=2,
     )
@@ -4602,7 +4442,7 @@ async def test_pq_delete_handles_unexpected_exception():
 
     get_call_count = 0
 
-    async def mock_get_side_effect(serial, timeout_seconds=0):
+    async def mock_get_side_effect(serial):
         nonlocal get_call_count
         get_call_count += 1
         if get_call_count == 1:
@@ -4619,18 +4459,16 @@ async def test_pq_delete_handles_unexpected_exception():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
     result = await pq_delete(
         context,
         pq_id=[
-            "enterprise:system:1",
-            "enterprise:system:2",
-            "enterprise:system:3",
+            "system:1",
+            "system:2",
+            "system:3",
         ],
     )
 
@@ -4674,7 +4512,7 @@ async def test_pq_start_parallel_execution():
     active_operations = []
     max_concurrent_observed = 0
 
-    async def mock_start_and_wait(serial, timeout):
+    async def mock_start_and_wait(serial, wait=True):
         active_operations.append(serial)
         nonlocal max_concurrent_observed
         max_concurrent_observed = max(max_concurrent_observed, len(active_operations))
@@ -4685,7 +4523,7 @@ async def test_pq_start_parallel_execution():
     # get() called twice per PQ: pre-start check (STOPPED) then post-start state (RUNNING)
     parallel_call_counts: dict[int, int] = {}
 
-    async def mock_get_parallel(s, timeout_seconds=0):
+    async def mock_get_parallel(s):
         parallel_call_counts[s] = parallel_call_counts.get(s, 0) + 1
         state = "RUNNING" if parallel_call_counts[s] > 1 else "STOPPED"
         return create_mock_pq_info(s, f"pq_{s}", state)
@@ -4695,16 +4533,14 @@ async def test_pq_start_parallel_execution():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
     # Test with 5 PQs and default max_concurrent (20)
     result = await pq_start(
         context,
-        pq_id=[f"enterprise:system:{i}" for i in range(1, 6)],
+        pq_id=[f"system:{i}" for i in range(1, 6)],
     )
 
     # Verify success
@@ -4732,13 +4568,13 @@ async def test_pq_stop_parallel_with_mixed_results():
     mock_factory.controller_client = mock_controller
 
     # First and third succeed, second fails
-    async def mock_stop_side_effect(serials, timeout):
+    async def mock_stop_side_effect(serials, wait=True):
         # serials is a list with one element
         serial = serials[0]
         if serial == 2:
             raise TimeoutError("PQ did not stop in time")
 
-    async def mock_get_side_effect(serial, timeout_seconds=0):
+    async def mock_get_side_effect(serial):
         # This is only called after successful stops
         return create_mock_pq_info(serial, f"pq_{serial}", "STOPPED")
 
@@ -4748,18 +4584,16 @@ async def test_pq_stop_parallel_with_mixed_results():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
     result = await pq_stop(
         context,
         pq_id=[
-            "enterprise:system:1",
-            "enterprise:system:2",
-            "enterprise:system:3",
+            "system:1",
+            "system:2",
+            "system:3",
         ],
     )
 
@@ -4795,24 +4629,20 @@ async def test_pq_restart_parallel_execution():
     # Mock successful restarts
     mock_controller.restart_query = AsyncMock()
     mock_controller.get = AsyncMock(
-        side_effect=lambda s, timeout_seconds=0: create_mock_pq_info(
-            s, f"pq_{s}", "RUNNING"
-        )
+        side_effect=lambda s: create_mock_pq_info(s, f"pq_{s}", "RUNNING")
     )
 
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
     # Test with 4 PQs
     result = await pq_restart(
         context,
-        pq_id=[f"enterprise:system:{i}" for i in range(1, 5)],
+        pq_id=[f"system:{i}" for i in range(1, 5)],
         max_concurrent=2,
     )
 
@@ -4842,17 +4672,13 @@ async def test_pq_delete_exception_escapes_to_gather(monkeypatch):
 
     mock_controller.delete_query = AsyncMock()
     mock_controller.get = AsyncMock(
-        side_effect=lambda s, timeout_seconds=0: create_mock_pq_info(
-            s, f"pq_{s}", "STOPPED"
-        )
+        side_effect=lambda s: create_mock_pq_info(s, f"pq_{s}", "STOPPED")
     )
 
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -4872,9 +4698,9 @@ async def test_pq_delete_exception_escapes_to_gather(monkeypatch):
     result = await pq_delete(
         context,
         pq_id=[
-            "enterprise:system:1",
-            "enterprise:system:2",
-            "enterprise:system:3",
+            "system:1",
+            "system:2",
+            "system:3",
         ],
     )
 
@@ -4902,17 +4728,13 @@ async def test_pq_start_exception_escapes_to_gather(monkeypatch):
 
     mock_controller.start_and_wait = AsyncMock()
     mock_controller.get = AsyncMock(
-        side_effect=lambda s, timeout_seconds=0: create_mock_pq_info(
-            s, f"pq_{s}", "RUNNING"
-        )
+        side_effect=lambda s: create_mock_pq_info(s, f"pq_{s}", "RUNNING")
     )
 
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -4931,9 +4753,9 @@ async def test_pq_start_exception_escapes_to_gather(monkeypatch):
     result = await pq_start(
         context,
         pq_id=[
-            "enterprise:system:1",
-            "enterprise:system:2",
-            "enterprise:system:3",
+            "system:1",
+            "system:2",
+            "system:3",
         ],
     )
 
@@ -4959,17 +4781,13 @@ async def test_pq_stop_exception_escapes_to_gather(monkeypatch):
 
     mock_controller.stop_query = AsyncMock()
     mock_controller.get = AsyncMock(
-        side_effect=lambda s, timeout_seconds=0: create_mock_pq_info(
-            s, f"pq_{s}", "STOPPED"
-        )
+        side_effect=lambda s: create_mock_pq_info(s, f"pq_{s}", "STOPPED")
     )
 
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -4988,9 +4806,9 @@ async def test_pq_stop_exception_escapes_to_gather(monkeypatch):
     result = await pq_stop(
         context,
         pq_id=[
-            "enterprise:system:1",
-            "enterprise:system:2",
-            "enterprise:system:3",
+            "system:1",
+            "system:2",
+            "system:3",
         ],
     )
 
@@ -5016,17 +4834,13 @@ async def test_pq_restart_exception_escapes_to_gather(monkeypatch):
 
     mock_controller.restart_query = AsyncMock()
     mock_controller.get = AsyncMock(
-        side_effect=lambda s, timeout_seconds=0: create_mock_pq_info(
-            s, f"pq_{s}", "RUNNING"
-        )
+        side_effect=lambda s: create_mock_pq_info(s, f"pq_{s}", "RUNNING")
     )
 
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -5045,9 +4859,9 @@ async def test_pq_restart_exception_escapes_to_gather(monkeypatch):
     result = await pq_restart(
         context,
         pq_id=[
-            "enterprise:system:1",
-            "enterprise:system:2",
-            "enterprise:system:3",
+            "system:1",
+            "system:2",
+            "system:3",
         ],
     )
 
@@ -5066,14 +4880,13 @@ async def test_pq_create_script_body_and_path_mutually_exclusive():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
     result = await pq_create(
         context,
+        _TEST_SYSTEM_NAME,
         pq_name="test-pq",
         heap_size_gb=8.0,
         script_body="print('hello')",
@@ -5085,77 +4898,13 @@ async def test_pq_create_script_body_and_path_mutually_exclusive():
     assert result["isError"] is True
 
 
-class TestPqConstantsEnvVarOverrides:
-    """Test that PQ module constants can be overridden via environment variables."""
-
-    def _reload(self):
-        importlib.reload(_pq_module)
-
-    def test_mcp_timeout_warning_threshold_default(self, monkeypatch):
-        """MCP_TIMEOUT_WARNING_THRESHOLD default is 60."""
-        monkeypatch.delenv("DH_MCP_TIMEOUT_WARNING_THRESHOLD", raising=False)
-        self._reload()
-        assert _pq_module.MCP_TIMEOUT_WARNING_THRESHOLD == 60
-
-    def test_mcp_timeout_warning_threshold_env_override(self, monkeypatch):
-        """DH_MCP_TIMEOUT_WARNING_THRESHOLD overrides MCP_TIMEOUT_WARNING_THRESHOLD."""
-        monkeypatch.setenv("DH_MCP_TIMEOUT_WARNING_THRESHOLD", "120")
-        self._reload()
-        assert _pq_module.MCP_TIMEOUT_WARNING_THRESHOLD == 120
-
-    def test_default_pq_timeout_default(self, monkeypatch):
-        """DEFAULT_PQ_TIMEOUT default is 30."""
-        monkeypatch.delenv("DH_MCP_DEFAULT_PQ_TIMEOUT", raising=False)
-        self._reload()
-        assert _pq_module.DEFAULT_PQ_TIMEOUT == 30
-
-    def test_default_pq_timeout_env_override(self, monkeypatch):
-        """DH_MCP_DEFAULT_PQ_TIMEOUT overrides DEFAULT_PQ_TIMEOUT."""
-        monkeypatch.setenv("DH_MCP_DEFAULT_PQ_TIMEOUT", "45")
-        self._reload()
-        assert _pq_module.DEFAULT_PQ_TIMEOUT == 45
-
-    def test_default_max_concurrent_default(self, monkeypatch):
-        """DEFAULT_MAX_CONCURRENT default is 20."""
-        monkeypatch.delenv("DH_MCP_DEFAULT_MAX_CONCURRENT", raising=False)
-        self._reload()
-        assert _pq_module.DEFAULT_MAX_CONCURRENT == 20
-
-    def test_default_max_concurrent_env_override(self, monkeypatch):
-        """DH_MCP_DEFAULT_MAX_CONCURRENT overrides DEFAULT_MAX_CONCURRENT."""
-        monkeypatch.setenv("DH_MCP_DEFAULT_MAX_CONCURRENT", "50")
-        self._reload()
-        assert _pq_module.DEFAULT_MAX_CONCURRENT == 50
-
-    def test_mcp_timeout_warning_threshold_invalid_env_raises_value_error(
-        self, monkeypatch
-    ):
-        """A non-integer value for DH_MCP_TIMEOUT_WARNING_THRESHOLD raises ValueError."""
-        monkeypatch.setenv("DH_MCP_TIMEOUT_WARNING_THRESHOLD", "not_an_int")
-        with pytest.raises(ValueError):
-            self._reload()
-
-    def test_default_pq_timeout_invalid_env_raises_value_error(self, monkeypatch):
-        """A non-integer value for DH_MCP_DEFAULT_PQ_TIMEOUT raises ValueError."""
-        monkeypatch.setenv("DH_MCP_DEFAULT_PQ_TIMEOUT", "not_an_int")
-        with pytest.raises(ValueError):
-            self._reload()
-
-    def test_default_max_concurrent_invalid_env_raises_value_error(self, monkeypatch):
-        """A non-integer value for DH_MCP_DEFAULT_MAX_CONCURRENT raises ValueError."""
-        monkeypatch.setenv("DH_MCP_DEFAULT_MAX_CONCURRENT", "not_an_int")
-        with pytest.raises(ValueError):
-            self._reload()
-
-    def test_constants_are_int_type(self, monkeypatch):
-        """MCP_TIMEOUT_WARNING_THRESHOLD, DEFAULT_PQ_TIMEOUT, and DEFAULT_MAX_CONCURRENT are ints."""
-        monkeypatch.delenv("DH_MCP_TIMEOUT_WARNING_THRESHOLD", raising=False)
-        monkeypatch.delenv("DH_MCP_DEFAULT_PQ_TIMEOUT", raising=False)
-        monkeypatch.delenv("DH_MCP_DEFAULT_MAX_CONCURRENT", raising=False)
-        self._reload()
-        assert isinstance(_pq_module.MCP_TIMEOUT_WARNING_THRESHOLD, int)
-        assert isinstance(_pq_module.DEFAULT_PQ_TIMEOUT, int)
-        assert isinstance(_pq_module.DEFAULT_MAX_CONCURRENT, int)
+# Note: The legacy ``MCP_TIMEOUT_WARNING_THRESHOLD`` /
+# ``DEFAULT_PQ_TIMEOUT`` / ``DEFAULT_MAX_CONCURRENT`` module
+# constants (and their ``DH_MCP_*`` env-var overrides) were removed.
+# These values now live on
+# :class:`deephaven_mcp.config._pq_tools.PqToolsConfig`, loaded from
+# ``server.json``'s ``pq_tools`` block. Direct coverage of the model
+# and the accessor pair lives in ``tests/config/test__pq_tools.py``.
 
 
 def test_register_tools_registers_all_pq_tools():
@@ -5179,6 +4928,34 @@ def test_register_tools_registers_all_pq_tools():
         "pq_restart",
     }
     assert expected <= set(tools.keys())
+
+
+@pytest.mark.parametrize(
+    "tool_name", ["pq_delete", "pq_start", "pq_stop", "pq_restart"]
+)
+@pytest.mark.parametrize("bad_value", [0, -1])
+@pytest.mark.asyncio
+async def test_pq_max_concurrent_schema_rejects_non_positive(tool_name, bad_value):
+    """FastMCP schema validation rejects ``max_concurrent`` <= 0.
+
+    The rejection happens before the tool body runs.
+    """
+    from mcp.server.fastmcp import FastMCP
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    from deephaven_mcp.mcp_systems_server._tools.pq import register_tools
+
+    server = FastMCP("test-pq-schema")
+    register_tools(server)
+
+    with pytest.raises(ToolError) as exc_info:
+        await server.call_tool(
+            tool_name,
+            {"pq_id": "system:1", "max_concurrent": bad_value},
+        )
+    msg = str(exc_info.value)
+    assert "max_concurrent" in msg
+    assert "greater than 0" in msg
 
 
 # ---------------------------------------------------------------------------
@@ -5219,3 +4996,92 @@ def test_pq_state_category_unknown_falls_back_to_invalid():
     assert _pq_state_category("UNKNOWN") == "INVALID"
     assert _pq_state_category("") == "INVALID"
     assert _pq_state_category("bogus") == "INVALID"
+
+
+# ---------------------------------------------------------------------------
+# Unknown-system error paths (covers get_enterprise_registry raises)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_pq_details_unknown_system_returns_structured_error():
+    """``pq_details`` reports unknown systems via the centralized registry lookup."""
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
+    mock_session_registry.system_name = _TEST_SYSTEM_NAME
+    context = MockContext(
+        {"config_manager": MagicMock(), "registry": mock_session_registry}
+    )
+    result = await pq_details(context, pq_id="unknown:42")
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "not configured" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_pq_modify_unknown_system_returns_structured_error():
+    """``pq_modify`` reports unknown systems via the centralized registry lookup."""
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
+    mock_session_registry.system_name = _TEST_SYSTEM_NAME
+    context = MockContext(
+        {"config_manager": MagicMock(), "registry": mock_session_registry}
+    )
+    result = await pq_modify(context, pq_id="unknown:42", heap_size_gb=8.0)
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "not configured" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_pq_delete_unknown_system_returns_structured_error():
+    """Batch tools fail cleanly when the resolved system is unknown."""
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
+    mock_session_registry.system_name = _TEST_SYSTEM_NAME
+    context = MockContext(
+        {"config_manager": MagicMock(), "registry": mock_session_registry}
+    )
+    result = await pq_delete(context, pq_id="unknown:42")
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "not configured" in result["error"]
+
+
+# ---------------------------------------------------------------------------
+# pq_id docstring format regression: every example/format must be 2-segment
+# ---------------------------------------------------------------------------
+
+
+def test_pq_id_docstring_format_never_uses_legacy_three_segment_prefix():
+    """No PQ tool docstring may document ``pq_id`` as ``enterprise:<system>:<serial>``.
+
+    The actual parser at :func:`_parse_pq_id` accepts exactly 2 segments
+    (``<system_name>:<serial>``). A 3-segment legacy example in a
+    docstring is read by AI agents as the contract; every PQ tool call
+    using that shape then fails. This regression test scans every PQ
+    tool docstring (and the module surface) for any literal of the form
+    ``"enterprise:<word>:<word>"`` or ``'enterprise:{system_name}:...'``
+    appearing in a ``pq_id`` context and fails the build if found.
+    """
+    import re
+
+    from deephaven_mcp.mcp_systems_server._tools import pq as pq_module
+
+    source_path = pq_module.__file__
+    assert source_path is not None
+    with open(source_path) as f:
+        source = f.read()
+
+    # Lines that mention pq_id AND contain "enterprise:" within ~80 chars
+    # are the failure mode. Allow `enterprise:` elsewhere (it appears in
+    # session_id examples, which IS 3-segment).
+    offenders: list[str] = []
+    for lineno, line in enumerate(source.splitlines(), 1):
+        if "pq_id" not in line:
+            continue
+        if re.search(r"['\"]?enterprise:[\w{<]+:[\w{<]", line):
+            offenders.append(f"  line {lineno}: {line.strip()}")
+
+    assert not offenders, (
+        "PQ tool docstrings must not document pq_id with the 3-segment "
+        "'enterprise:<system>:<serial>' shape; use '<system_name>:<serial>'. "
+        "Offending lines:\n" + "\n".join(offenders)
+    )

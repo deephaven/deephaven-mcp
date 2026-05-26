@@ -11,7 +11,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from deephaven_mcp import config
 from deephaven_mcp._exceptions import (
     InternalError,
 )
@@ -115,27 +114,29 @@ class MockItem:
 
 
 class ConcreteRegistry(BaseRegistry[MockItem]):
-    """A concrete implementation of BaseRegistry for testing."""
+    """A concrete implementation of BaseRegistry for testing.
 
-    async def _load_items(self, config_manager: config.ConfigManager) -> None:
-        config_data = await config_manager.get_config()
-        for name, item_config in config_data.get("items", {}).items():
-            self._items[name] = MockItem(name=item_config["name"])
+    The new ``BaseRegistry`` API has subclasses store their own
+    configuration at construction time and ``_load_items`` no longer
+    accepts arguments. Tests pass an items dict directly.
+    """
 
-
-@pytest.fixture
-def mock_base_config_manager():
-    """Fixture for a mock ConfigManager with item configurations."""
-    mock = AsyncMock(spec=config.ConfigManager)
-    mock.get_config = AsyncMock(
-        return_value={
-            "items": {
+    def __init__(self, items: dict[str, dict] | None = None) -> None:
+        super().__init__()
+        # Use ``is None`` rather than truthiness so callers can request an
+        # *empty* registry by passing ``items={}``.
+        self._configured_items = (
+            items
+            if items is not None
+            else {
                 "item1": {"name": "alpha"},
                 "item2": {"name": "beta"},
             }
-        }
-    )
-    return mock
+        )
+
+    async def _load_items(self) -> None:
+        for name, item_config in self._configured_items.items():
+            self._items[name] = MockItem(name=item_config["name"])
 
 
 @pytest.fixture
@@ -152,16 +153,16 @@ def test_construction(registry):
 
 
 @pytest.mark.asyncio
-async def test_initialize(registry, mock_base_config_manager):
+async def test_initialize(registry):
     """Test that initialize() loads items and sets the initialized flag."""
-    await registry.initialize(mock_base_config_manager)
+    await registry.initialize()
     assert registry._initialized
     assert len(registry._items) == 2
     assert "item1" in registry._items
     assert registry._items["item1"].name == "alpha"
 
     # Test idempotency
-    await registry.initialize(mock_base_config_manager)
+    await registry.initialize()
     assert len(registry._items) == 2
 
 
@@ -176,22 +177,20 @@ async def test_methods_raise_before_initialize(registry):
 
 
 @pytest.mark.asyncio
-async def test_get_returns_item(registry, mock_base_config_manager):
+async def test_get_returns_item(registry):
     """Test that get() returns the correct item after initialization."""
-    await registry.initialize(mock_base_config_manager)
+    await registry.initialize()
     item = await registry.get("item1")
     assert isinstance(item, MockItem)
     assert item.name == "alpha"
 
 
 @pytest.mark.asyncio
-async def test_get_unknown_raises_registry_item_not_found(
-    registry, mock_base_config_manager
-):
+async def test_get_unknown_raises_registry_item_not_found(registry):
     """Test that get() raises RegistryItemNotFoundError for an unknown item."""
     from deephaven_mcp._exceptions import RegistryItemNotFoundError
 
-    await registry.initialize(mock_base_config_manager)
+    await registry.initialize()
     with pytest.raises(
         RegistryItemNotFoundError,
         match="No item with name 'unknown' found in ConcreteRegistry",
@@ -207,9 +206,9 @@ async def test_get_all_raises_before_initialize(registry):
 
 
 @pytest.mark.asyncio
-async def test_get_all_returns_snapshot(registry, mock_base_config_manager):
+async def test_get_all_returns_snapshot(registry):
     """Test that get_all() returns a RegistrySnapshot after initialization."""
-    await registry.initialize(mock_base_config_manager)
+    await registry.initialize()
     snapshot = await registry.get_all()
 
     # Should return a RegistrySnapshot with both configured items
@@ -224,9 +223,9 @@ async def test_get_all_returns_snapshot(registry, mock_base_config_manager):
 
 
 @pytest.mark.asyncio
-async def test_get_all_returns_copy(registry, mock_base_config_manager):
+async def test_get_all_returns_copy(registry):
     """Test that get_all() returns a copy of items, not the original dict."""
-    await registry.initialize(mock_base_config_manager)
+    await registry.initialize()
     snapshot = await registry.get_all()
     assert snapshot.initialization_phase == InitializationPhase.COMPLETED
     assert snapshot.initialization_errors == {}
@@ -251,12 +250,8 @@ async def test_get_all_returns_copy(registry, mock_base_config_manager):
 @pytest.mark.asyncio
 async def test_get_all_empty_registry():
     """Test that get_all() works with an empty registry."""
-    # Create a registry with no items configured
-    empty_config_manager = AsyncMock(spec=config.ConfigManager)
-    empty_config_manager.get_config = AsyncMock(return_value={"items": {}})
-
-    registry = ConcreteRegistry()
-    await registry.initialize(empty_config_manager)
+    registry = ConcreteRegistry(items={})
+    await registry.initialize()
 
     snapshot = await registry.get_all()
     assert isinstance(snapshot, RegistrySnapshot)
@@ -265,10 +260,57 @@ async def test_get_all_empty_registry():
     assert len(snapshot.items) == 0
 
 
+# --- snapshot_items() tests ---
+
+
 @pytest.mark.asyncio
-async def test_close_calls_close_on_items(registry, mock_base_config_manager):
+async def test_snapshot_items_returns_copy_of_items(registry):
+    """snapshot_items() returns a fresh dict matching _items."""
+    await registry.initialize()
+
+    snapshot = await registry.snapshot_items()
+    assert isinstance(snapshot, dict)
+    assert set(snapshot.keys()) == set(registry._items.keys())
+    for name, item in snapshot.items():
+        assert item is registry._items[name]
+
+
+@pytest.mark.asyncio
+async def test_snapshot_items_is_independent_copy(registry):
+    """Mutating the returned dict does not affect the registry."""
+    await registry.initialize()
+
+    snapshot = await registry.snapshot_items()
+    snapshot["bogus"] = MockItem("bogus")
+    snapshot.pop("item1", None)
+
+    # Registry untouched.
+    fresh = await registry.snapshot_items()
+    assert "bogus" not in fresh
+    assert "item1" in fresh
+
+
+@pytest.mark.asyncio
+async def test_snapshot_items_raises_before_initialize(registry):
+    """snapshot_items() raises InternalError before initialization."""
+    with pytest.raises(InternalError, match="not initialized"):
+        await registry.snapshot_items()
+
+
+@pytest.mark.asyncio
+async def test_snapshot_items_empty_registry():
+    """snapshot_items() works on an empty registry."""
+    registry = ConcreteRegistry(items={})
+    await registry.initialize()
+
+    snapshot = await registry.snapshot_items()
+    assert snapshot == {}
+
+
+@pytest.mark.asyncio
+async def test_close_calls_close_on_items(registry):
     """Test that close() calls the close() method on all managed items."""
-    await registry.initialize(mock_base_config_manager)
+    await registry.initialize()
 
     item1 = await registry.get("item1")
     item2 = await registry.get("item2")
@@ -284,11 +326,9 @@ async def test_close_calls_close_on_items(registry, mock_base_config_manager):
 
 
 @pytest.mark.asyncio
-async def test_close_logs_error_when_item_close_raises(
-    registry, mock_base_config_manager
-):
+async def test_close_logs_error_when_item_close_raises(registry):
     """close() logs errors from item.close() but continues closing remaining items."""
-    await registry.initialize(mock_base_config_manager)
+    await registry.initialize()
 
     item1 = await registry.get("item1")
     item2 = await registry.get("item2")
@@ -311,7 +351,7 @@ async def test_close_logs_error_when_item_close_raises(
 class _MutableRegistryImpl(MutableSessionRegistry):
     """Minimal concrete subclass of MutableSessionRegistry for testing."""
 
-    async def _load_items(self, config_manager) -> None:  # type: ignore[override]
+    async def _load_items(self) -> None:  # type: ignore[override]
         pass  # no-op — tests populate _items directly
 
 
@@ -330,7 +370,7 @@ def _make_mock_manager(full_name: str) -> MagicMock:
     mgr.close = AsyncMock()
     mgr.system_type = MagicMock()
     mgr.system_type.value = parts[0] if len(parts) >= 1 else "community"
-    mgr.source = parts[1] if len(parts) >= 2 else ""
+    mgr.system = parts[1] if len(parts) >= 2 else ""
     mgr.name = parts[2] if len(parts) >= 3 else ""
     return mgr
 
@@ -394,14 +434,14 @@ async def test_mutable_registry_add_session_not_initialized_raises():
 
 
 @pytest.mark.asyncio
-async def test_mutable_registry_remove_session_success():
-    """remove_session() removes and returns the manager, discards tracking id."""
+async def test_mutable_registry_remove_success():
+    """remove() removes and returns the manager, discards tracking id."""
     registry = _make_initialized_mutable_registry()
     mgr = _make_mock_manager("community:default:tosremove")
     registry._items["community:default:tosremove"] = mgr
     registry._added_session_ids.add("community:default:tosremove")
 
-    result = await registry.remove_session("community:default:tosremove")
+    result = await registry.remove("community:default:tosremove")
 
     assert result is mgr
     assert "community:default:tosremove" not in registry._items
@@ -409,21 +449,21 @@ async def test_mutable_registry_remove_session_success():
 
 
 @pytest.mark.asyncio
-async def test_mutable_registry_remove_session_not_found_returns_none():
-    """remove_session() returns None for a non-existent session (idempotent)."""
+async def test_mutable_registry_remove_not_found_returns_none():
+    """remove() returns None for a non-existent session (idempotent)."""
     registry = _make_initialized_mutable_registry()
 
-    result = await registry.remove_session("community:default:ghost")
+    result = await registry.remove("community:default:ghost")
     assert result is None
 
 
 @pytest.mark.asyncio
-async def test_mutable_registry_remove_session_not_initialized_raises():
-    """remove_session() raises InternalError if registry not initialized."""
+async def test_mutable_registry_remove_not_initialized_raises():
+    """remove() raises InternalError if registry not initialized."""
     registry = _MutableRegistryImpl()
 
     with pytest.raises(InternalError):
-        await registry.remove_session("community:default:s")
+        await registry.remove("community:default:s")
 
 
 @pytest.mark.asyncio

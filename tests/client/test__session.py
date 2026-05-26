@@ -4,18 +4,6 @@ import sys
 import types
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
-import pytest
-
-
-@pytest.fixture(autouse=True)
-def patch_load_bytes():
-    with patch(
-        "deephaven_mcp.client._session.load_bytes",
-        new=AsyncMock(return_value=b"binary"),
-    ):
-        yield
-
-
 import pyarrow as pa
 import pytest
 
@@ -26,6 +14,48 @@ from deephaven_mcp._exceptions import (
     SessionCreationError,
     SessionError,
 )
+
+# Shared fixtures for community session configs. The on-disk schema
+# requires `auth.credentials`; tests below mostly exercise error paths
+# rather than auth selection, so they default to anonymous.
+_ANON_AUTH = {"auth": {"credentials": {"type": "anonymous"}}}
+
+
+def _cfg(**extra) -> dict:
+    """Return a minimal-but-valid community session config."""
+    return {**_ANON_AUTH, **extra}
+
+
+def _from_config(cfg, *, name: str = "test", timeout_seconds: float | None = None):
+    """Test helper: validate ``cfg`` to a ``CommunitySessionConfig`` then connect.
+
+    The production API now accepts the typed declaration directly via
+    :meth:`CoreSession.from_session_config`. Most tests in this file
+    were authored against the prior dict-based ``from_config`` entry
+    point; this helper preserves that calling style by validating
+    ``cfg`` first and routing through the new typed entry point.
+
+    The legacy ``timeout_seconds`` parameter (now removed from the
+    production API) is preserved here as a test convenience: when set,
+    it is folded into a per-call ``CommunityClientTimeouts`` override so
+    timeout-failure tests can still trigger fast.
+    """
+    from deephaven_mcp.client import CommunityClientTimeouts
+    from deephaven_mcp.sessions import CommunitySessionConfig
+
+    if isinstance(cfg, dict):
+        payload = {"name": name, **cfg}
+    else:
+        payload = cfg  # type: ignore[assignment]
+    session_config = CommunitySessionConfig.model_validate(payload)
+    if timeout_seconds is None:
+        timeouts = CommunityClientTimeouts()
+    else:
+        timeouts = CommunityClientTimeouts(
+            session_connect_timeout_seconds=timeout_seconds
+        )
+    return CoreSession.from_session_config(session_config, timeouts)
+
 
 # Patch sys.modules for enterprise imports BEFORE any tested imports
 mock_enterprise = types.ModuleType("deephaven_enterprise")
@@ -378,7 +408,7 @@ async def test_core_from_config_session_creation_error(monkeypatch):
 
     monkeypatch.setattr("deephaven_mcp.client._session.Session", FailingPDHSession)
     with pytest.raises(SessionCreationError) as exc_info:
-        await CoreSession.from_config({"host": "localhost"})
+        await _from_config(_cfg(host="localhost"))
     assert "Failed to create Deephaven Community (Core) Session" in str(exc_info.value)
 
 
@@ -393,7 +423,7 @@ async def test_core_from_config_timeout(monkeypatch):
 
     monkeypatch.setattr("deephaven_mcp.client._session.Session", SlowPDHSession)
     with pytest.raises(DeephavenConnectionError) as exc_info:
-        await CoreSession.from_config({"host": "localhost"}, timeout_seconds=0.01)
+        await _from_config(_cfg(host="localhost"), timeout_seconds=0.01)
     assert "timed out" in str(exc_info.value)
 
 
@@ -408,15 +438,15 @@ async def test_core_session_error_logging_configuration_constants(monkeypatch, c
     monkeypatch.setattr("deephaven_mcp.client._session.Session", FailingPDHSession)
 
     with pytest.raises(SessionCreationError):
-        await CoreSession.from_config({"host": "localhost"})
+        await _from_config(_cfg(host="localhost"))
 
     # Check that specific error guidance was logged
     assert (
-        "[CoreSession:from_config] This error indicates a connection issue when trying to connect to the server."
+        "[CoreSession:_log_session_creation_error_details] This error indicates a connection issue when trying to connect to the server."
         in caplog.text
     )
     assert (
-        "[CoreSession:from_config] Verify that: 1) Server address and port are correct"
+        "[CoreSession:_log_session_creation_error_details] Verify that: 1) Server address and port are correct"
         in caplog.text
     )
 
@@ -443,15 +473,15 @@ async def test_core_session_error_logging_certificate_errors(monkeypatch, caplog
         monkeypatch.setattr("deephaven_mcp.client._session.Session", FailingPDHSession)
 
         with pytest.raises(SessionCreationError):
-            await CoreSession.from_config({"host": "localhost"})
+            await _from_config(_cfg(host="localhost"))
 
         # Check that TLS/SSL error guidance was logged
         assert (
-            "[CoreSession:from_config] This error indicates a TLS/SSL certificate issue."
+            "[CoreSession:_log_session_creation_error_details] This error indicates a TLS/SSL certificate issue."
             in caplog.text
         )
         assert (
-            "[CoreSession:from_config] Verify that: 1) Server certificate is valid and not expired"
+            "[CoreSession:_log_session_creation_error_details] Verify that: 1) Server certificate is valid and not expired"
             in caplog.text
         )
 
@@ -478,15 +508,15 @@ async def test_core_session_error_logging_authentication_errors(monkeypatch, cap
         monkeypatch.setattr("deephaven_mcp.client._session.Session", FailingPDHSession)
 
         with pytest.raises(SessionCreationError):
-            await CoreSession.from_config({"host": "localhost"})
+            await _from_config(_cfg(host="localhost"))
 
         # Check that authentication error guidance was logged
         assert (
-            "[CoreSession:from_config] This error indicates an authentication issue."
+            "[CoreSession:_log_session_creation_error_details] This error indicates an authentication issue."
             in caplog.text
         )
         assert (
-            "[CoreSession:from_config] Verify that: 1) Authentication credentials are correct"
+            "[CoreSession:_log_session_creation_error_details] Verify that: 1) Authentication credentials are correct"
             in caplog.text
         )
 
@@ -511,15 +541,15 @@ async def test_core_session_error_logging_network_errors(monkeypatch, caplog):
         monkeypatch.setattr("deephaven_mcp.client._session.Session", FailingPDHSession)
 
         with pytest.raises(SessionCreationError):
-            await CoreSession.from_config({"host": "localhost"})
+            await _from_config(_cfg(host="localhost"))
 
         # Check that network connectivity error guidance was logged
         assert (
-            "[CoreSession:from_config] This error indicates a network connectivity issue."
+            "[CoreSession:_log_session_creation_error_details] This error indicates a network connectivity issue."
             in caplog.text
         )
         assert (
-            "[CoreSession:from_config] Verify that: 1) Server is running and accessible"
+            "[CoreSession:_log_session_creation_error_details] Verify that: 1) Server is running and accessible"
             in caplog.text
         )
 
@@ -543,15 +573,15 @@ async def test_core_session_error_logging_dns_errors(monkeypatch, caplog):
         monkeypatch.setattr("deephaven_mcp.client._session.Session", FailingPDHSession)
 
         with pytest.raises(SessionCreationError):
-            await CoreSession.from_config({"host": "localhost"})
+            await _from_config(_cfg(host="localhost"))
 
         # Check that DNS resolution error guidance was logged
         assert (
-            "[CoreSession:from_config] This error indicates a DNS resolution issue."
+            "[CoreSession:_log_session_creation_error_details] This error indicates a DNS resolution issue."
             in caplog.text
         )
         assert (
-            "[CoreSession:from_config] Verify that: 1) Hostname is correct and resolvable"
+            "[CoreSession:_log_session_creation_error_details] Verify that: 1) Hostname is correct and resolvable"
             in caplog.text
         )
 
@@ -575,15 +605,15 @@ async def test_core_session_error_logging_port_binding_errors(monkeypatch, caplo
         monkeypatch.setattr("deephaven_mcp.client._session.Session", FailingPDHSession)
 
         with pytest.raises(SessionCreationError):
-            await CoreSession.from_config({"host": "localhost"})
+            await _from_config(_cfg(host="localhost"))
 
         # Check that port binding error guidance was logged
         assert (
-            "[CoreSession:from_config] This error indicates a port binding issue."
+            "[CoreSession:_log_session_creation_error_details] This error indicates a port binding issue."
             in caplog.text
         )
         assert (
-            "[CoreSession:from_config] Verify that: 1) Port is not already in use by another process, 2) You have permission to bind to the port, 3) Try a different port number"
+            "[CoreSession:_log_session_creation_error_details] Verify that: 1) Port is not already in use by another process, 2) You have permission to bind to the port, 3) Try a different port number"
             in caplog.text
         )
 
@@ -599,227 +629,258 @@ async def test_core_session_error_logging_unknown_error(monkeypatch, caplog):
     monkeypatch.setattr("deephaven_mcp.client._session.Session", FailingPDHSession)
 
     with pytest.raises(SessionCreationError):
-        await CoreSession.from_config({"host": "localhost"})
+        await _from_config(_cfg(host="localhost"))
 
     # Check that no specific error guidance was logged for unknown errors
-    assert "[CoreSession:from_config] This error indicates a" not in caplog.text
-    assert "[CoreSession:from_config] Verify that:" not in caplog.text
+    assert (
+        "[CoreSession:_log_session_creation_error_details] This error indicates a"
+        not in caplog.text
+    )
+    assert (
+        "[CoreSession:_log_session_creation_error_details] Verify that:"
+        not in caplog.text
+    )
 
 
 @pytest.mark.asyncio
 async def test_core_from_config_invalid_not_dict(monkeypatch):
     # Config is not a dict
     with pytest.raises(Exception) as exc_info:
-        await CoreSession.from_config("not a dict")
-    assert "dictionary" in str(exc_info.value) or "dict" in str(exc_info.value)
+        await _from_config("not a dict")  # type: ignore[arg-type]
+    # Pydantic surfaces this as either a validation error mentioning
+    # the dict type or an AttributeError on the str input.
+    msg = str(exc_info.value)
+    assert "dict" in msg or "attribute" in msg
 
 
 @pytest.mark.asyncio
 async def test_core_from_config_invalid_unknown_field(monkeypatch):
     # Config with unknown field
-    config = {"host": "localhost", "bad_field": 123}
+    config = _cfg(host="localhost", bad_field=123)
     with pytest.raises(Exception) as exc_info:
-        await CoreSession.from_config(config)
-    assert "Unknown field 'bad_field'" in str(exc_info.value)
+        await _from_config(config)
+    msg = str(exc_info.value)
+    assert "bad_field" in msg
+    assert "Extra inputs" in msg or "not permitted" in msg
 
 
 @pytest.mark.asyncio
-async def test_core_from_config_invalid_mutually_exclusive(monkeypatch):
-    # Both auth_token and auth_token_env_var set
-    config = {"host": "localhost", "auth_token": "tok", "auth_token_env_var": "ENV"}
+async def test_core_from_config_rejects_legacy_token_env_var(monkeypatch):
+    # Legacy ``token_env_var`` shadow field is no longer accepted; env-var
+    # indirection lives in the JSON as ``"${env:NAME}"`` and is resolved
+    # by the templating engine at file-load time.
+    config = {
+        "host": "localhost",
+        "auth": {
+            "credentials": {
+                "type": "psk",
+                "token": "tok",
+                "token_env_var": "ENV",
+            }
+        },
+    }
     with pytest.raises(Exception) as exc_info:
-        await CoreSession.from_config(config)
-    assert "'auth_token' and 'auth_token_env_var' are mutually exclusive" in str(
-        exc_info.value
-    )
+        await _from_config(config)
+    assert "Extra inputs" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
 async def test_core_from_config_invalid_type(monkeypatch):
     # Wrong type for port
-    config = {"host": "localhost", "port": "not an int"}
+    config = _cfg(host="localhost", port="not an int")
     with pytest.raises(Exception) as exc_info:
-        await CoreSession.from_config(config)
+        await _from_config(config)
     assert "type" in str(exc_info.value) or "int" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
 async def test_core_from_config_valid_minimal(monkeypatch):
-    config = {"host": "localhost"}
+    config = _cfg(host="localhost")
     monkeypatch.setattr("deephaven_mcp.client._session.Session", DummyPDHSession)
-    session = await CoreSession.from_config(config)
+    session = await _from_config(config)
     assert isinstance(session, CoreSession)
 
 
 @pytest.mark.asyncio
-async def test_core_from_config_success(monkeypatch):
+async def test_core_from_config_success(monkeypatch, tmp_path):
     """Test CoreSession.from_config creates a session with all parameters."""
+    root_pem = tmp_path / "root.pem"
+    root_pem.write_text("-----BEGIN CERT-----\nROOT\n-----END CERT-----\n")
     config = {
         "host": "localhost",
         "port": 10000,
-        "auth_type": "token",
-        "auth_token": "tok",
         "never_timeout": True,
-        "session_type": "python",
-        "use_tls": True,
-        "tls_root_certs": "/no/such/file/root.pem",
-        "client_cert_chain": "/no/such/file/chain.pem",
-        "client_private_key": "/no/such/file/key.pem",
+        "programming_language": "Python",
+        "tls": {"root_certs": root_pem.read_text()},
+        "auth": {
+            "credentials": {
+                "type": "psk",
+                "token": "tok",
+            }
+        },
     }
     monkeypatch.setattr("deephaven_mcp.client._session.Session", DummyPDHSession)
-    session = await CoreSession.from_config(config)
+    session = await _from_config(config)
     assert isinstance(session, CoreSession)
     assert isinstance(session.wrapped, DummyPDHSession)
 
 
 @pytest.mark.asyncio
-async def test_core_from_config_tls_file_error(monkeypatch):
-    from unittest.mock import AsyncMock
+async def test_core_from_config_rejects_legacy_root_certs_path():
+    """Legacy ``root_certs_path`` shadow field is no longer accepted.
 
-    monkeypatch.setattr(
-        "deephaven_mcp.client._session.load_bytes",
-        AsyncMock(side_effect=IOError("fail")),
-    )
-    config = {"tls_root_certs": "/bad/path"}
-    with pytest.raises(IOError):
-        await CoreSession.from_config(config)
+    File indirection is expressed via ``"${file:/path}"`` in the
+    source JSON and resolved by :mod:`deephaven_mcp.config._templating`
+    before the model sees the value.
+    """
+    from pydantic import ValidationError
+
+    config = _cfg(tls={"root_certs_path": "/no/such/file/root.pem"})
+    with pytest.raises(ValidationError, match="Extra inputs"):
+        await _from_config(config)
 
 
 @pytest.mark.asyncio
-async def test_core_from_config_auth_token_from_env_var(monkeypatch):
-    env_var = "MY_TEST_TOKEN_VAR"
-    expected = "token_from_env"
-    monkeypatch.setenv(env_var, expected)
-    config = {"auth_token_env_var": env_var}
+async def test_core_from_config_psk_token_from_env_var(monkeypatch):
+    # Templating happens at file-load time. The typed model accepts
+    # the already-resolved token directly here.
     monkeypatch.setattr("deephaven_mcp.client._session.Session", DummyPDHSession)
-    session = await CoreSession.from_config(config)
+    config = {"auth": {"credentials": {"type": "psk", "token": "token_from_env"}}}
+    session = await _from_config(config)
     assert isinstance(session, CoreSession)
-    monkeypatch.delenv(env_var)
 
 
 @pytest.mark.asyncio
-async def test_core_from_config_auth_token_env_var_not_set(monkeypatch):
-    """If auth_token_env_var names an unset env var, raise ConfigurationError.
+async def test_core_from_config_psk_env_var_field_rejected(monkeypatch):
+    """Legacy ``token_env_var`` shadow field is no longer accepted.
 
-    Previously this returned an empty token with a warning; the strict
-    behavior surfaces a misconfigured env var at resolve time rather
-    than as a confusing downstream authentication failure.
+    The new flow expects callers to template ``"${env:NAME}"`` into the
+    ``token`` value at file-load time; passing the old shadow field is
+    a config-schema error.
     """
     env_var = "MY_MISSING_TOKEN_VAR"
     monkeypatch.delenv(env_var, raising=False)
-    config = {"auth_token_env_var": env_var}
+    config = {"auth": {"credentials": {"type": "psk", "token_env_var": env_var}}}
     monkeypatch.setattr("deephaven_mcp.client._session.Session", DummyPDHSession)
-    with pytest.raises(ConfigurationError, match=env_var):
-        await CoreSession.from_config(config)
+    # Validation fails because ``token_env_var`` is now an unknown
+    # field; the strict schema surfaces it as a
+    # :class:`pydantic.ValidationError`.
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match=env_var):
+        await _from_config(config)
 
 
 @pytest.mark.asyncio
-async def test_core_from_config_auth_token_from_config(monkeypatch):
+async def test_core_from_config_psk_token_inline(monkeypatch):
     expected = "token_from_config_direct"
-    config = {"auth_token": expected}
+    config = {"auth": {"credentials": {"type": "psk", "token": expected}}}
     monkeypatch.setattr("deephaven_mcp.client._session.Session", DummyPDHSession)
-    session = await CoreSession.from_config(config)
+    session = await _from_config(config)
     assert isinstance(session, CoreSession)
 
 
 @pytest.mark.asyncio
-async def test_core_from_config_no_auth_token(monkeypatch):
-    config = {"host": "localhost"}
+async def test_core_from_config_anonymous(monkeypatch):
+    config = _cfg(host="localhost")
     monkeypatch.setattr("deephaven_mcp.client._session.Session", DummyPDHSession)
-    session = await CoreSession.from_config(config)
+    session = await _from_config(config)
     assert isinstance(session, CoreSession)
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "cfg,expected",
+    "cfg",
     [
-        (
-            {"host": "localhost"},
-            {
-                "host": "localhost",
-                "port": None,
-                "auth_type": "Anonymous",
-                "auth_token": "",
-                "never_timeout": False,
-                "session_type": "python",
-                "use_tls": False,
-                "tls_root_certs": None,
-                "client_cert_chain": None,
-                "client_private_key": None,
-            },
-        ),
-        (
-            {"host": "localhost", "port": 123},
-            {
-                "host": "localhost",
-                "port": 123,
-                "auth_type": "Anonymous",
-                "auth_token": "",
-                "never_timeout": False,
-                "session_type": "python",
-                "use_tls": False,
-                "tls_root_certs": None,
-                "client_cert_chain": None,
-                "client_private_key": None,
-            },
-        ),
-        (
-            {"host": "localhost", "auth_type": "token", "auth_token": "tok"},
-            {
-                "host": "localhost",
-                "port": None,
-                "auth_type": "token",
-                "auth_token": "tok",
-                "never_timeout": False,
-                "session_type": "python",
-                "use_tls": False,
-                "tls_root_certs": None,
-                "client_cert_chain": None,
-                "client_private_key": None,
-            },
-        ),
-        (
-            {"host": "localhost", "never_timeout": True, "session_type": "custom"},
-            {
-                "host": "localhost",
-                "port": None,
-                "auth_type": "Anonymous",
-                "auth_token": "",
-                "never_timeout": True,
-                "session_type": "custom",
-                "use_tls": False,
-                "tls_root_certs": None,
-                "client_cert_chain": None,
-                "client_private_key": None,
-            },
-        ),
+        _cfg(host="localhost"),
+        _cfg(host="localhost", port=123),
+        {
+            "host": "localhost",
+            "auth": {"credentials": {"type": "psk", "token": "tok"}},
+        },
+        _cfg(host="localhost", never_timeout=True, programming_language="Groovy"),
     ],
 )
-async def test_core_from_config_defaults(monkeypatch, cfg, expected):
+async def test_core_from_config_defaults(monkeypatch, cfg):
     monkeypatch.setattr("deephaven_mcp.client._session.Session", DummyPDHSession)
-    session = await CoreSession.from_config(cfg)
-    actual = (
-        session.wrapped.__dict__
-        if hasattr(session.wrapped, "__dict__")
-        else {k: getattr(session.wrapped, k, None) for k in expected}
+    session = await _from_config(cfg)
+    assert isinstance(session, CoreSession)
+
+
+@pytest.mark.asyncio
+async def test_core_from_config_tls_root_certs_loaded(monkeypatch, tmp_path):
+    """A populated tls.root_certs (decoded text) is forwarded as encoded
+    bytes to pydeephaven; mTLS client material is covered by
+    test_core_from_config_with_mtls below."""
+    root_pem = tmp_path / "ca.pem"
+    root_pem.write_text("-----BEGIN CERT-----\nCA\n-----END CERT-----\n")
+
+    captured_kwargs: dict[str, object] = {}
+
+    class CapturingSession:
+        def __init__(self, **kwargs):
+            captured_kwargs.update(kwargs)
+
+    monkeypatch.setattr("deephaven_mcp.client._session.Session", CapturingSession)
+
+    config = _cfg(host="localhost", tls={"root_certs": root_pem.read_text()})
+    session = await _from_config(config)
+    assert isinstance(session, CoreSession)
+    assert captured_kwargs["use_tls"] is True
+    assert captured_kwargs["tls_root_certs"] == root_pem.read_bytes()
+    assert captured_kwargs["client_cert_chain"] is None
+    assert captured_kwargs["client_private_key"] is None
+
+
+@pytest.mark.asyncio
+async def test_core_from_config_with_mtls(monkeypatch, tmp_path):
+    """tls.client_certificate is read at load time and forwarded as
+    cert_chain / private_key bytes to pydeephaven."""
+    cert = tmp_path / "client.pem"
+    key = tmp_path / "client.key"
+    cert.write_text("-----BEGIN CERT-----\nCLIENT\n-----END CERT-----\n")
+    key.write_text("-----BEGIN KEY-----\nKEY\n-----END KEY-----\n")
+
+    captured_kwargs: dict[str, object] = {}
+
+    class CapturingSession:
+        def __init__(self, **kwargs):
+            captured_kwargs.update(kwargs)
+
+    monkeypatch.setattr("deephaven_mcp.client._session.Session", CapturingSession)
+
+    config = _cfg(
+        host="localhost",
+        tls={
+            "client_certificate": {
+                "cert_chain": cert.read_text(),
+                "private_key": key.read_text(),
+            }
+        },
     )
+    session = await _from_config(config)
     assert isinstance(session, CoreSession)
+    assert captured_kwargs["use_tls"] is True
+    assert captured_kwargs["client_cert_chain"] == cert.read_bytes()
+    assert captured_kwargs["client_private_key"] == key.read_bytes()
+    assert captured_kwargs["tls_root_certs"] is None
 
 
 @pytest.mark.asyncio
-@pytest.mark.asyncio
-async def test_core_from_config_tls_and_client_keys(monkeypatch):
-    # All present
-    config = {
-        "host": "localhost",
-        "tls_root_certs": "/no/such/file/a",
-        "client_cert_chain": "/no/such/file/b",
-        "client_private_key": "/no/such/file/c",
-    }
-    monkeypatch.setattr("deephaven_mcp.client._session.Session", DummyPDHSession)
-    session = await CoreSession.from_config(config)
-    assert isinstance(session, CoreSession)
+async def test_core_from_config_no_tls_means_plaintext(monkeypatch):
+    """Absence of a tls block disables TLS entirely."""
+    captured_kwargs: dict[str, object] = {}
+
+    class CapturingSession:
+        def __init__(self, **kwargs):
+            captured_kwargs.update(kwargs)
+
+    monkeypatch.setattr("deephaven_mcp.client._session.Session", CapturingSession)
+    await _from_config(_cfg(host="localhost"))
+    assert captured_kwargs["use_tls"] is False
+    assert captured_kwargs["tls_root_certs"] is None
+    assert captured_kwargs["client_cert_chain"] is None
+    assert captured_kwargs["client_private_key"] is None
 
 
 @pytest.mark.asyncio
@@ -937,19 +998,29 @@ def test_core_session_programming_language_custom():
 
 
 def test_core_session_from_config_programming_language():
-    """Test that CoreSession.from_config sets programming_language from session_type."""
+    """Test that CoreSession.from_config sets programming_language from the session config."""
     from deephaven_mcp.client._session import CoreSession
 
     # Mock the PDHSession class
     with patch("deephaven_mcp.client._session.Session", DummyPDHSession):
-        # Create a config with a custom session_type
-        config = {"host": "localhost", "port": 10000, "session_type": "groovy"}
+        # Create a config with a non-default programming_language
+        config = _cfg(host="localhost", port=10000, programming_language="Groovy")
 
         # Create a session using from_config
-        session = asyncio.run(CoreSession.from_config(config))
+        session = asyncio.run(_from_config(config))
 
-        # Verify the programming_language property matches the session_type
-        assert session.programming_language == "groovy"
+        # Verify the programming_language property matches the input
+        assert session.programming_language == "Groovy"
+
+
+def test_core_session_from_config_programming_language_lowercase_normalized():
+    """Lowercase ``"groovy"`` is normalized to ``"Groovy"`` by the field validator."""
+    from deephaven_mcp.client._session import CoreSession
+
+    with patch("deephaven_mcp.client._session.Session", DummyPDHSession):
+        config = _cfg(host="localhost", port=10000, programming_language="groovy")
+        session = asyncio.run(_from_config(config))
+        assert session.programming_language == "Groovy"
 
 
 def test_core_plus_session_programming_language():
@@ -1118,3 +1189,67 @@ async def test_catalog_table_connection_error(core_plus_session):
     core_plus_session.wrapped.catalog_table = MagicMock(side_effect=Exception("fail"))
     with pytest.raises(QueryError):
         await core_plus_session.catalog_table()
+
+
+# ---------------------------------------------------------------------------
+# _credentials_to_pydeephaven_auth — direct unit tests
+# ---------------------------------------------------------------------------
+
+
+def test_credentials_to_pydeephaven_auth_anonymous():
+    from deephaven_mcp.auth.credentials import AnonymousCredentials
+    from deephaven_mcp.client._session import _credentials_to_pydeephaven_auth
+
+    assert _credentials_to_pydeephaven_auth(AnonymousCredentials()) == (
+        "Anonymous",
+        "",
+    )
+
+
+def test_credentials_to_pydeephaven_auth_psk():
+    from deephaven_mcp.auth.credentials import PSKCredentials
+    from deephaven_mcp.client._session import _credentials_to_pydeephaven_auth
+
+    assert _credentials_to_pydeephaven_auth(PSKCredentials(token="hunter2")) == (
+        "io.deephaven.authentication.psk.PskAuthenticationHandler",
+        "hunter2",
+    )
+
+
+def test_credentials_to_pydeephaven_auth_password_uses_basic_format():
+    from deephaven_mcp.auth.credentials import PasswordCredentials
+    from deephaven_mcp.client._session import _credentials_to_pydeephaven_auth
+
+    creds = PasswordCredentials(username="alice", password="pw")
+    assert _credentials_to_pydeephaven_auth(creds) == ("Basic", "alice:pw")
+
+
+def test_credentials_to_pydeephaven_auth_custom_passes_through():
+    from deephaven_mcp.auth.credentials import CustomTokenCredentials
+    from deephaven_mcp.client._session import _credentials_to_pydeephaven_auth
+
+    creds = CustomTokenCredentials(auth_type="com.example.Auth", auth_token="opaque")
+    assert _credentials_to_pydeephaven_auth(creds) == (
+        "com.example.Auth",
+        "opaque",
+    )
+
+
+def test_credentials_to_pydeephaven_auth_rejects_private_key():
+    from deephaven_mcp.auth.credentials import PrivateKeyCredentials
+    from deephaven_mcp.client._session import _credentials_to_pydeephaven_auth
+
+    with pytest.raises(ConfigurationError, match="Private-key credentials"):
+        _credentials_to_pydeephaven_auth(PrivateKeyCredentials(key_text="k"))
+
+
+def test_credentials_to_pydeephaven_auth_rejects_unknown_type():
+    """Defensive guard for any future Credentials subclass."""
+    from deephaven_mcp.auth.credentials import Credentials
+    from deephaven_mcp.client._session import _credentials_to_pydeephaven_auth
+
+    class MysteryCreds(Credentials):
+        pass
+
+    with pytest.raises(ConfigurationError, match="Unsupported credential type"):
+        _credentials_to_pydeephaven_auth(MysteryCreds())

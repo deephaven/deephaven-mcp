@@ -18,7 +18,7 @@ Usage Example:
 Arguments:
     --concurrency         Number of concurrent connections (default: 100)
     --requests-per-conn   Number of requests per connection (default: 100)
-    --url                 Target HTTP endpoint URL (streamable-http or SSE)
+    --url                 Target streamable-HTTP endpoint URL
     --max-errors          Maximum number of errors before stopping the test (default: 5)
     --rps                 Requests per second limit per connection (default: 0, no limit)
     --max-response-time   Maximum allowed response time in seconds (default: 1)
@@ -47,7 +47,7 @@ import aiohttp
 from aiolimiter import AsyncLimiter
 
 parser = argparse.ArgumentParser(
-    description="Stress test the /sse endpoint with concurrent connections."
+    description="Stress test a streamable-HTTP endpoint with concurrent connections."
 )
 parser.add_argument(
     "--concurrency",
@@ -163,8 +163,9 @@ async def http_client(session, idx, state: "StressTestState"):
     """
     Execute HTTP requests for a single concurrent connection.
 
-    Sends multiple requests to the HTTP endpoint, handling SSE streaming responses
-    and tracking response times. Stops early if the global error threshold is reached.
+    Sends multiple requests to the streamable-HTTP endpoint, consuming the
+    line-delimited chunked response body and tracking response times. Stops
+    early if the global error threshold is reached.
 
     Args:
         session (aiohttp.ClientSession): HTTP session for making requests.
@@ -184,7 +185,7 @@ async def http_client(session, idx, state: "StressTestState"):
                     )
                     continue
                 async for line in resp.content:
-                    # SSE streams send data line by line
+                    # Streamable-HTTP responses are line-delimited (chunked).
                     if line:
                         response_time = time.monotonic() - start_time
                         if MAX_RESPONSE_TIME > 0 and response_time > MAX_RESPONSE_TIME:

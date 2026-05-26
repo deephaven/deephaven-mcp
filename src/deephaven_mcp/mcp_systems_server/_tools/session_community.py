@@ -17,15 +17,22 @@ from deephaven_mcp._exceptions import (
     InvalidSessionNameError,
     RegistryItemNotFoundError,
 )
-from deephaven_mcp.config import ConfigManager, resolve_secret_field
-from deephaven_mcp.mcp_systems_server._tools.session import (
-    DEFAULT_MAX_CONCURRENT_SESSIONS,
-    DEFAULT_PROGRAMMING_LANGUAGE,
+from deephaven_mcp.auth.credentials import (
+    AnonymousCredentials,
+    CredentialsUnion,
+    CustomTokenCredentials,
+    PasswordCredentials,
+    PSKCredentials,
 )
 from deephaven_mcp.mcp_systems_server._tools.shared import (
+    check_session_limit,
     error_response,
     get_community_registry,
-    get_config_manager,
+    get_community_settings,
+)
+from deephaven_mcp.mcp_systems_server.config import (
+    CommunitySessionCreationDefaults,
+    CommunitySettings,
 )
 from deephaven_mcp.resource_manager import (
     BaseItemManager,
@@ -36,99 +43,98 @@ from deephaven_mcp.resource_manager import (
     InstanceTracker,
     LaunchedSession,
     PythonLaunchedSession,
+    SessionOrigin,
     SystemType,
     find_available_port,
     generate_auth_token,
     launch_session,
 )
+from deephaven_mcp.sessions import CommunitySessionConfig
 
 _LOGGER = logging.getLogger(__name__)
 
+_PSK_AUTH_HANDLER = "io.deephaven.authentication.psk.PskAuthenticationHandler"
+"""Fully-qualified class name (FQCN) of the Deephaven worker-side Java
+authentication handler for Pre-Shared Key (PSK) auth.
 
-# Community session creation defaults
-DEFAULT_LAUNCH_METHOD = "docker"
-"""Default launch method for community sessions when not specified in config."""
+This is the value passed to a launched community worker so it knows
+which Java auth handler to instantiate. It is also used internally as
+the canonical ``auth_type`` string for PSK sessions (the single source
+of truth used by :func:`_credentials_to_auth_type`,
+:func:`_resolve_auth_token`, and :func:`_register_session_manager`).
+"""
 
+_ANONYMOUS_AUTH_HANDLER = "Anonymous"
+"""Sentinel ``auth_type`` string for anonymous (no-credential) workers.
 
-DEFAULT_AUTH_TYPE = "io.deephaven.authentication.psk.PskAuthenticationHandler"
-"""Default authentication type for community sessions when not specified in config."""
-
-
-DEFAULT_DOCKER_IMAGE_PYTHON = "ghcr.io/deephaven/server:latest"
-"""Docker image for Python community sessions."""
-
-
-DEFAULT_DOCKER_IMAGE_GROOVY = "ghcr.io/deephaven/server-slim:latest"
-"""Docker image for Groovy community sessions."""
-
-
-DEFAULT_HEAP_SIZE_GB = 4.0
-"""Default JVM heap size in GB for community sessions when not specified in config."""
-
-
-DEFAULT_STARTUP_TIMEOUT_SECONDS = 60
-"""Default maximum time to wait for session startup when not specified in config."""
+Unlike :data:`_PSK_AUTH_HANDLER`, this is not a Java FQCN — Deephaven
+treats the literal string ``"Anonymous"`` as the marker for the
+anonymous authentication path. Used as the canonical ``auth_type``
+value for sessions backed by :class:`AnonymousCredentials`.
+"""
 
 
-DEFAULT_STARTUP_CHECK_INTERVAL_SECONDS = 2
-"""Default time between health checks during startup when not specified in config."""
-
-
-DEFAULT_STARTUP_RETRIES = 3
-"""Default number of connection attempts per health check when not specified in config."""
-
-
-# =============================================================================
+# ==============================================================================
 # Community Session Management Tools
 # =============================================================================
 
 
-async def _get_session_creation_config(
-    config_manager: ConfigManager,
-) -> tuple[dict, int, dict | None]:
-    """Get and validate session creation configuration.
+def _get_session_creation_config(
+    settings: CommunitySettings,
+) -> tuple[CommunitySessionCreationDefaults | None, int | None, dict | None]:
+    """Extract the typed session-creation defaults from ``CommunitySettings``.
+
+    Args:
+        settings: The validated :class:`CommunitySettings` model.
 
     Returns:
-        Tuple of (defaults_dict, max_concurrent_sessions, error_dict).
-        On error, error_dict is set and other values are empty.
+        Tuple of (defaults_model, max_concurrent_sessions, error_dict).
+        ``max_concurrent_sessions`` is ``None`` when the operator
+        disabled the cap (unbounded). On error, error_dict is set and
+        other values are placeholders.
     """
-    config_data = await config_manager.get_config()
-    session_creation_config = config_data.get("session_creation")
-
-    if not session_creation_config:
-        error_msg = "Community session creation not configured in deephaven_mcp.json"
+    session_creation = settings.session_creation
+    if session_creation is None:
+        error_msg = (
+            "Community session creation not configured in "
+            "community/settings.json (missing 'session_creation' block)."
+        )
         _LOGGER.error(f"[mcp_systems_server:session_community_create] {error_msg}")
-        return {}, 0, error_response(error_msg)
+        return None, None, error_response(error_msg)
 
-    defaults = session_creation_config.get("defaults", {})
-    max_concurrent_sessions = session_creation_config.get(
-        "max_concurrent_sessions", DEFAULT_MAX_CONCURRENT_SESSIONS
+    return (
+        session_creation.defaults,
+        session_creation.max_concurrent_sessions,
+        None,
     )
-
-    return defaults, max_concurrent_sessions, None
 
 
 async def _check_session_limit(
     session_registry: CommunitySessionRegistry,
-    max_concurrent_sessions: int,
+    max_concurrent_sessions: int | None,
 ) -> dict | None:
-    """Check if session limit has been reached.
+    """Check if community session limit has been reached.
+
+    Args:
+        session_registry (CommunitySessionRegistry): The community child
+            registry whose dynamically added sessions are being counted.
+        max_concurrent_sessions (int | None): Maximum concurrent
+            dynamically added community sessions allowed. ``None``
+            disables the cap (unbounded).
 
     Returns:
-        Error dict if limit reached, None if limit not reached or disabled.
+        dict | None: ``None`` if the cap is disabled or not yet reached;
+            otherwise a structured error dict produced by
+            :func:`error_response`.
     """
-    if max_concurrent_sessions <= 0:
-        return None
-
-    current_count = await session_registry.count_added_sessions(
-        SystemType.COMMUNITY, "dynamic"
+    return await check_session_limit(
+        session_registry,
+        SystemType.COMMUNITY,
+        SystemType.COMMUNITY.value,
+        max_concurrent_sessions,
+        "session_community_create",
+        "Session limit reached: {current}/{max} sessions active",
     )
-    if current_count >= max_concurrent_sessions:
-        error_msg = f"Session limit reached: {current_count}/{max_concurrent_sessions} sessions active"
-        _LOGGER.error(f"[mcp_systems_server:session_community_create] {error_msg}")
-        return error_response(error_msg)
-
-    return None
 
 
 def _validate_launch_method_params(
@@ -192,7 +198,7 @@ def _validate_launch_method_params(
 def _resolve_docker_image(
     programming_language: str | None,
     docker_image: str | None,
-    defaults: dict,
+    defaults: CommunitySessionCreationDefaults,
 ) -> tuple[str, dict | None]:
     """Resolve docker image from programming language or explicit image parameter.
 
@@ -221,32 +227,24 @@ def _resolve_docker_image(
     if programming_language:
         lang_lower = programming_language.lower()
         if lang_lower == "python":
-            return DEFAULT_DOCKER_IMAGE_PYTHON, None
+            return defaults.docker.images.python, None
         elif lang_lower == "groovy":
-            return DEFAULT_DOCKER_IMAGE_GROOVY, None
+            return defaults.docker.images.groovy, None
         else:
             error_msg = f"Unsupported programming_language: '{programming_language}'. Must be 'Python' or 'Groovy'"
             _LOGGER.error(f"[mcp_systems_server:session_community_create] {error_msg}")
             return "", error_response(error_msg)
 
-    # Use config defaults
-    resolved_lang = defaults.get("programming_language", DEFAULT_PROGRAMMING_LANGUAGE)
-    lang_lower = resolved_lang.lower()
-
-    if lang_lower == "python":
-        return defaults.get("docker_image", DEFAULT_DOCKER_IMAGE_PYTHON), None
-    elif lang_lower == "groovy":
-        return defaults.get("docker_image", DEFAULT_DOCKER_IMAGE_GROOVY), None
-    else:
-        error_msg = f"Invalid programming_language in config: '{resolved_lang}'. Must be 'Python' or 'Groovy'"
-        _LOGGER.error(f"[mcp_systems_server:session_community_create] {error_msg}")
-        return "", error_response(error_msg)
+    # Use config defaults (programming_language is a Literal
+    # validated by Pydantic, so it is always "Python" or "Groovy").
+    if defaults.programming_language == "Python":
+        return defaults.docker.images.python, None
+    return defaults.docker.images.groovy, None
 
 
 def _resolve_community_session_parameters(
     launch_method: str | None,
     programming_language: str | None,
-    auth_type: str | None,
     auth_token: str | None,
     heap_size_gb: float | int | None,
     extra_jvm_args: list[str] | None,
@@ -256,17 +254,21 @@ def _resolve_community_session_parameters(
     docker_cpu_limit: float | None,
     docker_volumes: list[str] | None,
     python_venv_path: str | None,
-    defaults: dict,
+    defaults: CommunitySessionCreationDefaults,
 ) -> tuple[dict[str, Any], dict | None]:
     """Resolve all community session creation parameters from tool args, config defaults, and hardcoded defaults.
 
     This function implements the parameter resolution priority: tool parameter > config default > hardcoded default.
     It validates parameters, normalizes values, and returns a complete set of resolved parameters for session creation.
 
+    The worker-side authentication handler (``auth_type``) is derived
+    from ``defaults.credentials`` via :func:`_credentials_to_auth_type`
+    rather than exposed as an independent knob; see that function's
+    docstring for the rationale.
+
     Args:
         launch_method (str | None): Launch method ("docker" or "python"), or None to use default
         programming_language (str | None): Programming language ("Python" or "Groovy"), or None to use default
-        auth_type (str | None): Authentication type (shorthand or full class name), or None to use default
         auth_token (str | None): Authentication token, or None to auto-generate for PSK auth
         heap_size_gb (float | int | None): JVM heap size in GB (e.g., 4 or 2.5), or None to use default
         extra_jvm_args (list[str] | None): Additional JVM arguments, or None to use default
@@ -276,7 +278,7 @@ def _resolve_community_session_parameters(
         docker_cpu_limit (float | None): Docker CPU limit (docker only), or None for no limit
         docker_volumes (list[str] | None): Docker volume mounts (docker only), or None to use default
         python_venv_path (str | None): Python venv path (python only), or None to use default
-        defaults (dict): Configuration defaults from deephaven_mcp.json
+        defaults (dict): Configuration defaults from ``community/settings.json`` (under ``$DH_MCP_CONFIG_DIR``)
 
     Returns:
         tuple[dict[str, Any], dict | None]: Two-element tuple:
@@ -300,14 +302,12 @@ def _resolve_community_session_parameters(
             - Second element: Error dict with 'success', 'error', 'isError' keys, or None on success
     """
     # Resolve launch method and auth type
-    resolved_launch_method = (
-        launch_method or defaults.get("launch_method", DEFAULT_LAUNCH_METHOD)
-    ).lower()
-    # Normalize auth_type to full class name for Deephaven client compatibility
-    raw_auth_type = auth_type or defaults.get("auth_type", DEFAULT_AUTH_TYPE)
-    resolved_auth_type, auth_error = _normalize_auth_type(raw_auth_type)
+    resolved_launch_method = (launch_method or defaults.launch_method).lower()
+    # Derive worker-side auth handler FQCN from credentials kind (single
+    # source of truth; no parallel auth_type knob to drift out of sync).
+    resolved_auth_type, auth_error = _credentials_to_auth_type(defaults.credentials)
     if auth_error:
-        return {}, error_response(f"Invalid auth_type: {auth_error}")
+        return {}, error_response(auth_error)
 
     # Validate method-specific parameters
     validation_error = _validate_launch_method_params(
@@ -323,10 +323,10 @@ def _resolve_community_session_parameters(
         return {}, validation_error
 
     # Resolve programming_language for both launch methods
-    # This determines both the Docker image selection (for docker) and the session's
-    # programming_language property (via session_type in session config)
-    resolved_programming_language = programming_language or defaults.get(
-        "programming_language", DEFAULT_PROGRAMMING_LANGUAGE
+    # This determines both the Docker image selection (for docker) and the
+    # session's programming_language property (forwarded to the session config).
+    resolved_programming_language = (
+        programming_language or defaults.programming_language
     )
 
     # Resolve docker image (only for docker launch method)
@@ -341,35 +341,29 @@ def _resolve_community_session_parameters(
         resolved_docker_image = ""
 
     # Resolve heap size
-    resolved_heap_size_gb = heap_size_gb or defaults.get(
-        "heap_size_gb", DEFAULT_HEAP_SIZE_GB
-    )
+    resolved_heap_size_gb = heap_size_gb or defaults.heap_size_gb
 
-    # Resolve startup parameters from config or defaults (not exposed as tool parameters)
-    resolved_startup_timeout = defaults.get(
-        "startup_timeout_seconds", DEFAULT_STARTUP_TIMEOUT_SECONDS
-    )
-    resolved_startup_interval = defaults.get(
-        "startup_check_interval_seconds", DEFAULT_STARTUP_CHECK_INTERVAL_SECONDS
-    )
-    resolved_startup_retries = defaults.get("startup_retries", DEFAULT_STARTUP_RETRIES)
+    # Resolve startup parameters from typed defaults (not exposed as tool parameters)
+    resolved_startup_timeout = defaults.startup_timeout_seconds
+    resolved_startup_interval = defaults.startup_check_interval_seconds
+    resolved_startup_retries = defaults.startup_retries
 
     # Resolve optional parameters based on launch method
     if resolved_launch_method == "docker":
-        resolved_docker_memory_limit = docker_memory_limit_gb or defaults.get(
-            "docker_memory_limit_gb"
+        resolved_docker_memory_limit = (
+            docker_memory_limit_gb or defaults.docker.memory_limit_gb
         )
-        resolved_docker_cpu_limit = docker_cpu_limit or defaults.get("docker_cpu_limit")
-        resolved_docker_volumes = docker_volumes or defaults.get("docker_volumes", [])
+        resolved_docker_cpu_limit = docker_cpu_limit or defaults.docker.cpu_limit
+        resolved_docker_volumes = docker_volumes or (defaults.docker.volumes or [])
         resolved_python_venv_path = None
     else:  # python
         resolved_docker_memory_limit = None
         resolved_docker_cpu_limit = None
         resolved_docker_volumes = []
-        resolved_python_venv_path = python_venv_path or defaults.get("python_venv_path")
+        resolved_python_venv_path = python_venv_path or defaults.python.venv_path
 
-    resolved_extra_jvm_args = extra_jvm_args or defaults.get("extra_jvm_args", [])
-    resolved_environment_vars = environment_vars or defaults.get("environment_vars", {})
+    resolved_extra_jvm_args = extra_jvm_args or (defaults.extra_jvm_args or [])
+    resolved_environment_vars = environment_vars or (defaults.environment_vars or {})
 
     # Resolve auth token
     resolved_auth_token, auto_generated_token = _resolve_auth_token(
@@ -396,105 +390,99 @@ def _resolve_community_session_parameters(
     }, None
 
 
-def _normalize_auth_type(auth_type: str) -> tuple[str, str | None]:
-    """Normalize shorthand auth types to full Deephaven class names.
+def _credentials_to_auth_type(
+    credentials: CredentialsUnion | None,
+) -> tuple[str, str | None]:
+    """Derive the worker-side Java auth handler FQCN from typed credentials.
 
-    Dynamic community sessions only support PSK and Anonymous authentication.
-    Basic auth requires database setup and is not suitable for dynamic sessions.
+    The handler class the worker is launched with is uniquely
+    determined by the credentials kind: PSK → PSK handler, anonymous
+    → Anonymous, custom → the FQCN carried on the credential itself.
+    Deriving the handler this way (instead of exposing a parallel
+    ``auth_type`` knob) is the single-source-of-truth fix for the
+    "credentials and handler disagree" footgun that an independent
+    field would create.
 
-    Validation Rules:
-    - Rejects leading/trailing whitespace
-    - Rejects "Basic" authentication (case-insensitive)
-    - Detects and rejects incorrectly-cased Deephaven PSK handler
-    - Normalizes "PSK" → "io.deephaven.authentication.psk.PskAuthenticationHandler"
-    - Normalizes "ANONYMOUS" → "Anonymous" (canonical case)
-    - Preserves custom authenticator class names exactly as provided
+    ``None`` falls back to PSK — the historical default for
+    dynamically-launched community workers — with the token resolved
+    by :func:`_resolve_auth_token`.
 
     Args:
-        auth_type (str): Authentication type, either shorthand ("PSK", "Anonymous")
-            or full class name.
+        credentials (CredentialsUnion | None): Typed credentials from
+            ``community/settings.json``'s ``session_creation.defaults``.
 
     Returns:
-        tuple[str, str | None]: (normalized_auth_type, error_message).
-            - On success: (normalized_value, None)
-            - On failure: ("", error_message_string)
+        tuple[str, str | None]: ``(auth_type, error_message)``.
+            - On success: ``(handler_fqcn, None)``.
+            - On failure: ``("", error_message_string)``. Today the
+              only failure case is :class:`PasswordCredentials`,
+              which the dynamic launcher cannot use because freshly
+              launched workers have no pre-configured user database
+              for Basic auth to validate against. Static community
+              sessions (declared under ``community/sessions/``) and
+              enterprise systems still accept password credentials.
     """
-    # Check for whitespace first (applies to all auth_type values)
-    if auth_type != auth_type.strip():
+    if credentials is None or isinstance(credentials, PSKCredentials):
+        return _PSK_AUTH_HANDLER, None
+    if isinstance(credentials, AnonymousCredentials):
+        return _ANONYMOUS_AUTH_HANDLER, None
+    if isinstance(credentials, CustomTokenCredentials):
+        return credentials.auth_type, None
+    if isinstance(credentials, PasswordCredentials):
         return (
             "",
-            f"Invalid auth_type '{auth_type}': contains leading or trailing whitespace.",
+            "Basic authentication is not supported for dynamically-"
+            "launched workers because they have no pre-configured "
+            "user database for Basic to validate against. Use PSK or "
+            "anonymous credentials here, or declare a static session "
+            "under community/sessions/ if you have a pre-existing "
+            "worker with Basic auth set up.",
         )
-
-    auth_type_upper = auth_type.upper()
-
-    # Normalize shorthand to full class names (only PSK and Anonymous for dynamic sessions)
-    if auth_type_upper == "PSK":
-        return "io.deephaven.authentication.psk.PskAuthenticationHandler", None
-    elif auth_type_upper == "ANONYMOUS":
-        return "Anonymous", None
-    elif auth_type_upper == "BASIC":
-        return (
-            "",
-            "Basic authentication is not supported for dynamic sessions (requires database setup). Use 'PSK' or 'Anonymous'.",
-        )
-
-    # Check if it looks like the Deephaven PSK handler but with wrong case
-    if (
-        "." in auth_type
-        and auth_type.upper()
-        == "IO.DEEPHAVEN.AUTHENTICATION.PSK.PSKAUTHENTICATIONHANDLER"
-    ):
-        if auth_type != "io.deephaven.authentication.psk.PskAuthenticationHandler":
-            return (
-                "",
-                f"Invalid auth_type '{auth_type}': appears to be the Deephaven PSK handler with incorrect case. Use 'io.deephaven.authentication.psk.PskAuthenticationHandler' or shorthand 'PSK'.",
-            )
-
-    # Already a valid value ("Anonymous", correct PSK handler, or custom authenticator) - preserve exact case
-    return auth_type, None
+    return (
+        "",
+        f"Unsupported credentials kind for dynamic community session: "
+        f"{type(credentials).__name__}",
+    )
 
 
 def _resolve_auth_token(
     auth_type: str,
     auth_token: str | None,
-    defaults: dict,
+    defaults: CommunitySessionCreationDefaults,
 ) -> tuple[str | None, bool]:
     """Resolve authentication token, auto-generating if needed.
 
     Args:
         auth_type (str): Normalized authentication type (should be full class name from _normalize_auth_type).
         auth_token (str | None): Explicit auth token parameter, or None.
-        defaults (dict): Configuration defaults dictionary that may contain 'auth_token_env_var' or 'auth_token'.
+        defaults (CommunitySessionCreationDefaults): Typed defaults from
+            ``community/settings.json``. The typed ``credentials`` field
+            carries the resolved PSK token (via ``SecretStr``) when
+            the JSON declared one.
 
     Returns:
         tuple[str | None, bool]: (resolved_token, was_auto_generated).
             - (None, False) if auth_type doesn't require a token
             - (token_string, False) if token was provided or from config
             - (token_string, True) if token was auto-generated
-
-    Raises:
-        ConfigurationError: If auth_token_env_var is configured but the environment variable is not set.
     """
-    # Check if auth type requires a PSK token (must be exact match for full class name)
-    if auth_type != "io.deephaven.authentication.psk.PskAuthenticationHandler":
+    # Only the PSK handler requires (and consumes) a token.
+    if auth_type != _PSK_AUTH_HANDLER:
         return None, False
 
     # Check explicit parameter
     if auth_token:
         return auth_token, False
 
-    # Check inline config or environment variable from config (validator
-    # enforces these are mutually exclusive). resolve_secret_field raises
-    # ConfigurationError if auth_token_env_var names an unset/empty var.
-    resolved = resolve_secret_field(
-        config=defaults,
-        inline_field="auth_token",
-        env_var_field="auth_token_env_var",
-        context="community session_creation defaults",
-    )
-    if resolved is not None:
-        return resolved, False
+    # Pull the resolved token from the typed credentials, if any.
+    # Env-var indirection in the JSON has already been collapsed at
+    # validation time (the templating engine resolved ${env:VAR} into
+    # the literal value before the model was built).
+    creds = defaults.credentials
+    if isinstance(creds, PSKCredentials):
+        token = creds.token.get_secret_value()
+        if token:
+            return token, False
 
     # Auto-generate
     token = generate_auth_token()
@@ -515,38 +503,66 @@ async def _register_session_manager(
     session_registry: CommunitySessionRegistry,
     instance_tracker: InstanceTracker,
 ) -> None:
-    """Create session manager object and register it in the session registry.
+    """Build a session config and register a dynamic community session.
 
-    This helper function creates a DynamicCommunitySessionManager with the appropriate
-    configuration and registers it in the session registry. It also tracks
-    Python-launched processes for orphan cleanup.
+    The registry owns :class:`~deephaven_mcp.client.CommunityTimeouts`
+    and constructs the manager itself; this helper only assembles the
+    wire-format :class:`CommunitySessionConfig`, hands it to the
+    registry, and tracks the Python launcher for orphan cleanup.
 
     Args:
-        session_name (str): Simple session name (not full session_id)
-        session_id (str): Full session identifier in format "community:dynamic:{session_name}"
-        port (int): Port number where the session is listening
-        programming_language (str): Programming language for the session (e.g., "Python", "Groovy")
-        resolved_auth_type (str): Normalized authentication type (full class name)
-        resolved_auth_token (str | None): Authentication token if applicable
-        launched_session (DockerLaunchedSession | PythonLaunchedSession): The launched session object
-        session_registry (CommunitySessionRegistry): Registry to add the session to
-        instance_tracker (InstanceTracker): Tracker for orphan process cleanup
+        session_name (str): Simple session name (not full session_id).
+        session_id (str): Full session identifier in format
+            ``community:community:{session_name}``; used in log lines only.
+        port (int): Port number where the session is listening.
+        programming_language (str): Programming language for the session
+            (``"Python"`` or ``"Groovy"``).
+        resolved_auth_type (str): Normalized authentication type
+            (full class name).
+        resolved_auth_token (str | None): Authentication token if
+            applicable.
+        launched_session (DockerLaunchedSession | PythonLaunchedSession):
+            The launched session object.
+        session_registry (CommunitySessionRegistry): Registry that
+            constructs the manager (using its own timeouts) and stores it.
+        instance_tracker (InstanceTracker): Tracker for orphan-process
+            cleanup. Python launches are recorded here.
     """
-    # Create session configuration
-    # Note: session_type must be lowercase to match CoreSession.from_config expectations
-    session_config = {
-        "host": "localhost",
-        "port": port,
-        "auth_type": resolved_auth_type,
-        "session_type": programming_language.lower(),  # CoreSession uses this for programming_language property
-    }
-    if resolved_auth_token:
-        session_config["auth_token"] = resolved_auth_token
+    # Build a typed CommunitySessionConfig describing how to connect to
+    # the launched session. Authentication lives entirely inside
+    # ``auth.credentials``; the model unwraps that to the typed
+    # ``credentials`` field.
+    credentials_block: dict[str, Any]
+    if resolved_auth_type == _PSK_AUTH_HANDLER:
+        credentials_block = {
+            "type": "psk",
+            "token": resolved_auth_token or "",
+        }
+    elif resolved_auth_type == _ANONYMOUS_AUTH_HANDLER:
+        credentials_block = {"type": "anonymous"}
+    else:
+        # Any other authenticator class name is forwarded as a custom
+        # auth handler; the dynamic launcher does not generate this
+        # path today but the schema supports it for forward compat.
+        credentials_block = {
+            "type": "custom",
+            "auth_type": resolved_auth_type,
+            "auth_token": resolved_auth_token or "",
+        }
+    session_config = CommunitySessionConfig.model_validate(
+        {
+            "name": session_name,
+            "host": "localhost",
+            "port": port,
+            "programming_language": programming_language,
+            "auth": {"credentials": credentials_block},
+        }
+    )
 
-    # Create manager
-    session_manager = DynamicCommunitySessionManager(
+    # Registry owns the timeouts and constructs the manager.
+    await session_registry.add_dynamic_session(
         name=session_name,
-        config=session_config,
+        session_config=session_config,
         launched_session=launched_session,
     )
 
@@ -556,8 +572,6 @@ async def _register_session_manager(
             session_name, launched_session.process.pid
         )
 
-    # Add to registry
-    await session_registry.add_session(session_manager)
     _LOGGER.info(
         f"[mcp_systems_server:session_community_create] Successfully created and registered session '{session_id}'"
     )
@@ -645,7 +659,8 @@ async def _launch_process_and_wait_for_ready(
 
     if not is_ready:
         _LOGGER.error(
-            f"[mcp_systems_server:session_community_create] Session '{session_name}' failed to start within {resolved_startup_timeout}s"
+            f"[mcp_systems_server:session_community_create] Session '{session_name}' failed to start within {resolved_startup_timeout}s. "
+            f"Increase community/settings.json: session_creation.defaults.startup_timeout_seconds."
         )
         try:
             await launched_session.stop()
@@ -654,7 +669,11 @@ async def _launch_process_and_wait_for_ready(
                 f"[mcp_systems_server:session_community_create] Failed to cleanup failed session: {e}"
             )
 
-        error_msg = f"Session failed to start within {resolved_startup_timeout} seconds"
+        error_msg = (
+            f"Session failed to start within {resolved_startup_timeout} seconds. "
+            f"To allow more time, increase community/settings.json: "
+            f"session_creation.defaults.startup_timeout_seconds in the operator config."
+        )
         return None, None, error_response(error_msg)
 
     return launched_session, port, None
@@ -714,7 +733,7 @@ def _log_auto_generated_credentials(
     _LOGGER.warning(
         "   To retrieve credentials via MCP tool, enable credential_retrieval_enabled"
     )
-    _LOGGER.warning("   in your deephaven_mcp.json configuration.")
+    _LOGGER.warning("   in your community/settings.json under $DH_MCP_CONFIG_DIR.")
     _LOGGER.warning("=" * 70)
 
 
@@ -723,7 +742,6 @@ async def session_community_create(
     session_name: str,
     launch_method: str | None = None,
     programming_language: str | None = None,
-    auth_type: str | None = None,
     auth_token: str | None = None,
     heap_size_gb: float | int | None = None,
     extra_jvm_args: list[str] | None = None,
@@ -766,7 +784,7 @@ async def session_community_create(
     Args:
         context (Context): The MCP context object.
         session_name (str): Unique name for the session. Must not conflict with existing sessions.
-            Will be used to create session_id in format "community:dynamic:{session_name}".
+            Will be used to create session_id in format "community:community:{session_name}".
         launch_method (str | None): How to launch the session ("docker" or "python", case-insensitive).
             - "docker": Uses Docker containers (requires Docker daemon running)
             - "python": Uses Python-launched deephaven-server (requires: pip install deephaven-server)
@@ -778,16 +796,15 @@ async def session_community_create(
             - "Groovy" → ghcr.io/deephaven/server-slim:latest
             Defaults to configuration value or "Python".
             Cannot be specified together with docker_image (mutually exclusive).
-        auth_type (str | None): Authentication type ("PSK" or "Anonymous", case-insensitive).
-            - "PSK": Pre-shared key authentication (recommended for security)
-            - "Anonymous": No authentication required (less secure)
-            Note: Basic authentication is not supported for dynamic sessions (requires database setup).
-            Shorthand values are normalized to full Java class names internally.
-            Defaults to "io.deephaven.authentication.psk.PskAuthenticationHandler".
         auth_token (str | None): Pre-shared key for PSK authentication.
-            If None and auth_type is PSK, a cryptographically secure token will be auto-generated.
-            Auto-generated tokens are logged at WARNING level and included in response with
-            connection_url_with_auth for easy access.
+            The worker-side authentication handler is derived from
+            ``community/settings.json``'s
+            ``session_creation.defaults.auth.credentials`` block: PSK
+            credentials → PSK handler, anonymous credentials →
+            Anonymous handler, custom credentials → the FQCN carried
+            on the credential. When the resolved handler is PSK and
+            ``auth_token`` is omitted, a cryptographically secure
+            token is auto-generated and logged at WARNING level.
         docker_image (str | None): Custom Docker image to use (docker launch only).
             For advanced users who want to use a custom image instead of standard Python/Groovy images.
             Cannot be specified together with programming_language (mutually exclusive).
@@ -815,7 +832,7 @@ async def session_community_create(
     Returns:
         dict: Structured result object with keys:
             - 'success' (bool): True if creation succeeded, False if error occurred
-            - 'session_id' (str): Full identifier in format "community:dynamic:{session_name}"
+            - 'session_id' (str): Full identifier in format "community:community:{session_name}"
             - 'session_name' (str): Simple name provided by user
             - 'connection_url' (str): Base HTTP URL without authentication
             - 'auth_type' (str): Normalized authentication type as full class name
@@ -836,7 +853,7 @@ async def session_community_create(
         Example Success Response (docker):
         {
             "success": True,
-            "session_id": "community:dynamic:my-session",
+            "session_id": "community:community:my-session",
             "session_name": "my-session",
             "connection_url": "http://localhost:45123",
             "auth_type": "io.deephaven.authentication.psk.PskAuthenticationHandler",
@@ -848,7 +865,7 @@ async def session_community_create(
         Example Success Response (python):
         {
             "success": True,
-            "session_id": "community:dynamic:my-session",
+            "session_id": "community:community:my-session",
             "session_name": "my-session",
             "connection_url": "http://localhost:45123",
             "auth_type": "io.deephaven.authentication.psk.PskAuthenticationHandler",
@@ -874,7 +891,7 @@ async def session_community_create(
         - Registers session in registry for lifecycle management
 
     Common Error Scenarios:
-        - Session creation not configured: "Community session creation not configured in deephaven_mcp.json"
+        - Session creation not configured: "Community session creation not configured in community/settings.json"
         - Session limit reached: "Session limit reached: X/Y sessions active"
         - Docker param with python: "'programming_language' parameter only applies to docker launch method, not 'python'"
         - Docker image with python: "'docker_image' parameter only applies to docker launch method, not 'python'"
@@ -884,7 +901,7 @@ async def session_community_create(
         - Invalid parameters: "Cannot specify both 'programming_language' and 'docker_image' - use one or the other"
         - Unsupported language: "Unsupported programming_language: '{language}'. Must be 'Python' or 'Groovy'"
         - Invalid config language: "Invalid programming_language in config: '{language}'. Must be 'Python' or 'Groovy'"
-        - Name conflict: "Session 'community:dynamic:{name}' already exists in registry"
+        - Name conflict: "Session 'community:community:{name}' already exists in registry"
         - Startup timeout: "Session failed to start within {timeout} seconds"
 
     Note:
@@ -901,15 +918,22 @@ async def session_community_create(
 
     try:
         # Get config and session registry
-        config_manager = get_config_manager(context)
-        session_registry = await get_community_registry(context)
+        settings = get_community_settings(context)
+        session_registry = get_community_registry(context)
 
         # Get and validate configuration
-        defaults, max_concurrent_sessions, config_error = (
-            await _get_session_creation_config(config_manager)
+        defaults, max_concurrent_sessions, config_error = _get_session_creation_config(
+            settings
         )
-        if config_error:
-            return config_error
+        if config_error or defaults is None:
+            # ``_get_session_creation_config`` returns ``defaults is None``
+            # exactly when it also returns a ``config_error``; the narrowing
+            # here is for mypy's benefit.
+            return (
+                config_error
+                if config_error is not None
+                else error_response("Community session creation not configured")
+            )
 
         # Check session limit
         limit_error = await _check_session_limit(
@@ -922,7 +946,6 @@ async def session_community_create(
         params, params_error = _resolve_community_session_parameters(
             launch_method,
             programming_language,
-            auth_type,
             auth_token,
             heap_size_gb,
             extra_jvm_args,
@@ -957,7 +980,7 @@ async def session_community_create(
 
         # Check for session name conflicts
         session_id = BaseItemManager.make_full_name(
-            SystemType.COMMUNITY, "dynamic", session_name
+            SystemType.COMMUNITY, SystemType.COMMUNITY.value, session_name
         )
         try:
             await session_registry.get(session_id)
@@ -1063,11 +1086,11 @@ async def _delete_session_resources(
     2. **Close** the session (stops the Docker container or Python process).
        Close failure is non-fatal: it is logged as a warning and cleanup
        continues so that the registry entry is always removed.
-    3. **Remove** the session from the registry.  If ``remove_session`` raises,
+    3. **Remove** the session from the registry.  If ``remove`` raises,
        the exception propagates to the caller.
 
     Args:
-        session_id (str): Full session identifier, e.g. ``"community:dynamic:my-session"``.
+        session_id (str): Full session identifier, e.g. ``"community:community:my-session"``.
         session_name (str): Simple session name (the last component of ``session_id``),
             used for Python process untracking.
         session_manager (Any): The session manager retrieved from the registry.
@@ -1075,7 +1098,7 @@ async def _delete_session_resources(
         instance_tracker (InstanceTracker): Tracker used to unregister Python processes.
 
     Raises:
-        Exception: Propagates any exception raised by ``session_registry.remove_session``.
+        Exception: Propagates any exception raised by ``session_registry.remove``.
             Close failure is swallowed and logged; removal failure is fatal.
     """
     if isinstance(session_manager, DynamicCommunitySessionManager):
@@ -1096,7 +1119,7 @@ async def _delete_session_resources(
         )
         # Continue with removal even if close failed
 
-    removed_manager = await session_registry.remove_session(session_id)
+    removed_manager = await session_registry.remove(session_id)
     if removed_manager is None:
         _LOGGER.warning(
             f"[mcp_systems_server:session_community_delete] Session '{session_id}' was not found in registry during removal"
@@ -1118,11 +1141,11 @@ async def session_community_delete(
     session from the registry.
 
     Session ID Format:
-        Dynamic community session IDs have the format ``"community:dynamic:{session_name}"``.
+        Community session IDs have the format ``"community:community:{session_name}"``.
         Use the ``session_id`` returned by ``session_community_create`` or ``sessions_list``
         verbatim — do not construct or modify it manually.
-        Only dynamically created sessions (source ``"dynamic"``) can be deleted; passing
-        a static session ID (source ``"config"``) returns a clear error.
+        Only dynamically created sessions (``origin="dynamic"``) can be deleted; passing
+        a static session ID (``origin="static"``) returns a clear error.
 
     Terminology Note:
     - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
@@ -1139,21 +1162,21 @@ async def session_community_delete(
     - Pass the ``session_id`` exactly as returned by ``session_community_create`` or ``sessions_list``
     - Always check 'success' field first to verify deletion completed
     - This operation is irreversible - deleted sessions cannot be recovered
-    - Only dynamically created sessions (source='dynamic') can be deleted
+    - Only dynamically created sessions (origin='dynamic') can be deleted
     - Static sessions from configuration cannot be deleted (will return error)
     - After successful deletion, session_id will no longer be valid for other MCP tools
     - Deletion stops the Docker container or terminates the Python process
 
     Args:
         context (Context): The MCP context object.
-        session_id (str): Full session identifier in format ``"community:dynamic:{session_name}"``.
+        session_id (str): Full session identifier in format ``"community:community:{session_name}"``.
             Must be a dynamically created session from session_community_create.
             Static sessions from configuration files cannot be deleted.
 
     Returns:
         dict: Structured result object with keys:
             - 'success' (bool): True if deletion succeeded, False if error occurred
-            - 'session_id' (str): Full identifier in format "community:dynamic:{session_name}"
+            - 'session_id' (str): Full identifier in format "community:community:{session_name}"
             - 'session_name' (str): Simple name provided by user
             - 'error' (str, optional): Error message if deletion failed. Omitted on success.
             - 'isError' (bool, optional): Present and True if this is an error response
@@ -1161,30 +1184,30 @@ async def session_community_delete(
         Example Success Response:
         {
             "success": True,
-            "session_id": "community:dynamic:my-session",
+            "session_id": "community:community:my-session",
             "session_name": "my-session"
         }
 
         Example Error Response:
         {
             "success": False,
-            "error": "Session 'community:dynamic:nonexistent' not found",
+            "error": "Session 'community:community:nonexistent' not found",
             "isError": True
         }
 
     Validation and Safety:
         - Verifies session exists in registry
-        - Checks that session is dynamically created (source='dynamic')
+        - Checks that session is dynamically created (origin='dynamic')
         - Properly closes the session connection
         - Stops the underlying Docker container or pip process
         - Removes session from registry to prevent future access
         - Provides detailed error messages for troubleshooting
 
     Common Error Scenarios:
-        - Session not found: "Session 'community:dynamic:{name}' not found"
+        - Session not found: "Session 'community:community:{name}' not found"
         - Not a community session: "Session '{session_id}' is not a community session"
-        - Not a dynamic session: "Session '{session_id}' is not a dynamically created session (source: '{source}'). Only dynamically created sessions can be deleted."
-        - Already deleted: "Session 'community:dynamic:{name}' not found"
+        - Not a dynamic session: "Session '{session_id}' is not a dynamically created session (origin: '{origin}'). Only dynamically created sessions can be deleted."
+        - Already deleted: "Session 'community:community:{name}' not found"
         - Cleanup failure: "Failed to close session '{session_id}': {error}"
         - Registry removal failure: "Failed to remove session '{session_id}' from registry: {error}"
 
@@ -1205,11 +1228,11 @@ async def session_community_delete(
 
     try:
         # Get session registry
-        session_registry = await get_community_registry(context)
+        session_registry = get_community_registry(context)
 
         # Parse and validate the session_id
         try:
-            system_type_str, source, session_name = BaseItemManager.parse_full_name(
+            system_type_str, _system, session_name = BaseItemManager.parse_full_name(
                 session_id
             )
         except InvalidSessionNameError as e:
@@ -1226,16 +1249,6 @@ async def session_community_delete(
             result["isError"] = True
             return result
 
-        if source != "dynamic":
-            error_msg = (
-                f"Session '{session_id}' is not a dynamically created session "
-                f"(source: '{source}'). Only dynamically created sessions can be deleted."
-            )
-            _LOGGER.error(f"[mcp_systems_server:session_community_delete] {error_msg}")
-            result["error"] = error_msg
-            result["isError"] = True
-            return result
-
         _LOGGER.debug(
             f"[mcp_systems_server:session_community_delete] Looking for session '{session_id}'"
         )
@@ -1245,6 +1258,28 @@ async def session_community_delete(
             session_manager = await session_registry.get(session_id)
         except RegistryItemNotFoundError as e:
             error_msg = f"Session '{session_id}' not found: {e}"
+            _LOGGER.error(f"[mcp_systems_server:session_community_delete] {error_msg}")
+            result["error"] = error_msg
+            result["isError"] = True
+            return result
+
+        # Only dynamically created community sessions are deletable. The
+        # registry is community-only, so every manager returned here is a
+        # ``CommunitySessionManager`` with a non-``None`` ``origin``; the
+        # ``isinstance`` guard exists for the static type checker.
+        if (
+            not isinstance(session_manager, CommunitySessionManager)
+            or session_manager.origin is not SessionOrigin.DYNAMIC
+        ):
+            origin_str = (
+                session_manager.origin.value
+                if isinstance(session_manager, CommunitySessionManager)
+                else "unknown"
+            )
+            error_msg = (
+                f"Session '{session_id}' is not a dynamically created session "
+                f"(origin: '{origin_str}'). Only dynamically created sessions can be deleted."
+            )
             _LOGGER.error(f"[mcp_systems_server:session_community_delete] {error_msg}")
             result["error"] = error_msg
             result["isError"] = True
@@ -1291,6 +1326,52 @@ async def session_community_delete(
     return result
 
 
+def _static_credentials_view(
+    mgr: "CommunitySessionManager",
+) -> tuple[str, str, str, str]:
+    """Return ``(auth_type, auth_token, connection_url, connection_url_with_auth)``.
+
+    Reads directly from the typed ``CommunitySessionConfig`` carried by
+    the static session manager. Authentication shape:
+
+    - ``PSKCredentials`` → ``auth_type='PSK'`` and the resolved token.
+    - ``CustomTokenCredentials`` → the custom Java handler class name
+      and its opaque token.
+    - ``AnonymousCredentials`` → ``auth_type='ANONYMOUS'`` and an empty
+      token.
+    - Anything else (``PasswordCredentials``, ``PrivateKeyCredentials``)
+      returns an empty token to avoid leaking secrets; community workers
+      do not use these.
+    """
+    from deephaven_mcp.auth.credentials import (
+        AnonymousCredentials,
+        CustomTokenCredentials,
+        PSKCredentials,
+    )
+
+    session_cfg = mgr._session_config
+    host = session_cfg.host or ""
+    port = session_cfg.port
+    scheme = "https" if session_cfg.tls is not None else "http"
+    server = f"{scheme}://{host}:{port}" if host else ""
+    creds = session_cfg.credentials
+    if isinstance(creds, PSKCredentials):
+        auth_token = creds.token.get_secret_value()
+        auth_type = "PSK"
+    elif isinstance(creds, CustomTokenCredentials):
+        auth_token = creds.auth_token.get_secret_value()
+        auth_type = creds.auth_type
+    elif isinstance(creds, AnonymousCredentials):
+        auth_token = ""
+        auth_type = "ANONYMOUS"
+    else:
+        auth_token = ""
+        auth_type = type(creds).__name__.upper()
+    connection_url = server
+    connection_url_with_auth = f"{server}/?psk={auth_token}" if auth_token else server
+    return auth_type, auth_token, connection_url, connection_url_with_auth
+
+
 async def session_community_credentials(
     context: Context,
     session_id: str,
@@ -1302,13 +1383,11 @@ async def session_community_credentials(
     when the user explicitly needs browser access.
 
     IMPORTANT: This tool is DISABLED by default for security. To enable, add to your
-    deephaven_mcp.json configuration:
+    ``community/settings.json`` (under ``$DH_MCP_CONFIG_DIR``):
 
     {
       "security": {
-        "community": {
-          "credential_retrieval_mode": "dynamic_only"  // or "all", "static_only"
-        }
+        "credential_retrieval_mode": "dynamic_only"  // or "all", "static_only"
       }
     }
 
@@ -1350,11 +1429,12 @@ async def session_community_credentials(
 
     Args:
         context (Context): MCP context provided by the MCP framework
-        session_id (str): Session ID in format "community:source:name" where:
-            - source="config" for static (configuration-based) sessions
-            - source="dynamic" for dynamic (on-demand created) sessions
-            - name is the unique session identifier within that source
-            Examples: "community:config:local-dev", "community:dynamic:my-session"
+        session_id (str): Session ID in the canonical format
+            ``"community:community:{name}"``. Both static (configured)
+            and dynamic (runtime-created) sessions share this prefix; use
+            ``sessions_list`` and check the ``origin`` field to distinguish
+            them when needed.
+            Example: ``"community:community:my-session"``
 
     Returns:
         dict: Response structure varies based on success/failure:
@@ -1400,14 +1480,14 @@ async def session_community_credentials(
     Example Disabled Response:
         {
             "success": False,
-            "error": "Credential retrieval is disabled (mode='none'). To enable, configure in deephaven_mcp.json...",
+            "error": "Credential retrieval is disabled (mode='none'). To enable, configure security.credential_retrieval_mode in community/settings.json...",
             "isError": True
         }
 
     Example Session Not Found Response:
         {
             "success": False,
-            "error": "Session 'community:config:my-session' not found: ...",
+            "error": "Session 'community:community:my-session' not found: ...",
             "isError": True
         }
     """
@@ -1416,19 +1496,18 @@ async def session_community_credentials(
     )
 
     try:
-        # Get config manager from context
-        config_manager = get_config_manager(context)
-
-        # Check credential retrieval mode from security config
-        config = await config_manager.get_config()
-        credential_retrieval_mode = config.get("security", {}).get(
-            "credential_retrieval_mode", "none"
+        # Read security settings from the lifespan-loaded community config.
+        settings = get_community_settings(context)
+        credential_retrieval_mode = (
+            settings.security.credential_retrieval_mode
+            if settings.security is not None
+            else "none"
         )
 
         # Validate session_id format - must be a community session
         if not session_id.startswith("community:"):
             return error_response(
-                f"Invalid session_id '{session_id}'. This tool only works for community sessions (format: 'community:config:name' or 'community:dynamic:name')"
+                f"Invalid session_id '{session_id}'. This tool only works for community sessions (format: 'community:community:name')"
             )
 
         # Check if credential retrieval is disabled globally (mode='none')
@@ -1437,7 +1516,7 @@ async def session_community_credentials(
                 f"[mcp_systems_server:session_community_credentials] DENIED: Credential retrieval disabled (mode='none') for session_id '{session_id}'"
             )
             return error_response(
-                "Credential retrieval is disabled (mode='none'). To enable, configure in deephaven_mcp.json:\n\n"
+                "Credential retrieval is disabled (mode='none'). To enable, set security.credential_retrieval_mode in community/settings.json (under $DH_MCP_CONFIG_DIR):\n\n"
                 "Available modes:\n"
                 '  - "none": Disable all credential retrieval (secure default)\n'
                 '  - "dynamic_only": Allow only auto-generated session credentials\n'
@@ -1453,7 +1532,7 @@ async def session_community_credentials(
             )
 
         # Get session registry and session manager
-        session_registry = await get_community_registry(context)
+        session_registry = get_community_registry(context)
 
         try:
             mgr = await session_registry.get(session_id)
@@ -1476,7 +1555,7 @@ async def session_community_credentials(
             return error_response(
                 f"Credential retrieval for static sessions is disabled. Current mode: 'dynamic_only'. "
                 f"Session '{session_id}' is a static (config-based) session. "
-                f"To retrieve static session credentials, set security.credential_retrieval_mode to 'all' or 'static_only' in deephaven_mcp.json."
+                f"To retrieve static session credentials, set security.credential_retrieval_mode to 'all' or 'static_only' in community/settings.json (under $DH_MCP_CONFIG_DIR)."
             )
         elif credential_retrieval_mode == "static_only" and is_dynamic:
             _LOGGER.warning(
@@ -1485,7 +1564,7 @@ async def session_community_credentials(
             return error_response(
                 f"Credential retrieval for dynamic sessions is disabled. Current mode: 'static_only'. "
                 f"Session '{session_id}' is a dynamic (on-demand) session. "
-                f"To retrieve dynamic session credentials, set security.credential_retrieval_mode to 'all' or 'dynamic_only' in deephaven_mcp.json."
+                f"To retrieve dynamic session credentials, set security.credential_retrieval_mode to 'all' or 'dynamic_only' in community/settings.json (under $DH_MCP_CONFIG_DIR)."
             )
 
         # Credential retrieval is allowed - proceed
@@ -1507,17 +1586,14 @@ async def session_community_credentials(
             connection_url_with_auth = dynamic_mgr.connection_url_with_auth
             auth_type = dynamic_mgr.launched_session.auth_type.upper()
         else:
-            # Static session - get from config
-            server = mgr._config.get("server", "")
-            auth_token = mgr._config.get("auth_token", "")
-            auth_type = mgr._config.get("auth_type", "ANONYMOUS").upper()
-
-            # Build connection URL with auth if token exists
-            connection_url = server
-            if auth_token:
-                connection_url_with_auth = f"{server}/?psk={auth_token}"
-            else:
-                connection_url_with_auth = server
+            # Static session - reads directly from the typed declaration
+            # carried on the manager (no legacy ``_config`` dict here).
+            (
+                auth_type,
+                auth_token,
+                connection_url,
+                connection_url_with_auth,
+            ) = _static_credentials_view(mgr)
 
         result = {
             "success": True,

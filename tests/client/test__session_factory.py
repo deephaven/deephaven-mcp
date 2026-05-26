@@ -3,7 +3,7 @@ import io
 import logging
 import sys
 import types
-from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -22,6 +22,7 @@ except ImportError:
 
 # Import the session factory AFTER setting up mocks
 from deephaven_mcp.client._session_factory import CorePlusSessionFactory
+from deephaven_mcp.client._timeouts import EnterpriseClientTimeouts
 
 
 @pytest.fixture
@@ -46,7 +47,9 @@ def coreplus_session_manager(dummy_session_manager, monkeypatch):
         "deephaven_mcp.client._base.is_enterprise_available", lambda: True
     )
     # The factory is now created directly with the mocked SessionManager
-    return CorePlusSessionFactory(session_manager=dummy_session_manager)
+    return CorePlusSessionFactory(
+        session_manager=dummy_session_manager, timeouts=EnterpriseClientTimeouts()
+    )
 
 
 @pytest.mark.asyncio
@@ -86,8 +89,11 @@ async def test_ping_timeout(coreplus_session_manager, dummy_session_manager):
 
     dummy_session_manager.ping.side_effect = slow_ping
 
+    coreplus_session_manager._timeouts = coreplus_session_manager._timeouts.model_copy(
+        update={"quick_operation_timeout_seconds": 0.01}
+    )
     with pytest.raises(exc.DeephavenConnectionError) as exc_info:
-        await coreplus_session_manager.ping(timeout_seconds=0.01)
+        await coreplus_session_manager.ping()
     assert "timed out" in str(exc_info.value)
 
 
@@ -206,8 +212,11 @@ async def test_upload_key_timeout(coreplus_session_manager, dummy_session_manage
 
     dummy_session_manager.upload_key.side_effect = slow_upload_key
 
+    coreplus_session_manager._timeouts = coreplus_session_manager._timeouts.model_copy(
+        update={"quick_operation_timeout_seconds": 0.01}
+    )
     with pytest.raises(exc.DeephavenConnectionError) as exc_info:
-        await coreplus_session_manager.upload_key("pubkey", timeout_seconds=0.01)
+        await coreplus_session_manager.upload_key("pubkey")
     assert "timed out" in str(exc_info.value)
 
 
@@ -243,8 +252,11 @@ async def test_delete_key_timeout(coreplus_session_manager, dummy_session_manage
 
     dummy_session_manager.delete_key.side_effect = slow_delete_key
 
+    coreplus_session_manager._timeouts = coreplus_session_manager._timeouts.model_copy(
+        update={"quick_operation_timeout_seconds": 0.01}
+    )
     with pytest.raises(exc.DeephavenConnectionError) as exc_info:
-        await coreplus_session_manager.delete_key("pubkey", timeout_seconds=0.01)
+        await coreplus_session_manager.delete_key("pubkey")
     assert "timed out" in str(exc_info.value)
 
 
@@ -276,7 +288,7 @@ async def test_connect_to_new_worker_success(
             auto_delete_timeout=600,
             admin_groups=None,
             viewer_groups=None,
-            timeout_seconds=60,
+            timeout_seconds=EnterpriseClientTimeouts().worker_creation_timeout_seconds,
             configuration_transformer=None,
             session_arguments={"programming_language": "python"},
         )
@@ -336,6 +348,37 @@ async def test_connect_to_new_worker_other_error(
             name="worker",
             session_arguments={"programming_language": "python"},
         )
+
+
+@pytest.mark.asyncio
+async def test_connect_to_new_worker_python_side_timeout(
+    coreplus_session_manager, dummy_session_manager
+):
+    """Python-side ``asyncio.wait_for`` raises ``DeephavenConnectionError`` when the
+    SDK does not honour its own ``timeout_seconds`` argument.
+
+    The wrapped call is replaced with a slow synchronous function so the
+    underlying ``asyncio.to_thread`` would block past ``timeout_seconds``; the
+    new ``asyncio.wait_for`` wrap is what raises.
+    """
+    import time
+
+    def slow_connect_to_new_worker(**kwargs):
+        time.sleep(0.05)
+
+    dummy_session_manager.connect_to_new_worker.side_effect = slow_connect_to_new_worker
+    coreplus_session_manager._timeouts = coreplus_session_manager._timeouts.model_copy(
+        update={"worker_creation_timeout_seconds": 0.01}
+    )
+
+    with pytest.raises(exc.DeephavenConnectionError) as exc_info:
+        await coreplus_session_manager.connect_to_new_worker(
+            heap_size_gb=4,
+            name="worker",
+            session_arguments={"programming_language": "python"},
+        )
+    assert "Worker creation timed out" in str(exc_info.value)
+    assert "worker_creation_timeout_seconds" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
@@ -444,66 +487,36 @@ def test_auth_client_property_success(coreplus_session_manager, dummy_session_ma
     assert isinstance(result, CorePlusAuthClient)
 
 
-def test_controller_client_property_connection_error():
-    mock_session_manager = MagicMock()
-    mock_property = PropertyMock()
-    mock_property.__get__ = MagicMock(side_effect=ConnectionError("network failure"))
-    type(mock_session_manager).controller_client = mock_property
-
-    with (
-        patch("deephaven_mcp.client._base.is_enterprise_available", True),
-        pytest.raises(exc.SessionError),
-    ):
-        CorePlusSessionFactory(mock_session_manager)
+def test_get_programming_language_returns_session_type():
+    """When session._session_type is set, it is returned verbatim."""
+    session = MagicMock(spec=["_session_type"])
+    session._session_type = "groovy"
+    assert CorePlusSessionFactory._get_programming_language(session) == "groovy"
 
 
-def test_controller_client_property_session_error():
-    mock_session_manager = MagicMock()
-    mock_property = PropertyMock()
-    mock_property.__get__ = MagicMock(side_effect=Exception("generic failure"))
-    type(mock_session_manager).controller_client = mock_property
-
-    with (
-        patch("deephaven_mcp.client._base.is_enterprise_available", True),
-        pytest.raises(exc.SessionError),
-    ):
-        CorePlusSessionFactory(mock_session_manager)
+def test_get_programming_language_defaults_when_session_type_empty():
+    """When session._session_type is falsy, the default 'python' is returned."""
+    session = MagicMock(spec=["_session_type"])
+    session._session_type = ""
+    assert CorePlusSessionFactory._get_programming_language(session) == "python"
 
 
-def test_auth_client_property_connection_error():
-    mock_session_manager = MagicMock()
-    mock_controller = MagicMock()
-    mock_auth = PropertyMock()
-    mock_auth.__get__ = MagicMock(side_effect=ConnectionError("network failure"))
+def test_get_programming_language_defaults_on_attribute_error(caplog):
+    """When pydeephaven does not expose _session_type, return 'python' and WARN."""
 
-    type(mock_session_manager).controller_client = PropertyMock(
-        return_value=mock_controller
+    class _NoSessionType:
+        """Stand-in pydeephaven.Session that lacks _session_type."""
+
+    session = _NoSessionType()
+    with caplog.at_level(logging.WARNING):
+        result = CorePlusSessionFactory._get_programming_language(session)
+    assert result == "python"
+    assert any(
+        "[CorePlusSessionFactory:_get_programming_language]" in record.getMessage()
+        and "DH-19984" in record.getMessage()
+        and record.levelno == logging.WARNING
+        for record in caplog.records
     )
-    type(mock_session_manager).auth_client = mock_auth
-
-    with (
-        patch("deephaven_mcp.client._base.is_enterprise_available", True),
-        pytest.raises(exc.AuthenticationError),
-    ):
-        CorePlusSessionFactory(mock_session_manager)
-
-
-def test_auth_client_property_auth_error():
-    mock_session_manager = MagicMock()
-    mock_controller = MagicMock()
-    mock_auth = PropertyMock()
-    mock_auth.__get__ = MagicMock(side_effect=Exception("generic failure"))
-
-    type(mock_session_manager).controller_client = PropertyMock(
-        return_value=mock_controller
-    )
-    type(mock_session_manager).auth_client = mock_auth
-
-    with (
-        patch("deephaven_mcp.client._base.is_enterprise_available", True),
-        pytest.raises(exc.AuthenticationError),
-    ):
-        CorePlusSessionFactory(mock_session_manager)
 
 
 # =============================================================================
@@ -523,7 +536,8 @@ async def test_from_url_when_enterprise_not_available(monkeypatch):
     # Should raise MissingEnterprisePackageError when enterprise not available
     with pytest.raises(exc.MissingEnterprisePackageError) as excinfo:
         await sm_mod.CorePlusSessionFactory.from_url(
-            "https://example.com/iris/connection.json"
+            "https://example.com/iris/connection.json",
+            timeouts=EnterpriseClientTimeouts(),
         )
 
     assert "deephaven-coreplus-client" in str(excinfo.value)
@@ -544,9 +558,12 @@ async def test_password_timeout(coreplus_session_manager, dummy_session_manager)
 
     dummy_session_manager.password.side_effect = slow_password
 
-    # Use the timeout_seconds parameter directly
+    # Use a short configured auth timeout to trigger fast.
+    coreplus_session_manager._timeouts = coreplus_session_manager._timeouts.model_copy(
+        update={"auth_timeout_seconds": 0.01}
+    )
     with pytest.raises(exc.DeephavenConnectionError) as exc_info:
-        await coreplus_session_manager.password("user", "pw", timeout_seconds=0.01)
+        await coreplus_session_manager.password("user", "pw")
     assert "timed out" in str(exc_info.value)
 
 
@@ -560,8 +577,11 @@ async def test_private_key_timeout(coreplus_session_manager, dummy_session_manag
 
     dummy_session_manager.private_key.side_effect = slow_auth
 
+    coreplus_session_manager._timeouts = coreplus_session_manager._timeouts.model_copy(
+        update={"auth_timeout_seconds": 0.01}
+    )
     with pytest.raises(exc.DeephavenConnectionError) as exc_info:
-        await coreplus_session_manager.private_key("/fake/path", timeout_seconds=0.01)
+        await coreplus_session_manager.private_key("/fake/path")
     assert "timed out" in str(exc_info.value)
 
 
@@ -575,8 +595,11 @@ async def test_saml_timeout(coreplus_session_manager, dummy_session_manager):
 
     dummy_session_manager.saml.side_effect = slow_auth
 
+    coreplus_session_manager._timeouts = coreplus_session_manager._timeouts.model_copy(
+        update={"saml_auth_timeout_seconds": 0.01}
+    )
     with pytest.raises(exc.DeephavenConnectionError) as exc_info:
-        await coreplus_session_manager.saml(timeout_seconds=0.01)
+        await coreplus_session_manager.saml()
     assert "timed out" in str(exc_info.value)
 
 
@@ -590,9 +613,7 @@ async def test_connect_to_new_worker_timeout(
         "SDK timeout"
     )
     with pytest.raises(exc.DeephavenConnectionError):
-        await coreplus_session_manager.connect_to_new_worker(
-            heap_size_gb=4, timeout_seconds=60.0
-        )
+        await coreplus_session_manager.connect_to_new_worker(heap_size_gb=4)
 
 
 @pytest.mark.asyncio
@@ -607,10 +628,11 @@ async def test_connect_to_persistent_query_timeout(
 
     dummy_session_manager.connect_to_persistent_query.side_effect = slow_connect
 
+    coreplus_session_manager._timeouts = coreplus_session_manager._timeouts.model_copy(
+        update={"pq_connection_timeout_seconds": 0.01}
+    )
     with pytest.raises(exc.DeephavenConnectionError) as exc_info:
-        await coreplus_session_manager.connect_to_persistent_query(
-            name="test", timeout_seconds=0.01
-        )
+        await coreplus_session_manager.connect_to_persistent_query(name="test")
     assert "timed out" in str(exc_info.value)
 
 
@@ -654,7 +676,8 @@ async def test_from_url_success():
             new_callable=AsyncMock,
         ) as mock_subscribe:
             instance = await sm_mod.CorePlusSessionFactory.from_url(
-                "https://example.com/iris/connection.json"
+                "https://example.com/iris/connection.json",
+                timeouts=EnterpriseClientTimeouts(),
             )
         assert isinstance(instance, sm_mod.CorePlusSessionFactory)
         mock_subscribe.assert_awaited_once()
@@ -676,7 +699,7 @@ async def test_from_url_timeout():
         with pytest.raises(exc.DeephavenConnectionError, match="timed out"):
             await sm_mod.CorePlusSessionFactory.from_url(
                 "https://example.com/iris/connection.json",
-                timeout_seconds=0.01,
+                EnterpriseClientTimeouts(session_connect_timeout_seconds=0.01),
             )
 
 
@@ -690,7 +713,8 @@ async def test_from_url_connection_error():
 
         with pytest.raises(exc.DeephavenConnectionError, match="boom"):
             await sm_mod.CorePlusSessionFactory.from_url(
-                "https://example.com/iris/connection.json"
+                "https://example.com/iris/connection.json",
+                timeouts=EnterpriseClientTimeouts(),
             )
 
 
@@ -699,11 +723,34 @@ async def test_from_url_connection_error():
 # ---------------------------------------------------------------------------
 
 
-_FROM_CREDENTIALS_CONFIG = {
-    "system_name": "test-system",
-    "connection_json_url": "https://server/iris/connection.json",
-    "auth": {"backends": ["password", "private_key"]},
-}
+def _make_from_credentials_config():
+    """Build a valid ``EnterpriseSystemConfig`` for ``from_credentials`` tests.
+
+    The factory's typed entry point now accepts a pre-validated
+    declaration; tests construct one here rather than passing a
+    raw dict (the dict-based path was removed when
+    :class:`EnterpriseSystemConfig` moved to
+    :mod:`deephaven_mcp.sessions`).
+    """
+    from deephaven_mcp.sessions import EnterpriseSystemConfig
+
+    return EnterpriseSystemConfig.model_validate(
+        {
+            "name": "test-system",
+            "system_name": "test-system",
+            "connection_json_url": "https://server/iris/connection.json",
+            "auth": {
+                "credentials": {
+                    "type": "password",
+                    "username": "placeholder",
+                    "password": "placeholder",
+                }
+            },
+        }
+    )
+
+
+_FROM_CREDENTIALS_CONFIG = _make_from_credentials_config()
 
 
 def _make_session_manager_modules(side_effect=None):
@@ -724,11 +771,16 @@ def _make_session_manager_modules(side_effect=None):
 
 
 def _patches_for_from_credentials(side_effect=None):
-    """Standard set of patches used by every from_credentials test."""
+    """Standard set of patches used by every from_credentials test.
+
+    The new code path validates the config inline via
+    :meth:`EnterpriseSystemConfig.model_validate`; tests therefore
+    pass a fully-valid config dict (``_FROM_CREDENTIALS_CONFIG``)
+    rather than patching out the validator.
+    """
     sm_mod, client_mod, ent_mod = _make_session_manager_modules(side_effect)
     return [
         patch("deephaven_mcp.client._session_factory.is_enterprise_available", True),
-        patch("deephaven_mcp.client._session_factory.validate_enterprise_config"),
         patch.dict(
             "sys.modules",
             {
@@ -746,15 +798,15 @@ async def test_from_credentials_password_success():
 
     creds = PasswordCredentials(username="alice", password="pw")
 
-    p1, p2, p3 = _patches_for_from_credentials()
-    with p1, p2, p3:
+    p1, p2 = _patches_for_from_credentials()
+    with p1, p2:
         import deephaven_mcp.client._session_factory as sm_mod
 
         with patch.object(
             sm_mod.CorePlusSessionFactory, "password", new_callable=AsyncMock
         ) as mock_password:
             await sm_mod.CorePlusSessionFactory.from_credentials(
-                _FROM_CREDENTIALS_CONFIG, creds
+                _FROM_CREDENTIALS_CONFIG, creds, timeouts=EnterpriseClientTimeouts()
             )
         mock_password.assert_awaited_once_with("alice", "pw", None)
 
@@ -765,15 +817,15 @@ async def test_from_credentials_password_with_effective_user():
 
     creds = PasswordCredentials(username="alice", password="pw", effective_user="bob")
 
-    p1, p2, p3 = _patches_for_from_credentials()
-    with p1, p2, p3:
+    p1, p2 = _patches_for_from_credentials()
+    with p1, p2:
         import deephaven_mcp.client._session_factory as sm_mod
 
         with patch.object(
             sm_mod.CorePlusSessionFactory, "password", new_callable=AsyncMock
         ) as mock_password:
             await sm_mod.CorePlusSessionFactory.from_credentials(
-                _FROM_CREDENTIALS_CONFIG, creds
+                _FROM_CREDENTIALS_CONFIG, creds, timeouts=EnterpriseClientTimeouts()
             )
         mock_password.assert_awaited_once_with("alice", "pw", "bob")
 
@@ -784,15 +836,15 @@ async def test_from_credentials_private_key_success():
 
     creds = PrivateKeyCredentials(key_text="DH key payload\n")
 
-    p1, p2, p3 = _patches_for_from_credentials()
-    with p1, p2, p3:
+    p1, p2 = _patches_for_from_credentials()
+    with p1, p2:
         import deephaven_mcp.client._session_factory as sm_mod
 
         with patch.object(
             sm_mod.CorePlusSessionFactory, "private_key", new_callable=AsyncMock
         ) as mock_pk:
             await sm_mod.CorePlusSessionFactory.from_credentials(
-                _FROM_CREDENTIALS_CONFIG, creds
+                _FROM_CREDENTIALS_CONFIG, creds, timeouts=EnterpriseClientTimeouts()
             )
         # The key_text should arrive wrapped in an io.StringIO so the
         # upstream SessionManager.private_key() sees an in-memory text
@@ -813,17 +865,22 @@ async def test_from_credentials_private_key_success():
 
 @pytest.mark.asyncio
 async def test_from_credentials_unsupported_creds_type():
-    p1, p2, p3 = _patches_for_from_credentials()
-    with p1, p2, p3:
+    """An object that is not a Credentials member is rejected with a typed error."""
+    p1, p2 = _patches_for_from_credentials()
+    with p1, p2:
         import deephaven_mcp.client._session_factory as sm_mod
 
-        # PSKCredentials is a valid Credentials union member but not a
-        # legal input for the enterprise factory.
-        from deephaven_mcp.auth.credentials import PSKCredentials
+        # The Credentials union dropped PSKCredentials when the auth
+        # backends were torn down. Pass a plain object to exercise the
+        # "unsupported credentials" branch.
+        class _NotACredential:
+            pass
 
         with pytest.raises(exc.AuthenticationError, match="Unsupported credentials"):
             await sm_mod.CorePlusSessionFactory.from_credentials(
-                _FROM_CREDENTIALS_CONFIG, PSKCredentials(psk="x")  # type: ignore[arg-type]
+                _FROM_CREDENTIALS_CONFIG,
+                _NotACredential(),  # type: ignore[arg-type]
+                timeouts=EnterpriseClientTimeouts(),
             )
 
 
@@ -837,28 +894,15 @@ async def test_from_credentials_no_enterprise_package():
 
         with pytest.raises(exc.MissingEnterprisePackageError):
             await sm_mod.CorePlusSessionFactory.from_credentials(
-                _FROM_CREDENTIALS_CONFIG, creds
+                _FROM_CREDENTIALS_CONFIG, creds, timeouts=EnterpriseClientTimeouts()
             )
 
 
-@pytest.mark.asyncio
-async def test_from_credentials_invalid_config_propagates():
-    from deephaven_mcp.auth.credentials import PasswordCredentials
-
-    creds = PasswordCredentials(username="u", password="p")
-    with (
-        patch("deephaven_mcp.client._session_factory.is_enterprise_available", True),
-        patch(
-            "deephaven_mcp.client._session_factory.validate_enterprise_config",
-            side_effect=exc.ConfigurationError("boom"),
-        ),
-    ):
-        import deephaven_mcp.client._session_factory as sm_mod
-
-        with pytest.raises(exc.ConfigurationError, match="boom"):
-            await sm_mod.CorePlusSessionFactory.from_credentials(
-                _FROM_CREDENTIALS_CONFIG, creds
-            )
+# ``test_from_credentials_invalid_config_propagates`` was retired when
+# the dict-based entry point was removed: invalid configurations now
+# fail at :meth:`EnterpriseSystemConfig.model_validate` time, well
+# before the ``from_credentials`` call, and that schema-level rejection
+# is exercised by ``tests/sessions/test__enterprise.py``.
 
 
 @pytest.mark.asyncio
@@ -872,13 +916,15 @@ async def test_from_credentials_session_manager_timeout():
     def slow_init(_url):
         time_mod.sleep(0.1)
 
-    p1, p2, p3 = _patches_for_from_credentials(side_effect=slow_init)
-    with p1, p2, p3:
+    p1, p2 = _patches_for_from_credentials(side_effect=slow_init)
+    with p1, p2:
         import deephaven_mcp.client._session_factory as sm_mod
 
         with pytest.raises(exc.DeephavenConnectionError, match="timed out"):
             await sm_mod.CorePlusSessionFactory.from_credentials(
-                _FROM_CREDENTIALS_CONFIG, creds, timeout_seconds=0.01
+                _FROM_CREDENTIALS_CONFIG,
+                creds,
+                EnterpriseClientTimeouts(session_connect_timeout_seconds=0.01),
             )
 
 
@@ -891,11 +937,11 @@ async def test_from_credentials_session_manager_failure():
     def boom(_url):
         raise RuntimeError("connect failed")
 
-    p1, p2, p3 = _patches_for_from_credentials(side_effect=boom)
-    with p1, p2, p3:
+    p1, p2 = _patches_for_from_credentials(side_effect=boom)
+    with p1, p2:
         import deephaven_mcp.client._session_factory as sm_mod
 
         with pytest.raises(exc.DeephavenConnectionError, match="connect failed"):
             await sm_mod.CorePlusSessionFactory.from_credentials(
-                _FROM_CREDENTIALS_CONFIG, creds
+                _FROM_CREDENTIALS_CONFIG, creds, timeouts=EnterpriseClientTimeouts()
             )

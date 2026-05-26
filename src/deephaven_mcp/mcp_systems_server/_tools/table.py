@@ -14,11 +14,11 @@ from mcp.server.fastmcp import Context, FastMCP
 
 from deephaven_mcp import queries
 from deephaven_mcp.mcp_systems_server._tools.shared import (
-    ESTIMATED_BYTES_PER_CELL,
     build_table_data_response,
     check_response_size,
     error_response,
     format_meta_table_result,
+    get_response_limits,
     get_session_from_context,
 )
 
@@ -112,13 +112,13 @@ async def session_tables_schema(
         # Get full schemas for all tables in the session
         Tool: session_tables_schema
         Parameters: {
-            "session_id": "community:config:local"
+            "session_id": "community:community:local"
         }
 
         # Get full schemas for specific tables
         Tool: session_tables_schema
         Parameters: {
-            "session_id": "community:config:local",
+            "session_id": "community:community:local",
             "table_names": ["trades", "quotes", "orders"]
         }
 
@@ -243,7 +243,7 @@ async def session_tables_list(context: Context, session_id: str) -> dict:
     Example Successful Response:
         {
             'success': True,
-            'session_id': 'community:config:local',
+            'session_id': 'community:community:local',
             'table_names': ['trades', 'quotes', 'orders'],
             'count': 3
         }
@@ -251,7 +251,7 @@ async def session_tables_list(context: Context, session_id: str) -> dict:
     Example Error Response:
         {
             'success': False,
-            'error': 'Session not found: community:config:local',
+            'error': 'Session not found: community:community:local',
             'isError': True
         }
 
@@ -404,14 +404,14 @@ async def session_table_data(
         # Get first 1000 rows with default format
         Tool: session_table_data
         Parameters: {
-            "session_id": "community:config:local",
+            "session_id": "community:community:local",
             "table_name": "my_table"
         }
 
         # Get last 500 rows (most recent for time-series)
         Tool: session_table_data
         Parameters: {
-            "session_id": "community:config:local",
+            "session_id": "community:community:local",
             "table_name": "trades",
             "max_rows": 500,
             "head": false
@@ -429,7 +429,7 @@ async def session_table_data(
         # Get data optimized for AI comprehension
         Tool: session_table_data
         Parameters: {
-            "session_id": "community:config:local",
+            "session_id": "community:community:local",
             "table_name": "customer_records",
             "max_rows": 100,
             "format": "optimize-accuracy"
@@ -438,7 +438,7 @@ async def session_table_data(
         # Get entire small table in JSON row format
         Tool: session_table_data
         Parameters: {
-            "session_id": "community:config:local",
+            "session_id": "community:community:local",
             "table_name": "config_settings",
             "max_rows": null,
             "format": "json-row"
@@ -477,8 +477,9 @@ async def session_table_data(
         # Check response size before formatting (rough estimation to avoid memory overhead)
         row_count = len(arrow_table)
         col_count = len(arrow_table.schema)
-        estimated_size = row_count * col_count * ESTIMATED_BYTES_PER_CELL
-        size_error = check_response_size(table_name, estimated_size)
+        limits = get_response_limits(context, session_id)
+        estimated_size = row_count * col_count * limits.estimated_bytes_per_cell
+        size_error = check_response_size(table_name, estimated_size, limits)
 
         if size_error:
             return size_error

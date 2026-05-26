@@ -12,7 +12,6 @@ import pytest
 from conftest import (
     MockContext,
     create_mock_instance_tracker,
-    create_mock_session_registry_manager,
 )
 
 from deephaven_mcp import config
@@ -32,6 +31,7 @@ from deephaven_mcp.resource_manager import (
     EnterpriseSessionManager,
     PythonLaunchedSession,
     ResourceLivenessStatus,
+    SessionOrigin,
     SystemType,
 )
 
@@ -57,6 +57,10 @@ async def test_session_community_create_with_pip_and_process_id():
 
     full_config = community_config
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
+    # Stash for conftest's lifespan adapter — exposes the community
+    # settings dict to the multiplexed-server tool helpers without
+    # rewriting every test's MockContext call site.
+    mock_session_registry._community_settings = community_config
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
     mock_session_registry.add_session = AsyncMock()
     mock_session_registry.get = AsyncMock(
@@ -98,9 +102,7 @@ async def test_session_community_create_with_pip_and_process_id():
         context = MockContext(
             {
                 "config_manager": mock_config_manager,
-                "session_registry_manager": create_mock_session_registry_manager(
-                    registry=mock_session_registry
-                ),
+                "registry": mock_session_registry,
                 "instance_tracker": create_mock_instance_tracker(),
             }
         )
@@ -111,47 +113,13 @@ async def test_session_community_create_with_pip_and_process_id():
         assert result["process_id"] == 99999
 
 
-@pytest.mark.asyncio
-async def test_session_community_create_auth_token_env_var_not_found():
-    """Test that error is raised when auth_token_env_var is configured but env var not found."""
-    mock_config_manager = MagicMock()
-    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
-
-    community_config = {
-        "session_creation": {
-            "max_concurrent_sessions": 5,
-            "defaults": {
-                "auth_token_env_var": "NONEXISTENT_VAR",
-            },
-        }
-    }
-
-    full_config = community_config
-    mock_config_manager.get_config = AsyncMock(return_value=full_config)
-    mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
-    mock_session_registry.add_session = AsyncMock()
-    mock_session_registry.get = AsyncMock(
-        side_effect=RegistryItemNotFoundError("not found")
-    )
-
-    context = MockContext(
-        {
-            "config_manager": mock_config_manager,
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
-            "instance_tracker": create_mock_instance_tracker(),
-        }
-    )
-
-    with patch.dict(os.environ, {}, clear=True):  # Empty environment
-        result = await session_community_create(context, session_name="test-session")
-
-        # Should fail because explicitly configured env var is not set
-        assert result["success"] is False
-        assert "NONEXISTENT_VAR" in result["error"]
-        assert "unset or empty" in result["error"]
-        assert result["isError"] is True
+# Note: ``test_session_community_create_auth_token_env_var_not_found`` was
+# removed. The legacy code resolved ``token_env_var`` lazily at session-
+# creation time and surfaced ``unset or empty`` errors through this tool.
+# After the Pydantic migration, env-var resolution happens eagerly at
+# config-load time in :class:`PSKCredentials._resolve`, so a missing
+# env var fails the loader before any tool runs. That code path is now
+# covered by ``tests/auth/credentials/test__credentials.py``.
 
 
 @pytest.mark.asyncio
@@ -169,6 +137,10 @@ async def test_session_community_create_cleanup_fails_on_timeout():
 
     full_config = community_config
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
+    # Stash for conftest's lifespan adapter — exposes the community
+    # settings dict to the multiplexed-server tool helpers without
+    # rewriting every test's MockContext call site.
+    mock_session_registry._community_settings = community_config
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
     mock_session_registry.get = AsyncMock(
         side_effect=RegistryItemNotFoundError("not found")
@@ -210,9 +182,7 @@ async def test_session_community_create_cleanup_fails_on_timeout():
         context = MockContext(
             {
                 "config_manager": mock_config_manager,
-                "session_registry_manager": create_mock_session_registry_manager(
-                    registry=mock_session_registry
-                ),
+                "registry": mock_session_registry,
                 "instance_tracker": create_mock_instance_tracker(),
             }
         )
@@ -234,34 +204,33 @@ async def test_session_community_delete_removal_returns_none():
     mock_launched_session.launch_method = "docker"
 
     mock_manager = MagicMock(spec=DynamicCommunitySessionManager)
-    mock_manager.full_name = "community:dynamic:test-session"
+    mock_manager.full_name = "community:community:test-session"
     mock_manager._name = "test-session"
-    mock_manager.source = "dynamic"
+    mock_manager.system = "community"
+    mock_manager.origin = SessionOrigin.DYNAMIC
     mock_manager.system_type = SystemType.COMMUNITY
     mock_manager.launched_session = mock_launched_session
     mock_manager.close = AsyncMock()
 
     mock_session_registry.get = AsyncMock(return_value=mock_manager)
-    mock_session_registry.remove_session = AsyncMock(return_value=None)  # Not found
+    mock_session_registry.remove = AsyncMock(return_value=None)  # Not found
 
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
 
     result = await session_community_delete(
-        context, session_id="community:dynamic:test-session"
+        context, session_id="community:community:test-session"
     )
 
     # Should still succeed even though removal returned None
     assert result["success"] is True
-    mock_session_registry.remove_session.assert_awaited_once_with(
-        "community:dynamic:test-session"
+    mock_session_registry.remove.assert_awaited_once_with(
+        "community:community:test-session"
     )
 
 
@@ -274,9 +243,7 @@ def test_run_script_reads_script_from_file():
     mock_registry.get = AsyncMock(return_value=mock_session_manager)
     context = MockContext(
         {
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
             "config_manager": AsyncMock(),
         }
     )
@@ -326,9 +293,7 @@ async def test_session_script_run_both_script_and_path():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=session_registry
-            ),
+            "registry": session_registry,
         }
     )
     result = await session_script_run(
@@ -353,9 +318,7 @@ async def test_session_script_run_missing_session():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=session_registry
-            ),
+            "registry": session_registry,
         }
     )
     result = await session_script_run(context, session_id=None, script="print('hi')")
@@ -383,9 +346,7 @@ async def test_session_script_run_both_none():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=session_registry
-            ),
+            "registry": session_registry,
         }
     )
     result = await session_script_run(context, session_id="foo")
@@ -418,9 +379,7 @@ async def test_session_script_run_success():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=session_registry
-            ),
+            "registry": session_registry,
         }
     )
     result = await session_script_run(context, session_id="worker", script="print(1)")
@@ -443,9 +402,7 @@ async def test_session_script_run_no_script():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=session_registry
-            ),
+            "registry": session_registry,
         }
     )
     res = await session_script_run(context, session_id="worker")
@@ -472,9 +429,7 @@ async def test_session_script_run_neither_script_nor_path():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=session_registry
-            ),
+            "registry": session_registry,
         }
     )
 
@@ -504,9 +459,7 @@ async def test_session_script_run_session_error():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=session_registry
-            ),
+            "registry": session_registry,
         }
     )
     res = await session_script_run(context, session_id="worker", script="print(1)")
@@ -560,9 +513,7 @@ async def test_session_script_run_script_path():
         context = MockContext(
             {
                 "config_manager": MagicMock(),
-                "session_registry_manager": create_mock_session_registry_manager(
-                    registry=session_registry
-                ),
+                "registry": session_registry,
             }
         )
         res = await session_script_run(
@@ -589,9 +540,7 @@ async def test_session_script_run_script_path_none_error():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=session_registry
-            ),
+            "registry": session_registry,
         }
     )
     res = await session_script_run(
@@ -643,9 +592,7 @@ async def test_session_pip_list_success():
     ):
         context = MockContext(
             {
-                "session_registry_manager": create_mock_session_registry_manager(
-                    registry=mock_session_registry
-                ),
+                "registry": mock_session_registry,
                 "config_manager": AsyncMock(),
                 "instance_tracker": create_mock_instance_tracker(),
             }
@@ -690,9 +637,7 @@ async def test_session_pip_list_empty():
     ):
         context = MockContext(
             {
-                "session_registry_manager": create_mock_session_registry_manager(
-                    registry=mock_session_registry
-                ),
+                "registry": mock_session_registry,
                 "config_manager": AsyncMock(),
             }
         )
@@ -737,9 +682,7 @@ async def test_session_pip_list_malformed_data():
     ):
         context = MockContext(
             {
-                "session_registry_manager": create_mock_session_registry_manager(
-                    registry=mock_session_registry
-                ),
+                "registry": mock_session_registry,
                 "config_manager": AsyncMock(),
                 "instance_tracker": create_mock_instance_tracker(),
             }
@@ -780,9 +723,7 @@ async def test_session_pip_list_error():
     ):
         context = MockContext(
             {
-                "session_registry_manager": create_mock_session_registry_manager(
-                    registry=mock_session_registry
-                ),
+                "registry": mock_session_registry,
                 "config_manager": AsyncMock(),
                 "instance_tracker": create_mock_instance_tracker(),
             }
@@ -814,9 +755,7 @@ async def test_session_pip_list_session_not_found():
     ):
         context = MockContext(
             {
-                "session_registry_manager": create_mock_session_registry_manager(
-                    registry=mock_session_registry
-                ),
+                "registry": mock_session_registry,
                 "config_manager": AsyncMock(),
                 "instance_tracker": create_mock_instance_tracker(),
             }

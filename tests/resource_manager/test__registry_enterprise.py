@@ -11,15 +11,15 @@ Covers:
 - get / get_all
 - _sync_enterprise_sessions
 - _snapshot_factory_state
-- _apply_result
+- _apply_result (success path delegates to _apply_factory_success;
+  error path is inlined — record error, replace client, no _items changes)
 - _remove_sessions_by_keys
 - _apply_factory_success
-- _apply_factory_error
 - _discover_enterprise_sessions
 - _build_not_found_message
 - _make_enterprise_session_manager (static)
 
-Note: add_session / remove_session / count_added_sessions are inherited from
+Note: add_session / remove / count_added_sessions are inherited from
 MutableSessionRegistry and tested via test__registry.py.
 """
 
@@ -29,10 +29,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from deephaven_mcp._exceptions import (
-    AuthenticationError,
     InternalError,
     RegistryItemNotFoundError,
 )
+from deephaven_mcp.auth.credentials import PasswordCredentials
+from deephaven_mcp.client import EnterpriseClientTimeouts
 from deephaven_mcp.resource_manager import (
     EnterpriseSessionRegistry,
     InitializationPhase,
@@ -49,6 +50,7 @@ from deephaven_mcp.resource_manager._registry_enterprise import (
     _FactorySnapshot,
     _fetch_factory_pqs,
 )
+from deephaven_mcp.sessions import EnterpriseSystemConfig
 
 _TEST_SYSTEM_NAME = "system"
 
@@ -58,19 +60,60 @@ _TEST_SYSTEM_NAME = "system"
 # ---------------------------------------------------------------------------
 
 
-def _make_initialized_registry() -> EnterpriseSessionRegistry:
-    """Return a fully-bound EnterpriseSessionRegistry with a mock factory manager.
+def _password_creds(
+    username: str = "alice", password: str = "pw", effective: str | None = None
+) -> PasswordCredentials:
+    return PasswordCredentials(
+        username=username, password=password, effective_user=effective
+    )
 
-    Mirrors the post-``bind_credentials`` state: ``_factory_manager`` and
-    ``_creds`` are both set, since the production code sets them together.
+
+def _make_config(
+    system_name: str = _TEST_SYSTEM_NAME,
+    raw: dict | None = None,
+    creds: PasswordCredentials | None = None,
+) -> EnterpriseSystemConfig:
+    """Build a validated :class:`EnterpriseSystemConfig` for tests.
+
+    The legacy ``raw`` parameter is retained for backward compatibility
+    of test signatures, but the new pydantic model has typed fields
+    rather than a free-form dict; we accept ``raw`` as an optional
+    extra-fields dict that is merged into the canonical payload.
     """
-    registry = EnterpriseSessionRegistry()
+    resolved_creds = creds if creds is not None else _password_creds()
+    payload: dict = {
+        "name": system_name,
+        "connection_json_url": "https://example.com/iris/connection.json",
+        "credentials": resolved_creds.model_dump(mode="json", context={"reveal": True}),
+    }
+    if raw:
+        # Filter out keys that aren't part of the EnterpriseSystemConfig
+        # schema (legacy callers passed ``{"host": ..., "port": ...}``
+        # which never matched the on-disk schema either).
+        for key in ("session_creation", "connection_timeout_seconds"):
+            if key in raw:
+                payload[key] = raw[key]
+    return EnterpriseSystemConfig.model_validate(payload)
+
+
+def _make_registry() -> EnterpriseSessionRegistry:
+    """Return a fresh, **un-initialized** registry bound to a stock config."""
+    return EnterpriseSessionRegistry(
+        _make_config(), timeouts=EnterpriseClientTimeouts()
+    )
+
+
+def _make_initialized_registry() -> EnterpriseSessionRegistry:
+    """Return a registry in the post-``_load_items`` state.
+
+    Bypasses :meth:`initialize` so tests can swap in a mock factory
+    manager and exercise downstream behavior without launching the
+    background discovery task.
+    """
+    registry = _make_registry()
     registry._initialized = True
     registry._phase = InitializationPhase.COMPLETED
-    mock_factory = MagicMock(spec=CorePlusSessionFactoryManager)
-    registry._factory_manager = mock_factory
-    registry._system_name = _TEST_SYSTEM_NAME
-    registry._creds = _password_creds()
+    registry._factory_manager = MagicMock(spec=CorePlusSessionFactoryManager)
     return registry
 
 
@@ -289,7 +332,7 @@ def test_make_enterprise_session_manager_returns_enterprise_session_manager():
     )
 
     assert isinstance(manager, EnterpriseSessionManager)
-    assert manager.source == _TEST_SYSTEM_NAME
+    assert manager.system == _TEST_SYSTEM_NAME
     assert manager.name == "my-pq"
 
 
@@ -325,13 +368,21 @@ async def test_make_enterprise_session_manager_creation_function_calls_connect()
 
 
 def test_init_default_state():
-    """__init__ sets all fields to their initial values."""
-    registry = EnterpriseSessionRegistry()
+    """__init__ captures config and initializes per-run state to defaults."""
+    cfg = _make_config()
+    registry = EnterpriseSessionRegistry(cfg, timeouts=EnterpriseClientTimeouts())
 
+    # Config-derived fields are populated immediately.
+    assert registry._system_name == cfg.name
+    # The registry now stores the typed declaration directly rather
+    # than a model-dumped dict; downstream consumers (the factory
+    # manager and ``CorePlusSessionFactory.from_credentials``) accept
+    # the typed value, eliminating the previous reveal round-trip.
+    assert registry._system_config is cfg
+    assert registry._creds is cfg.credentials
+    # Per-run state stays at defaults until initialize() runs.
     assert registry._factory_manager is None
     assert registry._controller_client is None
-    assert registry._config is None
-    assert registry._creds is None
     assert registry._added_session_ids == set()
     assert registry._phase == InitializationPhase.NOT_STARTED
     assert registry._error is None
@@ -346,7 +397,7 @@ def test_init_default_state():
 
 def test_system_name_not_initialized_raises():
     """system_name raises InternalError when registry not initialized."""
-    registry = EnterpriseSessionRegistry()
+    registry = _make_registry()
 
     with pytest.raises(InternalError):
         _ = registry.system_name
@@ -365,36 +416,9 @@ def test_system_name_initialized_returns_name():
 
 def test_factory_manager_not_initialized_raises():
     """factory_manager raises InternalError when registry not initialized."""
-    registry = EnterpriseSessionRegistry()
+    registry = _make_registry()
 
     with pytest.raises(InternalError):
-        _ = registry.factory_manager
-
-
-def test_factory_manager_initialized_but_unbound_raises():
-    """factory_manager raises InternalError when initialized but bind_credentials was not called."""
-    registry = EnterpriseSessionRegistry()
-    registry._initialized = True
-    registry._factory_manager = None
-    registry._creds = None
-
-    with pytest.raises(InternalError, match="bind_credentials was not called"):
-        _ = registry.factory_manager
-
-
-def test_factory_manager_bound_but_factory_none_raises():
-    """factory_manager raises InternalError when bound but _factory_manager is None.
-
-    Guards against the divergent state that exists transiently inside
-    close() (factory cleared before creds) and against any future
-    refactor that splits the bind_credentials set-together pair.
-    """
-    registry = EnterpriseSessionRegistry()
-    registry._initialized = True
-    registry._creds = _password_creds()
-    registry._factory_manager = None
-
-    with pytest.raises(InternalError, match="factory manager is not available"):
         _ = registry.factory_manager
 
 
@@ -407,205 +431,60 @@ def test_factory_manager_returns_factory():
 
 
 # ---------------------------------------------------------------------------
-# 5. _load_items / initialize / bind_credentials
+# 5. _load_items / initialize
 # ---------------------------------------------------------------------------
 
 
-def _password_creds(
-    username: str = "alice", password: str = "pw", effective: str | None = None
-):
-    from deephaven_mcp.auth.credentials import PasswordCredentials
-
-    return PasswordCredentials(
-        username=username, password=password, effective_user=effective
-    )
-
-
-def _private_key_creds(key_text: str = "keymat"):
-    from deephaven_mcp.auth.credentials import PrivateKeyCredentials
-
-    return PrivateKeyCredentials(key_text=key_text)
-
-
 @pytest.mark.asyncio
-async def test_load_items_stores_config_no_factory():
-    """_load_items only stores the config; no factory is created yet."""
-    registry = EnterpriseSessionRegistry()
-    registry._initialized = True
-    config_manager = AsyncMock()
-    config = {"host": "myhost", "port": 8080, "system_name": _TEST_SYSTEM_NAME}
-    config_manager.get_config = AsyncMock(return_value=config)
-
-    with patch(
-        "deephaven_mcp.resource_manager._registry_enterprise.CorePlusSessionFactoryManager"
-    ) as mock_cls:
-        await registry._load_items(config_manager)
-
-    mock_cls.assert_not_called()
-    assert registry._factory_manager is None
-    assert registry._config is config
-    assert registry._system_name == _TEST_SYSTEM_NAME
-    assert registry._phase == InitializationPhase.NOT_STARTED
-
-
-@pytest.mark.asyncio
-async def test_initialize_does_not_start_discovery():
-    """initialize() loads config but does not kick off the discovery task."""
-    registry = EnterpriseSessionRegistry()
-    config_manager = AsyncMock()
-    config = {"host": "myhost", "system_name": _TEST_SYSTEM_NAME}
-    config_manager.get_config = AsyncMock(return_value=config)
-
+async def test_load_items_builds_factory_and_launches_discovery():
+    """:meth:`_load_items` builds the factory manager and starts discovery."""
+    registry = _make_registry()
+    mock_factory = MagicMock(spec=CorePlusSessionFactoryManager)
     mock_discover = AsyncMock()
-    with patch.object(registry, "_discover_enterprise_sessions", mock_discover):
-        await registry.initialize(config_manager)
+
+    with (
+        patch(
+            "deephaven_mcp.resource_manager._registry_enterprise.CorePlusSessionFactoryManager",
+            return_value=mock_factory,
+        ) as mock_cls,
+        patch.object(registry, "_discover_enterprise_sessions", mock_discover),
+    ):
+        await registry._load_items()
         await asyncio.sleep(0)
 
-    assert registry._discovery_task is None
-    assert registry._initialized is True
-    assert registry._config is config
-    mock_discover.assert_not_called()
-
-
-# ---------------------------------------------------------------------------
-# 6. bind_credentials
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_bind_credentials_first_call_creates_factory_and_starts_discovery():
-    """First bind_credentials call creates the factory and launches discovery."""
-    registry = EnterpriseSessionRegistry()
-    config_manager = AsyncMock()
-    config = {"host": "myhost", "system_name": _TEST_SYSTEM_NAME}
-    config_manager.get_config = AsyncMock(return_value=config)
-
-    mock_discover = AsyncMock()
-    mock_factory = MagicMock(spec=CorePlusSessionFactoryManager)
-    creds = _password_creds()
-
-    with (
-        patch.object(registry, "_discover_enterprise_sessions", mock_discover),
-        patch(
-            "deephaven_mcp.resource_manager._registry_enterprise.CorePlusSessionFactoryManager",
-            return_value=mock_factory,
-        ) as mock_cls,
-    ):
-        await registry.initialize(config_manager)
-        await registry.bind_credentials(creds)
-        await asyncio.sleep(0)  # let the discovery task start
-
-    mock_cls.assert_called_once_with(_TEST_SYSTEM_NAME, config, creds)
+    mock_cls.assert_called_once_with(
+        registry._system_name,
+        registry._system_config,
+        registry._creds,
+        timeouts=registry._timeouts,
+    )
     assert registry._factory_manager is mock_factory
-    assert registry._creds is creds
-    assert registry._discovery_task is not None
     assert registry._phase == InitializationPhase.PARTIAL
+    assert registry._discovery_task is not None
 
 
 @pytest.mark.asyncio
-async def test_bind_credentials_idempotent_for_same_creds():
-    """Re-binding the same credentials is a no-op (single factory + task)."""
-    registry = EnterpriseSessionRegistry()
-    config_manager = AsyncMock()
-    config_manager.get_config = AsyncMock(
-        return_value={"host": "myhost", "system_name": _TEST_SYSTEM_NAME}
-    )
-
-    mock_discover = AsyncMock()
+async def test_initialize_starts_discovery_once():
+    """A full ``initialize()`` call wires the factory and discovery task."""
+    registry = _make_registry()
     mock_factory = MagicMock(spec=CorePlusSessionFactoryManager)
+    mock_discover = AsyncMock()
 
     with (
-        patch.object(registry, "_discover_enterprise_sessions", mock_discover),
         patch(
             "deephaven_mcp.resource_manager._registry_enterprise.CorePlusSessionFactoryManager",
             return_value=mock_factory,
-        ) as mock_cls,
-    ):
-        await registry.initialize(config_manager)
-        await registry.bind_credentials(_password_creds())
-        first_task = registry._discovery_task
-        await registry.bind_credentials(_password_creds())  # equal value
-        second_task = registry._discovery_task
-
-    assert mock_cls.call_count == 1
-    assert first_task is second_task
-
-
-@pytest.mark.asyncio
-async def test_bind_credentials_different_creds_raises():
-    """Binding different credentials on the same registry instance is rejected."""
-    registry = EnterpriseSessionRegistry()
-    config_manager = AsyncMock()
-    config_manager.get_config = AsyncMock(
-        return_value={"host": "myhost", "system_name": _TEST_SYSTEM_NAME}
-    )
-
-    mock_discover = AsyncMock()
-
-    with (
-        patch.object(registry, "_discover_enterprise_sessions", mock_discover),
-        patch(
-            "deephaven_mcp.resource_manager._registry_enterprise.CorePlusSessionFactoryManager",
-            return_value=MagicMock(spec=CorePlusSessionFactoryManager),
         ),
-    ):
-        await registry.initialize(config_manager)
-        await registry.bind_credentials(_password_creds(username="alice"))
-        with pytest.raises(AuthenticationError, match="different set of credentials"):
-            await registry.bind_credentials(_password_creds(username="bob"))
-
-
-@pytest.mark.asyncio
-async def test_bind_credentials_different_type_distinguished():
-    """Password vs private-key with same-looking text are different fingerprints."""
-    registry = EnterpriseSessionRegistry()
-    config_manager = AsyncMock()
-    config_manager.get_config = AsyncMock(
-        return_value={"host": "myhost", "system_name": _TEST_SYSTEM_NAME}
-    )
-
-    mock_discover = AsyncMock()
-
-    with (
         patch.object(registry, "_discover_enterprise_sessions", mock_discover),
-        patch(
-            "deephaven_mcp.resource_manager._registry_enterprise.CorePlusSessionFactoryManager",
-            return_value=MagicMock(spec=CorePlusSessionFactoryManager),
-        ),
     ):
-        await registry.initialize(config_manager)
-        await registry.bind_credentials(_password_creds())
-        with pytest.raises(AuthenticationError, match="different set of credentials"):
-            await registry.bind_credentials(_private_key_creds())
+        await registry.initialize()
+        # Idempotent: a second call must not re-create the factory.
+        await registry.initialize()
+        await asyncio.sleep(0)
 
-
-# Note: there is no longer a ``test_bind_credentials_rejects_unsupported_type``
-# at this layer. The registry no longer maintains a local list of supported
-# credential types; rejection of unsupported types is the sole responsibility
-# of :meth:`CorePlusSessionFactory.from_credentials`, and is exercised by
-# ``tests/client/test__session_factory.py::test_from_credentials_unsupported_creds_type``.
-# At runtime, an unsupported type bound on the registry surfaces as an
-# ``AuthenticationError`` raised from the background discovery task,
-# logged and stored on ``self._error`` for later ``get()`` callers.
-
-
-@pytest.mark.asyncio
-async def test_bind_credentials_not_initialized_raises():
-    """bind_credentials before initialize() is rejected."""
-    registry = EnterpriseSessionRegistry()
-    with pytest.raises(InternalError):
-        await registry.bind_credentials(_password_creds())
-
-
-@pytest.mark.asyncio
-async def test_bind_credentials_missing_config_raises():
-    """Defensive: if _config is somehow None after initialized, raise."""
-    registry = EnterpriseSessionRegistry()
-    registry._initialized = True
-    registry._config = None
-    registry._system_name = _TEST_SYSTEM_NAME
-    with pytest.raises(InternalError, match="no config loaded"):
-        await registry.bind_credentials(_password_creds())
+    assert registry._initialized
+    assert registry._factory_manager is mock_factory
+    assert registry._discovery_task is not None
 
 
 # ---------------------------------------------------------------------------
@@ -616,7 +495,7 @@ async def test_bind_credentials_missing_config_raises():
 @pytest.mark.asyncio
 async def test_close_not_initialized_raises():
     """close() raises InternalError if registry is not initialized."""
-    registry = EnterpriseSessionRegistry()
+    registry = _make_registry()
 
     with pytest.raises(InternalError):
         await registry.close()
@@ -707,33 +586,9 @@ async def test_close_clears_controller_client_and_errors():
 
 
 @pytest.mark.asyncio
-async def test_get_unbound_raises():
-    """get() raises InternalError when bind_credentials was not called."""
-    registry = EnterpriseSessionRegistry()
-    registry._initialized = True
-    registry._phase = InitializationPhase.COMPLETED
-    registry._creds = None
-
-    with pytest.raises(InternalError, match="bind_credentials was not called"):
-        await registry.get("enterprise:system:any-pq")
-
-
-@pytest.mark.asyncio
-async def test_get_all_unbound_raises():
-    """get_all() raises InternalError when bind_credentials was not called."""
-    registry = EnterpriseSessionRegistry()
-    registry._initialized = True
-    registry._phase = InitializationPhase.COMPLETED
-    registry._creds = None
-
-    with pytest.raises(InternalError, match="bind_credentials was not called"):
-        await registry.get_all()
-
-
-@pytest.mark.asyncio
 async def test_get_not_initialized_raises():
     """get() raises InternalError when not initialized."""
-    registry = EnterpriseSessionRegistry()
+    registry = _make_registry()
 
     with pytest.raises(InternalError):
         await registry.get("enterprise:system:pq1")
@@ -790,7 +645,7 @@ async def test_get_not_found_raises():
 @pytest.mark.asyncio
 async def test_get_all_not_initialized_raises():
     """get_all() raises InternalError when not initialized."""
-    registry = EnterpriseSessionRegistry()
+    registry = _make_registry()
 
     with pytest.raises(InternalError):
         await registry.get_all()
@@ -848,7 +703,7 @@ async def test_get_all_includes_errors():
 @pytest.mark.asyncio
 async def test_check_and_sync_not_initialized_raises():
     """_check_and_sync raises InternalError when registry not initialized."""
-    registry = EnterpriseSessionRegistry()
+    registry = _make_registry()
 
     with pytest.raises(InternalError):
         await registry._check_and_sync()
@@ -899,7 +754,7 @@ def test_enterprise_registry_is_mutable_session_registry():
     """EnterpriseSessionRegistry is a MutableSessionRegistry (mutation API inherited)."""
     from deephaven_mcp.resource_manager._registry import MutableSessionRegistry
 
-    assert isinstance(EnterpriseSessionRegistry(), MutableSessionRegistry)
+    assert isinstance(_make_registry(), MutableSessionRegistry)
 
 
 # ---------------------------------------------------------------------------
@@ -1024,17 +879,24 @@ def test_apply_result_success_calls_apply_factory_success():
     assert managers == []
 
 
-def test_apply_result_error_calls_apply_factory_error():
-    """_apply_result delegates to _apply_factory_error for _FactoryQueryError."""
+def test_apply_result_error_records_error_and_returns_empty():
+    """_apply_result handles _FactoryQueryError inline: record error,
+    replace controller client, do not touch _items, return empty."""
     registry = _make_initialized_registry()
-    result = _FactoryQueryError(new_client=None, error="conn refused")
+    key = f"enterprise:{_TEST_SYSTEM_NAME}:pq1"
+    mgr = _make_mock_manager(key)
+    registry._items[key] = mgr
+
+    new_client = MagicMock()
+    result = _FactoryQueryError(new_client=new_client, error="conn refused")
     factory_manager = registry._factory_manager
 
-    with patch.object(registry, "_apply_factory_error", return_value=[]) as mock_error:
-        managers = registry._apply_result(result, factory_manager)
+    managers = registry._apply_result(result, factory_manager)
 
-    mock_error.assert_called_once_with(result)
     assert managers == []
+    assert registry._items[key] is mgr
+    assert registry._controller_client is new_client
+    assert registry._error == "conn refused"
 
 
 def test_apply_result_unexpected_type_raises():
@@ -1195,44 +1057,51 @@ def test_apply_factory_success_noop_when_unchanged():
 
 
 # ---------------------------------------------------------------------------
-# 19. _apply_factory_error
+# 19. _apply_result error-path behavior (inlined; no separate _apply_factory_error)
 # ---------------------------------------------------------------------------
 
 
-def test_apply_factory_error_records_error_and_removes_sessions():
-    """_apply_factory_error records error, clears enterprise sessions, sets controller_client=None."""
+def test_apply_result_error_records_error_and_preserves_items():
+    """Error path: record the error, clear the controller client, leave
+    ``_items`` untouched.
+
+    A failed controller query carries no information about which
+    sessions are still alive; wiping would be too disruptive. The next
+    successful refresh reconciles.
+    """
     registry = _make_initialized_registry()
-    mgr = _make_mock_manager(f"enterprise:{_TEST_SYSTEM_NAME}:pq1")
-    registry._items[f"enterprise:{_TEST_SYSTEM_NAME}:pq1"] = mgr
+    key = f"enterprise:{_TEST_SYSTEM_NAME}:pq1"
+    mgr = _make_mock_manager(key)
+    registry._items[key] = mgr
 
     result = _FactoryQueryError(new_client=None, error="ValueError: connection refused")
-    managers_to_close = registry._apply_factory_error(result)
+    managers_to_close = registry._apply_result(result, registry._factory_manager)
 
     assert registry._error is not None
     assert "connection refused" in registry._error
-    assert f"enterprise:{_TEST_SYSTEM_NAME}:pq1" not in registry._items
-    assert len(managers_to_close) == 1
+    assert registry._items[key] is mgr
+    assert managers_to_close == []
     assert registry._controller_client is None
 
 
-def test_apply_factory_error_with_new_client_updates_controller_client():
-    """_apply_factory_error updates _controller_client when new_client is provided."""
+def test_apply_result_error_with_new_client_updates_controller_client():
+    """Error path updates ``_controller_client`` when ``new_client`` is provided."""
     registry = _make_initialized_registry()
     new_client = MagicMock()
     result = _FactoryQueryError(new_client=new_client, error="IOError: map failed")
 
-    registry._apply_factory_error(result)
+    registry._apply_result(result, registry._factory_manager)
 
     assert registry._controller_client is new_client
 
 
-def test_apply_factory_error_no_new_client_sets_controller_client_none():
-    """_apply_factory_error sets _controller_client=None when new_client is None."""
+def test_apply_result_error_no_new_client_sets_controller_client_none():
+    """Error path sets ``_controller_client=None`` when ``new_client`` is ``None``."""
     registry = _make_initialized_registry()
     registry._controller_client = MagicMock()
     result = _FactoryQueryError(new_client=None, error="ConnError: timeout")
 
-    registry._apply_factory_error(result)
+    registry._apply_result(result, registry._factory_manager)
 
     assert registry._controller_client is None
 
@@ -1417,3 +1286,140 @@ def test_build_not_found_message_malformed_name_with_error_no_raise():
     msg = registry._build_not_found_message("badname")
     assert "badname" in msg
     assert "some error" in msg
+
+
+# ---------------------------------------------------------------------------
+# Reconciliation behavior: registry mirrors the controller
+# ---------------------------------------------------------------------------
+
+
+def test_apply_factory_success_removes_keys_not_reported_by_controller():
+    """A controller refresh removes any session the controller no longer reports.
+
+    The registry is a cache of the controller's view. Anything not in
+    the controller's report is removed — this includes sessions that
+    were originally added via ``add_session`` (cache-warming). If the
+    controller has stopped reporting it, the worker is gone and the
+    manager should not linger.
+    """
+    registry = _make_initialized_registry()
+    stale_controller_key = f"enterprise:{_TEST_SYSTEM_NAME}:stale-pq"
+    stale_dynamic_key = f"enterprise:{_TEST_SYSTEM_NAME}:dead-dynamic"
+    stale_controller_mgr = _make_mock_manager(stale_controller_key)
+    stale_dynamic_mgr = _make_mock_manager(stale_dynamic_key)
+    registry._items[stale_controller_key] = stale_controller_mgr
+    registry._items[stale_dynamic_key] = stale_dynamic_mgr
+    # The dead dynamic session was added via the create tool and the
+    # worker has since died (controller no longer reports it).
+    registry._added_session_ids.add(stale_dynamic_key)
+
+    mock_factory = registry._factory_manager
+    result = _FactoryQueryResult(new_client=MagicMock(), query_names=set())
+
+    managers_to_close = registry._apply_factory_success(result, mock_factory)
+
+    # Both removed; both managers returned for the caller to close.
+    assert stale_controller_key not in registry._items
+    assert stale_dynamic_key not in registry._items
+    # ``_added_session_ids`` is synchronously kept in lockstep with
+    # ``_items`` removals (handled by ``_remove_sessions_by_keys``), so
+    # the cap drops correctly when the dead dynamic session goes away.
+    assert stale_dynamic_key not in registry._added_session_ids
+    assert set(managers_to_close) == {stale_controller_mgr, stale_dynamic_mgr}
+
+
+def test_apply_factory_success_adds_keys_reported_by_controller():
+    """A controller refresh adds any new session the controller reports."""
+    registry = _make_initialized_registry()
+    new_pq_name = "new-pq"
+    new_key = f"enterprise:{_TEST_SYSTEM_NAME}:{new_pq_name}"
+
+    mock_factory = registry._factory_manager
+    result = _FactoryQueryResult(new_client=MagicMock(), query_names={new_pq_name})
+
+    managers_to_close = registry._apply_factory_success(result, mock_factory)
+
+    assert new_key in registry._items
+    assert managers_to_close == []
+
+
+def test_apply_factory_error_does_not_modify_items():
+    """A failed controller query preserves the last known state.
+
+    Wiping the catalog on every transient controller blip would be too
+    disruptive; with no new information from the controller, the
+    safest move is to keep what we had. The next successful refresh
+    will reconcile.
+    """
+    registry = _make_initialized_registry()
+    controller_key = f"enterprise:{_TEST_SYSTEM_NAME}:controller-pq"
+    dynamic_key = f"enterprise:{_TEST_SYSTEM_NAME}:dynamic-pq"
+    controller_mgr = _make_mock_manager(controller_key)
+    dynamic_mgr = _make_mock_manager(dynamic_key)
+    registry._items[controller_key] = controller_mgr
+    registry._items[dynamic_key] = dynamic_mgr
+    registry._added_session_ids.add(dynamic_key)
+
+    result = _FactoryQueryError(new_client=None, error="RuntimeError: outage")
+    managers_to_close = registry._apply_result(result, registry._factory_manager)
+
+    # Both entries untouched.
+    assert registry._items[controller_key] is controller_mgr
+    assert registry._items[dynamic_key] is dynamic_mgr
+    assert dynamic_key in registry._added_session_ids
+    assert managers_to_close == []
+    assert registry._error is not None
+    assert "outage" in registry._error
+
+
+@pytest.mark.asyncio
+async def test_sync_enterprise_sessions_dropping_known_session_removes_it():
+    """Full-stack: when the controller stops reporting a session it had reported,
+    the next refresh removes it from ``_items``.
+
+    Covers the worker-died case: session was alive (in both ``_items``
+    and the controller's report), then dies (controller drops it).
+    Next refresh sweeps it.
+    """
+    registry = _make_initialized_registry()
+    dead_key = f"enterprise:{_TEST_SYSTEM_NAME}:dead-pq"
+    dead_mgr = _make_mock_manager(dead_key)
+    registry._items[dead_key] = dead_mgr
+
+    with patch(
+        "deephaven_mcp.resource_manager._registry_enterprise._fetch_factory_pqs",
+        new=AsyncMock(
+            return_value=_FactoryQueryResult(new_client=MagicMock(), query_names=set())
+        ),
+    ):
+        await registry._sync_enterprise_sessions()
+
+    assert dead_key not in registry._items
+
+
+@pytest.mark.asyncio
+async def test_sync_enterprise_sessions_controller_error_preserves_all_state():
+    """Full-stack: a refresh tick where the factory query errors leaves
+    every session in place. The error is recorded for diagnostics.
+    """
+    registry = _make_initialized_registry()
+    controller_key = f"enterprise:{_TEST_SYSTEM_NAME}:controller-pq"
+    dynamic_key = f"enterprise:{_TEST_SYSTEM_NAME}:dynamic-pq"
+    controller_mgr = _make_mock_manager(controller_key)
+    dynamic_mgr = _make_mock_manager(dynamic_key)
+    registry._items[controller_key] = controller_mgr
+    await registry.add_session(dynamic_mgr)
+
+    with patch(
+        "deephaven_mcp.resource_manager._registry_enterprise._fetch_factory_pqs",
+        new=AsyncMock(
+            return_value=_FactoryQueryError(
+                new_client=None, error="RuntimeError: outage"
+            )
+        ),
+    ):
+        await registry._sync_enterprise_sessions()
+
+    assert registry._items[controller_key] is controller_mgr
+    assert registry._items[dynamic_key] is dynamic_mgr
+    assert registry._error is not None

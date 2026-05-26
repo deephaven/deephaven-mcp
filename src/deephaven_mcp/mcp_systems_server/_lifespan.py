@@ -1,17 +1,31 @@
-"""MCP Server Lifespan Factories.
+"""MCP systems-server lifespan factory.
 
-Provides lifespan context managers for the DHE and DHC FastMCP servers:
+The multiplexed systems server is built from an already-loaded
+:class:`~deephaven_mcp.mcp_systems_server.config.MultiSystemConfig`
+(produced by the entry-point in :mod:`deephaven_mcp.mcp_systems_server.server`)
+and constructs a single
+:class:`~deephaven_mcp.resource_manager.MultiSystemRegistry` over the
+community + enterprise systems it describes, plus one
+:class:`~deephaven_mcp.resource_manager.Evictor` *per child registry*
+so each system runs idle eviction with its own configured timers.
 
-- :func:`make_enterprise_lifespan`: Lifespan factory for the DHE MCP server.
-- :func:`make_community_lifespan`: Lifespan factory for the DHC MCP server.
-- :class:`LifespanContext`: ``TypedDict`` describing the context object
-  yielded by both lifespans.
+The lifespan deliberately does **not** parse the on-disk configuration
+tree itself — that is the entry-point's job, and threading the result
+in here avoids a redundant second parse + permission-audit pass.
 
-Both factories yield the same context keys
-(``config_manager``, ``session_registry_manager``, ``refresh_lock``,
-``instance_tracker``) so all shared tools work without modification in
-either server context.
+Public surface:
+
+- :class:`LifespanContext`: ``TypedDict`` describing the dictionary the
+  lifespan yields to FastMCP tools.
+- :func:`make_lifespan`: factory returning the FastMCP lifespan async
+  context manager. Single function — there is no community/enterprise
+  split.
+
+The previous ``refresh_lock`` field is gone because the ``mcp_reload``
+tool was removed: configuration changes require a server restart.
 """
+
+from __future__ import annotations
 
 import asyncio
 import logging
@@ -21,221 +35,281 @@ from typing import TypedDict
 
 from mcp.server.fastmcp import FastMCP
 
-from deephaven_mcp.config import (
-    CommunityServerConfigManager,
-    ConfigManager,
-    EnterpriseServerConfigManager,
-)
-from deephaven_mcp.mcp_systems_server._session_registry_manager import (
-    SessionRegistryManager,
-)
+from deephaven_mcp._exceptions import InternalError
+from deephaven_mcp.mcp_systems_server.config import MultiSystemConfig
 from deephaven_mcp.resource_manager import (
-    BaseRegistry,
+    Evictor,
     InstanceTracker,
+    MultiSystemRegistry,
     cleanup_orphaned_resources,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
-__all__ = [
-    "LifespanContext",
-    "make_enterprise_lifespan",
-    "make_community_lifespan",
-]
+__all__ = ["LifespanContext", "make_lifespan"]
 
 
-class LifespanContext[R: BaseRegistry](TypedDict):
-    """Typed dictionary yielded by the MCP server lifespan context managers.
-
-    Parameterized by the registry type ``R`` so that consumers know whether
-    ``session_registry_manager`` produces
-    :class:`~deephaven_mcp.resource_manager.CommunitySessionRegistry` or
-    :class:`~deephaven_mcp.resource_manager.EnterpriseSessionRegistry`
-    instances per MCP session.
+class LifespanContext(TypedDict):
+    """Typed dictionary yielded by :func:`make_lifespan`.
 
     Attributes:
-        config_manager (ConfigManager): The server-wide configuration manager
-            (``CommunityServerConfigManager`` for DHC, ``EnterpriseServerConfigManager``
-            for DHE).
-        session_registry_manager (SessionRegistryManager[R]): Manages per-MCP-session
-            registries of type ``R``.
-        refresh_lock (asyncio.Lock): Lock acquired by the ``mcp_reload`` tools
-            to serialize concurrent config-reload requests against each other.
-            Other tools do not acquire this lock and run concurrently with
-            reloads.
-        instance_tracker (InstanceTracker): Tracks this server instance for
-            orphan-resource cleanup at startup and shutdown.
+        multi_config (MultiSystemConfig): The validated multi-system
+            configuration loaded at startup. Tools that need to
+            enumerate available systems read it from here.
+        registry (MultiSystemRegistry): Composite registry that routes
+            session-id reads to one community child registry plus one
+            enterprise child registry per configured enterprise system.
+        evictors (list[Evictor]): One :class:`Evictor` per child
+            registry, each parameterized by that child's own idle
+            timeout and sweep interval. The list is in startup order:
+            community first (when present), then enterprise systems in
+            declaration order.
+        instance_tracker (InstanceTracker): Per-process tracker used by
+            the orphan-resource cleanup helper at startup and shutdown.
     """
 
-    config_manager: ConfigManager
-    session_registry_manager: SessionRegistryManager[R]
-    refresh_lock: asyncio.Lock
+    multi_config: MultiSystemConfig
+    registry: MultiSystemRegistry
+    evictors: list[Evictor]
     instance_tracker: InstanceTracker
 
 
-def _make_lifespan[R: BaseRegistry](
-    config_manager_class: type[ConfigManager],
-    session_registry_manager: SessionRegistryManager[R],
-    label: str,
-    config_path: str | None,
-) -> Callable[
-    [FastMCP[LifespanContext[R]]], AbstractAsyncContextManager[LifespanContext[R]]
-]:
-    """Create a lifespan context manager shared by community and enterprise servers.
+def make_lifespan(
+    multi_config: MultiSystemConfig,
+) -> Callable[[FastMCP[LifespanContext]], AbstractAsyncContextManager[LifespanContext]]:
+    """Build the FastMCP lifespan context manager for the systems server.
 
-    Lifecycle of the returned context manager:
+    Lifecycle:
 
     1. **Startup** (before ``yield``):
 
-       a. Create an :class:`InstanceTracker` and register this server instance.
-       b. Run :func:`cleanup_orphaned_resources` to reclaim resources left
-          behind by previously crashed instances.
-       c. Instantiate ``config_manager_class(config_path=config_path)`` and
-          eagerly load the configuration (so config errors surface during
-          startup rather than on first tool call).
-       d. Start ``session_registry_manager`` (launches its TTL sweeper).
-       e. Create a fresh ``refresh_lock`` for the ``mcp_reload`` tools.
-       f. Yield a :class:`LifespanContext` containing the four objects
-          above.
+       a. Register an :class:`InstanceTracker` and reclaim resources
+          left behind by previously crashed instances via
+          :func:`cleanup_orphaned_resources`.
+       b. Build a :class:`MultiSystemRegistry` from the supplied
+          ``multi_config`` and call :meth:`MultiSystemRegistry.initialize`,
+          which fans out to every child registry concurrently.
+       c. Build one :class:`Evictor` per child registry, parameterized
+          by the ``timeouts.eviction`` block on the owning section's
+          settings (community or enterprise). Enterprise evictors
+          share one :class:`EvictionTimeouts` across every system.
+          Callers that want different timers for tests or short-lived
+          tooling construct a ``MultiSystemConfig`` whose
+          ``settings.timeouts.eviction`` carries the values they want;
+          there is no parallel scalar override path.
+       d. Yield a :class:`LifespanContext` whose ``evictors`` field is
+          a list of every started evictor.
 
-    2. **Shutdown** (in ``finally``, runs on both clean shutdown and
+    2. **Shutdown** (in ``finally``, runs on clean shutdown and on
        startup failure):
 
-       a. ``await session_registry_manager.stop()``; errors are logged
-          and swallowed so that step (b) still runs.
-       b. ``await instance_tracker.unregister()`` if the tracker was
-          successfully created in step 1a; errors are logged and
-          swallowed.
+       a. Stop every evictor concurrently via :func:`asyncio.gather`
+          with ``return_exceptions=True`` (best effort: one failure is
+          logged but does not block the rest). Each :class:`Evictor`
+          owns its own lock and task, so concurrent ``stop()`` calls
+          do not race.
+       b. Close the registry, which closes every child registry
+          concurrently.
+       c. Unregister the instance tracker.
 
     Args:
-        config_manager_class (type[ConfigManager]): The config manager class
-            to instantiate during startup step 1c.
-        session_registry_manager (SessionRegistryManager[R]): The per-session
-            registry manager to start (1d) and stop (2a) with the server
-            lifespan.
-        label (str): Server label used in log messages (``"community"`` or
-            ``"enterprise"``).
-        config_path (str | None): Explicit path to the config file, or
-            ``None`` to fall back to the ``DH_MCP_CONFIG_FILE`` environment
-            variable (resolution is performed by ``config_manager_class``).
+        multi_config (MultiSystemConfig): Pre-validated multi-system
+            configuration (already produced by
+            :class:`~deephaven_mcp.mcp_systems_server.config.MultiSystemConfigManager`
+            in the server entry-point). The lifespan does **not**
+            re-parse the on-disk tree, and there are no parallel
+            scalar override kwargs — every duration knob the lifespan
+            consumes lives on this object.
 
     Returns:
-        Callable[[FastMCP[LifespanContext[R]]], AbstractAsyncContextManager[LifespanContext[R]]]:
+        Callable[[FastMCP[LifespanContext]], AbstractAsyncContextManager[LifespanContext]]:
         An async context manager suitable for passing to
         ``FastMCP(..., lifespan=...)``.
     """
 
     @asynccontextmanager
     async def _lifespan(
-        server: FastMCP[LifespanContext[R]],
-    ) -> AsyncIterator[LifespanContext[R]]:
-        _LOGGER.info(
-            f"[{label}_lifespan] Starting {label.upper()} MCP server '{server.name}'"
-        )
-        instance_tracker = None
+        server: FastMCP[LifespanContext],
+    ) -> AsyncIterator[LifespanContext]:
+        _LOGGER.info(f"[systems_lifespan] Starting MCP systems server '{server.name}'")
+        instance_tracker: InstanceTracker | None = None
+        registry: MultiSystemRegistry | None = None
+        evictors: list[Evictor] = []
         try:
             instance_tracker = await InstanceTracker.create_and_register()
             _LOGGER.info(
-                f"[{label}_lifespan] Server instance: {instance_tracker.instance_id}"
+                f"[systems_lifespan] Server instance: {instance_tracker.instance_id}"
             )
             await cleanup_orphaned_resources()
 
-            config_manager = config_manager_class(config_path=config_path)
-            _LOGGER.info(f"[{label}_lifespan] Loading {label} configuration...")
-            await config_manager.get_config()
             _LOGGER.info(
-                f"[{label}_lifespan] {label.capitalize()} configuration loaded."
+                "[systems_lifespan] Using pre-loaded configuration; "
+                f"systems={multi_config.list_systems()}"
             )
 
-            await session_registry_manager.start()
+            # ``MultiSystemRegistry`` takes its per-section ingredients
+            # directly so it has no dependency on ``MultiSystemConfig``;
+            # there is no process-global timeout state. ``pq_tools`` is
+            # likewise read from the lifespan context by PQ tool
+            # functions via
+            # :func:`deephaven_mcp.mcp_systems_server._tools.shared.get_enterprise_settings`.
+            community = multi_config.community
+            enterprise = multi_config.enterprise
+            registry = MultiSystemRegistry(
+                community_sessions=community.sessions if community else None,
+                community_client_timeouts=(
+                    community.settings.timeouts.client if community else None
+                ),
+                enterprise_systems=enterprise.systems if enterprise else None,
+                enterprise_client_timeouts=(
+                    enterprise.settings.timeouts.client if enterprise else None
+                ),
+            )
+            await registry.initialize()
 
-            refresh_lock = asyncio.Lock()
+            evictors = await _build_and_start_per_child_evictors(
+                registry,
+                multi_config,
+            )
 
             _LOGGER.info(
-                f"[{label}_lifespan] {label.upper()} MCP server '{server.name}' ready."
+                f"[systems_lifespan] MCP systems server '{server.name}' ready."
             )
             yield LifespanContext(
-                config_manager=config_manager,
-                session_registry_manager=session_registry_manager,
-                refresh_lock=refresh_lock,
+                multi_config=multi_config,
+                registry=registry,
+                evictors=evictors,
                 instance_tracker=instance_tracker,
             )
         finally:
             _LOGGER.info(
-                f"[{label}_lifespan] Shutting down {label.upper()} MCP server '{server.name}'"
+                f"[systems_lifespan] Shutting down MCP systems server '{server.name}'"
             )
-            try:
-                await session_registry_manager.stop()
-            except Exception:
-                _LOGGER.exception(
-                    f"[{label}_lifespan] Error stopping session_registry_manager"
+            # Stop all evictors in parallel (best-effort). Each Evictor
+            # has independent state (its own ``_lock`` and ``_sweeper_task``),
+            # so concurrent ``stop()`` calls do not race with each other.
+            # We log any exceptions returned, but do not re-raise: shutdown
+            # must continue regardless.
+            if evictors:
+                stop_results = await asyncio.gather(
+                    *(ev.stop() for ev in evictors),
+                    return_exceptions=True,
                 )
+                for ev, result in zip(evictors, stop_results, strict=True):
+                    if isinstance(result, BaseException):
+                        _LOGGER.error(
+                            "[systems_lifespan] Error stopping evictor %r: %r",
+                            ev,
+                            result,
+                            exc_info=result,
+                        )
+            if registry is not None:
+                try:
+                    await registry.close()
+                except Exception:
+                    _LOGGER.exception("[systems_lifespan] Error closing registry")
             if instance_tracker is not None:
                 try:
                     await instance_tracker.unregister()
                 except Exception:
                     _LOGGER.exception(
-                        f"[{label}_lifespan] Error unregistering instance_tracker"
+                        "[systems_lifespan] Error unregistering instance_tracker"
                     )
             _LOGGER.info(
-                f"[{label}_lifespan] {label.upper()} MCP server '{server.name}' shut down."
+                f"[systems_lifespan] MCP systems server '{server.name}' shut down."
             )
 
     return _lifespan
 
 
-def make_enterprise_lifespan[R: BaseRegistry](
-    session_registry_manager: SessionRegistryManager[R],
-    config_path: str | None = None,
-) -> Callable[
-    [FastMCP[LifespanContext[R]]], AbstractAsyncContextManager[LifespanContext[R]]
-]:
-    """Create a FastMCP lifespan for the DHE MCP server.
+async def _build_and_start_per_child_evictors(
+    registry: MultiSystemRegistry,
+    multi_config: MultiSystemConfig,
+) -> list[Evictor]:
+    """Build and start one :class:`Evictor` per child registry.
 
-    The returned lifespan initializes an :class:`EnterpriseServerConfigManager` that reads
-    the DHE config file and starts the given :class:`SessionRegistryManager` for per-session
-    registry management.
-
-    Args:
-        session_registry_manager (SessionRegistryManager[R]): The per-session registry manager to start
-            and stop with the server lifespan.
-        config_path (str | None): Explicit path to the DHE config file.
-            If ``None``, the ``DH_MCP_CONFIG_FILE`` environment variable is used.
-
-    Returns:
-        Callable[[FastMCP[LifespanContext[R]]], AbstractAsyncContextManager[LifespanContext[R]]]: An async
-        context manager suitable for passing to ``FastMCP(..., lifespan=...)``.
-    """
-    return _make_lifespan(
-        EnterpriseServerConfigManager,
-        session_registry_manager,
-        "enterprise",
-        config_path,
-    )
-
-
-def make_community_lifespan[R: BaseRegistry](
-    session_registry_manager: SessionRegistryManager[R],
-    config_path: str | None = None,
-) -> Callable[
-    [FastMCP[LifespanContext[R]]], AbstractAsyncContextManager[LifespanContext[R]]
-]:
-    """Create a FastMCP lifespan for the DHC MCP server.
-
-    The returned lifespan initializes a :class:`CommunityServerConfigManager` that reads
-    the DHC config file and starts the given :class:`SessionRegistryManager` for per-session
-    registry management.
+    Startup is atomic: on a mid-loop failure, every already-started
+    evictor is stopped (best-effort) before the original exception is
+    re-raised. Callers therefore see either a fully-started list or no
+    surviving state to clean up.
 
     Args:
-        session_registry_manager (SessionRegistryManager[R]): The per-session registry manager to start
-            and stop with the server lifespan.
-        config_path (str | None): Explicit path to the DHC config file.
-            If ``None``, the ``DH_MCP_CONFIG_FILE`` environment variable is used.
+        registry (MultiSystemRegistry): The composite registry whose
+            child registries will each receive their own evictor.
+        multi_config (MultiSystemConfig): The validated configuration
+            tree the timers are read from.
 
     Returns:
-        Callable[[FastMCP[LifespanContext[R]]], AbstractAsyncContextManager[LifespanContext[R]]]: An async
-        context manager suitable for passing to ``FastMCP(..., lifespan=...)``.
+        list[Evictor]: All started evictors, in startup order
+            (community first when present, then enterprise systems in
+            declaration order). The lifespan stops them in reverse on
+            shutdown.
+
+    Raises:
+        Exception: Any exception raised by :meth:`Evictor.start` is
+            re-raised after partial cleanup. Other failures (e.g.
+            :class:`InternalError` from the enterprise consistency
+            check) follow the same path.
     """
-    return _make_lifespan(
-        CommunityServerConfigManager, session_registry_manager, "community", config_path
-    )
+    evictors: list[Evictor] = []
+    try:
+        if registry.community is not None and multi_config.community is not None:
+            timeouts = multi_config.community.settings.timeouts.eviction
+            ev = Evictor(registry.community, timeouts)
+            await ev.start()
+            evictors.append(ev)
+            _LOGGER.info(
+                f"[systems_lifespan:_build_and_start_per_child_evictors] "
+                f"Started evictor for community "
+                f"(idle={timeouts.session_idle_timeout_seconds}, "
+                f"sweep={timeouts.sweep_interval_seconds})"
+            )
+
+        enterprise_children = registry.enterprise_systems
+        enterprise_cfg = multi_config.enterprise
+        if enterprise_cfg is not None:
+            timeouts = enterprise_cfg.settings.timeouts.eviction
+            for name, child in enterprise_children.items():
+                if name not in enterprise_cfg.systems:
+                    raise InternalError(
+                        f"[systems_lifespan:_build_and_start_per_child_evictors] "
+                        f"Enterprise system {name!r} has a "
+                        f"child registry but no matching config entry"
+                    )
+                ev = Evictor(child, timeouts)
+                await ev.start()
+                evictors.append(ev)
+                _LOGGER.info(
+                    f"[systems_lifespan:_build_and_start_per_child_evictors] "
+                    f"Started evictor for enterprise system "
+                    f"{name!r} (idle={timeouts.session_idle_timeout_seconds}, "
+                    f"sweep={timeouts.sweep_interval_seconds})"
+                )
+        return evictors
+    except BaseException as exc:
+        # Atomic startup: stop every already-started evictor before
+        # re-raising so callers cannot observe partial state.
+        _LOGGER.error(
+            f"[systems_lifespan:_build_and_start_per_child_evictors] "
+            f"Partial-startup failure: {exc!r}; rolling back "
+            f"{len(evictors)} already-started evictor(s)",
+            exc_info=True,
+        )
+        rollback_failures = 0
+        for ev in reversed(evictors):
+            try:
+                await ev.stop()
+            except Exception as stop_exc:
+                rollback_failures += 1
+                _LOGGER.exception(
+                    f"[systems_lifespan:_build_and_start_per_child_evictors] "
+                    f"Error stopping evictor {ev!r} during "
+                    f"partial-startup cleanup: {stop_exc!r}"
+                )
+        _LOGGER.info(
+            f"[systems_lifespan:_build_and_start_per_child_evictors] "
+            f"Partial-startup rollback complete: "
+            f"{len(evictors) - rollback_failures}/{len(evictors)} evictors "
+            f"stopped cleanly; re-raising original failure"
+        )
+        raise

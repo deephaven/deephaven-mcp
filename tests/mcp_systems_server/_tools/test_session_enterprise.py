@@ -12,7 +12,6 @@ import pytest
 from conftest import (
     MockContext,
     create_mock_instance_tracker,
-    create_mock_session_registry_manager,
 )
 
 from deephaven_mcp import config
@@ -48,12 +47,16 @@ async def test_session_enterprise_create_auto_name_no_username_and_language_tran
     mock_registry.system_name = _TEST_SYSTEM_NAME
     mock_config_manager = MagicMock()
 
-    # Flat config format - no username to exercise the no-username branch
+    # Use private-key credentials (no username field) to exercise the
+    # "no-username branch" of _generate_session_name_if_none.
     flat_config = {
         "connection_json_url": "https://example.com/iris/connection.json",
-        "auth_type": "password",
-        # Intentionally omit 'username' to exercise the no-username branch
-        "password": "pass",
+        "auth": {
+            "credentials": {
+                "type": "private_key",
+                "key_text": "-----BEGIN KEY-----\nfake\n-----END KEY-----",
+            }
+        },
         "session_creation": {
             "max_concurrent_sessions": 5,
             "defaults": {
@@ -99,15 +102,14 @@ async def test_session_enterprise_create_auto_name_no_username_and_language_tran
         context = MockContext(
             {
                 "config_manager": mock_config_manager,
-                "session_registry_manager": create_mock_session_registry_manager(
-                    registry=mock_registry
-                ),
+                "registry": mock_registry,
             }
         )
 
         # Use a non-Python programming language to exercise configuration_transformer
         result = await session_enterprise_create(
             context,
+            _TEST_SYSTEM_NAME,
             None,
             programming_language="Groovy",
         )
@@ -150,15 +152,13 @@ async def test_session_enterprise_delete_removal_missing_in_registry():
     enterprise_config = {"system": {"session_creation": {"max_concurrent_sessions": 5}}}
 
     mock_registry.get = AsyncMock(return_value=mock_session_manager)
-    # Mock remove_session to return None (simulating session not found in registry)
-    mock_registry.remove_session = AsyncMock(return_value=None)
+    # Mock remove to return None (simulating session not found in registry)
+    mock_registry.remove = AsyncMock(return_value=None)
 
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
@@ -180,17 +180,15 @@ async def test_session_enterprise_delete_cleanup_created_sessions_empty():
 
     enterprise_config = {"system": {"session_creation": {"max_concurrent_sessions": 5}}}
 
-    # Mock remove_session to return the manager (simulating successful removal)
+    # Mock remove to return the manager (simulating successful removal)
     full_id = "enterprise:system:solo"
-    mock_registry.remove_session = AsyncMock(return_value=mock_session_manager)
+    mock_registry.remove = AsyncMock(return_value=mock_session_manager)
     mock_registry.get = AsyncMock(return_value=mock_session_manager)
 
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
@@ -218,16 +216,12 @@ async def test_session_enterprise_delete_registry_pop_raises_error():
 
     enterprise_config = {"system": {"session_creation": {"max_concurrent_sessions": 5}}}
     mock_registry.get = AsyncMock(return_value=mock_session_manager)
-    mock_registry.remove_session = AsyncMock(
-        side_effect=Exception("Simulated registry error")
-    )
+    mock_registry.remove = AsyncMock(side_effect=Exception("Simulated registry error"))
 
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
@@ -251,15 +245,13 @@ async def test_session_enterprise_delete_outer_exception_logger_info_raises():
 
     enterprise_config = {"system": {"session_creation": {"max_concurrent_sessions": 5}}}
     full_id = "enterprise:system:s4"
-    mock_registry.remove_session = AsyncMock(return_value=mock_session_manager)
+    mock_registry.remove = AsyncMock(return_value=mock_session_manager)
     mock_registry.get = AsyncMock(return_value=mock_session_manager)
 
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
@@ -312,45 +304,13 @@ async def test_enterprise_systems_status_success():
     # Create context
     context = MockContext(
         {
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
             "config_manager": mock_config_manager,
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
 
     # Mock the redact function to match the actual implementation
-    with patch(
-        "deephaven_mcp.config.enterprise.redact_enterprise_config"
-    ) as mock_redact:
-        mock_redact.side_effect = lambda config: config
-
-        # Call the function with default parameters
-        result = await enterprise_systems_status(context)
-
-    # Verify the result - new code always returns exactly one system with name="system"
-    assert result["success"] is True
-    assert len(result["systems"]) == 1
-
-    # Check system (always named "system", read from session_registry.system_name)
-    system = result["systems"][0]
-    assert system["name"] == "system"
-    assert system["liveness_status"] == "ONLINE"
-    assert system["liveness_detail"] == "System is healthy"
-    assert system["is_alive"] is True
-    assert system["config"]["url"] == "http://example.com"
-    assert system["config"]["api_key"] == "secret_key"
-
-    # COMPLETED with no errors should not include initialization info
-    assert "initialization" not in result
-
-    # Verify liveness_status was called with attempt_to_connect=False
-    mock_factory_manager.liveness_status.assert_called_once_with(ensure_item=False)
-
-
-@pytest.mark.asyncio
-async def test_enterprise_systems_status_with_attempt_to_connect():
     """Test enterprise systems status with attempt_to_connect=True."""
     # Mock factory_manager with liveness_status and is_alive methods
     mock_factory_manager = AsyncMock()
@@ -374,38 +334,34 @@ async def test_enterprise_systems_status_with_attempt_to_connect():
     # Create context
     context = MockContext(
         {
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
             "config_manager": mock_config_manager,
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
 
     # Mock the redact function
-    with patch(
-        "deephaven_mcp.config.enterprise.redact_enterprise_config",
-        return_value={},
-    ):
-        # Call the function with attempt_to_connect=True
-        result = await enterprise_systems_status(context, attempt_to_connect=True)
+    # Call the function with attempt_to_connect=True
+    result = await enterprise_systems_status(
+        context, _TEST_SYSTEM_NAME, attempt_to_connect=True
+    )
 
-        # Verify the result - always one system with name="system"
-        assert result["success"] is True
-        assert len(result["systems"]) == 1
+    # Verify the result - always one system with name="system"
+    assert result["success"] is True
+    assert len(result["systems"]) == 1
 
-        # Check system (always named "system")
-        system = result["systems"][0]
-        assert system["name"] == "system"
-        assert system["liveness_status"] == "ONLINE"
-        assert "liveness_detail" not in system  # No detail was provided
-        assert system["is_alive"] is True
+    # Check system (always named "system")
+    system = result["systems"][0]
+    assert system["name"] == "system"
+    assert system["liveness_status"] == "ONLINE"
+    assert "liveness_detail" not in system  # No detail was provided
+    assert system["is_alive"] is True
 
-        # COMPLETED with no errors should not include initialization info
-        assert "initialization" not in result
+    # COMPLETED with no errors should not include initialization info
+    assert "initialization" not in result
 
-        # Verify liveness_status was called with attempt_to_connect=True
-        mock_factory_manager.liveness_status.assert_called_once_with(ensure_item=True)
+    # Verify liveness_status was called with attempt_to_connect=True
+    mock_factory_manager.liveness_status.assert_called_once_with(ensure_item=True)
 
 
 @pytest.mark.asyncio
@@ -433,20 +389,14 @@ async def test_enterprise_systems_status_no_systems():
     # Create context
     context = MockContext(
         {
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
             "config_manager": mock_config_manager,
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
 
-    with patch(
-        "deephaven_mcp.config.enterprise.redact_enterprise_config",
-        return_value={},
-    ):
-        # Call the function
-        result = await enterprise_systems_status(context)
+    # Call the function
+    result = await enterprise_systems_status(context, _TEST_SYSTEM_NAME)
 
     # Verify the result - new code always returns exactly 1 system
     assert result["success"] is True
@@ -489,19 +439,13 @@ async def test_enterprise_systems_status_all_status_types():
 
         context = MockContext(
             {
-                "session_registry_manager": create_mock_session_registry_manager(
-                    registry=mock_session_registry
-                ),
+                "registry": mock_session_registry,
                 "config_manager": mock_config_manager,
                 "instance_tracker": create_mock_instance_tracker(),
             }
         )
 
-        with patch(
-            "deephaven_mcp.config.enterprise.redact_enterprise_config",
-            return_value={},
-        ):
-            result = await enterprise_systems_status(context)
+        result = await enterprise_systems_status(context, _TEST_SYSTEM_NAME)
 
         assert result["success"] is True
         assert len(result["systems"]) == 1
@@ -531,23 +475,27 @@ async def test_enterprise_systems_status_config_error():
         return_value=RegistrySnapshot.simple(items={})
     )
 
-    # Mock config manager that raises an exception
+    # The lifespan-loaded config is read directly; trigger the error
+    # path by making the system config's ``model_dump`` raise.
     mock_config_manager = AsyncMock()
-    mock_config_manager.get_config = AsyncMock(side_effect=Exception("Config error"))
 
     # Create context
     context = MockContext(
         {
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
             "config_manager": mock_config_manager,
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
+    # Replace the system config entry with a Mock whose ``model_dump``
+    # raises (``EnterpriseSystemConfig`` is frozen, so we cannot mutate
+    # the validated instance in place).
+    multi_config = context.request_context.lifespan_context["multi_config"]
+    boom = MagicMock()
+    boom.model_dump = MagicMock(side_effect=Exception("Config error"))
+    multi_config.enterprise.systems[_TEST_SYSTEM_NAME] = boom
 
-    # Call the function
-    result = await enterprise_systems_status(context)
+    result = await enterprise_systems_status(context, _TEST_SYSTEM_NAME)
 
     # Verify the result
     assert result["success"] is False
@@ -570,16 +518,14 @@ async def test_enterprise_systems_status_registry_error():
     # Create context
     context = MockContext(
         {
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
             "config_manager": mock_config_manager,
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
 
     # Call the function
-    result = await enterprise_systems_status(context)
+    result = await enterprise_systems_status(context, _TEST_SYSTEM_NAME)
 
     # Verify the result
     assert result["success"] is False
@@ -612,16 +558,14 @@ async def test_enterprise_systems_status_liveness_error():
     # Create context
     context = MockContext(
         {
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
             "config_manager": mock_config_manager,
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
 
     # Call the function
-    result = await enterprise_systems_status(context)
+    result = await enterprise_systems_status(context, _TEST_SYSTEM_NAME)
 
     # Verify the result
     assert result["success"] is False
@@ -653,20 +597,14 @@ async def test_enterprise_systems_status_no_enterprise_registry():
     # Create context
     context = MockContext(
         {
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
             "config_manager": mock_config_manager,
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
 
-    with patch(
-        "deephaven_mcp.config.enterprise.redact_enterprise_config",
-        return_value={},
-    ):
-        # Call the function
-        result = await enterprise_systems_status(context)
+    # Call the function
+    result = await enterprise_systems_status(context, _TEST_SYSTEM_NAME)
 
     # Verify the result - new code always returns exactly 1 system
     assert result["success"] is True
@@ -705,19 +643,13 @@ async def test_enterprise_systems_status_factory_snapshot_unexpected_phase():
 
     context = MockContext(
         {
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
             "config_manager": mock_config_manager,
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
 
-    with patch(
-        "deephaven_mcp.config.enterprise.redact_enterprise_config",
-        return_value={},
-    ):
-        result = await enterprise_systems_status(context)
+    result = await enterprise_systems_status(context, _TEST_SYSTEM_NAME)
 
     # LOADING phase is surfaced in initialization info, not as an error
     assert result["success"] is True
@@ -756,19 +688,13 @@ async def test_enterprise_systems_status_factory_snapshot_with_errors():
 
     context = MockContext(
         {
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
             "config_manager": mock_config_manager,
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
 
-    with patch(
-        "deephaven_mcp.config.enterprise.redact_enterprise_config",
-        return_value={},
-    ):
-        result = await enterprise_systems_status(context)
+    result = await enterprise_systems_status(context, _TEST_SYSTEM_NAME)
 
     # Errors from snapshot are surfaced in initialization info
     assert result["success"] is True
@@ -809,19 +735,13 @@ async def test_enterprise_systems_status_discovery_in_progress():
 
     context = MockContext(
         {
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
             "config_manager": mock_config_manager,
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
 
-    with patch(
-        "deephaven_mcp.config.enterprise.redact_enterprise_config",
-        return_value={},
-    ):
-        result = await enterprise_systems_status(context)
+    result = await enterprise_systems_status(context, _TEST_SYSTEM_NAME)
 
     assert result["success"] is True
     assert "initialization" in result
@@ -853,19 +773,13 @@ async def test_enterprise_systems_status_discovery_in_progress_with_errors():
 
     context = MockContext(
         {
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
             "config_manager": mock_config_manager,
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
 
-    with patch(
-        "deephaven_mcp.config.enterprise.redact_enterprise_config",
-        return_value={},
-    ):
-        result = await enterprise_systems_status(context)
+    result = await enterprise_systems_status(context, _TEST_SYSTEM_NAME)
 
     assert result["success"] is True
     assert "initialization" in result
@@ -899,19 +813,13 @@ async def test_enterprise_systems_status_completed_with_errors():
 
     context = MockContext(
         {
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
             "config_manager": mock_config_manager,
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
 
-    with patch(
-        "deephaven_mcp.config.enterprise.redact_enterprise_config",
-        return_value={},
-    ):
-        result = await enterprise_systems_status(context)
+    result = await enterprise_systems_status(context, _TEST_SYSTEM_NAME)
 
     assert result["success"] is True
     assert "initialization" in result
@@ -941,19 +849,13 @@ async def test_enterprise_systems_status_completed_no_errors():
 
     context = MockContext(
         {
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
             "config_manager": mock_config_manager,
             "instance_tracker": create_mock_instance_tracker(),
         }
     )
 
-    with patch(
-        "deephaven_mcp.config.enterprise.redact_enterprise_config",
-        return_value={},
-    ):
-        result = await enterprise_systems_status(context)
+    result = await enterprise_systems_status(context, _TEST_SYSTEM_NAME)
 
     assert result["success"] is True
     assert "initialization" not in result
@@ -977,13 +879,11 @@ async def test_session_enterprise_create_no_session_creation_config():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
-    result = await session_enterprise_create(context, "test-worker")
+    result = await session_enterprise_create(context, _TEST_SYSTEM_NAME, "test-worker")
 
     assert result["isError"] is True
     assert result["success"] is False
@@ -1037,13 +937,11 @@ async def test_session_enterprise_create_success_with_defaults():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
-    result = await session_enterprise_create(context, "test-worker")
+    result = await session_enterprise_create(context, _TEST_SYSTEM_NAME, "test-worker")
 
     assert result["success"] is True
     assert result["session_id"] == "enterprise:system:test-worker"
@@ -1065,7 +963,6 @@ async def test_session_enterprise_create_success_with_defaults():
         extra_environment_vars=None,
         admin_groups=None,
         viewer_groups=None,
-        timeout_seconds=60,
         configuration_transformer=None,
         session_arguments=None,
     )
@@ -1119,14 +1016,13 @@ async def test_session_enterprise_create_success_with_overrides():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
     result = await session_enterprise_create(
         context,
+        _TEST_SYSTEM_NAME,
         "custom-worker",
         heap_size_gb=16.0,
         auto_delete_timeout=7200,
@@ -1150,7 +1046,6 @@ async def test_session_enterprise_create_success_with_overrides():
         extra_environment_vars=None,
         admin_groups=None,
         viewer_groups=None,
-        timeout_seconds=60,
         configuration_transformer=None,
         session_arguments=None,
     )
@@ -1202,13 +1097,11 @@ async def test_session_enterprise_create_auto_generate_name():
         context = MockContext(
             {
                 "config_manager": mock_config_manager,
-                "session_registry_manager": create_mock_session_registry_manager(
-                    registry=mock_registry
-                ),
+                "registry": mock_registry,
             }
         )
 
-        result = await session_enterprise_create(context)
+        result = await session_enterprise_create(context, _TEST_SYSTEM_NAME)
 
         assert result["success"] is True
         assert result["session_name"] == "mcp-test-20241126-1430"
@@ -1245,13 +1138,11 @@ async def test_session_enterprise_create_system_not_found():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
-    result = await session_enterprise_create(context, "worker")
+    result = await session_enterprise_create(context, _TEST_SYSTEM_NAME, "worker")
 
     assert result["success"] is False
     assert "connection failed" in result["error"]
@@ -1299,13 +1190,11 @@ async def test_session_enterprise_create_max_workers_exceeded():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
-    result = await session_enterprise_create(context, "worker3")
+    result = await session_enterprise_create(context, _TEST_SYSTEM_NAME, "worker3")
 
     assert result["success"] is False
     assert "Max concurrent sessions (2) reached" in result["error"]
@@ -1341,13 +1230,13 @@ async def test_session_enterprise_create_session_conflict():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
-    result = await session_enterprise_create(context, "existing-worker")
+    result = await session_enterprise_create(
+        context, _TEST_SYSTEM_NAME, "existing-worker"
+    )
 
     assert result["success"] is False
     assert (
@@ -1398,13 +1287,13 @@ async def test_session_enterprise_create_factory_creation_failure():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
-    result = await session_enterprise_create(context, "failing-worker")
+    result = await session_enterprise_create(
+        context, _TEST_SYSTEM_NAME, "failing-worker"
+    )
 
     assert result["success"] is False
     assert "Resource exhausted" in result["error"]
@@ -1412,19 +1301,27 @@ async def test_session_enterprise_create_factory_creation_failure():
 
 
 @pytest.mark.asyncio
-async def test_session_enterprise_create_disabled_by_zero_max_workers():
-    """Test session_enterprise_create when worker creation is disabled (max_concurrent_sessions = 0)."""
+async def test_session_enterprise_create_at_session_limit():
+    """Reaching ``max_concurrent_sessions`` rejects new creates.
+
+    The previous ``0``-as-disabled sentinel is gone; the cap must be
+    a positive integer, and ``None`` disables it. We exercise the
+    per-system cap by saturating the registry to its configured
+    limit and asserting the typed error path."""
     mock_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_registry.system_name = _TEST_SYSTEM_NAME
+    mock_registry.count_added_sessions = AsyncMock(return_value=1)
     mock_config_manager = MagicMock()
 
-    # Flat config format returned directly by get_config()
     flat_config = {
-        "connection_json_url": "https://disabled.example.com/iris/connection.json",
+        "connection_json_url": "https://limit.example.com/iris/connection.json",
         "auth_type": "password",
         "username": "user",
         "password": "pass",
-        "session_creation": {"max_concurrent_sessions": 0},  # Disabled
+        "session_creation": {
+            "max_concurrent_sessions": 1,
+            "defaults": {"heap_size_gb": 4},
+        },
     }
 
     # get_config() returns flat config directly
@@ -1433,16 +1330,14 @@ async def test_session_enterprise_create_disabled_by_zero_max_workers():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
-    result = await session_enterprise_create(context, "test-worker")
+    result = await session_enterprise_create(context, _TEST_SYSTEM_NAME, "test-worker")
 
     assert result["success"] is False
-    assert "Session creation is disabled" in result["error"]
+    assert "Max concurrent sessions" in result["error"]
     assert result["isError"] is True
 
 
@@ -1471,14 +1366,12 @@ async def test_session_enterprise_delete_success():
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
 
     mock_registry.get = AsyncMock(return_value=mock_session_manager)
-    mock_registry.remove_session = AsyncMock(return_value=mock_session_manager)
+    mock_registry.remove = AsyncMock(return_value=mock_session_manager)
 
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
@@ -1491,10 +1384,8 @@ async def test_session_enterprise_delete_success():
 
     # Verify session was closed and removed
     mock_session_manager.close.assert_called_once()
-    # Verify remove_session was called
-    mock_registry.remove_session.assert_called_once_with(
-        "enterprise:system:test-worker"
-    )
+    # Verify remove was called
+    mock_registry.remove.assert_called_once_with("enterprise:system:test-worker")
 
 
 @pytest.mark.asyncio
@@ -1512,9 +1403,7 @@ async def test_session_enterprise_delete_system_not_found():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
@@ -1552,9 +1441,7 @@ async def test_session_enterprise_delete_session_not_found():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
@@ -1595,9 +1482,7 @@ async def test_session_enterprise_delete_not_enterprise_session():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
@@ -1635,14 +1520,12 @@ async def test_session_enterprise_delete_close_failure_continues():
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
 
     mock_registry.get = AsyncMock(return_value=mock_session_manager)
-    mock_registry.remove_session = AsyncMock(return_value=mock_session_manager)
+    mock_registry.remove = AsyncMock(return_value=mock_session_manager)
 
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
@@ -1655,8 +1538,8 @@ async def test_session_enterprise_delete_close_failure_continues():
     assert result["session_id"] == "enterprise:system:failing-close-worker"
 
     # Verify session was still removed from registry
-    # Verify remove_session was called even after close failure
-    mock_registry.remove_session.assert_called_once_with(
+    # Verify remove was called even after close failure
+    mock_registry.remove.assert_called_once_with(
         "enterprise:system:failing-close-worker"
     )
 
@@ -1670,9 +1553,7 @@ async def test_session_enterprise_delete_invalid_session_id_format():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
@@ -1692,9 +1573,7 @@ async def test_session_enterprise_delete_wrong_system_type():
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
@@ -1706,56 +1585,81 @@ async def test_session_enterprise_delete_wrong_system_type():
 
 
 @pytest.mark.asyncio
-async def test_session_enterprise_delete_wrong_server():
-    """session_enterprise_delete returns clear error when session_id belongs to different server."""
+async def test_session_enterprise_delete_unknown_system():
+    """session_enterprise_delete returns a clear error when the session id
+    targets an enterprise system this server does not manage.
+
+    The multiplexed server can host any number of enterprise systems, so
+    routing by the ``<system_name>`` segment of the session id now
+    surfaces an :class:`InvalidSessionNameError` listing the configured
+    systems rather than the single-system mismatch message used by the
+    legacy DHE-only server.
+    """
     mock_registry = MagicMock(spec=EnterpriseSessionRegistry)
-    mock_registry.system_name = "prod"  # This server manages "prod"
+    mock_registry.system_name = "prod"  # The only configured system.
 
     context = MockContext(
         {
             "config_manager": MagicMock(),
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_registry
-            ),
+            "registry": mock_registry,
         }
     )
 
-    # session_id says "dev", but this server manages "prod"
+    # session_id targets "dev", which is not in enterprise_systems.
     result = await session_enterprise_delete(context, session_id="enterprise:dev:s1")
 
     assert result["success"] is False
     assert result["isError"] is True
-    assert "belongs to system 'dev'" in result["error"]
-    assert "this server manages 'prod'" in result["error"]
+    assert "Enterprise system 'dev' is not configured" in result["error"]
+    assert "'prod'" in result["error"]
+
+
+def test_env_vars_to_list_helper_round_trip():
+    """``_env_vars_to_list`` adapts the ``dict[str, str]`` schema form
+    to the controller's ``["NAME=value", ...]`` wire format and
+    propagates ``None`` through unchanged."""
+    from deephaven_mcp.mcp_systems_server._tools.session_enterprise import (
+        _env_vars_to_list,
+    )
+
+    assert _env_vars_to_list(None) is None
+    assert _env_vars_to_list({}) == []
+    out = _env_vars_to_list({"FOO": "1", "BAR": "two"})
+    assert sorted(out) == sorted(["FOO=1", "BAR=two"])
 
 
 def test_resolve_session_parameters():
     """Test _resolve_session_parameters helper function."""
-    defaults = {
-        "heap_size_gb": 4.0,
-        "auto_delete_timeout": 1800,
-        "server": "default-server",
-        "engine": "DeephavenCommunity",
-        "extra_jvm_args": ["-Xmx1g"],
-        "extra_environment_vars": ["ENV=test"],
-        "admin_groups": ["admins"],
-        "viewer_groups": ["viewers"],
-        "timeout_seconds": 120,
-        "session_arguments": {"key": "value"},
-        "programming_language": "Python",
-    }
+    from deephaven_mcp.sessions import EnterpriseSessionCreationDefaults
 
-    # Test with all parameters provided (should override defaults)
+    defaults = EnterpriseSessionCreationDefaults.model_validate(
+        {
+            "heap_size_gb": 4.0,
+            "auto_delete_timeout": 1800,
+            "server": "default-server",
+            "engine": "DeephavenCommunity",
+            "extra_jvm_args": ["-Xmx1g"],
+            "environment_vars": {"ENV": "test"},
+            "admin_groups": ["admins"],
+            "viewer_groups": ["viewers"],
+            "session_arguments": {"key": "value"},
+            "programming_language": "Python",
+        }
+    )
+
+    # Test with all parameters provided (should override defaults).
+    # ``engine`` is a Literal at the schema layer, but the resolver
+    # itself just forwards whatever the caller supplies; pin to a
+    # legal value to keep the helper-level test self-consistent.
     result = _resolve_session_parameters(
         heap_size_gb=8.0,
         auto_delete_timeout=3600,
         server="custom-server",
-        engine="CustomEngine",
+        engine="DeephavenEnterprise",
         extra_jvm_args=["-Xmx2g"],
-        extra_environment_vars=["ENV=prod"],
+        environment_vars={"ENV": "prod"},
         admin_groups=["custom-admins"],
         viewer_groups=["custom-viewers"],
-        timeout_seconds=240,
         session_arguments={"custom": "args"},
         programming_language="Groovy",
         defaults=defaults,
@@ -1764,12 +1668,11 @@ def test_resolve_session_parameters():
     assert result["heap_size_gb"] == 8.0
     assert result["auto_delete_timeout"] == 3600
     assert result["server"] == "custom-server"
-    assert result["engine"] == "CustomEngine"
+    assert result["engine"] == "DeephavenEnterprise"
     assert result["extra_jvm_args"] == ["-Xmx2g"]
     assert result["extra_environment_vars"] == ["ENV=prod"]
     assert result["admin_groups"] == ["custom-admins"]
     assert result["viewer_groups"] == ["custom-viewers"]
-    assert result["timeout_seconds"] == 240
     assert result["session_arguments"] == {"custom": "args"}
     assert result["programming_language"] == "Groovy"
 
@@ -1780,10 +1683,9 @@ def test_resolve_session_parameters():
         server=None,
         engine=None,
         extra_jvm_args=None,
-        extra_environment_vars=None,
+        environment_vars=None,
         admin_groups=None,
         viewer_groups=None,
-        timeout_seconds=None,
         session_arguments=None,
         programming_language=None,
         defaults=defaults,
@@ -1797,7 +1699,6 @@ def test_resolve_session_parameters():
     assert result["extra_environment_vars"] == ["ENV=test"]
     assert result["admin_groups"] == ["admins"]
     assert result["viewer_groups"] == ["viewers"]
-    assert result["timeout_seconds"] == 120
     assert result["session_arguments"] == {"key": "value"}
     assert result["programming_language"] == "Python"
 
@@ -1808,10 +1709,9 @@ def test_resolve_session_parameters():
         server="override-server",  # Override
         engine=None,  # Use default
         extra_jvm_args=None,
-        extra_environment_vars=None,
+        environment_vars=None,
         admin_groups=None,
         viewer_groups=None,
-        timeout_seconds=None,
         session_arguments=None,
         programming_language=None,
         defaults=defaults,
@@ -1822,33 +1722,36 @@ def test_resolve_session_parameters():
     assert result["server"] == "override-server"
     assert result["engine"] == "DeephavenCommunity"
 
-    # Test with empty defaults (should use built-in defaults)
+    # Test with minimal defaults; every field on
+    # ``EnterpriseSessionCreationDefaults`` carries a schema-level
+    # default now, including ``heap_size_gb`` (4.0).
+    minimal_defaults = EnterpriseSessionCreationDefaults.model_validate(
+        {"heap_size_gb": 1.0}
+    )
     result = _resolve_session_parameters(
         heap_size_gb=None,
         auto_delete_timeout=None,
         server=None,
         engine=None,
         extra_jvm_args=None,
-        extra_environment_vars=None,
+        environment_vars=None,
         admin_groups=None,
         viewer_groups=None,
-        timeout_seconds=None,
         session_arguments=None,
         programming_language=None,
-        defaults={},
+        defaults=minimal_defaults,
     )
 
-    assert result["heap_size_gb"] is None
+    assert result["heap_size_gb"] == 1.0
     assert result["auto_delete_timeout"] is None
     assert result["server"] is None
-    assert result["engine"] == "DeephavenCommunity"  # Built-in default
+    assert result["engine"] == "DeephavenCommunity"
     assert result["extra_jvm_args"] is None
     assert result["extra_environment_vars"] is None
     assert result["admin_groups"] is None
     assert result["viewer_groups"] is None
-    assert result["timeout_seconds"] == 60  # Built-in default
     assert result["session_arguments"] is None
-    assert result["programming_language"] == "Python"  # Built-in default
+    assert result["programming_language"] == "Python"  # Schema default
 
 
 @pytest.mark.asyncio
@@ -1886,14 +1789,13 @@ async def test_session_enterprise_create_success():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
     result = await session_enterprise_create(
         context,
+        _TEST_SYSTEM_NAME,
         session_name="test-session",
         heap_size_gb=8.0,
         programming_language="Groovy",
@@ -1936,10 +1838,21 @@ async def test_session_enterprise_create_auto_generated_name():
         side_effect=RegistryItemNotFoundError("Session not found")
     )
 
-    # Flat config format with username for auto-name generation
+    # Wire-format config with password credentials carrying ``alice``
+    # so the auto-name generator embeds the username in the session name.
     flat_config = {
-        "session_creation": {"max_concurrent_sessions": 5, "defaults": {}},
-        "username": "alice",
+        "connection_json_url": "https://auto.example.com/iris/connection.json",
+        "auth": {
+            "credentials": {
+                "type": "password",
+                "username": "alice",
+                "password": "shh",
+            }
+        },
+        "session_creation": {
+            "max_concurrent_sessions": 5,
+            "defaults": {"heap_size_gb": 4.0},
+        },
     }
 
     mock_config_manager.get_config = AsyncMock(return_value=flat_config)
@@ -1947,14 +1860,13 @@ async def test_session_enterprise_create_auto_generated_name():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
     result = await session_enterprise_create(
         context,
+        _TEST_SYSTEM_NAME,
         session_name=None,  # This should trigger auto-generation
     )
 
@@ -1980,9 +1892,7 @@ async def test_session_enterprise_create_max_sessions_reached():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -2000,7 +1910,9 @@ async def test_session_enterprise_create_max_sessions_reached():
 
     mock_session_registry.get = AsyncMock(side_effect=mock_get)
 
-    result = await session_enterprise_create(context, session_name="test-session")
+    result = await session_enterprise_create(
+        context, _TEST_SYSTEM_NAME, session_name="test-session"
+    )
 
     # Verify failure due to max sessions reached
     assert result["success"] is False
@@ -2009,38 +1921,54 @@ async def test_session_enterprise_create_max_sessions_reached():
 
 
 @pytest.mark.asyncio
-async def test_session_enterprise_create_disabled():
-    """Test enterprise session creation when session creation is disabled."""
+async def test_session_enterprise_create_unbounded_when_cap_null():
+    """``max_concurrent_sessions: null`` disables the cap (unbounded).
+
+    A high in-flight count must not block new creates when the cap
+    has been disabled at the per-system level."""
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
+    mock_session_registry.count_added_sessions = AsyncMock(return_value=10_000)
 
-    # Flat config format with session creation disabled
     flat_config = {
         "session_creation": {
-            "max_concurrent_sessions": 0,  # Disabled
-            "defaults": {},
+            "max_concurrent_sessions": None,
+            "defaults": {"heap_size_gb": 4},
         }
     }
+    mock_config_manager.get_config = AsyncMock(return_value=flat_config)
+
+    # ``factory_manager.get`` is reached only when the limit check
+    # passes; raise here to short-circuit further work and prove that
+    # the limit gate did not fire.
+    mock_factory_manager = AsyncMock()
+    mock_factory_manager.get = AsyncMock(
+        side_effect=RuntimeError("limit-gate bypassed; reached factory")
+    )
+    mock_session_registry.factory_manager = mock_factory_manager
+    mock_session_registry.get = AsyncMock(
+        side_effect=RegistryItemNotFoundError("Session not found")
+    )
 
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
-    # get_config() returns flat config directly
-    mock_config_manager.get_config = AsyncMock(return_value=flat_config)
+    result = await session_enterprise_create(
+        context, _TEST_SYSTEM_NAME, session_name="test-session"
+    )
 
-    result = await session_enterprise_create(context, session_name="test-session")
-
-    # Verify failure due to disabled session creation
     assert result["success"] is False
+    assert "limit-gate bypassed" in result["error"]
     assert result["isError"] is True
-    assert "Session creation is disabled" in result["error"]
+    # ``count_added_sessions`` must not be consulted when the cap is
+    # disabled; reaching it would be wasted work and would also drag
+    # the registry into the gate path needlessly.
+    mock_session_registry.count_added_sessions.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -2073,13 +2001,13 @@ async def test_session_enterprise_create_system_not_found_v2():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
-    result = await session_enterprise_create(context, session_name="test-session")
+    result = await session_enterprise_create(
+        context, _TEST_SYSTEM_NAME, session_name="test-session"
+    )
 
     # Verify failure due to factory connection failure
     assert result["success"] is False
@@ -2106,14 +2034,12 @@ async def test_session_enterprise_delete_success_v2():
     # Mock session registry
     mock_session_registry.get = AsyncMock(return_value=mock_session_manager)
     mock_session_manager.close = AsyncMock()
-    mock_session_registry.remove_session = AsyncMock(return_value=mock_session_manager)
+    mock_session_registry.remove = AsyncMock(return_value=mock_session_manager)
 
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -2132,11 +2058,11 @@ async def test_session_enterprise_delete_success_v2():
     assert result["session_name"] == "test-session"
 
     # Verify session was removed from registry
-    mock_session_registry.remove_session.assert_called_once_with(
+    mock_session_registry.remove.assert_called_once_with(
         "enterprise:system:test-session"
     )
 
-    # Session tracking cleanup is now handled automatically by remove_session()
+    # Session tracking cleanup is now handled automatically by remove()
 
 
 @pytest.mark.asyncio
@@ -2159,9 +2085,7 @@ async def test_session_enterprise_delete_not_found():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -2192,9 +2116,7 @@ async def test_session_enterprise_delete_system_not_found_v2():
     context = MockContext(
         {
             "config_manager": mock_config_manager,
-            "session_registry_manager": create_mock_session_registry_manager(
-                registry=mock_session_registry
-            ),
+            "registry": mock_session_registry,
         }
     )
 
@@ -2209,20 +2131,17 @@ async def test_session_enterprise_delete_system_not_found_v2():
 
 
 @pytest.mark.asyncio
-async def test_check_session_limit_disabled():
-    """Test _check_session_limit when sessions are disabled (max_sessions = 0)."""
+async def test_check_session_limit_disabled_when_cap_none():
+    """``max_sessions=None`` disables the cap; the helper returns
+    ``None`` and never queries the registry."""
     mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
+    mock_session_registry.count_added_sessions = AsyncMock(return_value=999)
 
-    result = await _check_session_limit(mock_session_registry, 0)
+    result = await _check_session_limit(mock_session_registry, None)
 
-    assert result is not None
-    assert result["success"] is False
-    assert (
-        result["error"]
-        == "Session creation is disabled for system 'system' (max_concurrent_sessions = 0)"
-    )
-    assert result["isError"] is True
+    assert result is None
+    mock_session_registry.count_added_sessions.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -2254,9 +2173,46 @@ async def test_check_session_limit_at_limit():
     mock_session_registry.count_added_sessions.assert_awaited_once()
 
 
+def _make_password_system(username: str = "testuser"):
+    """Build a real :class:`EnterpriseSystemConfig` with password creds."""
+    from deephaven_mcp.sessions import EnterpriseSystemConfig
+
+    return EnterpriseSystemConfig.model_validate(
+        {
+            "name": "system",
+            "connection_json_url": "https://example.com/iris/connection.json",
+            "auth": {
+                "credentials": {
+                    "type": "password",
+                    "username": username,
+                    "password": "shh",
+                }
+            },
+        }
+    )
+
+
+def _make_private_key_system():
+    """Build a real :class:`EnterpriseSystemConfig` with private-key creds."""
+    from deephaven_mcp.sessions import EnterpriseSystemConfig
+
+    return EnterpriseSystemConfig.model_validate(
+        {
+            "name": "system",
+            "connection_json_url": "https://example.com/iris/connection.json",
+            "auth": {
+                "credentials": {
+                    "type": "private_key",
+                    "key_text": "-----BEGIN KEY-----\nfake\n-----END KEY-----",
+                }
+            },
+        }
+    )
+
+
 def test_generate_session_name_if_none_with_name():
     """Test _generate_session_name_if_none when session_name is provided."""
-    system_config = {"username": "testuser"}
+    system_config = _make_password_system()
 
     result = _generate_session_name_if_none(system_config, "provided-name")
 
@@ -2265,7 +2221,7 @@ def test_generate_session_name_if_none_with_name():
 
 def test_generate_session_name_if_none_with_username():
     """Test _generate_session_name_if_none when no name provided but username exists."""
-    system_config = {"username": "testuser"}
+    system_config = _make_password_system(username="testuser")
 
     with patch(
         "deephaven_mcp.mcp_systems_server._tools.session_enterprise.datetime"
@@ -2277,8 +2233,8 @@ def test_generate_session_name_if_none_with_username():
 
 
 def test_generate_session_name_if_none_without_username():
-    """Test _generate_session_name_if_none when no name or username provided."""
-    system_config = {}  # No username
+    """Without a username-bearing credential type, the name omits the user."""
+    system_config = _make_private_key_system()  # No username field
 
     with patch(
         "deephaven_mcp.mcp_systems_server._tools.session_enterprise.datetime"
@@ -2320,12 +2276,16 @@ async def test_check_session_id_available_conflict():
 
 def test_resolve_session_parameters_with_defaults():
     """Test _resolve_session_parameters using configuration defaults."""
-    defaults = {
-        "heap_size_gb": 8.0,
-        "auto_delete_timeout": 3600,
-        "server": "default-server",
-        "programming_language": "Python",
-    }
+    from deephaven_mcp.sessions import EnterpriseSessionCreationDefaults
+
+    defaults = EnterpriseSessionCreationDefaults.model_validate(
+        {
+            "heap_size_gb": 8.0,
+            "auto_delete_timeout": 3600,
+            "server": "default-server",
+            "programming_language": "Python",
+        }
+    )
 
     result = _resolve_session_parameters(
         heap_size_gb=None,
@@ -2333,10 +2293,9 @@ def test_resolve_session_parameters_with_defaults():
         server=None,
         engine=None,
         extra_jvm_args=None,
-        extra_environment_vars=None,
+        environment_vars=None,
         admin_groups=None,
         viewer_groups=None,
-        timeout_seconds=None,
         session_arguments=None,
         programming_language=None,
         defaults=defaults,
@@ -2351,22 +2310,25 @@ def test_resolve_session_parameters_with_defaults():
 
 def test_resolve_session_parameters_with_overrides():
     """Test _resolve_session_parameters with parameter overrides."""
-    defaults = {
-        "heap_size_gb": 8.0,
-        "auto_delete_timeout": 3600,
-        "programming_language": "Python",
-    }
+    from deephaven_mcp.sessions import EnterpriseSessionCreationDefaults
+
+    defaults = EnterpriseSessionCreationDefaults.model_validate(
+        {
+            "heap_size_gb": 8.0,
+            "auto_delete_timeout": 3600,
+            "programming_language": "Python",
+        }
+    )
 
     result = _resolve_session_parameters(
         heap_size_gb=16.0,  # Override
         auto_delete_timeout=7200,  # Override
         server="custom-server",  # Override
-        engine="CustomEngine",  # Override
+        engine="DeephavenEnterprise",  # Override
         extra_jvm_args=["-Xms4g"],
-        extra_environment_vars=["VAR=value"],
+        environment_vars={"VAR": "value"},
         admin_groups=["admins"],
         viewer_groups=["viewers"],
-        timeout_seconds=300.0,
         session_arguments={"arg": "value"},
         programming_language="Groovy",  # Override
         defaults=defaults,
@@ -2375,22 +2337,30 @@ def test_resolve_session_parameters_with_overrides():
     assert result["heap_size_gb"] == 16.0
     assert result["auto_delete_timeout"] == 7200
     assert result["server"] == "custom-server"
-    assert result["engine"] == "CustomEngine"
+    assert result["engine"] == "DeephavenEnterprise"
     assert result["extra_jvm_args"] == ["-Xms4g"]
     assert result["extra_environment_vars"] == ["VAR=value"]
     assert result["admin_groups"] == ["admins"]
     assert result["viewer_groups"] == ["viewers"]
-    assert result["timeout_seconds"] == 300.0
     assert result["session_arguments"] == {"arg": "value"}
     assert result["programming_language"] == "Groovy"
 
 
 def test_resolve_session_parameters_zero_values():
-    """Test _resolve_session_parameters handles zero values correctly."""
-    defaults = {
-        "auto_delete_timeout": 3600,
-        "timeout_seconds": 120.0,
-    }
+    """Test _resolve_session_parameters handles ``auto_delete_timeout=0`` correctly.
+
+    Explicit ``auto_delete_timeout=0`` from the tool call is preserved by
+    the resolver (``is not None`` check) rather than being treated as
+    falsy and replaced by the default.
+    """
+    from deephaven_mcp.sessions import EnterpriseSessionCreationDefaults
+
+    defaults = EnterpriseSessionCreationDefaults.model_validate(
+        {
+            "heap_size_gb": 1.0,
+            "auto_delete_timeout": 3600,
+        }
+    )
 
     result = _resolve_session_parameters(
         heap_size_gb=None,
@@ -2398,17 +2368,15 @@ def test_resolve_session_parameters_zero_values():
         server=None,
         engine=None,
         extra_jvm_args=None,
-        extra_environment_vars=None,
+        environment_vars=None,
         admin_groups=None,
         viewer_groups=None,
-        timeout_seconds=0.0,  # Explicitly set to 0.0
         session_arguments=None,
         programming_language=None,
         defaults=defaults,
     )
 
     assert result["auto_delete_timeout"] == 0  # Should use explicit 0, not default
-    assert result["timeout_seconds"] == 0.0  # Should use explicit 0.0, not default
 
 
 def test_register_tools_registers_enterprise_tools():
@@ -2425,3 +2393,151 @@ def test_register_tools_registers_enterprise_tools():
     assert "enterprise_systems_status" in tools
     assert "session_enterprise_create" in tools
     assert "session_enterprise_delete" in tools
+
+
+# ---------------------------------------------------------------------------
+# enterprise_systems_status with system=None (aggregation)
+# ---------------------------------------------------------------------------
+
+
+def _build_aggregating_context(systems: dict[str, dict]) -> MockContext:
+    """Build a MockContext exposing multiple enterprise systems.
+
+    ``systems`` maps system name to a dict with keys: ``status``,
+    ``detail``, ``is_alive``, ``raw_config``, ``init_phase``,
+    ``init_errors``.
+    """
+    enterprise_systems: dict[str, MagicMock] = {}
+    enterprise_cfg_systems: dict[str, MagicMock] = {}
+    for sys_name, spec in systems.items():
+        factory_manager = AsyncMock()
+        factory_manager.liveness_status = AsyncMock(
+            return_value=(spec["status"], spec["detail"])
+        )
+        factory_manager.is_alive = AsyncMock(return_value=spec["is_alive"])
+
+        reg = MagicMock(spec=EnterpriseSessionRegistry)
+        reg.system_name = sys_name
+        reg.factory_manager = factory_manager
+        reg.get_all = AsyncMock(
+            return_value=RegistrySnapshot.with_initialization(
+                items={},
+                phase=spec.get("init_phase", InitializationPhase.COMPLETED),
+                errors=spec.get("init_errors", {}),
+            )
+        )
+        enterprise_systems[sys_name] = reg
+        sys_cfg = MagicMock()
+        sys_cfg.raw = spec["raw_config"]
+        enterprise_cfg_systems[sys_name] = sys_cfg
+
+    multi_registry = MagicMock()
+    multi_registry.community = None
+    multi_registry.enterprise_systems = enterprise_systems
+
+    multi_config = MagicMock()
+    multi_config.community = None
+    multi_config.enterprise = MagicMock()
+    multi_config.enterprise.systems = enterprise_cfg_systems
+    multi_config.server = MagicMock()
+
+    return MockContext(
+        {
+            "registry": multi_registry,
+            "multi_config": multi_config,
+            "instance_tracker": create_mock_instance_tracker(),
+        }
+    )
+
+
+@pytest.mark.asyncio
+async def test_enterprise_systems_status_aggregates_when_system_none():
+    """``system=None`` returns one entry per configured enterprise system."""
+    context = _build_aggregating_context(
+        {
+            "prod": {
+                "status": ResourceLivenessStatus.ONLINE,
+                "detail": "ok",
+                "is_alive": True,
+                "raw_config": {"url": "http://prod"},
+                "init_phase": InitializationPhase.COMPLETED,
+                "init_errors": {},
+            },
+            "staging": {
+                "status": ResourceLivenessStatus.OFFLINE,
+                "detail": "down",
+                "is_alive": False,
+                "raw_config": {"url": "http://staging"},
+                "init_phase": InitializationPhase.LOADING,
+                "init_errors": {"factory": "boom"},
+            },
+        }
+    )
+
+    result = await enterprise_systems_status(context)
+
+    assert result["success"] is True
+    assert {s["name"] for s in result["systems"]} == {"prod", "staging"}
+    # Aggregated calls namespace error keys with the originating system.
+    assert "initialization" in result
+    assert "staging:factory" in result["initialization"]["errors"]
+
+
+@pytest.mark.asyncio
+async def test_enterprise_systems_status_aggregation_no_enterprise_group():
+    """``system=None`` with no enterprise group returns an empty list."""
+    multi_config = MagicMock()
+    multi_config.enterprise = None
+    multi_registry = MagicMock()
+    multi_registry.community = None
+    multi_registry.enterprise_systems = {}
+    context = MockContext(
+        {
+            "registry": multi_registry,
+            "multi_config": multi_config,
+            "instance_tracker": create_mock_instance_tracker(),
+        }
+    )
+    result = await enterprise_systems_status(context)
+    assert result == {"success": True, "systems": []}
+
+
+@pytest.mark.asyncio
+async def test_enterprise_systems_status_aggregation_failed_outranks_loading():
+    """A single FAILED sibling must surface in the merged phase, not be hidden by LOADING.
+
+    Regression: the aggregation previously used a local ``phase_order`` table
+    that ranked FAILED between LOADING and COMPLETED, which caused
+    ``{FAILED, LOADING}`` to fold to LOADING and silently masked failures.
+    The merge now reuses ``_least_advanced_phase`` from
+    ``MultiSystemRegistry`` so FAILED always wins.
+    """
+    context = _build_aggregating_context(
+        {
+            "prod": {
+                "status": ResourceLivenessStatus.OFFLINE,
+                "detail": "down",
+                "is_alive": False,
+                "raw_config": {"url": "http://prod"},
+                "init_phase": InitializationPhase.FAILED,
+                "init_errors": {"factory": "fatal"},
+            },
+            "staging": {
+                "status": ResourceLivenessStatus.OFFLINE,
+                "detail": "starting",
+                "is_alive": False,
+                "raw_config": {"url": "http://staging"},
+                "init_phase": InitializationPhase.LOADING,
+                "init_errors": {},
+            },
+        }
+    )
+
+    result = await enterprise_systems_status(context)
+
+    assert result["success"] is True
+    assert "initialization" in result
+    # FAILED outranks LOADING so the merged status surfaces the failure
+    # message rather than the in-progress "actively running" message.
+    assert "failed critically" in result["initialization"]["status"]
+    assert "prod:factory" in result["initialization"]["errors"]

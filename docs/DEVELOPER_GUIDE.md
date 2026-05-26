@@ -31,18 +31,17 @@ This repository houses the Python-based [Model Context Protocol (MCP)](https://m
   - [Optional Dependencies](#optional-dependencies)
     - [Quick Verification Checklist](#quick-verification-checklist)
   - [Quick Start Guide](#quick-start-guide)
-    - [Community Server Quick Start](#community-server-quick-start)
+    - [Systems Server Quick Start](#systems-server-quick-start)
     - [Docs Server Quick Start](#docs-server-quick-start)
   - [Command Line Entry Points](#command-line-entry-points)
-  - [Transport Security (TLS)](#transport-security-tls)
-    - [Decision matrix](#decision-matrix)
-    - [CLI flags / env vars](#cli-flags--env-vars)
-    - [Production deployment patterns](#production-deployment-patterns)
+  - [HTTP Transport Security](#http-transport-security)
+    - [PSK gating](#psk-gating)
+    - [Loopback-only enforcement](#loopback-only-enforcement)
     - [Health-check endpoint](#health-check-endpoint)
   - [MCP Server Implementations](#mcp-server-implementations)
     - [Community Server](#community-server)
       - [Community Server Overview](#community-server-overview)
-        - [Core Configuration File (`deephaven_mcp.json`)](#core-configuration-file-deephaven_mcpjson)
+        - [Configuration Directory Tree](#configuration-directory-tree)
           - [Environment Variables](#environment-variables)
           - [File Structure Overview](#file-structure-overview)
       - [Systems Sessions Configuration](#systems-sessions-configuration)
@@ -51,17 +50,15 @@ This repository houses the Python-based [Model Context Protocol (MCP)](https://m
       - [Community Session Creation Configuration](#community-session-creation-configuration)
       - [Enterprise Server Configuration](#enterprise-server-configuration)
         - [Enterprise Auth Model](#enterprise-auth-model)
-      - [Running the Enterprise Server](#running-the-enterprise-server)
-        - [Enterprise Server CLI Arguments](#enterprise-server-cli-arguments)
-      - [Running the Community Server](#running-the-community-server)
-        - [Community Server CLI Arguments](#community-server-cli-arguments)
-      - [Using the Community Server](#using-the-community-server)
+      - [Running the Systems Server](#running-the-systems-server)
+        - [Systems Server CLI Arguments](#systems-server-cli-arguments)
+      - [Using the Systems Server](#using-the-systems-server)
       - [Session ID Format and Terminology](#session-id-format-and-terminology)
       - [Community Server Tools](#community-server-tools)
       - [Error Handling](#error-handling)
       - [MCP Tools](#mcp-tools)
     - [System Tools](#system-tools)
-      - [`mcp_reload`](#mcp_reload)
+      - [`list_systems`](#list_systems)
       - [`enterprise_systems_status`](#enterprise_systems_status)
       - [Enterprise Session Tools](#enterprise-session-tools)
         - [`session_enterprise_create`](#session_enterprise_create)
@@ -163,39 +160,35 @@ This repository houses the Python-based [Model Context Protocol (MCP)](https://m
 
 The [deephaven-mcp](https://github.com/deephaven/deephaven-mcp) project provides Python implementations of three [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) servers:
 
-1. **Deephaven MCP Community Server** (`dh-mcp-community-server`):
-   - Manages multiple Deephaven Community Core worker nodes via the MCP protocol
-   - Built with [FastMCP](https://github.com/modelcontextprotocol/python-sdk) (bundled as `mcp.server.fastmcp`)
-   - Exposes tools for reloading configuration, listing sessions, inspecting table schemas, and running scripts
-   - Maintains [PyDeephaven](https://github.com/deephaven/deephaven-core/tree/main/py) client sessions to each configured worker, with automatic caching, concurrent access safety, and lifecycle management
+1. **Deephaven MCP Systems Server** (`dh-mcp-systems-server`):  <!-- markdownlint-disable-line MD029 -->
+   - A single multiplexed binary that hosts every configured Community session **and** every Enterprise (Core+) system in one process.
+   - Built with [FastMCP](https://github.com/modelcontextprotocol/python-sdk) (bundled as `mcp.server.fastmcp`).
+   - Supports `--transport stdio` (default; AI clients launch it as a subprocess) and `--transport http` (streamable-HTTP, loopback-only, gated by a Pre-Shared Key).
+   - Exposes the union of community + enterprise tools: session/table/script tools, dynamic community session creation, persistent-query lifecycle management, catalog discovery, and a `list_systems` discovery tool.
+   - Maintains [PyDeephaven](https://github.com/deephaven/deephaven-core/tree/main/py) client sessions per configured worker (community side) and a `CorePlusSessionFactoryManager` per configured Enterprise system, with automatic caching, concurrent access safety, and lifecycle management.
 
-2. **Deephaven MCP Enterprise Server** (`dh-mcp-enterprise-server`):
-   - Manages exactly one Deephaven Enterprise (Core+) system per server instance; run multiple instances for multiple systems
-   - Per-request authentication via `X-Deephaven-*` HTTP headers — no credentials stored in the config file
-   - Exposes enterprise-specific tools: PQ lifecycle management, catalog discovery, enterprise session creation
-
-3. **Deephaven MCP Docs Server**:
+2. **Deephaven MCP Docs Server**:
    - Offers an agentic, LLM-powered API for Deephaven documentation Q&A and chat
    - Uses the [Inkeep](https://inkeep.com/) LLM API (an OpenAI-compatible endpoint) for its LLM capabilities
-   - HTTP-only (streamable-http), like the Community and Enterprise servers
+   - HTTP-only (streamable-http)
    - Designed for integration with orchestration frameworks
 
-All three servers are designed for integration with MCP-compatible tools like the [MCP Inspector](https://github.com/modelcontextprotocol/inspector) and [Claude Desktop](https://claude.ai).
+Both servers are designed for integration with MCP-compatible tools like the [MCP Inspector](https://github.com/modelcontextprotocol/inspector) and [Claude Desktop](https://claude.ai).
 
 ### Key Features
 
-**Community and Enterprise Server Features:**
+**Systems Server Features:**
 
 - **MCP Server:** Implements the MCP protocol for Deephaven Community Core and Enterprise systems
-- **HTTP-only:** Uses streamable-http transport exclusively (like the Docs Server)
-- **Configurable:** Loads worker configuration from a JSON file or environment variable
+- **Two transports:** `stdio` (default; AI-client subprocess) and `http` (streamable-HTTP; loopback-only, gated by a Pre-Shared Key)
+- **Configurable:** Loads worker configuration from a directory tree of JSON5 files.
 - **Async Lifecycle:** Uses FastMCP's async lifespan for robust startup and shutdown handling
 - **Lazy Loading:** Sessions are created on-demand to improve startup performance and resilience
 
 **Docs Server Features:**
 
 - **MCP-compatible server** for documentation Q&A and chat
-- **HTTP-only:** Uses streamable-http transport exclusively (like the Community and Enterprise servers)
+- **HTTP-only:** Uses streamable-http transport exclusively
 - **LLM-powered:** Uses the Inkeep LLM API (OpenAI-compatible) for conversational documentation assistance
 - **FastMCP backend:** Built on FastMCP framework, deployable locally or via Docker
 - **Single tool:** `docs_chat` for conversational documentation assistance
@@ -205,31 +198,30 @@ All three servers are designed for integration with MCP-compatible tools like th
 
 **Systems Server Architecture:**
 
-*Enterprise Server* — each instance manages exactly one DHE system:
+*One multiplexed `dh-mcp-systems-server` process composes one
+community child registry (when `community/sessions/` is non-empty)
+and one enterprise child registry per file under `enterprise/systems/`.
+Tools that operate on a specific enterprise system take a `system`
+argument; PQ tools encode the system in the PQ id (`<system>:<serial>`).*
 
 ```mermaid
 graph TD
-    A["MCP Clients (Claude Desktop, etc.)"] --"streamable-http (MCP)"--> B("dh-mcp-enterprise-server :8002")
-    C["MCP Clients"] --"streamable-http (MCP)"--> D("dh-mcp-enterprise-server :8004")
-    B --"Manages"--> E("Deephaven Enterprise System A")
-    D --"Manages"--> F("Deephaven Enterprise System B")
-    E --"Manages"--> G("Enterprise Worker A.1")
-    E --"Manages"--> H("Enterprise Worker A.N")
-    F --"Manages"--> I("Enterprise Worker B.1")
-    F --"Manages"--> J("Enterprise Worker B.N")
+    A["MCP Clients (Claude Desktop, Cursor, Copilot, ...)"] --"stdio or streamable-HTTP"--> S("dh-mcp-systems-server")
+    S --> R{{"MultiSystemRegistry"}}
+    R --> CR("Community session registry")
+    R --> E1("Enterprise system 'prod'")
+    R --> E2("Enterprise system 'staging'")
+    CR --> CW1("Community Core Worker 1")
+    CR --> CW2("Community Core Worker N")
+    E1 --> EP("PQ workers (prod)")
+    E2 --> ES("PQ workers (staging)")
 ```
 
-*Community Server* — one instance manages all configured DHC workers:
-
-```mermaid
-graph TD
-    A["MCP Clients (Claude Desktop, etc.)"] --"streamable-http (MCP)"--> B("dh-mcp-community-server :8003")
-    B --"Manages"--> C("Deephaven Community Core Worker 1")
-    B --"Manages"--> D("Deephaven Community Core Worker N")
-```
-
-**Typical Usage:**
-The Community Server manages Deephaven Community Core workers via streamable-http transport. A separate Enterprise Server instance manages each Deephaven Enterprise system. Each enterprise system can manage multiple enterprise workers, providing comprehensive session management, table operations, and script execution.
+**Typical Usage:** A single `dh-mcp-systems-server` process exposes
+every configured Community session and Enterprise system through one
+stdio or streamable-HTTP MCP transport. AI clients call `list_systems`
+to discover what's configured and route subsequent calls via the
+`system` / `session_id` / `pq_id` arguments.
 
 **Docs Server Architecture:**
 
@@ -243,7 +235,7 @@ graph TD
 
 **Transport:**
 
-The Docs Server uses **streamable-http exclusively** (like the Community and Enterprise servers). Clients without native streamable-http support can use [mcp-proxy](#mcp-proxy-with-docs-server) to bridge stdio to streamable-http.
+The Docs Server uses **streamable-http exclusively**. Clients without native streamable-http support can use [mcp-proxy](#mcp-proxy-with-docs-server) to bridge stdio to streamable-http. (The systems server, by contrast, supports both stdio and streamable-HTTP natively.)
 
 The MCP Docs Server processes natural language questions about Deephaven documentation using LLM capabilities via the Inkeep API.
 
@@ -261,16 +253,16 @@ Before using the Deephaven MCP servers, ensure you have the following prerequisi
 
 **Configuration File**
 
-- **Requirement**: A JSON configuration file (typically named `deephaven_mcp.json`) for the Systems Server
-- **Location**: Can be placed anywhere on your system, specified via the `DH_MCP_CONFIG_FILE` environment variable
-- **Details**: See [Core Configuration File](#core-configuration-file-deephaven_mcpjson) for complete schema and examples
+- **Requirement**: A directory tree of JSON5 configuration files (not a single file) for the Systems Server
+- **Location**: Default `~/.deephaven/ai/config/` (POSIX) or `%APPDATA%/Deephaven/ai/config/` (Windows). Override with the `DH_MCP_CONFIG_DIR` env var or the `--config-dir` CLI flag.
+- **Details**: See [Configuration Directory Tree](#configuration-directory-tree) for the layout summary, [`docs/CONFIGURATION.md`](CONFIGURATION.md) for the authoritative schema reference, and [`config-samples/ai/config/`](../config-samples/ai/config/) for a sample tree.
 
 ### Systems Server Prerequisites
 
 **For Static Community Sessions**
 
 - **Requirement**: Access to running Deephaven Community Core instance(s)
-- **Configuration**: Connection details (host, port, auth) specified in `deephaven_mcp.json`
+- **Configuration**: Connection details (host, port, auth) specified in per-session JSON files under `community/sessions/`
 - **More Info**: See [Systems Sessions Configuration](#systems-sessions-configuration)
 
 **For Dynamic Community Sessions (Optional)**
@@ -288,13 +280,13 @@ Choose **one** of the following launch methods for dynamically creating Deephave
   - **Installation**: `pip install deephaven-server` (in MCP venv or a custom venv)
   - **Verification**: Run `deephaven server --help` to confirm the command is available
   - **Best For**: Development environments, faster startup, no Docker dependency
-  - **Custom Venv**: Use `python_venv_path` config parameter to specify a different Python environment
+  - **Custom Venv**: Use the `python.venv_path` config setting to specify a different Python environment
 
 **For Enterprise Systems (Optional)**
 
 - **Requirement**: Deephaven Enterprise (Core+) system(s) with accessible connection.json URL
 - **Installation**: `pip install "deephaven-mcp[enterprise]"` (installs `deephaven-coreplus-client` from PyPI)
-- **Configuration**: Enterprise system details specified in `deephaven_mcp.json`
+- **Configuration**: Each Enterprise system gets one file at `enterprise/systems/<system_name>.json` under your configuration directory.
 - **More Info**: See [Enterprise Server Configuration](#enterprise-server-configuration) and [Development Workflow](#development-workflow)
 
 ### Docs Server Prerequisites (Only If Using Docs Server)
@@ -313,7 +305,7 @@ Choose **one** of the following launch methods for dynamically creating Deephave
 
 - **Required**: Git, Python 3.12+, virtual environment tool (`venv` or `uv`)
 - **Recommended**: [`uv`](https://github.com/astral-sh/uv) for faster package management
-- **Installation**: See [UV.md](UV.md) for project-specific uv setup and workflows, or the [uv installation guide](https://github.com/astral-sh/uv#installation) for general installation
+- **Installation**: See the [uv installation guide](https://github.com/astral-sh/uv#installation), or [`docs/UV.md`](UV.md) for a quick orientation if you are new to `uv`
 
 **Testing Requirements**
 
@@ -359,52 +351,60 @@ pip install -e ".[dev]"
 Before proceeding with the Quick Start Guide, verify your setup:
 
 - ✅ Python 3.12+ installed: `python --version`
-- ✅ Configuration file created (for Systems Server): `deephaven_mcp.json`
-- ✅ Environment variable set (for Systems Server): `export DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json`
+- ✅ Configuration directory populated (for Systems Server): see [`config-samples/ai/config/`](../config-samples/ai/config/)
+- ✅ Environment variable set when overriding the default location: `export DH_MCP_CONFIG_DIR=/path/to/your/config`
 - ✅ Inkeep API key set (for Docs Server): `export INKEEP_API_KEY=your-key`
 - ✅ Docker running (for docker launch method): `docker ps`
 - ✅ OR deephaven-server installed (for python launch method): `deephaven server --help`
 
 ## Quick Start Guide
 
-### Community Server Quick Start
+### Systems Server Quick Start
 
-1. **Set up worker configuration:**
-   Create a JSON configuration file for your Deephaven MCP:
+1. **Set up the configuration directory:**
+   `dh-mcp-systems-server` reads a directory tree of small JSON files
+   (default `~/.deephaven/ai/config/`). Create at least one community
+   session file:
 
    ```json5
+   // ~/.deephaven/ai/config/community/sessions/local_session.json
    {
-     "sessions": {
-       // Connect to a local Deephaven Community instance
-       "local_session": {
-         "host": "localhost",  // Deephaven server address
-         "port": 10000         // Default Deephaven port
-       }
-     }
+     "session_name": "local_session",  // must match the filename stem
+     "host": "localhost",              // Deephaven server address
+     "port": 10000                     // Default Deephaven port
    }
    ```
 
-   Save this as `deephaven_mcp.json` in your project directory.
+   See [`config-samples/ai/config/`](../config-samples/ai/config/) for a complete
+   sample tree (community sessions, enterprise systems, and
+   `server.json` for the HTTP-transport PSK).
 
-   > **Dynamic Community Session Creation (Optional):** To enable on-demand creation of Deephaven Community sessions, add session creation configuration. Choose your launch method:
+   > **Dynamic Community Session Creation (Optional):** To enable
+   > on-demand creation of Deephaven Community sessions, add a
+   > `session_creation` block to `~/.deephaven/ai/config/community/settings.json`.
+   > Choose your launch method:
    >
    > - **Docker (default):** Requires Docker installed and running. No additional Python packages needed.
    >
    >   ```json
-   >   "session_creation": {
-   >     "max_concurrent_sessions": 5,
-   >     "defaults": {"launch_method": "docker"}
+   >   {
+   >     "session_creation": {
+   >       "max_concurrent_sessions": 5,
+   >       "defaults": {"launch_method": "docker"}
+   >     }
    >   }
    >   ```
    >
    > - **Python:** Faster startup, no Docker needed. Install `deephaven-server` in your Python environment.
    >
-   >   ```json
-   >   "session_creation": {
-   >     "max_concurrent_sessions": 5,
-   >     "defaults": {
-   >       "launch_method": "python",
-   >       "python_venv_path": null  // Optional: null uses MCP venv, or specify "/path/to/custom/venv"
+   >   ```json5
+   >   {
+   >     "session_creation": {
+   >       "max_concurrent_sessions": 5,
+   >       "defaults": {
+   >         "launch_method": "python",
+   >         "python": { "venv_path": null }  // null uses MCP venv, or specify "/path/to/custom/venv"
+   >       }
    >     }
    >   }
    >   ```
@@ -416,18 +416,23 @@ Before proceeding with the Quick Start Guide, verify your setup:
    ```sh
    # For anonymous authentication (no MCP auth needed)
    uv run scripts/run_deephaven_test_server.py --table-group simple
-   
+
    # OR for PSK authentication (if your MCP config uses auth tokens)
    uv run scripts/run_deephaven_test_server.py --table-group simple --auth-token Deephaven123
    ```
 
    > This script is located at [`../scripts/run_deephaven_test_server.py`](../scripts/run_deephaven_test_server.py) and creates a local Deephaven server with test data. Use the `--auth-token` parameter if your MCP configuration requires PSK authentication.
 
-3. **Run the Community Server:**
+3. **Run the Systems Server (HTTP transport, for the Inspector):**
 
    ```sh
-   DH_MCP_CONFIG_FILE=deephaven_mcp.json uv run dh-mcp-community-server
+   # server.json must declare a PSK; here we read it from $DH_MCP_PSK
+   export DH_MCP_PSK='your-shared-secret'
+   uv run dh-mcp-systems-server --transport http --port 8000
    ```
+
+   For desktop AI clients, drop the `--transport http` flag and let
+   the client launch the server as a stdio subprocess instead.
 
 4. **Test with the MCP Inspector:**
 
@@ -435,7 +440,8 @@ Before proceeding with the Quick Start Guide, verify your setup:
    npx @modelcontextprotocol/inspector@latest
    ```
 
-   Connect to `http://127.0.0.1:8003/mcp` in the Inspector UI.
+   Connect to `http://127.0.0.1:8000/mcp` in the Inspector UI and add
+   the request header `X-Deephaven-PSK: your-shared-secret`.
 
 ### Docs Server Quick Start
 
@@ -465,125 +471,97 @@ This package registers the following console entry points for easy command-line 
 
 | Command | Description | Source |
 |---------|-------------|--------|
-| `dh-mcp-community-server` | Start the Community Server | `deephaven_mcp.mcp_systems_server.server:community` |
-| `dh-mcp-enterprise-server` | Start the Enterprise Server (one instance per DHE system) | `deephaven_mcp.mcp_systems_server.server:enterprise` |
+| `dh-mcp-systems-server` | Start the multiplexed Systems Server (hosts every configured Community session and Enterprise system in one process). Supports `--transport stdio` (default) or `--transport http`. | `deephaven_mcp.mcp_systems_server.server:main` |
 | `dh-mcp-docs-server` | Start the Docs Server | `deephaven_mcp.mcp_docs_server.main:main` |
 
 These commands are automatically available in your PATH after installing the package.
 
-## Transport Security (TLS)
+## HTTP Transport Security
 
-> **See also: [`docs/SECURITY.md`](SECURITY.md)** for the project's security
-> model and hardening checklist. The section below is the deep operator
-> reference: decision matrix, deployment commands, and CLI/env-var details.
+> **See also: [`docs/SECURITY.md`](SECURITY.md)** for the project's
+> security model and hardening checklist. The section below is the
+> deep operator reference for the multiplexed `dh-mcp-systems-server`'s
+> HTTP transport.
 
-The Community and Enterprise MCP servers authenticate every request via
-the `X-Deephaven-*` HTTP headers (`X-Deephaven-Password`,
-`X-Deephaven-Private-Key`, `X-Deephaven-PSK`). Those headers carry
-secrets in cleartext on the wire and **must** travel over an encrypted
-transport. The server enforces this with a defense-in-depth design:
+`dh-mcp-systems-server` supports two transports:
 
-1. **Startup-time validation** — refuses to start when binding to a
-   non-loopback host without an explicit transport-security mechanism.
-2. **Request-time middleware** — rejects cleartext requests from
-   non-loopback peers with HTTP `426 Upgrade Required`.
+- **`stdio`** (default) — the AI client launches the server as a
+  subprocess; auth comes from the fact that only that client can
+  write to the pipe.
+- **`http`** (streamable-HTTP) — a long-lived HTTP service that
+  binds **only** to loopback and is gated by a Pre-Shared Key.
+  Production deployments terminate TLS at a reverse proxy on the same
+  host and forward to `127.0.0.1:<port>`; the server itself never
+  uses TLS.
 
-A loopback bind (`127.0.0.1`, the default) is exempt from both checks
-because traffic never leaves the kernel.
+### PSK gating
 
-### Decision matrix
+When started with `--transport http`, the server requires `server.json`
+(in the configuration directory) to declare a `psk` value. Use
+`"${env:NAME}"` templating inside the value if you want to source the
+secret from an environment variable. Every request must
+then carry the `X-Deephaven-PSK` HTTP header with that value. The
+middleware enforces this with a constant-time comparison
+(`hmac.compare_digest`); requests with a missing or mismatched header
+are rejected with HTTP `401`.
 
-| Bind         | Native TLS<br>(ssl-keyfile + ssl-certfile) | Trusted proxy<br>(trust-forwarded-proto) | Allow cleartext | Result                  |
-|--------------|--------------------------------------------|------------------------------------------|-----------------|-------------------------|
-| Loopback     | any                                        | any                                      | any             | **Pass**                |
-| Non-loopback | yes                                        | any                                      | any             | **Pass** (TLS at server) |
-| Non-loopback | no                                         | yes                                      | any             | **Pass** (TLS at proxy)  |
-| Non-loopback | no                                         | no                                       | yes             | **Pass** (loud warning)  |
-| Non-loopback | no                                         | no                                       | no              | **Refuse to start**     |
+```json5
+// $DH_MCP_CONFIG_DIR/server.json
+{
+  "psk": "${env:DH_MCP_PSK}"   // server reads $DH_MCP_PSK at startup
+}
+```
 
-### CLI flags / env vars
+### Loopback-only enforcement
 
-All flags can also be set via the corresponding `MCP_*` environment
-variable. CLI takes precedence over env vars. See [`docs/ENV.md`](ENV.md#transport-security-variables)
-for the full reference.
+The server validates `--host` at startup using
+[`socket.getaddrinfo`](https://docs.python.org/3/library/socket.html#socket.getaddrinfo)
+and refuses to bind to any address that is not exclusively loopback.
+Accepted values are `127.0.0.1`, `::1`, `localhost` (case-insensitive),
+and any hostname whose resolution yields only loopback addresses.
+Unresolvable hosts are also refused so the safe default is to fail
+closed.
 
-| CLI flag                  | Env var                      | Purpose                                         |
-|---------------------------|------------------------------|-------------------------------------------------|
-| `--ssl-keyfile <path>`    | `MCP_SSL_KEYFILE`            | Native-TLS private key (PEM); paired with cert. |
-| `--ssl-certfile <path>`   | `MCP_SSL_CERTFILE`           | Native-TLS certificate (PEM); paired with key.  |
-| `--trust-forwarded-proto` | `MCP_TRUST_FORWARDED_PROTO`  | Honor `X-Forwarded-Proto: https` from a trusted proxy. |
-| `--forwarded-allow-ips <list>` | `MCP_FORWARDED_ALLOW_IPS` | Comma-separated peer IPs/CIDRs allowed to set the header (default `127.0.0.1`; `*` = any peer). |
-| `--allow-cleartext`       | `MCP_ALLOW_CLEARTEXT`        | Emergency opt-out for trusted private networks. |
+If you need to expose the server beyond loopback, terminate TLS at a
+reverse proxy on the same host:
 
-### Production deployment patterns
-
-- **Native TLS**: terminate TLS in uvicorn itself.
-
-  ```sh
-  dh-mcp-community-server \
-      --host 0.0.0.0 --port 8003 \
-      --ssl-keyfile /etc/ssl/private/dh-mcp.key \
-      --ssl-certfile /etc/ssl/certs/dh-mcp.crt
-  ```
-
-- **Reverse proxy (nginx/Envoy/Cloud Run/ALB)**: terminate TLS at the
-  proxy and pass `X-Forwarded-Proto`. The server only honors the
-  header from peers in the allowlist.
-
-  ```sh
-  dh-mcp-enterprise-server \
-      --host 0.0.0.0 --port 8002 \
-      --trust-forwarded-proto \
-      --forwarded-allow-ips 10.0.0.0/8
-  ```
-
-- **Loopback only** (development, single-host deployments):
-
-  ```sh
-  dh-mcp-community-server  # default --host 127.0.0.1
-  ```
-
-- **Trusted private network only** (LAN, air-gapped):
-
-  ```sh
-  dh-mcp-community-server --host 0.0.0.0 --allow-cleartext
-  ```
-
-  > **Warning:** `--allow-cleartext` lets auth headers travel
-  > unencrypted. Only use it on networks where an out-of-band control
-  > already prevents cleartext exposure. The server logs a loud
-  > `WARNING` banner at startup and a periodic per-request reminder.
+```nginx
+# nginx fragment (TLS terminating in front of the systems server)
+upstream deephaven_mcp { server 127.0.0.1:8000; }
+server {
+    listen 443 ssl http2;
+    ssl_certificate     /etc/ssl/certs/example.crt;
+    ssl_certificate_key /etc/ssl/private/example.key;
+    location /mcp {
+        proxy_pass         http://deephaven_mcp;
+        proxy_http_version 1.1;
+        proxy_set_header   X-Deephaven-PSK $http_x_deephaven_psk;
+    }
+}
+```
 
 ### Health-check endpoint
 
-Every server (community, enterprise, docs) exposes a `/health` endpoint
-that returns `200 OK` with JSON body `{"status": "ok"}`. The endpoint is
-designed for liveness/readiness probes from load balancers and orchestrator
-agents (Kubernetes, Cloud Run, AWS ALB, etc.) that cannot present TLS
-client certs or auth headers.
+The systems server exposes a `/health` endpoint that returns `200 OK`
+with JSON body `{"status": "ok"}`. The endpoint is designed for
+liveness/readiness probes from load balancers and orchestrator agents
+(Kubernetes, Cloud Run, AWS ALB, etc.). `/health` is registered via
+`@server.custom_route("/health", methods=["GET"])` and is added to
+`PSKMiddleware`'s `bypass_paths`, so external probes do not need to
+share the PSK.
 
-On the **systems servers** (community / enterprise) `/health` is registered
-on the FastMCP app via `@server.custom_route("/health", methods=["GET"])`
-and bypasses **both** middleware layers:
+The **docs server** (`dh-mcp-docs-server`) registers `/health` the
+same way and mounts no auth middleware at all, so the bypass is moot
+there.
 
-- **TLS layer** — `TransportSecurityPolicy.bypass_paths` defaults to
-  `frozenset({"/health"})`, so the request reaches the inner app even on
-  cleartext from a non-loopback peer.
-- **Auth layer** — `AuthenticationMiddleware` is mounted with
-  `bypass_paths=frozenset({"/health"})` (see `_build_community_middleware`
-  and `_build_enterprise_middleware` in `mcp_systems_server/server.py`),
-  so probes succeed without any `X-Deephaven-*` header.
-
-The **docs server** (`dh-mcp-docs-server`) registers `/health` the same way
-but mounts no TLS-enforcement or authentication middleware, so the bypass
-is moot there.
-
-No other path is bypassed; in particular `/healthz` is **not** an alias
-and is rejected normally.
+No other path is bypassed; in particular `/healthz` is **not** an
+alias and is rejected normally.
 
 ## MCP Server Implementations
 
 ### Community Server
+
+> **Note:** This describes the community-side capabilities exposed by the unified `dh-mcp-systems-server`. There is no longer a separate Community server process — community sessions and enterprise systems are multiplexed inside the single systems server.
 
 #### Community Server Overview
 
@@ -592,15 +570,38 @@ The Deephaven MCP Community Server is an [MCP](https://github.com/modelcontextpr
 Key architectural features include:
 
 - **Efficient Session Management**: Implements a sophisticated session caching system using [PyDeephaven](https://github.com/deephaven/deephaven-core/tree/main/py) that automatically reuses existing connections when possible and manages session lifecycles.
-- **Concurrent Access Safety**: Uses [asyncio](https://docs.python.org/3/library/asyncio.html) Lock mechanisms to ensure thread-safe operations during configuration reloads and session management.
+- **Concurrent Access Safety**: Uses [asyncio](https://docs.python.org/3/library/asyncio.html) Lock mechanisms to ensure thread-safe operations during session management.
 - **Automatic Resource Cleanup**: Gracefully handles session termination and cleanup during server shutdown or reload operations.
 - **On-Demand Session Creation**: Sessions to worker nodes are created only when needed and cached for future use.
 - **Async-First Design**: Built around [asyncio](https://docs.python.org/3/library/asyncio.html) for high-concurrency performance and non-blocking operations.
 - **Configurable Session Behavior**: Supports worker configuration options such as `never_timeout` to control session persistence and lifecycle management.
 
-##### Core Configuration File (`deephaven_mcp.json`)
+##### Configuration Directory Tree
 
-The Community Server relies on a JSON or JSON5 configuration file (conventionally named `deephaven_mcp.json`, though any name can be used) to define the Deephaven instances it can connect to and manage. This configuration is crucial for the server to operate correctly.
+The multiplexed `dh-mcp-systems-server` reads a *directory tree* of small JSON5 files (not a single configuration file). The default location is `~/.deephaven/ai/config/` on POSIX or `%APPDATA%/Deephaven/ai/config/` on Windows; override with the `DH_MCP_CONFIG_DIR` env var or the `--config-dir` CLI flag.
+
+> **Authoritative reference:** [`docs/CONFIGURATION.md`](CONFIGURATION.md) is
+> the single source of truth for the on-disk layout, every Pydantic schema,
+> the `${env:VAR}` / `${file:PATH}` templating engine, and the schema-level
+> defaults. The summary below is for quick orientation only — when prose here
+> disagrees with `CONFIGURATION.md`, `CONFIGURATION.md` wins.
+
+Layout:
+
+```text
+$DH_MCP_CONFIG_DIR/
+  server.json                       # optional; HTTP transport + PSK
+  community/
+    settings.json                   # optional; session-creation defaults, timeouts, security
+    sessions/
+      <name>.json                   # zero or more static community sessions
+  enterprise/
+    settings.json                   # optional; enterprise-wide timeouts
+    systems/
+      <name>.json                   # zero or more enterprise systems
+```
+
+Every file is JSON5 (comments and trailing commas allowed) and validated by Pydantic v2. Unknown fields are rejected. Filename stems are cross-checked against the `session_name` / `system_name` field inside each file. The directory permission audit (POSIX strict, Windows best-effort) runs before any file is parsed. There is **no** flat `deephaven_mcp.json` file and **no** `DH_MCP_CONFIG_FILE` env var — both were removed in the multi-section refactor.
 
 **File Format**: The configuration file supports both standard JSON and JSON5 formats:
 
@@ -616,9 +617,8 @@ The Community Server's behavior, particularly how it finds its configuration, ca
 
 | Variable             | Required | Description                                                                                                                                                              | Where Used              |
 |----------------------|----------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------|
-| `DH_MCP_CONFIG_FILE` | Yes      | Path to the `deephaven_mcp.json` configuration file. The MCP Community/Enterprise server discovers the location of this file via this environment variable. You must set this variable to the absolute path of your configuration file before starting the server. If this variable is not set, the server will fail to start, logging an error. <br><br>Example: <br>`export DH_MCP_CONFIG_FILE="/home/user/project/config/deephaven_mcp.json"` <br>`# Now run the server` <br>`uv run dh-mcp-community-server`                                 | MCP Server, Test Client |
-| `MCP_HOST`           | No       | Host for the server to bind to (e.g., `0.0.0.0` to listen on all interfaces). Default: `127.0.0.1`.                                                                     | Community/Enterprise Server (optional) |
-| `MCP_PORT`           | No       | Port for the server to listen on. Default: `8003` for the community server, `8002` for the enterprise server.                                                            | Community/Enterprise Server (optional) |
+| `DH_MCP_CONFIG_DIR`  | No       | Path to the configuration *directory* (the systems server reads a directory tree, not a single file). When unset, the platform default is used (`~/.deephaven/ai/config/` on POSIX, `%APPDATA%/Deephaven/ai/config/` on Windows). Overridden by the `--config-dir` CLI flag.<br><br>Example:<br>`export DH_MCP_CONFIG_DIR="/home/user/.deephaven/ai/config"`<br>`uv run dh-mcp-systems-server`                                                                                                                                          | Systems Server, Test Client |
+| (HTTP port)          | No       | Set the `port` field in `server.json` (default: `8000`). Only relevant under `--transport http`. Overridden by the `--port` CLI flag. There is no `DH_MCP_HTTP_PORT` env var; use `"port": "${env:NAME}"` for env-var indirection.                                    | Systems Server (optional)              |
 | `PYTHONLOGLEVEL`     | No       | Sets the Python logging level for the server (e.g., `DEBUG`, `INFO`, `WARNING`, `ERROR`).                                                                                    | Server (optional)       |
 
 > Environment variables must be set in the shell or process environment before starting the server; there is no built-in `.env` file support.
@@ -627,121 +627,42 @@ For the complete list of environment variables (including timeout-tuning vars an
 
 ###### File Structure Overview
 
-The `deephaven_mcp.json` file (community config) is a flat JSON object — all keys live at the top level. Recognized top-level keys:
+The configuration is split across files in the directory tree shown above:
 
-- `"auth"` (**required**): PSK gate that controls who may connect to the community MCP server itself. The validator refuses to start the server unless this block is present and configured: provide `auth.psk` or `auth.psk_env_var` to enable PSK, or `auth.enabled: false` to disable auth entirely (loopback binds only). See `auth.psk_env_var` in [`docs/ENV.md`](ENV.md#community-mcp-server-gate-authpsk_env_var).
-- `"security"` (optional): Security-related settings (e.g., `credential_retrieval_mode`). See [Security Configuration](#security-configuration).
-- `"sessions"` (optional): Map of user-defined session names to per-session connection configs for Deephaven Community Core workers. Details below.
-- `"session_creation"` (optional): Configuration for dynamic session creation via `session_community_create`. See [Community Session Creation Configuration](#community-session-creation-configuration).
-- `"mcp_session_idle_timeout_seconds"` (optional): Per-MCP-client idle timeout (seconds, positive number; default `3600.0`).
+- **`server.json`** (optional): Server-process tunables — `transport` (`"stdio"` / `"http"`), `host`, `port`, `psk`, `server_name`. The HTTP transport is gated by the PSK in this file.
+- **`community/settings.json`** (optional): Community-wide globals — `security.credential_retrieval_mode`, `session_creation.defaults`, and a `timeouts` umbrella block (`timeouts.client.*` for outbound community client calls; `timeouts.eviction.*` for the MCP-side idle-session sweeper).
+- **`community/sessions/<name>.json`** (zero or more): One static community session per file. Each file declares `session_name` (must equal the filename stem), `host`, `port`, `programming_language`, an optional `tls` block, and an `auth.credentials` discriminated-union block.
+- **`enterprise/settings.json`** (optional): Enterprise-wide `timeouts` umbrella block (`timeouts.client.*` consumed by the enterprise client layer; `timeouts.eviction.*` consumed by the MCP-side idle-session sweeper, applied uniformly to every system) plus a `pq_tools` block holding the persistent-query tool defaults.
+- **`enterprise/systems/<name>.json`** (zero or more): One enterprise system per file. Each file declares `system_name` (filename stem match), `connection_json_url`, `auth.credentials`, optional `session_creation`, and per-system timer overrides.
 
-Unknown top-level keys are rejected. The smallest valid config is `{"auth": {"enabled": false}}` (loopback-only).
+Authentication credentials live exclusively under `auth.credentials` as a discriminated union (`type`: `anonymous`, `psk`, `password`, `private_key`, `custom`). The legacy flat fields (`auth_type`, `auth_token`, `auth_token_env_var`, `client_private_key`, `tls_root_certs` paths, etc.) are gone. Authors who want to pull a value from an environment variable or file write `"${env:NAME}"` / `"${file:/path}"` directly inside the JSON value.
 
-> **Note**: Enterprise (Core+) systems are configured separately via the DHE server (`dh-mcp-enterprise-server`), which uses its own flat config format with `system_name` at the top level. See [Enterprise Server Configuration](#enterprise-server-configuration).
+For the **complete schema** — every field, every default, every example — see [`docs/CONFIGURATION.md`](CONFIGURATION.md). For ready-to-edit example files, see [`config-samples/ai/config/`](../config-samples/ai/config/).
 
 #### Systems Sessions Configuration
 
-This section details the configuration for individual sessions listed under the top-level `"sessions"` key in `deephaven_mcp.json`.
+This section formerly mirrored the per-session schema for community sessions. The schema is now authoritative in [`docs/CONFIGURATION.md`](CONFIGURATION.md#per-session-community-files); a sample file lives at [`config-samples/ai/config/community/sessions/local_dev.json`](../config-samples/ai/config/community/sessions/local_dev.json). Quick orientation only — the per-file shape is:
 
-**Systems Session Configuration Fields:**
-
-All fields within a session's configuration object are optional. If a field is omitted, the server or client library may use default behaviors or the corresponding feature might be disabled.
-
-- `host` (string): Hostname or IP address of the Deephaven Community Core worker (e.g., `"localhost"`).
-- `port` (integer): Port number for the worker connection (e.g., `10000`).
-- `auth_type` (string): Authentication method. Common values include:
-  - `"Anonymous"`: For connections requiring no authentication (default if omitted).
-  - `"PSK"` or `"io.deephaven.authentication.psk.PskAuthenticationHandler"`: For Pre-Shared Key authentication. Both the shorthand `"PSK"` and full Java class name are accepted. See the `auth_token` field below for token configuration.
-  - `"Basic"`: For username/password authentication. The `auth_token` must be in `"username:password"` format.
-  - Custom authenticator strings: Full Java class names for custom authentication handlers.
-- `auth_token` (string, optional): The authentication token. For `"Basic"` auth, this must be in `"username:password"` format. For custom authenticators, this should conform to the specific requirements of that authenticator. Ignored when `auth_type` is `"Anonymous"`. Use this OR `auth_token_env_var`, but not both.
-- `auth_token_env_var` (string, optional): The name of an environment variable from which to read the authentication token. Use this OR `auth_token`, but not both. If specified, the token will be sourced from this environment variable.
-- `never_timeout` (boolean): If `true`, the MCP server attempts to configure the session to this worker to prevent timeouts. Server-side settings might still enforce timeouts.
-- `session_type` (string): Specifies the programming language for the session (e.g., `"python"`, `"groovy"`).
-- `use_tls` (boolean): Set to `true` if the connection to the worker requires TLS/SSL encryption.
-- `tls_root_certs` (string, optional): Absolute path to a PEM file containing trusted root CA certificates for TLS verification. If omitted, system CAs might be used, or verification behavior depends on the client library.
-- `client_cert_chain` (string, optional): Absolute path to a PEM file containing the client's TLS certificate chain. Used for client-side certificate authentication (mTLS).
-- `client_private_key` (string, optional): Absolute path to a PEM file containing the client's private key, corresponding to the `client_cert_chain`. Used for mTLS.
-
-**Example `deephaven_mcp.json` (standard JSON):**
-
-```json
+```json5
 {
-  "auth": { "psk_env_var": "DH_MCP_COMMUNITY_PSK" },
-  "sessions": {
-    "my_local_deephaven": {
-      "host": "localhost",
-      "port": 10000,
-      "session_type": "python"
-    },
-    "psk_authenticated_session": {
-      "host": "localhost",
-      "port": 10001,
-      "auth_type": "io.deephaven.authentication.psk.PskAuthenticationHandler",
-      "auth_token": "your-shared-secret-key",
-      "session_type": "python"
-    },
-    "basic_auth_worker": {
-      "host": "secure.deephaven.example.com",
-      "port": 10002,
-      "auth_type": "Basic",
-      "auth_token_env_var": "MY_BASIC_AUTH_ENV_VAR",
-      "never_timeout": true,
-      "session_type": "groovy",
-      "use_tls": true,
-      "tls_root_certs": "/path/to/trusted_cas.pem",
-      "client_cert_chain": "/path/to/client_cert_and_chain.pem",
-      "client_private_key": "/path/to/client_private_key.pem"
+  "session_name": "local_dev",
+  "host": "localhost",
+  "port": 10000,
+  "programming_language": "Python",
+  "auth": {
+    "credentials": {
+      "type": "psk",
+      "token": "${env:DH_LOCAL_DEV_PSK}"
     }
   }
 }
 ```
 
-**Example with JSON5 (JSON with Comments):**
-
-```json5
-{
-  // MCP-gate PSK sourced from env var. Set DH_MCP_COMMUNITY_PSK in your shell.
-  "auth": { "psk_env_var": "DH_MCP_COMMUNITY_PSK" },
-  // Community Core session configurations
-  "sessions": {
-    // Local development environment - no authentication
-    "my_local_deephaven": {
-      "host": "localhost",
-      "port": 10000,
-      "session_type": "python"
-    },
-    // Staging environment with PSK authentication
-    "psk_authenticated_session": {
-      "host": "localhost",
-      "port": 10001,
-      "auth_type": "io.deephaven.authentication.psk.PskAuthenticationHandler",
-      "auth_token": "your-shared-secret-key",  // Consider using auth_token_env_var instead
-      "session_type": "python"
-    },
-    /* Production environment with full TLS and mTLS
-     * Uses Basic auth with credentials from environment variable
-     * Never times out for long-running operations
-     */
-    "basic_auth_worker": {
-      "host": "secure.deephaven.example.com",
-      "port": 10002,
-      "auth_type": "Basic",
-      "auth_token_env_var": "MY_BASIC_AUTH_ENV_VAR",  // More secure than hardcoding
-      "never_timeout": true,
-      "session_type": "groovy",
-      "use_tls": true,
-      "tls_root_certs": "/path/to/trusted_cas.pem",
-      "client_cert_chain": "/path/to/client_cert_and_chain.pem",
-      "client_private_key": "/path/to/client_private_key.pem",
-    },  // Trailing comma supported in JSON5
-  }
-}
-```
+Optional blocks include `tls` (server-trust bundle + optional mTLS client cert) and the various credentials types under `auth.credentials.type`.
 
 ### Security Configuration
 
-The top-level `security` section in `deephaven_mcp.json` contains security-related settings for all session types. This section makes security decisions explicit and easy to audit.
+The optional `security` block in `community/settings.json` controls security-sensitive behavior for community sessions. It is the single place where the operator opts into (or out of) credential exposure to MCP tools, so security decisions are explicit and easy to audit.
 
 #### Community Session Credential Retrieval
 
@@ -781,74 +702,64 @@ Controls which community session credentials can be retrieved via the MCP tool. 
 - Consider: Do AI agents really need access to credentials you already have?
 - Recommendation: Use `"dynamic_only"` if needed, `"none"` otherwise
 
-**Example Configuration:**
+**Example `community/settings.json`:**
 
 ```json5
 {
-  "auth": { "psk_env_var": "DH_MCP_COMMUNITY_PSK" },
   "security": {
     "credential_retrieval_mode": "dynamic_only"
   },
-  "sessions": { /* static sessions */ },
-  "session_creation": { /* dynamic session config */ },
-  "mcp_session_idle_timeout_seconds": 3600.0  // optional; see below
+  "session_creation": {
+    "max_concurrent_sessions": 5,
+    "defaults": {
+      "launch_method": "docker",
+      "auth": {
+        "credentials": { "type": "psk", "token": "${env:DH_DYNAMIC_SESSION_TOKEN}" }
+      },
+      "heap_size_gb": 4
+    }
+  },
+  "timeouts": {
+    "eviction": {
+      "session_idle_timeout_seconds": 3600.0,
+      "sweep_interval_seconds": 60.0
+    }
+  }
 }
 ```
 
-**Top-Level Server Settings:**
+Static community sessions live in their own files under `community/sessions/`; the server-process PSK that gates inbound HTTP requests lives in `server.json`.
 
-- `mcp_session_idle_timeout_seconds` (integer | float, **optional, default: 3600.0**): Seconds of MCP client inactivity after which the per-session Deephaven registry is closed and resources are reclaimed. Must be positive.
+**Per-Section Settings:**
+
+Duration knobs live under `timeouts.eviction.*` (community and enterprise share the same shape):
+
+- `timeouts.eviction.session_idle_timeout_seconds` (float, **optional, default: 3600.0**): Seconds of Deephaven-session inactivity after which idle sessions in the registry are closed; static sessions are kept and lazily reconnected, dynamic sessions are removed. Must be positive.
+- `timeouts.eviction.sweep_interval_seconds` (float, **optional, default: 60.0**): How often the per-registry idle sweeper wakes (seconds). Must be positive.
 
 #### Community Session Creation Configuration
 
-This section details the configuration for dynamically creating Deephaven Community sessions on demand via the `session_community_create` MCP tool. Configuration is specified under the top-level `"session_creation"` key in `deephaven_mcp.json`.
-
-**Session Creation Configuration Fields:**
-
-All fields are optional. If the `session_creation` key is omitted entirely, dynamic session creation is not available.
-
-- **`max_concurrent_sessions`** (integer, optional):
-  - Maximum number of concurrent dynamically created sessions.
-  - Set to 0 to disable dynamic session creation entirely.
-  - Used for resource management and safety.
-
-- **`defaults`** (object, optional): Default parameters for creating new community sessions. All fields are optional:
-  - `launch_method` (string): Method to launch sessions (`"docker"` or `"python"`).
-  - `programming_language` (string): Programming language for Docker sessions (`"Python"` or `"Groovy"`). Docker only. Mutually exclusive with `docker_image`.
-  - `auth_type` (string): Default authentication type for dynamically created sessions. Supported values: `"PSK"` (default), `"Anonymous"`, or full class name `"io.deephaven.authentication.psk.PskAuthenticationHandler"`. Case-insensitive for shorthand. Note: Basic auth is not supported for dynamic sessions (requires database setup).
-  - `auth_token` (string): Default authentication token. Use this OR `auth_token_env_var`, but not both.
-  - `auth_token_env_var` (string): Environment variable for auth token. Use this OR `auth_token`, but not both.
-  - `docker_image` (string): Docker image to use for docker launch method. Mutually exclusive with `programming_language`.
-  - `docker_memory_limit_gb` (float): Memory limit in GB for docker containers.
-  - `docker_cpu_limit` (float): CPU limit for docker containers.
-  - `docker_volumes` (list[string]): Volume mounts for docker containers (format: `["host:container:mode"]`).
-  - `python_venv_path` (string | null): Path to custom Python venv directory (python only). If null (default), uses same venv as MCP server. If path provided, uses deephaven-server from that venv.
-  - `heap_size_gb` (float | int): JVM heap size in GB (e.g., 4 or 2.5). Integer values use 'g' suffix (4 → `-Xmx4g`). Float values converted to MB (2.5 → `-Xmx2560m`).
-  - `extra_jvm_args` (list[string]): Additional JVM arguments.
-  - `environment_vars` (object): Environment variables for the session (key-value pairs).
-  - `startup_timeout_seconds` (number): Timeout for session startup.
-  - `startup_check_interval_seconds` (number): Interval between startup health checks.
-  - `startup_retries` (integer): Number of startup retry attempts.
+Dynamic community sessions are configured under the `session_creation`
+block of `community/settings.json`. The full schema (every field, every
+default, the `auth.credentials` discriminated union) lives in
+[`docs/CONFIGURATION.md`](CONFIGURATION.md#community-settingsjson) and
+is the authoritative reference; the bullets below cover only the
+operational notes that are not part of the schema itself.
 
 **Launch Method Requirements:**
 
-The `launch_method` parameter determines how Deephaven Community sessions are started. Each method has specific prerequisites:
+The `launch_method` field on `session_creation.defaults` selects how
+new dynamic sessions start.
 
-- **`"docker"` (Docker launch method)**:
-  - **Requirement**: [Docker](https://www.docker.com/get-started/) must be installed and running on the host system
-  - **Installation**: Works with the base `deephaven-mcp` installation (no additional Python packages required)
-  - **Benefits**: Isolated environments, easy cleanup, consistent across platforms
-  - **Considerations**: Requires Docker daemon, higher resource overhead
-  - **Verification**: Run `docker ps` to confirm Docker is accessible
+- **`"docker"`** (default):
+  - Requires [Docker](https://www.docker.com/get-started/) installed and running on the host.
+  - Works with the base `deephaven-mcp` installation; no extra Python packages.
+  - Verify with `docker ps`.
 
-- **`"python"` (Python launch method)**:
-  - **Requirement**: The `deephaven-server` Python package must be installed
-  - **Installation**: Install with `pip install deephaven-server` in MCP venv or custom venv
-  - **Benefits**: No Docker dependency, lighter resource footprint, faster startup
-  - **Custom Venv Support**: Use `python_venv_path` parameter to specify a different Python environment
-    - If `null` (default): Uses same venv as MCP server
-    - If path provided: Uses deephaven-server from that venv
-  - **Verification**: Run `deephaven server --help` to confirm the command is available
+- **`"python"`**:
+  - Requires the `deephaven-server` Python package: `pip install deephaven-server`.
+  - Use the optional `python.venv_path` field to point at a different venv; `null` (default) reuses the MCP server's own venv.
+  - Verify with `deephaven server --help`.
 
 > **💡 Tip**: For development environments, the python method is often faster and simpler. For production or isolated environments, the docker method provides better consistency and isolation.
 
@@ -858,9 +769,7 @@ When `credential_retrieval_mode` is set to a value other than `"none"` (the defa
 
 **Arguments:**
 
-- `session_id` (string): Full session ID
-  - For static sessions: `"community:config:session-name"`
-  - For dynamic sessions: `"community:dynamic:session-name"`
+- `session_id` (string): Full session ID — `"community:community:session-name"` for both static and dynamic community sessions. The static-vs-dynamic distinction lives on the manager's `origin` field, not in the id.
 
 **Returns:**
 
@@ -873,11 +782,11 @@ When `credential_retrieval_mode` is set to a value other than `"none"` (the defa
 
 ```text
 User: "Get me the browser URL for my-analysis session"
-AI: [calls session_community_credentials with session_id="community:dynamic:my-analysis"]
+AI: [calls session_community_credentials with session_id="community:community:my-analysis"]
 AI: "Here's your browser URL: http://localhost:45123/?psk=abc123..."
 
 User: "What's the URL for my static local-dev session?"
-AI: [calls session_community_credentials with session_id="community:config:local-dev"]
+AI: [calls session_community_credentials with session_id="community:community:local-dev"]
 AI: "Here's the URL: http://localhost:10000/?psk=your-token"
 ```
 
@@ -901,17 +810,16 @@ If `credential_retrieval_mode` is `"none"` (default), credentials are still acce
    Browser URL: http://localhost:45123/?psk=abc123xyz789
 
    To retrieve credentials via MCP tool, set security.credential_retrieval_mode
-   in your deephaven_mcp.json configuration.
+   in your `community/settings.json` configuration.
 ======================================================================
 ```
 
 This is similar to how Jupyter displays tokens when starting a notebook server.
 
-**Example Configuration:**
+**Example `community/settings.json`:**
 
-```json
+```json5
 {
-  "auth": { "psk_env_var": "DH_MCP_COMMUNITY_PSK" },
   "security": {
     "credential_retrieval_mode": "dynamic_only"
   },
@@ -919,7 +827,9 @@ This is similar to how Jupyter displays tokens when starting a notebook server.
     "max_concurrent_sessions": 5,
     "defaults": {
       "launch_method": "docker",
-      "auth_type": "PSK",
+      "auth": {
+        "credentials": { "type": "psk", "token": "${env:DH_DYNAMIC_SESSION_TOKEN}" }
+      },
       "heap_size_gb": 4,
       "extra_jvm_args": ["-XX:+UseG1GC"],
       "docker_image": "ghcr.io/deephaven/server:latest",
@@ -931,58 +841,41 @@ This is similar to how Jupyter displays tokens when starting a notebook server.
 
 #### Enterprise Server Configuration
 
-The DHE server (`dh-mcp-enterprise-server`) manages exactly one enterprise system per instance. Its configuration file uses a **flat** format where all fields sit at the top level.
+> **Note:** This describes the enterprise-side capabilities exposed by the unified `dh-mcp-systems-server`. There is no longer a separate Enterprise server process — community sessions and enterprise systems are multiplexed inside the single systems server.
 
-> **Per-request authentication.** The enterprise MCP server **does not hold
-> any user credentials in its config file**. Instead, every incoming MCP
-> request must carry the caller's credentials in `X-Deephaven-*` HTTP
-> headers; an auth middleware exchanges those headers for a per-request
-> `CorePlusSessionFactory`. The config file only declares *which* auth
-> backends are allowed; see [Enterprise Auth Model](#enterprise-auth-model)
-> below for full details.
+Each Enterprise system gets one file under
+`$DH_MCP_CONFIG_DIR/enterprise/systems/<system_name>.json`. The
+filename stem must equal the `system_name` field. The single
+multiplexed `dh-mcp-systems-server` hosts every file it finds.
 
-The configuration file supports the following fields:
+The full per-system schema (every required field, every optional
+block, the `auth.credentials` discriminated-union shape, and the
+`session_creation.defaults` block consumed by
+`session_enterprise_create`) lives in
+[`docs/CONFIGURATION.md`](CONFIGURATION.md#enterprisesystemsnamejson)
+and is the authoritative reference. The notes below cover only what
+is specific to operational use.
 
-- `system_name` (string, **required**): A human-readable name for this enterprise system (e.g., `"prod"`, `"staging"`). This name appears in all session and PQ identifiers (e.g., `"enterprise:prod:my-pq"`), making it easy to identify which system a session or query belongs to when working across multiple DHE server instances.
-- `connection_json_url` (string, **required**): The URL pointing to the `connection.json` file of the Deephaven Enterprise server. This file provides necessary connection details for the client. For standard HTTPS port 443, no port is needed (e.g., `"https://enterprise.example.com/iris/connection.json"`). For non-standard ports, include the port number explicitly (e.g., `"https://enterprise.example.com:8123/iris/connection.json"`)
-- `auth` (object, **required**): Declares the authentication backends this server mounts in front of its streamable-HTTP app. See [Enterprise Auth Model](#enterprise-auth-model) for the full schema. Supported fields:
-  - `backends` (array of string, **required**, non-empty): A non-empty subset of `["password", "private_key"]`. Each entry enables one HTTP auth backend. The order in which the backends run is implementation-defined; a request is accepted by the first backend whose headers are complete.
-  - `allow_effective_user` (boolean, **optional**, default `false`): When `true`, the `"password"` backend honors the optional `X-Deephaven-Effective-User` HTTP header so privileged callers can act as another Deephaven user. Only meaningful when `"password"` is in `backends`.
+> **Server-stored credentials.** The systems server reads the
+> credentials needed to talk to each Core+ controller from each
+> per-system `auth.credentials` block (one of `type=password`,
+> `type=private_key`) at startup. No per-request `X-Deephaven-*`
+> credential headers are involved — HTTP-transport requests are
+> gated by the single PSK in `server.json`.
 
-- Optional Connection Settings:
-  - `connection_timeout` (integer | float, **optional, default: 10.0**): Timeout in seconds for establishing connection to the Enterprise system.
-  - `mcp_session_idle_timeout_seconds` (integer | float, **optional, default: 3600.0**): Seconds of MCP client inactivity after which the per-session Deephaven registry is closed and resources are reclaimed. Must be positive.
-
-- Optional Worker Creation Configuration:
-  - `session_creation` (object, **optional**): Configuration for creating enterprise workers on this system. If omitted, `session_enterprise_create` returns a "not configured" error.
-    - `max_concurrent_sessions` (integer, **optional, default: 5**): Maximum number of concurrent sessions that can be created on this system. Set to 0 to disable session creation. Used for resource management and safety.
-    - `defaults` (object, **required when section is present**): Default values for worker creation parameters.
-      - `heap_size_gb` (float | int, **required**): JVM heap size in gigabytes for new workers (e.g., 4 or 2.5). The Deephaven API provides no server-side default; this value must always be specified.
-      - `programming_language` (string, **optional**): Default programming language for new workers ("Python" or "Groovy", default: "Python"). Creates configuration_transformer internally.
-      - `auto_delete_timeout` (integer, **optional**): Default auto-deletion timeout in seconds for idle workers (API default: 600).
-      - `server` (string, **optional**): Default target server/environment name where workers will be created.
-      - `engine` (string, **optional**): Default engine type for new workers (API default: "DeephavenCommunity").
-      - `extra_jvm_args` (array, **optional**): Default additional JVM arguments for new workers (e.g., ["-XX:+UseG1GC"]).
-      - `extra_environment_vars` (array, **optional**): Default environment variables for new workers (format: ["NAME=value"]).
-      - `admin_groups` (array, **optional**): Default user groups with administrative permissions for new workers.
-      - `viewer_groups` (array, **optional**): Default user groups with read-only access to new workers.
-      - `timeout_seconds` (float, **optional**): Default worker startup timeout in seconds (API default: 60).
-      - `session_arguments` (object, **optional**): Default arguments for pydeephaven.Session constructor (passed as-is, no validation of contents).
-
-Unknown fields at every level are rejected. The legacy fields
-`auth_type`, `username`, `password`, `password_env_var`, and
-`private_key_path` have been removed from the schema — configs that still
-contain them will fail validation.
-
-**Example DHE server configuration file:**
+**Example `enterprise/systems/prod.json`:**
 
 ```json5
+// $DH_MCP_CONFIG_DIR/enterprise/systems/prod.json
 {
   "system_name": "prod",
   "connection_json_url": "https://enterprise.example.com/iris/connection.json",
   "auth": {
-    "backends": ["password", "private_key"],
-    "allow_effective_user": false
+    "credentials": {
+      "type": "password",
+      "username": "iris",
+      "password": "${env:DH_PROD_PASSWORD}"
+    }
   },
   "session_creation": {
     "max_concurrent_sessions": 5,
@@ -995,160 +888,112 @@ contain them will fail validation.
 }
 ```
 
-Each DHE server instance manages exactly one enterprise system. Run a separate `dh-mcp-enterprise-server` instance for each enterprise system you need to expose.
+Drop one file per system into `enterprise/systems/` and the single
+`dh-mcp-systems-server` instance will host all of them; tools that
+operate on a specific system take a `system` argument that selects
+the right per-system registry.
 
 ##### Enterprise Auth Model
 
-The enterprise server performs authentication **per request** on its
-streamable-HTTP transport. There is no shared, server-held service
-account: every tool call runs under the credentials presented in that
-call's HTTP headers.
+The systems server holds a single set of credentials per Enterprise
+system (built once at startup from each
+`enterprise/systems/<system>.json` file's `auth.credentials` block)
+and reuses it for the lifetime of the process. There is no
+per-request credential resolution, no `X-Deephaven-*` credential
+headers, and no middleware-driven exchange.
 
-**Supported auth backends** (choose one or more in `auth.backends`):
+**Supported credential kinds** (set `auth.credentials.type` per system):
 
-- `"password"` — maps `X-Deephaven-Username` + `X-Deephaven-Password` (and,
-  if `allow_effective_user=true`, the optional `X-Deephaven-Effective-User`)
-  to a `PasswordCredentials`. The session factory authenticates with
-  `SessionManager.password(username, password, effective_user)`.
-- `"private_key"` — maps `X-Deephaven-Username` + a base64-encoded
-  `X-Deephaven-Private-Key` header (the contents of a Deephaven
-  `priv-<keyname>.base64.txt` file) to a `PrivateKeyCredentials`. The session
-  factory authenticates with `SessionManager.private_key(key_bytes)`.
+- `"password"` — builds a `PasswordCredentials` from `username`
+  plus `password` (with `${env:NAME}` templating recommended for the
+  password value rather than inlining it). At session-creation time
+  the session factory authenticates with
+  `SessionManager.password(username, password)`.
+- `"private_key"` — builds a `PrivateKeyCredentials` from `key_text`
+  (typically `"${file:/path/to/key.pem}"` so the templating engine
+  reads the PEM contents at config-load time). The session factory
+  authenticates with `SessionManager.private_key(key_text)`.
 
-**Request headers recognized by the middleware:**
-
-| Header | Backend | Required | Description |
-|--------|---------|----------|-------------|
-| `X-Deephaven-Username` | both | yes | Deephaven username. |
-| `X-Deephaven-Password` | password | yes | Cleartext Deephaven password. The client is responsible for using TLS. |
-| `X-Deephaven-Effective-User` | password | optional | Only honored when `auth.allow_effective_user=true`. |
-| `X-Deephaven-Private-Key` | private_key | yes | Base64-encoded contents of the Deephaven private keypair file. |
+The `anonymous`, `psk`, and `custom` kinds are community-only and
+are rejected on enterprise systems.
 
 **Credential lifecycle:**
 
-- Credentials flow from HTTP headers → auth middleware → per-MCP-session
-  `EnterpriseSessionRegistry`. The first tool call binds the credentials
-  to the registry, which then lazily builds a
-  `CorePlusSessionFactoryManager` authenticated with those credentials.
-- Credential binding is idempotent for the lifetime of a single MCP
-  session: subsequent requests with the same credentials reuse the
-  existing factory; a request whose credentials fingerprint differs from
-  the bound one is rejected (the client must open a new MCP session).
-- The server never writes credentials to disk; in-memory copies live only
-  inside the factory manager and are cleared when the MCP session is
-  closed or times out (`mcp_session_idle_timeout_seconds`).
+- Credentials are validated and embedded into the per-system
+  `EnterpriseSystemConfig` at startup; the corresponding
+  `EnterpriseSessionRegistry` uses them to build its
+  `CorePlusSessionFactoryManager` and start its discovery task.
+- Credentials are not refreshed at runtime. To pick up an updated
+  `${env:NAME}` value or rotate a private-key file, restart the
+  systems server.
+- The server never writes credentials to disk; in-memory copies live
+  only inside the per-system factory manager and are cleared when
+  the server shuts down. All `SecretStr` fields redact under
+  `model_dump(context={"redact": True})` and in `repr`.
 
 **Security Considerations:**
 
-- The enterprise server **must** be deployed behind TLS (either via a
-  reverse proxy or a TLS-terminating load balancer). The `X-Deephaven-*`
-  headers carry sensitive secrets in cleartext on the wire.
-- The `deephaven_mcp.json` file no longer contains passwords or private
-  keys, but the Community Server's `deephaven_mcp.json` can still carry
-  `auth_token` values and paths to private keys. Protect those files with
-  strict filesystem permissions (e.g., `chmod 600 path/to/your/deephaven_mcp.json`
-  on Unix-like systems).
+- HTTP-transport requests are gated by the systems server's PSK
+  (`X-Deephaven-PSK`) and bind only to loopback. Production deployments
+  terminate TLS at a reverse proxy on the same host — see
+  [HTTP Transport Security](#http-transport-security).
+- Per-system files contain credentials (or the names of env vars or
+  files that hold them). Lock down `$DH_MCP_CONFIG_DIR` with
+  `chmod 700` and per-file `chmod 600`; the startup permission audit
+  fails fast otherwise.
 
 **File Paths:**
 
-Ensure any file paths specified in the configuration (e.g., for TLS certificates) are absolute and accessible by the user/process running the MCP Community Server.
+Ensure any file paths referenced via `${file:...}` (private-key
+files, TLS PEM bundles) are absolute and readable by the user
+running the systems server.
 
-#### Running the Enterprise Server
+#### Running the Systems Server
 
-Each `dh-mcp-enterprise-server` instance manages exactly one DHE system. Run one instance per system you need to expose.
+A single `dh-mcp-systems-server` process hosts every configured
+Community session and Enterprise system. Choose your transport:
 
-##### Enterprise Server CLI Arguments
-
-| Argument | Description | Default |
-|----------|-------------|---------|
-| `-c, --config` | Path to the flat DHE config file (overrides `DH_MCP_CONFIG_FILE` env var) | env var |
-| `--host` | Bind host (overrides `MCP_HOST` env var) | `127.0.0.1` |
-| `--port` | Port to listen on (overrides `MCP_PORT` env var) | `8002` |
-| `-h, --help` | Show help message | - |
-
-> **Note:** The Enterprise Server also accepts the transport-security
-> CLI flags documented in [Transport Security → CLI flags / env
-> vars](#cli-flags--env-vars) (`--ssl-keyfile`, `--ssl-certfile`,
-> `--trust-forwarded-proto`, `--forwarded-allow-ips`,
-> `--allow-cleartext`). They are required when binding to a
-> non-loopback host.
-
-> **Note:** The Enterprise Server is HTTP-only (streamable-http). Run multiple instances on different ports for different systems.
-
-```sh
-# Single enterprise system (default port 8002) — run in background, log to named file
-DH_MCP_CONFIG_FILE=/path/to/prod_enterprise.json uv run dh-mcp-enterprise-server >dh-mcp-enterprise-prod.log 2>&1 &
-
-# Multiple systems on different ports
-MCP_PORT=8002 DH_MCP_CONFIG_FILE=/path/to/prod.json uv run dh-mcp-enterprise-server >dh-mcp-enterprise-prod.log 2>&1 &
-MCP_PORT=8012 DH_MCP_CONFIG_FILE=/path/to/staging.json uv run dh-mcp-enterprise-server >dh-mcp-enterprise-staging.log 2>&1 &
-```
-
-Connect to `http://127.0.0.1:8002/mcp` (or the port you chose) from your MCP client.
-
-To stop the server: `pkill -f dh-mcp-enterprise-server` or `kill $(lsof -ti tcp:8002)`
-
-#### Running the Community Server
-
-Follow these steps to start the Community Server:
-
-1. **Start a Deephaven Core worker**:
-
-      ```sh
-      # For anonymous authentication (no MCP auth needed)
-      uv run scripts/run_deephaven_test_server.py --table-group simple
-      
-      # OR for PSK authentication (if your MCP config uses auth tokens)
-      uv run scripts/run_deephaven_test_server.py --table-group simple --auth-token Deephaven123
-      ```
-
-      This script is located at [`../scripts/run_deephaven_test_server.py`](../scripts/run_deephaven_test_server.py).
-
-2. **Start the MCP Community Server**:
-
-   ```sh
-   DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json uv run dh-mcp-community-server
-   ```
-
-   The Community Server uses **streamable-http** transport exclusively. It listens on `127.0.0.1:8003` by default.
-
-##### Community Server CLI Arguments
+##### Systems Server CLI Arguments
 
 | Argument | Description | Default |
 |----------|-------------|---------|
-| `-c, --config` | Path to config file (overrides `DH_MCP_CONFIG_FILE` env var) | env var |
-| `--host` | Bind host (overrides `MCP_HOST` env var) | `127.0.0.1` |
-| `--port` | Port to listen on (overrides `MCP_PORT` env var) | `8003` |
+| `--transport {stdio,http}` | Transport to expose. `stdio` carries no authentication and is intended for AI clients launching the server as a subprocess. `http` serves streamable-HTTP gated by `server.json`'s PSK. | `stdio` |
+| `--host` | HTTP transport bind address. Must be a loopback host (`127.0.0.1`, `::1`, or `localhost`). Ignored under `stdio`. | `127.0.0.1` |
+| `--port` | HTTP transport TCP port (overrides `server.json`'s `port` field). Ignored under `stdio`. | `8000` |
+| `--config-dir` | Override for the configuration directory (overrides `DH_MCP_CONFIG_DIR`). | platform default |
 | `-h, --help` | Show help message | - |
 
-> **Note:** The Community Server also accepts the transport-security
-> CLI flags documented in [Transport Security → CLI flags / env
-> vars](#cli-flags--env-vars) (`--ssl-keyfile`, `--ssl-certfile`,
-> `--trust-forwarded-proto`, `--forwarded-allow-ips`,
-> `--allow-cleartext`). They are required when binding to a
-> non-loopback host.
-
-> **Note:** The Community Server is HTTP-only (streamable-http). Host and port can be set via `MCP_HOST` / `MCP_PORT` environment variables or `--host` / `--port` CLI arguments.
+> **Note:** Non-loopback `--host` values are rejected at startup — the
+> HTTP transport never uses TLS itself. Production deployments
+> terminate TLS at a reverse proxy on the same host (see
+> [HTTP Transport Security](#http-transport-security)).
 
 ```sh
-# Basic startup — run in background, log to named file (default port 8003)
-DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json uv run dh-mcp-community-server >dh-mcp-community.log 2>&1 &
+# stdio (default; no flags needed when launched as an AI-client subprocess)
+uv run dh-mcp-systems-server
 
-# Custom host and port via CLI arguments
-DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json uv run dh-mcp-community-server --host 0.0.0.0 --port 8010 >dh-mcp-community.log 2>&1 &
+# HTTP transport on default port 8000 — run in background, log to named file
+export DH_MCP_PSK='your-shared-secret'
+uv run dh-mcp-systems-server --transport http >dh-mcp-systems.log 2>&1 &
 
-# Custom host and port via environment variables
-MCP_HOST=0.0.0.0 MCP_PORT=8010 DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json uv run dh-mcp-community-server >dh-mcp-community.log 2>&1 &
+# Custom config directory and port
+DH_MCP_CONFIG_DIR=/etc/deephaven/mcp uv run dh-mcp-systems-server \
+    --transport http --port 8010 >dh-mcp-systems.log 2>&1 &
 ```
 
-To stop the server: `pkill -f dh-mcp-community-server` or `kill $(lsof -ti tcp:8003)`
+Connect HTTP-transport MCP clients to `http://127.0.0.1:8000/mcp`
+(or the port you chose) and have them send `X-Deephaven-PSK: <psk>`
+on every request.
 
-#### Using the Community Server
+To stop the server: `pkill -f dh-mcp-systems-server` or
+`kill $(lsof -ti tcp:8000)`.
 
-Once running, you can interact with the Community Server in several ways:
+#### Using the Systems Server
+
+Once running, you can interact with the Systems Server in several ways:
 
 - Connect using [MCP Inspector](#mcp-inspector-with-community-server)
-- Use with [Claude Desktop](#claude-desktop)
+- Use with [Claude Desktop](#claude-desktop) (stdio is simplest; HTTP via `mcp-proxy` is also supported)
 - Run the [Community Server Test Client](#community-server-test-client) script
 - Build your own MCP client application
 
@@ -1161,20 +1006,19 @@ The Community Server uses a consistent session identifier format across all MCP 
 Where:
 
 - `type`: Either `"community"` or `"enterprise"`
-- `source`: For community sessions, `"config"` for static (configuration-file) sessions or `"dynamic"` for dynamically created sessions; for enterprise sessions, the server's configured `system_name` (e.g. `"prod"`, `"staging"`)
+- `source`: For community sessions, always the literal `"community"` (the umbrella system name; the static-vs-dynamic distinction lives on the manager's `origin` field, not in the id). For enterprise sessions, the server's configured `system_name` (e.g. `"prod"`, `"staging"`).
 - `session_name`: The specific session name within that source
 
 For enterprise sessions, `source` equals the server's configured `system_name`, which is embedded in the session ID to support multiple enterprise servers running simultaneously without ID collisions. Each enterprise server validates that the `system_name` component of an incoming session ID matches its own, providing clear errors when a session ID from one server is accidentally sent to another.
 
 **Examples**:
 
-- `"community:config:my_session"` - A static community session named "my_session" defined in the configuration file
-- `"community:dynamic:my_session"` - A dynamically created community session named "my_session"
+- `"community:community:my_session"` - A community session named "my_session" (the middle segment is the umbrella system name; the static-vs-dynamic distinction lives on the manager's `origin` field, not in the id)
 - `"enterprise:prod:analytics_session"` - An enterprise session named "analytics_session" on the `"prod"` enterprise system
 
 **Terminology Clarification**:
 
-- **Worker**: A Deephaven Community Core instance (configured under the top-level `"sessions"` key)
+- **Worker**: A Deephaven Community Core instance (configured per-file under `community/sessions/<name>.json`)
 - **System**: A Deephaven Enterprise instance/factory (managed by the DHE server; identified by the configured `system_name` value in session IDs)
 - **Session**: A specific connection/session within a worker or system
 - **Session ID**: The fully qualified identifier used by MCP tools to reference a specific session
@@ -1182,6 +1026,8 @@ For enterprise sessions, `source` equals the server's configured `system_name`, 
 All MCP tools that interact with Deephaven instances use the `session_id` parameter with this format, replacing the older `session_name` parameter from previous versions.
 
 #### Community Server Tools
+
+> **Note:** This describes the community-side tools exposed by the unified `dh-mcp-systems-server`.
 
 The Community Server exposes the following MCP tools, each designed for a specific aspect of Deephaven worker management:
 
@@ -1212,8 +1058,8 @@ The two MCP servers together provide the following tools. Each tool is available
 
 | Tool | Category | Purpose | Server |
 |------|----------|---------|--------|
-| [`mcp_reload`](#mcp_reload) | System | Reload configuration and clear sessions | Both |
-| [`enterprise_systems_status`](#enterprise_systems_status) | System | Check status of enterprise systems | Enterprise |
+| [`list_systems`](#list_systems) | System | List every configured Community session and Enterprise system | Both |
+| [`enterprise_systems_status`](#enterprise_systems_status) | System | Check status of an enterprise system | Enterprise |
 | [`sessions_list`](#sessions_list) | Session Management | List all active sessions | Both |
 | [`session_details`](#session_details) | Session Management | Get detailed session information | Both |
 | [`session_community_create`](#session_community_create) | Session Management | Create new community session | Community |
@@ -1244,9 +1090,10 @@ The two MCP servers together provide the following tools. Each tool is available
 
 ### System Tools
 
-#### `mcp_reload`
+#### `list_systems`
 
-**Purpose**: Atomically reload configuration and clear all active session cache.
+**Purpose**: List every Deephaven system the systems server is
+configured to serve.
 
 **Parameters**: None
 
@@ -1254,7 +1101,12 @@ The two MCP servers together provide the following tools. Each tool is available
 
 ```json
 {
-  "success": true
+  "success": true,
+  "systems": [
+    { "name": "community", "type": "community" },
+    { "name": "prod",      "type": "enterprise" },
+    { "name": "staging",   "type": "enterprise" }
+  ]
 }
 ```
 
@@ -1268,7 +1120,17 @@ On error:
 }
 ```
 
-**Description**: This tool reloads the Deephaven session configuration from the file specified in `DH_MCP_CONFIG_FILE` and clears the calling MCP client's session registry. It uses dependency injection via the Context to access the config manager, `McpSessionManager`, and a coroutine-safe reload lock. The operation is protected by the provided lock to prevent concurrent reloads. Only the calling client's Deephaven connections are reset; other MCP client sessions are unaffected. The registry is lazily recreated with the new configuration on the next tool call.
+**Description**: Returns a discovery list of every Community session
+and Enterprise system the multiplexed `dh-mcp-systems-server` was
+configured with at startup. The umbrella Community side (when
+`community/sessions/` is non-empty) appears as a single
+`("community", "community")` entry; each file under
+`enterprise/systems/` becomes one `(<name>, "enterprise")` entry.
+Useful for AI agents to discover which `system` arguments are valid
+for enterprise-targeted tools.
+
+> **Note:** The previous `mcp_reload` tool has been removed.
+> Configuration changes require a server restart.
 
 #### `enterprise_systems_status`
 
@@ -1280,7 +1142,7 @@ On error:
 
 **Returns**:
 
-```json
+```json5
 {
   "success": true,
   "systems": [
@@ -1293,8 +1155,9 @@ On error:
         "system_name": "prod",
         "connection_json_url": "https://enterprise.example.com/iris/connection.json",
         "auth": {
-          "backends": ["password", "private_key"],
-          "allow_effective_user": false
+          "type": "password",
+          "username": "iris",
+          "password": "[REDACTED]"
         }
       }
     }
@@ -1315,6 +1178,8 @@ On error:
 **Description**: This tool provides status information about the configured enterprise system. Status values include "ONLINE", "OFFLINE", "UNAUTHORIZED", "MISCONFIGURED", or "UNKNOWN". Sensitive configuration fields are redacted for security.
 
 #### Enterprise Session Tools
+
+> **Note:** This describes the enterprise-side tools exposed by the unified `dh-mcp-systems-server`.
 
 ##### `session_enterprise_create`
 
@@ -1362,11 +1227,11 @@ On error:
 }
 ```
 
-**Description**: This tool creates a new enterprise session on the configured enterprise system and registers it in the calling MCP client's per-session registry for future use. The session is configured with either provided parameters or defaults from the enterprise system configuration. Parameter resolution follows the priority: tool parameter → config default → API default.
+**Description**: This tool creates a new enterprise session on the configured enterprise system and registers it in the shared registry for future use. The session is configured with either provided parameters or defaults from the enterprise system configuration. Parameter resolution follows the priority: tool parameter → config default → API default.
 
 ##### `session_enterprise_delete`
 
-**Purpose**: Delete an enterprise session by terminating it and removing it from the calling MCP client's session registry.
+**Purpose**: Delete an enterprise session by terminating it and removing it from the shared session registry.
 
 **Parameters**:
 
@@ -1403,7 +1268,7 @@ Cross-server error:
 }
 ```
 
-**Description**: This tool permanently terminates an enterprise session and removes it from the calling MCP client's session registry. The session cannot be recovered after deletion. Use with caution as any unsaved work in the session will be lost.
+**Description**: This tool permanently terminates an enterprise session and removes it from the shared session registry (visible to every connected MCP client). The session cannot be recovered after deletion. Use with caution as any unsaved work in the session will be lost.
 
 #### Persistent Query (PQ) Management Tools
 
@@ -1803,6 +1668,8 @@ Persistent Queries (PQs) are recipes for creating and managing long-running work
 
 #### Community Session Tools
 
+> **Note:** This describes the community-side tools exposed by the unified `dh-mcp-systems-server`.
+
 ##### `session_community_create`
 
 **Purpose**: Create a new dynamically launched Deephaven Community session via Docker or Python.
@@ -1823,14 +1690,14 @@ Persistent Queries (PQs) are recipes for creating and managing long-running work
 - `extra_jvm_args` (optional, array): Additional JVM arguments
 - `environment_vars` (optional, object): Environment variables as key-value pairs
 
-**Note**: Startup parameters (`startup_timeout_seconds`, `startup_check_interval_seconds`, `startup_retries`) are configured via `deephaven_mcp.json` defaults only and are not exposed as tool parameters.
+**Note**: Startup parameters (`startup_timeout_seconds`, `startup_check_interval_seconds`, `startup_retries`) are configured via the `community/settings.json` `session_creation.defaults` block only and are not exposed as tool parameters.
 
 **Returns**:
 
-```json
+```json5
 {
   "success": true,
-  "session_id": "community:dynamic:my-session",
+  "session_id": "community:community:my-session",
   "session_name": "my-session",
   "connection_url": "http://localhost:45123",
   "auth_type": "io.deephaven.authentication.psk.PskAuthenticationHandler",
@@ -1858,14 +1725,14 @@ On error:
 
 **Parameters**:
 
-- `session_id` (required, string): Full session identifier in format `"community:dynamic:{session_name}"`. Only dynamically created sessions (source `"dynamic"`) can be deleted; passing a config-based session ID (source `"config"`) returns a clear error.
+- `session_id` (required, string): Full session identifier in format `"community:community:{session_name}"`. Only dynamically created sessions (manager `origin` `DYNAMIC`) can be deleted; passing a static session ID (manager `origin` `STATIC`) returns a clear error.
 
 **Returns**:
 
 ```json
 {
   "success": true,
-  "session_id": "community:dynamic:my-session",
+  "session_id": "community:community:my-session",
   "session_name": "my-session"
 }
 ```
@@ -1875,7 +1742,7 @@ On error:
 ```json
 {
   "success": false,
-  "error": "Session 'community:dynamic:nonexistent' not found",
+  "error": "Session 'community:community:nonexistent' not found",
   "isError": true
 }
 ```
@@ -1892,7 +1759,7 @@ On error:
 
 **Returns**:
 
-```json
+```json5
 {
   "success": true,
   "auth_type": "PSK",
@@ -1931,15 +1798,17 @@ On error:
   "success": true,
   "sessions": [
     {
-      "session_id": "community:config:session_name",
-      "type": "COMMUNITY",
-      "source": "config",
+      "session_id": "community:community:session_name",
+      "type": "community",
+      "system": "community",
+      "origin": "static",
       "session_name": "session_name"
     },
     {
       "session_id": "enterprise:staging_env:analytics_session",
-      "type": "ENTERPRISE",
-      "source": "staging_env",
+      "type": "enterprise",
+      "system": "staging_env",
+      "origin": null,
       "session_name": "analytics_session"
     }
   ]
@@ -1973,9 +1842,10 @@ On error:
 {
   "success": true,
   "session": {
-    "session_id": "community:config:session_name",
-    "type": "COMMUNITY",
-    "source": "config",
+    "session_id": "community:community:session_name",
+    "type": "community",
+    "system": "community",
+    "origin": "static",
     "session_name": "session_name",
     "available": true,
     "liveness_status": "ONLINE",
@@ -2501,7 +2371,7 @@ On error:
 ```json
 {
   "success": true,
-  "session_id": "community:config:session_name",
+  "session_id": "community:community:session_name",
   "table_names": ["table1", "table2", "table3"],
   "count": 3
 }
@@ -2538,37 +2408,37 @@ uv run scripts/run_deephaven_test_server.py --table-group {simple|financial|all}
 
 ##### Community Server Test Client
 
-A Python script ([`../scripts/mcp_community_test_client.py`](../scripts/mcp_community_test_client.py)) is available for exercising the Community MCP tools and validating server functionality without setting up a full MCP Inspector deployment. The script connects to a running server, lists all available tools, and demonstrates calling each tool with appropriate arguments.
+A Python script ([`../scripts/mcp_systems_test_client.py`](../scripts/mcp_systems_test_client.py)) is available as a smoke-test client for the systems MCP server. It connects to a running server, lists all registered tools, and calls a representative read-only subset. Exits with code `0` on full success and `1` if any tool call raised — usable as a CI smoke gate or post-deploy ping.
 
 ```sh
-uv run scripts/mcp_community_test_client.py --transport {sse|stdio|streamable-http} [OPTIONS]
+uv run scripts/mcp_systems_test_client.py --transport {stdio|streamable-http} [OPTIONS]
 ```
 
 **Key Arguments:**
 
-- `--transport`: Choose `streamable-http` (default), `sse`, or `stdio`
-- `--env`: Pass environment variables as `KEY=VALUE` (e.g., `DH_MCP_CONFIG_FILE=/path/to/config.json`). Can be repeated for multiple variables
-- `--url`: URL for HTTP server (default: `http://127.0.0.1:8003/mcp`)
-- `--stdio-cmd`: Command to launch a server as a subprocess (note: `dh-mcp-community-server` is HTTP-only and does not support stdio; this option is for custom stdio-capable servers)
+- `--transport`: Choose `streamable-http` (default) or `stdio`
+- `--env`: Pass environment variables as `KEY=VALUE` (e.g., `DH_MCP_CONFIG_DIR=/path/to/your/config`). Can be repeated for multiple variables
+- `--url`: URL for HTTP transport. Default `http://127.0.0.1:8000/mcp` (match the systems server's port — default `8000`)
+- `--stdio-cmd`: Command to launch the server as a subprocess (default `uv run dh-mcp-systems-server --transport stdio`)
+- `--psk`: Pre-shared key for HTTP transport, sent in the `X-Deephaven-PSK` header (required when the server has a PSK configured)
+- `--session-id`: Fully qualified community session id to exercise. Default `community:community:default`
+- `--strict`: Abort on the first failed tool call (otherwise the script tries every tool and reports the total at the end)
 
 **Example Usage:**
 
 ```sh
-# Connect to running streamable-http server (default)
-uv run scripts/mcp_community_test_client.py --transport streamable-http --url http://127.0.0.1:8003/mcp
+# Smoke-test a running streamable-http server (default)
+uv run scripts/mcp_systems_test_client.py --psk your-psk
+
+# CI gate (exit 1 on any tool failure)
+uv run scripts/mcp_systems_test_client.py --psk your-psk --strict
 ```
 
 > ⚠️ **Prerequisites:**
 >
-> - You must have a test Deephaven server running (see [Running the Community Server](#running-the-community-server))
-> - The MCP Community server must be running before using the test client
+> - The systems server must be running (see [Running the Systems Server](#running-the-systems-server))
+> - For HTTP transport, the server is gated by `PSKMiddleware`; pass the configured PSK via `--psk`
 > - For troubleshooting connection issues, see [Common Errors & Solutions](#common-errors--solutions)
-
-> 💡 **Tips:**
->
-> - Streamable-http (default) provides optimal performance and scalability
-> - Environment variables can be set in your shell or passed via `--env` parameter
-> - For multiple environment variables, use `--env` multiple times: `--env VAR1=value1 --env VAR2=value2`
 
 ---
 
@@ -2578,7 +2448,7 @@ uv run scripts/mcp_community_test_client.py --transport streamable-http --url ht
 
 The Deephaven MCP Docs Server is a specialized MCP server that provides a single tool for conversational chat about Deephaven documentation.
 
-- **HTTP-only**: Uses streamable-http transport exclusively (no SSE or stdio modes)
+- **HTTP-only**: Uses streamable-http transport exclusively (no stdio mode)
 - **LLM**: Uses the [Inkeep](https://inkeep.com/) `inkeep-context-expert` model (an OpenAI-compatible endpoint) with domain-specific knowledge of Deephaven documentation
 - **System Prompting**: Uses a specialized system prompt that instructs the model to answer with reference to Deephaven documentation
 - **Error Resilience**: Implements robust error handling with custom `OpenAIClientError` for detailed diagnostics
@@ -2735,7 +2605,7 @@ curl http://localhost:8001/health
 - **Availability**: Available when the server is running (streamable-http only)
 - **Authentication**: No authentication or parameters required
 - **Deployment**: Intended for use as a liveness or readiness probe in Kubernetes, Cloud Run, or similar environments
-- **Note**: This endpoint is only available in the Docs Server, not in the Systems Server
+- **Note**: This endpoint is available on both MCP servers in this repo (Systems and Docs). On the systems server, `/health` is added to `PSKMiddleware`'s `bypass_paths`, so external probes do not need to share the PSK (see [Transport Security → Health-check endpoint](#health-check-endpoint)).
 
 #### Docs Server Test Components
 
@@ -2747,12 +2617,10 @@ A Python script is provided for testing the MCP Docs tool and validating server 
 
 **Arguments:**
 
-- `--transport`: Choose `streamable-http` or `stdio` (default: `streamable-http`)
-- `--env`: Pass environment variables as `KEY=VALUE` (can be repeated; for stdio mode)
-- `--url`: URL for HTTP server (default: `http://localhost:8001/mcp`)
-- `--stdio-cmd`: Command to launch stdio server (for testing only — the production `dh-mcp-docs-server` is HTTP-only)
-- `--prompt`: Prompt/question to send to the docs_chat tool (required)
+- `--url`: streamable-http server URL (default: `http://localhost:8001/mcp`)
+- `--prompt`: Prompt/question to send to the docs_chat tool (default: `"How do I use Deephaven tables?"`)
 - `--history`: Optional chat history (JSON string) for multi-turn conversations
+- `--token`: Optional Bearer token sent in the `Authorization` header
 
 **Example Usage:**
 
@@ -2796,10 +2664,11 @@ The [MCP Inspector](https://github.com/modelcontextprotocol/inspector) is a web-
    uv run scripts/run_deephaven_test_server.py --table-group simple --auth-token Deephaven123
    ```
 
-2. **Start the MCP Community server** (in another terminal):
+2. **Start the MCP Systems server** (in another terminal):
 
    ```sh
-   DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json uv run dh-mcp-community-server
+   export DH_MCP_PSK='your-shared-secret'   # only if using --transport http
+   uv run dh-mcp-systems-server --transport http --port 8000
    ```
 
 3. **Start the MCP Inspector** (in a third terminal):
@@ -2810,8 +2679,8 @@ The [MCP Inspector](https://github.com/modelcontextprotocol/inspector) is a web-
 
 4. **Connect to the MCP server**:
    - Open the Inspector in your browser (URL shown in terminal, typically `http://localhost:6274`)
-   - In the Inspector UI, select "Connect" and enter the server URL: `http://127.0.0.1:8003/mcp`
-   - Explore and invoke tools like `mcp_reload`, `sessions_list`, `session_tables_schema` and `session_script_run`
+   - In the Inspector UI, select "Connect" and enter the server URL: `http://127.0.0.1:8000/mcp` (and add the request header `X-Deephaven-PSK: <psk>` to match `server.json`).
+   - Explore and invoke tools like `list_systems`, `sessions_list`, `session_tables_schema` and `session_script_run`.
 
 #### MCP Inspector with Docs Server
 
@@ -2842,15 +2711,15 @@ Claude Desktop is very useful for debugging and interactively exploring MCP serv
 2. **Navigate to `Settings > Developer > Edit Config`.**
 3. **Edit the `claude_desktop_config.json` file.**
 4. **Add your MCP server under the `mcpServers` section.**
-   - All three servers (Community, Enterprise, Docs) are HTTP-only. Start them first, then configure Claude Desktop using `mcp-proxy` as a stdio bridge (Claude Desktop does not support HTTP transport natively). `mcp-proxy` is **not** a dependency of this project; install it separately with `uv tool install --python-preference managed mcp-proxy`.
+   - Both servers (Systems, Docs) are HTTP-only. Start them first, then configure Claude Desktop using `mcp-proxy` as a stdio bridge (Claude Desktop does not support HTTP transport natively). `mcp-proxy` is **not** a dependency of this project; install it separately with `uv tool install --python-preference managed mcp-proxy`.
    - Example configuration:
 
-     ```json
+     ```json5
      {
        "mcpServers": {
-         "mcp-community": {
+         "mcp-systems": {
            "command": "mcp-proxy",
-           "args": ["--transport=streamablehttp", "http://127.0.0.1:8003/mcp"]
+           "args": ["--transport=streamablehttp", "http://127.0.0.1:8000/mcp"]
          },
          "mcp-docs": {
            "command": "mcp-proxy",
@@ -2866,11 +2735,18 @@ Claude Desktop is very useful for debugging and interactively exploring MCP serv
    > INKEEP_API_KEY=your-inkeep-api-key uv run dh-mcp-docs-server
    > ```
 
-   > **Note:** The Community Server must already be running before Claude Desktop connects. Start it with:
+   > **Note:** When using HTTP transport, the Systems Server must
+   > already be running before Claude Desktop connects. Start it with:
    >
    > ```sh
-   > DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json uv run dh-mcp-community-server
+   > export DH_MCP_PSK='your-shared-secret'
+   > uv run dh-mcp-systems-server --transport http --port 8000
    > ```
+   >
+   > For stdio transport, no separate process is needed — Claude
+   > Desktop launches the server as a subprocess (set
+   > `"command": "dh-mcp-systems-server"` and
+   > `"args": ["--transport", "stdio"]` in your MCP block).
 
 5. **Save the configuration and restart Claude Desktop if needed.**
 
@@ -2886,7 +2762,7 @@ For troubleshooting Claude Desktop MCP integration, log files are located at:
 
 ### mcp-proxy
 
-[mcp-proxy](https://github.com/modelcontextprotocol/mcp-proxy) enables MCP clients that only support stdio to connect to servers using HTTP-based transports (streamable-http or SSE). This is useful for clients that do not natively support streamable-http. `mcp-proxy` is **not** a dependency of this project; install it separately with `uv tool install --python-preference managed mcp-proxy` (this places `mcp-proxy` on your PATH).
+[mcp-proxy](https://github.com/modelcontextprotocol/mcp-proxy) enables MCP clients that only support stdio to connect to streamable-HTTP servers. This is useful for clients that do not natively support streamable-HTTP. `mcp-proxy` is **not** a dependency of this project; install it separately with `uv tool install --python-preference managed mcp-proxy` (this places `mcp-proxy` on your PATH).
 
 **Use Cases:**
 
@@ -2895,20 +2771,21 @@ For troubleshooting Claude Desktop MCP integration, log files are located at:
 
 #### mcp-proxy with Community Server
 
-1. Ensure the MCP Community Server is running:
+1. Ensure the MCP Systems Server is running:
 
    ```sh
-   DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json uv run dh-mcp-community-server
+   export DH_MCP_PSK='your-shared-secret'
+   uv run dh-mcp-systems-server --transport http --port 8000
    ```
 
 2. Configure Claude Desktop to launch `mcp-proxy` as a stdio bridge:
 
-   ```json
+   ```json5
    {
      "mcpServers": {
        "deephaven-community": {
          "command": "mcp-proxy",
-         "args": ["--transport=streamablehttp", "http://127.0.0.1:8003/mcp"]
+         "args": ["--transport=streamablehttp", "http://127.0.0.1:8000/mcp"]
        }
      }
    }
@@ -2926,7 +2803,7 @@ For troubleshooting Claude Desktop MCP integration, log files are located at:
 
 2. Configure Claude Desktop to launch `mcp-proxy` as a stdio bridge:
 
-   ```json
+   ```json5
    {
      "mcpServers": {
        "deephaven-docs": {
@@ -2950,11 +2827,11 @@ from deephaven_mcp.mcp_systems_server.server import community
 # Enterprise Server
 from deephaven_mcp.mcp_systems_server.server import enterprise
 
-# Both are plain functions that parse --config, --host, --port, etc. and start the server.
-# The community and enterprise servers are HTTP-only (streamable-http).
-# Typically invoked via the CLI commands:
-#   dh-mcp-community-server
-#   dh-mcp-enterprise-server
+# main() parses --transport, --host, --port, --config-dir, etc. and starts the server.
+# stdio (default) carries no auth; --transport http serves streamable-HTTP gated
+# by server.json's PSK and bound only to loopback.
+# Typically invoked via the CLI command:
+#   dh-mcp-systems-server [--transport stdio|http]
 ```
 
 #### Docs Server Example
@@ -3038,10 +2915,11 @@ Both servers expose their tools through FastMCP, following the Model Context Pro
    uv run scripts/run_deephaven_test_server.py --table-group simple --auth-token Deephaven123
    ```
 
-5. **Run the MCP Community Server** (in another terminal):
+5. **Run the MCP Systems Server** (in another terminal):
 
    ```sh
-   DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json uv run dh-mcp-community-server
+   export DH_MCP_PSK='your-shared-secret'   # only for --transport http
+   uv run dh-mcp-systems-server --transport http --port 8000
    ```
 
 6. **Use the MCP Inspector or test client** to validate your changes.
@@ -3051,14 +2929,17 @@ Both servers expose their tools through FastMCP, following the Model Context Pro
 - **Run the server directly (development mode):**
 
   ```sh
-  DH_MCP_CONFIG_FILE=/path/to/deephaven_mcp.json uv run dh-mcp-community-server
+  # stdio (no auth, simplest for local debugging)
+  uv run dh-mcp-systems-server
+
+  # HTTP transport (requires server.json PSK)
+  export DH_MCP_PSK='your-shared-secret'
+  uv run dh-mcp-systems-server --transport http --port 8000
   ```
 
-  Use the MCP Inspector or test client for interactive debugging. For enterprise development:
-
-  ```sh
-  DH_MCP_CONFIG_FILE=/path/to/enterprise.json uv run dh-mcp-enterprise-server
-  ```
+  Use the MCP Inspector or test client for interactive debugging.
+  Enterprise systems are picked up automatically from
+  `$DH_MCP_CONFIG_DIR/enterprise/systems/`.
 
 - **Interactive Tools:**
   Use the Inspector or the test client for interactive tool calls and debugging during development.
@@ -3148,6 +3029,7 @@ The codebase is organized as follows:
 deephaven-mcp/
 ├── src/
 │   └── deephaven_mcp/      # Main Python package
+│       ├── auth/                # Inbound PSK middleware, outbound credential dataclasses, outbound TLS dataclasses
 │       ├── client/             # Core+ client components
 │       ├── config/             # Configuration models and validators
 │       ├── formatters/         # Data formatting utilities
@@ -3157,6 +3039,7 @@ deephaven-mcp/
 │       ├── __init__.py
 │       ├── _env.py             # Typed env-var helpers (env_str/int/float/bool/required)
 │       ├── _exceptions.py      # Custom exception classes
+│       ├── _health.py          # Canonical /health probe path constant
 │       ├── _logging.py         # Logging configuration
 │       ├── _monkeypatch.py     # Runtime patches
 │       ├── _redaction.py       # Sensitive-value redaction utilities
@@ -3227,9 +3110,9 @@ deephaven-mcp/
 
 **Configuration (`config/`):**
 
-- Custom dict-based configuration validators (no Pydantic dependency)
+- Pydantic v2 schemas built on the project's `StrictSchema` / `RedactableSchema` bases
 - Support for Community and Enterprise session configurations
-- Environment variable integration with security redaction
+- `${env:VAR}` and `${file:PATH}` templating resolved at file-load time, with `SecretStr`-typed fields for sensitive values
 - Comprehensive validation with detailed error messages
 
 **Client (`client/`):**
@@ -3239,13 +3122,23 @@ deephaven-mcp/
 - Protocol buffer integration and session factory management
 - TLS/SSL support with custom certificate handling
 
+**Auth (`auth/`):**
+
+- Authentication primitives for the MCP servers, split into three subpackages
+- `middleware/_psk.py`: `PSKMiddleware`, the Starlette middleware that gates inbound HTTP requests on the shared PSK (`X-Deephaven-PSK` header), with `/health` as a bypass path
+- `credentials/_credentials.py`: outbound credential Pydantic models (`AnonymousCredentials`, `PSKCredentials`, `PasswordCredentials`, `PrivateKeyCredentials`, `CustomTokenCredentials`) forwarded to community and enterprise session-creation entry points
+- `tls/_tls.py`: outbound TLS Pydantic models (`ClientCertificate`, `TlsConfig`) describing optional server-trust material and optional mTLS client identity for community sessions
+
 **Core Utilities**:
 
 - **`openai.py`**: OpenAI client integration with async support and rate limiting
 - **`queries.py`**: Query management and execution framework
 - **`io.py`**: I/O utilities for file operations and data handling
+- **`_env.py`**: Typed environment-variable helpers (`env_str`, `env_int`, `env_float`, `env_bool`, `env_required`). The systems server itself reads only `DH_MCP_CONFIG_DIR` and `PYTHONLOGLEVEL` from the environment; the helpers are used by the docs server and by utility scripts.
 - **`_exceptions.py`**: Custom exception classes for MCP-specific errors
+- **`_health.py`**: Single source of truth for the `/health` probe path
 - **`_logging.py`**: Centralized logging configuration with sensitive data redaction
+- **`_redaction.py`**: Constants and helpers for redacting sensitive values in logs
 
 #### Script References
 
@@ -3254,12 +3147,10 @@ The project includes several utility scripts to help with development and testin
 | Script | Purpose | Usage |
 |--------|---------|-------|
 | [`../scripts/run_deephaven_test_server.py`](../scripts/run_deephaven_test_server.py) | Starts a local Deephaven server for testing | `uv run scripts/run_deephaven_test_server.py --table-group simple [--auth-token TOKEN]` |
-| [`../scripts/mcp_community_test_client.py`](../scripts/mcp_community_test_client.py) | Tests the Community Server tools | `uv run scripts/mcp_community_test_client.py --transport streamable-http --url http://127.0.0.1:8003/mcp` |
+| [`../scripts/mcp_systems_test_client.py`](../scripts/mcp_systems_test_client.py) | Smoke-test client for the systems server (exits 0 on full success, 1 on tool failure) | `uv run scripts/mcp_systems_test_client.py --psk YOUR_PSK` |
 | [`../scripts/mcp_docs_test_client.py`](../scripts/mcp_docs_test_client.py) | Tests the Docs Server chat functionality | `uv run scripts/mcp_docs_test_client.py --prompt "What is Deephaven?"` |
 | [`../scripts/mcp_docs_stress_test.py`](../scripts/mcp_docs_stress_test.py) | Comprehensive stress test for docs server (validates timeout fixes) | `uv run scripts/mcp_docs_stress_test.py` |
-| [`../scripts/mcp_docs_stress_http.py`](../scripts/mcp_docs_stress_http.py) | Stress tests HTTP endpoints (streamable-http or SSE) | `uv run scripts/mcp_docs_stress_http.py --url "http://localhost:8001/mcp"` |
-| [`../scripts/mcp_docs_stress_sse_cancel_queries.py`](../scripts/mcp_docs_stress_sse_cancel_queries.py) | Stress tests streamable-http with query cancellation | `uv run scripts/mcp_docs_stress_sse_cancel_queries.py --url http://localhost:8001/mcp --runs 10` |
-| [`../scripts/mcp_docs_stress_sse_user_queries.py`](../scripts/mcp_docs_stress_sse_user_queries.py) | Stress tests streamable-http with user-defined queries | `uv run scripts/mcp_docs_stress_sse_user_queries.py --url http://localhost:8001/mcp` |
+| [`../scripts/mcp_docs_stress_http.py`](../scripts/mcp_docs_stress_http.py) | Stress tests the streamable-HTTP endpoint with concurrent connections | `uv run scripts/mcp_docs_stress_http.py --url "http://localhost:8001/mcp"` |
 | [`../bin/precommit.sh`](../bin/precommit.sh) | Runs pre-commit code quality checks | `bin/precommit.sh` |
 
 ### Dependencies
@@ -3335,7 +3226,7 @@ uv run scripts/mcp_docs_stress_test.py
 
 #### HTTP Transport Stress Testing
 
-A script is also provided for stress testing the HTTP transports (streamable-http and SSE) for production deployments. This is useful for validating the stability and performance of production or staging deployments under load. The script uses [aiohttp](https://docs.aiohttp.org/) for asynchronous HTTP requests and [aiolimiter](https://github.com/mjpieters/aiolimiter) for rate limiting.
+A script is also provided for stress testing the streamable-HTTP transport for production deployments. This is useful for validating the stability and performance of production or staging deployments under load. The script uses [aiohttp](https://docs.aiohttp.org/) for asynchronous HTTP requests and [aiolimiter](https://github.com/mjpieters/aiolimiter) for rate limiting.
 
 #### Usage Example
 
@@ -3470,11 +3361,10 @@ uv pip install -e ".[dev]"
    - Check for typos in key names or values
 
 3. **HTTP Transport Connection Failures**:
-   - Verify the server is running on the expected port (default: `8003` for community server, `8002` for enterprise server)
+   - Verify the server is running with `--transport http` and listening on the expected port (default: `8000`, override with `--port` or the `port` field in `server.json`)
    - Check for firewall or network issues
-   - Ensure the client is using the correct URL
-   - Community Server: `http://127.0.0.1:8003/mcp`
-   - Enterprise Server: `http://127.0.0.1:8002/mcp`
+   - Ensure the client is using the correct URL: `http://127.0.0.1:8000/mcp` (or whichever `--port` you chose)
+   - Ensure the client sends `X-Deephaven-PSK: <psk>` on every non-`/health` request
 
 4. **Deephaven Worker Connectivity**:
    - Confirm the Deephaven server is running and accessible
@@ -3482,7 +3372,7 @@ uv pip install -e ".[dev]"
    - Check for authentication issues if using secured connections
 
 5. **Environment Variable Problems**:
-   - Make sure `DH_MCP_CONFIG_FILE` points to a valid, readable file
+   - Make sure `DH_MCP_CONFIG_DIR` points to a valid, readable directory (or unset both `DH_MCP_CONFIG_DIR` and `--config-dir` to use the platform default)
    - The value should be an absolute path for reliability across different working directories
    - Environment variables must be set in the shell before starting the server; there is no built-in `.env` file support
 
@@ -3493,10 +3383,10 @@ uv pip install -e ".[dev]"
 
 ### Common Errors & Solutions
 
-1. **Config File Not Found:**
-   - Ensure `DH_MCP_CONFIG_FILE` points to a valid JSON or JSON5 file with absolute path
-   - Example error: `FileNotFoundError: No such file or directory: ...`
-   - Fix: Verify the file path and permissions
+1. **Config Directory Not Found / permissions audit failure:**
+   - Ensure `DH_MCP_CONFIG_DIR` (or `--config-dir`) points to a valid directory containing the expected `community/` and/or `enterprise/` subtrees
+   - Example error: `FileNotFoundError: No such file or directory: ...` or a permission audit failure naming the offending file
+   - Fix: Verify the directory path; on POSIX, `chmod 700` the directory and `chmod 600` each file
 
 2. **Invalid JSON/Schema in Config:**
    - Double-check your Deephaven MCP config file for syntax errors or unsupported fields
@@ -3514,19 +3404,19 @@ uv pip install -e ".[dev]"
    - If using TLS, ensure certificates are valid and trusted
 
 5. **Transport Issues:**
-   - All servers use streamable-http exclusively; verify the server URL (e.g., `http://127.0.0.1:8003/mcp`)
+   - The systems server uses stdio (default) or streamable-http; for HTTP, verify the URL (e.g., `http://127.0.0.1:8000/mcp`)
    - Ensure the server port is open and not firewalled
-   - Verify `MCP_HOST` / `MCP_PORT` env vars or `--host` / `--port` CLI args are set correctly if using non-defaults
+   - Verify the `port` in `server.json` or the `--port` CLI arg matches the URL your client connects to
 
-6. **Transport-Security Startup Refusal / `426 Upgrade Required`:**
-   - **Symptom (startup):** `Refusing to start: server is set to bind to '0.0.0.0' (non-loopback) without any transport-security mechanism enabled.`
-   - **Symptom (runtime):** Requests rejected with HTTP `426 Upgrade Required` and `Upgrade: TLS/1.2, HTTP/1.1` header.
-   - **Cause:** The systems servers reject cleartext non-loopback traffic carrying `X-Deephaven-*` auth headers because those secrets must travel over TLS.
-   - **Fix:** Pick one of the four mechanisms documented in [Transport Security (TLS)](#transport-security-tls):
-     - Enable native TLS with `--ssl-keyfile` + `--ssl-certfile` (or the corresponding `MCP_*` env vars).
-     - Run behind a TLS-terminating reverse proxy and pass `--trust-forwarded-proto` (with `--forwarded-allow-ips` for the proxy's peer CIDRs).
-     - Bind to loopback only (`--host 127.0.0.1`, the default).
-     - Emergency: `--allow-cleartext` (auth headers travel unencrypted; trusted private networks only).
+6. **HTTP transport startup refusal / `401 Unauthorized`:**
+   - **Symptom (startup):** `--host` rejected because it is not a loopback address.
+   - **Symptom (runtime):** Requests rejected with HTTP `401` from `PSKMiddleware`.
+   - **Cause:** The HTTP transport binds only to loopback and requires the `X-Deephaven-PSK` header on every non-`/health` request.
+   - **Fix:** See [HTTP Transport Security](#http-transport-security):
+     - Bind to `127.0.0.1`, `::1`, or `localhost` only.
+     - Make sure `server.json` declares a `psk` value (with optional `${env:NAME}` templating) and that the env var is set if you used the indirection.
+     - Have your MCP client send `X-Deephaven-PSK: <psk>` on every request (the `/health` endpoint is exempt).
+     - To expose the server beyond loopback, terminate TLS at a reverse proxy on the same host and forward to `127.0.0.1:<port>`.
 
 7. **Missing Dependencies:**
    - Ensure all Python dependencies are installed (`uv pip install ".[dev]"`)
@@ -3534,7 +3424,7 @@ uv pip install -e ".[dev]"
 
 8. **Session Errors:**
    - Review logs for session cache or connection errors
-   - Try refreshing the session with the `mcp_reload` tool
+   - Configuration changes require a server restart — the `mcp_reload` tool has been removed.
 
 9. **Development-Specific Issues:**
    - **Test Execution**: Always use `uv run pytest` instead of `pytest` for consistency
@@ -3558,7 +3448,7 @@ uv pip install -e ".[dev]"
 ### Documentation
 
 - [Environment Variables Reference (`docs/ENV.md`)](ENV.md) — full list of env vars recognized by every MCP server in this repo
-- [`docs/UV.md`](UV.md) — project-specific `uv` setup and workflows
+- [`docs/UV.md`](UV.md) — generic `uv` crash course for developers new to the tool
 - [Model Context Protocol (MCP) Specification](https://github.com/modelcontextprotocol/spec)
 - [Deephaven Documentation](https://deephaven.io/docs/)
 - [Inkeep API Documentation](https://inkeep.com/docs)

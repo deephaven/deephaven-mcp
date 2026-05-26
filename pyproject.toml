@@ -35,7 +35,7 @@ dependencies = [
     "fastapi>=0.116.0",         # FastAPI web framework for Docs server
     "uvicorn[standard]>=0.35.0", # ASGI server for FastAPI
     "openai>=1.0.0",            # OpenAI Python SDK for LLM Q&A
-    "pydantic>=2.0.0",          # Data validation and settings
+    "pydantic>=2.6.0",          # Data validation and settings (model_serializer context support)
     # Configuration file parsing
     "json5>=0.9.0",             # JSON5 format support (comments, trailing commas)
     # Structured logging for GCP Cloud Run
@@ -96,8 +96,7 @@ Repository = "https://github.com/deephaven/deephaven-mcp"
 Issues = "https://github.com/deephaven/deephaven-mcp/issues"
 
 [project.scripts]
-dh-mcp-enterprise-server = "deephaven_mcp.mcp_systems_server.server:enterprise"
-dh-mcp-community-server = "deephaven_mcp.mcp_systems_server.server:community"
+dh-mcp-systems-server = "deephaven_mcp.mcp_systems_server.server:main"
 dh-mcp-docs-server = "deephaven_mcp.mcp_docs_server.main:main"
 
 [tool.uv]
@@ -119,7 +118,7 @@ fallback_version = "0.0.0"
 # Black configuration for code formatting
 [tool.black]
 line-length = 88
-target-version = ["py310"]
+target-version = ["py312"]
 
 # Ruff configuration for linting and code quality
 [tool.ruff]

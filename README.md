@@ -18,14 +18,6 @@
 - [Prerequisites](#prerequisites)
 - [Installation & Initial Setup](#installation--initial-setup)
 - [Configuration](#configuration)
-  - [Configuring DHE (Enterprise) Server](#configuring-dhe-enterprise-server)
-  - [Configuring DHC (Community) Server](#configuring-dhc-community-server)
-  - [Security Configuration (Community Server)](#security-configuration-community-server)
-  - [Setting `DH_MCP_CONFIG_FILE`](#setting-dh_mcp_config_file)
-  - [Transport Security (TLS)](#transport-security-tls)
-  - [Environment Variables](#environment-variables)
-  - [Browser Access to Created Sessions](#browser-access-to-created-sessions)
-  - [Applying Configuration Changes](#applying-configuration-changes)
 - [AI Tool Setup](#ai-tool-setup)
 - [Troubleshooting](#troubleshooting)
 - [Contributing](#contributing)
@@ -79,81 +71,94 @@ Choose the quickstart for your Deephaven deployment type:
 Install with [`uv`](https://docs.astral.sh/uv/) (see [Prerequisites](#prerequisites) if you don't have it yet):
 
 ```bash
-uv tool install --python-preference managed "deephaven-mcp[community,enterprise]"
+uv tool install --python-preference managed "deephaven-mcp[community]"
 ```
 
-This places three commands on your PATH — `dh-mcp-community-server`, `dh-mcp-enterprise-server`, and `dh-mcp-docs-server` — with no venv to manage.
+This places `dh-mcp-systems-server` and `dh-mcp-docs-server` on your PATH with no venv to manage. Use `"deephaven-mcp[community,enterprise]"` if you also need Deephaven Enterprise support. For full extras and the venv-based alternative, see [Installation & Initial Setup](#installation--initial-setup).
 
-> **What `--python-preference managed` does**: tells uv to download and use its own Python (stored in `~/.local/share/uv/python/`) rather than any Python on your system. The tool environment is unaffected if your system Python is upgraded, moved, or removed. uv picks the latest Python version compatible with `requires-python` in the package.
->
-> **Where tools are installed**: Scripts land in `~/.local/bin/` (macOS/Linux) or `%LOCALAPPDATA%\uv\bin\` (Windows). The tool environment itself lives under `~/.local/share/uv/tools/deephaven-mcp/` — run `uv tool dir` to find the root.
->
-> **Optional extras**: `[community]` adds Python-based session creation; `[enterprise]` adds DHE connectivity. Both together is the recommended default. For more details, see [Installation & Initial Setup](#installation--initial-setup).
->
-> **For stdio-only AI tools** (e.g. Claude Desktop): also install `mcp-proxy`, which bridges stdio transport to the HTTP servers:
->
-> ```bash
-> uv tool install --python-preference managed mcp-proxy
-> ```
+> **About `--python-preference managed`**: tells `uv` to download and use its own managed Python (under `~/.local/share/uv/python/`) instead of any Python on your system. You do not need to install Python yourself.
 
-#### 2. Create Configuration File
+**For stdio-only AI tools** (e.g. Claude Desktop), also install `mcp-proxy`, which bridges stdio transport to the HTTP servers:
 
-For the Community server, create a file (e.g., `dhc.json`) anywhere on your system:
+```bash
+uv tool install --python-preference managed mcp-proxy
+```
+
+#### 2. Create Configuration Directory
+
+`dh-mcp-systems-server` reads a **directory tree** of small JSON files
+(default `~/.deephaven/ai/config/` on POSIX, `%APPDATA%/Deephaven/ai/config/`
+on Windows). A complete sample tree lives in
+[`config-samples/ai/config/`](config-samples/ai/config/). For a minimal Community-only
+setup, create a single per-session file:
+
+```text
+~/.deephaven/ai/config/
+└── community/
+    └── sessions/
+        └── local.json   # filename stem == session name
+```
 
 ```json5
+// ~/.deephaven/ai/config/community/sessions/local.json
 {
-  // MCP-gate PSK that controls who may connect to the MCP server itself.
-  // Sourced from an env var; set DH_MCP_COMMUNITY_PSK in your shell.
-  "auth": { "psk_env_var": "DH_MCP_COMMUNITY_PSK" },
-  // Community Core session configurations
-  "sessions": {
-    // "local" is a custom name - use any name you want for your sessions
-    "local": {
-      "host": "localhost",           // Server hostname or IP address
-      "port": 10000,                 // Deephaven gRPC port (default: 10000)
-      // Full authentication handler class name (can also use "PSK" shorthand)
-      "auth_type": "io.deephaven.authentication.psk.PskAuthenticationHandler",
-      "auth_token": "YOUR_PASSWORD_HERE"  // Must match your Deephaven server token
-    }
-  },
-  // Optional: Enable MCP tools for creating/deleting sessions on-demand
-  // Useful for temporary workspaces and dynamic testing environments
-  "session_creation": {
-    "defaults": {
-      "launch_method": "python"     // "python" or "docker"
+  "session_name": "local",        // must match the filename stem
+  "host": "localhost",            // Server hostname or IP address
+  "port": 10000,                  // Deephaven gRPC port (default: 10000)
+  "auth": {
+    "credentials": {
+      "type": "psk",
+      "token": "${env:DH_LOCAL_PSK}"   // export DH_LOCAL_PSK=your-token
     }
   }
 }
 ```
 
-> **Security Note**: Since this file contains authentication credentials, set restrictive permissions:
+For on-demand session creation, also add
+`~/.deephaven/ai/config/community/settings.json` with a
+`session_creation` block (see
+[`docs/CONFIGURATION.md`](docs/CONFIGURATION.md)).
+
+> **Security Note**: Lock down the configuration directory — the
+> startup permission audit fails fast otherwise:
 >
 > ```sh
-> chmod 600 dhc.json
+> chmod 700 ~/.deephaven/ai/config
+> chmod 600 ~/.deephaven/ai/config/community/sessions/local.json
 > ```
 
-> **Dynamic Sessions**: The `session_creation` section enables on-demand [Community Core](https://deephaven.io/community/) session creation. Requirements: `deephaven-server` (installed in any Python venv) for the python method, or [Docker](https://www.docker.com/get-started/) for the docker method. See [Community Session Creation Configuration](#community-session-creation-configuration) for details.
+> **Dynamic Sessions**: The `session_creation` section enables on-demand [Community Core](https://deephaven.io/community/) session creation. Requirements: `deephaven-server` (installed in any Python venv) for the python method, or [Docker](https://www.docker.com/get-started/) for the docker method. See [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) for details.
 
-#### 3. Start the Community Server and Configure Your AI Tool
+#### 3. Start the Systems Server and Configure Your AI Tool
 
-Start the Community MCP server in the background (logs go to `dh-mcp-community.log`):
+For desktop AI clients (Claude Desktop, Cursor, ...) the simplest
+option is **stdio** — the client launches the server as a subprocess
+and no port or PSK is involved. No background process is needed.
+
+If you instead want to run the server as a long-lived HTTP service
+(useful when sharing one server across several clients on the same
+host), start it with `--transport http`:
 
 ```bash
-dh-mcp-community-server --config /full/path/to/dhc.json --port 8003 >dh-mcp-community.log 2>&1 &
+export DH_MCP_PSK='your-shared-secret'    # referenced from server.json
+dh-mcp-systems-server --transport http --port 8000 >dh-mcp-systems.log 2>&1 &
 ```
 
-To check logs: `tail -f dh-mcp-community.log`
+To check logs: `tail -f dh-mcp-systems.log`
 
-To stop the server: `pkill -f dh-mcp-community-server`
+To stop the server: `pkill -f dh-mcp-systems-server`
 
-**For Claude Desktop**, open **Claude Desktop** → **Settings** → **Developer** → **Edit Config** and add:
+**For Claude Desktop**, open **Claude Desktop** → **Settings** → **Developer** → **Edit Config** and add (stdio variant; no separate process to start):
 
-```json
+```json5
 {
   "mcpServers": {
-    "deephaven-community": {
-      "command": "mcp-proxy",
-      "args": ["--transport=streamablehttp", "http://127.0.0.1:8003/mcp"]
+    "deephaven-systems": {
+      "command": "dh-mcp-systems-server",
+      "args": ["--transport", "stdio"],
+      "env": {
+        "DH_MCP_CONFIG_DIR": "/full/path/to/your/config"
+      }
     },
     "deephaven-docs": {
       "command": "mcp-proxy",
@@ -163,7 +168,23 @@ To stop the server: `pkill -f dh-mcp-community-server`
 }
 ```
 
-> If your AI tool reports that `mcp-proxy` is not found, locate it with `which mcp-proxy` (macOS/Linux) or `where mcp-proxy` / `Get-Command mcp-proxy` (Windows cmd.exe / PowerShell), and use the full path as the `command` value.
+For an HTTP setup, replace the `deephaven-systems` stanza with one
+that bridges through `mcp-proxy` and forwards the PSK header:
+
+```json5
+{
+  "deephaven-systems": {
+    "command": "mcp-proxy",
+    "args": [
+      "--transport=streamablehttp",
+      "--header", "X-Deephaven-PSK=${DH_MCP_PSK}",
+      "http://127.0.0.1:8000/mcp"
+    ]
+  }
+}
+```
+
+> If `mcp-proxy` is reported missing, see [Setup Instructions by Tool](#setup-instructions-by-tool).
 
 **For other tools**, see the [detailed setup instructions](#setup-instructions-by-tool) below.
 
@@ -195,105 +216,104 @@ Install with [`uv`](https://docs.astral.sh/uv/) (see [Prerequisites](#prerequisi
 uv tool install --python-preference managed "deephaven-mcp[enterprise]"
 ```
 
-This places `dh-mcp-enterprise-server` (and `dh-mcp-community-server`, `dh-mcp-docs-server`) on your PATH with no venv to manage.
+This places `dh-mcp-systems-server` and `dh-mcp-docs-server` on your PATH. Use `"deephaven-mcp[community,enterprise]"` if you also need Community Core support. For full extras and venv alternative, see [Installation & Initial Setup](#installation--initial-setup).
 
-> **Installing both server types?** Use `"deephaven-mcp[community,enterprise]"` instead.
->
-> **Where tools are installed**: Scripts land in `~/.local/bin/` (macOS/Linux) or `%LOCALAPPDATA%\uv\bin\` (Windows). The tool environment lives under `~/.local/share/uv/tools/deephaven-mcp/` — run `uv tool dir` to find the root.
->
-> **For stdio-only AI tools** (e.g. Claude Desktop): also install `mcp-proxy`, which bridges stdio transport to the HTTP servers:
->
-> ```bash
-> uv tool install --python-preference managed mcp-proxy
-> ```
+> **About `--python-preference managed`**: tells `uv` to download and use its own managed Python (under `~/.local/share/uv/python/`) instead of any Python on your system. You do not need to install Python yourself.
 
-#### 2. Create Configuration File
+**For stdio-only AI tools** (e.g. Claude Desktop), also install `mcp-proxy`, which bridges stdio transport to the HTTP servers:
 
-Create a config file (e.g., `dhe.json`) for your enterprise system. Each enterprise server instance manages **one** DHE system.
+```bash
+uv tool install --python-preference managed mcp-proxy
+```
 
-> **Per-request authentication.** The enterprise MCP server does **not**
-> store any user credentials in its config file. The config only tells
-> the server *which* authentication backends to accept. Each MCP client
-> (your AI tool / IDE) must send its own Deephaven credentials in
-> `X-Deephaven-*` HTTP headers on every request. See
-> [Client authentication headers](#client-authentication-headers) below.
+#### 2. Create Configuration Directory
 
-**Typical config — accept both password and private-key auth:**
+Create a per-system file under your configuration directory
+(default `~/.deephaven/ai/config/`). Each enterprise system gets one
+file under `enterprise/systems/`; the filename stem must equal
+`system_name`. The systems server hosts every file it finds.
+
+> **Server-stored credentials.** The systems server holds the
+> credentials needed to talk to the Core+ controller, expressed as a
+> discriminated `auth.credentials` block (`type: "password"` or
+> `type: "private_key"`). Secret material uses templating —
+> `${env:VAR}` reads from an environment variable, `${file:/path}`
+> reads from a file. MCP clients themselves do **not** send
+> per-request Deephaven credentials — HTTP-transport requests are
+> gated by a single PSK in `server.json`.
+
+**Password auth (with the secret read from an env var):**
 
 ```json5
+// ~/.deephaven/ai/config/enterprise/systems/prod.json
 {
-  "system_name": "prod",                                          // A short name for this system
-  "connection_json_url": "https://dhe.example.com/iris/connection.json",  // From your administrator
+  "system_name": "prod",                                          // must match the filename stem
+  "connection_json_url": "https://dhe.example.com/iris/connection.json",
   "auth": {
-    "backends": ["password", "private_key"],                      // Allow either auth method
-    "allow_effective_user": false                                 // Set true to honor X-Deephaven-Effective-User
+    "credentials": {
+      "type": "password",
+      "username": "iris",
+      "password": "${env:DH_PROD_PASSWORD}"   // export DH_PROD_PASSWORD=...
+    }
   }
 }
 ```
 
-**Password-only:**
+**Private-key auth:**
 
 ```json5
+// ~/.deephaven/ai/config/enterprise/systems/prod.json
 {
   "system_name": "prod",
   "connection_json_url": "https://dhe.example.com/iris/connection.json",
-  "auth": { "backends": ["password"] }
+  "auth": {
+    "credentials": {
+      "type": "private_key",
+      "key_text": "${file:/etc/deephaven/prod-key.pem}"
+    }
+  }
 }
 ```
 
-**Private-key only:**
+> **Security Note**: Lock down the configuration directory — the
+> startup permission audit fails fast otherwise:
+>
+> ```sh
+> chmod 700 ~/.deephaven/ai/config
+> chmod 600 ~/.deephaven/ai/config/enterprise/systems/prod.json
+> ```
 
-```json5
-{
-  "system_name": "prod",
-  "connection_json_url": "https://dhe.example.com/iris/connection.json",
-  "auth": { "backends": ["private_key"] }
-}
-```
+#### 3. Start the Systems Server and Configure Your AI Tool
 
-> **Security Note**: Restrict config file permissions: `chmod 600 dhe.json`.
-> Even though this file no longer contains secrets, protecting it prevents
-> an attacker from silently changing `connection_json_url` or loosening
-> `allow_effective_user`.
-
-##### Client authentication headers
-
-Every request your MCP client sends to the enterprise server must carry
-the caller's Deephaven credentials in HTTP headers:
-
-| Header | Used by | Required | Description |
-|--------|---------|----------|-------------|
-| `X-Deephaven-Username` | both | yes | Your Deephaven username. |
-| `X-Deephaven-Password` | password backend | yes (password) | Cleartext Deephaven password. Always send over TLS. |
-| `X-Deephaven-Effective-User` | password backend | optional | Only honored when `allow_effective_user: true` in the server config. |
-| `X-Deephaven-Private-Key` | private_key backend | yes (private_key) | Base64-encoded contents of your Deephaven `priv-<keyname>.base64.txt` keypair file (provided by your IT/security team). |
-
-The enterprise server must be deployed behind TLS — the headers above
-carry secrets in cleartext on the wire. Consult your MCP client's
-documentation for how to inject custom HTTP headers on every request.
-
-#### 3. Start the Enterprise Server and Configure Your AI Tool
-
-Start the Enterprise MCP server in the background (logs go to `dh-mcp-enterprise-prod.log`):
+For desktop AI clients, the systems server runs as a stdio subprocess
+launched by the client — no background process to start. For an
+HTTP deployment:
 
 ```bash
-dh-mcp-enterprise-server --config /full/path/to/dhe.json --port 8002 >dh-mcp-enterprise-prod.log 2>&1 &
+export DH_MCP_PSK='your-shared-secret'
+dh-mcp-systems-server --transport http --port 8000 >dh-mcp-systems.log 2>&1 &
 ```
 
-To check logs: `tail -f dh-mcp-enterprise-prod.log`
+To check logs: `tail -f dh-mcp-systems.log`
 
-To stop the server: `pkill -f dh-mcp-enterprise-server`
+To stop the server: `pkill -f dh-mcp-systems-server`
 
-> **Multiple DHE systems**: Run a separate instance on a different port for each system, with a distinct log file per instance (e.g., `dh-mcp-enterprise-staging.log`).
+> **Multiple DHE systems**: Drop one
+> `~/.deephaven/ai/config/enterprise/systems/<name>.json` per system
+> into the directory — the single `dh-mcp-systems-server` instance
+> hosts them all.
 
-**For Claude Desktop**, open **Claude Desktop** → **Settings** → **Developer** → **Edit Config** and add:
+**For Claude Desktop**, open **Claude Desktop** → **Settings** → **Developer** → **Edit Config** and add (stdio variant):
 
-```json
+```json5
 {
   "mcpServers": {
-    "deephaven-enterprise": {
-      "command": "mcp-proxy",
-      "args": ["--transport=streamablehttp", "http://127.0.0.1:8002/mcp"]
+    "deephaven-systems": {
+      "command": "dh-mcp-systems-server",
+      "args": ["--transport", "stdio"],
+      "env": {
+        "DH_MCP_CONFIG_DIR": "/full/path/to/your/config"
+      }
     },
     "deephaven-docs": {
       "command": "mcp-proxy",
@@ -303,7 +323,22 @@ To stop the server: `pkill -f dh-mcp-enterprise-server`
 }
 ```
 
-> If your AI tool reports that `mcp-proxy` is not found, locate it with `which mcp-proxy` (macOS/Linux) or `where mcp-proxy` / `Get-Command mcp-proxy` (Windows cmd.exe / PowerShell), and use the full path as the `command` value.
+Or, for an HTTP-bridged setup, use:
+
+```json5
+{
+  "deephaven-systems": {
+    "command": "mcp-proxy",
+    "args": [
+      "--transport=streamablehttp",
+      "--header", "X-Deephaven-PSK=${DH_MCP_PSK}",
+      "http://127.0.0.1:8000/mcp"
+    ]
+  }
+}
+```
+
+> If `mcp-proxy` is reported missing, see [Setup Instructions by Tool](#setup-instructions-by-tool).
 
 **For other tools**, see the [detailed setup instructions](#setup-instructions-by-tool) below.
 
@@ -351,29 +386,14 @@ After upgrading, restart your AI tool for changes to take effect.
 
 ## Deephaven MCP Components
 
-### Enterprise Server (`dh-mcp-enterprise-server`)
+### Systems Server (`dh-mcp-systems-server`)
 
-Manages ONE [Deephaven Enterprise](https://deephaven.io/enterprise/) system per server instance. Run multiple instances on different ports to connect to multiple DHE systems simultaneously.
+A single multiplexed binary that hosts every configured Community
+session **and** every Enterprise system in one process. Tools that
+operate on a specific Enterprise system take a `system` argument; PQ
+tools encode the system in the PQ id (form `<system>:<serial>`).
 
-**Key Capabilities:**
-
-- **Enterprise System Status**: Check status of the configured DHE system
-- **Enterprise Session Management**: Create and delete enterprise worker sessions
-- **Persistent Query Management**: Full lifecycle management of enterprise persistent queries (PQs) - create, start, stop, restart, and delete
-- **Catalog Discovery**: Browse the enterprise catalog at table and namespace levels
-- **Table Discovery**: Lightweight table name listing and comprehensive schema retrieval
-- **Table Operations**: Retrieve table schemas, metadata, and actual data with flexible formatting
-- **Script Execution**: Run Python or Groovy scripts on Deephaven sessions
-- **Package Management**: Query installed Python packages in session environments
-- **Configuration Management**: Reload configuration and clear caches
-
----
-
-### Community Server (`dh-mcp-community-server`)
-
-Manages multiple [Deephaven Community Core](https://deephaven.io/community/) sessions in a single server instance.
-
-**Key Capabilities:**
+**Key Capabilities (Community side):**
 
 - **Session Management**: List, monitor, and get detailed status of all configured DHC sessions
 - **Community Session Creation**: Dynamically launch new Community Core sessions via Docker or python with configurable resources
@@ -381,73 +401,73 @@ Manages multiple [Deephaven Community Core](https://deephaven.io/community/) ses
 - **Table Operations**: Retrieve table schemas, metadata, and actual data with flexible formatting
 - **Script Execution**: Run Python or Groovy scripts directly on Deephaven sessions
 - **Package Management**: Query installed Python packages in session environments
-- **Configuration Management**: Dynamically reload and refresh session configurations
+
+**Key Capabilities (Enterprise side):**
+
+- **System Discovery**: List every configured Community session and Enterprise system (`list_systems`)
+- **Enterprise System Status**: Check status of any configured DHE system (`enterprise_systems_status(system)`)
+- **Enterprise Session Management**: Create and delete enterprise worker sessions per system
+- **Persistent Query Management**: Full lifecycle management of enterprise PQs across systems — create, start, stop, restart, modify, delete
+- **Catalog Discovery**: Browse the enterprise catalog at table and namespace levels
+
+> Configuration changes require a server restart — the previous
+> `mcp_reload` tool has been removed.
 
 ---
 
 ## Available MCP Tools
 
-### Enterprise Server Tools
+All tools below are exposed by the single multiplexed
+`dh-mcp-systems-server`. Tools that operate on a specific Enterprise
+system take a required `system` argument; PQ tools encode the system
+in the PQ id (form `<system>:<serial>`).
 
-*System:*
+*System discovery:*
 
-- `enterprise_systems_status` - Get status of the configured DHE system
-- `mcp_reload` - Reload configuration and clear caches
+- `list_systems` - List every configured Community session and Enterprise system as `(name, type)` pairs
+- `enterprise_systems_status(system)` - Get the initialization status / last error of one configured DHE system
 
-*Enterprise Sessions:*
+*Community sessions:*
 
-- `session_enterprise_create` - Create enterprise sessions
-- `session_enterprise_delete` - Delete enterprise sessions
+- `session_community_create` - Dynamically launch Community Core sessions
+- `session_community_delete(session_id)` - Delete a dynamically created session
+- `session_community_credentials(session_id)` - Retrieve session credentials (subject to `security.credential_retrieval_mode`)
+
+*Enterprise sessions:*
+
+- `session_enterprise_create(system, ...)` - Create a worker session in the named DHE system
+- `session_enterprise_delete(session_id)` - Delete an enterprise session
 
 *Persistent Query (PQ) Management:*
 
-- `pq_name_to_id` - Convert PQ name to canonical pq_id
-- `pq_list` - List all persistent queries
-- `pq_details` - Get detailed PQ information
-- `pq_create` - Create new persistent queries
-- `pq_modify` - Modify existing persistent query configuration
-- `pq_start` - Start persistent queries (parallel execution with configurable concurrency)
-- `pq_stop` - Stop running persistent queries (parallel execution with configurable concurrency)
-- `pq_restart` - Restart persistent queries (parallel execution with configurable concurrency)
-- `pq_delete` - Delete persistent queries (parallel execution with configurable concurrency)
+- `pq_name_to_id(system, name)` - Convert a PQ name to its canonical `pq_id`
+- `pq_list(system)` - List all persistent queries in a system
+- `pq_details(pq_id)` - Get detailed PQ information (`pq_id` = `<system>:<serial>`)
+- `pq_create(system, ...)` - Create a new persistent query
+- `pq_modify(pq_id, ...)` - Modify an existing PQ's configuration
+- `pq_start(pq_ids)` - Start PQs (parallel execution with configurable concurrency)
+- `pq_stop(pq_ids)` - Stop running PQs (parallel execution with configurable concurrency)
+- `pq_restart(pq_ids)` - Restart PQs (parallel execution with configurable concurrency)
+- `pq_delete(pq_ids)` - Delete PQs (parallel execution with configurable concurrency)
 
 **Parallel Batch Operations**: When operating on multiple PQs, `pq_start`, `pq_stop`, `pq_restart`, and `pq_delete` execute operations in parallel with a default concurrency limit of 20. This provides near-batch performance (~10x faster for large batches) while maintaining granular per-item error reporting for AI agents. The concurrency limit can be adjusted via the `max_concurrent` parameter to balance performance and server load.
 
-*Catalog Discovery:*
+*Catalog discovery:*
 
-- `catalog_tables_list` - List catalog tables
-- `catalog_namespaces_list` - Browse catalog namespaces
-- `catalog_tables_schema` - Get catalog table schemas
-- `catalog_table_sample` - Sample catalog table data
+- `catalog_tables_list(session_id, ...)` - List catalog tables
+- `catalog_namespaces_list(session_id, ...)` - Browse catalog namespaces
+- `catalog_tables_schema(session_id, ...)` - Get catalog table schemas
+- `catalog_table_sample(session_id, ...)` - Sample catalog table data
 
-*Session & Table Operations:*
-
-- `sessions_list` - List all sessions
-- `session_details` - Get detailed session information
-- `session_tables_list` - List available tables
-- `session_tables_schema` - Get table schema information
-- `session_table_data` - Retrieve table data with formatting options
-- `session_script_run` - Execute Python/Groovy scripts
-- `session_pip_list` - Query installed packages
-
-### Community Server Tools
-
-*Community Sessions:*
-
-- `session_community_create` - Dynamically launch Community Core sessions
-- `session_community_delete` - Delete dynamically created sessions
-- `session_community_credentials` - Retrieve session credentials
-
-*Session & Table Operations:*
+*Session & table operations (any session, community or enterprise):*
 
 - `sessions_list` - List all sessions
-- `session_details` - Get detailed session information
-- `session_tables_list` - List available tables
-- `session_tables_schema` - Get table schema information
-- `session_table_data` - Retrieve table data with formatting options
-- `session_script_run` - Execute Python/Groovy scripts
-- `session_pip_list` - Query installed packages
-- `mcp_reload` - Reload configuration and clear caches
+- `session_details(session_id)` - Get detailed session information
+- `session_tables_list(session_id)` - List available tables
+- `session_tables_schema(session_id, ...)` - Get table schema information
+- `session_table_data(session_id, ...)` - Retrieve table data with formatting options
+- `session_script_run(session_id, ...)` - Execute Python/Groovy scripts
+- `session_pip_list(session_id)` - Query installed packages
 
 > For detailed tool documentation with parameters and examples, see the [Developer & Contributor Guide](docs/DEVELOPER_GUIDE.md).
 
@@ -461,32 +481,22 @@ Connects to Deephaven's documentation knowledge base via [Inkeep](https://inkeep
 
 ## Architecture Diagrams
 
-### Enterprise Server Architecture
+### Systems Server Architecture
 
 ```mermaid
 graph TD
-    A["MCP Clients (Claude Desktop, etc.)"] --"streamable-http (MCP)"--> B("dh-mcp-enterprise-server :8002")
-    C["MCP Clients"] --"streamable-http (MCP)"--> D("dh-mcp-enterprise-server :8004")
-    B --"Manages"--> E("Deephaven Enterprise System A")
-    D --"Manages"--> F("Deephaven Enterprise System B")
-    E --"Manages"--> G("Enterprise Worker A.1")
-    E --"Manages"--> H("Enterprise Worker A.N")
-    F --"Manages"--> I("Enterprise Worker B.1")
-    F --"Manages"--> J("Enterprise Worker B.N")
+    A["MCP Clients (Claude Desktop, Cursor, Copilot, ...)"] --"stdio or streamable-HTTP (MCP)"--> S("dh-mcp-systems-server")
+    S --> R{{"MultiSystemRegistry"}}
+    R --> C("Community session registry")
+    R --> E1("Enterprise system 'prod'")
+    R --> E2("Enterprise system 'staging'")
+    C --> CW1("Community Core Worker 1")
+    C --> CW2("Community Core Worker N")
+    E1 --> EP("PQ workers (prod)")
+    E2 --> ES("PQ workers (staging)")
 ```
 
-*Each enterprise server instance manages exactly one DHE system. Run multiple instances on different ports to connect to multiple DHE systems simultaneously.*
-
-### Community Server Architecture
-
-```mermaid
-graph TD
-    A["MCP Clients (Claude Desktop, etc.)"] --"streamable-http (MCP)"--> B("dh-mcp-community-server :8003")
-    B --"Manages"--> C("Deephaven Community Core Worker 1")
-    B --"Manages"--> D("Deephaven Community Core Worker N")
-```
-
-*One community server instance manages all configured DHC workers.*
+*A single `dh-mcp-systems-server` process composes one community child registry (when `community/sessions/` is non-empty) and one enterprise child registry per file under `enterprise/systems/`. Tools route to the right child based on either a `system` argument or the parsed prefix of a session/PQ id.*
 
 ### Docs Server Architecture
 
@@ -536,7 +546,9 @@ Or see the [uv installation guide](https://docs.astral.sh/uv/getting-started/ins
 uv tool install --python-preference managed "deephaven-mcp[community,enterprise]"
 ```
 
-After this command, `dh-mcp-community-server`, `dh-mcp-enterprise-server`, and `dh-mcp-docs-server` are available on your PATH.
+After this command, `dh-mcp-systems-server` and `dh-mcp-docs-server` are available on your PATH.
+
+> **About `--python-preference managed`**: this flag tells `uv` to download and use its own managed Python interpreter (stored under `~/.local/share/uv/python/`) rather than any Python already on your system. The tool environment is unaffected if your system Python is upgraded, moved, or removed; `uv` picks the latest Python version compatible with the package's `requires-python`. Recommended for everyone — you do not need to install Python yourself.
 
 **Where tools are installed:**
 
@@ -558,7 +570,7 @@ Run `uv tool dir` to find the tool environment root on your system.
 | `[lint]` | Code quality tools (linting, formatting, type checking) |
 | `[dev]` | Full development environment (all of the above) |
 
-For detailed [`uv`](https://github.com/astral-sh/uv) workflows and project-specific setup, see the [`uv` documentation](docs/UV.md).
+New to [`uv`](https://github.com/astral-sh/uv)? See the [`uv` crash course](docs/UV.md) for a quick orientation.
 
 #### Alternative: Using `uv pip` or standard `pip` with a venv
 
@@ -579,589 +591,107 @@ python3.12 -m venv .venv
 .venv/bin/pip install "deephaven-mcp[community,enterprise]"
 ```
 
-When using a venv, use the full path to executables (e.g., `.venv/bin/dh-mcp-community-server`).
+When using a venv, use the full path to executables (e.g., `.venv/bin/dh-mcp-systems-server`).
 
 ---
 
 ## Configuration
 
-This section is the full configuration reference for both the Enterprise and Community servers, including all supported fields, authentication options, session creation, environment variables, and security settings.
-
-> **New users**: The Quick Start config examples cover the most common setups. Return here when you need to go beyond the basics.
-
-### Configuring DHE (Enterprise) Server
-
-The enterprise server (`dh-mcp-enterprise-server`) uses a **flat** JSON or JSON5 config file where fields sit at the top level (not nested under a system name). Each server instance manages exactly one DHE system.
-
-**Config file location**: Pass via `--config` CLI flag or `DH_MCP_CONFIG_FILE` environment variable.
-
-**File Format**: Supports standard JSON and JSON5 (comments and trailing commas allowed).
-
-> **Per-request authentication.** The enterprise server holds **no**
-> user credentials itself. It declares which auth backends are allowed
-> via the `auth` block, and every MCP request must present the caller's
-> own Deephaven credentials in `X-Deephaven-*` HTTP headers. See
-> [Client authentication headers](#client-authentication-headers) for
-> the full header list.
-
-#### DHE Config Examples
-
-**Accept both password and private-key auth (recommended default):**
-
-```json5
-{
-  "system_name": "prod",
-  "connection_json_url": "https://dhe.example.com/iris/connection.json",
-  "auth": {
-    "backends": ["password", "private_key"],
-    "allow_effective_user": false
-  }
-}
-```
-
-**Password-only:**
-
-```json5
-{
-  "system_name": "prod",
-  "connection_json_url": "https://dhe.example.com/iris/connection.json",
-  "auth": { "backends": ["password"] }
-}
-```
-
-**Private-key only:**
-
-```json5
-{
-  "system_name": "prod",
-  "connection_json_url": "https://dhe.example.com/iris/connection.json",
-  "auth": { "backends": ["private_key"] }
-}
-```
-
-**With session creation enabled:**
-
-```json5
-{
-  "system_name": "prod",
-  "connection_json_url": "https://dhe.example.com/iris/connection.json",
-  "auth": { "backends": ["password"] },
-  "session_creation": {
-    "max_concurrent_sessions": 5,
-    "defaults": {
-      "heap_size_gb": 4,
-      "programming_language": "Python"
-    }
-  }
-}
-```
-
-#### DHE Configuration Fields
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `system_name` | string | Yes | Name for this enterprise system — appears in all session and PQ identifiers (e.g. `"enterprise:prod:my-pq"`) |
-| `connection_json_url` | string | Yes | URL to the Enterprise server's `connection.json` file |
-| `auth` | object | Yes | Authentication backends config (see fields below). The server accepts a request when any listed backend's required headers are present. |
-| `auth.backends` | array of string | Yes | Non-empty subset of `["password", "private_key"]`. Each entry enables one HTTP auth backend. |
-| `auth.allow_effective_user` | boolean | No | Default `false`. When `true`, the `"password"` backend honors the optional `X-Deephaven-Effective-User` header so privileged callers can act as another user. |
-| `connection_timeout` | int or float | No | Timeout in seconds for connecting to the system (default: 10.0) |
-| `mcp_session_idle_timeout_seconds` | int or float | No | Seconds of MCP client inactivity after which the per-session Deephaven registry is closed and resources are reclaimed (default: 3600.0 — 1 hr). Must be positive. |
-| `session_creation` | object | No | Optional section that enables `session_enterprise_create`. If absent, the tool returns a "not configured" error. When present, `defaults` and `defaults.heap_size_gb` are required. |
-| `session_creation.max_concurrent_sessions` | integer | No | Max concurrent sessions (default: 5). Set to 0 to disable `session_enterprise_create` |
-| `session_creation.defaults` | object | Yes (when section present) | Default parameters applied to `session_enterprise_create` when the caller does not specify them |
-| `session_creation.defaults.heap_size_gb` | int or float | Yes (when section present) | JVM heap size in GB. Required — the Deephaven API has no server-side default for this value. |
-| `session_creation.defaults.auto_delete_timeout` | integer | No | Default auto-delete timeout in seconds |
-| `session_creation.defaults.server` | string | No | Default target server name within the DHE system |
-| `session_creation.defaults.engine` | string | No | Default execution engine name |
-| `session_creation.defaults.extra_jvm_args` | array of strings | No | Default additional JVM arguments |
-| `session_creation.defaults.extra_environment_vars` | array of strings | No | Default additional environment variables |
-| `session_creation.defaults.admin_groups` | array of strings | No | Default groups with admin access |
-| `session_creation.defaults.viewer_groups` | array of strings | No | Default groups with view-only access |
-| `session_creation.defaults.timeout_seconds` | int or float | No | Default session timeout in seconds |
-| `session_creation.defaults.session_arguments` | object | No | Default additional session arguments |
-| `session_creation.defaults.programming_language` | string | No | Default language: `"Python"` or `"Groovy"` |
-
-**Running multiple DHE instances:**
-
-```bash
-# Two DHE systems on different ports, each with its own log file
-dh-mcp-enterprise-server --config /path/to/dhe_prod.json --port 8002 >dh-mcp-enterprise-prod.log 2>&1 &
-dh-mcp-enterprise-server --config /path/to/dhe_staging.json --port 8004 >dh-mcp-enterprise-staging.log 2>&1 &
-```
-
-> **Security Note**: Enterprise config files no longer contain user
-> credentials (those now flow from `X-Deephaven-*` HTTP headers), but
-> should still be locked down (e.g. `chmod 600 /path/to/dhe_prod.json`)
-> to prevent unauthorized changes to `connection_json_url` or
-> `allow_effective_user`. The enterprise server must be deployed behind
-> TLS — the auth headers carry secrets in cleartext on the wire.
-
----
-
-### Configuring DHC (Community) Server
-
-The community server (`dh-mcp-community-server`) uses a flat JSON or JSON5 config file. Valid top-level keys are `"auth"` (**required**), `"sessions"`, `"session_creation"`, `"security"`, and `"mcp_session_idle_timeout_seconds"` (all others optional). The `"auth"` block configures the PSK gate that controls who may connect to the community MCP server itself; the validator refuses to start the server unless it is present and contains a PSK (`auth.psk` or `auth.psk_env_var`) or `auth.enabled: false` (loopback binds only). See [`docs/ENV.md`](docs/ENV.md#community-mcp-server-gate-authpsk_env_var) for `auth.psk_env_var` and related fields.
-
-**Config file location**: Pass via `--config` CLI flag or `DH_MCP_CONFIG_FILE` environment variable.
-
-**File Format**: Supports standard JSON and JSON5 (comments and trailing commas allowed).
-
-#### Community Examples
-
-> **Note**: Every community config below includes a top-level `auth` block.
-> The community server's MCP-gate auth is on by default and the validator
-> refuses to start without either a PSK (`auth.psk` / `auth.psk_env_var`)
-> or an explicit `auth.enabled: false` (loopback binds only).
-
-**Minimal configuration (no static sessions, local-dev gate disabled):**
-
-```json5
-{
-  // Loopback-only: server refuses non-loopback binds when auth is disabled.
-  "auth": { "enabled": false }
-}
-```
-
-**Anonymous worker auth (local development):**
-
-```json5
-{
-  // MCP-gate auth disabled - only safe on loopback binds.
-  "auth": { "enabled": false },
-  "sessions": {
-    // No worker authentication required - local development only.
-    // When auth_type is omitted, defaults to "Anonymous".
-    "my_local_server": {
-      "host": "localhost",  // Deephaven server address
-      "port": 10000          // Default Deephaven port (gRPC)
-    }
-  }
-}
-```
-
-**PSK authentication:**
-
-```json5
-{
-  // MCP-gate PSK sourced from env var. Set DH_MCP_COMMUNITY_PSK in your shell.
-  "auth": { "psk_env_var": "DH_MCP_COMMUNITY_PSK" },
-  "sessions": {
-    "psk_server": {
-      "host": "localhost",
-      "port": 10000,
-      // Pre-Shared Key authentication for the worker
-      // Can use "PSK" shorthand or full class name shown here
-      "auth_type": "io.deephaven.authentication.psk.PskAuthenticationHandler",
-      // For production, prefer auth_token_env_var to keep the secret out of the file.
-      "auth_token": "your-shared-secret-key"  // Token configured on server
-    }
-  }
-}
-```
-
-**Basic authentication with environment variable:**
-
-```json5
-{
-  "auth": { "psk_env_var": "DH_MCP_COMMUNITY_PSK" },
-  "sessions": {
-    "prod_session": {
-      "host": "deephaven-prod.example.com",  // Remote server
-      "port": 10000,
-      "auth_type": "Basic",  // HTTP Basic authentication
-      // More secure: read credentials from environment variable
-      // Set in shell: export DH_AUTH_TOKEN="username:password"
-      "auth_token_env_var": "DH_AUTH_TOKEN"  // Must be in "user:pass" format
-    }
-  }
-}
-```
-
-**TLS/SSL configuration:**
-
-```json5
-{
-  "auth": { "psk_env_var": "DH_MCP_COMMUNITY_PSK" },
-  "sessions": {
-    "secure_tls_session": {
-      "host": "secure.deephaven.example.com",
-      "port": 443,  // Standard HTTPS port (use 10000 for non-TLS)
-      "use_tls": true,  // Enable SSL/TLS encryption
-      // Optional: Custom CA certificate for server verification
-      "tls_root_certs": "/absolute/path/to/ca.pem",  // Must be absolute path!
-      // Optional: Mutual TLS (mTLS) for client authentication
-      "client_cert_chain": "/absolute/path/to/client-cert.pem",
-      "client_private_key": "/absolute/path/to/client-key.pem"
-    }
-  }
-}
-```
-
-#### Community Configuration Fields
-
-*All community session fields are optional. Default values are applied by the server if a field is omitted.*
-
-> 💡 **See Examples Above:** For complete configuration examples, refer to [Community Examples](#community-examples).
-
-| Field | Type | Required When | Description |
-|-------|------|---------------|-------------|
-| `host` | string | Optional | Hostname or IP address of the Deephaven Community Core session (e.g., `"localhost"`) |
-| `port` | integer | Optional | Port number for the session connection (e.g., `10000`) |
-| `auth_type` | string | Optional | Authentication type: `"PSK"` (shorthand), `"Anonymous"` (default), `"Basic"`, or full class names like `"io.deephaven.authentication.psk.PskAuthenticationHandler"` |
-| `auth_token` | string | Optional | Authentication token. For `"Basic"` auth: `"username:password"` format. Mutually exclusive with `auth_token_env_var` |
-| `auth_token_env_var` | string | Optional | Environment variable name containing the auth token (e.g., `"MY_AUTH_TOKEN"`). More secure than hardcoding tokens |
-| `never_timeout` | boolean | Optional | If `true`, attempts to configure the session to never time out |
-| `session_type` | string | Optional | Type of session to create: `"groovy"` or `"python"` |
-| `use_tls` | boolean | Optional | Set to `true` if the connection requires TLS/SSL |
-| `tls_root_certs` | string | Optional | Absolute path to PEM file with trusted root CA certificates for TLS verification |
-| `client_cert_chain` | string | Optional | Absolute path to PEM file with client's TLS certificate chain (for mTLS) |
-| `client_private_key` | string | Optional | Absolute path to PEM file with client's private key (for mTLS) |
-
-#### Community Server Settings
-
-Top-level fields that apply to the server as a whole (not per-session):
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `mcp_session_idle_timeout_seconds` | int or float | No | Seconds of MCP client inactivity after which the per-session Deephaven registry is closed and resources are reclaimed (default: 3600.0 — 1 hr). Must be positive. |
-
-#### Community Session Creation Configuration
-
-The `session_creation` key configures dynamic creation of Deephaven Community Core sessions on-demand. The `session_community_create` and `session_community_delete` MCP tools are always registered on the Community server, but they require this key to be present in the config — if it is omitted, calls to these tools return an error.
-
-**Requirements by launch method:**
-
-- **Docker method** (`launch_method: "docker"`):
-  - Requires [Docker](https://www.docker.com/get-started/) installed and running
-  - Works with base `deephaven-mcp` installation (no additional packages needed)
-
-- **Python method** (`launch_method: "python"`):
-  - Requires `deephaven-server` installed in a Python environment
-  - **Default venv**: Uses same venv as MCP server
-  - **Custom venv**: Optionally specify a different venv via `python_venv_path` parameter
-  - No Docker needed
-
-| Field | Type | Required When | Description |
-|-------|------|---------------|-------------|
-| `session_creation` | object | Optional | Configuration for creating community sessions. If omitted, `session_community_create` and `session_community_delete` return an error when called |
-| `session_creation.max_concurrent_sessions` | integer | Optional | Maximum concurrent dynamic sessions (default: 5). Set to 0 for no limit |
-| `session_creation.defaults` | object | Optional | Default parameters for new sessions |
-| `session_creation.defaults.launch_method` | string | Optional | How to launch sessions: `"docker"` or `"python"` (default: "docker") |
-| `session_creation.defaults.auth_type` | string | Optional | Authentication type: `"PSK"` (default), `"Anonymous"`, or full class name `"io.deephaven.authentication.psk.PskAuthenticationHandler"`. Case-insensitive for shorthand. Basic auth not supported for dynamic sessions |
-| `session_creation.defaults.auth_token` | string | Optional | Pre-shared key for PSK auth. If omitted with PSK auth, a secure token is auto-generated |
-| `session_creation.defaults.auth_token_env_var` | string | Optional | Environment variable containing auth token. Mutually exclusive with `auth_token` |
-| `session_creation.defaults.programming_language` | string | Optional | Programming language for Docker sessions: `"Python"` or `"Groovy"` (default: "Python"). Docker only. Mutually exclusive with `docker_image`. See examples below. |
-| `session_creation.defaults.docker_image` | string | Optional | Custom Docker image to use. Docker only. Mutually exclusive with `programming_language`. If neither specified, defaults to Python image. See examples below. |
-| `session_creation.defaults.docker_memory_limit_gb` | float | Optional | Container memory limit in GB (Docker only, default: no limit) |
-| `session_creation.defaults.docker_cpu_limit` | float | Optional | Container CPU limit in cores (Docker only, default: no limit) |
-| `session_creation.defaults.docker_volumes` | array | Optional | Volume mounts in format `["host:container:mode"]` (Docker only, default: []) |
-| `session_creation.defaults.python_venv_path` | string | Optional | Path to custom Python venv directory (Python only). If provided, uses deephaven from that venv. If null (default), uses same venv as MCP server. Raises error if used with docker. |
-| `session_creation.defaults.heap_size_gb` | float \| int | Optional | JVM heap size in gigabytes (e.g., 4 or 2.5, default: 4). Integer values use 'g' suffix (4 → `-Xmx4g`). Float values converted to MB (2.5 → `-Xmx2560m`) |
-| `session_creation.defaults.extra_jvm_args` | array | Optional | Additional JVM arguments (e.g., `["-XX:+UseG1GC"]`, default: []) |
-| `session_creation.defaults.environment_vars` | object | Optional | Environment variables as key-value pairs (default: {}) |
-| `session_creation.defaults.startup_timeout_seconds` | float | Optional | Maximum time to wait for session startup (default: 60) |
-| `session_creation.defaults.startup_check_interval_seconds` | float | Optional | Time between health checks during startup (default: 2) |
-| `session_creation.defaults.startup_retries` | integer | Optional | Connection attempts per health check (default: 3) |
-
-**Docker Image Configuration Examples:**
-
-```json5
-// CORRECT: Use programming_language for standard Deephaven images
-{
-  "session_creation": {
-    "defaults": {
-      "launch_method": "docker",
-      "programming_language": "Python"  // Uses ghcr.io/deephaven/server:latest
-    }
-  }
-}
-
-// CORRECT: Use programming_language for Groovy
-{
-  "session_creation": {
-    "defaults": {
-      "launch_method": "docker",
-      "programming_language": "Groovy"  // Uses ghcr.io/deephaven/server-slim:latest
-    }
-  }
-}
-
-// CORRECT: Use docker_image for custom images
-{
-  "session_creation": {
-    "defaults": {
-      "launch_method": "docker",
-      "docker_image": "my-custom-deephaven:v1.0"  // Uses your custom image
-    }
-  }
-}
-
-// INCORRECT: Don't use both programming_language and docker_image together
-{
-  "session_creation": {
-    "defaults": {
-      "launch_method": "docker",
-      "programming_language": "Python",  // Conflict!
-      "docker_image": "custom:latest"     // Conflict!
-    }
-  }
-}
-```
-
-> **📝 Session Lifecycle Notes**:
->
-> **Automatic Cleanup:**
->
-> - Sessions are automatically stopped and cleaned up when the MCP server shuts down
-> - All ports are released and containers/processes are terminated gracefully
-> - On restart, the MCP server detects and cleans up any orphaned resources from previous runs
->
-> **Session Management:**
->
-> - Auto-generated PSK tokens are logged at WARNING level for visibility (similar to [Jupyter](https://jupyter.org/) notebooks)
-> - Created sessions use session IDs in format: `community:dynamic:{session_name}`
-> - Only dynamically created sessions can be deleted via `session_community_delete` (pass the full `session_id` in `"community:dynamic:{session_name}"` format, not just the bare name)
-> - Static configuration-based sessions cannot be deleted via MCP tools
-
-### Security Configuration (Community Server)
-
-> **Read [`docs/SECURITY.md`](docs/SECURITY.md) first** for the full security
-> model and hardening checklist. This subsection covers one specific knob.
-
-The optional top-level `security` section in the community config controls the `session_community_credentials` tool.
-
-> **SECURITY WARNING**: When credential retrieval is enabled, your AI assistant can see and access authentication tokens. Only enable if you understand the implications. **NEVER** enable when the MCP server is accessible over untrusted networks.
-
-| Field | Type | Values | Description |
-|-------|------|--------|-------------|
-| `security.credential_retrieval_mode` | string | `"none"` (default), `"dynamic_only"`, `"static_only"`, `"all"` | Controls credential retrieval access |
-
-**Mode Descriptions:**
-
-- **`"none"`** (default): Credential retrieval disabled for all sessions (most secure)
-- **`"dynamic_only"`**: Only dynamically created session credentials can be retrieved (recommended for development)
-- **`"static_only"`**: Only static configuration-based session credentials can be retrieved
-- **`"all"`**: Both dynamic and static session credentials can be retrieved
-
-### Setting `DH_MCP_CONFIG_FILE`
-
-Both servers accept the config file path via `--config` CLI flag or the `DH_MCP_CONFIG_FILE` environment variable. The CLI flag takes priority. You can start the servers from any shell and pass the environment variable directly:
-
-```bash
-DH_MCP_CONFIG_FILE=/path/to/dhc.json dh-mcp-community-server
-DH_MCP_CONFIG_FILE=/path/to/dhe.json dh-mcp-enterprise-server
-```
-
----
-
-### Transport Security (TLS)
-
-> **Read [`docs/SECURITY.md`](docs/SECURITY.md) first** for the full security
-> model and hardening checklist. The summary below covers transport security
-> specifically.
-
-Auth headers (`X-Deephaven-Password`, `X-Deephaven-Private-Key`,
-`X-Deephaven-PSK`) carry secrets in cleartext on the wire. The
-Community and Enterprise servers refuse to start when binding to a
-non-loopback host (e.g. `--host 0.0.0.0`) without an explicit
-transport-security mechanism, and reject cleartext requests from
-non-loopback peers at runtime with HTTP `426 Upgrade Required`.
-
-Pick one of the following deployment patterns:
-
-- **Native TLS** (server terminates):
-
-  ```bash
-  dh-mcp-community-server --host 0.0.0.0 \
-      --ssl-keyfile /etc/ssl/private/dh-mcp.key \
-      --ssl-certfile /etc/ssl/certs/dh-mcp.crt
-  ```
-
-- **Behind a TLS-terminating reverse proxy** (nginx, Envoy, Cloud Run, ALB):
-
-  ```bash
-  dh-mcp-enterprise-server --host 0.0.0.0 \
-      --trust-forwarded-proto \
-      --forwarded-allow-ips 10.0.0.0/8
-  ```
-
-- **Loopback only** (default, no extra flags needed): bind stays on
-  `127.0.0.1`, traffic never leaves the kernel.
-
-- **Trusted private network** (LAN-only, air-gapped):
-  `--allow-cleartext` (logs a loud `WARNING`; do not use over the
-  public internet).
-
-For the full flag/env-var reference and decision matrix, see
-[Transport Security in the Developer Guide](docs/DEVELOPER_GUIDE.md#transport-security-tls)
-and [transport-security env vars in `docs/ENV.md`](docs/ENV.md#transport-security-variables).
-
----
-
-### Environment Variables
-
-> **⚠️ Security Warning**: Environment variables containing sensitive information like API keys and authentication tokens should be handled securely and never committed to version control.
-
-For the full reference of all supported environment variables — including credential variables, timeout tuning, and Docs Server configuration — see **[docs/ENV.md](docs/ENV.md)**.
-
-The variables needed to get started are:
-
-- **`DH_MCP_CONFIG_FILE`** *(required)*: Path to your server config file (DHE flat config or DHC community config)
-  - Example: `DH_MCP_CONFIG_FILE=/path/to/your/dhc.json`
-  - Overridden by the `--config` (or `-c`) CLI flag
-
-- **`MCP_HOST`**: Host the server binds to (default: `127.0.0.1`)
-  - Overridden by the `--host` CLI flag
-
-- **`MCP_PORT`**: Port the server listens on (default: `8002` for enterprise, `8003` for community)
-  - Overridden by the `--port` CLI flag
-
-- **`PYTHONLOGLEVEL`**: Controls the verbosity of logging output
-  - Values: `DEBUG`, `INFO`, `WARNING`, `ERROR`
-  - Default: `INFO`
-  - Example: `PYTHONLOGLEVEL=DEBUG`
-
-- **Custom authentication variables**: The community server supports two env-var indirection fields. Pick a variable name in your `deephaven_mcp.json`, then export the corresponding env var in your shell:
-  - **`sessions[*].auth_token_env_var`** — sources the per-worker `auth_token` (pydeephaven client token) from the named env var. Mutually exclusive with the inline `auth_token`.
-  - **`auth.psk_env_var`** — sources the community **MCP server gate** PSK from the named env var. Mutually exclusive with the inline `auth.psk`.
-  - Example: If your config has `"auth_token_env_var": "MY_DH_TOKEN"`, then `export MY_DH_TOKEN=your-secret`.
-  - Note: The enterprise server holds **no** user credentials in its config (per-request auth via `X-Deephaven-*` headers), so it has no env-var indirection fields. See [`docs/ENV.md`](docs/ENV.md) for the full list.
-
----
-
-### Browser Access to Created Sessions
-
-When you create a Deephaven session via the MCP tools, you may want to access it through a web browser. By default, authentication credentials are not returned through MCP tools for security.
-
-#### Viewing Credentials in Console
-
-When a session is created with an auto-generated token, the connection information is logged to your console:
+`dh-mcp-systems-server` reads a directory tree of small JSON / JSON5
+files (resolved as `--config-dir`, then `$DH_MCP_CONFIG_DIR`, then the
+platform default `~/.deephaven/ai/config/` on POSIX or
+`%APPDATA%/Deephaven/ai/config/` on Windows). The Quick Start
+sections above show minimal Community and Enterprise examples; this
+section orients you to the rest of the tree.
 
 ```text
-====================================================================
-🔑 Session 'my-analysis' Created - Browser Access Information:
-   Port: 45123
-   Base URL: http://localhost:45123
-   Auth Token: abc123xyz789...
-   Browser URL: http://localhost:45123/?psk=abc123xyz789
-
-   To retrieve credentials via MCP tool, set security.credential_retrieval_mode
-   in your deephaven_mcp.json configuration.
-====================================================================
+config_dir/
+├── server.json                      # transport / host / port / PSK (HTTP only)
+├── community/
+│   ├── settings.json                # community-wide globals (optional)
+│   └── sessions/
+│       └── <name>.json              # one file per static session
+└── enterprise/
+    ├── settings.json                # enterprise-wide globals (optional)
+    └── systems/
+        └── <name>.json              # one file per enterprise system
 ```
 
-You can copy this URL directly into your browser.
+Filename stems must equal the `session_name` / `system_name` field
+inside each file. The startup permission audit requires the directory
+to be locked down (POSIX strict, Windows best-effort) — see
+[`docs/SECURITY.md`](docs/SECURITY.md).
 
-#### Retrieving Credentials via MCP Tool (Optional)
+**Full reference**:
+[`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) is the single source
+of truth for the schema — every supported field, every authentication
+type, the `${env:VAR}` / `${file:/path}` templating syntax, the
+`session_creation` block for on-demand Community sessions, and the
+`server.json` transport / PSK options.
 
-If you want AI agents to retrieve credentials programmatically, you can enable the `session_community_credentials` tool in your configuration:
+**Working examples**:
+[`config-samples/ai/config/`](config-samples/ai/config/) contains a complete,
+copy-pasteable sample tree for both Community and Enterprise.
 
-1. **Edit your community config file:**
-
-   ```json
-   {
-     "security": {
-       "credential_retrieval_mode": "dynamic_only"
-     },
-     "session_creation": {
-       "defaults": {
-         "launch_method": "docker",
-         "heap_size_gb": 4
-       }
-     }
-   }
-   ```
-
-   See [Security Configuration (Community Server)](#security-configuration-community-server) for `credential_retrieval_mode` descriptions.
-
-2. **Use the tool:**
-
-   Ask your AI assistant: *"Get me the browser URL for session 'my-analysis'"*
-
-   The AI will use `session_community_credentials` to retrieve the authenticated URL.
-
-   > **🔒 SECURITY WARNING**
-   >
-   > This tool exposes sensitive credentials. Only enable credential retrieval if the MCP server is running locally and you understand the security implications. **NEVER** enable when accessible over untrusted networks.
-
----
-
-### Applying Configuration Changes
-
-After creating or modifying your MCP configuration, you must restart your IDE or AI assistant for the changes to take effect.
-
-#### Restart and Verify
-
-1. **Restart your tool** completely (Claude Desktop, VS Code, Cursor, etc.)
-2. **Check MCP server status** in your tool's interface - you should see your configured servers listed
-3. **Test the connection** by asking your AI assistant:
-
-   ```text
-   Are the Deephaven MCP servers working? Can you list any available sessions?
-   ```
-
-   Your AI assistant should connect to both servers and respond with information about Deephaven capabilities and available sessions.
-
-If the servers don't appear or you encounter errors, see the [Troubleshooting](#troubleshooting) section.
+**Security**: [`docs/SECURITY.md`](docs/SECURITY.md) covers directory
+permissions, PSK handling, and credential templating in detail.
 
 ---
 
 ## AI Tool Setup
 
-This section explains how to connect Deephaven to your AI assistant or IDE. Both servers (`dh-mcp-enterprise-server` and `dh-mcp-community-server`) use **streamable-http** transport only — you start them separately and point your MCP client to their HTTP URLs.
+This section explains how to connect Deephaven to your AI assistant or IDE. The single multiplexed `dh-mcp-systems-server` supports **stdio** (default; the AI client launches the server as a subprocess) and **streamable-HTTP** (loopback-only, gated by a PSK).
 
 ### How It Works
 
-1. Start the server(s) you need in a terminal (they run as persistent HTTP servers)
-2. Configure your AI tool to connect to those servers by URL
-3. Restart your AI tool if needed to pick up configuration changes
+1. Decide whether to run the server as a stdio subprocess of the AI client (simplest) or as a long-lived HTTP service shared across clients on the same host.
+2. Configure your AI tool's MCP block accordingly — stdio stanzas spawn the binary directly, HTTP stanzas point to `http://127.0.0.1:<port>/mcp` and inject the PSK via the `X-Deephaven-PSK` header.
+3. Restart your AI tool if needed to pick up configuration changes.
 
-**Starting the servers in the background:**
+**Starting an HTTP server in the background:**
 
-Run each server as a background process, redirecting logs to a named file. Use a descriptive log file name for each server so logs don't collide when running multiple instances.
+Redirect logs to a named file so they don't get lost.
 
 ```bash
-# Community server
-dh-mcp-community-server --config /path/to/dhc.json --port 8003 >dh-mcp-community.log 2>&1 &
-
-# Enterprise server (one instance per system, each on its own port)
-dh-mcp-enterprise-server --config /path/to/dhe_prod.json --port 8002 >dh-mcp-enterprise-prod.log 2>&1 &
-dh-mcp-enterprise-server --config /path/to/dhe_staging.json --port 8004 >dh-mcp-enterprise-staging.log 2>&1 &
+export DH_MCP_PSK='your-shared-secret'
+dh-mcp-systems-server --transport http --port 8000 >dh-mcp-systems.log 2>&1 &
 ```
 
-**Stopping background servers:**
+**Stopping a background server:**
 
 ```bash
 # By process name
-pkill -f dh-mcp-community-server
-pkill -f dh-mcp-enterprise-server
+pkill -f dh-mcp-systems-server
 
-# Or stop a specific port (e.g., port 8002)
-kill $(lsof -ti tcp:8002)
+# Or stop a specific port (e.g., port 8000)
+kill $(lsof -ti tcp:8000)
 ```
 
 **Following logs in real time:**
 
 ```bash
-tail -f dh-mcp-community.log
-tail -f dh-mcp-enterprise-prod.log
+tail -f dh-mcp-systems.log
 ```
 
 ### Setup Instructions by Tool
 
 #### Claude Desktop
 
-Claude Desktop uses stdio transport and requires `mcp-proxy` as a bridge to the HTTP servers. Make sure you have run `uv tool install --python-preference managed mcp-proxy` first (see the install step in [Quick Start](#quick-start)).
+Claude Desktop uses stdio transport. The simplest setup is to let it
+launch `dh-mcp-systems-server` directly via stdio — no `mcp-proxy`,
+no HTTP server, no PSK to manage.
 
 Open **Claude Desktop** → **Settings** → **Developer** → **Edit Config** and add:
 
-```json
+```json5
 {
   "mcpServers": {
-    "deephaven-community": {
-      "command": "mcp-proxy",
-      "args": ["--transport=streamablehttp", "http://127.0.0.1:8003/mcp"]
+    "deephaven-systems": {
+      "command": "dh-mcp-systems-server",
+      "args": ["--transport", "stdio"],
+      "env": {
+        "DH_MCP_CONFIG_DIR": "/full/path/to/your/config"
+      }
     },
     "deephaven-docs": {
       "command": "mcp-proxy",
@@ -1171,7 +701,30 @@ Open **Claude Desktop** → **Settings** → **Developer** → **Edit Config** a
 }
 ```
 
-> If your AI tool reports that `mcp-proxy` is not found, locate it with `which mcp-proxy` (macOS/Linux) or `where mcp-proxy` / `Get-Command mcp-proxy` (Windows cmd.exe / PowerShell), and use the full path as the `command` value.
+If you instead want to share a single HTTP-transport server across
+several clients, install `mcp-proxy` (see
+[Quick Start](#quick-start)) and bridge through it, forwarding the
+PSK header on every request:
+
+```json5
+{
+  "mcpServers": {
+    "deephaven-systems": {
+      "command": "mcp-proxy",
+      "args": [
+        "--transport=streamablehttp",
+        "--header", "X-Deephaven-PSK=${DH_MCP_PSK}",
+        "http://127.0.0.1:8000/mcp"
+      ]
+    }
+  }
+}
+```
+
+> If your AI tool reports that `mcp-proxy` or `dh-mcp-systems-server`
+> is not found, locate it with `which <name>` (macOS/Linux) or
+> `where <name>` / `Get-Command <name>` (Windows cmd.exe / PowerShell),
+> and use the full path as the `command` value.
 
 **Additional Resources:**
 
@@ -1186,12 +739,13 @@ Cursor supports HTTP MCP servers. Create or edit an MCP configuration file:
 - **Project-specific**: `.cursor/mcp.json` in your project root
 - **Global**: `~/.cursor/mcp.json` for all projects
 
-```json
+```json5
 {
   "mcpServers": {
-    "deephaven-community": {
+    "deephaven-systems": {
       "type": "http",
-      "url": "http://127.0.0.1:8003/mcp"
+      "url": "http://127.0.0.1:8000/mcp",
+      "headers": { "X-Deephaven-PSK": "${DH_MCP_PSK}" }
     },
     "deephaven-docs": {
       "type": "http",
@@ -1211,12 +765,13 @@ VS Code supports HTTP MCP servers natively. To add MCP servers to your workspace
 
 Configure your servers:
 
-```json
+```json5
 {
   "servers": {
-    "deephaven-community": {
+    "deephaven-systems": {
       "type": "http",
-      "url": "http://127.0.0.1:8003/mcp"
+      "url": "http://127.0.0.1:8000/mcp",
+      "headers": { "X-Deephaven-PSK": "${DH_MCP_PSK}" }
     },
     "deephaven-docs": {
       "type": "http",
@@ -1238,11 +793,12 @@ You will see the MCP servers listed in the Extensions sidebar under "MCP Servers
 
 Windsurf supports HTTP MCP servers natively. Go to **Windsurf Settings** > **Cascade** > **MCP Servers** > **Manage MCPs** > **View Raw Config** to open `~/.codeium/windsurf/mcp_config.json` for editing.
 
-```json
+```json5
 {
   "mcpServers": {
-    "deephaven-community": {
-      "serverUrl": "http://127.0.0.1:8003/mcp"
+    "deephaven-systems": {
+      "serverUrl": "http://127.0.0.1:8000/mcp",
+      "headers": { "X-Deephaven-PSK": "${DH_MCP_PSK}" }
     },
     "deephaven-docs": {
       "serverUrl": "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"
@@ -1277,12 +833,16 @@ Before diving into detailed troubleshooting, try these common solutions:
 |-------|----------------------|----------|
 | `spawn mcp-proxy ENOENT` | AI tool logs | Run `uv tool install --python-preference managed mcp-proxy` first; if the tool still can't find it, locate it with `which mcp-proxy` (macOS/Linux) or `where mcp-proxy` / `Get-Command mcp-proxy` (Windows) and use the full path as the `command` |
 | `Connection failed` | MCP server logs | Check internet connection and server URLs |
-| `Config not found` | MCP server startup | Verify full path to config file passed via `--config` or `DH_MCP_CONFIG_FILE` |
+| `Config directory not found` / permissions audit failure | MCP server startup | Verify the directory passed via `--config-dir` (or `DH_MCP_CONFIG_DIR`) exists and that every file is `chmod 600` and the directory is `chmod 700` (POSIX). |
 | `Permission denied` | Command execution | Ensure executable has proper permissions; run `chmod +x` on the `mcp-proxy` path |
 | `Python version error` | uv tool install | Deephaven MCP requires Python 3.12+; use `uv tool install --python-preference managed ...` |
 | `JSON parse error` | IDE/AI assistant logs | Fix JSON syntax errors in configuration files |
 | `Module not found: deephaven_mcp` | MCP server logs | Re-run `uv tool install --python-preference managed "deephaven-mcp[community,enterprise]"` |
-| `Invalid session_id format` | MCP tool responses | Community: `community:config:{name}` or `community:dynamic:{name}`; Enterprise: `enterprise:{system_name}:{name}` |
+| `Invalid session_id format` | MCP tool responses | Community: `community:community:{name}`; Enterprise: `enterprise:{system_name}:{name}` |
+| `Invalid pq_id` | MCP tool responses | PQ ids are `<system>:<serial>` where `<serial>` is a positive integer. |
+| `Enterprise system 'foo' is not configured` | MCP tool responses | The `system` argument does not match any file under `enterprise/systems/`. The error lists configured systems. |
+| HTTP `401`/`403` from the server | HTTP transport | The `X-Deephaven-PSK` header is missing or does not match `server.json`. Restart the server after editing the PSK. |
+| HTTP server refuses to start with a loopback error | systems-server startup | `--host` was set to a non-loopback address. The HTTP transport binds only to `127.0.0.1` / `::1` / `localhost`; terminate TLS at a reverse proxy on the same host instead. |
 
 ### JSON Configuration Issues
 
@@ -1299,26 +859,27 @@ Before diving into detailed troubleshooting, try these common solutions:
   - Verify files exist at the specified paths
 
 - **Environment Variable Issues:**
-  - `DH_MCP_CONFIG_FILE` must point to a valid config file
+  - `DH_MCP_CONFIG_DIR` must point to a valid configuration *directory* (or be unset, in which case the platform default is used)
   - Environment variables in `env` block must use correct names
   - Sensitive values should use environment variables, not hardcoded strings
 
 ### LLM Tool Connection Issues
 
 - **LLM Tool Can't Connect / Server Not Found:**
-  - Verify the MCP server is running and listening on the expected port
+  - Verify the MCP server is running and listening on the expected port (HTTP transport only)
   - Verify the URL in your MCP client config matches the server's host and port
-  - Ensure `DH_MCP_CONFIG_FILE` or `--config` points to a valid config file
+  - Ensure `DH_MCP_CONFIG_DIR` or `--config-dir` points to a valid configuration directory (or unset both to use the platform default)
+  - For HTTP transport, ensure your client sends the `X-Deephaven-PSK` header with the value declared in `server.json`
   - Ensure any [Deephaven Community Core](https://deephaven.io/community/) sessions you intend to use are running and network-accessible
   - Check for typos in server URLs or config paths
-  - Set `PYTHONLOGLEVEL=DEBUG` to get more detailed logs from the MCP servers
+  - Set `PYTHONLOGLEVEL=DEBUG` to get more detailed logs from the MCP server
 
 ### Network and Firewall Issues
 
 - **Firewall or Network Issues:**
   - Ensure that there are no firewall rules (local or network) preventing:
-    - The MCP servers from connecting to your Deephaven instances on their specified hosts and ports.
-    - Your MCP client from reaching the server's HTTP endpoint (e.g., `http://127.0.0.1:8002/mcp`).
+    - The MCP server from connecting to your Deephaven instances on their specified hosts and ports.
+    - Your MCP client from reaching the systems server's HTTP endpoint (e.g., `http://127.0.0.1:8000/mcp`).
     - Your MCP client from reaching the Docs Server at `https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io`.
   - Test basic network connectivity (e.g., using [`ping`](https://en.wikipedia.org/wiki/Ping_(networking_utility)) or [`curl`](https://curl.se/docs/manpage.html) from the relevant machine) if connections are failing.
 
@@ -1326,9 +887,9 @@ Before diving into detailed troubleshooting, try these common solutions:
 
 - **`command not found` for [`uv`](docs/UV.md) (in LLM tool logs):**
   - Ensure [`uv`](docs/UV.md) is installed and its installation directory is in your system's `PATH` environment variable, accessible by the LLM tool.
-- **`command not found` for `dh-mcp-enterprise-server`, `dh-mcp-community-server`, or `dh-mcp-docs-server`:**
-  - **If you used `uv tool install` (recommended):** Reinstall (or upgrade) with `uv tool install --python-preference managed "deephaven-mcp[community,enterprise]"` (or `uv tool upgrade deephaven-mcp`). Then make sure the uv tool bin directory is on your `PATH` — run `uv tool update-shell` and open a new shell, or locate the binary with `which dh-mcp-community-server` (macOS/Linux) or `where dh-mcp-community-server` / `Get-Command dh-mcp-community-server` (Windows).
-  - **If you used a virtual environment (alternative install):** Ensure the package is installed in the venv with `uv pip install "deephaven-mcp[community,enterprise]"`, and either activate the venv or use the full path to the executable (e.g. `.venv/bin/dh-mcp-community-server`).
+- **`command not found` for `dh-mcp-systems-server` or `dh-mcp-docs-server`:**
+  - **If you used `uv tool install` (recommended):** Reinstall (or upgrade) with `uv tool install --python-preference managed "deephaven-mcp[community,enterprise]"` (or `uv tool upgrade deephaven-mcp`). Then make sure the uv tool bin directory is on your `PATH` — run `uv tool update-shell` and open a new shell, or locate the binary with `which dh-mcp-systems-server` (macOS/Linux) or `where dh-mcp-systems-server` / `Get-Command dh-mcp-systems-server` (Windows).
+  - **If you used a virtual environment (alternative install):** Ensure the package is installed in the venv with `uv pip install "deephaven-mcp[community,enterprise]"`, and either activate the venv or use the full path to the executable (e.g. `.venv/bin/dh-mcp-systems-server`).
 
 ### Installation and Dependency Issues
 
@@ -1372,38 +933,27 @@ Before diving into detailed troubleshooting, try these common solutions:
 ### Deephaven Session Configuration Issues
 
 - **Session Connection Failures:**
-  - Verify your config file syntax and content - see [Configuring DHE (Enterprise) Server](#configuring-dhe-enterprise-server) or [Configuring DHC (Community) Server](#configuring-dhc-community-server)
-  - Check the [Environment Variables](#environment-variables) section for required environment variables
+  - Verify your config file syntax and content — see [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md)
+  - Check [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) for any required environment variables referenced via `${env:VAR}` templating
   - Ensure target Deephaven instances are running and network-accessible
-  - Check that the MCP server process has read permissions for the configuration file
+  - Check that the MCP server process has read permissions for every file under the configuration directory
 
 - **Session ID Format Issues:**
   - Use the correct format: `{type}:{source}:{session_name}`
-  - Examples: `community:config:my_session`, `community:dynamic:my_session`, `enterprise:prod:analytics`
+  - Examples: `community:community:my_session`, `enterprise:prod:analytics`
+  - PQ ids use the simpler form `<system>:<serial>` (e.g. `prod:42`) and route to the right enterprise system automatically
   - Avoid special characters or spaces in session names
 
 - **Authentication Problems:**
-  - **Community sessions:** Verify connection URLs and authentication - see [Configuring DHC (Community) Server](#configuring-dhc-community-server)
-  - **Enterprise sessions:** Check authentication tokens and key paths - see [Configuring DHE (Enterprise) Server](#configuring-dhe-enterprise-server)
-  - **Environment variables:** Ensure sensitive credentials are properly set - see [Environment Variables](#environment-variables)
-  - **Credential retrieval:** Check [Security Configuration (Community Server)](#security-configuration-community-server) for credential access settings
+  - **Community sessions:** Verify connection URLs and the `auth.credentials` block — see [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md)
+  - **Enterprise sessions:** Check the per-system `auth.credentials` block (discriminated by `type`: `password` or `private_key`) — see [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md)
+  - **Templating:** Ensure any `${env:VAR}` / `${file:/path}` references resolve at startup — see [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md)
+  - **Security:** See [`docs/SECURITY.md`](docs/SECURITY.md) for credential handling and directory permissions
 
-### Platform-Specific Issues
+### Platform-Specific Notes
 
-- **Windows-Specific:**
-  - Use forward slashes `/` in JSON file paths, even on Windows
-  - Executable paths should point to `.venv\Scripts\` instead of `.venv/bin/`
-  - PowerShell execution policy may block script execution
-
-- **macOS-Specific:**
-  - Gatekeeper may block unsigned executables
-  - File permissions may need adjustment: `chmod +x /path/to/executable`
-  - Network security settings may block connections
-
-- **Linux-Specific:**
-  - Check firewall settings: `ufw status` or `iptables -L`
-  - Verify user permissions for network binding
-  - SELinux policies may restrict server operations
+- **Windows:** use forward slashes `/` in JSON file paths; venv executables live under `.venv\Scripts\` rather than `.venv/bin/`.
+- **macOS:** Gatekeeper may block unsigned executables on first run; allow them via System Settings or `xattr -d com.apple.quarantine <path>`.
 
 ### Log Analysis and Debugging
 
@@ -1426,7 +976,7 @@ Before diving into detailed troubleshooting, try these common solutions:
 Set `PYTHONLOGLEVEL=DEBUG` in your shell before starting the server for detailed logging:
 
 ```bash
-PYTHONLOGLEVEL=DEBUG dh-mcp-community-server --config /path/to/dhc.json
+PYTHONLOGLEVEL=DEBUG dh-mcp-systems-server --transport http --port 8000
 ```
 
 ### When to Seek Help
@@ -1479,7 +1029,7 @@ We warmly welcome contributions to Deephaven MCP! Whether it's bug reports, feat
 **Additional Resources:**
 
 - **Developer & Contributor Guide:** Detailed tool APIs, architecture, and development workflows — [docs/DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md)
-- **`uv` Workflow:** Using `uv` for project management — [docs/UV.md](docs/UV.md)
+- **`uv` crash course:** Quick orientation for developers new to `uv` — [docs/UV.md](docs/UV.md)
 - **Deephaven Documentation:** [deephaven.io/docs](https://deephaven.io/docs/) | [Community Core Python API](https://deephaven.io/core/pydoc/) | [Enterprise Python API](https://docs.deephaven.io/pycoreplus/latest/worker/)
 
 ---

@@ -185,3 +185,7 @@ cython_debug/
 
 # Stress test results
 stress_test_results.json
+
+# Local dev-only MCP server configs (often contain credentials)
+/deephaven_mcp*.json
+/claude_desktop_config*.json
